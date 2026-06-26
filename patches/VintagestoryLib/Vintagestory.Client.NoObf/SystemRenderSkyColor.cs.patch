@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
+index 78189c3..8efc392 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
+@@ -86,11 +86,11 @@ internal class SystemRenderSkyColor : ClientSystem
+ 		//IL_006c: Unknown result type (might be due to invalid IL or missing references)
+ 		float num = (GameMath.Clamp(Sn.Y * 1.5f, -1f, 1f) + 1f) / 2f;
+ 		float num2 = GameMath.Max(0f, (GameMath.Clamp((0f - Sn.Y) * 1.5f, -1f, 1f) + 0.9f) / 13f);
+ 		SKColor pixelRel = skyTexture.GetPixelRel(num, 0.99f);
+ 		Vec3f vec3f = game.GameWorldCalendar.ReflectColor.Clone();
+-		Vec3f vec3f2 = game.FogColorSky.Set((float)(int)((SKColor)(ref pixelRel)).Red / 255f + num2 / 2f, (float)(int)((SKColor)(ref pixelRel)).Green / 255f + num2 / 2f, (float)(int)((SKColor)(ref pixelRel)).Blue / 255f + num2 / 2f);
++		Vec3f vec3f2 = game.FogColorSky.Set((float)(int)pixelRel.Red / 255f + num2 / 2f, (float)(int)pixelRel.Green / 255f + num2 / 2f, (float)(int)pixelRel.Blue / 255f + num2 / 2f);
+ 		float num3 = (vec3f.R + vec3f.G + vec3f.B) / 3f;
+ 		float num4 = game.GameWorldCalendar.DayLightStrength - num3;
+ 		float num5 = GameMath.Clamp(GameMath.Max(game.AmbientManager.BlendedFlatFogDensity * 40f, game.AmbientManager.BlendedCloudDensity * game.AmbientManager.BlendedCloudDensity), 0f, 1f);
+ 		vec3f.R = num5 * num3 + (1f - num5) * vec3f.R;
+ 		vec3f.G = num5 * num3 + (1f - num5) * vec3f.G;

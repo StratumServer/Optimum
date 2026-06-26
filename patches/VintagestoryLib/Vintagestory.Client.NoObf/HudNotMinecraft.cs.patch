@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/HudNotMinecraft.cs b/VintagestoryLib/Vintagestory.Client.NoObf/HudNotMinecraft.cs
+index c7efaa4..e34831b 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/HudNotMinecraft.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/HudNotMinecraft.cs
+@@ -42,11 +42,11 @@ public class HudNotMinecraft : HudElement
+ 		//IL_0048: Unknown result type (might be due to invalid IL or missing references)
+ 		grassBlock = capi.World.GetBlock(new AssetLocation("soil-medium-normal"));
+ 		dummySlot = new DummySlot(new ItemStack(grassBlock));
+ 		string text = "No, this is not Minecraft";
+ 		TextExtents textExtents = CairoFont.WhiteSmallishText().GetTextExtents(text);
+-		double num = ((TextExtents)(ref textExtents)).Width / (double)RuntimeEnv.GUIScale;
++		double num = textExtents.Width / (double)RuntimeEnv.GUIScale;
+ 		ElementBounds.Fixed(EnumDialogArea.RightBottom, 0.0, 0.0, 45.0, 20.0);
+ 		ElementBounds bounds = ElementBounds.Fixed(47.0, 13.0, 330.0, 40.0);
+ 		ElementBounds bounds2 = ElementBounds.Fixed(EnumDialogArea.LeftTop, 0.0, 0.0, num + 60.0, 50.0).WithFixedAlignmentOffset(10.0, 10.0);
+ 		crossBounds = ElementBounds.Fixed(EnumDialogArea.LeftTop, 0.0, 0.0, 35.0, 35.0).WithFixedPadding(17.0, 17.0);
+ 		crossBounds.WithParent(bounds2);

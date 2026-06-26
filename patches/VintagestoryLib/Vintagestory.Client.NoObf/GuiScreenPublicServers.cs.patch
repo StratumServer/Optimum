@@ -1,0 +1,25 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServers.cs
+index 52c20d6..70d8767 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServers.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServers.cs
+@@ -83,17 +83,17 @@ public class GuiScreenPublicServers : GuiScreen
+ 		ElementBounds elementBounds = ElementBounds.FixedSize(60.0, 30.0).WithFixedPadding(10.0, 2.0);
+ 		ElementBounds elementBounds2 = ElementBounds.Fixed(EnumDialogArea.LeftTop, 0.0, 0.0, 690.0, 35.0);
+ 		_ = Math.Max(400.0, (double)width * 0.5) / (double)ClientSettings.GUIScale;
+ 		string text = Lang.Get("Password protected");
+ 		TextExtents textExtents = CairoFont.WhiteSmallText().GetTextExtents(text);
+-		double num = ((TextExtents)(ref textExtents)).Width / (double)RuntimeEnv.GUIScale;
++		double num = textExtents.Width / (double)RuntimeEnv.GUIScale;
+ 		string text2 = Lang.Get("Open for all");
+ 		textExtents = CairoFont.WhiteSmallText().GetTextExtents(text2);
+-		double num2 = ((TextExtents)(ref textExtents)).Width / (double)RuntimeEnv.GUIScale;
++		double num2 = textExtents.Width / (double)RuntimeEnv.GUIScale;
+ 		string text3 = Lang.Get("Modded");
+ 		textExtents = CairoFont.WhiteSmallText().GetTextExtents(text3);
+-		double num3 = ((TextExtents)(ref textExtents)).Width / (double)RuntimeEnv.GUIScale;
++		double num3 = textExtents.Width / (double)RuntimeEnv.GUIScale;
+ 		ElementBounds elementBounds3;
+ 		ElementComposer = dialogBase("mainmenu-browserpublicservers").AddDynamicText(Lang.Get("multiplayer-loadingpublicservers"), CairoFont.WhiteSmallishText(), elementBounds2, "titleText").AddSwitch(onToggleOpen4All, ElementBounds.Fixed(0, 45), "4allSwitch", 20.0, 3.0).AddStaticTextAutoBoxSize(text2, CairoFont.WhiteSmallText(), EnumTextOrientation.Left, ElementBounds.Fixed(25, 45))
+ 			.AddSwitch(onTogglePwdProtected, ElementBounds.Fixed((int)(50.0 + num2), 45), "pwdSwitch", 20.0, 3.0)
+ 			.AddStaticTextAutoBoxSize(text, CairoFont.WhiteSmallText(), EnumTextOrientation.Left, ElementBounds.Fixed((int)(75.0 + num2), 45))
+ 			.AddSwitch(onToggleWhitelisted, ElementBounds.Fixed((int)(100.0 + num + num2), 45), "whitelistSwitch", 20.0, 3.0)

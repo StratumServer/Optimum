@@ -1,0 +1,34 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs b/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
+index 9ec0f32..1bbe344 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
+@@ -119,14 +119,14 @@ public class DrawWorldInteractionUtil
+ 		array[2] = (array[2] + 1.0) / 2.0;
+ 		CairoFont cairoFont = CairoFont.WhiteMediumText().WithColor(array).WithFontSize(FontSize)
+ 			.WithStroke(GuiStyle.DarkBrownColor, 2.0);
+ 		cairoFont.SetupContext(ctx);
+ 		FontExtents fontExtents = cairoFont.GetFontExtents();
+-		double height = ((FontExtents)(ref fontExtents)).Height;
++		double height = fontExtents.Height;
+ 		double num2 = 5.0;
+ 		TextExtents textExtents = cairoFont.GetTextExtents("+");
+-		double width = ((TextExtents)(ref textExtents)).Width;
++		double width = textExtents.Width;
+ 		if ((stacks != null && stacks.Length != 0) || wi.RequireFreeHand)
+ 		{
+ 			GuiElement.RoundRectangle(ctx, num, drawY + 1.0, lineheight, lineheight, 3.5);
+ 			ctx.SetSourceRGBA(array);
+ 			ctx.LineWidth = 1.5;
+@@ -191,11 +191,11 @@ public class DrawWorldInteractionUtil
+ 		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-2.2");
+ 		string text = ": " + Lang.Get(wi.ActionLangCode);
+ 		capi.Gui.Text.DrawTextLine(ctx, cairoFont, text, num - 4.0, drawY + (lineheight - height) / 2.0 + 2.0);
+ 		double num3 = num;
+ 		textExtents = cairoFont.GetTextExtents(text);
+-		ActualWidth = num3 + ((TextExtents)(ref textExtents)).Width;
++		ActualWidth = num3 + textExtents.Width;
+ 		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-2.3");
+ 	}
+ 
+ 	private double DrawHotkey(HotKey hk, double x, double y, Context ctx, CairoFont font, double lineheight, double textHeight, double pluswdith, double symbolspacing, double[] color)
+ 	{

@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs b/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs
+index 7621b43..b3d9aa2 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs
+@@ -41,11 +41,11 @@ public class OggDecoder
+ 		Page val3 = (Page)(object)new OggPage();
+ 		Packet val4 = new Packet();
+ 		Info val5 = new Info();
+ 		Comment val6 = new Comment();
+ 		DspState val7 = new DspState();
+-		Block val8 = new Block(val7);
++		csvorbis.Block val8 = new csvorbis.Block(val7);
+ 		int num = 0;
+ 		val.init();
+ 		int num2 = 0;
+ 		int offset = val.buffer(4096);
+ 		byte[] data = val.data;

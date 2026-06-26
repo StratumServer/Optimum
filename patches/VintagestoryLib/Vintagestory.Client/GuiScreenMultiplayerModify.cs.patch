@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenMultiplayerModify.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenMultiplayerModify.cs
+index b7121a5..57ae728 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenMultiplayerModify.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenMultiplayerModify.cs
+@@ -23,11 +23,11 @@ public class GuiScreenMultiplayerModify : GuiScreen
+ 	private void InitGui()
+ 	{
+ 		//IL_0014: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0019: Unknown result type (might be due to invalid IL or missing references)
+ 		TextExtents textExtents = CairoFont.ButtonText().GetTextExtents(Lang.Get("general-save"));
+-		double num = ((TextExtents)(ref textExtents)).Width + 20.0;
++		double num = textExtents.Width + 20.0;
+ 		ElementComposer = dialogBase("mainmenu-multiplayernewserver", -1.0, 330.0).AddStaticText(Lang.Get("multiplayer-modifyserver"), CairoFont.WhiteSmallishText(), ElementStdBounds.Rowed(0f, 0.0, EnumDialogArea.LeftFixed).WithFixedWidth(300.0)).AddStaticText(Lang.Get("multiplayer-servername"), CairoFont.WhiteSmallText(), ElementStdBounds.Rowed(1.05f, 0.0, EnumDialogArea.LeftFixed).WithFixedWidth(300.0)).AddTextInput(ElementStdBounds.Rowed(1f, 0.0, EnumDialogArea.RightFixed).WithFixedSize(300.0, 30.0).WithFixedAlignmentOffset(-35.0, 0.0), null, null, "servername")
+ 			.AddStaticText(Lang.Get("multiplayer-address"), CairoFont.WhiteSmallText(), ElementStdBounds.Rowed(1.74f, 0.0, EnumDialogArea.LeftFixed).WithFixedWidth(300.0))
+ 			.AddTextInput(ElementStdBounds.Rowed(1.7f, 0.0, EnumDialogArea.RightFixed).WithFixedSize(300.0, 30.0).WithFixedAlignmentOffset(-35.0, 0.0), null, null, "serverhost")
+ 			.AddIconButton("copy", OnCopyServer, ElementStdBounds.Rowed(1.7f, 0.0, EnumDialogArea.RightFixed).WithFixedSize(30.0, 30.0))
+ 			.AddHoverText(Lang.Get("Copies the server address to your clipboard"), CairoFont.WhiteDetailText(), 200, ElementStdBounds.Rowed(1.7f, 0.0, EnumDialogArea.RightFixed).WithFixedSize(30.0, 30.0))

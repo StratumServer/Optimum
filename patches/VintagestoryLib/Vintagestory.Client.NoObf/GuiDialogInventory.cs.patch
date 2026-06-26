@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs
+index dd625fa..cbf7988 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs
+@@ -161,11 +161,11 @@ public class GuiDialogInventory : GuiDialog
+ 				DataInt = index,
+ 				Name = Lang.Get("tabname-" + orderedTabs[i].Code),
+ 				PaddingTop = orderedTabs[i].PaddingTop
+ 			};
+ 			TextExtents textExtents = cairoFont.GetTextExtents(tabs2[i].Name);
+-			val = Math.Max(((TextExtents)(ref textExtents)).Width + 1.0 + 2.0 * num4, val);
++			val = Math.Max(textExtents.Width + 1.0 + 2.0 * num4, val);
+ 		}
+ 		elementBounds5.fixedWidth = Math.Max(elementBounds5.fixedWidth, val);
+ 		elementBounds5.fixedX = 0.0 - elementBounds5.fixedWidth;
+ 		if (creativeInvDialog != null)
+ 		{

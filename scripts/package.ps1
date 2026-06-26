@@ -1,0 +1,158 @@
+<#
+.SYNOPSIS
+Assembles a ready-to-run Optimum folder (full game plus optimized DLLs).
+Requires a successful build first (dotnet build VintageStory.slnx -c Release).
+
+.PARAMETER OutputDir
+Where to create the output folder (and zip). Default: repo root.
+
+.PARAMETER Zip
+Also compress the folder into Optimum-v<version>-win-x64.zip.
+
+.EXAMPLE
+.\scripts\package.ps1                          # folder only
+.\scripts\package.ps1 -Zip                     # folder + zip
+.\scripts\package.ps1 -OutputDir D:\releases -Zip
+#>
+
+[CmdletBinding()]
+param(
+    [string]$OutputDir,
+    [switch]$Zip,
+    [string]$Version = '1.22.3'
+)
+
+$ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+. "$PSScriptRoot/_hostcaps.ps1"
+
+# Resolve a Windows vanilla install. On Windows, bootstrap already extracted the
+# Windows client into .vanilla/. Off-Windows, .vanilla holds the host's (Linux/
+# macOS) client, so download the Windows installer and unpack it with
+# innoextract into a separate .vanilla-win/ — otherwise we'd ship native libs
+# for the wrong OS under a win-x64 label.
+function Resolve-WindowsVanilla {
+    param([string]$RepoRoot, [string]$Version)
+    $hostWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
+    if ($IsWindows -and (Test-Path (Join-Path $hostWin 'Vintagestory.exe'))) { return $hostWin }
+
+    $winDir = Join-Path (Join-Path $RepoRoot '.vanilla-win') 'vintagestory'
+    if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
+
+    if (-not (Test-Cmd innoextract)) {
+        throw "Cannot build a win-x64 package on this host: innoextract not found (needed to unpack vs_install_win-x64_$Version.exe). Install it (apt-get install innoextract) or run package.ps1 on Windows."
+    }
+    $zipCache = Join-Path $RepoRoot '.vanilla-zips'
+    New-Item -ItemType Directory -Force -Path $zipCache | Out-Null
+    $exeName = "vs_install_win-x64_$Version.exe"
+    $installer = Join-Path $zipCache $exeName
+    if (-not (Test-Path $installer)) {
+        $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
+        Write-Host "Downloading $url (~570MB)"
+        curl -L --fail -o $installer $url
+        if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
+    } else { Write-Host "Using cached $installer" }
+
+    $parent = Split-Path -Parent $winDir
+    if (Test-Path $parent) { Remove-Item -Recurse -Force $parent }
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+    Write-Host "Extracting Windows client with innoextract..."
+    innoextract -s -d $parent $installer | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "innoextract failed on $installer" }
+    # innoextract writes the install tree under app/.
+    $appDir = Join-Path $parent 'app'
+    if (Test-Path $appDir) { Rename-Item -Path $appDir -NewName 'vintagestory' -Force }
+    if (-not (Test-Path (Join-Path $winDir 'Vintagestory.exe'))) {
+        throw "Extraction failed: Vintagestory.exe not found under $winDir"
+    }
+    return $winDir
+}
+
+Push-Location $repoRoot
+try {
+    Show-HostCaps -Only 'win-x64' | Out-Null
+    $vanillaDir = Resolve-WindowsVanilla -RepoRoot $repoRoot -Version $Version
+    $buildOut = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'Vintagestory') 'bin') (Join-Path 'Release' 'net10.0')
+    $libOut = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'VintagestoryLib') 'bin') (Join-Path 'Release' 'net10.0')
+
+    if (-not (Test-Path (Join-Path $libOut 'VintagestoryLib.dll'))) {
+        throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
+    }
+
+    # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
+    $infoFile = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'VintagestoryLib') 'Optimum') 'OptimumInfo.cs'
+    $optVer = '0.1.0'
+    if (Test-Path $infoFile) {
+        $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
+        if ($match.Success) { $optVer = $match.Groups[1].Value }
+    }
+
+    if (-not $OutputDir) { $OutputDir = $repoRoot }
+    $name = "Optimum-v$optVer-win-x64"
+    $stageDir = Join-Path $OutputDir $name
+
+    # Fresh copy of the vanilla install. Leaves .vanilla untouched.
+    Write-Host "Copying vanilla install to $stageDir..."
+    if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
+    Copy-Item -Recurse -Force $vanillaDir $stageDir
+
+    # Apply optimized DLLs over the copy.
+    Write-Host "Applying optimized DLLs..."
+    Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll') $stageDir
+    Copy-Item -Force (Join-Path $libOut 'VintagestoryLib.dll') $stageDir
+    Copy-Item -Force (Join-Path $buildOut 'VintagestoryAPI.dll') $stageDir
+
+    # Apply optimized shaders.
+    $shaderSrc = Join-Path $repoRoot 'sources/shaders'
+    $shaderDst = Join-Path $stageDir 'assets/game/shaders'
+    if (Test-Path $shaderSrc) {
+        Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
+    }
+
+    # Use the built apphost. It embeds the Optimum app.ico, unlike the vanilla
+    # launcher. On a non-Windows host `dotnet build` produces no Vintagestory.exe,
+    # so cross-build the win-x64 apphost on demand. Fall back to the vanilla
+    # launcher (vanilla icon) only if even that is unavailable.
+    $builtExe = Join-Path $buildOut 'Vintagestory.exe'
+    if (-not (Test-Path $builtExe)) {
+        $ridExe = Join-Path (Join-Path $buildOut 'win-x64') 'Vintagestory.exe'
+        if (-not (Test-Path $ridExe)) {
+            Write-Host "Cross-building win-x64 launcher (Optimum.exe apphost)..."
+            $proj = Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'Vintagestory') 'Vintagestory.csproj'
+            dotnet build $proj -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo
+            if ($LASTEXITCODE -ne 0) { Write-Warning "Cross-build failed; will keep vanilla launcher." }
+        }
+        if (Test-Path $ridExe) { $builtExe = $ridExe }
+    }
+    if (Test-Path $builtExe) {
+        Copy-Item -Force $builtExe $stageDir
+    } else {
+        Write-Warning "Vintagestory.exe not found and cross-build unavailable; keeping vanilla launcher (vanilla icon)."
+    }
+
+    # Remove installer artifacts.
+    Get-ChildItem -Path $stageDir -Filter 'unins000.*' | Remove-Item -Force
+
+    # Brand the launcher: Vintagestory.exe -> Optimum.exe. The apphost still
+    # loads Vintagestory.dll by name, so the dll keeps its name.
+    $exe = Join-Path $stageDir 'Vintagestory.exe'
+    if (Test-Path $exe) {
+        Rename-Item -Path $exe -NewName 'Optimum.exe' -Force
+        Write-Host "Renamed launcher to Optimum.exe"
+    } else {
+        Write-Warning "Vintagestory.exe not found; launcher not renamed."
+    }
+
+    Write-Host "Folder ready: $stageDir" -ForegroundColor Green
+
+    if ($Zip) {
+        $zipPath = Join-Path $OutputDir "$name.zip"
+        if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+        Write-Host "Packaging $name.zip..."
+        Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $zipPath -CompressionLevel Optimal
+        $size = [math]::Round((Get-Item $zipPath).Length / 1MB)
+        Write-Host "Done: $zipPath (${size}MB)" -ForegroundColor Green
+    }
+} finally {
+    Pop-Location
+}

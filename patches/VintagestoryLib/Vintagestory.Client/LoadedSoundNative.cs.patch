@@ -1,0 +1,144 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs b/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
+index e74280e..2fda1ef 100644
+--- a/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
++++ b/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
+@@ -1,10 +1,11 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Threading;
+ using System.Threading.Tasks;
+ using OpenTK.Audio.OpenAL;
++using EFX = OpenTK.Audio.OpenAL.ALC.EFX;
+ using OpenTK.Mathematics;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+@@ -55,11 +56,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 	public bool IsPlaying
+ 	{
+ 		get
+ 		{
+ 			int num = default(int);
+-			AL.GetSource(sourceId, (ALGetSourcei)4112, ref num);
++			AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+ 			if (!disposed)
+ 			{
+ 				return num == 4114;
+ 			}
+ 			return false;
+@@ -69,11 +70,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 	public bool IsPaused
+ 	{
+ 		get
+ 		{
+ 			int num = default(int);
+-			AL.GetSource(sourceId, (ALGetSourcei)4112, ref num);
++			AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+ 			if (!disposed)
+ 			{
+ 				return num == 4115;
+ 			}
+ 			return false;
+@@ -89,11 +90,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 			if (disposed)
+ 			{
+ 				return true;
+ 			}
+ 			int num = default(int);
+-			AL.GetSource(sourceId, (ALGetSourcei)4112, ref num);
++			AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+ 			if (num != 4114)
+ 			{
+ 				return num != 4115;
+ 			}
+ 			return false;
+@@ -104,11 +105,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 	{
+ 		get
+ 		{
+ 			if (!disposed)
+ 			{
+-				AL.GetSource(sourceId, (ALSourcef)4132, ref playbackPosition);
++				AL.GetSource(sourceId, (ALSourcef)4132, out playbackPosition);
+ 				testError("get playback pos");
+ 			}
+ 			return playbackPosition;
+ 		}
+ 		set
+@@ -272,32 +273,32 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 			fixed (byte* pcm = sample.Pcm)
+ 			{
+ 				AL.BufferData(bufferId, soundFormat, (void*)pcm, sample.Pcm.Length, sample.Rate);
+ 			}
+ 			int num = default(int);
+-			AL.GetBuffer(bufferId, (ALGetBufferi)8196, ref num);
++			AL.GetBuffer(bufferId, (ALGetBufferi)8196, out num);
+ 			int num2 = default(int);
+-			AL.GetBuffer(bufferId, (ALGetBufferi)8195, ref num2);
++			AL.GetBuffer(bufferId, (ALGetBufferi)8195, out num2);
+ 			soundLengthSeconds = 1f * (float)num / (float)(sample.Rate * sample.BitsPerSample / 8) / (float)num2;
+ 			float num3 = 0f - (float)(Math.Log(0.009999999776482582) / Math.Log(soundParams.Range));
+ 			float num4 = (float)Math.Max(3.0, Math.Pow(soundParams.Range, 0.5) - 2.0);
+ 			AL.DistanceModel((ALDistanceModel)53254);
+ 			AL.Source(sourceId, (ALSourcef)4129, num3);
+ 			AL.Source(sourceId, (ALSourcef)4128, (soundParams.ReferenceDistance != 3f) ? soundParams.ReferenceDistance : num4);
+ 			AL.Source(sourceId, (ALSourcef)4131, 9999f);
+ 			AL.Source(sourceId, (ALSourcei)4105, bufferId);
+ 			AL.Source(sourceId, (ALSourcef)4106, soundParams.Volume * GlobalVolume);
+ 			AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
+-			bool flag = soundFormat - 4354 <= 1;
++			bool flag = ((int)soundFormat - 4354) <= 1;
+ 			if (flag && AudioOpenAl.UseHrtf)
+ 			{
+ 				AL.Source(sourceId, (ALSourcei)4147, 2);
+ 			}
+ 			if (soundParams.Position != null)
+ 			{
+ 				Vector3 val = default(Vector3);
+-				((Vector3)(ref val))._002Ector(soundParams.Position.X, soundParams.Position.Y, soundParams.Position.Z);
++				val = new Vector3(soundParams.Position.X, soundParams.Position.Y, soundParams.Position.Z);
+ 				AL.Source(sourceId, (ALSource3f)4100, ref val);
+ 			}
+ 			AL.Source(sourceId, (ALSourceb)514, soundParams.RelativePosition);
+ 			AL.Source(sourceId, (ALSourceb)4103, soundParams.ShouldLoop);
+ 			if (playbackPosition > 0f)
+@@ -399,11 +400,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		if (sourceId == 0)
+ 		{
+ 			disposed = true;
+ 			return;
+ 		}
+-		AL.GetSource(sourceId, (ALSourcef)4132, ref playbackPosition);
++		AL.GetSource(sourceId, (ALSourcef)4132, out playbackPosition);
+ 		AL.SourceStop(sourceId);
+ 		AL.Source(sourceId, (ALSourcei)4105, 0);
+ 		testError("disposestop");
+ 		DisposeLowPassfilter();
+ 		DisposeReverb();
+@@ -433,11 +434,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		if (sourceId != 0)
+ 		{
+ 			if (!disposed)
+ 			{
+ 				Vector3 val = default(Vector3);
+-				((Vector3)(ref val))._002Ector(x, y, z);
++				val = new Vector3(x, y, z);
+ 				AL.Source(sourceId, (ALSource3f)4100, ref val);
+ 			}
+ 			testError("setposition x/y/z");
+ 		}
+ 	}
+@@ -461,11 +462,11 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		if (sourceId != 0)
+ 		{
+ 			if (!disposed)
+ 			{
+ 				Vector3 val = default(Vector3);
+-				((Vector3)(ref val))._002Ector(position.X, position.Y, position.Z);
++				val = new Vector3(position.X, position.Y, position.Z);
+ 				AL.Source(sourceId, (ALSource3f)4100, ref val);
+ 			}
+ 			testError("setposition vec3");
+ 		}
+ 	}

@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogMacroEditor.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogMacroEditor.cs
+index 7d9c281..31c08b9 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogMacroEditor.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogMacroEditor.cs
+@@ -133,11 +133,11 @@ internal class GuiDialogMacroEditor : GuiDialog
+ 	private void OnTextAreaCursorMoved(double posX, double posY)
+ 	{
+ 		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_001a: Unknown result type (might be due to invalid IL or missing references)
+ 		FontExtents fontExtents = base.SingleComposer.GetTextArea("commands").Font.GetFontExtents();
+-		double height = ((FontExtents)(ref fontExtents)).Height;
++		double height = fontExtents.Height;
+ 		base.SingleComposer.GetScrollbar("scrollbar").EnsureVisible(posX, posY);
+ 		base.SingleComposer.GetScrollbar("scrollbar").EnsureVisible(posX, posY + height + 5.0);
+ 	}
+ 
+ 	private void OnCommandCodeChanged(string newCode)

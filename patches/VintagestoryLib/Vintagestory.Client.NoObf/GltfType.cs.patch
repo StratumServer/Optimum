@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GltfType.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GltfType.cs
+index 6f29f45..3401132 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GltfType.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GltfType.cs
+@@ -1,11 +1,11 @@
+ using Newtonsoft.Json;
+ using Vintagestory.API.Client;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+-[JsonObject(/*Could not decode attribute arguments.*/)]
++[JsonObject(MemberSerialization.OptIn)]
+ public class GltfType
+ {
+ 	public TextureAtlasPosition[] BaseTextures { get; set; }
+ 
+ 	public TextureAtlasPosition[] PBRTextures { get; set; }

@@ -1,0 +1,32 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
+index 2eca300..b709f21 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
+@@ -31,15 +31,26 @@ public class SystemRenderPlayerEffects : ClientSystem
+ 	public override void OnOwnPlayerDataReceived()
+ 	{
+ 		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
+ 	}
+ 
++	// Optimum: scale light search radius by view distance. Lower VD means fewer
++	// distant lights processed. At VD 128, radius drops from 120 to 35 blocks.
++	private static float GetOptimumLightRadius(int viewDistance) => viewDistance switch
++	{
++		<= 128 => 35f,
++		<= 256 => 45f,
++		<= 384 => 52f,
++		_ => 60f
++	};
++
+ 	private void onBeforeRender(float dt)
+ 	{
+ 		game.shUniforms.PointLightsCount = 0;
+ 		Vec3d plrPos = game.EntityPlayer.Pos.XYZ;
+-		Entity[] array = game.GetEntitiesAround(plrPos, 120f, 120f, (Entity e) => e.LightHsv != null && e.LightHsv[2] > 0);
++		float lightRadius = ClientSettings.OptimumDynamicLightScale ? GetOptimumLightRadius(ClientSettings.ViewDistance) : 120f;
++		Entity[] array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, (Entity e) => e.LightHsv != null && e.LightHsv[2] > 0);
+ 		if (array.Length > maxDynLights)
+ 		{
+ 			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
+ 		}
+ 		foreach (Entity entity in array)

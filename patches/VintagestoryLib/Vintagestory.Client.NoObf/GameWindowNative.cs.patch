@@ -1,0 +1,20 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs
+index 8a11e3e..08ca0c1 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs
+@@ -41,13 +41,13 @@ public class GameWindowNative : GameWindow
+ 				array[i + 2] = pixels[i];
+ 				array[i + 3] = pixels[i + 3];
+ 			}
+ 			Image[] array2 = new Image[1];
+ 			SKImageInfo info = val.Info;
+-			int height = ((SKImageInfo)(ref info)).Height;
++			int height = info.Height;
+ 			info = val.Info;
+-			array2[0] = new Image(height, ((SKImageInfo)(ref info)).Width, array);
++			array2[0] = new Image(height, info.Width, array);
+ 			((NativeWindow)this).Icon = new WindowIcon((Image[])(object)array2);
+ 		}
+ 		catch (Exception)
+ 		{
+ 		}

@@ -1,0 +1,21 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GltfAccessor.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GltfAccessor.cs
+index f96ccd4..518d337 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GltfAccessor.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GltfAccessor.cs
+@@ -12,14 +12,14 @@ public class GltfAccessor
+ 	public VertexAttribPointerType ComponentType { get; set; }
+ 
+ 	[JsonProperty("count")]
+ 	public int Count { get; set; }
+ 
+-	[JsonProperty(/*Could not decode attribute arguments.*/)]
++	[JsonProperty("max", NullValueHandling = NullValueHandling.Ignore)]
+ 	public double[] Max { get; set; }
+ 
+-	[JsonProperty(/*Could not decode attribute arguments.*/)]
++	[JsonProperty("min", NullValueHandling = NullValueHandling.Ignore)]
+ 	public double[] Min { get; set; }
+ 
+ 	[JsonProperty("type")]
+ 	public EnumGltfAccessorType Type { get; set; }
+ }

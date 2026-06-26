@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogToolMode.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogToolMode.cs
+index eddb68d..21009f7 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogToolMode.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogToolMode.cs
+@@ -89,11 +89,11 @@ public class GuiDialogToolMode : GuiDialog
+ 		SkillItem[] array = toolModes;
+ 		foreach (SkillItem skillItem in array)
+ 		{
+ 			double val = num3;
+ 			TextExtents textExtents = CairoFont.WhiteSmallishText().GetTextExtents(skillItem.Name);
+-			num3 = Math.Max(val, ((TextExtents)(ref textExtents)).Width / (double)RuntimeEnv.GUIScale + 1.0);
++			num3 = Math.Max(val, textExtents.Width / (double)RuntimeEnv.GUIScale + 1.0);
+ 		}
+ 		ElementBounds elementBounds = ElementBounds.Fixed(0.0, 0.0, num3, (double)count * num2);
+ 		ElementBounds bounds = ElementBounds.Fixed(0.0, (double)count * (num2 + 2.0) + 5.0, num3, 25.0);
+ 		base.SingleComposer = capi.Gui.CreateCompo("toolmodeselect", ElementStdBounds.AutosizedMainDialog).AddShadedDialogBG(ElementStdBounds.DialogBackground().WithFixedPadding(GuiStyle.ElementToDialogPadding / 2.0), withTitleBar: false).BeginChildElements();
+ 		int num4 = 0;

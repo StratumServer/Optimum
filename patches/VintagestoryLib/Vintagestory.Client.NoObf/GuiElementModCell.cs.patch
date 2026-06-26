@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiElementModCell.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiElementModCell.cs
+index eace32c..c75baf4 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiElementModCell.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiElementModCell.cs
+@@ -112,11 +112,11 @@ public class GuiElementModCell : GuiElementTextBase, IGuiElementCell, IDisposabl
+ 		Font = cell.DetailTextFont;
+ 		textUtil.AutobreakAndDrawMultilineTextAt(val2, Font, cell.DetailText, Bounds.absPaddingX + num3, Bounds.absPaddingY + titleTextheight + Bounds.absPaddingY, Bounds.InnerWidth - num3);
+ 		if (cell.RightTopText != null)
+ 		{
+ 			TextExtents textExtents = Font.GetTextExtents(cell.RightTopText);
+-			textUtil.AutobreakAndDrawMultilineTextAt(val2, Font, cell.RightTopText, Bounds.absPaddingX + Bounds.InnerWidth - ((TextExtents)(ref textExtents)).Width - num - GuiElement.scaled(10.0), Bounds.absPaddingY + GuiElement.scaled(cell.RightTopOffY), ((TextExtents)(ref textExtents)).Width + 1.0, EnumTextOrientation.Right);
++			textUtil.AutobreakAndDrawMultilineTextAt(val2, Font, cell.RightTopText, Bounds.absPaddingX + Bounds.InnerWidth - textExtents.Width - num - GuiElement.scaled(10.0), Bounds.absPaddingY + GuiElement.scaled(cell.RightTopOffY), textExtents.Width + 1.0, EnumTextOrientation.Right);
+ 		}
+ 		if (cell.DrawAsButton)
+ 		{
+ 			EmbossRoundRectangleElement(val2, 0.0, 0.0, Bounds.OuterWidth, Bounds.OuterHeight, inverse: false, (int)GuiElement.scaled(4.0), 0);
+ 		}

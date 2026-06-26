@@ -1,0 +1,13 @@
+<Project>
+  <PropertyGroup>
+    <FrameworkVersion>net10.0</FrameworkVersion>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;CS1572;CS1573;CS1570;CS0649;CS0414;CS0169;CS0162;CS0168;CS0067;NU1904</NoWarn>
+    <!-- NU1904: System.Drawing.Common 4.5.0 CVE. Vanilla pins this version.
+         VS uses SkiaSharp for all image processing; System.Drawing is never
+         fed untrusted input. Suppressed until upstream bumps the dep. -->
+  </PropertyGroup>
+
+  <Import Project="Directory.Build.local.props" Condition="Exists('Directory.Build.local.props')" />
+</Project>
