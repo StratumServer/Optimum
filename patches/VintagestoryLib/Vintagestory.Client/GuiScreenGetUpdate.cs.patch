@@ -1,0 +1,29 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenGetUpdate.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenGetUpdate.cs
+index 9d3a98e..a3e7916 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenGetUpdate.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenGetUpdate.cs
+@@ -84,22 +84,22 @@ internal class GuiScreenGetUpdate : GuiScreen
+ 		{
+ 			ElementComposer.GetDynamicText("status").SetNewText(Lang.Get("Download failed. Release {0} not found, possibly programming error. Please send us a bug report", ScreenManager.newestVersion));
+ 			return;
+ 		}
+ 		GameBuild build = release.WindowsUpdate ?? release.Windows;
+-		string dstPath = Path.Combine(Path.GetTempPath(), build.filename);
++		string dstPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), build.filename);
+ 		FileStream fileStream = File.Create(dstPath);
+ 		_gameReleaseDownloadCts = new CancellationTokenSource();
+ 		Progress<Tuple<int, long>> progress = new Progress<Tuple<int, long>>();
+ 		progress.ProgressChanged += onProgress;
+ 		TyronThreadPool.QueueTask(async delegate
+ 		{
+ 			try
+ 			{
+ 				await VSWebClient.Inst.DownloadAsync(build.urls["cdn"], fileStream, progress, _gameReleaseDownloadCts.Token);
+ 				fileStream.Close();
+-				string directoryName = Path.GetDirectoryName(Environment.ProcessPath);
++				string directoryName = System.IO.Path.GetDirectoryName(Environment.ProcessPath);
+ 				Process.Start(dstPath, "/SILENT /DIR=\"" + directoryName + "\"");
+ 				ScreenManager.GamePlatform.WindowExit("Installing update", EnumExitMode.SoftExit);
+ 			}
+ 			catch (Exception ex)
+ 			{

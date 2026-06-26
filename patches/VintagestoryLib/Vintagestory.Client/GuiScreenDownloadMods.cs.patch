@@ -1,0 +1,31 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenDownloadMods.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenDownloadMods.cs
+index 2fb4996..df84b6d 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenDownloadMods.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenDownloadMods.cs
+@@ -69,11 +69,11 @@ public class GuiScreenDownloadMods : GuiScreen
+ 			title = Lang.Get("downloadmods-title-dependencyinstall");
+ 			text = Lang.Get("downloadmods-dependencyinstall", string.Join(", ", modsToDownload));
+ 		}
+ 		else
+ 		{
+-			installPath = Path.Combine(GamePaths.DataPathServerMods, GamePaths.ReplaceInvalidChars(sourceServer.Host + "-" + sourceServer.Port));
++			installPath = System.IO.Path.Combine(GamePaths.DataPathServerMods, GamePaths.ReplaceInvalidChars(sourceServer.Host + "-" + sourceServer.Port));
+ 			title = Lang.Get("downloadmods-title-serverinstall");
+ 			text = Lang.Get("downloadmods-serverinstall", modsToDownload.Count);
+ 		}
+ 		return new GuiScreenDownloadMods(sourceServer, serverArgs, installPath, modsToDownload, title, text, screenManager, parentScreen);
+ 	}
+@@ -430,12 +430,10 @@ public class GuiScreenDownloadMods : GuiScreen
+ 			FocusedMouseCursor = ScreenManager.mainMenuComposer.MouseOverCursor;
+ 		}
+ 		ElementComposer.PostRender(dt);
+ 	}
+ 
+-	[GeneratedRegex("</?([\\w\\-]+)(?: .*?)?/?>")]
+-	[GeneratedCode("System.Text.RegularExpressions.Generator", "10.0.13.7005")]
+ 	private static Regex GetHtmlTagRegex()
+ 	{
+-		return _003CRegexGenerator_g_003EF7C3416659A89DE69D307209EBAB141680463E82FA58DF94FA09D5F330FC4C71E__GetHtmlTagRegex_0.Instance;
++		return new Regex("</?([\\w\\-]+)(?: .*?)?/?>", RegexOptions.Compiled);
+ 	}
+ }

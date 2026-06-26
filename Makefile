@@ -1,0 +1,126 @@
+# Optimum development targets.
+# Requires (dev):       .NET 10 SDK, bash, python3, git, curl, perl.
+# Requires (packaging): PowerShell 7+ (pwsh). Optional per target:
+#                         macOS .dmg on Linux -> cmake + mkisofs/genisoimage
+#                         Windows package off-Windows -> innoextract
+# Run `make check` to see exactly what your host is missing.
+# Windows: use Git Bash, WSL, or adapt to PowerShell.
+#
+# Packaging note: the optimized DLLs are platform-agnostic IL, so any host can
+# target any platform (quality varies — see README "Host x target matrix").
+# Vintage Story ships native ARM only for macOS, so Linux/Windows packages are
+# x64-only; ARM there runs x64 via emulation (box64 / Windows-on-ARM).
+
+# --- Configuration (override via env or make VAR=value) ---
+CONFIGURATION ?= Release
+VERSION ?= 1.22.3
+CLIENT_ARCHIVE ?=
+
+# Paths (all overridable)
+VANILLA_DIR ?= .vanilla/vintagestory
+DATA_PATH ?= $(HOME)/.config/OptimumVintagestoryData
+LOG_PATH ?=
+EXTRA_MOD_PATH ?= $(CURDIR)/mods
+EXTRA_ORIGIN ?=
+
+# Launch options
+CONNECT ?=
+OPEN_WORLD ?=
+PLAY_STYLE ?= creativebuilding
+
+# Build output locations
+BUILD_OUT = baseline/Vintagestory/bin/$(CONFIGURATION)/net10.0
+MOD_OUT = bin/$(CONFIGURATION)/net10.0
+
+BOOTSTRAP_ARGS :=
+ifneq ($(CLIENT_ARCHIVE),)
+  BOOTSTRAP_ARGS += --client-archive $(CLIENT_ARCHIVE)
+endif
+ifneq ($(VERSION),1.22.3)
+  BOOTSTRAP_ARGS += --version $(VERSION)
+endif
+
+.PHONY: help check bootstrap build clean refresh patches deploy run run-creative run-connect \
+        package package-linux package-macos package-win
+
+help: ## Show available targets
+	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
+
+check: ## Report which bootstrap/packaging tools are installed (installs nothing)
+	bash scripts/check-prereqs.sh
+
+bootstrap: ## Download client, decompile, clone forks, apply patches
+	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
+
+build: ## Build Release (runs bootstrap if working tree is missing)
+	@if [ ! -d baseline/VintagestoryLib ]; then $(MAKE) bootstrap; fi
+	dotnet build VintageStory.slnx -c $(CONFIGURATION)
+
+clean: ## Remove intermediate build files
+	find . -type d -name obj -not -path './.baseline/*' -not -path './.vanilla/*' | xargs rm -rf
+	find . -type d -name bin -not -path './.baseline/*' -not -path './.vanilla/*' | xargs rm -rf
+
+refresh: ## Force full re-bootstrap from scratch
+	bash scripts/bootstrap.sh --refresh $(BOOTSTRAP_ARGS)
+
+patches: ## Extract patches from working tree
+	bash scripts/extract-patches.sh
+
+deploy: build ## Copy compiled DLLs into vanilla client dir
+	@echo "Deploying to $(VANILLA_DIR)..."
+	@cp $(BUILD_OUT)/Vintagestory.dll $(VANILLA_DIR)/
+	@cp baseline/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib.dll $(VANILLA_DIR)/
+	@cp $(MOD_OUT)/VintagestoryAPI.dll $(VANILLA_DIR)/
+	@cp $(MOD_OUT)/VSEssentials.dll $(VANILLA_DIR)/Mods/
+	@cp $(MOD_OUT)/VSSurvivalMod.dll $(VANILLA_DIR)/Mods/
+	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
+	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
+	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
+	@echo "Deploy complete."
+
+run: deploy ## Build, deploy, and launch client
+	@echo "Launching Vintage Story client..."
+	cd $(VANILLA_DIR) && dotnet Vintagestory.dll \
+		--dataPath "$(DATA_PATH)" \
+		$(if $(LOG_PATH),--logPath "$(LOG_PATH)") \
+		$(if $(EXTRA_MOD_PATH),--addModPath "$(EXTRA_MOD_PATH)") \
+		$(if $(EXTRA_ORIGIN),--addOrigin "$(EXTRA_ORIGIN)") \
+		$(if $(CONNECT),-c "$(CONNECT)") \
+		$(if $(OPEN_WORLD),-o "$(OPEN_WORLD)") \
+		$(if $(filter run-creative,$(MAKECMDGOALS)),--rndWorld -p creativebuilding)
+
+run-creative: deploy ## Launch straight into a new creative world
+	cd $(VANILLA_DIR) && dotnet Vintagestory.dll \
+		--dataPath "$(DATA_PATH)" \
+		$(if $(LOG_PATH),--logPath "$(LOG_PATH)") \
+		$(if $(EXTRA_MOD_PATH),--addModPath "$(EXTRA_MOD_PATH)") \
+		--rndWorld -p creativebuilding
+
+run-connect: deploy ## Launch and connect to a server (set CONNECT=ip:port)
+	@if [ -z "$(CONNECT)" ]; then echo "Usage: make run-connect CONNECT=ip:port"; exit 1; fi
+	cd $(VANILLA_DIR) && dotnet Vintagestory.dll \
+		--dataPath "$(DATA_PATH)" \
+		$(if $(LOG_PATH),--logPath "$(LOG_PATH)") \
+		$(if $(EXTRA_MOD_PATH),--addModPath "$(EXTRA_MOD_PATH)") \
+		-c "$(CONNECT)"
+
+logs: ## Tail the client log
+	@tail -f "$(DATA_PATH)/Logs/client-main.txt" 2>/dev/null || echo "No log file at $(DATA_PATH)/Logs/client-main.txt"
+
+settings: ## Open client settings in editor
+	@$${EDITOR:-nano} "$(DATA_PATH)/clientsettings.json"
+
+test: build ## Run unit tests (separate from release build)
+	dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-restore --verbosity quiet
+
+package: build ## Build every package this host can produce (Linux/macOS/Windows)
+	pwsh scripts/package-all.ps1 -Version $(VERSION)
+
+package-linux: build ## Package Linux x64 (tar.gz)
+	pwsh scripts/package-linux.ps1 -Version $(VERSION)
+
+package-macos: build ## Package macOS (.dmg/.app); ARCH=arm64 or x64
+	pwsh scripts/package-macos.ps1 -Arch $(or $(ARCH),arm64) -Version $(VERSION)
+
+package-win: build ## Package Windows x64 (folder + zip); needs innoextract off-Windows
+	pwsh scripts/package.ps1 -Zip -Version $(VERSION)

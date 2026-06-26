@@ -1,0 +1,28 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogCharacter.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogCharacter.cs
+index cfc214b..18f273f 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogCharacter.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogCharacter.cs
+@@ -50,10 +50,11 @@ public class GuiDialogCharacter : GuiDialogCharacterBase
+ 	public override event Action ComposeExtraGuis;
+ 
+ 	public override event Action<int> TabClicked;
+ 
+ 	public GuiDialogCharacter(ICoreClientAPI capi)
++		: base(capi)
+ 	{
+ 		int num = 1;
+ 		List<GuiTab> list = new List<GuiTab>(num);
+ 		CollectionsMarshal.SetCount(list, num);
+ 		CollectionsMarshal.AsSpan(list)[0] = new GuiTab
+@@ -64,11 +65,10 @@ public class GuiDialogCharacter : GuiDialogCharacterBase
+ 		tabs = list;
+ 		rendertabhandlers = new List<Action<GuiComposer>>();
+ 		mainTabInnerSize = new Size2d();
+ 		lighPos = new Vec4f(-1f, -1f, 0f, 0f).NormalizeXYZ();
+ 		mat = new Matrixf();
+-		base._002Ector(capi);
+ 		clientApi = capi;
+ 		rendertabhandlers.Add(ComposeCharacterTab);
+ 	}
+ 
+ 	protected virtual void RegisterArmorIcons()

@@ -1,0 +1,56 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/ModContainer.cs b/VintagestoryLib/Vintagestory.Common/ModContainer.cs
+index 96337d8..5e55e81 100644
+--- a/VintagestoryLib/Vintagestory.Common/ModContainer.cs
++++ b/VintagestoryLib/Vintagestory.Common/ModContainer.cs
+@@ -701,39 +701,39 @@ public class ModContainer : Mod
+ 		{
+ 			modWorldConfig = null;
+ 			return null;
+ 		}
+ 		CustomAttributeArgument val2 = val.ConstructorArguments[0];
+-		string name = ((CustomAttributeArgument)(ref val2)).Value as string;
++		string name = val2.Value as string;
+ 		val2 = val.ConstructorArguments[1];
+-		string modID = ((CustomAttributeArgument)(ref val2)).Value as string;
++		string modID = val2.Value as string;
+ 		ModInfoAttribute modInfoAttribute = new ModInfoAttribute(name, modID);
+-		foreach (CustomAttributeNamedArgument item in ((IEnumerable<CustomAttributeNamedArgument>)val.Properties).Where((CustomAttributeNamedArgument p) => ((CustomAttributeNamedArgument)(ref p)).Name != "Name" && ((CustomAttributeNamedArgument)(ref p)).Name != "ModID"))
++		foreach (Mono.Cecil.CustomAttributeNamedArgument item in ((IEnumerable<Mono.Cecil.CustomAttributeNamedArgument>)val.Properties).Where((Mono.Cecil.CustomAttributeNamedArgument p) => p.Name != "Name" && p.Name != "ModID"))
+ 		{
+-			CustomAttributeNamedArgument current = item;
+-			PropertyInfo property = modInfoAttribute.GetType().GetProperty(((CustomAttributeNamedArgument)(ref current)).Name);
+-			val2 = ((CustomAttributeNamedArgument)(ref current)).Argument;
+-			if (((CustomAttributeArgument)(ref val2)).Value is CustomAttributeArgument[] source)
++			Mono.Cecil.CustomAttributeNamedArgument current = item;
++			PropertyInfo property = modInfoAttribute.GetType().GetProperty(current.Name);
++			val2 = current.Argument;
++			if (val2.Value is CustomAttributeArgument[] source)
+ 			{
+-				property.SetValue(modInfoAttribute, source.Select((CustomAttributeArgument item) => ((CustomAttributeArgument)(ref item)).Value as string).ToArray());
++				property.SetValue(modInfoAttribute, source.Select((CustomAttributeArgument item) => item.Value as string).ToArray());
+ 			}
+ 			else
+ 			{
+-				val2 = ((CustomAttributeNamedArgument)(ref current)).Argument;
+-				property.SetValue(modInfoAttribute, ((CustomAttributeArgument)(ref val2)).Value);
++				val2 = current.Argument;
++				property.SetValue(modInfoAttribute, val2.Value);
+ 			}
+ 		}
+ 		List<ModDependency> dependencies = ((IEnumerable<CustomAttribute>)assemblyDefinition.CustomAttributes).Where((CustomAttribute attribute) => ((MemberReference)attribute.AttributeType).Name == "ModDependencyAttribute").Select(delegate(CustomAttribute attribute)
+ 		{
+ 			//IL_0007: Unknown result type (might be due to invalid IL or missing references)
+ 			//IL_000c: Unknown result type (might be due to invalid IL or missing references)
+ 			//IL_0020: Unknown result type (might be due to invalid IL or missing references)
+ 			//IL_0025: Unknown result type (might be due to invalid IL or missing references)
+ 			CustomAttributeArgument val3 = attribute.ConstructorArguments[0];
+-			string modID2 = (string)((CustomAttributeArgument)(ref val3)).Value;
++			string modID2 = (string)val3.Value;
+ 			val3 = attribute.ConstructorArguments[1];
+-			return new ModDependency(modID2, ((CustomAttributeArgument)(ref val3)).Value as string);
++			return new ModDependency(modID2, val3.Value as string);
+ 		}).ToList();
+ 		return LoadModInfoFromModInfoAttribute(modInfoAttribute, dependencies, out modWorldConfig);
+ 	}
+ 
+ 	private ModInfo LoadModInfoFromModInfoAttribute(ModInfoAttribute modInfoAttr, List<ModDependency> dependencies, out ModWorldConfiguration modWorldConfig)

@@ -1,0 +1,113 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
+index 9786197..6b2b1b4 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
+@@ -7,11 +7,11 @@ using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.Common;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+-[JsonObject(/*Could not decode attribute arguments.*/)]
++[JsonObject(MemberSerialization.OptIn)]
+ public class ClientSettings : SettingsBase
+ {
+ 	private List<Action<string, KeyCombination>> OnKeyCombinationsUpdated = new List<Action<string, KeyCombination>>();
+ 
+ 	public static ClientSettings Inst;
+@@ -1811,10 +1811,59 @@ public class ClientSettings : SettingsBase
+ 		{
+ 			Inst.Bool["forceUdpOverTcp"] = value;
+ 		}
+ 	}
+ 
++	// Optimum performance settings.
++	public static bool OptimumBackgroundFpsLimit
++	{
++		get { return Inst.GetBoolSetting("optimumBackgroundFpsLimit"); }
++		set { Inst.Bool["optimumBackgroundFpsLimit"] = value; }
++	}
++
++	public static bool OptimumPreciseFramePacing
++	{
++		get { return Inst.GetBoolSetting("optimumPreciseFramePacing"); }
++		set { Inst.Bool["optimumPreciseFramePacing"] = value; }
++	}
++
++	public static bool OptimumEntityShadowCull
++	{
++		get { return Inst.GetBoolSetting("optimumEntityShadowCull"); }
++		set { Inst.Bool["optimumEntityShadowCull"] = value; }
++	}
++
++	public static int OptimumShadowCullDistance
++	{
++		get { return Inst.GetIntSetting("optimumShadowCullDistance"); }
++		set { Inst.Int["optimumShadowCullDistance"] = value; }
++	}
++
++	public static bool OptimumRepulsionGate
++	{
++		get { return Inst.GetBoolSetting("optimumRepulsionGate"); }
++		set { Inst.Bool["optimumRepulsionGate"] = value; }
++	}
++
++	public static int OptimumRepulsionDistance
++	{
++		get { return Inst.GetIntSetting("optimumRepulsionDistance"); }
++		set { Inst.Int["optimumRepulsionDistance"] = value; }
++	}
++
++	public static bool OptimumDynamicLightScale
++	{
++		get { return Inst.GetBoolSetting("optimumDynamicLightScale"); }
++		set { Inst.Bool["optimumDynamicLightScale"] = value; }
++	}
++
++	public static bool OptimumAnimBlockLod
++	{
++		get { return Inst.GetBoolSetting("optimumAnimBlockLod"); }
++		set { Inst.Bool["optimumAnimBlockLod"] = value; }
++	}
++
+ 	public static bool IsNewSettingsFile => Inst.isnewfile;
+ 
+ 	static ClientSettings()
+ 	{
+ 		Inst = new ClientSettings();
+@@ -1831,10 +1880,14 @@ public class ClientSettings : SettingsBase
+ 		RuntimeEnv.GUIScale = GUIScale;
+ 		if (Inst.isnewfile && File.Exists("default.lang"))
+ 		{
+ 			Language = File.ReadAllText("default.lang").Trim();
+ 		}
++		// Optimum: sync cross-project config from persisted settings.
++		Vintagestory.API.Config.OptimumConfig.RepulsionGateEnabled = OptimumRepulsionGate;
++		Vintagestory.API.Config.OptimumConfig.SetRepulsionDistance(OptimumRepulsionDistance);
++		Vintagestory.API.Config.OptimumConfig.AnimBlockLodEnabled = OptimumAnimBlockLod;
+ 	}
+ 
+ 	public void SetDialogPosition(string key, Vec2i pos)
+ 	{
+ 		Inst.dialogPositions[key] = pos;
+@@ -2039,10 +2092,20 @@ public class ClientSettings : SettingsBase
+ 		GodRayQuality = (high.GodRays ? 1 : 0);
+ 		ShadowMapQuality = high.ShadowMapQuality;
+ 		ParticleLevel = high.ParticleLevel;
+ 		MaxDynamicLights = high.DynamicLights;
+ 		SSAA = high.Resolution;
++
++		// Optimum settings (all enabled by default).
++		base.boolSettings["optimumBackgroundFpsLimit"] = true;
++		base.boolSettings["optimumPreciseFramePacing"] = true;
++		base.boolSettings["optimumEntityShadowCull"] = true;
++		base.boolSettings["optimumRepulsionGate"] = true;
++		base.boolSettings["optimumDynamicLightScale"] = true;
++		base.boolSettings["optimumAnimBlockLod"] = true;
++		base.intSettings["optimumShadowCullDistance"] = 80;
++		base.intSettings["optimumRepulsionDistance"] = 64;
+ 	}
+ 
+ 	internal override void DidDeserialize()
+ 	{
+ 		if (keyMapping == null)

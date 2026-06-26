@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServerView.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServerView.cs
+index 329a12d..7e929d6 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServerView.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiScreenPublicServerView.cs
+@@ -106,11 +106,11 @@ public class GuiScreenPublicServerView : GuiScreen
+ 		{
+ 			elementBounds2 = elementBounds2.FlatCopy();
+ 			elementBounds2.fixedY += num2;
+ 		}
+ 		TextExtents textExtents = CairoFont.ButtonText().GetTextExtents(Lang.Get("Join Server"));
+-		double num3 = ((TextExtents)(ref textExtents)).Width / (double)RuntimeEnv.GUIScale;
++		double num3 = textExtents.Width / (double)RuntimeEnv.GUIScale;
+ 		ElementComposer.AddButton(Lang.Get("Back"), OnBack, ElementBounds.Fixed(0, 0).FixedUnder(elementBounds2, 20.0).WithAlignment(EnumDialogArea.LeftFixed)
+ 			.WithFixedAlignmentOffset(0.0, 0.0)
+ 			.WithFixedPadding(10.0, 2.0)).AddButton(Lang.Get("Add to Favorites"), OnAddToFavorites, ElementBounds.Fixed(0, 0).FixedUnder(elementBounds2, 20.0).WithAlignment(EnumDialogArea.RightFixed)
+ 			.WithFixedAlignmentOffset(-30.0 - num3, 0.0)
+ 			.WithFixedPadding(10.0, 2.0)).AddButton(Lang.Get("Join Server"), OnJoin, ElementBounds.Fixed(0, 0).FixedUnder(elementBounds2, 20.0).WithAlignment(EnumDialogArea.RightFixed)

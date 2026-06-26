@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogTickProfiler.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogTickProfiler.cs
+index b6b34d3..c260f14 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogTickProfiler.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogTickProfiler.cs
+@@ -31,11 +31,11 @@ public class GuiDialogTickProfiler : GuiDialog
+ 		//IL_0054: Unknown result type (might be due to invalid IL or missing references)
+ 		root1sSum.Code = "root";
+ 		capi.Event.RegisterGameTickListener(OnEverySecond, 1000);
+ 		CairoFont cairoFont = CairoFont.WhiteDetailText();
+ 		FontExtents fontExtents = cairoFont.GetFontExtents();
+-		double num = ((FontExtents)(ref fontExtents)).Height * cairoFont.LineHeightMultiplier / (double)RuntimeEnv.GUIScale;
++		double num = fontExtents.Height * cairoFont.LineHeightMultiplier / (double)RuntimeEnv.GUIScale;
+ 		ElementBounds elementBounds = ElementBounds.Fixed(EnumDialogArea.None, 0.0, 0.0, 450.0, 30.0 + (double)maxLines * num);
+ 		ElementBounds bounds = elementBounds.ForkBoundingParent(5.0, 5.0, 5.0, 5.0);
+ 		ElementBounds bounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.RightMiddle).WithFixedAlignmentOffset(0.0 - GuiStyle.DialogToScreenPadding, 0.0);
+ 		base.SingleComposer = capi.Gui.CreateCompo("tickprofiler", bounds2).AddGameOverlay(bounds).AddDynamicText("", cairoFont, elementBounds, "text")
+ 			.Compose();

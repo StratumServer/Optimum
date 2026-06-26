@@ -1,0 +1,31 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs b/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs
+index d45d14e..9d2afcb 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/HudHotbar.cs
+@@ -308,23 +308,23 @@ public class HudHotbar : HudElement
+ 		//IL_006d: Unknown result type (might be due to invalid IL or missing references)
+ 		CairoFont cairoFont = numberFont;
+ 		cairoFont.SetupContext(cr);
+ 		string text = ScreenManager.hotkeyManager.GetHotKeyByCode(type).CurrentMapping.ToString();
+ 		TextExtents textExtents = numberFont.GetTextExtents(text);
+-		double width = ((TextExtents)(ref textExtents)).Width;
++		double width = textExtents.Width;
+ 		if (width > GuiElement.scaled(20.0))
+ 		{
+ 			cairoFont = cairoFont.Clone();
+ 			cairoFont.UnscaledFontsize *= 0.6;
+ 			cairoFont.SetupContext(cr);
+ 			textExtents = cairoFont.GetTextExtents(text);
+-			width = ((TextExtents)(ref textExtents)).Width;
++			width = textExtents.Width;
+ 		}
+ 		double num = (double)((float)x + w) - width + 1.0;
+ 		double num2 = y;
+ 		FontExtents fontExtents = cairoFont.GetFontExtents();
+-		cr.MoveTo(num, num2 + ((FontExtents)(ref fontExtents)).Ascent - 3.0);
++		cr.MoveTo(num, num2 + fontExtents.Ascent - 3.0);
+ 		cr.ShowText(text);
+ 	}
+ 
+ 	private void SendInvPacket(object packet)
+ 	{

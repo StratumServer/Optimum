@@ -1,0 +1,62 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
+index 374f827..71496c7 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
+@@ -28,11 +28,14 @@ public class SystemRenderEntities : ClientSystem
+ 		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
+ 		int dimension = game.EntityPlayer.Pos.Dimension;
+ 		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
+ 		{
+ 			Entity entity = entityRenderer.Value.entity;
+-			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && entity.Pos.Dimension == dimension && (entity.AllowOutsideLoadedRange || (xYZ.HorizontalSquareDistanceTo(entity.Pos.X, entity.Pos.Z) < (float)num && (entity == game.EntityPlayer || game.WorldMap.IsChunkRendered(entity.Pos)))))
++			// Optimum: reorder checks cheapest-first. Dimension (int ==)
++			// and distance (2 muls + compare) reject before the frustum
++			// test (6 plane dot-products per call).
++			if (entity.Pos.Dimension == dimension && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || xYZ.HorizontalSquareDistanceTo(entity.Pos.X, entity.Pos.Z) < (float)num) && game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || game.WorldMap.IsChunkRendered(entity.Pos)))
+ 			{
+ 				entity.IsRendered = true;
+ 				entityRenderer.Value.BeforeRender(dt);
+ 			}
+ 			else
+@@ -114,23 +117,41 @@ public class SystemRenderEntities : ClientSystem
+ 				entityRenderer.Value.DoRender3DAfterOIT(dt, isShadowPass: false);
+ 			}
+ 		}
+ 	}
+ 
++	// Optimum: entities beyond the configured distance occupy sub-pixel
++	// area in shadow map. Skip them.
++	private static double ShadowCullDistanceSq => (double)ClientSettings.OptimumShadowCullDistance * ClientSettings.OptimumShadowCullDistance;
++
+ 	private void OnRenderFrameShadows(float dt)
+ 	{
+ 		int dimension = game.EntityPlayer.Pos.Dimension;
+ 		ShaderProgramChunkshadowmap shaderProgramChunkshadowmap = (ShaderProgramChunkshadowmap)ShaderProgramBase.CurrentShaderProgram;
+ 		if (game.api.Render.UseSSBOs)
+ 		{
+ 			shaderProgramChunkshadowmap.Stop();
+ 			shaderProgramChunkshadowmap = (ShaderProgramChunkshadowmap)game.api.Shader.GetProgram(42);
+ 			shaderProgramChunkshadowmap.Use();
+ 		}
++		double plrX = game.EntityPlayer.Pos.X;
++		double plrZ = game.EntityPlayer.Pos.Z;
++		bool shadowCullEnabled = ClientSettings.OptimumEntityShadowCull;
++		double shadowCullDistSq = ShadowCullDistanceSq;
+ 		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
+ 		{
+ 			Entity entity = entityRenderer.Value.entity;
++			if (shadowCullEnabled && entity != game.EntityPlayer)
++			{
++				double dx = entity.Pos.X - plrX;
++				double dz = entity.Pos.Z - plrZ;
++				if (dx * dx + dz * dz > shadowCullDistSq)
++				{
++					entity.IsShadowRendered = false;
++					continue;
++				}
++			}
+ 			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
+ 			{
+ 				entity.IsShadowRendered = true;
+ 				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
+ 			}

@@ -1,0 +1,16 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GltfPbrMetallicRoughness.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GltfPbrMetallicRoughness.cs
+index 7b60172..7fad2e9 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GltfPbrMetallicRoughness.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GltfPbrMetallicRoughness.cs
+@@ -1,10 +1,10 @@
+ using Newtonsoft.Json;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+-[JsonObject(/*Could not decode attribute arguments.*/)]
++[JsonObject(MemberSerialization.OptIn)]
+ public class GltfPbrMetallicRoughness
+ {
+ 	[JsonProperty("baseColorTexture")]
+ 	public GltfMatTexture BaseColorTexture { get; set; }
+ 

@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/MacroBase.cs b/VintagestoryLib/Vintagestory.Client.NoObf/MacroBase.cs
+index 2600634..4f8ddb3 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/MacroBase.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/MacroBase.cs
+@@ -2,11 +2,11 @@ using System;
+ using Newtonsoft.Json;
+ using Vintagestory.API.Client;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+-[JsonObject(/*Could not decode attribute arguments.*/)]
++[JsonObject(MemberSerialization.OptIn)]
+ public class MacroBase : IMacroBase
+ {
+ 	[JsonProperty]
+ 	public int Index { get; set; }
+ 

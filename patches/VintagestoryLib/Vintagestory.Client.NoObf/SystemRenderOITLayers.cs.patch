@@ -1,0 +1,19 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
+index 9df8cc5..6fb5ff5 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
+@@ -39,13 +39,11 @@ public class SystemRenderOITLayers : ClientSystem
+ 			currentActiveShader?.Use();
+ 			if (revealTextureId == 0 || transparentfb.Disposed)
+ 			{
+ 				rebuild();
+ 			}
+-			DrawBuffersEnum[] array = new DrawBuffersEnum[6];
+-			RuntimeHelpers.InitializeArray(array, (RuntimeFieldHandle)/*OpCode not supported: LdMemberToken*/);
+-			DrawBuffersEnum[] array2 = (DrawBuffersEnum[])(object)array;
++			DrawBuffersEnum[] array2 = new DrawBuffersEnum[] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
+ 			GL.DrawBuffers(array2.Length, array2);
+ 			GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0);
+ 			GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0);
+ 			GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1);
+ 			GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1);

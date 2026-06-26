@@ -1,0 +1,120 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
+index 34ff0fd..ac7f262 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
+@@ -52,11 +52,11 @@ public class SystemRenderSunMoon : ClientSystem
+ 		MeshData customQuadModelData = QuadMeshUtilExt.GetCustomQuadModelData(0f, 0f, 0f, ImageSize, ImageSize, byte.MaxValue, byte.MaxValue, byte.MaxValue, byte.MaxValue);
+ 		customQuadModelData.Flags = new int[4];
+ 		quadModel = game.Platform.UploadMesh(customQuadModelData);
+ 		game.eventManager.RegisterRenderer(OnRenderFrame3D, EnumRenderStage.Opaque, Name, 0.3);
+ 		game.eventManager.RegisterRenderer(OnRenderFrame3DPost, EnumRenderStage.Opaque, Name, 999.0);
+-		GL.GenQueries(1, ref occlQueryId);
++		GL.GenQueries(1, out occlQueryId);
+ 	}
+ 
+ 	private void OnRenderFrame3DPost(float obj)
+ 	{
+ 		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
+@@ -101,15 +101,15 @@ public class SystemRenderSunMoon : ClientSystem
+ 		standard.ProjectionMatrix = game.api.renderapi.CurrentProjectionMatrix;
+ 		standard.Tex2D = suntextureId;
+ 		if (firstTickDone)
+ 		{
+ 			int num = default(int);
+-			GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34919, ref num);
++			GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34919, out num);
+ 			if (num > 0)
+ 			{
+ 				int num2 = default(int);
+-				GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34918, ref num2);
++				GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34918, out num2);
+ 				targetSunSpec = GameMath.Clamp((float)num2 / 1500f, 0f, 1f);
+ 				nowQuerying = false;
+ 			}
+ 		}
+ 		firstTickDone = true;
+@@ -220,26 +220,26 @@ public class SystemRenderSunMoon : ClientSystem
+ 			double[] top2 = game.PMatrix.Top;
+ 			double[] cameraMatrixOrigin2 = game.api.renderapi.CameraMatrixOrigin;
+ 			double[] array2 = new double[16];
+ 			Mat4d.Mul(array2, cameraMatrixOrigin2, new double[16]
+ 			{
+-				((Matrix4)(ref sunmat)).M11,
+-				((Matrix4)(ref sunmat)).M12,
+-				((Matrix4)(ref sunmat)).M13,
+-				((Matrix4)(ref sunmat)).M14,
+-				((Matrix4)(ref sunmat)).M21,
+-				((Matrix4)(ref sunmat)).M22,
+-				((Matrix4)(ref sunmat)).M23,
+-				((Matrix4)(ref sunmat)).M24,
+-				((Matrix4)(ref sunmat)).M31,
+-				((Matrix4)(ref sunmat)).M32,
+-				((Matrix4)(ref sunmat)).M33,
+-				((Matrix4)(ref sunmat)).M34,
+-				((Matrix4)(ref sunmat)).M41,
+-				((Matrix4)(ref sunmat)).M42,
+-				((Matrix4)(ref sunmat)).M43,
+-				((Matrix4)(ref sunmat)).M44
++				sunmat.M11,
++				sunmat.M12,
++				sunmat.M13,
++				sunmat.M14,
++				sunmat.M21,
++				sunmat.M22,
++				sunmat.M23,
++				sunmat.M24,
++				sunmat.M31,
++				sunmat.M32,
++				sunmat.M33,
++				sunmat.M34,
++				sunmat.M41,
++				sunmat.M42,
++				sunmat.M43,
++				sunmat.M44
+ 			});
+ 			Vec3d vec3d2 = MatrixToolsd.Project(new Vec3d((float)ImageSize / 2f, (float)ImageSize / 2f, 0.0), top2, array2, game.Width, game.Height);
+ 			Vec3f sunPositionScreen2 = new Vec3f((float)vec3d2.X / (float)game.Width * 2f - 1f, (float)vec3d2.Y / (float)game.Height * 2f - 1f, (float)vec3d2.Z);
+ 			game.shUniforms.SunPositionScreen = sunPositionScreen2;
+ 		}
+@@ -346,17 +346,17 @@ public class SystemRenderSunMoon : ClientSystem
+ 		//IL_0098: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_009d: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_009f: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
+ 		Vector3 val = new Vector3(direction.X, 0f, direction.Z);
+-		Vector3 val2 = ((Vector3)(ref val)).Normalized();
++		Vector3 val2 = val.Normalized();
+ 		double num = Math.Atan2(val2.X, val2.Z);
+ 		Quaternion val3 = Quaternion.FromAxisAngle(Vector3.UnitY, (float)num);
+ 		Vector2 val4 = new Vector2(direction.X, direction.Z);
+-		float length = ((Vector2)(ref val4)).Length;
++		float length = val4.Length;
+ 		val = new Vector3(0f, direction.Y, length);
+-		Vector3 val5 = ((Vector3)(ref val)).Normalized();
++		Vector3 val5 = val.Normalized();
+ 		double num2 = Math.Atan2(val5.Y, val5.Z);
+ 		Quaternion val6 = Quaternion.FromAxisAngle(-Vector3.UnitX, (float)num2);
+ 		return val3 * val6;
+ 	}
+ 
+@@ -388,17 +388,17 @@ public class SystemRenderSunMoon : ClientSystem
+ 		//IL_0098: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_009d: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_009f: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_00a1: Unknown result type (might be due to invalid IL or missing references)
+ 		Vector3 val = new Vector3(direction.X, 0f, direction.Z);
+-		Vector3 val2 = ((Vector3)(ref val)).Normalized();
++		Vector3 val2 = val.Normalized();
+ 		double num = Math.Atan2(val2.X, val2.Z);
+ 		Quaternion val3 = Quaternion.FromAxisAngle(Vector3.UnitY, (float)num);
+ 		Vector2 val4 = new Vector2(direction.X, direction.Z);
+-		float length = ((Vector2)(ref val4)).Length;
++		float length = val4.Length;
+ 		val = new Vector3(0f, direction.Y, length);
+-		Vector3 val5 = ((Vector3)(ref val)).Normalized();
++		Vector3 val5 = val.Normalized();
+ 		double num2 = Math.Atan2(val5.Y, val5.Z);
+ 		Quaternion val6 = Quaternion.FromAxisAngle(-Vector3.UnitX, (float)num2);
+ 		return val3 * val6;
+ 	}
+ 

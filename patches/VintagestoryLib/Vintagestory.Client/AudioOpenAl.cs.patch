@@ -1,0 +1,16 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs b/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs
+index fa88f47..f929421 100644
+--- a/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs
++++ b/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs
+@@ -1,10 +1,11 @@
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using OpenTK.Audio.OpenAL;
++using EFX = OpenTK.Audio.OpenAL.ALC.EFX;
+ using OpenTK.Mathematics;
+ using Vintagestory.API.Common;
+ using Vintagestory.Client.NoObf;
+ 
+ namespace Vintagestory.Client;

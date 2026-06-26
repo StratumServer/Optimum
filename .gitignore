@@ -1,0 +1,40 @@
+# Build output
+bin/
+obj/
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Profiling
+*.nettrace
+*.etl
+BenchmarkDotNet.Artifacts/
+
+# Bootstrap artifacts (generated at build time)
+.vanilla/
+.vanilla-*/
+.tools/
+.baseline/
+baseline/
+VintagestoryApi/
+Cairo/
+VSEssentials/
+VSSurvivalMod/
+VSCreativeMod/
+
+# Packaging output
+Optimum-v*/
+Optimum.app/
+*.tar.gz
+*.zip
+*.dmg
+
+# Vanilla client zips (cached downloads)
+.vanilla-zips/

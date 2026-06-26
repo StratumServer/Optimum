@@ -1,0 +1,19 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenServerDashboard.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenServerDashboard.cs
+index 39d65f2..25ee6b2 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenServerDashboard.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenServerDashboard.cs
+@@ -589,12 +589,12 @@ public class GuiScreenServerDashboard : GuiScreen
+ 	private void OnReturnFromCustomizer(bool didApply)
+ 	{
+ 		if (didApply)
+ 		{
+ 			wcu = customizeScreen.wcu;
+-			wcu.Jworldconfig.Token[(object)"Seed"] = JToken.op_Implicit(wcu.Seed);
+-			wcu.Jworldconfig.Token[(object)"MapSizeY"] = JToken.op_Implicit(wcu.MapsizeY);
++			wcu.Jworldconfig.Token[(object)"Seed"] = JToken.FromObject(wcu.Seed);
++			wcu.Jworldconfig.Token[(object)"MapSizeY"] = JToken.FromObject(wcu.MapsizeY);
+ 			string worldconfig = wcu.Jworldconfig.ToString();
+ 			backend.SetConfig(onStatusReady, null, worldconfig);
+ 		}
+ 		ScreenManager.LoadScreen(this);
+ 	}
