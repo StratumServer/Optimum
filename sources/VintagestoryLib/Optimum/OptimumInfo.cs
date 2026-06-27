@@ -6,7 +6,7 @@ namespace Optimum;
 /// </summary>
 public static class OptimumInfo
 {
-    public const string Version = "0.1.0";
+    public const string Version = "0.1.1";
     public const string Name = "Optimum";
     public const string Url = "https://github.com/Zaldaryon/Optimum";
     public const string DisplayTag = Name + " v" + Version;

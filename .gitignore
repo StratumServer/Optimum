@@ -23,11 +23,11 @@ BenchmarkDotNet.Artifacts/
 .tools/
 .baseline/
 baseline/
-VintagestoryApi/
-Cairo/
-VSEssentials/
-VSSurvivalMod/
-VSCreativeMod/
+/VintagestoryApi/
+/Cairo/
+/VSEssentials/
+/VSSurvivalMod/
+/VSCreativeMod/
 
 # Packaging output
 Optimum-v*/

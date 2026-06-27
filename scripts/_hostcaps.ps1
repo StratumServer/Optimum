@@ -1,4 +1,4 @@
-<#
+﻿<#
 Shared host-capability detection for the packaging scripts.
 Dot-source it:  . "$PSScriptRoot/_hostcaps.ps1"
 
@@ -12,7 +12,7 @@ anything.
 #>
 
 function Get-HostOS {
-    if ($IsWindows) { 'Windows' }
+    if ($IsWindows -or ($env:OS -eq 'Windows_NT')) { 'Windows' }
     elseif ($IsMacOS) { 'macOS' }
     elseif ($IsLinux) { 'Linux' }
     else { 'Unknown' }
@@ -68,7 +68,7 @@ function Show-HostCaps {
     if ($Only) { $caps = $caps | Where-Object { $Only -contains $_.Target } }
 
     Write-Host ""
-    Write-Host "Host: $os  —  packaging capability (no native ARM client exists for Linux/Windows; x64 runs there via emulation)" -ForegroundColor Cyan
+    Write-Host "Host: $os - packaging capability [no native ARM client for Linux/Windows; x64 via emulation]" -ForegroundColor Cyan
     foreach ($c in $caps) {
         $color = switch ($c.Quality) { 'Full' {'Green'} 'Degraded' {'Yellow'} default {'Red'} }
         Write-Host ("  {0,-10} {1,-9} {2}" -f $c.Target, $c.Quality, $c.Note) -ForegroundColor $color

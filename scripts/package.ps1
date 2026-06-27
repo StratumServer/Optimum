@@ -34,7 +34,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 function Resolve-WindowsVanilla {
     param([string]$RepoRoot, [string]$Version)
     $hostWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
-    if ($IsWindows -and (Test-Path (Join-Path $hostWin 'Vintagestory.exe'))) { return $hostWin }
+    if (($IsWindows -or ($env:OS -eq 'Windows_NT')) -and (Test-Path (Join-Path $hostWin 'Vintagestory.exe'))) { return $hostWin }
 
     $winDir = Join-Path (Join-Path $RepoRoot '.vanilla-win') 'vintagestory'
     if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
@@ -81,7 +81,7 @@ try {
 
     # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
     $infoFile = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'VintagestoryLib') 'Optimum') 'OptimumInfo.cs'
-    $optVer = '0.1.0'
+    $optVer = '0.1.1'
     if (Test-Path $infoFile) {
         $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($match.Success) { $optVer = $match.Groups[1].Value }
@@ -100,7 +100,8 @@ try {
     Write-Host "Applying optimized DLLs..."
     Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll') $stageDir
     Copy-Item -Force (Join-Path $libOut 'VintagestoryLib.dll') $stageDir
-    Copy-Item -Force (Join-Path $buildOut 'VintagestoryAPI.dll') $stageDir
+    $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
+    Copy-Item -Force (Join-Path $apiOut 'VintagestoryAPI.dll') $stageDir
 
     # Apply optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'
