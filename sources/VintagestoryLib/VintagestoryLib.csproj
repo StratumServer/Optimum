@@ -1,0 +1,40 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>VintagestoryLib</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\VintagestoryApi\VintagestoryAPI.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="cairo-sharp"><HintPath>..\..\.vanilla\vintagestory\Lib\cairo-sharp.dll</HintPath></Reference>
+    <Reference Include="protobuf-net"><HintPath>..\..\.vanilla\vintagestory\Lib\protobuf-net.dll</HintPath></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>..\..\.vanilla\vintagestory\Lib\Newtonsoft.Json.dll</HintPath></Reference>
+    <Reference Include="CommandLine"><HintPath>..\..\.vanilla\vintagestory\Lib\CommandLine.dll</HintPath></Reference>
+    <Reference Include="SkiaSharp"><HintPath>..\..\.vanilla\vintagestory\Lib\SkiaSharp.dll</HintPath></Reference>
+    <Reference Include="Open.Nat"><HintPath>..\..\.vanilla\vintagestory\Lib\Open.Nat.dll</HintPath></Reference>
+    <Reference Include="Mono.Nat"><HintPath>..\..\.vanilla\vintagestory\Lib\Mono.Nat.dll</HintPath></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>..\..\.vanilla\vintagestory\Lib\Mono.Cecil.dll</HintPath></Reference>
+    <Reference Include="Microsoft.CodeAnalysis"><HintPath>..\..\.vanilla\vintagestory\Lib\Microsoft.CodeAnalysis.dll</HintPath></Reference>
+    <Reference Include="Microsoft.CodeAnalysis.CSharp"><HintPath>..\..\.vanilla\vintagestory\Lib\Microsoft.CodeAnalysis.CSharp.dll</HintPath></Reference>
+    <Reference Include="ICSharpCode.SharpZipLib"><HintPath>..\..\.vanilla\vintagestory\Lib\ICSharpCode.SharpZipLib.dll</HintPath></Reference>
+    <Reference Include="Microsoft.Data.Sqlite"><HintPath>..\..\.vanilla\vintagestory\Lib\Microsoft.Data.Sqlite.dll</HintPath></Reference>
+    <Reference Include="0Harmony"><HintPath>..\..\.vanilla\vintagestory\Lib\0Harmony.dll</HintPath></Reference>
+    <Reference Include="OpenTK.Windowing.Desktop"><HintPath>..\..\.vanilla\vintagestory\Lib\OpenTK.Windowing.Desktop.dll</HintPath></Reference>
+    <Reference Include="OpenTK.Audio.OpenAL"><HintPath>..\..\.vanilla\vintagestory\Lib\OpenTK.Audio.OpenAL.dll</HintPath></Reference>
+    <Reference Include="OpenTK.Mathematics"><HintPath>..\..\.vanilla\vintagestory\Lib\OpenTK.Mathematics.dll</HintPath></Reference>
+    <Reference Include="OpenTK.Windowing.Common"><HintPath>..\..\.vanilla\vintagestory\Lib\OpenTK.Windowing.Common.dll</HintPath></Reference>
+    <Reference Include="OpenTK.Windowing.GraphicsLibraryFramework"><HintPath>..\..\.vanilla\vintagestory\Lib\OpenTK.Windowing.GraphicsLibraryFramework.dll</HintPath></Reference>
+    <Reference Include="DnsClient"><HintPath>..\..\.vanilla\vintagestory\Lib\DnsClient.dll</HintPath></Reference>
+    <Reference Include="OpenTK.Graphics"><HintPath>..\..\.vanilla\vintagestory\Lib\OpenTK.Graphics.dll</HintPath></Reference>
+    <Reference Include="csvorbis"><HintPath>..\..\.vanilla\vintagestory\Lib\csvorbis.dll</HintPath></Reference>
+    <Reference Include="csogg"><HintPath>..\..\.vanilla\vintagestory\Lib\csogg.dll</HintPath></Reference>
+    <Reference Include="xplatforminterface"><HintPath>..\..\.vanilla\vintagestory\Lib\xplatforminterface.dll</HintPath></Reference>
+  </ItemGroup>
+</Project>

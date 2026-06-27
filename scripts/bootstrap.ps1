@@ -50,8 +50,21 @@ try {
     if ($Refresh -and (Test-Path $vanillaDir))  { Remove-Item -Recurse -Force $vanillaDir }
     if ($Refresh -and (Test-Path $baselineDir)) { Remove-Item -Recurse -Force $baselineDir }
 
-    # --- 1. Download and install Windows client ---
-    if (-not (Test-Path $vanillaDir)) {
+    # --- 1. Obtain vanilla client files ---
+    # Three modes:
+    #   a) .vanilla/ already exists (junction from installer, or previous run) -> skip
+    #   b) -ClientArchive '__skip__' -> the caller (install-windows.ps1) already placed
+    #      .vanilla via junction; verify it exists and move on
+    #   c) Normal: download the installer and extract with innounp
+    $skipDownload = ($ClientArchive -eq '__skip__')
+    if ((Test-Path (Join-Path $vanillaDir 'vintagestory\Vintagestory.exe'))) {
+        Write-Host "Using existing $vanillaDir"
+    } elseif ($skipDownload) {
+        # The installer creates .vanilla/vintagestory as a junction before calling us.
+        if (-not (Test-Path (Join-Path $vanillaDir 'vintagestory\Vintagestory.exe'))) {
+            throw ".vanilla/vintagestory not found and download was skipped. Provide a VS install path."
+        }
+    } else {
         New-Item -ItemType Directory -Force -Path $zipCacheDir | Out-Null
         $exeName = "vs_install_win-x64_$Version.exe"
         if (-not $ClientArchive) {
@@ -96,8 +109,6 @@ try {
             throw "Extraction failed: Vintagestory.exe not found"
         }
         Write-Host "Extraction complete."
-    } else {
-        Write-Host "Using existing $vanillaDir"
     }
 
     # --- 2. Decompile closed-source DLLs ---
@@ -117,7 +128,8 @@ try {
 
     foreach ($dllBase in $decompileTargets.Keys) {
         $desc = $decompileTargets[$dllBase]
-        $dllPath = Get-ChildItem -Path $vanillaDir -Recurse -Filter "$dllBase.dll" | Select-Object -First 1
+        $dllPath = Get-ChildItem -Path (Join-Path $vanillaDir 'vintagestory') -Recurse -Filter "$dllBase.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $dllPath) { $dllPath = Get-ChildItem -Path $vanillaDir -Recurse -Filter "$dllBase.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 }
         if (-not $dllPath) { Write-Warning "Skipping $dllBase.dll (not found in archive)"; continue }
 
         $out = Join-Path $baselineDir $dllBase
@@ -139,6 +151,20 @@ try {
         if (Test-Path $work) { Remove-Item -Recurse -Force $work }
         New-Item -ItemType Directory -Force -Path (Split-Path $work) | Out-Null
         Copy-Item -Recurse -Force $out $work
+
+        # Normalize to LF (patches assume LF). ilspycmd emits CRLF on Windows;
+        # without this, git apply fails on patches/<target>/*.patch with a CRLF-vs-LF
+        # context mismatch, falls back to --3way, and errors "does not exist in index"
+        # because baseline/ is gitignored. Forks already get this at clone time (step 3).
+        Get-ChildItem -Path $work -Recurse -File -Include '*.cs','*.csproj' -ErrorAction SilentlyContinue | ForEach-Object {
+            $bytes = [IO.File]::ReadAllBytes($_.FullName)
+            $hasCR = $false
+            foreach ($b in $bytes) { if ($b -eq 13) { $hasCR = $true; break } }
+            if ($hasCR) {
+                $t = [Text.Encoding]::UTF8.GetString($bytes) -replace "`r`n", "`n"
+                [IO.File]::WriteAllBytes($_.FullName, [Text.Encoding]::UTF8.GetBytes($t))
+            }
+        }
     }
 
     # --- 3. Clone open-source forks ---
@@ -187,7 +213,7 @@ try {
             foreach ($patch in $patches) {
                 $rel = $patch.FullName.Substring($repoRoot.Length + 1)
                 $topProj = ($rel -split '[\\/]')[1]
-                $applyArgs = @('apply', '--3way', '--whitespace=nowarn')
+                $applyArgs = @('apply', '--whitespace=nowarn')
                 if ($vanillaPatchProjects -contains $topProj) { $applyArgs += '--directory=baseline' }
                 $applyArgs += $patch.FullName
                 Write-Host "Applying $rel"
