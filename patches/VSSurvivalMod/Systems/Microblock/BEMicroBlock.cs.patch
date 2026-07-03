@@ -1,0 +1,59 @@
+diff --git a/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs b/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs
+index 4e4704b..6b7d21c 100644
+--- a/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs
++++ b/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs
+@@ -2465,18 +2465,50 @@ namespace Vintagestory.GameContent
+             {
+                 Mesh = GenMesh();
+             }
+ 
+             base.OnTesselation(mesher, tesselator);
+-            if (withColorMapData)
++
++            ICoreClientAPI capi = Api as ICoreClientAPI;
++            if (capi == null)
+             {
+-                var cmapdata = (Api as ICoreClientAPI).World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
+-                mesher.AddMeshData(Mesh, cmapdata);
++                mesher.AddMeshData(Mesh);
++                Block = Api.World.BlockAccessor.GetBlock(Pos);
++                return true;
++            }
++
++            // Optimum: chiseled block LOD via the engine's native lodLevel system.
++            // lodLevel 0 draws at short distance and skips medium/long.
++            // lodLevel 3 skips short/medium and draws at long distance.
++            // The engine swaps meshes by distance with no retesselation needed.
++            if (OptimumConfig.ChiselLodEnabled && BlockIds != null && BlockIds.Length > 0)
++            {
++                if (withColorMapData)
++                {
++                    var cmapdata = capi.World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
++                    mesher.AddMeshData(Mesh, cmapdata, 0);
++                }
++                else
++                {
++                    mesher.AddMeshData(Mesh, 0);
++                }
++
++                Block primaryBlock = Api.World.GetBlock(BlockIds[0]);
++                tesselator.TesselateBlock(primaryBlock, out MeshData lodMesh);
++                mesher.AddMeshData(lodMesh, 3);
+             }
+             else
+             {
+-                mesher.AddMeshData(Mesh);
++                if (withColorMapData)
++                {
++                    var cmapdata = capi.World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
++                    mesher.AddMeshData(Mesh, cmapdata);
++                }
++                else
++                {
++                    mesher.AddMeshData(Mesh);
++                }
+             }
+ 
+             Block = Api.World.BlockAccessor.GetBlock(Pos);
+ 
+             return true;

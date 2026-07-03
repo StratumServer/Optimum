@@ -1,0 +1,28 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
+index 431e51a..d378863 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
+@@ -208,14 +208,20 @@ public class ChunkRenderer
+ 			chunkshadowmap.Tex2d2D = textureIds[j];
+ 			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
+ 		}
+ 		ScreenManager.FrameProfiler.Mark("rend3D-rets-tpp");
+ 		platform.GlDisableCullFace();
+-		for (int k = 0; k < textureIds.Length; k++)
++		// Optimum: skip vegetation (BlendNoCull) in far shadow cascade.
++		// At 60-270 blocks a chunk subtends 1-3 texels in the 1024² shadow map;
++		// thin foliage casts no resolvable shadow at that distance.
++		if (!ClientSettings.OptimumShadowFarVegetation || game.currentRenderStage != EnumRenderStage.ShadowFar)
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++			for (int k = 0; k < textureIds.Length; k++)
++			{
++				chunkshadowmap.Tex2d2D = textureIds[k];
++				poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++			}
+ 		}
+ 		for (int l = 0; l < textureIds.Length; l++)
+ 		{
+ 			chunkshadowmap.Tex2d2D = textureIds[l];
+ 			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);

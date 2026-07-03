@@ -1,0 +1,65 @@
+diff --git a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
+index 59421c6..a44d455 100644
+--- a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
++++ b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.Common
+@@ -17,10 +18,18 @@ namespace Vintagestory.API.Common
+         protected ICoreClientAPI capi;
+         protected Vec3d position;
+         protected Vec3f soundPosition;
+         protected int dimension = 0;
+ 
++        // Optimum: animation LOD for distant animated block-entities.
++        // Skip OnFrame beyond far threshold; stride every 4th frame
++        // between near and far. Saves animator work for forges,
++        // querns, barrels outside close range.
++        private const double AnimLodNearSq = 24.0 * 24.0;
++        private const double AnimLodFarSq = 48.0 * 48.0;
++        private int _animFrameCounter;
++
+         [Obsolete]
+         protected virtual int RenderTextureId => capi.BlockTextureAtlas.AtlasTextures[0].TextureId;
+ 
+         public double RenderOrder => 1;
+         public int RenderRange => 99;
+@@ -90,10 +99,31 @@ namespace Vintagestory.API.Common
+         {
+             if (animator == null || renderer == null || (api as ICoreClientAPI)?.IsGamePaused == true) return; // not initialized yet
+ 
+             if (activeAnimationsByAnimCode.Count > 0 || animator.ActiveAnimationCount > 0)
+             {
++                // Optimum: animation LOD. Skip animator work for
++                // distant animated blocks (forges, querns, etc).
++                if (OptimumConfig.AnimBlockLodEnabled)
++                {
++                    var plrPos = capi.World.Player.Entity.Pos;
++                    double dx = position.X - plrPos.X;
++                    double dz = position.Z - plrPos.Z;
++                    double distSq = dx * dx + dz * dz;
++
++                    if (distSq > AnimLodFarSq)
++                    {
++                        return;
++                    }
++                    if (distSq > AnimLodNearSq)
++                    {
++                        _animFrameCounter++;
++                        if ((_animFrameCounter & 3) != 0) return;
++                        deltaTime *= 4f;
++                    }
++                }
++
+                 animator.OnFrame(activeAnimationsByAnimCode, deltaTime);
+             }
+ 
+             if (activeAnimationsByAnimCode.Count == 0 && animator.ActiveAnimationCount == 0 && renderer.ShouldRender && !stopRenderTriggered)
+             {

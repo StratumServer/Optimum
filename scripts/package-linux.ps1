@@ -40,14 +40,15 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
     Show-HostCaps -Only 'linux-x64' | Out-Null
-    $buildOut = Join-Path $repoRoot 'baseline/Vintagestory/bin/Release/net10.0'
-    $libOut   = Join-Path $repoRoot 'baseline/VintagestoryLib/bin/Release/net10.0'
+    $buildOut = Join-Path $repoRoot 'build/Vintagestory/bin/Release/net10.0'
+    $libOut   = Join-Path $repoRoot 'build/VintagestoryLib/bin/Release/net10.0'
+    $modOut   = Join-Path $repoRoot 'bin/Release/net10.0'
     if (-not (Test-Path (Join-Path $libOut 'VintagestoryLib.dll'))) {
         throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
     }
 
     # 1. Acquire the official Linux client archive.
-    $zipCache = Join-Path $repoRoot '.vanilla-zips'
+    $zipCache = Join-Path $repoRoot '.vanilla/archives'
     New-Item -ItemType Directory -Force -Path $zipCache | Out-Null
     if (-not $ClientArchive) {
         $ClientArchive = Join-Path $zipCache "vs_client_linux-x64_$Version.tar.gz"
@@ -62,7 +63,7 @@ try {
     }
 
     # 2. Extract the base install (vintagestory/) once.
-    $baseRoot   = Join-Path $repoRoot '.vanilla-linux'
+    $baseRoot   = Join-Path $repoRoot '.vanilla/linux-x64'
     $vanillaDir = Join-Path $baseRoot 'vintagestory'
     if (-not (Test-Path $vanillaDir)) {
         New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
@@ -72,8 +73,8 @@ try {
     if (-not (Test-Path $vanillaDir)) { throw "Extraction failed: $vanillaDir not found" }
 
     # 3. Version from OptimumInfo.cs.
-    $infoFile = Join-Path $repoRoot 'baseline/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.1.1'
+    $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
+    $optVer = '0.1.2'
     if (Test-Path $infoFile) {
         $m = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($m.Success) { $optVer = $m.Groups[1].Value }
@@ -91,7 +92,11 @@ try {
     # 5. Overlay optimized DLLs (platform-agnostic IL).
     Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll')    $stageDir
     Copy-Item -Force (Join-Path $libOut   'VintagestoryLib.dll') $stageDir
-    Copy-Item -Force (Join-Path $buildOut 'VintagestoryAPI.dll') $stageDir
+    Copy-Item -Force (Join-Path $modOut 'VintagestoryAPI.dll') $stageDir
+    Copy-Item -Force (Join-Path $modOut 'VSEssentials.dll') (Join-Path $stageDir 'Mods')
+    Copy-Item -Force (Join-Path $modOut 'VSSurvivalMod.dll') (Join-Path $stageDir 'Mods')
+    Copy-Item -Force (Join-Path $modOut 'VSCreativeMod.dll') (Join-Path $stageDir 'Mods')
+    Copy-Item -Force (Join-Path $modOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib')
 
     # 5b. Overlay optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'

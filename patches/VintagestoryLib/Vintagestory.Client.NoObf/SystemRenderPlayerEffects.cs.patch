@@ -1,8 +1,15 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..b709f21 100644
+index 2eca300..70889f3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-@@ -31,15 +31,26 @@ public class SystemRenderPlayerEffects : ClientSystem
+@@ -1,5 +1,6 @@
++using System;
+ using System.Linq;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.MathTools;
+ 
+@@ -31,18 +32,38 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
@@ -18,15 +25,28 @@ index 2eca300..b709f21 100644
 +		_ => 60f
 +	};
 +
++	// Optimum: static predicate avoids lambda allocation and <>c cache field.
++	private static bool HasLight(Entity e) => e.LightHsv != null && e.LightHsv[2] > 0;
++
++	// Optimum: sort key stored in a field so the sort delegate is static (no DisplayClass).
++	private Vec3d _sortOrigin;
++	private double SortByDistance(Entity e) => e.Pos.SquareDistanceTo(_sortOrigin);
++
  	private void onBeforeRender(float dt)
  	{
  		game.shUniforms.PointLightsCount = 0;
  		Vec3d plrPos = game.EntityPlayer.Pos.XYZ;
 -		Entity[] array = game.GetEntitiesAround(plrPos, 120f, 120f, (Entity e) => e.LightHsv != null && e.LightHsv[2] > 0);
++		// Optimum: dynamic light radius gated by OptimumDynamicLightScale setting.
 +		float lightRadius = ClientSettings.OptimumDynamicLightScale ? GetOptimumLightRadius(ClientSettings.ViewDistance) : 120f;
-+		Entity[] array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, (Entity e) => e.LightHsv != null && e.LightHsv[2] > 0);
++		Entity[] array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, HasLight);
  		if (array.Length > maxDynLights)
  		{
- 			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
+-			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
++			_sortOrigin = plrPos;
++			array = array.OrderBy((Func<Entity, double>)SortByDistance).ToArray();
  		}
  		foreach (Entity entity in array)
+ 		{
+ 			byte[] lightHsv = entity.LightHsv;
+ 			AddPointLight(lightHsv, entity.Pos);

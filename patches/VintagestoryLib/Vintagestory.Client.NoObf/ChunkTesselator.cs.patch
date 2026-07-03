@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
+index 9592e54..7d9ddeb 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
+@@ -102,11 +102,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 
+ 	internal readonly ClientChunk[] chunksNearby;
+ 
+ 	internal readonly ClientChunkData[] chunkdatasNearby;
+ 
+-	public object ReloadLock = new object();
++	public readonly Lock ReloadLock = new();
+ 
+ 	private ColorMapData defaultColorMapData;
+ 
+ 	private float[][] decorRotationMatrices = new float[24][];
+ 

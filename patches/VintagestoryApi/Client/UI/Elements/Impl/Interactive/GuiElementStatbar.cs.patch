@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs
+index c024532..f3762b9 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs
+@@ -67,11 +67,11 @@ namespace Vintagestory.API.Client
+ 
+             this.hideable = hideable;
+             this.color = color;
+             this.rightToLeft = rightToLeft;
+ 
+-            onGetStatbarValue = () => { return (float)Math.Round((float)value, 1) + " / " + (int)Math.Round(this.maxValue); };
++            onGetStatbarValue = () => { return (float)Math.Round((float)value, 1) + " / " + (float)Math.Round(this.maxValue, 1); };
+         }
+ 
+         public override void ComposeElements(Context ctx, ImageSurface surface)
+         {
+             Bounds.CalcWorldBounds();

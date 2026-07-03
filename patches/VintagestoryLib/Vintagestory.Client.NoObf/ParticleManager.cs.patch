@@ -1,0 +1,12 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs
+index 5ba5406..2dce194 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs
+@@ -1,6 +1,7 @@
+ using System;
++using System.Threading;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.Config;

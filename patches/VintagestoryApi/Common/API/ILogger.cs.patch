@@ -1,0 +1,21 @@
+diff --git a/VintagestoryApi/Common/API/ILogger.cs b/VintagestoryApi/Common/API/ILogger.cs
+index 1424235..1b7b72b 100644
+--- a/VintagestoryApi/Common/API/ILogger.cs
++++ b/VintagestoryApi/Common/API/ILogger.cs
+@@ -175,11 +175,15 @@ namespace Vintagestory.API.Common
+             }
+             catch (DummyLoggerException ex)
+             {
+                 var stackTrace = new StackTrace(ex, true);
+                 var frame = stackTrace.GetFrame(0);
+-                SourcePath = frame.GetFileName().Split("VintagestoryApi")[0];
++                var fileName = frame?.GetFileName();
++                if (fileName != null && fileName.Contains("VintagestoryApi"))
++                    SourcePath = fileName.Split("VintagestoryApi")[0];
++                else
++                    SourcePath = "";
+             }
+         }
+ 
+         public event LogEntryDelegate EntryAdded;
+         public void ClearWatchers() => EntryAdded = null;

@@ -1,0 +1,34 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
+index 8f0a63f..47dc2c9 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
+@@ -180,15 +180,28 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+ 		TargetReverbness = (float)num;
+ 		RoomLocation = new Cuboidi(vec3d2.AsBlockPos, vec3d3.AsBlockPos).GrowBy(10, 10, 10);
+ 		scanning = false;
+ 	}
+ 
++	// Optimum: skip the platform audio listener update when stationary.
++	private double _lastListenerX, _lastListenerY, _lastListenerZ;
++	private float _lastListenerDirX, _lastListenerDirZ;
++
+ 	public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+ 	{
+ 		Vec3f viewVector = game.EntityPlayer.Pos.GetViewVector();
+ 		Vec3d vec3d = game.EntityPlayer.Pos.XYZ.Add(game.EntityPlayer.LocalEyePos);
+-		game.Platform.UpdateAudioListener((float)vec3d.X, (float)vec3d.Y, (float)vec3d.Z, viewVector.X, 0f, viewVector.Z);
++		if (vec3d.X != _lastListenerX || vec3d.Y != _lastListenerY || vec3d.Z != _lastListenerZ ||
++		    viewVector.X != _lastListenerDirX || viewVector.Z != _lastListenerDirZ)
++		{
++			_lastListenerX = vec3d.X;
++			_lastListenerY = vec3d.Y;
++			_lastListenerZ = vec3d.Z;
++			_lastListenerDirX = viewVector.X;
++			_lastListenerDirZ = viewVector.Z;
++			game.Platform.UpdateAudioListener((float)vec3d.X, (float)vec3d.Y, (float)vec3d.Z, viewVector.X, 0f, viewVector.Z);
++		}
+ 		NowReverbness += (TargetReverbness - NowReverbness) * deltaTime / 1.5f;
+ 	}
+ 
+ 	private void OnGameTick100ms(float dt)
+ 	{

@@ -7,7 +7,7 @@
 # Windows: use Git Bash, WSL, or adapt to PowerShell.
 #
 # Packaging note: the optimized DLLs are platform-agnostic IL, so any host can
-# target any platform (quality varies — see README "Host x target matrix").
+# target any platform (quality varies - see README "Host x target matrix").
 # Vintage Story ships native ARM only for macOS, so Linux/Windows packages are
 # x64-only; ARM there runs x64 via emulation (box64 / Windows-on-ARM).
 
@@ -17,7 +17,8 @@ VERSION ?= 1.22.3
 CLIENT_ARCHIVE ?=
 
 # Paths (all overridable)
-VANILLA_DIR ?= .vanilla/vintagestory
+VANILLA_DIR ?= .vanilla/win-x64/vintagestory
+INSTALL_DIR ?= $(HOME)/.local/share/optimum
 DATA_PATH ?= $(HOME)/.config/OptimumVintagestoryData
 LOG_PATH ?=
 EXTRA_MOD_PATH ?= $(CURDIR)/mods
@@ -29,7 +30,7 @@ OPEN_WORLD ?=
 PLAY_STYLE ?= creativebuilding
 
 # Build output locations
-BUILD_OUT = baseline/Vintagestory/bin/$(CONFIGURATION)/net10.0
+BUILD_OUT = build/Vintagestory/bin/$(CONFIGURATION)/net10.0
 MOD_OUT = bin/$(CONFIGURATION)/net10.0
 
 BOOTSTRAP_ARGS :=
@@ -40,7 +41,7 @@ ifneq ($(VERSION),1.22.3)
   BOOTSTRAP_ARGS += --version $(VERSION)
 endif
 
-.PHONY: help check bootstrap build clean refresh patches deploy run run-creative run-connect \
+.PHONY: help check check-patches check-compat bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-linux package-macos package-win
 
 help: ## Show available targets
@@ -49,16 +50,22 @@ help: ## Show available targets
 check: ## Report which bootstrap/packaging tools are installed (installs nothing)
 	bash scripts/check-prereqs.sh
 
+check-patches: ## Verify patch files against the current working tree
+	bash scripts/check-patches.sh
+
+check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
+	bash scripts/check-vanilla-compat.sh
+
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
 
 build: ## Build Release (runs bootstrap if working tree is missing)
-	@if [ ! -d baseline/VintagestoryLib ]; then $(MAKE) bootstrap; fi
+	@if [ ! -d build/VintagestoryLib ]; then $(MAKE) bootstrap; fi
 	dotnet build VintageStory.slnx -c $(CONFIGURATION)
 
 clean: ## Remove intermediate build files
-	find . -type d -name obj -not -path './.baseline/*' -not -path './.vanilla/*' | xargs rm -rf
-	find . -type d -name bin -not -path './.baseline/*' -not -path './.vanilla/*' | xargs rm -rf
+	find . -type d -name obj -not -path './.build/*' -not -path './.vanilla/*' | xargs rm -rf
+	find . -type d -name bin -not -path './.build/*' -not -path './.vanilla/*' | xargs rm -rf
 
 refresh: ## Force full re-bootstrap from scratch
 	bash scripts/bootstrap.sh --refresh $(BOOTSTRAP_ARGS)
@@ -66,16 +73,37 @@ refresh: ## Force full re-bootstrap from scratch
 patches: ## Extract patches from working tree
 	bash scripts/extract-patches.sh
 
-deploy: build ## Copy compiled DLLs into vanilla client dir
+patch-il: build ## Run Cecil patcher: vanilla DLL + compiled donor → patched output
+	@echo "Running IL patcher..."
+	@dotnet run --project Optimum.Patcher -c $(CONFIGURATION) --no-build -- \
+		.vanilla/linux-x64/vintagestory/VintagestoryLib.dll \
+		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib.dll \
+		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll
+	@echo ""
+
+deploy: patch-il ## Deploy Cecil-patched DLLs into vanilla client dir and install dir
 	@echo "Deploying to $(VANILLA_DIR)..."
+	@cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(VANILLA_DIR)/VintagestoryLib.dll
 	@cp $(BUILD_OUT)/Vintagestory.dll $(VANILLA_DIR)/
-	@cp baseline/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib.dll $(VANILLA_DIR)/
+	@cp $(BUILD_OUT)/Vintagestory.runtimeconfig.json $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/VintagestoryAPI.dll $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/VSEssentials.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSSurvivalMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
 	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
+	@if [ -d "$(INSTALL_DIR)" ]; then \
+		echo "Deploying to $(INSTALL_DIR)..."; \
+		cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(INSTALL_DIR)/VintagestoryLib.dll; \
+		cp $(BUILD_OUT)/Vintagestory.dll $(INSTALL_DIR)/; \
+		cp $(BUILD_OUT)/Vintagestory.runtimeconfig.json $(INSTALL_DIR)/; \
+		cp $(MOD_OUT)/VintagestoryAPI.dll $(INSTALL_DIR)/; \
+		cp $(MOD_OUT)/VSEssentials.dll $(INSTALL_DIR)/Mods/; \
+		cp $(MOD_OUT)/VSSurvivalMod.dll $(INSTALL_DIR)/Mods/; \
+		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
+		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
+		cp sources/shaders/*.fsh sources/shaders/*.vsh $(INSTALL_DIR)/assets/game/shaders/; \
+	fi
 	@echo "Deploy complete."
 
 run: deploy ## Build, deploy, and launch client

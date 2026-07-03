@@ -1,31 +1,48 @@
 {
-  "_comment": "Pinned upstream commits for each Anego open-source fork. Bootstrap clones each repo at the listed ref into .baseline/<name>/ and the working <name>/ folder, then applies patches/<name>/*.patch on top.",
+  "_comment": "Build sources and reference repos for Optimum. 'compile' entries are built from source. 'reference' entries are cloned for code reading/mapping but NOT compiled - the vanilla DLLs are used instead.",
   "vintageStoryVersion": "1.22.3",
-  "forks": [
+  "compile": [
     {
       "name": "VintagestoryApi",
+      "source": "clone",
       "url": "https://github.com/anegostudios/vsapi.git",
       "ref": "caebe5cd00289f5deb7d9584ba8415f062225dc4"
     },
     {
       "name": "Cairo",
+      "source": "clone",
       "url": "https://github.com/anegostudios/Cairo.git",
       "ref": "b5a93a4"
     },
     {
-      "name": "VSCreativeMod",
-      "url": "https://github.com/anegostudios/vscreativemod.git",
-      "ref": "1c649719734ac5c049ce947a945847b2a07e9f59"
-    },
-    {
       "name": "VSEssentials",
+      "source": "clone",
       "url": "https://github.com/anegostudios/vsessentialsmod.git",
       "ref": "3319dff9e22b2f57c301a915fe5aa67e1ca349d2"
     },
     {
       "name": "VSSurvivalMod",
+      "source": "clone",
       "url": "https://github.com/anegostudios/vssurvivalmod.git",
       "ref": "36d9550e19c32197e8f0d8a9780a5d0b1320dc7c"
+    },
+    {
+      "name": "VSCreativeMod",
+      "source": "clone",
+      "url": "https://github.com/anegostudios/vscreativemod.git",
+      "ref": "1c649719734ac5c049ce947a945847b2a07e9f59"
+    }
+  ],
+  "decompile": [
+    {
+      "name": "VintagestoryLib",
+      "dll": "VintagestoryLib.dll",
+      "target": "build/VintagestoryLib"
+    },
+    {
+      "name": "Vintagestory",
+      "dll": "Vintagestory.dll",
+      "target": "build/Vintagestory"
     }
   ]
 }

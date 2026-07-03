@@ -44,8 +44,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 Push-Location $repoRoot
 try {
     Show-HostCaps -Only "osx-$Arch" | Out-Null
-    $buildOut = Join-Path $repoRoot 'baseline/Vintagestory/bin/Release/net10.0'
-    $libOut   = Join-Path $repoRoot 'baseline/VintagestoryLib/bin/Release/net10.0'
+    $buildOut = Join-Path $repoRoot 'build/Vintagestory/bin/Release/net10.0'
+    $libOut   = Join-Path $repoRoot 'build/VintagestoryLib/bin/Release/net10.0'
+    $modOut   = Join-Path $repoRoot 'bin/Release/net10.0'
     if (-not (Test-Path (Join-Path $libOut 'VintagestoryLib.dll'))) {
         throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
     }
@@ -53,7 +54,7 @@ try {
     if (-not (Test-Path $icns)) { throw "logo.icns not found at repo root." }
 
     # 1. Acquire the official macOS client archive.
-    $zipCache = Join-Path $repoRoot '.vanilla-zips'
+    $zipCache = Join-Path $repoRoot '.vanilla/archives'
     New-Item -ItemType Directory -Force -Path $zipCache | Out-Null
     if (-not $ClientArchive) {
         $ClientArchive = Join-Path $zipCache "vs_client_osx-$Arch`_$Version.tar.gz"
@@ -68,7 +69,7 @@ try {
     }
 
     # 2. Extract the base bundle (Vintage Story.app) once.
-    $baseRoot = Join-Path $repoRoot ".vanilla-mac-$Arch"
+    $baseRoot = Join-Path $repoRoot ".vanilla/osx-$Arch"
     $baseApp  = Join-Path $baseRoot 'Vintage Story.app'
     if (-not (Test-Path $baseApp)) {
         New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
@@ -78,8 +79,8 @@ try {
     if (-not (Test-Path $baseApp)) { throw "Extraction failed: 'Vintage Story.app' not found" }
 
     # 3. Version from OptimumInfo.cs.
-    $infoFile = Join-Path $repoRoot 'baseline/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.1.1'
+    $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
+    $optVer = '0.1.2'
     if (Test-Path $infoFile) {
         $m = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($m.Success) { $optVer = $m.Groups[1].Value }
@@ -96,7 +97,11 @@ try {
     # 5. Overlay optimized DLLs (platform-agnostic IL).
     Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll')    $appDir
     Copy-Item -Force (Join-Path $libOut   'VintagestoryLib.dll') $appDir
-    Copy-Item -Force (Join-Path $buildOut 'VintagestoryAPI.dll') $appDir
+    Copy-Item -Force (Join-Path $modOut 'VintagestoryAPI.dll') $appDir
+    Copy-Item -Force (Join-Path $modOut 'VSEssentials.dll') (Join-Path $appDir 'Mods')
+    Copy-Item -Force (Join-Path $modOut 'VSSurvivalMod.dll') (Join-Path $appDir 'Mods')
+    Copy-Item -Force (Join-Path $modOut 'VSCreativeMod.dll') (Join-Path $appDir 'Mods')
+    Copy-Item -Force (Join-Path $modOut 'cairo-sharp.dll') (Join-Path $appDir 'Lib')
 
     # 5b. Overlay optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'

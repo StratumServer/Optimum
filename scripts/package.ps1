@@ -26,23 +26,21 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . "$PSScriptRoot/_hostcaps.ps1"
 
-# Resolve a Windows vanilla install. On Windows, bootstrap already extracted the
-# Windows client into .vanilla/. Off-Windows, .vanilla holds the host's (Linux/
-# macOS) client, so download the Windows installer and unpack it with
-# innoextract into a separate .vanilla-win/ — otherwise we'd ship native libs
-# for the wrong OS under a win-x64 label.
+# Resolve a Windows vanilla install. Bootstrap extracts the Windows client into
+# .vanilla/win-x64/. Off-Windows, this keeps native libs from another platform
+# out of the win-x64 package.
 function Resolve-WindowsVanilla {
     param([string]$RepoRoot, [string]$Version)
-    $hostWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
-    if (($IsWindows -or ($env:OS -eq 'Windows_NT')) -and (Test-Path (Join-Path $hostWin 'Vintagestory.exe'))) { return $hostWin }
-
-    $winDir = Join-Path (Join-Path $RepoRoot '.vanilla-win') 'vintagestory'
+    $winDir = Join-Path (Join-Path $RepoRoot '.vanilla/win-x64') 'vintagestory'
     if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
+
+    $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
+    if (($IsWindows -or ($env:OS -eq 'Windows_NT')) -and (Test-Path (Join-Path $legacyWin 'Vintagestory.exe'))) { return $legacyWin }
 
     if (-not (Test-Cmd innoextract)) {
         throw "Cannot build a win-x64 package on this host: innoextract not found (needed to unpack vs_install_win-x64_$Version.exe). Install it (apt-get install innoextract) or run package.ps1 on Windows."
     }
-    $zipCache = Join-Path $RepoRoot '.vanilla-zips'
+    $zipCache = Join-Path $RepoRoot '.vanilla/archives'
     New-Item -ItemType Directory -Force -Path $zipCache | Out-Null
     $exeName = "vs_install_win-x64_$Version.exe"
     $installer = Join-Path $zipCache $exeName
@@ -72,16 +70,16 @@ Push-Location $repoRoot
 try {
     Show-HostCaps -Only 'win-x64' | Out-Null
     $vanillaDir = Resolve-WindowsVanilla -RepoRoot $repoRoot -Version $Version
-    $buildOut = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'Vintagestory') 'bin') (Join-Path 'Release' 'net10.0')
-    $libOut = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'VintagestoryLib') 'bin') (Join-Path 'Release' 'net10.0')
+    $buildOut = Join-Path $repoRoot 'build/Vintagestory/bin/Release/net10.0'
+    $libOut = Join-Path $repoRoot 'build/VintagestoryLib/bin/Release/net10.0'
 
     if (-not (Test-Path (Join-Path $libOut 'VintagestoryLib.dll'))) {
         throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
     }
 
     # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
-    $infoFile = Join-Path (Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'VintagestoryLib') 'Optimum') 'OptimumInfo.cs'
-    $optVer = '0.1.1'
+    $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
+    $optVer = '0.1.2'
     if (Test-Path $infoFile) {
         $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($match.Success) { $optVer = $match.Groups[1].Value }
@@ -102,6 +100,10 @@ try {
     Copy-Item -Force (Join-Path $libOut 'VintagestoryLib.dll') $stageDir
     $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
     Copy-Item -Force (Join-Path $apiOut 'VintagestoryAPI.dll') $stageDir
+    Copy-Item -Force (Join-Path $apiOut 'VSEssentials.dll') (Join-Path $stageDir 'Mods')
+    Copy-Item -Force (Join-Path $apiOut 'VSSurvivalMod.dll') (Join-Path $stageDir 'Mods')
+    Copy-Item -Force (Join-Path $apiOut 'VSCreativeMod.dll') (Join-Path $stageDir 'Mods')
+    Copy-Item -Force (Join-Path $apiOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib')
 
     # Apply optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'
@@ -119,7 +121,7 @@ try {
         $ridExe = Join-Path (Join-Path $buildOut 'win-x64') 'Vintagestory.exe'
         if (-not (Test-Path $ridExe)) {
             Write-Host "Cross-building win-x64 launcher (Optimum.exe apphost)..."
-            $proj = Join-Path (Join-Path (Join-Path $repoRoot 'baseline') 'Vintagestory') 'Vintagestory.csproj'
+            $proj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
             dotnet build $proj -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo
             if ($LASTEXITCODE -ne 0) { Write-Warning "Cross-build failed; will keep vanilla launcher." }
         }
