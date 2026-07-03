@@ -1,0 +1,55 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
+index 5212420..c397c98 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
+@@ -1,8 +1,11 @@
+ using System;
++using System.Collections;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
++using System.Runtime.CompilerServices;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+@@ -34,11 +37,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 
+ 	internal ConcurrentDictionary<long, ClientMapRegion> MapRegions = new ConcurrentDictionary<long, ClientMapRegion>(4, 32);
+ 
+ 	internal Dictionary<long, ClientMapChunk> MapChunks = new Dictionary<long, ClientMapChunk>();
+ 
+-	internal object chunksLock = new object();
++	internal readonly Lock chunksLock = new();
+ 
+ 	internal Dictionary<long, ClientChunk> chunks = new Dictionary<long, ClientChunk>();
+ 
+ 	internal Dictionary<int, IMiniDimension> dimensions = new Dictionary<int, IMiniDimension>();
+ 
+@@ -54,11 +57,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 
+ 	private int prevChunkZ = -1;
+ 
+ 	private IWorldChunk prevChunk;
+ 
+-	private object LerpedClimateMapsLock = new object();
++	private readonly Lock LerpedClimateMapsLock = new();
+ 
+ 	private LimitedDictionary<long, int[]> LerpedClimateMaps = new LimitedDictionary<long, int[]>(10);
+ 
+ 	public IBlockAccessor RelaxedBlockAccess;
+ 
+@@ -68,11 +71,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 
+ 	public IBlockAccessor NoRelightBulkBlockAccess;
+ 
+ 	public IBlockAccessor BulkMinimalBlockAccess;
+ 
+-	public object LightingTasksLock = new object();
++	public readonly Lock LightingTasksLock = new();
+ 
+ 	public Queue<UpdateLightingTask> LightingTasks = new Queue<UpdateLightingTask>();
+ 
+ 	private bool lightsGo;
+ 

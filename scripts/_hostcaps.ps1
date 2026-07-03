@@ -20,6 +20,11 @@ function Get-HostOS {
 
 function Test-Cmd { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
 
+function Test-CachedWindowsClient {
+    $repoRoot = Split-Path -Parent $PSScriptRoot
+    Test-Path (Join-Path $repoRoot '.vanilla/win-x64/vintagestory/Vintagestory.exe')
+}
+
 # Returns an array of capability objects: Target, Quality (Full/Degraded/Blocked), Note.
 function Get-HostCaps {
     $os = Get-HostOS
@@ -49,7 +54,10 @@ function Get-HostCaps {
     } else {
         $hasExtract = (Test-Cmd innoextract)
         $hasRid     = (Test-Cmd dotnet)   # cross-build the win-x64 apphost
-        if ($hasExtract -and $hasRid) {
+        $hasCachedWinClient = Test-CachedWindowsClient
+        if ($hasCachedWinClient -and $hasRid) {
+            $caps += [pscustomobject]@{ Target='win-x64'; Quality='Degraded'; Note='cross-build Optimum.exe + cached Windows client' }
+        } elseif ($hasExtract -and $hasRid) {
             $caps += [pscustomobject]@{ Target='win-x64'; Quality='Degraded'; Note='cross-build Optimum.exe + innoextract vanilla installer' }
         } elseif (-not $hasExtract) {
             $caps += [pscustomobject]@{ Target='win-x64'; Quality='Blocked'; Note='need innoextract to unpack the Windows installer (vs_install_win-x64_*.exe)' }

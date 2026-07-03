@@ -1,0 +1,69 @@
+diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
+index f9128b4..62b76e8 100644
+--- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
++++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
+@@ -363,30 +363,55 @@ namespace Vintagestory.API.Client
+         /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
+         /// <param name="frustumCullMode">The mode of the culling.</param>
+         public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
+         {
+             indicesGroupsCount = 0;
+-            RenderedTriangles = 0;
+-            AllocatedTris = 0;
+ 
+-            for (int i = 0; i < poolLocations.Count; i++)
++            // Optimum: two per-location costs removed from this hot loop
++            // (one of the most-called methods in the renderer). 1) Inline the
++            // visibility test so each location no longer pays a call into
++            // IsVisible(). 2) Accumulate the index sizes and divide by 3 once
++            // at the end instead of dividing per location. Behaviour is
++            // byte-identical to IsVisible(), including the NoCull case checking
++            // only Hide (not CullVisible) and the CullNormal side effect that
++            // refreshes the location's FrustumVisible flag. VisibleBufIndex is
++            // static and frame-stable, so it is read once here.
++            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
++            int renderedIndices = 0;
++            int allocatedIndices = 0;
++            int count = poolLocations.Count;
++
++            for (int i = 0; i < count; i++)
+             {
+                 ModelDataPoolLocation location = poolLocations[i];
+-
+                 int size = location.IndicesEnd - location.IndicesStart;
+-                if (location.IsVisible(frustumCullMode, frustumCuller))
++
++                bool visible = frustumCullMode switch
++                {
++                    EnumFrustumCullMode.CullInstant => !location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustum(location.FrustumCullSphere),
++                    EnumFrustumCullMode.CullInstantShadowPassNear => !location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere),
++                    EnumFrustumCullMode.CullInstantShadowPassFar => !location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere) && location.LodLevel >= 1,
++                    EnumFrustumCullMode.CullNormal => !location.Hide && location.CullVisible[visibleBufIndex] && (location.FrustumVisible = frustumCuller.InFrustumAndRange(location.FrustumCullSphere, location.FrustumVisible, location.LodLevel)),
++                    _ => !location.Hide
++                };
++
++                if (visible)
+                 {
+                     indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4; // Offset in bytes, not ints
+                     indicesSizes[indicesGroupsCount] = size;
+-
+-                    RenderedTriangles += size / 3;
+-
++                    renderedIndices += size;
+                     indicesGroupsCount++;
+                 }
+ 
+-                AllocatedTris += size / 3;
++                allocatedIndices += size;
+             }
++
++            // Index counts are triangle lists (always multiples of 3), so
++            // summing first and dividing once yields the same totals; both are
++            // stats counters.
++            RenderedTriangles = renderedIndices / 3;
++            AllocatedTris = allocatedIndices / 3;
+         }
+ 
+         public void SetFullyVisible()
+         {
+             indicesGroupsCount = 0;

@@ -4,11 +4,11 @@ Builds every Optimum package this host is capable of producing, in one run.
 Requires a successful build first (dotnet build VintageStory.slnx -c Release).
 
 Targets: linux-x64, osx-x64, osx-arm64, win-x64. The optimized DLLs are
-platform-agnostic IL, so any host can target any platform — but quality varies
+platform-agnostic IL, so any host can target any platform - but quality varies
 (e.g. a .dmg needs macOS hdiutil or a Linux libdmg toolchain; the Windows
 package off-Windows needs innoextract). This script reports what the host can do
 and runs only the capable targets. There is no native ARM client for Linux or
-Windows — x64 runs there via emulation (box64 / Windows-on-ARM).
+Windows - x64 runs there via emulation (box64 / Windows-on-ARM).
 
 .PARAMETER OutputDir
 Where to write packages. Default: repo root.

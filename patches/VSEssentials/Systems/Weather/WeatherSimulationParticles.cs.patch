@@ -1,0 +1,49 @@
+diff --git a/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs b/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
+index 93ab467..1e981aa 100644
+--- a/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
++++ b/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
+@@ -64,10 +64,13 @@ namespace Vintagestory.GameContent
+         WeatherSystemClient ws;
+         ICoreClientAPI capi;
+         Random rand;
+         static int[,] lowResRainHeightMap = new int[16, 16];
+         static BlockPos centerPos = new BlockPos(API.Config.Dimensions.NormalWorld);
++        // Optimum: track last heightmap center to skip rebuild when stationary.
++        private int _lastHeightmapCenterX = int.MinValue;
++        private int _lastHeightmapCenterZ = int.MinValue;
+ 
+         #region Particle
+ 
+         public static int waterColor = ColorUtil.ToRgba(230, 128, 178, 255);
+         public static int lowStabColor = ColorUtil.ToRgba(230, 207, 53, 10);
+@@ -368,18 +371,25 @@ namespace Vintagestory.GameContent
+             int onwaterSplashParticleColor = capi.World.ApplyColorMapOnRgba(lblock.ClimateColorMapResolved, lblock.SeasonColorMapResolved, ColorUtil.WhiteArgb, (int)particlePos.X, (int)particlePos.Y, (int)particlePos.Z, false);
+             byte[] col = ColorUtil.ToBGRABytes(onwaterSplashParticleColor);
+             onwaterSplashParticleColor = ColorUtil.ToRgba(94, col[0], col[1], col[2]);
+ 
+             centerPos.Set((int)particlePos.X, 0, (int)particlePos.Z);
+-            for (int lx = 0; lx < 16; lx++)
++            // Optimum: skip the 256-lookup heightmap rebuild if the player
++            // moved less than 4 blocks (the grid spacing) since last rebuild.
++            if (Math.Abs(centerPos.X - _lastHeightmapCenterX) >= 4 || Math.Abs(centerPos.Z - _lastHeightmapCenterZ) >= 4)
+             {
+-                int dx = (lx - 8) * 4;
+-                for (int lz = 0; lz < 16; lz++)
++                _lastHeightmapCenterX = centerPos.X;
++                _lastHeightmapCenterZ = centerPos.Z;
++                for (int lx = 0; lx < 16; lx++)
+                 {
+-                    int dz = (lz - 8) * 4;
++                    int dx = (lx - 8) * 4;
++                    for (int lz = 0; lz < 16; lz++)
++                    {
++                        int dz = (lz - 8) * 4;
+ 
+-                    lowResRainHeightMap[lx, lz] = capi.World.BlockAccessor.GetRainMapHeightAt(centerPos.X + dx, centerPos.Z + dz);
++                        lowResRainHeightMap[lx, lz] = capi.World.BlockAccessor.GetRainMapHeightAt(centerPos.X + dx, centerPos.Z + dz);
++                    }
+                 }
+             }
+ 
+ 
+             windSpeed = capi.World.BlockAccessor.GetWindSpeedAt(plrPos.XYZ).ToVec3f();

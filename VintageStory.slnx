@@ -1,13 +1,16 @@
-<Solution>
+﻿<Solution>
+  <Folder Name="/Build/">
+    <Project Path="build/VintagestoryLib/VintagestoryLib.csproj" />
+    <Project Path="build/Vintagestory/Vintagestory.csproj" />
+    <Project Path="VintagestoryApi/VintagestoryAPI.csproj" />
+    <Project Path="Cairo/Cairo.csproj" />
+  </Folder>
   <Folder Name="/Forks/">
-    <Project Path="VSCreativeMod/VSCreativeMod.csproj" />
     <Project Path="VSEssentials/VSEssentialsMod.csproj" />
     <Project Path="VSSurvivalMod/VSSurvivalMod.csproj" />
+    <Project Path="VSCreativeMod/VSCreativeMod.csproj" />
   </Folder>
-  <Folder Name="/Vanilla/">
-    <Project Path="Cairo/Cairo.csproj" />
-    <Project Path="VintagestoryApi/VintagestoryAPI.csproj" />
-    <Project Path="baseline/VintagestoryLib/VintagestoryLib.csproj" />
-    <Project Path="baseline/Vintagestory/Vintagestory.csproj" />
+  <Folder Name="/Tests/">
+    <Project Path="Optimum.Tests/Optimum.Tests.csproj" />
   </Folder>
 </Solution>

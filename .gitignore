@@ -1,6 +1,7 @@
 # Build output
 bin/
 obj/
+build/
 
 # IDE
 .vs/

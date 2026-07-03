@@ -1,22 +1,16 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs b/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs
-index 982d946..84ee351 100644
+index 5f68dc1..c7a15d0 100644
 --- a/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs
 +++ b/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs
-@@ -66,16 +66,18 @@ public class GuiCompositeMainMenuLeft : GuiComposite
- 		ElementBounds bounds = ElementBounds.Fixed(0.0, 25.0, ElementStdBounds.mainMenuUnscaledLogoSize, ElementStdBounds.mainMenuUnscaledLogoSize).WithFixedPadding(ElementStdBounds.mainMenuUnscaledLogoHorPadding, ElementStdBounds.mainMenuUnscaledLogoVerPadding);
- 		ElementBounds elementBounds = ElementBounds.Fixed(0.0, ElementStdBounds.mainMenuUnscaledLogoSize + 2 * ElementStdBounds.mainMenuUnscaledLogoVerPadding + 25 + 50, (double)(ElementStdBounds.mainMenuUnscaledLogoSize + 2 * ElementStdBounds.mainMenuUnscaledLogoHorPadding) - 2.0 * GuiElementTextButton.Padding + 2.0, 33.0);
- 		CairoFont cairoFont = CairoFont.ButtonText().WithFontSize(22f).WithWeight((FontWeight)0);
- 		ElementBounds elementBounds2 = elementBounds;
- 		FontExtents fontExtents = cairoFont.GetFontExtents();
--		elementBounds2.fixedHeight = ((FontExtents)(ref fontExtents)).Height / (double)ClientSettings.GUIScale + 2.0 * GuiElementTextButton.Padding + 5.0;
-+		elementBounds2.fixedHeight = fontExtents.Height / (double)ClientSettings.GUIScale + 2.0 * GuiElementTextButton.Padding + 5.0;
+@@ -71,11 +71,13 @@ public class GuiCompositeMainMenuLeft : GuiComposite
+ 		elementBounds2.fixedHeight = fontExtents.Height / (double)ClientSettings.GUIScale + 2.0 * GuiElementTextButton.Padding + 5.0;
  		CairoFont cairoFont2 = CairoFont.WhiteSmallText();
  		cairoFont2.Color = GuiStyle.ButtonTextColor;
  		ElementBounds elementBounds3 = ElementBounds.Fixed(EnumDialogArea.LeftBottom, 0.0, 0.0, 300.0, 30.0).WithFixedAlignmentOffset(13.0, -8.0);
  		ElementBounds bounds2 = ElementBounds.Fixed(0.0, 0.0, ElementStdBounds.mainMenuUnscaledLogoSize + 2 * ElementStdBounds.mainMenuUnscaledLogoHorPadding - 11, 60.0).WithFixedPadding(5.0);
 -		string text = Lang.Get("mainmenu-loggedin", ClientSettings.PlayerName);
++		// Optimum: insert Optimum link before the vanilla login block.
 +		string loginText = Lang.Get("mainmenu-loggedin", ClientSettings.PlayerName);
-+		// Insert Optimum link before the vanilla login block, matching its lineHeight.
 +		string text = loginText.Replace("<font lineHeight=\"1.15\">", "<font lineHeight=\"1.15\"><a href=\"" + Optimum.OptimumInfo.Url + "\">" + Optimum.OptimumInfo.DisplayTag + "</a><br>");
  		if (screenManager.ClientIsOffline)
  		{

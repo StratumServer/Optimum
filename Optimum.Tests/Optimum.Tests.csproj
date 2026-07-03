@@ -9,11 +9,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="VintagestoryLib">
-      <HintPath>..\baseline\Vintagestory\bin\Release\net10.0\VintagestoryLib.dll</HintPath>
-    </Reference>
-    <Reference Include="VintagestoryAPI">
-      <HintPath>..\bin\Release\net10.0\VintagestoryAPI.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="..\build\VintagestoryLib\VintagestoryLib.csproj" />
+    <ProjectReference Include="..\VintagestoryApi\VintagestoryAPI.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,38 @@
+diff --git a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
+index a571d72..3b74136 100644
+--- a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
++++ b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
+@@ -1,10 +1,11 @@
+ using System;
+ using Vintagestory.API;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ 
+ #nullable disable
+ 
+@@ -211,10 +212,21 @@ namespace Vintagestory.GameContent
+ 
+         public override void OnGameTick(float deltaTime)
+         {
+             var entity = this.entity;
+             if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable) return;
++
++            // Optimum: skip repulsion physics for entities beyond the
++            // configured distance from the player.
++            if (OptimumConfig.RepulsionGateEnabled && cworld != null && entity != cworld.Player.Entity)
++            {
++                var plr = cworld.Player.Entity;
++                double dx = entity.Pos.X - plr.Pos.X;
++                double dz = entity.Pos.Z - plr.Pos.Z;
++                if (dx * dx + dz * dz > OptimumConfig.RepulsionDistanceSq) return;
++            }
++
+             EntityAgent eagent = entity as EntityAgent;
+             if (eagent?.MountedOn != null) return;
+             if (entity.World.ElapsedMilliseconds < 2000) return;
+ 
+             var pushVector = this.pushVector;

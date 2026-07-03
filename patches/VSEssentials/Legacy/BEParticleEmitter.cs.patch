@@ -1,0 +1,28 @@
+diff --git a/VSEssentials/Legacy/BEParticleEmitter.cs b/VSEssentials/Legacy/BEParticleEmitter.cs
+index abb84d5..b511803 100644
+--- a/VSEssentials/Legacy/BEParticleEmitter.cs
++++ b/VSEssentials/Legacy/BEParticleEmitter.cs
+@@ -1,7 +1,8 @@
+ ﻿using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.GameContent
+ {
+@@ -28,11 +29,13 @@ namespace Vintagestory.GameContent
+         }
+ 
+         private void OnGameTick(float dt)
+         {
+             IClientWorldAccessor clientWorld = (IClientWorldAccessor)Api.World;
+-            if (!clientWorld.Player.Entity.Pos.InRangeOf(Pos, 128 * 128)) return;
++            // Optimum: reduce range from 128 to 48 blocks when enabled.
++            int rangeSq = OptimumConfig.ParticleDistanceGateEnabled ? 48 * 48 : 128 * 128;
++            if (!clientWorld.Player.Entity.Pos.InRangeOf(Pos, rangeSq)) return;
+             if (block == null || block.ParticleProperties == null) return;
+             
+             for (int i = 0; i < block.ParticleProperties.Length; i++)
+             {
+                 AdvancedParticleProperties bps = block.ParticleProperties[i];

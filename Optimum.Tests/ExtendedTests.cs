@@ -212,27 +212,27 @@ public class ExtendedTests
 
 /// <summary>
 /// Smoke tests that verify the build pipeline and client launch.
-/// These require the project to be built first (make build).
+/// Run make build before these checks.
 /// </summary>
 public class SmokeTests
 {
     private static readonly string RepoRoot = Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+    private static readonly string VintagestoryLibDll = Path.Combine(
+        RepoRoot, "build", "VintagestoryLib", "bin", "Release", "net10.0", "VintagestoryLib.dll");
 
     [Fact]
     public void Smoke_VintagestoryLibDll_Exists()
     {
-        string dll = Path.Combine(RepoRoot, "baseline", "VintagestoryLib", "bin", "Release", "net10.0", "VintagestoryLib.dll");
-        Assert.True(File.Exists(dll), $"VintagestoryLib.dll not found at {dll}");
+        Assert.True(File.Exists(VintagestoryLibDll), $"VintagestoryLib.dll not found at {VintagestoryLibDll}");
     }
 
     [Fact]
     public void Smoke_VintagestoryLibDll_ContainsOptimum()
     {
-        string dll = Path.Combine(RepoRoot, "baseline", "VintagestoryLib", "bin", "Release", "net10.0", "VintagestoryLib.dll");
-        if (!File.Exists(dll)) return; // skip if not built
+        if (!File.Exists(VintagestoryLibDll)) return;
 
-        string content = File.ReadAllText(dll);
+        string content = File.ReadAllText(VintagestoryLibDll);
         Assert.Contains("OptimumInfo", content);
     }
 

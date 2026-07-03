@@ -1,0 +1,172 @@
+diff --git a/VintagestoryApi/Math/Matrix/Mat4f.cs b/VintagestoryApi/Math/Matrix/Mat4f.cs
+index 80bb38e..296f743 100644
+--- a/VintagestoryApi/Math/Matrix/Mat4f.cs
++++ b/VintagestoryApi/Math/Matrix/Mat4f.cs
+@@ -22,10 +22,11 @@
+ //SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ 
+ using Cairo;
+ using System;
++using System.Runtime.CompilerServices;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.MathTools
+ {
+@@ -395,10 +396,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="output">{mat4} out the receiving matrix</param>
+         /// <param name="a">{mat4} a the first operand</param>
+         /// <param name="b">{mat4} b the second operand</param>
+         /// <returns>{mat4} out</returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] Multiply(float[] output, float[] a, float[] b)
+         {
+             float a00 = a[0]; float a01 = a[1]; float a02 = a[2]; float a03 = a[3];
+             float a10 = a[4]; float a11 = a[5]; float a12 = a[6]; float a13 = a[7];
+             float a20 = a[8]; float a21 = a[9]; float a22 = a[10]; float a23 = a[11];
+@@ -429,10 +431,11 @@ namespace Vintagestory.API.MathTools
+             output[14] = b0 * a02 + b1 * a12 + b2 * a22 + b3 * a32;
+             output[15] = b0 * a03 + b1 * a13 + b2 * a23 + b3 * a33;
+             return output;
+         }
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static void Mul(Span<float> a, Span<float> b)
+         {
+             float a00 = a[0]; float a01 = a[1]; float a02 = a[2]; float a03 = a[3];
+             float a10 = a[4]; float a11 = a[5]; float a12 = a[6]; float a13 = a[7];
+             float a20 = a[8]; float a21 = a[9]; float a22 = a[10]; float a23 = a[11];
+@@ -469,10 +472,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="output"></param>
+         /// <param name="a"></param>
+         /// <param name="b"></param>
+         /// <returns></returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] Mul(float[] output, float[] a, float[] b)
+         {
+             return Multiply(output, a, b);
+         }
+ 
+@@ -484,10 +488,11 @@ namespace Vintagestory.API.MathTools
+         /// <param name="input">{mat4} a the matrix to translate</param>
+         /// <param name="x">{vec3} v vector to translate by</param>
+         /// <param name="y"></param>
+         /// <param name="z"></param>
+         /// <returns>{mat4} out</returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] Translate(float[] output, float[] input, float x, float y, float z)
+         {
+             if (input == output)
+             {
+                 output[12] = input[0] * x + input[4] * y + input[8] * z + input[12];
+@@ -524,10 +529,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="matrix"></param>
+         /// <param name="x"></param>
+         /// <param name="y"></param>
+         /// <param name="z"></param>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static void Translate(Span<float> matrix, float x, float y, float z)
+         {
+             matrix[12] += matrix[0] * x + matrix[4] * y + matrix[8] * z;
+             matrix[13] += matrix[1] * x + matrix[5] * y + matrix[9] * z;
+             matrix[14] += matrix[2] * x + matrix[6] * y + matrix[10] * z;
+@@ -579,10 +585,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="output">{mat4} out the receiving matrix</param>
+         /// <param name="a">{mat4} a the matrix to scale</param>
+         /// <param name="v">{vec3} v the vec3 to scale the matrix by</param>
+         /// <returns>{mat4} out</returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] Scale(float[] output, float[] a, float[] v)
+         {
+             float x = v[0]; float y = v[1]; float z = v[2];
+ 
+             output[0] = a[0] * x;
+@@ -612,10 +619,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="a"></param>
+         /// <param name="x"></param>
+         /// <param name="y"></param>
+         /// <param name="z"></param>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static void Scale(Span<float> a, float x, float y, float z)
+         {
+             a[0] *= x;
+             a[1] *= x;
+             a[2] *= x;
+@@ -743,10 +751,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="output">{mat4} out the receiving matrix</param>
+         /// <param name="a">{mat4} a the matrix to rotate</param>
+         /// <param name="rad">{Number} rad the angle to rotate the matrix by</param>
+         /// <returns>{mat4} out</returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] RotateX(float[] output, float[] a, float rad)
+         {
+             float s = GameMath.Sin(rad);
+             float c = GameMath.Cos(rad);
+             float a10 = a[4];
+@@ -788,10 +797,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="output">{mat4} out the receiving matrix</param>
+         /// <param name="a">{mat4} a the matrix to rotate</param>
+         /// <param name="rad">{Number} rad the angle to rotate the matrix by</param>
+         /// <returns>{mat4} out</returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] RotateY(float[] output, float[] a, float rad)
+         {
+             float s = GameMath.Sin(rad);
+             float c = GameMath.Cos(rad);
+             float a00 = a[0];
+@@ -833,10 +843,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="output">{mat4} out the receiving matrix</param>
+         /// <param name="a">{mat4} a the matrix to rotate</param>
+         /// <param name="rad">{Number} rad the angle to rotate the matrix by</param>
+         /// <returns>{mat4} out</returns>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float[] RotateZ(float[] output, float[] a, float rad)
+         {
+             float s = GameMath.Sin(rad);
+             float c = GameMath.Cos(rad);
+             float a00 = a[0];
+@@ -876,10 +887,11 @@ namespace Vintagestory.API.MathTools
+         /// <summary>
+         /// Span version of RotateY, for performance
+         /// </summary>
+         /// <param name="a"></param>
+         /// <param name="rad"></param>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static void RotateY(Span<float> a, float rad)
+         {
+             float s = GameMath.Sin(rad);
+             float c = GameMath.Cos(rad);
+             float a00 = a[0];
+@@ -910,10 +922,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="matrix"></param>
+         /// <param name="radX"></param>
+         /// <param name="radY"></param>
+         /// <param name="radZ"></param>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static void RotateXYZ(Span<float> matrix, float radX, float radY, float radZ)
+         {
+             float sx = GameMath.Sin(radX);
+             float cx = GameMath.Cos(radX);
+             float sy = GameMath.Sin(radY);
+@@ -946,10 +959,11 @@ namespace Vintagestory.API.MathTools
+         /// </summary>
+         /// <param name="matrix"></param>
+         /// <param name="radX"></param>
+         /// <param name="radY"></param>
+         /// <param name="radZ"></param>
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static void RotateByXYZ(Span<float> matrix, float radX, float radY, float radZ)
+         {
+             if (radX == 0f && radY == 0f && radZ == 0f) return;
+             float sx = GameMath.Sin(radX);
+             float cx = GameMath.Cos(radX);

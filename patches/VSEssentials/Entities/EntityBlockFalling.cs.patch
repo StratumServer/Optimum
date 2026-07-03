@@ -1,0 +1,19 @@
+diff --git a/VSEssentials/Entities/EntityBlockFalling.cs b/VSEssentials/Entities/EntityBlockFalling.cs
+index 0615808..8fcee92 100644
+--- a/VSEssentials/Entities/EntityBlockFalling.cs
++++ b/VSEssentials/Entities/EntityBlockFalling.cs
+@@ -108,10 +108,14 @@ namespace Vintagestory.GameContent
+             prog.Stop();
+         }
+ 
+         private void genMesh(EntityBlockFalling entity)
+         {
++            // Optimum: #9222 fix. Clear the shared mesh field before
++            // tesselation. Without this, a prior entity's mesh data
++            // leaks into the next (charcoal renders as gravel, etc).
++            mesh.Clear();
+             int posx = entity.blockEntityAttributes?.GetInt("posx", entity.initialPos.X) ?? entity.initialPos.X;
+             int posy = entity.blockEntityAttributes?.GetInt("posy", entity.initialPos.Y) ?? entity.initialPos.Y;
+             int posz = entity.blockEntityAttributes?.GetInt("posz", entity.initialPos.Z) ?? entity.initialPos.Z;
+             BlockEntity be = capi.World.BlockAccessor.GetBlockEntity(new BlockPos(posx, posy, posz));
+ 

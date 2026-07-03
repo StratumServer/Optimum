@@ -1,0 +1,38 @@
+diff --git a/VSEssentials/EntityRenderer/EntityItemRenderer.cs b/VSEssentials/EntityRenderer/EntityItemRenderer.cs
+index 30357cd..a094bcd 100644
+--- a/VSEssentials/EntityRenderer/EntityItemRenderer.cs
++++ b/VSEssentials/EntityRenderer/EntityItemRenderer.cs
+@@ -49,12 +49,14 @@ namespace Vintagestory.GameContent
+             foreach (var val in capi.World.LoadedEntities)
+             {
+                 if (val.Value is EntityItem) itemCount++;
+             }
+ 
+-            EntityItemRenderer.RunWittySkipRenderAlgorithm = itemCount > 400;
+-            EntityItemRenderer.RenderModulo = itemCount / 200;
++            // Optimum: lower threshold from 400 to 50. Dropped items
++            // rarely need per-item render fidelity at any count.
++            EntityItemRenderer.RunWittySkipRenderAlgorithm = itemCount > 50;
++            EntityItemRenderer.RenderModulo = Math.Max(2, itemCount / 50);
+             EntityItemRenderer.LastPos.Set(-99, -99, -99);
+         }
+ 
+         private void onServerTick(float dt)
+         {
+@@ -104,10 +106,16 @@ namespace Vintagestory.GameContent
+         public override void DoRender3DOpaque(float dt, bool isShadowPass)
+         {
+             // Optimization: If this item is out of view, lets not render its shadow, since its very likely not gonna contribute to the scene anyway
+             if (isShadowPass && !entity.IsRendered || entityitem.Itemstack == null) return;
+ 
++            // Optimum: skip rendering items beyond 64 blocks from the player.
++            // Items are sub-pixel at this distance regardless of view distance.
++            double dx = entity.Pos.X - capi.World.Player.Entity.Pos.X;
++            double dz = entity.Pos.Z - capi.World.Player.Entity.Pos.Z;
++            if (dx * dx + dz * dz > 64.0 * 64.0) return;
++
+             if (RunWittySkipRenderAlgorithm)
+             {
+                 int x = (int)entity.Pos.X;
+                 int y = (int)entity.Pos.InternalY;
+                 int z = (int)entity.Pos.Z;

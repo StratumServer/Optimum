@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Regenerates patches/ from the diff between .baseline/ and the working tree.
+# Regenerates patches/ from the diff between build/snapshot/ and the working tree.
 # Also syncs sources/ for files that have no baseline equivalent.
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,19 +12,36 @@ patches_dir="$repo_root/patches"
 sources_dir="$repo_root/sources"
 
 if [[ ! -d "$baseline_dir" ]]; then
-  echo "No .baseline/ found. Run scripts/bootstrap.sh first." >&2
+  echo "No build/snapshot/ found. Run scripts/bootstrap.sh first." >&2
   exit 1
 fi
 
-# Clear old patches and sources (regenerated from scratch).
+# Clear old patches and auto-generated sources (regenerated from scratch).
+# Preserve manually-maintained files in sources/ (shaders, csproj overlays)
+# by saving them, clearing, then restoring.
+preserved_dir="$(mktemp -d)"
+if [[ -d "$sources_dir" ]]; then
+  # Preserve non-.cs files (shaders, csproj) that are hand-maintained
+  find "$sources_dir" -type f \( -name '*.fsh' -o -name '*.vsh' -o -name '*.csproj' -o -name '*.glsl' \) -print0 | \
+    while IFS= read -r -d '' f; do
+      rel="${f#$sources_dir/}"
+      mkdir -p "$(dirname "$preserved_dir/$rel")"
+      cp -f "$f" "$preserved_dir/$rel"
+    done
+fi
 rm -rf "$patches_dir" "$sources_dir"
 mkdir -p "$patches_dir" "$sources_dir"
+# Restore preserved files
+if [[ -d "$preserved_dir" ]] && find "$preserved_dir" -type f -print -quit | grep -q .; then
+  cp -a "$preserved_dir"/. "$sources_dir"/
+fi
+rm -rf "$preserved_dir"
 
 patch_count=0
 source_count=0
 stale_count=0
 
-# Projects that live under baseline/ (decompiled closed-source).
+# Projects that live under build/ (decompiled closed-source).
 vanilla_projects=("VintagestoryLib" "Vintagestory")
 
 # All project directories in the working tree that have a baseline.
@@ -32,10 +49,10 @@ for base_project in "$baseline_dir"/*/; do
   project="$(basename "$base_project")"
   work_dir="$repo_root/$project"
 
-  # For vanilla (decompiled) projects, the working copy is under baseline/.
+  # For vanilla (decompiled) projects, the working copy is under build/.
   for vp in "${vanilla_projects[@]}"; do
     if [[ "$project" == "$vp" ]]; then
-      work_dir="$repo_root/baseline/$project"
+      work_dir="$repo_root/build/$project"
       break
     fi
   done
@@ -62,8 +79,12 @@ for base_project in "$baseline_dir"/*/; do
       mkdir -p "$(dirname "$patch_file")"
       tmp_base="$(mktemp)"
       tmp_work="$(mktemp)"
-      sed '1s/^\xEF\xBB\xBF//' "$base_file" | perl -pe 's/\r\n/\n/g; s/\r/\n/g' > "$tmp_base"
-      sed '1s/^\xEF\xBB\xBF//' "$file" | perl -pe 's/\r\n/\n/g; s/\r/\n/g' > "$tmp_work"
+      # Normalize CRLF only. A leading UTF-8 BOM must survive into the patch
+      # context: the working tree file still carries it at apply time (the
+      # bootstrap pipeline never strips BOM), so stripping it here would
+      # make line 1 fail to match on apply for any BOM-prefixed source.
+      perl -pe 's/\r\n/\n/g; s/\r/\n/g' "$base_file" > "$tmp_base"
+      perl -pe 's/\r\n/\n/g; s/\r/\n/g' "$file" > "$tmp_work"
       git --no-pager -c core.safecrlf=false diff --no-color --no-index -U5 \
         -- "$tmp_base" "$tmp_work" \
         | sed \

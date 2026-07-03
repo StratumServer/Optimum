@@ -1,0 +1,43 @@
+diff --git a/VSSurvivalMod/Block/BlockSmeltingContainer.cs b/VSSurvivalMod/Block/BlockSmeltingContainer.cs
+index c3b3246..11f785f 100644
+--- a/VSSurvivalMod/Block/BlockSmeltingContainer.cs
++++ b/VSSurvivalMod/Block/BlockSmeltingContainer.cs
+@@ -1,16 +1,17 @@
+ using System;
+ using System.Collections.Generic;
++using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.GameContent
+ {
+-    public class BlockSmeltingContainer : Block
++    public class BlockSmeltingContainer : Block, IInFirepitRendererSupplier
+     {
+         public override bool TryPlaceBlock(IWorldAccessor world, IPlayer byPlayer, ItemStack itemstack, BlockSelection blockSel, ref string failureCode)
+         {
+             if (!byPlayer.Entity.Controls.ShiftKey)
+             {
+@@ -289,7 +290,19 @@ namespace Vintagestory.GameContent
+                 stacks[i] = cookingSlotsProvider.Slots[i].Itemstack;
+             }
+ 
+             return stacks;
+         }
++
++        // Optimum: fix #9718 crucible heat-glow in firepit.
++        public IInFirepitRenderer GetRendererWhenInFirepit(ItemStack stack, BlockEntityFirepit firepit, bool forOutputSlot)
++        {
++            if (api is not ICoreClientAPI capi) return null;
++            return new CrucibleInFirepitRenderer(capi, this, firepit.Pos);
++        }
++
++        public EnumFirepitModel GetDesiredFirepitModel(ItemStack stack, BlockEntityFirepit firepit, bool forOutputSlot)
++        {
++            return EnumFirepitModel.Wide;
++        }
+     }
+ }

@@ -1,0 +1,35 @@
+diff --git a/VintagestoryApi/Config/GameVersion.cs b/VintagestoryApi/Config/GameVersion.cs
+index a7911ea..5fdf194 100644
+--- a/VintagestoryApi/Config/GameVersion.cs
++++ b/VintagestoryApi/Config/GameVersion.cs
+@@ -36,11 +36,16 @@ namespace Vintagestory.API.Config
+         public const string OverallMajorMinor = "1.22";
+ 
+         /// <summary>
+         /// Assembly Info Version number in the format: major.minor.revision-[rc/pre.subrevision]
+         /// </summary>
+-        public const string OverallVersion = OverallMajorMinor + ".2";
++        public const string OverallVersion = OverallMajorMinor + ".3";
++
++        /// <summary>
++        /// Optimum version tag appended to the game version display.
++        /// </summary>
++        public const string OptimumVersion = "0.1.2";
+ 
+         /// <summary>
+         /// Whether this is a stable or unstable version
+         /// </summary>
+         public const EnumGameBranch Branch = EnumGameBranch.Stable;
+@@ -53,11 +58,11 @@ namespace Vintagestory.API.Config
+         public static EnumReleaseType ReleaseType => GetReleaseType(ShortGameVersion);
+ 
+         /// <summary>
+         /// Version number in the format: major.minor.revision-[rc/pre.subrevision] [release title]
+         /// </summary>
+-        public static string LongGameVersion = "v" + ShortGameVersion + " (" + Branch + ")";
++        public static string LongGameVersion = "v" + ShortGameVersion + " (" + Branch + ") + Optimum v" + OptimumVersion;
+ 
+         /// <summary>
+         /// Assembly Info Version number in the format: major.minor.revision.subrevision
+         /// </summary>
+         public const string AssemblyVersion = OverallVersion +".0";

@@ -1,0 +1,54 @@
+diff --git a/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs b/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
+index be5e47c..c35e887 100644
+--- a/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
++++ b/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
+@@ -571,10 +571,11 @@ namespace Vintagestory.API.Client
+             }
+ 
+             if (!IsOpened()) return;
+             foreach (GuiComposer composer in composers)
+             {
++                if (!composer.Enabled) continue;
+                 if (composer.Bounds.PointInside(args.X, args.Y))
+                 {
+                     args.Handled = true;
+                     return;
+                 }
+@@ -596,10 +597,11 @@ namespace Vintagestory.API.Client
+                 if (args.Handled) return;
+             }
+ 
+             foreach (GuiComposer composer in composers)
+             {
++                if (!composer.Enabled) continue;
+                 if (composer.Bounds.PointInside(args.X, args.Y))
+                 {
+                     args.Handled = true;
+                     return;
+                 }
+@@ -621,10 +623,11 @@ namespace Vintagestory.API.Client
+                 if (args.Handled) return;
+             }
+ 
+             foreach (GuiComposer composer in composers)
+             {
++                if (!composer.Enabled) continue;
+                 if (composer.Bounds.PointInside(args.X, args.Y))
+                 {
+                     args.Handled = true;
+                     break;
+                 }
+@@ -646,11 +649,12 @@ namespace Vintagestory.API.Client
+ 
+             if (focused)
+             {
+                 foreach (GuiComposer composer in composers)
+                 {
+-                    if (composer.Bounds.PointInside(capi.Input.MouseX, capi.Input.MouseY))
++                    if (!composer.Enabled) continue;
++                if (composer.Bounds.PointInside(capi.Input.MouseX, capi.Input.MouseY))
+                     {
+                         args.SetHandled(true);
+                     }
+                 }
+             }

@@ -1,8 +1,23 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..71496c7 100644
+index 374f827..174d37f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -28,11 +28,14 @@ public class SystemRenderEntities : ClientSystem
+@@ -6,10 +6,14 @@ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class SystemRenderEntities : ClientSystem
+ {
++	// Optimum: entities beyond the configured distance occupy sub-pixel
++	// area in shadow map. Skip them.
++	private static double ShadowCullDistanceSq => (double)ClientSettings.OptimumShadowCullDistance * ClientSettings.OptimumShadowCullDistance;
++
+ 	public override string Name => "ree";
+ 
+ 	public SystemRenderEntities(ClientMain game)
+ 		: base(game)
+ 	{
+@@ -28,11 +32,14 @@ public class SystemRenderEntities : ClientSystem
  		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
  		int dimension = game.EntityPlayer.Pos.Dimension;
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
@@ -18,38 +33,19 @@ index 374f827..71496c7 100644
  				entityRenderer.Value.BeforeRender(dt);
  			}
  			else
-@@ -114,23 +117,41 @@ public class SystemRenderEntities : ClientSystem
- 				entityRenderer.Value.DoRender3DAfterOIT(dt, isShadowPass: false);
- 			}
- 		}
- 	}
- 
-+	// Optimum: entities beyond the configured distance occupy sub-pixel
-+	// area in shadow map. Skip them.
-+	private static double ShadowCullDistanceSq => (double)ClientSettings.OptimumShadowCullDistance * ClientSettings.OptimumShadowCullDistance;
-+
- 	private void OnRenderFrameShadows(float dt)
- 	{
- 		int dimension = game.EntityPlayer.Pos.Dimension;
- 		ShaderProgramChunkshadowmap shaderProgramChunkshadowmap = (ShaderProgramChunkshadowmap)ShaderProgramBase.CurrentShaderProgram;
- 		if (game.api.Render.UseSSBOs)
- 		{
- 			shaderProgramChunkshadowmap.Stop();
- 			shaderProgramChunkshadowmap = (ShaderProgramChunkshadowmap)game.api.Shader.GetProgram(42);
+@@ -127,10 +134,22 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
-+		double plrX = game.EntityPlayer.Pos.X;
-+		double plrZ = game.EntityPlayer.Pos.Z;
-+		bool shadowCullEnabled = ClientSettings.OptimumEntityShadowCull;
-+		double shadowCullDistSq = ShadowCullDistanceSq;
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
  			Entity entity = entityRenderer.Value.entity;
++			// Optimum: cull entities beyond shadow distance threshold.
++			bool shadowCullEnabled = ClientSettings.OptimumEntityShadowCull;
 +			if (shadowCullEnabled && entity != game.EntityPlayer)
 +			{
-+				double dx = entity.Pos.X - plrX;
-+				double dz = entity.Pos.Z - plrZ;
-+				if (dx * dx + dz * dz > shadowCullDistSq)
++				double dx = entity.Pos.X - game.EntityPlayer.Pos.X;
++				double dz = entity.Pos.Z - game.EntityPlayer.Pos.Z;
++				if (dx * dx + dz * dz > ShadowCullDistanceSq)
 +				{
 +					entity.IsShadowRendered = false;
 +					continue;

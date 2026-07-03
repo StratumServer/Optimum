@@ -1,0 +1,54 @@
+diff --git a/VintagestoryApi/Common/Model/Animation/AnimatorBase.cs b/VintagestoryApi/Common/Model/Animation/AnimatorBase.cs
+index d2d4a4e..700e0c1 100644
+--- a/VintagestoryApi/Common/Model/Animation/AnimatorBase.cs
++++ b/VintagestoryApi/Common/Model/Animation/AnimatorBase.cs
+@@ -35,11 +35,11 @@ namespace Vintagestory.API.Common
+         public List<ElementPose> RootPoses;
+         /// <summary>
+         /// A RunningAnimation object for each of the possible Animations for this object
+         /// </summary>
+         public RunningAnimation[] anims;
+-        private readonly Dictionary<string, RunningAnimation> animsByCode;   // For performance, allows quick lookups instead of enumerating the whole anims array
++        private readonly Dictionary<string, RunningAnimation> animsByCode;   // OrdinalIgnoreCase comparer eliminates per-lookup ToLowerInvariant allocations
+         /// <summary>
+         /// We skip the last row - https://stackoverflow.com/questions/32565827/whats-the-purpose-of-magic-4-of-last-row-in-matrix-4x4-for-3d-graphics 
+         /// </summary>
+         public float[] TransformationMatrices;
+         /// <summary>
+@@ -72,21 +72,21 @@ namespace Vintagestory.API.Common
+         public abstract int MaxJointId { get; }
+ 
+         public RunningAnimation GetAnimationState(string code)
+         {
+             if (code == null) return null;
+-            animsByCode.TryGetValue(code.ToLowerInvariant(), out var anim);
++            animsByCode.TryGetValue(code, out var anim);
+             return anim;
+         }
+ 
+         public AnimatorBase(WalkSpeedSupplierDelegate WalkSpeedSupplier, Animation[] Animations, Action<string> onAnimationStoppedListener = null)
+         {
+             this.WalkSpeedSupplier = WalkSpeedSupplier;
+             this.onAnimationStoppedListener = onAnimationStoppedListener;
+ 
+             var anims = this.anims = Animations == null ? Array.Empty<RunningAnimation>() : new RunningAnimation[Animations.Length];
+-            animsByCode = new(anims.Length);
++            animsByCode = new(anims.Length, StringComparer.OrdinalIgnoreCase);
+             var animsByCodeLocal = animsByCode;
+ 
+             for (int i = 0; i < anims.Length; i++)
+             {
+                 var Anim = Animations[i];
+@@ -118,11 +118,11 @@ namespace Vintagestory.API.Common
+             }
+             
+             string missingAnimCode = null;
+             foreach (var code in activeAnimationsByAnimCode.Keys)
+             {
+-                if (!animsByCode.TryGetValue(code.ToLowerInvariant(), out RunningAnimation anim)) { missingAnimCode = code; continue; }
++                if (!animsByCode.TryGetValue(code, out RunningAnimation anim)) { missingAnimCode = code; continue; }
+                 // Animation got started
+                 if (!anim.Active)
+                 {
+                     AnimNowActive(anim, activeAnimationsByAnimCode[code]);
+                 }

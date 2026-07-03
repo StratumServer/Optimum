@@ -1,0 +1,81 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
+index 67feafa..6d192de 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
+@@ -314,11 +314,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	private int lastWidth;
+ 
+ 	private int lastHeight;
+ 
+-	public object MainThreadTasksLock = new object();
++	public readonly Lock MainThreadTasksLock = new();
+ 
+ 	public Queue<ClientTask> GameLaunchTasks;
+ 
+ 	public Queue<ClientTask> MainThreadTasks;
+ 
+@@ -340,15 +340,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	internal bool ignoreServerCalendarUpdates;
+ 
+ 	public HashSet<ChunkPos> chunkPositionsForRegenTrav = new HashSet<ChunkPos>();
+ 
+-	public object chunkPositionsLock = new object();
++	public readonly Lock chunkPositionsLock = new();
+ 
+ 	public Queue<long> compactedClientChunks = new Queue<long>();
+ 
+-	public object compactSyncLock = new object();
++	public readonly Lock compactSyncLock = new();
+ 
+ 	internal bool unbindSamplers;
+ 
+ 	public object EntityLoadQueueLock = new object();
+ 
+@@ -378,11 +378,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	internal PickingRayUtil pickingRayUtil = new PickingRayUtil();
+ 
+ 	public TrackedPlayerProperties playerProperties = new TrackedPlayerProperties();
+ 
+-	internal object asyncParticleSpawnersLock = new object();
++	internal readonly Lock asyncParticleSpawnersLock = new();
+ 
+ 	internal List<ContinousParticleSpawnTaskDelegate> asyncParticleSpawners = new List<ContinousParticleSpawnTaskDelegate>();
+ 
+ 	internal List<IPointLight> pointlights = new List<IPointLight>();
+ 
+@@ -402,27 +402,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	internal int frameSeed;
+ 
+ 	internal ChunkRenderer chunkRenderer;
+ 
+-	internal object dirtyChunksLastLock = new object();
++	internal readonly Lock dirtyChunksLastLock = new();
+ 
+ 	internal UniqueQueue<long> dirtyChunksLast = new UniqueQueue<long>();
+ 
+-	internal object dirtyChunksLock = new object();
++	internal readonly Lock dirtyChunksLock = new();
+ 
+ 	internal UniqueQueue<long> dirtyChunks = new UniqueQueue<long>();
+ 
+-	internal object dirtyChunksPriorityLock = new object();
++	internal readonly Lock dirtyChunksPriorityLock = new();
+ 
+ 	internal UniqueQueue<long> dirtyChunksPriority = new UniqueQueue<long>();
+ 
+-	internal object tesselatedChunksLock = new object();
++	internal readonly Lock tesselatedChunksLock = new();
+ 
+ 	internal Queue<long> tesselatedChunks = new Queue<long>();
+ 
+-	internal object tesselatedChunksPriorityLock = new object();
++	internal readonly Lock tesselatedChunksPriorityLock = new();
+ 
+ 	internal Queue<long> tesselatedChunksPriority = new Queue<long>();
+ 
+ 	internal ServerInformation ServerInfo;
+ 

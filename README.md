@@ -11,18 +11,27 @@ Optimum is a high-performance, client-side fork of [Vintage Story](https://www.v
 
 ## Features
 
-- Background FPS limiter (20 FPS when alt-tabbed)
+- Background FPS limiter (30 FPS when alt-tabbed)
 - Precise frame pacing (hybrid sleep/yield/spin, fixes stutter)
-- Weather wind throttling (cache lookups for 4 frames)
-- Ticking blocks GC reduction (reuse BlockPos in particle loop)
-- Ambient sound position throttling (skip updates when stationary)
-- Fly sound volume deduplication (skip updates below 1% change)
 - Entity shadow distance culling (skip draws beyond 80 blocks)
-- Entity repulsion distance gate (skip physics beyond 64 blocks)
+- Shadow far vegetation skip (skip foliage in far cascade)
+- Entity render distance pre-cull (skip render before matrix work)
 - Dynamic light radius scaling (35-60 blocks based on view distance)
 - Animated block LOD (3-tier distance scaling for forges, querns, etc.)
-- SSAO bilateral blur tap reduction (11 to 7 taps, 8 fewer texture reads/pass)
-- Water foam grid reduction (5x5 to 3x3, 16 fewer depth reads per fragment)
+- Chiseled block LOD (solid cube beyond threshold, 83x vertex reduction)
+- Entity repulsion distance gate (skip physics beyond 64 blocks)
+- Weather wind throttle (cache lookups for 4 frames)
+- Particle distance gate (skip emitters beyond 48 blocks)
+- Ambient sound position throttling (skip updates when stationary)
+- Fly sound volume deduplication (skip updates below 1% change)
+- Name-tag frustum reuse (IsRendered flag instead of recomputing)
+- Animation check reorder (distance before frustum)
+- Server GC + DATAS (73% fewer collections, zero Gen1 promotions)
+- Lock contention reduction (11 locks to System.Threading.Lock)
+- BlockPos reuse in particle ticks (99.9% GC reduction in that path)
+- Mat4f.Multiply inlining (13 hot methods, 50k+ calls/frame)
+- SSAO bilateral blur tap reduction (11 to 7 taps, 8 fewer reads/pass)
+- Water foam grid reduction (5x5 to 3x3, 16 fewer depth reads/fragment)
 - Mouse wheel fix at low sensitivity (#9710)
 - Prospecting dialog mouse fix (#8874)
 - Health tooltip decimal fix (#8901)
@@ -43,23 +52,24 @@ make package  # build every package this host can produce (see matrix below)
 
 ### Windows (PowerShell)
 
-Requires .NET 10 SDK and PowerShell 5.1+. The bootstrap downloads the official installer and extracts it with innounp (fetched on first run).
+Requires .NET 10 SDK, Git for Windows, and PowerShell 5.1+. The bootstrap downloads the official installer and extracts it with innounp (fetched on first run).
 
 ```powershell
+.\install-windows.cmd                         # GUI installer
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.1.1-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.1.2-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
-The package script copies a vanilla install, applies the optimized DLLs and shaders, and installs the built launcher as Optimum.exe (carrying the Optimum icon). It writes a ready-to-run folder; pass -Zip to produce the portable archive. No installer, no runtime patching.
+The package script copies a vanilla install, applies the optimized DLLs and shaders, and installs the built launcher as Optimum.exe (carrying the Optimum icon). It writes a ready-to-run folder; pass -Zip to produce the portable archive. The GUI installer wraps this build and package flow. No runtime patching.
 
 ### Packaging for Linux and macOS
 
 The optimized DLLs are platform-agnostic IL, so one build packages for every OS. Each script downloads the official client for that platform, overlays the DLLs and optimized shaders, and rebrands the launcher and icon. Run with PowerShell 7+ (`pwsh`).
 
 ```powershell
-pwsh ./scripts/package-linux.ps1               # Optimum-v0.1.1-linux-x64.tar.gz
+pwsh ./scripts/package-linux.ps1               # Optimum-v0.1.2-linux-x64.tar.gz
 pwsh ./scripts/package-linux.ps1 -Format zip
 pwsh ./scripts/package-macos.ps1 -Arch arm64   # Apple Silicon .dmg
 pwsh ./scripts/package-macos.ps1 -Arch x64     # Intel .dmg
@@ -110,4 +120,8 @@ No Harmony overhead. No runtime patching. Native compiled performance.
 
 ## License
 
-GPL-3.0 with the Commons Clause. The source is open: read it, modify it, share it. Copyleft applies, so any work that includes Optimum source carries the same license. The Commons Clause adds one rule on top: you may not sell Optimum or a product whose value derives from it. See [LICENSE](LICENSE) for the full terms.
+GPL-3.0 with the Commons Clause. The source is open: read it, modify it, share it. Copyleft applies, so any work that includes Optimum source carries the same license. The Commons Clause adds one rule on top: you may not sell Optimum or a product whose value derives from it.
+
+**Vendor Exception.** The Licensor grants [Anego Studios](https://anegostudios.com) a perpetual, irrevocable, royalty-free license to use, modify, and incorporate Optimum patches into their products. The Commons Clause restriction does not apply to Anego Studios. This exception follows the GPL-3.0 Section 7 additional permissions mechanism.
+
+See [LICENSE](LICENSE) for the full terms.
