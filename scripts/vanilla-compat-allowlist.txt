@@ -1,0 +1,12 @@
+# Patches that legitimately reference a dangerous-content keyword without
+# changing multiplayer compatibility behavior. check-vanilla-compat.sh's
+# check_patch_content scan is a blunt keyword match on added/removed lines;
+# an entry here means a human read the diff and confirmed the match is a
+# reference, not a redefinition. Add new entries only after that reading,
+# with the reason on the line above.
+
+# LongGameVersion's display string interpolates the existing ShortGameVersion
+# constant to build a UI label ("v1.22.3 (Stable) + Optimum v0.2.0"). The
+# constant's own value is untouched; the actual protocol-relevant assignments
+# live in ClientPackets.cs and ServerMain.cs, neither touched by this patch.
+patches/VintagestoryApi/Config/GameVersion.cs.patch

@@ -1,0 +1,16 @@
+diff --git a/VSSurvivalMod/Entities/EntityPlayerBot.cs b/VSSurvivalMod/Entities/EntityPlayerBot.cs
+index a65c1dc..d00661d 100644
+--- a/VSSurvivalMod/Entities/EntityPlayerBot.cs
++++ b/VSSurvivalMod/Entities/EntityPlayerBot.cs
+@@ -1,11 +1,9 @@
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.MathTools;
+ 
+-#nullable disable
+-
+ namespace Vintagestory.GameContent
+ {
+     public class EntityPlayerBot : EntityAnimalBot
+     {
+         EntityBehaviorSeraphInventory invbh;

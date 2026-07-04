@@ -36,53 +36,108 @@ Optimum is a high-performance, client-side fork of [Vintage Story](https://www.v
 - Prospecting dialog mouse fix (#8874)
 - Health tooltip decimal fix (#8901)
 
-## Build
+## Getting Started
 
-### Linux, WSL, or Git Bash
+Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
+
+### Linux
+
+**Interactive installer** (guided, checks and installs prerequisites):
+
+```bash
+git clone https://github.com/Zaldaryon/Optimum.git
+cd Optimum
+./scripts/install-linux.sh
+```
+
+The installer shows a ✓/✗ checklist of required tools, offers to install anything missing, asks where to install (default: `~/.local/share/optimum`), and creates a menu entry. Run the game from the menu or with `~/.local/share/optimum/optimum-launch.sh`.
+
+**AppImage** (single portable executable, no install):
+
+```bash
+git clone https://github.com/Zaldaryon/Optimum.git
+cd Optimum
+make package-appimage
+chmod +x Optimum-v0.2.0-linux-x64.AppImage
+./Optimum-v0.2.0-linux-x64.AppImage
+```
+
+If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/`.
+
+**Manual build** (for development or full control):
+
+```bash
+git clone https://github.com/Zaldaryon/Optimum.git
+cd Optimum
+make check    # report which tools are installed (installs nothing)
+make build    # bootstrap + build
+make run      # build, deploy, and launch client
+```
 
 Requires .NET 10 SDK, bash, python3, git, curl, perl.
 
-```bash
-make check    # report which build/packaging tools are installed (installs nothing)
-make build    # bootstrap + build (first run downloads ~570MB client archive)
-make test     # run 81 unit tests
-make run      # build, deploy, and launch client
-make package  # build every package this host can produce (see matrix below)
-```
+### Windows
 
-### Windows (PowerShell)
-
-Requires .NET 10 SDK, Git for Windows, and PowerShell 5.1+. The bootstrap downloads the official installer and extracts it with innounp (fetched on first run).
+**GUI installer** (checks prerequisites, offers downloads, choose install folder):
 
 ```powershell
-.\install-windows.cmd                         # GUI installer
+git clone https://github.com/Zaldaryon/Optimum.git
+cd Optimum
+.\install-windows.cmd
+```
+
+The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story install. Missing tools show with a "Download" checkbox that opens the install page. Choose the install directory, click Install. Done.
+
+**Manual build** (PowerShell):
+
+```powershell
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.1.2-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.2.0-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
-The package script copies a vanilla install, applies the optimized DLLs and shaders, and installs the built launcher as Optimum.exe (carrying the Optimum icon). It writes a ready-to-run folder; pass -Zip to produce the portable archive. The GUI installer wraps this build and package flow. No runtime patching.
+Requires .NET 10 SDK, Git for Windows, and PowerShell 5.1+.
 
-### Packaging for Linux and macOS
+### macOS
 
-The optimized DLLs are platform-agnostic IL, so one build packages for every OS. Each script downloads the official client for that platform, overlays the DLLs and optimized shaders, and rebrands the launcher and icon. Run with PowerShell 7+ (`pwsh`).
+```bash
+git clone https://github.com/Zaldaryon/Optimum.git
+cd Optimum
+make build
+./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
+./scripts/package-macos.sh --arch x64          # Intel .dmg
+```
 
-```powershell
-pwsh ./scripts/package-linux.ps1               # Optimum-v0.1.2-linux-x64.tar.gz
-pwsh ./scripts/package-linux.ps1 -Format zip
-pwsh ./scripts/package-macos.ps1 -Arch arm64   # Apple Silicon .dmg
-pwsh ./scripts/package-macos.ps1 -Arch x64     # Intel .dmg
+Open the .dmg and drag Optimum.app to Applications. Requires .NET 10 SDK, bash, python3, git, curl, perl.
+
+## Build
+
+### Packaging for distribution
+
+The optimized DLLs are platform-agnostic IL, so one build packages for every OS. Each script downloads the official client for that platform, overlays the DLLs and optimized shaders, and rebrands the launcher and icon.
+
+```bash
+make package              # all targets this host can produce
+make package-linux        # tar.gz
+make package-appimage     # single .AppImage executable
+make package-macos        # .dmg (ARCH=arm64 or x64)
+make package-win          # Windows zip (needs pwsh + innoextract off-platform)
+```
+
+Or call the scripts directly:
+
+```bash
+./scripts/package-linux.sh                     # Optimum-v0.2.0-linux-x64.tar.gz
+./scripts/package-linux.sh --format zip
+./scripts/package-linux.sh --format appimage   # Optimum-v0.2.0-linux-x64.AppImage
+./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
+./scripts/package-macos.sh --arch x64          # Intel .dmg
+./scripts/package-all.sh                       # all capable targets at once
+./scripts/package-all.sh --targets linux-x64,osx-arm64
 ```
 
 The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg.
-
-### Build everything at once
-
-```powershell
-pwsh ./scripts/package-all.ps1                       # all capable targets
-pwsh ./scripts/package-all.ps1 -Targets linux-x64,osx-arm64
-```
 
 ### Host prerequisites for packaging
 
@@ -90,23 +145,21 @@ Beyond the build requirements (.NET 10 SDK, bash, git, curl, perl), packaging ne
 
 | Tool | What it does | Install |
 |---|---|---|
-| `pwsh` | Runs packaging scripts (all platforms) | [Install PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) |
-| `wine` | Runs `innounp.exe` to extract the Windows Inno installer on Linux/macOS | `sudo apt install wine64` |
-| `hfsprogs` | Creates HFS+ filesystem for .dmg on Linux | `sudo apt install hfsprogs` |
-| `libbz2-dev` | Build dependency for libdmg-hfsplus | `sudo apt install libbz2-dev` |
+| `appimagetool` | Builds .AppImage (downloaded to .tools/ on first use) | auto or `sudo apt install appimagetool` |
+| `pwsh` | Windows packaging off-platform (win-x64 target only) | [Install PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) |
+| `innoextract` | Extracts the Windows Inno installer on Linux/macOS | `sudo apt install innoextract` |
+| `mkisofs` / `genisoimage` | Creates hybrid HFS image for .dmg on Linux | `sudo apt install cdrtools` or `genisoimage` |
 | `cmake` + `git` | Build libdmg-hfsplus (compiled once into .tools/) | `sudo apt install cmake git` |
 
-On first macOS .dmg build, the script clones and compiles [mozilla/libdmg-hfsplus](https://github.com/mozilla/libdmg-hfsplus) into `.tools/`. This provides the `dmg` and `hfsplus` commands needed to create .dmg files without macOS.
-
-On first Windows package build off-Windows, the script downloads `innounp.exe` and runs it via `wine` to extract the Inno Setup installer. The script cross-builds `Optimum.exe` with `dotnet build -r win-x64`.
+Linux and macOS packaging runs with bash. No PowerShell required for those targets.
 
 ### Host x target matrix
 
 | Produce ↓ \ on → | Linux host | macOS host | Windows host |
 |---|---|---|---|
-| **linux-x64** | ✅ tar.gz | ✅ tar.gz | ✅ tar.gz |
+| **linux-x64** | ✅ tar.gz / AppImage | ✅ tar.gz | ✅ tar.gz |
 | **osx-x64 / osx-arm64** | ✅ unsigned .dmg | ✅ signed .dmg (hdiutil) | ⚠️ .tar.gz fallback |
-| **win-x64** | ✅ needs wine + innounp | ✅ needs wine + innounp | ✅ native |
+| **win-x64** | ✅ needs innoextract + pwsh | ✅ needs innoextract + pwsh | ✅ native |
 
 The .dmg files built on Linux are unsigned. macOS Gatekeeper shows a warning on first open; users right-click > Open to accept. For a notarizable .dmg, build on macOS with an Apple Developer certificate.
 

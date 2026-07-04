@@ -1,8 +1,8 @@
 # Optimum development targets.
 # Requires (dev):       .NET 10 SDK, bash, python3, git, curl, perl.
-# Requires (packaging): PowerShell 7+ (pwsh). Optional per target:
+# Requires (packaging): tar, curl. Optional per target:
 #                         macOS .dmg on Linux -> cmake + mkisofs/genisoimage
-#                         Windows package off-Windows -> innoextract
+#                         Windows package off-Windows -> pwsh + innoextract
 # Run `make check` to see exactly what your host is missing.
 # Windows: use Git Bash, WSL, or adapt to PowerShell.
 #
@@ -42,7 +42,7 @@ ifneq ($(VERSION),1.22.3)
 endif
 
 .PHONY: help check check-patches check-compat bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-linux package-macos package-win
+        package package-linux package-appimage package-macos package-win
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -61,7 +61,7 @@ bootstrap: ## Download client, decompile, clone forks, apply patches
 
 build: ## Build Release (runs bootstrap if working tree is missing)
 	@if [ ! -d build/VintagestoryLib ]; then $(MAKE) bootstrap; fi
-	dotnet build VintageStory.slnx -c $(CONFIGURATION)
+	unset Platform; dotnet build VintageStory.slnx -c $(CONFIGURATION)
 
 clean: ## Remove intermediate build files
 	find . -type d -name obj -not -path './.build/*' -not -path './.vanilla/*' | xargs rm -rf
@@ -92,6 +92,7 @@ deploy: patch-il ## Deploy Cecil-patched DLLs into vanilla client dir and instal
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
 	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
+	@if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(VANILLA_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1])); d=json.load(open(sys.argv[2])); d.update(s); json.dump(d,open(sys.argv[2],'w'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi
 	@if [ -d "$(INSTALL_DIR)" ]; then \
 		echo "Deploying to $(INSTALL_DIR)..."; \
 		cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(INSTALL_DIR)/VintagestoryLib.dll; \
@@ -103,6 +104,7 @@ deploy: patch-il ## Deploy Cecil-patched DLLs into vanilla client dir and instal
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp sources/shaders/*.fsh sources/shaders/*.vsh $(INSTALL_DIR)/assets/game/shaders/; \
+		if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(INSTALL_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1])); d=json.load(open(sys.argv[2])); d.update(s); json.dump(d,open(sys.argv[2],'w'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi; \
 	fi
 	@echo "Deploy complete."
 
@@ -142,13 +144,16 @@ test: build ## Run unit tests (separate from release build)
 	dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-restore --verbosity quiet
 
 package: build ## Build every package this host can produce (Linux/macOS/Windows)
-	pwsh scripts/package-all.ps1 -Version $(VERSION)
+	bash scripts/package-all.sh --version $(VERSION)
 
 package-linux: build ## Package Linux x64 (tar.gz)
-	pwsh scripts/package-linux.ps1 -Version $(VERSION)
+	bash scripts/package-linux.sh --version $(VERSION)
+
+package-appimage: build ## Package Linux x64 as AppImage (single executable)
+	bash scripts/package-linux.sh --format appimage --version $(VERSION)
 
 package-macos: build ## Package macOS (.dmg/.app); ARCH=arm64 or x64
-	pwsh scripts/package-macos.ps1 -Arch $(or $(ARCH),arm64) -Version $(VERSION)
+	bash scripts/package-macos.sh --arch $(or $(ARCH),arm64) --version $(VERSION)
 
 package-win: build ## Package Windows x64 (folder + zip); needs innoextract off-Windows
 	pwsh scripts/package.ps1 -Zip -Version $(VERSION)

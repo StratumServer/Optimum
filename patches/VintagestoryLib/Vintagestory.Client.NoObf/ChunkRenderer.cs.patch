@@ -1,8 +1,45 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..d378863 100644
+index 431e51a..1ad0b47 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-@@ -208,14 +208,20 @@ public class ChunkRenderer
+@@ -1,9 +1,11 @@
+ using System;
++using System.Collections.Generic;
+ using OpenTK.Graphics.OpenGL;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class ChunkRenderer
+@@ -40,10 +42,24 @@ public class ChunkRenderer
+ 
+ 	private float lastSetRainFall;
+ 
+ 	private float accum;
+ 
++	// Optimum: scratch buffers reused per AddTesselatedChunk call instead
++	// of freshly allocated. Declared bare (no initializer) and lazily
++	// constructed: Cecil-injected fields only copy field definitions, not
++	// constructor initializer IL. MeshDataPoolManager/MeshDataPool both
++	// copy the values out of chunkOriginScratch (pool.poolOrigin =
++	// modelOrigin.Clone(), poolOrigin.Set(modelOrigin)), never retain the
++	// passed instance, so reusing one across calls is safe. The two
++	// List<ModelDataPoolLocation> scratch lists are likewise fully
++	// consumed into hostChunk.SetPoolLocations(..., list.ToArray(), ...)
++	// before the next call reuses them.
++	internal Vec3i chunkOriginScratch;
++	internal List<ModelDataPoolLocation> centerPoolLocationsScratch;
++	internal List<ModelDataPoolLocation> edgePoolLocationsScratch;
++
+ 	public ChunkRenderer(int[] textureIds, ClientMain game)
+ 	{
+ 		this.textureIds = textureIds;
+ 		platform = game.Platform;
+ 		this.game = game;
+@@ -208,14 +224,25 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -13,16 +50,34 @@ index 431e51a..d378863 100644
 +		// At 60-270 blocks a chunk subtends 1-3 texels in the 1024² shadow map;
 +		// thin foliage casts no resolvable shadow at that distance.
 +		if (!ClientSettings.OptimumShadowFarVegetation || game.currentRenderStage != EnumRenderStage.ShadowFar)
- 		{
--			chunkshadowmap.Tex2d2D = textureIds[k];
--			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++		{
++			OptimumDiagnostics.ShadowFarVegetation.Hit();
 +			for (int k = 0; k < textureIds.Length; k++)
 +			{
 +				chunkshadowmap.Tex2d2D = textureIds[k];
 +				poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
 +			}
++		}
++		else
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++			OptimumDiagnostics.ShadowFarVegetation.Skip();
  		}
  		for (int l = 0; l < textureIds.Length; l++)
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
+@@ -442,11 +469,11 @@ public class ChunkRenderer
+ 		masterPool.DisposeAllPools(game.api);
+ 	}
+ 
+ 	public void AddTesselatedChunk(TesselatedChunk tesschunk, ClientChunk hostChunk)
+ 	{
+-		Vec3i chunkOrigin = new Vec3i(tesschunk.positionX, tesschunk.positionYAndDimension % 32768, tesschunk.positionZ);
++		Vec3i chunkOrigin = (chunkOriginScratch ??= new Vec3i()).Set(tesschunk.positionX, tesschunk.positionYAndDimension % 32768, tesschunk.positionZ);
+ 		int dimension = tesschunk.positionYAndDimension / 32768;
+ 		Sphere boundingSphere = tesschunk.boundingSphere;
+ 		tesschunk.AddCenterToPools(this, chunkOrigin, dimension, boundingSphere, hostChunk);
+ 		tesschunk.AddEdgeToPools(this, chunkOrigin, dimension, boundingSphere, hostChunk);
+ 		tesschunk.centerParts = null;

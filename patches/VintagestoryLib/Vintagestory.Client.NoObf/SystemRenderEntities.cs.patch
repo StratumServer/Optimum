@@ -1,8 +1,14 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..174d37f 100644
+index 374f827..425a53c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -6,10 +6,14 @@ using Vintagestory.API.MathTools;
+@@ -1,15 +1,20 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
  
  namespace Vintagestory.Client.NoObf;
  
@@ -17,8 +23,18 @@ index 374f827..174d37f 100644
  	public SystemRenderEntities(ClientMain game)
  		: base(game)
  	{
-@@ -28,11 +32,14 @@ public class SystemRenderEntities : ClientSystem
- 		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
+@@ -23,23 +28,33 @@ public class SystemRenderEntities : ClientSystem
+ 	}
+ 
+ 	private void OnBeforeRender(float dt)
+ 	{
+ 		int num = ClientSettings.ViewDistance * ClientSettings.ViewDistance;
+-		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
++		// Optimum: .XYZ allocates a new Vec3d every call; the loop only
++		// needs the player's X/Z to compute a squared distance, so read
++		// those two doubles directly instead.
++		double plrX = game.EntityPlayer.Pos.X;
++		double plrZ = game.EntityPlayer.Pos.Z;
  		int dimension = game.EntityPlayer.Pos.Dimension;
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
@@ -26,14 +42,24 @@ index 374f827..174d37f 100644
 -			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && entity.Pos.Dimension == dimension && (entity.AllowOutsideLoadedRange || (xYZ.HorizontalSquareDistanceTo(entity.Pos.X, entity.Pos.Z) < (float)num && (entity == game.EntityPlayer || game.WorldMap.IsChunkRendered(entity.Pos)))))
 +			// Optimum: reorder checks cheapest-first. Dimension (int ==)
 +			// and distance (2 muls + compare) reject before the frustum
-+			// test (6 plane dot-products per call).
-+			if (entity.Pos.Dimension == dimension && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || xYZ.HorizontalSquareDistanceTo(entity.Pos.X, entity.Pos.Z) < (float)num) && game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || game.WorldMap.IsChunkRendered(entity.Pos)))
++			// test (6 plane dot-products per call). Distance stays behind
++			// the || so it's still skipped for the player/AllowOutsideLoadedRange cases.
++			if (entity.Pos.Dimension == dimension && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || (float)((plrX - entity.Pos.X) * (plrX - entity.Pos.X) + (plrZ - entity.Pos.Z) * (plrZ - entity.Pos.Z)) < (float)num) && game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || game.WorldMap.IsChunkRendered(entity.Pos)))
  			{
  				entity.IsRendered = true;
++				OptimumDiagnostics.EntityRenderCull.Hit();
  				entityRenderer.Value.BeforeRender(dt);
  			}
  			else
-@@ -127,10 +134,22 @@ public class SystemRenderEntities : ClientSystem
+ 			{
+ 				entity.IsRendered = false;
++				OptimumDiagnostics.EntityRenderCull.Skip();
+ 			}
+ 			game.api.World.FrameProfiler.Mark("esr-beforeanim");
+ 			try
+ 			{
+ 				entity.AnimManager?.OnClientFrame(dt);
+@@ -127,10 +142,24 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
@@ -48,8 +74,10 @@ index 374f827..174d37f 100644
 +				if (dx * dx + dz * dz > ShadowCullDistanceSq)
 +				{
 +					entity.IsShadowRendered = false;
++					OptimumDiagnostics.EntityShadowCull.Skip();
 +					continue;
 +				}
++				OptimumDiagnostics.EntityShadowCull.Hit();
 +			}
  			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
  			{

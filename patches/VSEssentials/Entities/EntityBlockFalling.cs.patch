@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Entities/EntityBlockFalling.cs b/VSEssentials/Entities/EntityBlockFalling.cs
-index 0615808..8fcee92 100644
+index 0615808..62e6161 100644
 --- a/VSEssentials/Entities/EntityBlockFalling.cs
 +++ b/VSEssentials/Entities/EntityBlockFalling.cs
 @@ -108,10 +108,14 @@ namespace Vintagestory.GameContent
@@ -17,3 +17,41 @@ index 0615808..8fcee92 100644
              int posz = entity.blockEntityAttributes?.GetInt("posz", entity.initialPos.Z) ?? entity.initialPos.Z;
              BlockEntity be = capi.World.BlockAccessor.GetBlockEntity(new BlockPos(posx, posy, posz));
  
+@@ -140,10 +144,11 @@ namespace Vintagestory.GameContent
+                 }
+ 
+                 entity.reusedMeshRef = true;
+                 if (!dict.TryGetValue(cacheKey, out entity.meshRef))
+                 {
++                    MeshData meshToUpload = mesh;
+                     if (ifbms != null)
+                     {
+                         ifbms.OnFallingBlockTesselation(entity, this, capi.Tesselator);
+                         if (mesh.VerticesCount > 0)
+                         {
+@@ -153,14 +158,23 @@ namespace Vintagestory.GameContent
+                             entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh);
+                         }
+                     }
+                     else
+                     {
+-                        mesh = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
++                        // Optimum: GetDefaultBlockMesh returns the shared, cached
++                        // MeshData for this block type (ShapeTesselatorManager's
++                        // blockModelDatas[block.BlockId]), not a fresh copy.
++                        // Assigning it into the reused `mesh` field used to alias
++                        // that shared cache into this method's scratch buffer, so
++                        // the NEXT genMesh() call's mesh.Clear() at the top of this
++                        // method would wipe the shared cache -- corrupting that
++                        // block's rendering everywhere else it's drawn (held item,
++                        // ground drops), not just this falling-block entity.
++                        meshToUpload = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
+                     }
+ 
+-                    dict[cacheKey] = entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh);
++                    dict[cacheKey] = entity.meshRef = capi.Render.UploadMultiTextureMesh(meshToUpload);
+                 }
+             }
+         }
+ 
+         private bool IsRendered(EntityBlockFalling entity)

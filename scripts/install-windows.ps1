@@ -96,7 +96,43 @@ function Find-OptimumInstall {
     return @{ Path = $dir; Version = $reg.DisplayVersion }
 }
 
+function Resolve-DotNetPath {
+    # If dotnet already resolves, nothing to do.
+    if (Get-Command dotnet -ErrorAction SilentlyContinue) { return }
+
+    # Probe known install locations (order: most common first).
+    $candidates = @(
+        (Join-Path $env:ProgramFiles 'dotnet')
+        (Join-Path ${env:ProgramFiles(x86)} 'dotnet')
+        (Join-Path $env:USERPROFILE '.dotnet')
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet')
+    )
+    foreach ($dir in $candidates) {
+        if ($dir -and (Test-Path (Join-Path $dir 'dotnet.exe'))) {
+            $env:PATH = "$dir;$env:PATH"
+            return
+        }
+    }
+
+    # Last resort: read the Machine and User PATH from the registry in case
+    # the current PowerShell session launched before a recent SDK install.
+    $regPaths = @(
+        [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+        [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+    )
+    foreach ($regPath in $regPaths) {
+        if (-not $regPath) { continue }
+        foreach ($entry in $regPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            if (Test-Path (Join-Path $entry 'dotnet.exe')) {
+                $env:PATH = "$entry;$env:PATH"
+                return
+            }
+        }
+    }
+}
+
 function Test-DotNet10 {
+    Resolve-DotNetPath
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { return $false }
     return [bool](dotnet --list-sdks 2>$null | Where-Object { $_ -match '^10\.' })
 }
@@ -266,7 +302,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) {
             $VsPath = $vsInfo.Path
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version), Optimum 0.1.2 requires $requiredVer. Update or reinstall VS $requiredVer."
+                throw "Vintage Story version mismatch: found $($vsInfo.Version), Optimum 0.2.0 requires $requiredVer. Update or reinstall VS $requiredVer."
             }
         }
     }
@@ -297,7 +333,21 @@ function Invoke-OptimumBuild {
         Write-Phase "Unpacking Vintage Story..."
         $vanillaDir = Join-Path $Root '.vanilla\win-x64\vintagestory'
         New-Item -ItemType Directory -Force -Path $vanillaDir | Out-Null
-        & $innounp -x -d"$vanillaDir" -c"{app}" $installer | Out-Null
+        # Kill any leftover innounp processes from a previous failed run.
+        Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        $innounpArgs = '-x -d"{0}" -c"{{app}}" "{1}"' -f $vanillaDir, $installer
+        $innounpProc = Start-Process -FilePath $innounp -ArgumentList $innounpArgs -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\innounp-out.txt"
+        $exited = $innounpProc.WaitForExit(300000)  # 5 minute timeout
+        if (-not $exited) {
+            $innounpProc.Kill()
+            Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            throw "innounp timed out after 5 minutes. Kill any innounp.exe processes in Task Manager and retry."
+        }
+        if ($innounpProc.ExitCode -ne 0) {
+            $errText = if (Test-Path "$env:TEMP\innounp-out.txt") { Get-Content "$env:TEMP\innounp-out.txt" -Raw } else { "" }
+            throw "innounp failed (exit $($innounpProc.ExitCode)): $errText"
+        }
+        Remove-Item -Force "$env:TEMP\innounp-out.txt" -ErrorAction SilentlyContinue
         $appDir = Join-Path $vanillaDir '{app}'
         if (Test-Path $appDir) {
             Get-ChildItem -Path $appDir | Move-Item -Destination $vanillaDir -Force
@@ -357,19 +407,19 @@ function Invoke-OptimumBuild {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            robocopy $srcRoot $buildRoot /E /NFL /NDL /NJH /NJS /NP /XD $excludeDirs /XF '*.zip' '*.tar.gz' '*.dmg' *>&1 | Out-Null
+            robocopy "$srcRoot" "$buildRoot" /E /NFL /NDL /NJH /NJS /NP /XD $excludeDirs /XF '*.zip' '*.tar.gz' '*.dmg' *>&1 | Out-Null
         } finally { $ErrorActionPreference = $prevEAP }
         if ($LASTEXITCODE -ge 8) { throw "Failed to copy the source into the temp folder (robocopy $LASTEXITCODE)." }
         $global:LASTEXITCODE = 0
 
         $vanillaLink = Join-Path $buildRoot '.vanilla\win-x64\vintagestory'
         New-Item -ItemType Directory -Force -Path (Split-Path $vanillaLink) | Out-Null
-        cmd /c mklink /J "$vanillaLink" "$VsPath" | Out-Null
+        New-Item -ItemType Junction -Path $vanillaLink -Target $VsPath -ErrorAction SilentlyContinue | Out-Null
         if (-not (Test-Path (Join-Path $vanillaLink 'Vintagestory.exe'))) {
             Write-Log "Junction failed, copying VS install..."
             Remove-Item -Recurse -Force (Split-Path $vanillaLink) -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force -Path $vanillaLink | Out-Null
-            robocopy $VsPath $vanillaLink /E /NFL /NDL /NJH /NJS /NP *>&1 | Out-Null
+            robocopy "$VsPath" "$vanillaLink" /E /NFL /NDL /NJH /NJS /NP *>&1 | Out-Null
         }
 
         Push-Location $buildRoot
@@ -386,9 +436,13 @@ function Invoke-OptimumBuild {
                 $slnxContent = [System.IO.File]::ReadAllText($slnx)
                 $slnxContent = $slnxContent -replace '(?m)[^\r\n]*Optimum\.Tests[^\r\n]*(\r?\n)?', ''
                 [System.IO.File]::WriteAllText($slnx, $slnxContent)
+                # Clear Platform env var (HP and other vendors set it to values like 'HPD' which break MSBuild).
+                $savedPlatform = $env:Platform
+                $env:Platform = $null
                 dotnet build $slnx -c Release --nologo --no-incremental -v q /p:WarningLevel=0 2>&1 |
                     Where-Object { $_ -match 'error|Error|->|BUILD' } |
                     ForEach-Object { Write-Log ([string]$_) }
+                $env:Platform = $savedPlatform
             } finally { $ErrorActionPreference = $prevEAP }
             if ($LASTEXITCODE -ne 0) { throw "dotnet build failed (exit code $LASTEXITCODE)." }
 
@@ -452,7 +506,7 @@ function Invoke-OptimumBuild {
         $regKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1'
         New-Item -Path $regKey -Force | Out-Null
         Set-ItemProperty -Path $regKey -Name 'DisplayName' -Value "Optimum $requiredVer"
-        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.1.2'
+        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.0'
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
@@ -737,12 +791,13 @@ $form.BackColor = $colBg
 $form.ForeColor = $colText
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9.5)
 
-# Load window icon from app.ico, header image from logo.png
-$logoIco = Join-Path $Root 'sources/Vintagestory/app.ico'
+# Load icon from logo.png if present
 $logoPng = Join-Path $Root 'logo.png'
-if (Test-Path $logoIco) {
+if (Test-Path $logoPng) {
     try {
-        $ico = New-Object System.Drawing.Icon($logoIco, 256, 256)
+        $icoStream = New-Object System.IO.MemoryStream
+        $bmp = [System.Drawing.Bitmap]::new($logoPng)
+        $ico = [System.Drawing.Icon]::FromHandle($bmp.GetHicon())
         $form.Icon = $ico
     } catch { }
 }
@@ -1084,7 +1139,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = 'vs1.22.3+v0.1.2'
+$lblVersion.Text = 'vs1.22.3+v0.2.0'
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1132,9 +1187,9 @@ $script:timer.Add_Tick({
             $script:progress.Value = 100
             $script:lblStatus.Text = "Done. Installed to $($script:installDir)"
             $script:lblStatus.ForeColor = $colGreen
-            $script:btnInstall.Text = 'View Log'
+            $script:btnInstall.Text = 'Launch'
             $script:btnInstall.Enabled = $true
-            $script:btnInstall.Tag = 'log'
+            $script:btnInstall.Tag = 'launch'
             $script:btnCancel.Text = 'Exit'
         } else {
             $script:progress.Visible = $false
@@ -1149,7 +1204,17 @@ $script:timer.Add_Tick({
 
 # === Install click ===
 $script:btnInstall.Add_Click({
-    # If button was repurposed to "View Log" after success/failure
+    # If button was repurposed to "Launch" after successful install
+    if ($script:btnInstall.Tag -eq 'launch') {
+        $exe = Join-Path $script:installDir 'Optimum.exe'
+        if (Test-Path $exe) {
+            Start-Process -FilePath $exe -WorkingDirectory $script:installDir
+        }
+        $form.Close()
+        return
+    }
+
+    # If button was repurposed to "View Log" after failure
     if ($script:btnInstall.Tag -eq 'log' -and $script:savedLog) {
         Start-Process notepad.exe $script:savedLog
         return
@@ -1186,10 +1251,9 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $agreeForm.MinimizeBox = $false
     $agreeForm.BackColor = $colBg
 
-    $txt = New-Object System.Windows.Forms.TextBox
-    $txt.Multiline = $true
+    $txt = New-Object System.Windows.Forms.RichTextBox
     $txt.ReadOnly = $true
-    $txt.ScrollBars = 'Vertical'
+    $txt.ScrollBars = [System.Windows.Forms.RichTextBoxScrollBars]::Vertical
     $txt.Location = New-Object System.Drawing.Point(16, 16)
     $txt.Size = New-Object System.Drawing.Size(492, 290)
     $txt.Text = $disclaimer -replace "`n", "`r`n"
@@ -1198,6 +1262,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $txt.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     $txt.SelectionStart = 0
     $txt.SelectionLength = 0
+    $txt.DetectUrls = $false
     $agreeForm.Controls.Add($txt)
 
     $chk = New-Object System.Windows.Forms.CheckBox
@@ -1206,7 +1271,20 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $chk.AutoSize = $true
     $chk.ForeColor = $colText
     $chk.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $chk.Visible = $false
     $agreeForm.Controls.Add($chk)
+
+    # Show the checkbox only after the user scrolls to the bottom.
+    $script:eulaScrolledToEnd = $false
+    $txt.Add_VScroll({
+        $pos = $txt.GetPositionFromCharIndex($txt.TextLength)
+        if ($pos.Y -le $txt.ClientSize.Height) {
+            if (-not $script:eulaScrolledToEnd) {
+                $script:eulaScrolledToEnd = $true
+                $chk.Visible = $true
+            }
+        }
+    })
 
     $btnAccept = New-FlatButton -Text 'Continue' -W 110 -H 34
     $btnAccept.Location = New-Object System.Drawing.Point(270, 355)
@@ -1227,10 +1305,34 @@ By checking the box below and proceeding, you acknowledge that you have read, un
 
     if ($agreeForm.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 
-    $dir = $script:txtDir.Text.Trim()
+    $dir = $script:txtDir.Text.Trim().TrimEnd('\')
     if (-not $dir) {
         [System.Windows.Forms.MessageBox]::Show('Choose the install folder.', 'Optimum', 'OK', 'Warning') | Out-Null
         return
+    }
+
+    # Block installing into the Vintage Story directory (would overwrite vanilla files).
+    $vsP = $script:txtVsPath.Text.Trim().TrimEnd('\')
+    if ($vsP -and (Test-Path (Join-Path $vsP 'Vintagestory.exe'))) {
+        $dirNorm = [System.IO.Path]::GetFullPath($dir).TrimEnd('\')
+        $vsNorm = [System.IO.Path]::GetFullPath($vsP).TrimEnd('\')
+        if ($dirNorm -eq $vsNorm -or $dirNorm.StartsWith($vsNorm + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "The install folder cannot be inside your Vintage Story directory ($vsP).`nOptimum must install to a separate location.",
+                'Optimum', 'OK', 'Warning') | Out-Null
+            return
+        }
+    }
+    # Also check against the detected VS path (if user didn't browse).
+    if ($script:detectedVsPath) {
+        $dirNorm2 = [System.IO.Path]::GetFullPath($dir).TrimEnd('\')
+        $vsNorm2 = [System.IO.Path]::GetFullPath($script:detectedVsPath).TrimEnd('\')
+        if ($dirNorm2 -eq $vsNorm2 -or $dirNorm2.StartsWith($vsNorm2 + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            [System.Windows.Forms.MessageBox]::Show(
+                "The install folder cannot be inside your Vintage Story directory ($($script:detectedVsPath)).`nOptimum must install to a separate location.",
+                'Optimum', 'OK', 'Warning') | Out-Null
+            return
+        }
     }
 
     # .NET 10 SDK: if missing and user unchecked download, block
@@ -1270,7 +1372,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
         return
     }
 
-    $vsP = $script:txtVsPath.Text.Trim()
+    $vsP = $script:txtVsPath.Text.Trim().TrimEnd('\')
     $downloadVs = ($script:chkVsDl.Visible -and $script:chkVsDl.Checked -and -not $vsP)
 
     if (-not $downloadVs -and (-not $vsP -or -not (Test-Path (Join-Path $vsP 'Vintagestory.exe')))) {
@@ -1294,7 +1396,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             $existingSemver = ($fvi.ProductVersion -split '\+')[0]
         }
 
-        $thisVer = '0.1.2'
+        $thisVer = '0.2.0'
         if ($existingSemver) {
             if ([version]$existingSemver -lt [version]$thisVer) {
                 $r = [System.Windows.Forms.MessageBox]::Show(
@@ -1319,7 +1421,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     if ($vsP) { $argLine += " -VsPath $q$vsP$q" }
     if ($downloadVs) { $argLine += ' -DownloadVs' }
     if ($script:chkSep.Checked) {
-        $data = $script:txtData.Text.Trim()
+        $data = $script:txtData.Text.Trim().TrimEnd('\')
         if (-not $data) {
             [System.Windows.Forms.MessageBox]::Show('Enter the data folder or uncheck the option.', 'Optimum', 'OK', 'Warning') | Out-Null
             return

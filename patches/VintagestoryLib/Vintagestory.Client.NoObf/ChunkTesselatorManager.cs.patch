@@ -1,31 +1,101 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..309af53 100644
+index 5714490..5d56323 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-@@ -1,6 +1,8 @@
+@@ -1,22 +1,40 @@
++using System;
  using System.Collections.Generic;
 +using System.Runtime.CompilerServices;
 +using System.Threading;
  using Vintagestory.API.Client;
++using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  using Vintagestory.Common.Database;
  
-@@ -8,15 +10,15 @@ namespace Vintagestory.Client.NoObf;
+ namespace Vintagestory.Client.NoObf;
  
  public class ChunkTesselatorManager : ClientSystem
  {
  	internal int chunksize;
  
 -	private object tessChunksQueueLock = new object();
-+	private readonly Lock tessChunksQueueLock = new();
++	// Optimum: kept as `object`, not the System.Threading.Lock this file's
++	// (unshipped) lock migration used. C# 13 lowers `lock` on a Lock-typed
++	// expression to Lock.EnterScope()/Scope.Dispose(), not Monitor.Enter/
++	// Exit -- different IL. OnBeforeFrame (below) is now Cecil-transplanted
++	// for the C1 fix, and the transplant remaps field references by name
++	// only (ILPatcher.InjectMissingFieldsForMethod / SelfConsistencyVerifier
++	// both match FieldReference by name, not type), so if this field were
++	// Lock-typed here but the vanilla target type still declares it as
++	// object (never Cecil-injected), the transplanted body would carry
++	// Lock-specific IL bound to an object field -- a mismatch neither
++	// safety check catches, likely fatal the first time this method runs.
++	// Keeping this as object avoids depending on that migration being
++	// completed and Cecil-registered, which is tracked separately.
++	private readonly object tessChunksQueueLock = new object();
  
  	private SortableQueue<TesselatedChunk> tessChunksQueue = new SortableQueue<TesselatedChunk>();
  
 -	private object tessChunksQueuePriorityLock = new object();
-+	private readonly Lock tessChunksQueuePriorityLock = new();
++	private readonly object tessChunksQueuePriorityLock = new object();
  
  	private Queue<TesselatedChunk> tessChunksQueuePriority = new Queue<TesselatedChunk>();
  
  	private Vec3i chunkPos = new Vec3i();
  
+@@ -24,10 +42,18 @@ public class ChunkTesselatorManager : ClientSystem
+ 
+ 	private int singleUploadDelayCounter;
+ 
+ 	private bool processPrioQueue;
+ 
++	// Optimum: skip RecalcPriority+Sort when the player has barely moved
++	// since the last pass. Stale order only changes upload order for one
++	// frame, never which chunks get uploaded, so this is safe to skip.
++	private Vec3d _lastSortPlayerPos;
++	private float _lastSortYaw;
++	private const double SortMoveThresholdSq = 0.25;
++	private const float SortYawThreshold = 0.05f;
++
+ 	public static long cumulativeTime;
+ 
+ 	public static int cumulativeCount;
+ 
+ 	public override string Name => "tete";
+@@ -102,15 +128,30 @@ public class ChunkTesselatorManager : ClientSystem
+ 			return;
+ 		}
+ 		singleUploadDelayCounter = 0;
+ 		lock (tessChunksQueueLock)
+ 		{
+-			tessChunksQueue.RunForEach(delegate(TesselatedChunk eachTC)
++			EntityPos plrPos = game.EntityPlayer.Pos;
++			bool moved = _lastSortPlayerPos == null
++				|| plrPos.SquareDistanceTo(_lastSortPlayerPos) >= SortMoveThresholdSq
++				|| Math.Abs(GameMath.AngleRadDistance(_lastSortYaw, plrPos.Yaw)) >= SortYawThreshold;
++			if (moved)
+ 			{
+-				eachTC.RecalcPriority(game.player);
+-			});
+-			tessChunksQueue.Sort();
++				int itemCount = tessChunksQueue.Count;
++				for (int i = 0; i < itemCount; i++)
++				{
++					tessChunksQueue.ItemAt(i).RecalcPriority(game.player);
++				}
++				tessChunksQueue.Sort();
++				_lastSortPlayerPos = (_lastSortPlayerPos ?? new Vec3d()).Set(plrPos.X, plrPos.Y, plrPos.Z);
++				_lastSortYaw = plrPos.Yaw;
++				OptimumDiagnostics.ChunkUploadSort.Hit();
++			}
++			else
++			{
++				OptimumDiagnostics.ChunkUploadSort.Skip();
++			}
+ 			while (tessChunksQueue.Count > 0 && num2 < num3)
+ 			{
+ 				TesselatedChunk tesselatedChunk = tessChunksQueue.Dequeue();
+ 				tesselatedChunk.chunk.queuedForUpload = false;
+ 				ClientChunk chunkAtBlockPos2 = game.WorldMap.GetChunkAtBlockPos(tesselatedChunk.positionX, tesselatedChunk.positionYAndDimension, tesselatedChunk.positionZ);

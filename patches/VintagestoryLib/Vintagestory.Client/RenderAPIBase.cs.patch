@@ -1,0 +1,26 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
+index bfae02c..2f624fb 100644
+--- a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
++++ b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
+@@ -290,13 +290,21 @@ public abstract class RenderAPIBase : IRenderAPI
+ 		plat.RenderMesh(meshRef);
+ 	}
+ 
+ 	public void RenderMultiTextureMesh(MultiTextureMeshRef mmr, string textureSampleName, int textureNumber = 0)
+ 	{
++		// Optimum: guard against rendering a disposed meshref. Callers across
++		// the codebase null-check their own meshref fields before calling
++		// this, but a mesh disposed out from under an in-flight render call
++		// (a different code path releasing it the same frame) would still
++		// reach here with a non-null but disposed mmr, feeding stale/freed
++		// GL handles into plat.RenderMesh.
++		if (mmr == null || mmr.Disposed) return;
+ 		for (int i = 0; i < mmr.meshrefs.Length; i++)
+ 		{
+ 			MeshRef vao = mmr.meshrefs[i];
++			if (vao == null || vao.Disposed) continue;
+ 			CurrentActiveShader.BindTexture2D(textureSampleName, mmr.textureids[i], textureNumber);
+ 			plat.RenderMesh(vao);
+ 		}
+ 	}
+ 

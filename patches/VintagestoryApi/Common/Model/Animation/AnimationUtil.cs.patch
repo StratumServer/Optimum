@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
-index 59421c6..a44d455 100644
+index 59421c6..dde07d8 100644
 --- a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
 +++ b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
 @@ -1,8 +1,9 @@
@@ -31,7 +31,7 @@ index 59421c6..a44d455 100644
  
          public double RenderOrder => 1;
          public int RenderRange => 99;
-@@ -90,10 +99,31 @@ namespace Vintagestory.API.Common
+@@ -90,10 +99,37 @@ namespace Vintagestory.API.Common
          {
              if (animator == null || renderer == null || (api as ICoreClientAPI)?.IsGamePaused == true) return; // not initialized yet
  
@@ -48,16 +48,22 @@ index 59421c6..a44d455 100644
 +
 +                    if (distSq > AnimLodFarSq)
 +                    {
++                        OptimumDiagnostics.AnimBlockLod.Skip();
 +                        return;
 +                    }
 +                    if (distSq > AnimLodNearSq)
 +                    {
 +                        _animFrameCounter++;
-+                        if ((_animFrameCounter & 3) != 0) return;
++                        if ((_animFrameCounter & 3) != 0)
++                        {
++                            OptimumDiagnostics.AnimBlockLod.Skip();
++                            return;
++                        }
 +                        deltaTime *= 4f;
 +                    }
 +                }
 +
++                OptimumDiagnostics.AnimBlockLod.Hit();
                  animator.OnFrame(activeAnimationsByAnimCode, deltaTime);
              }
  

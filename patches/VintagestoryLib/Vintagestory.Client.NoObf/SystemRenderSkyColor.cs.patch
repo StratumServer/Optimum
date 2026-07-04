@@ -1,0 +1,48 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
+index 8efc392..bef6775 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
+@@ -11,10 +11,17 @@ internal class SystemRenderSkyColor : ClientSystem
+ {
+ 	private MeshRef skyIcosahedron;
+ 
+ 	private BitmapRef skyTexture;
+ 
++	// Optimum: scratch vectors reused every frame in OnRenderFrame3D
++	// instead of freshly allocated (GetViewVector, .XYZ.ToVec3f()).
++	// Declared bare and lazily constructed: Cecil-injected fields only
++	// copy field definitions, not constructor initializer IL.
++	private Vec3f _scratchViewVector;
++	private Vec3f _scratchPlayerPos;
++
+ 	public override string Name => "resc";
+ 
+ 	public SystemRenderSkyColor(ClientMain game)
+ 		: base(game)
+ 	{
+@@ -45,19 +52,23 @@ internal class SystemRenderSkyColor : ClientSystem
+ 			game.shUniforms.SkyDaylight = num;
+ 			game.shUniforms.DitherSeed = (game.frameSeed + 1) % Math.Max(1, game.Width * game.Height);
+ 			game.shUniforms.SkyTextureId = game.skyTextureId;
+ 			game.shUniforms.GlowTextureId = game.skyGlowTextureId;
+ 			Vec3f sunPositionNormalized = game.GameWorldCalendar.SunPositionNormalized;
+-			Vec3f viewVector = EntityPos.GetViewVector(game.mouseYaw, game.mousePitch);
++			// Optimum: reuse scratch vectors instead of allocating a new
++			// Vec3f from GetViewVector and a new Vec3d+Vec3f pair from
++			// .XYZ.ToVec3f() every frame.
++			Vec3f viewVector = (_scratchViewVector ??= new Vec3f());
++			EntityPos.GetViewVector(game.mouseYaw, game.mousePitch, viewVector);
+ 			game.GlMatrixModeModelView();
+ 			ShaderProgramSky sky = ShaderPrograms.Sky;
+ 			sky.Use();
+ 			sky.Sky2D = game.skyTextureId;
+ 			sky.Glow2D = game.skyGlowTextureId;
+ 			sky.SunPosition = sunPositionNormalized;
+ 			sky.DayLight = game.shUniforms.SkyDaylight;
+-			sky.PlayerPos = game.EntityPlayer.Pos.XYZ.ToVec3f();
++			sky.PlayerPos = (_scratchPlayerPos ??= new Vec3f()).Set((float)game.EntityPlayer.Pos.X, (float)game.EntityPlayer.Pos.InternalY, (float)game.EntityPlayer.Pos.Z);
+ 			sky.DitherSeed = (game.frameSeed = (game.frameSeed + 1) % (game.Width * game.Height));
+ 			sky.HorizontalResolution = game.Width;
+ 			sky.PlayerToSealevelOffset = (float)game.EntityPlayer.Pos.Y - (float)game.SeaLevel;
+ 			sky.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+ 			sky.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;

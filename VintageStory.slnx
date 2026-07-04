@@ -1,6 +1,12 @@
 ﻿<Solution>
-  <Folder Name="/Build/">
+  <Folder Name="/Donor/">
+    <!-- Compiles for two reasons: a ProjectReference of build/Vintagestory/Vintagestory.csproj
+         and of Optimum.Tests.csproj. Its own recompiled DLL never ships; the release
+         patches the vanilla VintagestoryLib.dll via Mono.Cecil instead (Optimum.Patcher,
+         `make patch-il`). See docs/il-patcher-plan.md. -->
     <Project Path="build/VintagestoryLib/VintagestoryLib.csproj" />
+  </Folder>
+  <Folder Name="/Build/">
     <Project Path="build/Vintagestory/Vintagestory.csproj" />
     <Project Path="VintagestoryApi/VintagestoryAPI.csproj" />
     <Project Path="Cairo/Cairo.csproj" />

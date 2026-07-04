@@ -1,0 +1,49 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
+index 7befa7d..0a47741 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.Common.Database;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+@@ -63,12 +64,21 @@ public class ChunkCuller
+ 		cubicShellPositions = hashSet.ToArray();
+ 	}
+ 
+ 	public void CullInvisibleChunks()
+ 	{
+-		if (!ClientSettings.Occlusionculling || game.WorldMap.chunks.Count < 100)
++		// Optimum: the fixed 100-chunk floor never engages occlusion culling
++		// at low view distances, where fewer than 100 chunks ever load, even
++		// though culling would still cut draw calls there. Scale the floor
++		// down with view distance instead, with a hard minimum so the
++		// traversal cost never runs against a handful of chunks.
++		int occlusionThreshold = OptimumConfig.OcclusionCullingScaleEnabled
++			? Math.Max(50, (ClientSettings.ViewDistance / 32 + 1) * 8)
++			: 100;
++		if (!ClientSettings.Occlusionculling || game.WorldMap.chunks.Count < occlusionThreshold)
+ 		{
++			OptimumDiagnostics.OcclusionCullingScale.Skip();
+ 			if (nowOff)
+ 			{
+ 				return;
+ 			}
+ 			ClientChunk.bufIndex = 1;
+@@ -94,10 +104,11 @@ public class ChunkCuller
+ 				}
+ 			}
+ 			nowOff = true;
+ 			return;
+ 		}
++		OptimumDiagnostics.OcclusionCullingScale.Hit();
+ 		nowOff = false;
+ 		Vec3d cameraPos = game.player.Entity.CameraPos;
+ 		if (centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32) && Math.Abs(game.chunkPositionsForRegenTrav.Count - qCount) < 10)
+ 		{
+ 			return;

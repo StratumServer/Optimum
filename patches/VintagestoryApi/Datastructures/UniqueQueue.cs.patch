@@ -1,0 +1,137 @@
+diff --git a/VintagestoryApi/Datastructures/UniqueQueue.cs b/VintagestoryApi/Datastructures/UniqueQueue.cs
+index c4841b6..ef23a05 100644
+--- a/VintagestoryApi/Datastructures/UniqueQueue.cs
++++ b/VintagestoryApi/Datastructures/UniqueQueue.cs
+@@ -10,107 +10,103 @@ namespace Vintagestory.API.Datastructures
+     /// Same as your normal c# queue but ensures that every element is contained only once using a Hashset.
+     /// </summary>
+     /// <typeparam name="T"></typeparam>
+     public class UniqueQueue<T> : IEnumerable<T>
+     {
+-        private HashSet<T> hashSet;
+-        private Queue<T> queue;
++        // Optimum: a Dictionary<T, LinkedListNode<T>> gives Remove() a direct
++        // node reference instead of the vanilla Queue<T>, whose only removal
++        // path is dequeuing every element into a freshly allocated queue.
++        // FIFO order and dedup semantics are unchanged; Enqueue/Dequeue/Peek
++        // still cost one node allocation/release, same as before.
++        private Dictionary<T, LinkedListNode<T>> nodesByValue;
++        private LinkedList<T> list;
+ 
+ 
+         public UniqueQueue()
+         {
+-            hashSet = new HashSet<T>();
+-            queue = new Queue<T>();
++            nodesByValue = new Dictionary<T, LinkedListNode<T>>();
++            list = new LinkedList<T>();
+         }
+ 
+         /// <summary>
+         /// Amount of elements in the queue
+         /// </summary>
+         public int Count
+         {
+             get
+             {
+-                return hashSet.Count;
++                return nodesByValue.Count;
+             }
+         }
+ 
+         /// <summary>
+         /// Emptys the queue and the hashset
+         /// </summary>
+         public void Clear()
+         {
+-            hashSet.Clear();
+-            queue.Clear();
++            nodesByValue.Clear();
++            list.Clear();
+         }
+ 
+         /// <summary>
+         /// Check if given item is contained. Uses the hashset to find the item.
+         /// </summary>
+         /// <param name="item"></param>
+         /// <returns></returns>
+         public bool Contains(T item)
+         {
+-            return hashSet.Contains(item);
++            return nodesByValue.ContainsKey(item);
+         }
+ 
+         /// <summary>
+         /// Adds an item to the queue
+         /// </summary>
+         /// <param name="item"></param>
+         public void Enqueue(T item)
+         {
+-            if (hashSet.Add(item))
++            if (!nodesByValue.ContainsKey(item))
+             {
+-                queue.Enqueue(item);
++                nodesByValue[item] = list.AddLast(item);
+             }
+         }
+ 
+         /// <summary>
+         /// Removes an item from the queue
+         /// </summary>
+         /// <returns></returns>
+         public T Dequeue()
+         {
+-            T item = queue.Dequeue();
+-            hashSet.Remove(item);
+-            return item;
++            LinkedListNode<T> node = list.First;
++            list.RemoveFirst();
++            nodesByValue.Remove(node.Value);
++            return node.Value;
+         }
+ 
+         /// <summary>
+         /// Returns the first item in the queue without removing it.
+         /// </summary>
+         /// <returns></returns>
+         public T Peek()
+         {
+-            return queue.Peek();
++            return list.First.Value;
+         }
+ 
+ 
+         public IEnumerator<T> GetEnumerator()
+         {
+-            return queue.GetEnumerator();
++            return list.GetEnumerator();
+         }
+ 
+         System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
+         {
+-            return queue.GetEnumerator();
++            return list.GetEnumerator();
+         }
+ 
+         public void Remove(T item)
+         {
+-            hashSet.Remove(item);
+-            Queue<T> tmp = new();
+-            bool notFound = true;
+-            do
++            if (nodesByValue.Remove(item, out LinkedListNode<T> node))
+             {
+-                T read = queue.Dequeue();
+-                if (notFound && item.Equals(read))
+-                {
+-                    notFound = false;
+-                    continue;
+-                }
+-                tmp.Enqueue(read);
+-            } while (queue.Count > 0);
+-            queue = tmp;
++                list.Remove(node);
++            }
+         }
+     }
+ }

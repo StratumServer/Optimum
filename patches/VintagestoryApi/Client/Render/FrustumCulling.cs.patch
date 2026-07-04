@@ -1,0 +1,52 @@
+diff --git a/VintagestoryApi/Client/Render/FrustumCulling.cs b/VintagestoryApi/Client/Render/FrustumCulling.cs
+index f9dfad8..6e2652f 100644
+--- a/VintagestoryApi/Client/Render/FrustumCulling.cs
++++ b/VintagestoryApi/Client/Render/FrustumCulling.cs
+@@ -11,10 +11,11 @@
+ 
+ // AABB update by radfast, February 2023
+ 
+ 
+ using System;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.Client
+@@ -136,11 +137,11 @@ namespace Vintagestory.API.Client
+             if (frustum[5].AABBisOutside(sphere)) return false;
+             return true;// && lodLevel == 1) || (distx < shadowRangeX * lodBias + 24 && distz < shadowRangeZ * lodBias + 24);
+         }
+ 
+ 
+-        public bool InFrustumAndRange(Sphere sphere, bool nowVisible, int lodLevel = 0)
++        public bool InFrustumAndRange(Sphere sphere, bool nowVisible, int lodLevel = 0, bool optimumUseChiselLodDistance = false)
+         {
+             if (frustum[0].AABBisOutside(sphere)) return false;
+             if (frustum[1].AABBisOutside(sphere)) return false;
+             if (frustum[2].AABBisOutside(sphere)) return false;
+             if (frustum[3].AABBisOutside(sphere)) return false;
+@@ -153,10 +154,22 @@ namespace Vintagestory.API.Client
+             // Lod level 1: drawn at all view distance
+             // Lod level 0: only high detail stuff
+ 
+             double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
+ 
++            if (optimumUseChiselLodDistance && OptimumConfig.ChiselLodEnabled)
++            {
++                double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
++                switch (lodLevel)
++                {
++                    case 2:
++                        return distance <= chiselDistanceSq && distance < ViewDistanceSq;
++                    case 3:
++                        return distance > chiselDistanceSq && distance < ViewDistanceSq;
++                }
++            }
++
+             switch (lodLevel)
+             {
+                 case 0:
+                     return lod0BiasSq > 0 && distance < lod0BiasSq + 32 * 32;
+                 case 1:
