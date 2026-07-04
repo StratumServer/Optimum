@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
-index a571d72..3b74136 100644
+index a571d72..ea97a9d 100644
 --- a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
 +++ b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
 @@ -1,10 +1,11 @@
@@ -14,7 +14,7 @@ index a571d72..3b74136 100644
  
  #nullable disable
  
-@@ -211,10 +212,21 @@ namespace Vintagestory.GameContent
+@@ -211,10 +212,26 @@ namespace Vintagestory.GameContent
  
          public override void OnGameTick(float deltaTime)
          {
@@ -28,8 +28,13 @@ index a571d72..3b74136 100644
 +                var plr = cworld.Player.Entity;
 +                double dx = entity.Pos.X - plr.Pos.X;
 +                double dz = entity.Pos.Z - plr.Pos.Z;
-+                if (dx * dx + dz * dz > OptimumConfig.RepulsionDistanceSq) return;
++                if (dx * dx + dz * dz > OptimumConfig.RepulsionDistanceSq)
++                {
++                    OptimumDiagnostics.RepulseAgents.Skip();
++                    return;
++                }
 +            }
++            OptimumDiagnostics.RepulseAgents.Hit();
 +
              EntityAgent eagent = entity as EntityAgent;
              if (eagent?.MountedOn != null) return;

@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Legacy/BEParticleEmitter.cs b/VSEssentials/Legacy/BEParticleEmitter.cs
-index abb84d5..b511803 100644
+index abb84d5..86ee58b 100644
 --- a/VSEssentials/Legacy/BEParticleEmitter.cs
 +++ b/VSEssentials/Legacy/BEParticleEmitter.cs
 @@ -1,7 +1,8 @@
@@ -11,7 +11,7 @@ index abb84d5..b511803 100644
  
  namespace Vintagestory.GameContent
  {
-@@ -28,11 +29,13 @@ namespace Vintagestory.GameContent
+@@ -28,11 +29,18 @@ namespace Vintagestory.GameContent
          }
  
          private void OnGameTick(float dt)
@@ -20,7 +20,12 @@ index abb84d5..b511803 100644
 -            if (!clientWorld.Player.Entity.Pos.InRangeOf(Pos, 128 * 128)) return;
 +            // Optimum: reduce range from 128 to 48 blocks when enabled.
 +            int rangeSq = OptimumConfig.ParticleDistanceGateEnabled ? 48 * 48 : 128 * 128;
-+            if (!clientWorld.Player.Entity.Pos.InRangeOf(Pos, rangeSq)) return;
++            if (!clientWorld.Player.Entity.Pos.InRangeOf(Pos, rangeSq))
++            {
++                OptimumDiagnostics.ParticleDistanceGate.Skip();
++                return;
++            }
++            OptimumDiagnostics.ParticleDistanceGate.Hit();
              if (block == null || block.ParticleProperties == null) return;
              
              for (int i = 0; i < block.ParticleProperties.Length; i++)

@@ -464,7 +464,15 @@ try {
         $extractTarget = $winVanillaDir
         New-Item -ItemType Directory -Force -Path $extractTarget | Out-Null
         Write-Host "Extracting with innounp to $extractTarget"
-        & $innounp -x -d"$extractTarget" -c"{app}" $ClientArchive | Out-Null
+        Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        $innounpProc = Start-Process -FilePath $innounp -ArgumentList "-x -d`"$extractTarget`" -c`"{app}`" `"$ClientArchive`"" -NoNewWindow -PassThru
+        $exited = $innounpProc.WaitForExit(300000)
+        if (-not $exited) {
+            $innounpProc.Kill()
+            Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            throw "innounp timed out after 5 minutes. Kill any innounp.exe in Task Manager and retry."
+        }
+        if ($innounpProc.ExitCode -ne 0) { throw "innounp failed (exit $($innounpProc.ExitCode))." }
         $appDir = Join-Path $extractTarget '{app}'
         if (Test-Path $appDir) {
             Get-ChildItem -Path $appDir | Move-Item -Destination $extractTarget -Force

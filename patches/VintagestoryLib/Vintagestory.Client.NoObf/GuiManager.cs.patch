@@ -1,0 +1,177 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
+index 7720d30..290c610 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
+@@ -17,10 +17,32 @@ public class GuiManager : ClientSystem
+ 
+ 	private bool didHoverSlotEventTrigger;
+ 
+ 	private ItemSlot prevHoverSlot;
+ 
++	// Optimum: reusable scratch buffers replacing per-call .ToList() snapshots.
++	// Vanilla copies LoadedGuis/OpenedGuis before iterating because a handler
++	// can open or close a dialog mid-loop; the scratch buffer keeps that same
++	// same-frame-snapshot protection without a fresh List allocation every
++	// call. Each site below has its own buffer, not a shared one: OnMouseDown
++	// calls RequestFocus from inside its own snapshot loop, so any two sites
++	// that could nest at runtime cannot safely share a buffer.
++	// Lazily initialized with ??= at first use, not the constructor: these
++	// fields are Cecil-injected into the vanilla type (Optimum.Patcher), which
++	// copies field definitions only, not constructor initializer IL, so an
++	// eager `= new()` here would silently stay null after injection.
++	private List<GuiDialog> _scratchBlockTexturesLoaded;
++	private List<GuiDialog> _scratchLevelFinalize;
++	private List<GuiDialog> _scratchOwnPlayerData;
++	private List<GuiDialog> _scratchFinalizeFrame;
++	private List<GuiDialog> _scratchKeyDownOpened;
++	private List<GuiDialog> _scratchKeyUp;
++	private List<GuiDialog> _scratchKeyPress;
++	private List<GuiDialog> _scratchMouseDown;
++	private List<GuiDialog> _scratchMouseUp;
++	private List<GuiDialog> _scratchMouseMove;
++
+ 	public override string Name => "gdm";
+ 
+ 	public IWorldAccessor World => game;
+ 
+ 	public GuiManager(ClientMain game)
+@@ -166,27 +188,33 @@ public class GuiManager : ClientSystem
+ 		list[to] = element;
+ 	}
+ 
+ 	public override void OnBlockTexturesLoaded()
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchBlockTexturesLoaded ??= new List<GuiDialog>()).Clear();
++		_scratchBlockTexturesLoaded.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchBlockTexturesLoaded)
+ 		{
+ 			item.OnBlockTexturesLoaded();
+ 		}
+ 	}
+ 
+ 	internal override void OnLevelFinalize()
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchLevelFinalize ??= new List<GuiDialog>()).Clear();
++		_scratchLevelFinalize.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchLevelFinalize)
+ 		{
+ 			item.OnLevelFinalize();
+ 		}
+ 	}
+ 
+ 	public override void OnOwnPlayerDataReceived()
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchOwnPlayerData ??= new List<GuiDialog>()).Clear();
++		_scratchOwnPlayerData.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchOwnPlayerData)
+ 		{
+ 			item.OnOwnPlayerDataReceived();
+ 		}
+ 	}
+ 
+@@ -224,21 +252,25 @@ public class GuiManager : ClientSystem
+ 		ScreenManager.FrameProfiler.Mark("rendGuiDone");
+ 	}
+ 
+ 	public void OnFinalizeFrame(float dt)
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchFinalizeFrame ??= new List<GuiDialog>()).Clear();
++		_scratchFinalizeFrame.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchFinalizeFrame)
+ 		{
+ 			item.OnFinalizeFrame(dt);
+ 			ScreenManager.FrameProfiler.Mark("gdm-finFr-", item.DebugName);
+ 		}
+ 	}
+ 
+ 	public override void OnKeyDown(KeyEvent args)
+ 	{
+ 		int keyCode = args.KeyCode;
+-		List<GuiDialog> list = game.OpenedGuis.ToList();
++		(_scratchKeyDownOpened ??= new List<GuiDialog>()).Clear();
++		_scratchKeyDownOpened.AddRange(game.OpenedGuis);
++		List<GuiDialog> list = _scratchKeyDownOpened;
+ 		foreach (GuiDialog item in list)
+ 		{
+ 			if (item.CaptureAllInputs())
+ 			{
+ 				item.OnKeyDown(args);
+@@ -267,11 +299,13 @@ public class GuiManager : ClientSystem
+ 		}
+ 	}
+ 
+ 	public override void OnKeyUp(KeyEvent args)
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchKeyUp ??= new List<GuiDialog>()).Clear();
++		_scratchKeyUp.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchKeyUp)
+ 		{
+ 			if (item.ShouldReceiveKeyboardEvents())
+ 			{
+ 				item.OnKeyUp(args);
+ 				if (args.Handled)
+@@ -282,11 +316,13 @@ public class GuiManager : ClientSystem
+ 		}
+ 	}
+ 
+ 	public override void OnKeyPress(KeyEvent args)
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchKeyPress ??= new List<GuiDialog>()).Clear();
++		_scratchKeyPress.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchKeyPress)
+ 		{
+ 			if (item.ShouldReceiveKeyboardEvents())
+ 			{
+ 				item.OnKeyPress(args);
+ 				if (args.Handled)
+@@ -297,11 +333,13 @@ public class GuiManager : ClientSystem
+ 		}
+ 	}
+ 
+ 	public override void OnMouseDown(MouseEvent args)
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchMouseDown ??= new List<GuiDialog>()).Clear();
++		_scratchMouseDown.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchMouseDown)
+ 		{
+ 			if (!item.ShouldReceiveMouseEvents())
+ 			{
+ 				continue;
+ 			}
+@@ -318,11 +356,13 @@ public class GuiManager : ClientSystem
+ 		}
+ 	}
+ 
+ 	public override void OnMouseUp(MouseEvent args)
+ 	{
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchMouseUp ??= new List<GuiDialog>()).Clear();
++		_scratchMouseUp.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchMouseUp)
+ 		{
+ 			if (!item.ShouldReceiveMouseEvents())
+ 			{
+ 				continue;
+ 			}
+@@ -339,11 +379,13 @@ public class GuiManager : ClientSystem
+ 	}
+ 
+ 	public override void OnMouseMove(MouseEvent args)
+ 	{
+ 		didHoverSlotEventTrigger = false;
+-		foreach (GuiDialog item in game.LoadedGuis.ToList())
++		(_scratchMouseMove ??= new List<GuiDialog>()).Clear();
++		_scratchMouseMove.AddRange(game.LoadedGuis);
++		foreach (GuiDialog item in _scratchMouseMove)
+ 		{
+ 			if (item.ShouldReceiveMouseEvents())
+ 			{
+ 				item.OnMouseMove(args);
+ 				if (args.Handled)

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..62b76e8 100644
+index f9128b4..78c63aa 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-@@ -363,30 +363,55 @@ namespace Vintagestory.API.Client
+@@ -363,30 +363,46 @@ namespace Vintagestory.API.Client
          /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
          /// <param name="frustumCullMode">The mode of the culling.</param>
          public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
@@ -12,15 +12,8 @@ index f9128b4..62b76e8 100644
 -            AllocatedTris = 0;
  
 -            for (int i = 0; i < poolLocations.Count; i++)
-+            // Optimum: two per-location costs removed from this hot loop
-+            // (one of the most-called methods in the renderer). 1) Inline the
-+            // visibility test so each location no longer pays a call into
-+            // IsVisible(). 2) Accumulate the index sizes and divide by 3 once
-+            // at the end instead of dividing per location. Behaviour is
-+            // byte-identical to IsVisible(), including the NoCull case checking
-+            // only Hide (not CullVisible) and the CullNormal side effect that
-+            // refreshes the location's FrustumVisible flag. VisibleBufIndex is
-+            // static and frame-stable, so it is read once here.
++            // Optimum: inline visibility checks and sum indices before one division.
++            // This keeps CullNormal's FrustumVisible side effect.
 +            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
 +            int renderedIndices = 0;
 +            int allocatedIndices = 0;
@@ -38,7 +31,7 @@ index f9128b4..62b76e8 100644
 +                    EnumFrustumCullMode.CullInstant => !location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustum(location.FrustumCullSphere),
 +                    EnumFrustumCullMode.CullInstantShadowPassNear => !location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere),
 +                    EnumFrustumCullMode.CullInstantShadowPassFar => !location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere) && location.LodLevel >= 1,
-+                    EnumFrustumCullMode.CullNormal => !location.Hide && location.CullVisible[visibleBufIndex] && (location.FrustumVisible = frustumCuller.InFrustumAndRange(location.FrustumCullSphere, location.FrustumVisible, location.LodLevel)),
++                    EnumFrustumCullMode.CullNormal => !location.Hide && location.CullVisible[visibleBufIndex] && (location.FrustumVisible = frustumCuller.InFrustumAndRange(location.FrustumCullSphere, location.FrustumVisible, location.LodLevel, location.OptimumUseChiselLodDistance)),
 +                    _ => !location.Hide
 +                };
 +
@@ -57,9 +50,7 @@ index f9128b4..62b76e8 100644
 +                allocatedIndices += size;
              }
 +
-+            // Index counts are triangle lists (always multiples of 3), so
-+            // summing first and dividing once yields the same totals; both are
-+            // stats counters.
++            // The renderer uses triangle lists, so one division yields the same stats.
 +            RenderedTriangles = renderedIndices / 3;
 +            AllocatedTris = allocatedIndices / 3;
          }
@@ -67,3 +58,29 @@ index f9128b4..62b76e8 100644
          public void SetFullyVisible()
          {
              indicesGroupsCount = 0;
+@@ -513,10 +529,12 @@ namespace Vintagestory.API.Client
+ 
+         public Bools CullVisible = new Bools(true, true);
+ 
+         public int LodLevel = 0;
+ 
++        public bool OptimumUseChiselLodDistance;
++
+         public bool Hide;
+ 
+         /// <summary>
+         /// Used for models with movements (like a door).
+         /// </summary>
+@@ -541,11 +559,11 @@ namespace Vintagestory.API.Client
+ 
+                 case EnumFrustumCullMode.CullInstantShadowPassFar:
+                     return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustumShadowPass(FrustumCullSphere) && LodLevel >= 1;
+ 
+                 case EnumFrustumCullMode.CullNormal:
+-                    return !Hide && CullVisible[VisibleBufIndex] && UpdateVisibleFlag(culler.InFrustumAndRange(FrustumCullSphere, FrustumVisible, LodLevel));
++                    return !Hide && CullVisible[VisibleBufIndex] && UpdateVisibleFlag(culler.InFrustumAndRange(FrustumCullSphere, FrustumVisible, LodLevel, OptimumUseChiselLodDistance));
+ 
+                 default:
+                     return !Hide;
+             }
+ 

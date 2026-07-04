@@ -98,6 +98,16 @@ public static class ILPatcher
         }
 
         Console.WriteLine($"\n  Summary: {injectedTypes} types, {injectedMembers} members injected, {patched}/{targets.Count} methods patched, {hooked} hooks.");
+
+        var selfRefErrors = SelfConsistencyVerifier.VerifySelfReferences(vanillaAsm.MainModule);
+        if (selfRefErrors.Count > 0)
+        {
+            Console.Error.WriteLine($"\n  {selfRefErrors.Count} self-reference error(s), output not written:");
+            foreach (var err in selfRefErrors)
+                Console.Error.WriteLine($"    {err}");
+            return -1;
+        }
+
         vanillaAsm.Write(outputPath);
         return injectedTypes + injectedMembers + patched;
     }

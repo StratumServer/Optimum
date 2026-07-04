@@ -1,15 +1,19 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..70889f3 100644
+index 2eca300..4c2e97f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-@@ -1,5 +1,6 @@
+@@ -1,8 +1,10 @@
 +using System;
  using System.Linq;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
  using Vintagestory.API.MathTools;
  
-@@ -31,18 +32,38 @@ public class SystemRenderPlayerEffects : ClientSystem
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class SystemRenderPlayerEffects : ClientSystem
+@@ -31,18 +33,75 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
@@ -32,19 +36,57 @@ index 2eca300..70889f3 100644
 +	private Vec3d _sortOrigin;
 +	private double SortByDistance(Entity e) => e.Pos.SquareDistanceTo(_sortOrigin);
 +
++	// Optimum: dynamic-light entity scan cache. The scan result (which
++	// entities are in range) is reused while the player is roughly
++	// stationary; each entity's light still reads its live .Pos/.LightHsv
++	// when added below, so this only risks a brief delay picking up
++	// entities that just crossed into or out of range, never a stale
++	// light position or color for entities already in the cached set.
++	private Entity[] _cachedLightEntities;
++	private Vec3d _lastLightScanPos;
++	private int _lightScanFramesSinceRefresh;
++	private const int LightScanRefreshFrames = 15;
++	private const double LightScanMoveThresholdSq = 4.0;
++
  	private void onBeforeRender(float dt)
  	{
  		game.shUniforms.PointLightsCount = 0;
  		Vec3d plrPos = game.EntityPlayer.Pos.XYZ;
 -		Entity[] array = game.GetEntitiesAround(plrPos, 120f, 120f, (Entity e) => e.LightHsv != null && e.LightHsv[2] > 0);
+-		if (array.Length > maxDynLights)
 +		// Optimum: dynamic light radius gated by OptimumDynamicLightScale setting.
-+		float lightRadius = ClientSettings.OptimumDynamicLightScale ? GetOptimumLightRadius(ClientSettings.ViewDistance) : 120f;
-+		Entity[] array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, HasLight);
- 		if (array.Length > maxDynLights)
++		bool scaled = ClientSettings.OptimumDynamicLightScale;
++		float lightRadius = scaled ? GetOptimumLightRadius(ClientSettings.ViewDistance) : 120f;
++		if (scaled) OptimumDiagnostics.DynamicLightRadius.Hit(); else OptimumDiagnostics.DynamicLightRadius.Skip();
++
++		bool cacheEnabled = ClientSettings.OptimumDynamicLightCache;
++		_lightScanFramesSinceRefresh++;
++		bool needsRefresh = !cacheEnabled || _cachedLightEntities == null
++			|| _lightScanFramesSinceRefresh >= LightScanRefreshFrames
++			|| plrPos.SquareDistanceTo(_lastLightScanPos ?? plrPos) >= LightScanMoveThresholdSq;
++
++		Entity[] array;
++		if (needsRefresh)
++		{
++			OptimumDiagnostics.DynamicLightCache.Hit();
++			array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, HasLight);
++			if (array.Length > maxDynLights)
++			{
++				_sortOrigin = plrPos;
++				array = array.OrderBy((Func<Entity, double>)SortByDistance).ToArray();
++			}
++			if (cacheEnabled)
++			{
++				_cachedLightEntities = array;
++				_lastLightScanPos = (_lastLightScanPos ?? new Vec3d()).Set(plrPos);
++				_lightScanFramesSinceRefresh = 0;
++			}
++		}
++		else
  		{
 -			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
-+			_sortOrigin = plrPos;
-+			array = array.OrderBy((Func<Entity, double>)SortByDistance).ToArray();
++			OptimumDiagnostics.DynamicLightCache.Skip();
++			array = _cachedLightEntities;
  		}
  		foreach (Entity entity in array)
  		{

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..58683d1 100644
+index 4d08f84..c02d2a0 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -32,7 +32,7 @@ index 4d08f84..58683d1 100644
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
 -				.EndIf();
 +				.EndIf()
-+				.AddToggleButton("Extra", font, OnOptimumOptions, oButtonBounds, "optimum");
++				.AddToggleButton(Lang.Get("optimum-tab-header"), font, OnOptimumOptions, oButtonBounds, "optimum");
  		}
  		else
  		{
@@ -50,25 +50,37 @@ index 4d08f84..58683d1 100644
  			{
  				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
  				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
-@@ -199,10 +204,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -185,10 +190,11 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
+ 				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
+ 				.AddIf(ClientSettings.DeveloperMode)
+ 				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
+ 				.EndIf()
++				.AddToggleButton(Lang.Get("optimum-tab-header"), font, OnOptimumOptions, oButtonBounds, "optimum")
+ 				.AddButton(Lang.Get("general-back"), delegate
+ 				{
+ 					clickedItemIndex = null;
+ 					hotkeyCapturer?.EndCapture(wasCancelled: true);
+ 					return handler.OnBackPressed();
+@@ -199,10 +205,11 @@ public class GuiCompositeSettings : GuiComposite
  		result.GetToggleButton("controls").SetValue(currentTab == "controls");
  		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
  		result.GetToggleButton("interface").SetValue(currentTab == "interface");
  		result.GetToggleButton("developer")?.SetValue(currentTab == "developer");
-+		result.GetToggleButton("optimum").SetValue(currentTab == "optimum");
++		result.GetToggleButton("optimum")?.SetValue(currentTab == "optimum");
  		return result;
  	}
  
  	private void updateButtonBounds()
  	{
-@@ -235,20 +241,23 @@ public class GuiCompositeSettings : GuiComposite
+@@ -235,20 +242,23 @@ public class GuiCompositeSettings : GuiComposite
  		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-dev-header"));
  		double width7 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
-+		textExtents = cairoFont.GetTextExtents("Extra");
++		textExtents = cairoFont.GetTextExtents(Lang.Get("optimum-tab-header"));
 +		double width9 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("general-back"));
  		double width8 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -87,7 +99,7 @@ index 4d08f84..58683d1 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1749,84 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,84 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -98,41 +110,41 @@ index 4d08f84..58683d1 100644
 +		double rowH = 45.0;
 +		double y0 = 87.0;
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
-+			.AddStaticText("Limit Background FPS", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
-+			.AddHoverText("Cap to 30 FPS when the game window loses focus.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
++			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
++			.AddHoverText(Lang.Get("optimum-bgfps-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
 +			.AddSwitch(onOptimumBackgroundFpsChanged, ElementBounds.Fixed(450, y0 + 2, 200, 20), "optBgFps")
-+			.AddStaticText("Smooth Frame Pacing", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH, 400, 30))
-+			.AddHoverText("Precise sleep/spin timing to reduce micro-stutter.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH, 400, 25))
++			.AddStaticText(Lang.Get("optimum-framepacing"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH, 400, 30))
++			.AddHoverText(Lang.Get("optimum-framepacing-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH, 400, 25))
 +			.AddSwitch(onOptimumFramePacingChanged, ElementBounds.Fixed(450, y0 + rowH + 2, 200, 20), "optFramePacing")
-+			.AddStaticText("Skip Distant Shadows", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 2, 400, 30))
-+			.AddHoverText("Entities beyond the threshold cast no shadow.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 2, 400, 25))
++			.AddStaticText(Lang.Get("optimum-shadowcull"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 2, 400, 30))
++			.AddHoverText(Lang.Get("optimum-shadowcull-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 2, 400, 25))
 +			.AddSwitch(onOptimumShadowCullChanged, ElementBounds.Fixed(450, y0 + rowH * 2 + 2, 200, 20), "optShadowCull")
-+			.AddStaticText("Shadow Distance", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 3, 400, 30))
++			.AddStaticText(Lang.Get("optimum-shadowdist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 3, 400, 30))
 +			.AddSlider(onOptimumShadowDistChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 20), "optShadowDist")
-+			.AddStaticText("Skip Distant Collisions", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 4, 400, 30))
-+			.AddHoverText("Entities beyond the threshold stop pushing each other.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 4, 400, 25))
++			.AddStaticText(Lang.Get("optimum-repulsion"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 4, 400, 30))
++			.AddHoverText(Lang.Get("optimum-repulsion-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 4, 400, 25))
 +			.AddSwitch(onOptimumRepulsionChanged, ElementBounds.Fixed(450, y0 + rowH * 4 + 2, 200, 20), "optRepulsion")
-+			.AddStaticText("Collision Distance", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 400, 30))
++			.AddStaticText(Lang.Get("optimum-repulsiondist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 400, 30))
 +			.AddSlider(onOptimumRepulsionDistChanged, ElementBounds.Fixed(450, y0 + rowH * 5 + 2, 200, 20), "optRepulsionDist")
-+			.AddStaticText("Scale Light Range", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 400, 30))
-+			.AddHoverText("Reduce the dynamic light search radius at lower view distances.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 400, 25))
++			.AddStaticText(Lang.Get("optimum-dynlight"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 400, 30))
++			.AddHoverText(Lang.Get("optimum-dynlight-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 400, 25))
 +			.AddSwitch(onOptimumDynLightChanged, ElementBounds.Fixed(450, y0 + rowH * 6 + 2, 200, 20), "optDynLight")
-+			.AddStaticText("Reduce Distant Animations", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 7, 400, 30))
-+			.AddHoverText("Forges, querns, and other animated blocks skip frames when far away.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 7, 400, 25))
++			.AddStaticText(Lang.Get("optimum-animblocklod"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 7, 400, 30))
++			.AddHoverText(Lang.Get("optimum-animblocklod-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 7, 400, 25))
 +			.AddSwitch(onOptimumAnimBlockLodChanged, ElementBounds.Fixed(450, y0 + rowH * 7 + 2, 200, 20), "optAnimBlockLod")
-+			.AddStaticText("Skip Foliage Far Shadows", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 8, 400, 30))
-+			.AddHoverText("Vegetation casts no shadow in the far cascade.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 8, 400, 25))
++			.AddStaticText(Lang.Get("optimum-shadowfarveg"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 8, 400, 30))
++			.AddHoverText(Lang.Get("optimum-shadowfarveg-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 8, 400, 25))
 +			.AddSwitch(onOptimumShadowFarVegChanged, ElementBounds.Fixed(450, y0 + rowH * 8 + 2, 200, 20), "optShadowFarVeg")
-+			.AddStaticText("Throttle Wind Updates", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 9, 400, 30))
-+			.AddHoverText("Sample wind speed every 4th frame instead of every frame.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 9, 400, 25))
++			.AddStaticText(Lang.Get("optimum-weatherwind"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 9, 400, 30))
++			.AddHoverText(Lang.Get("optimum-weatherwind-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 9, 400, 25))
 +			.AddSwitch(onOptimumWeatherWindChanged, ElementBounds.Fixed(450, y0 + rowH * 9 + 2, 200, 20), "optWeatherWind")
-+			.AddStaticText("Reduce Distant Particles", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 10, 400, 30))
-+			.AddHoverText("Particle emitters beyond 48 blocks stop spawning.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 10, 400, 25))
++			.AddStaticText(Lang.Get("optimum-particledist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 10, 400, 30))
++			.AddHoverText(Lang.Get("optimum-particledist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 10, 400, 25))
 +			.AddSwitch(onOptimumParticleDistChanged, ElementBounds.Fixed(450, y0 + rowH * 10 + 2, 200, 20), "optParticleDist")
-+			.AddStaticText("Simplify Distant Chiseled Blocks", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 11, 400, 30))
-+			.AddHoverText("Render chiseled blocks as solid cubes beyond the threshold.", CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 11, 400, 25))
++			.AddStaticText(Lang.Get("optimum-chisellod"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 11, 400, 30))
++			.AddHoverText(Lang.Get("optimum-chisellod-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 11, 400, 25))
 +			.AddSwitch(onOptimumChiselLodChanged, ElementBounds.Fixed(450, y0 + rowH * 11 + 2, 200, 20), "optChiselLod")
-+			.AddStaticText("Chisel LOD Distance", CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 12, 400, 30))
++			.AddStaticText(Lang.Get("optimum-chiselloddist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 12, 400, 30))
 +			.AddSlider(onOptimumChiselLodDistChanged, ElementBounds.Fixed(450, y0 + rowH * 12 + 2, 200, 20), "optChiselLodDist")
 +			.EndChildElements()
 +			.Compose();
@@ -172,7 +184,7 @@ index 4d08f84..58683d1 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1901,22 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1902,22 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
@@ -185,13 +197,13 @@ index 4d08f84..58683d1 100644
 +		if (oButtonBounds == null)
 +		{
 +			CairoFont font = CairoFont.ButtonText();
-+			TextExtents ext = font.GetTextExtents("Extra");
++			TextExtents ext = font.GetTextExtents(Lang.Get("optimum-tab-header"));
 +			double w = ext.Width / (double)ClientSettings.GUIScale + 15.0;
 +			oButtonBounds = ElementBounds.Fixed(0.0, 0.0, w, 40.0).WithFixedPadding(0.0, 3.0);
 +			ElementBounds anchor = ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds;
 +			if (anchor != null) oButtonBounds.FixedRightOf(anchor, 15.0);
 +			if (anchor?.ParentBounds != null) oButtonBounds.ParentBounds = anchor.ParentBounds;
 +		}
-+		return GuiComposerHelpers.AddToggleButton(c, "Extra", CairoFont.ButtonText(), OnOptimumOptions, oButtonBounds, "optimum");
++		return GuiComposerHelpers.AddToggleButton(c, Lang.Get("optimum-tab-header"), CairoFont.ButtonText(), OnOptimumOptions, oButtonBounds, "optimum");
 +	}
  }

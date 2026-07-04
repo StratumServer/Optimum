@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Datastructures/SortableQueue.cs b/VintagestoryApi/Datastructures/SortableQueue.cs
-index b674310..3b2983c 100644
+index b674310..59c1108 100644
 --- a/VintagestoryApi/Datastructures/SortableQueue.cs
 +++ b/VintagestoryApi/Datastructures/SortableQueue.cs
 @@ -9,10 +9,11 @@ namespace Vintagestory.API.Datastructures
@@ -54,3 +54,23 @@ index b674310..3b2983c 100644
              Array.Sort(array, start, tail % maxSize - start);
          }
  
+@@ -101,10 +106,19 @@ namespace Vintagestory.API.Datastructures
+             {
+                 for (int j = head % maxSize; j < tail % maxSize; j++) action(array[j]);
+             }
+         }
+ 
++        /// <summary>
++        /// Item at logical queue position i (0 = front, same order Dequeue() would return),
++        /// for callers that need a delegate-free foreach instead of RunForEach(Action&lt;T&gt;).
++        /// </summary>
++        public T ItemAt(int i)
++        {
++            return array[(head + i) % maxSize];
++        }
++
+         /// <summary>
+         /// Will return invalid data if called when Count &lt;= 0: it is the responsibility of the calling code to check Count > 0
+         /// </summary>
+         /// <returns></returns>
+         public T DequeueLIFO()

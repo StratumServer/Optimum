@@ -4,6 +4,13 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 patches_dir="$repo_root/patches"
+compat_allowlist="$script_dir/vanilla-compat-allowlist.txt"
+
+is_allowlisted() {
+  local rel="$1"
+  [[ -f "$compat_allowlist" ]] || return 1
+  grep -qxF "$rel" <(grep -v '^#' "$compat_allowlist" | grep -v '^[[:space:]]*$')
+}
 
 failures=0
 skips=0
@@ -66,9 +73,18 @@ check_patch_content() {
   local dangerous_content
   dangerous_content='NetworkVersion|ShortGameVersion|ProtoContract|ProtoMember|ImplicitFields|ModInfoAttribute|RequiredOnClient|RequiredOnServer'
 
+  # Scan only added/removed lines, not unified-diff context. A patch's hunk
+  # context legitimately includes unrelated existing code (like a reference to
+  # ShortGameVersion three lines above the actual change), and matching on the
+  # whole file flags that context as if the patch itself introduced it.
   while IFS= read -r -d '' patch; do
-    if rg -q "$dangerous_content" "$patch"; then
-      fail "patch changes multiplayer compatibility content: ${patch#$repo_root/}"
+    local rel="${patch#$repo_root/}"
+    if grep -E '^[-+][^-+]' "$patch" | rg -q "$dangerous_content"; then
+      if is_allowlisted "$rel"; then
+        skip "patch changes multiplayer compatibility content (allowlisted): $rel"
+      else
+        fail "patch changes multiplayer compatibility content: $rel"
+      fi
     fi
   done < <(find "$patches_dir" -type f -name '*.patch' -print0)
 }

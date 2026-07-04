@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 4909b4b..12f5760 100644
+index 4909b4b..1d9f14c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -45,10 +45,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -45,10 +45,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private AssetManager assetManager;
  
@@ -34,6 +34,8 @@ index 4909b4b..12f5760 100644
 +		ClientSettings.OptimumParticleDistanceGate = Vintagestory.API.Config.OptimumConfig.ParticleDistanceGateEnabled;
 +		ClientSettings.OptimumChiselLod = Vintagestory.API.Config.OptimumConfig.ChiselLodEnabled;
 +		ClientSettings.OptimumChiselLodDistance = Vintagestory.API.Config.OptimumConfig.ChiselLodDistance;
++		ClientSettings.OptimumDynamicLightCache = Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled;
++		Optimum.OptimumUpdateChecker.CheckAsync();
 +	}
 +
  	internal Stopwatch uptimeStopWatch = new Stopwatch();
@@ -41,7 +43,7 @@ index 4909b4b..12f5760 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -478,21 +506,60 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,21 +508,67 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -62,6 +64,11 @@ index 4909b4b..12f5760 100644
 -			int num = (int)(1000f / base.MaxFps - 1000f * (float)frameStopWatch.ElapsedTicks / (float)Stopwatch.Frequency);
 -			if (num > 0)
 +			effectiveMaxFps = OptimumBgMaxFps;
++			Vintagestory.API.Config.OptimumDiagnostics.BackgroundFpsLimiter.Skip();
++		}
++		else
++		{
++			Vintagestory.API.Config.OptimumDiagnostics.BackgroundFpsLimiter.Hit();
 +		}
 +
 +		if (ClientSettings.VsyncMode != 1 && effectiveMaxFps > 10f && effectiveMaxFps < 241f)
@@ -74,6 +81,7 @@ index 4909b4b..12f5760 100644
 -				Thread.Sleep(num);
 +				if (ClientSettings.OptimumPreciseFramePacing)
 +				{
++					Vintagestory.API.Config.OptimumDiagnostics.PreciseFramePacing.Hit();
 +					// Optimum: hybrid sleep/yield/spin for precise frame pacing.
 +					long finalWaitTicks = Math.Max(
 +						Stopwatch.Frequency / 2000,
@@ -98,6 +106,7 @@ index 4909b4b..12f5760 100644
 +				}
 +				else
 +				{
++					Vintagestory.API.Config.OptimumDiagnostics.PreciseFramePacing.Skip();
 +					int sleepMs = (int)(remainingTicks * 1000L / Stopwatch.Frequency);
 +					if (sleepMs > 0) Thread.Sleep(sleepMs);
 +				}

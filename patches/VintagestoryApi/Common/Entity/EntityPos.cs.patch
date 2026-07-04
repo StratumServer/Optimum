@@ -1,0 +1,30 @@
+diff --git a/VintagestoryApi/Common/Entity/EntityPos.cs b/VintagestoryApi/Common/Entity/EntityPos.cs
+index e313870..e095b29 100644
+--- a/VintagestoryApi/Common/Entity/EntityPos.cs
++++ b/VintagestoryApi/Common/Entity/EntityPos.cs
+@@ -639,10 +639,25 @@ namespace Vintagestory.API.Common.Entities
+             float sinYaw = GameMath.Sin(yaw);
+ 
+             return new Vec3f(-cosPitch * sinYaw, sinPitch, -cosPitch * cosYaw);
+         }
+ 
++        /// <summary>
++        /// Same as <see cref="GetViewVector(float, float)"/> but writes into a caller-supplied
++        /// vector instead of allocating, for callers that run this every frame.
++        /// </summary>
++        public static void GetViewVector(float pitch, float yaw, Vec3f intoVector)
++        {
++            float cosPitch = GameMath.Cos(pitch);
++            float sinPitch = GameMath.Sin(pitch);
++
++            float cosYaw = GameMath.Cos(yaw);
++            float sinYaw = GameMath.Sin(yaw);
++
++            intoVector.Set(-cosPitch * sinYaw, sinPitch, -cosPitch * cosYaw);
++        }
++
+         /// <summary>
+         /// Returns a new entity position that is in front of the position the entity is currently looking at
+         /// </summary>
+         /// <param name="offset"></param>
+         /// <returns></returns>

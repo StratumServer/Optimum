@@ -5,6 +5,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 patches_dir="$repo_root/patches"
 vanilla_patch_projects="VintagestoryLib Vintagestory"
+cecil_list="$patches_dir/cecil-owned.list"
+patcher_program="$repo_root/Optimum.Patcher/Program.cs"
 
 usage() {
   cat <<'EOF'
@@ -14,8 +16,16 @@ Usage: scripts/check-patches.sh
 Checks each patch against the current working tree. A patch passes when reverse
 apply succeeds, which means the tree contains the optimization.
 
+VintagestoryLib.dll ships patched by Mono.Cecil transplant over the vanilla
+DLL, not recompiled, so a patch whose release effect ships that way is listed
+in patches/cecil-owned.list and reported as "cecil" against the donor tree
+(build/) instead of "applied". A patch on that list that fails reverse-apply
+still counts as a conflict.
+
 The script marks absent targets in partial checkouts as unavailable. Use
---strict-unavailable when every fork should exist.
+--strict-unavailable when every fork should exist, or when a mismatch between
+patches/cecil-owned.list and Optimum.Patcher/Program.cs's own target list
+should fail the run instead of just printing a warning.
 EOF
 }
 
@@ -119,6 +129,46 @@ patch_has_unavailable_target() {
   return 1
 }
 
+cecil_type_to_patch() {
+  local type="$1" ns class subdir
+  class="${type##*.}"
+  ns="${type%.*}"
+  subdir="Vintagestory.Client${ns#Vintagestory.Client}"
+  echo "patches/VintagestoryLib/$subdir/$class.cs.patch"
+}
+
+check_cecil_cross_reference() {
+  local mismatch=0
+  local -A expected=()
+  local type rel
+
+  if [[ ! -f "$patcher_program" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r type; do
+    [[ -z "$type" ]] && continue
+    rel="$(cecil_type_to_patch "$type")"
+    expected["$rel"]=1
+    if [[ ! -f "$repo_root/$rel" ]]; then
+      continue
+    fi
+    if [[ -z "${cecil_owned["$rel"]:-}" ]]; then
+      echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
+      mismatch=1
+    fi
+  done < <(grep -oE '"Vintagestory\.Client(\.NoObf)?\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
+
+  for rel in "${!cecil_owned[@]}"; do
+    if [[ -z "${expected["$rel"]:-}" ]]; then
+      echo "cecil-owned.list lists a patch no Program.cs target maps to: $rel" >&2
+      mismatch=1
+    fi
+  done
+
+  return "$mismatch"
+}
+
 if [[ ! -d "$patches_dir" ]]; then
   echo "No patches directory found." >&2
   exit 1
@@ -126,7 +176,19 @@ fi
 
 cd "$repo_root"
 
+declare -A cecil_owned=()
+if [[ -f "$cecil_list" ]]; then
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    cecil_owned["$line"]=1
+  done < "$cecil_list"
+fi
+
+cecil_cross_reference_mismatch=0
+check_cecil_cross_reference || cecil_cross_reference_mismatch=1
+
 applied=0
+cecil=0
 pending=0
 unavailable=0
 conflict=0
@@ -194,7 +256,13 @@ while IFS= read -r -d '' patch; do
     mode="-"
   fi
 
-  if [[ "$state" != "applied" ]]; then
+  if [[ "$state" == "applied" && -n "${cecil_owned["$rel"]:-}" ]]; then
+    state="cecil"
+    applied=$((applied-1))
+    cecil=$((cecil+1))
+  fi
+
+  if [[ "$state" != "applied" && "$state" != "cecil" ]]; then
     printf '%-8s %-7s %s\n' "$state" "$mode" "$rel"
     if [[ -n "$unavailable_path" ]]; then
       printf '  target missing: %s\n' "$unavailable_path"
@@ -205,7 +273,14 @@ while IFS= read -r -d '' patch; do
   fi
 done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort -z)
 
-echo "Patches: $applied applied, $pending pending, $unavailable unavailable, $conflict conflict, $total total"
+echo "Patches: $applied applied, $cecil cecil, $pending pending, $unavailable unavailable, $conflict conflict, $total total"
+
+if [[ "$cecil_cross_reference_mismatch" == "1" ]]; then
+  echo "cecil-owned.list and Optimum.Patcher/Program.cs disagree, see warnings above." >&2
+  if [[ "$strict_unavailable" == "1" ]]; then
+    exit 1
+  fi
+fi
 
 if [[ "$pending" -gt 0 || "$conflict" -gt 0 ]]; then
   exit 1

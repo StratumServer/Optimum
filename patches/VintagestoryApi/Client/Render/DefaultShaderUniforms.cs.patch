@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/Render/DefaultShaderUniforms.cs b/VintagestoryApi/Client/Render/DefaultShaderUniforms.cs
+index 0451071..d950c31 100644
+--- a/VintagestoryApi/Client/Render/DefaultShaderUniforms.cs
++++ b/VintagestoryApi/Client/Render/DefaultShaderUniforms.cs
+@@ -169,11 +169,11 @@ namespace Vintagestory.API.Client
+ 
+             
+             plrPos.Set(capi.World.Player.Entity.Pos.XInt, capi.World.Player.Entity.Pos.YInt, capi.World.Player.Entity.Pos.ZInt);
+ 
+             // For godrays shader
+-            PlayerViewVector = EntityPos.GetViewVector(capi.Input.MousePitch, capi.Input.MouseYaw);
++            EntityPos.GetViewVector(capi.Input.MousePitch, capi.Input.MouseYaw, PlayerViewVector);
+ 
+             Dusk = capi.World.Calendar.Dusk ? 1 : 0;
+ 
+             
+             PlayerToSealevelOffset = (float)capi.World.Player.Entity.Pos.Y - capi.World.SeaLevel;

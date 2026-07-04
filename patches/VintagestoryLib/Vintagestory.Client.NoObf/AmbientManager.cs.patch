@@ -1,0 +1,134 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs
+index 03f3699..40fdbf0 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs
+@@ -28,10 +28,23 @@ public class AmbientManager : IAmbientManager
+ 
+ 	private float targetSepiaLevel;
+ 
+ 	private float smoothedLightLevel = -1f;
+ 
++	// Optimum: scratch buffers reused every frame instead of freshly
++	// allocated in UpdateAmbient/setWaterColors/UpdateDaylight/
++	// updateColorGradingValues. Declared bare (no initializer) and
++	// lazily constructed on first use: Cecil-injected fields only copy
++	// field definitions, not constructor initializer IL, so an eager
++	// `= new()` here would never actually run.
++	private float[] _updateAmbientFogColorScratch;
++	private float[] _updateAmbientAmbientColorScratch;
++	private int[] _waterColorHsvScratch;
++	private int[] _waterColorRgbScratch;
++	private BlockPos _daylightBlockPosScratch;
++	private BlockPos _colorGradingBlockPosScratch;
++
+ 	public Vec4f BlendedFogColor { get; set; }
+ 
+ 	public Vec3f BlendedAmbientColor { get; set; }
+ 
+ 	public float BlendedFogDensity { get; set; }
+@@ -148,11 +161,13 @@ public class AmbientManager : IAmbientManager
+ 		AmbientModifier ambientModifier = ambientModifiers["night"];
+ 		float val = Math.Min(0.6f, 0f - game.Calendar.SunPositionNormalized.Y) - 0.75f * Math.Min(0.33f, game.Calendar.MoonLightStrength);
+ 		ambientModifier.FogBrightness.Weight = GameMath.Clamp(1f - game.Calendar.DayLightStrength + GameMath.Clamp(val, 0f, 0.5f) * 0.85f, 0f, 0.88f);
+ 		float num = GameMath.Clamp(1.5f * game.Calendar.DayLightStrength - 0.2f, 0.1f, 1f);
+ 		ambientModifier.SceneBrightness.Weight = GameMath.Clamp(1f - num, 0f, 0.65f);
+-		BlockPos asBlockPos = game.player.Entity.Pos.AsBlockPos;
++		// Optimum: reuse a scratch BlockPos instead of allocating one via
++		// .AsBlockPos every frame.
++		BlockPos asBlockPos = (_daylightBlockPosScratch ??= new BlockPos()).Set(game.player.Entity.Pos);
+ 		int num2 = Math.Max(game.BlockAccessor.GetLightLevel(asBlockPos, EnumLightLevelType.OnlySunLight), game.BlockAccessor.GetLightLevel(asBlockPos.Up(), EnumLightLevelType.OnlySunLight));
+ 		smoothedLightLevel += ((float)num2 - smoothedLightLevel) * dt;
+ 		float num3 = GameMath.Clamp(3f * smoothedLightLevel / 20f, 0f, 1f);
+ 		float num4 = (float)GameMath.Clamp(game.Player.Entity.Pos.Y / (double)game.SeaLevel, 0.0, 1.0);
+ 		num4 *= num4;
+@@ -182,26 +197,32 @@ public class AmbientManager : IAmbientManager
+ 	private void setWaterColors()
+ 	{
+ 		AmbientModifier ambientModifier = ambientModifiers["water"];
+ 		float num = Math.Max(0.2f, game.Calendar.DayLightStrength);
+ 		int num2 = game.WorldMap.ApplyColorMapOnRgba("climateWaterTint", null, -1, (int)game.EntityPlayer.Pos.X, (int)game.EntityPlayer.Pos.Y, (int)game.EntityPlayer.Pos.Z, flipRb: false);
+-		int[] array = ColorUtil.RgbToHsvInts(num2 & 0xFF, (num2 >> 8) & 0xFF, (num2 >> 16) & 0xFF);
++		// Optimum: reuse scratch int[3] buffers instead of the two
++		// allocating RgbToHsvInts/Hsv2RgbInts overloads, and mutate the
++		// existing WaterMurkColor instance instead of assigning a new
++		// Vec4f. Runs every frame.
++		int[] array = (_waterColorHsvScratch ??= new int[3]);
++		ColorUtil.RgbToHsvInts(num2 & 0xFF, (num2 >> 8) & 0xFF, (num2 >> 16) & 0xFF, array);
+ 		array[2] /= 2;
+ 		array[2] = (int)((float)array[2] * num);
+-		int[] array2 = ColorUtil.Hsv2RgbInts(array[0], array[1], array[2]);
++		int[] array2 = (_waterColorRgbScratch ??= new int[3]);
++		ColorUtil.Hsv2RgbInts(array[0], array[1], array[2], array2);
+ 		float[] value = ambientModifier.FogColor.Value;
+ 		value[0] = (float)array2[0] / 255f;
+ 		value[1] = (float)array2[1] / 255f;
+ 		value[2] = (float)array2[2] / 255f;
+ 		ambientModifier.AmbientColor.Value[0] = value[0] * 2f;
+ 		ambientModifier.AmbientColor.Value[1] = value[1] * 2f;
+ 		ambientModifier.AmbientColor.Value[2] = value[2] * 2f;
+ 		float num3 = game.EyesInWaterDepth();
+ 		ambientModifier.AmbientColor.Weight = ((num3 > 0f) ? GameMath.Clamp(game.EyesInWaterDepth() / 30f, 0f, 1f) : 0f);
+ 		array[1] /= 2;
+-		array2 = ColorUtil.Hsv2RgbInts(array[0], array[1], array[2]);
+-		game.api.Render.ShaderUniforms.WaterMurkColor = new Vec4f((float)array2[0] / 255f, (float)array2[1] / 255f, (float)array2[2] / 255f, 1f);
++		ColorUtil.Hsv2RgbInts(array[0], array[1], array[2], array2);
++		game.api.Render.ShaderUniforms.WaterMurkColor.Set((float)array2[0] / 255f, (float)array2[1] / 255f, (float)array2[2] / 255f, 1f);
+ 	}
+ 
+ 	private void OnPlayerSightBeingChangedByLava(TrackedPlayerProperties oldValues, TrackedPlayerProperties newValues)
+ 	{
+ 		AmbientModifier ambientModifier = ambientModifiers["lava"];
+@@ -219,23 +240,22 @@ public class AmbientManager : IAmbientManager
+ 
+ 	public void UpdateAmbient(float dt)
+ 	{
+ 		setWaterColors();
+ 		updateColorGradingValues(dt);
+-		float[] array = new float[4]
+-		{
+-			BaseModifier.FogColor.Value[0],
+-			BaseModifier.FogColor.Value[1],
+-			BaseModifier.FogColor.Value[2],
+-			1f
+-		};
+-		float[] array2 = new float[3]
+-		{
+-			BaseModifier.AmbientColor.Value[0],
+-			BaseModifier.AmbientColor.Value[1],
+-			BaseModifier.AmbientColor.Value[2]
+-		};
++		// Optimum: reuse scratch buffers instead of allocating float[4]/
++		// float[3] every frame. Every element gets overwritten below
++		// before use, same as the fresh-allocation version did.
++		float[] array = (_updateAmbientFogColorScratch ??= new float[4]);
++		array[0] = BaseModifier.FogColor.Value[0];
++		array[1] = BaseModifier.FogColor.Value[1];
++		array[2] = BaseModifier.FogColor.Value[2];
++		array[3] = 1f;
++		float[] array2 = (_updateAmbientAmbientColorScratch ??= new float[3]);
++		array2[0] = BaseModifier.AmbientColor.Value[0];
++		array2[1] = BaseModifier.AmbientColor.Value[1];
++		array2[2] = BaseModifier.AmbientColor.Value[2];
+ 		BlendedFogDensity = BaseModifier.FogDensity.Value;
+ 		BlendedFogMin = BaseModifier.FogMin.Value;
+ 		BlendedFlatFogDensity = BaseModifier.FlatFogDensity.Value;
+ 		BlendedFlatFogYOffset = BaseModifier.FlatFogYPos.Value;
+ 		BlendedCloudBrightness = BaseModifier.CloudBrightness.Value;
+@@ -304,11 +324,16 @@ public class AmbientManager : IAmbientManager
+ 				prevDynamicColourGrading = true;
+ 				shaderUniforms.ExtraContrastLevel = ClientSettings.ExtraContrastLevel;
+ 				shaderUniforms.SepiaLevel = ClientSettings.SepiaLevel;
+ 			}
+ 			dt = Math.Min(0.2f, dt);
+-			BlockPos asBlockPos = game.player.Entity.Pos.XYZ.AsBlockPos;
++			// Optimum: reuse a scratch BlockPos instead of allocating one via
++			// .XYZ.AsBlockPos every frame. .XYZ bakes dimension into Y (see
++			// EntityPos.InternalY), so this needs SetAndCorrectDimension
++			// (the Y-decoding equivalent of the 3-arg BlockPos constructor
++			// AsBlockPos uses), not the dimension-naive Set(Vec3d).
++			BlockPos asBlockPos = (_colorGradingBlockPosScratch ??= new BlockPos()).SetAndCorrectDimension(game.player.Entity.Pos.XYZ);
+ 			asBlockPos.Y = game.SeaLevel;
+ 			ClimateCondition climateAt = game.World.BlockAccessor.GetClimateAt(asBlockPos);
+ 			if (climateAt != null)
+ 			{
+ 				if (float.IsNaN(climateAt.Temperature) || float.IsNaN(climateAt.WorldgenRainfall))

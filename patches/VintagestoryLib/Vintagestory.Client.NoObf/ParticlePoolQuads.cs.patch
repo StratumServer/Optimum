@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
-index 4db59d6..296842c 100644
+index 4db59d6..d1543d6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
 @@ -1,6 +1,8 @@
@@ -24,3 +24,30 @@ index 4db59d6..296842c 100644
  
  	protected int poolSize;
  
+@@ -141,10 +143,26 @@ public class ParticlePoolQuads : IParticlePool
+ 		int num2 = 0;
+ 		if (!particleProperties.IgnoreUserConfig && QuantityAlive * 100 >= game.particleLevel * poolSize)
+ 		{
+ 			return 0;
+ 		}
++		// Optimum: reject spawns beyond the configured view distance. Vanilla
++		// has no distance gate here, every SpawnParticles call runs the full
++		// revive loop regardless of how far the emitter is from the camera.
++		if (OptimumConfig.ParticleDistanceGateEnabled)
++		{
++			Vec3d plrPos = game.EntityPlayer.Pos.XYZ;
++			double dx = particleProperties.Pos.X - plrPos.X;
++			double dz = particleProperties.Pos.Z - plrPos.Z;
++			double gateDistSq = (double)ClientSettings.ViewDistance * ClientSettings.ViewDistance;
++			if (dx * dx + dz * dz > gateDistSq)
++			{
++				OptimumDiagnostics.ParticleDistanceGate.Skip();
++				return 0;
++			}
++			OptimumDiagnostics.ParticleDistanceGate.Hit();
++		}
+ 		float num3 = particleProperties.Quantity * currentGamespeed;
+ 		while ((float)num2 < num3 && ParticlesPool.FirstDead != null && !(rand.NextDouble() > (double)(num3 - (float)num2)))
+ 		{
+ 			int rgbaColor = particleProperties.GetRgbaColor(game.api);
+ 			if (rgbaColor == 0)

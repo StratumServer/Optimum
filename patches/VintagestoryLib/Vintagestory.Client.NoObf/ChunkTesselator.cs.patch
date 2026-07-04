@@ -1,8 +1,41 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-index 9592e54..7d9ddeb 100644
+index 9592e54..4fa3b7c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-@@ -102,11 +102,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -3,10 +3,11 @@ using System.Collections.Generic;
+ using System.Runtime.CompilerServices;
+ using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ using Vintagestory.Common;
+ 
+@@ -62,14 +63,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 
+ 	internal bool[] isLiquidBlock;
+ 
+ 	internal MeshData[][][] currentModeldataByRenderPassByLodLevel;
+ 
++	internal MeshData[][][] currentOptimumChiselModeldataByRenderPassByLodLevel;
++
+ 	internal MeshData[][][] centerModeldataByRenderPassByLodLevel;
+ 
+ 	internal MeshData[][][] edgeModeldataByRenderPassByLodLevel;
+ 
++	internal MeshData[][][] centerOptimumChiselModeldataByRenderPassByLodLevel;
++
++	internal MeshData[][][] edgeOptimumChiselModeldataByRenderPassByLodLevel;
++
+ 	private int[][] fastBlockTextureSubidsByBlockAndFace;
+ 
+ 	private TesselatedChunkPart[] ret;
+ 
+ 	private TesselatedChunkPart[] emptyParts = Array.Empty<TesselatedChunkPart>();
+@@ -102,11 +109,11 @@ public class ChunkTesselator : IMeshPoolSupplier
  
  	internal readonly ClientChunk[] chunksNearby;
  
@@ -15,3 +48,202 @@ index 9592e54..7d9ddeb 100644
  
  	private float[][] decorRotationMatrices = new float[24][];
  
+@@ -206,14 +213,18 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		mapsizeChunksy = mapsizey / 32;
+ 		mapsizeChunksz = mapsizez / 32;
+ 		Array values = Enum.GetValues(typeof(EnumChunkRenderPass));
+ 		centerModeldataByRenderPassByLodLevel = new MeshData[4][][];
+ 		edgeModeldataByRenderPassByLodLevel = new MeshData[4][][];
++		centerOptimumChiselModeldataByRenderPassByLodLevel = new MeshData[4][][];
++		edgeOptimumChiselModeldataByRenderPassByLodLevel = new MeshData[4][][];
+ 		for (int j = 0; j < 4; j++)
+ 		{
+ 			centerModeldataByRenderPassByLodLevel[j] = new MeshData[values.Length][];
+ 			edgeModeldataByRenderPassByLodLevel[j] = new MeshData[values.Length][];
++			centerOptimumChiselModeldataByRenderPassByLodLevel[j] = new MeshData[values.Length][];
++			edgeOptimumChiselModeldataByRenderPassByLodLevel[j] = new MeshData[values.Length][];
+ 		}
+ 		ReloadTextures();
+ 		int count = game.Blocks.Count;
+ 		isPartiallyTransparent = new bool[count];
+ 		isLiquidBlock = new bool[count];
+@@ -268,14 +279,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			{
+ 				for (int i = 0; i < 4; i++)
+ 				{
+ 					MeshData[][] array = centerModeldataByRenderPassByLodLevel[i];
+ 					MeshData[][] array2 = edgeModeldataByRenderPassByLodLevel[i];
++					MeshData[][] array3 = centerOptimumChiselModeldataByRenderPassByLodLevel[i];
++					MeshData[][] array4 = edgeOptimumChiselModeldataByRenderPassByLodLevel[i];
+ 					array[(int)item] = new MeshData[quantityAtlasses];
+ 					array2[(int)item] = new MeshData[quantityAtlasses];
++					array3[(int)item] = new MeshData[quantityAtlasses];
++					array4[(int)item] = new MeshData[quantityAtlasses];
+ 					InitialiseRenderPassPools(array[(int)item], item, 1024);
+ 					InitialiseRenderPassPools(array2[(int)item], item, 1024);
++					InitialiseRenderPassPools(array3[(int)item], item, 1024);
++					InitialiseRenderPassPools(array4[(int)item], item, 1024);
+ 				}
+ 			}
+ 		}
+ 	}
+ 
+@@ -395,13 +412,15 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 				for (int j = 0; j < quantityAtlasses; j++)
+ 				{
+ 					for (int k = 0; k < 4; k++)
+ 					{
+ 						edgeModeldataByRenderPassByLodLevel[k][(int)enumChunkRenderPass][j].Clear();
++						edgeOptimumChiselModeldataByRenderPassByLodLevel[k][(int)enumChunkRenderPass][j].Clear();
+ 						if (!skipChunkCenter)
+ 						{
+ 							centerModeldataByRenderPassByLodLevel[k][(int)enumChunkRenderPass][j].Clear();
++							centerOptimumChiselModeldataByRenderPassByLodLevel[k][(int)enumChunkRenderPass][j].Clear();
+ 						}
+ 					}
+ 				}
+ 			}
+ 			try
+@@ -429,18 +448,39 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			}
+ 			int num = 0;
+ 			if (!skipChunkCenter)
+ 			{
+ 				num += populateTesselatedChunkPart(centerModeldataByRenderPassByLodLevel, out tessChunk.centerParts);
++				num += populateTesselatedChunkPart(centerOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] centerOptimumChiselParts, true);
++				tessChunk.centerParts = MergeTesselatedChunkParts(tessChunk.centerParts, centerOptimumChiselParts);
+ 			}
+ 			num += populateTesselatedChunkPart(edgeModeldataByRenderPassByLodLevel, out tessChunk.edgeParts);
++			num += populateTesselatedChunkPart(edgeOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] edgeOptimumChiselParts, true);
++			tessChunk.edgeParts = MergeTesselatedChunkParts(tessChunk.edgeParts, edgeOptimumChiselParts);
+ 			tessChunk.SetBounds(vars.xMin, vars.xMax, vars.yMin, vars.yMax, vars.zMin, vars.zMax);
+ 			return num;
+ 		}
+ 	}
+ 
+-	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
++	private TesselatedChunkPart[] MergeTesselatedChunkParts(TesselatedChunkPart[] first, TesselatedChunkPart[] second)
++	{
++		if (first == null || first.Length == 0)
++		{
++			return second;
++		}
++		if (second == null || second.Length == 0)
++		{
++			return first;
++		}
++
++		TesselatedChunkPart[] merged = new TesselatedChunkPart[first.Length + second.Length];
++		Array.Copy(first, 0, merged, 0, first.Length);
++		Array.Copy(second, 0, merged, first.Length, second.Length);
++		return merged;
++	}
++
++	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts, bool optimumUseChiselLodDistance = false)
+ 	{
+ 		int num = 0;
+ 		int num2 = 0;
+ 		MeshData.Recycler.DoRecycling();
+ 		EnumChunkRenderPass[] array = passes;
+@@ -463,11 +503,12 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 						atlasNumber = j,
+ 						modelDataLod0 = ((verticesCount == 0) ? null : meshData.CloneUsingRecycler()),
+ 						modelDataLod1 = ((verticesCount2 == 0) ? null : meshData2.CloneUsingRecycler()),
+ 						modelDataNotLod2Far = ((verticesCount3 == 0) ? null : meshData3.CloneUsingRecycler()),
+ 						modelDataLod2Far = ((verticesCount4 == 0) ? null : meshData4.CloneUsingRecycler()),
+-						pass = enumChunkRenderPass
++						pass = enumChunkRenderPass,
++						optimumUseChiselLodDistance = optimumUseChiselLodDistance
+ 					};
+ 					num2 += verticesCount + verticesCount2;
+ 				}
+ 			}
+ 		}
+@@ -717,10 +758,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 				currentChunkDrawFluids[i] &= 223;
+ 			}
+ 		}
+ 		TCTCache tCTCache = vars;
+ 		currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
++		currentOptimumChiselModeldataByRenderPassByLodLevel = edgeOptimumChiselModeldataByRenderPassByLodLevel;
+ 		int num4 = -1;
+ 		for (int j = 0; j < 32; j++)
+ 		{
+ 			int num5 = (j + 1) * 34 + 1;
+ 			tCTCache.posY = num + j;
+@@ -731,20 +773,23 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			do
+ 			{
+ 				tCTCache.lz = num7;
+ 				int posZ = (tCTCache.posZ = num2 + num7);
+ 				MeshData[][][] array = ((num6 * num7 * (num7 ^ 0x1F) != 0) ? centerModeldataByRenderPassByLodLevel : edgeModeldataByRenderPassByLodLevel);
++				MeshData[][][] array2 = ((num6 * num7 * (num7 ^ 0x1F) != 0) ? centerOptimumChiselModeldataByRenderPassByLodLevel : edgeOptimumChiselModeldataByRenderPassByLodLevel);
+ 				int extIndex3dBase = (num5 + num7) * 34 + 1;
+ 				TesselateBlock(++num4, extIndex3dBase, 0, baseX, posZ);
+ 				currentModeldataByRenderPassByLodLevel = array;
++				currentOptimumChiselModeldataByRenderPassByLodLevel = array2;
+ 				int num8 = 1;
+ 				do
+ 				{
+ 					TesselateBlock(++num4, extIndex3dBase, num8, baseX, posZ);
+ 				}
+ 				while (++num8 < 31);
+ 				currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
++				currentOptimumChiselModeldataByRenderPassByLodLevel = edgeOptimumChiselModeldataByRenderPassByLodLevel;
+ 				TesselateBlock(++num4, extIndex3dBase, num8, baseX, posZ);
+ 			}
+ 			while (++num7 < 32);
+ 		}
+ 	}
+@@ -761,10 +806,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			{
+ 				currentChunkDraw32[i] &= 223;
+ 			}
+ 		}
+ 		currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
++		currentOptimumChiselModeldataByRenderPassByLodLevel = edgeOptimumChiselModeldataByRenderPassByLodLevel;
+ 		TCTCache tCTCache = vars;
+ 		int num4 = -1;
+ 		for (int j = 0; j < 32; j++)
+ 		{
+ 			int num5 = (j + 1) * 34 + 1;
+@@ -838,18 +884,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			int num7 = num5 / 32 / 32;
+ 			int num8 = num5 / 32 % 32;
+ 			if (num6 * (num6 ^ num) * num7 * (num7 ^ num) * num8 * (num8 ^ num) == 0)
+ 			{
+ 				currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
++				currentOptimumChiselModeldataByRenderPassByLodLevel = edgeOptimumChiselModeldataByRenderPassByLodLevel;
+ 			}
+ 			else
+ 			{
+ 				if (edgeonly)
+ 				{
+ 					continue;
+ 				}
+ 				currentModeldataByRenderPassByLodLevel = centerModeldataByRenderPassByLodLevel;
++				currentOptimumChiselModeldataByRenderPassByLodLevel = centerOptimumChiselModeldataByRenderPassByLodLevel;
+ 			}
+ 			tCTCache.extIndex3d = ((num7 + 1) * 34 + num8 + 1) * 34 + num6 + 1;
+ 			tCTCache.index3d = num5;
+ 			Vec3i normali = blockFacing.Normali;
+ 			num7 += normali.Y;
+@@ -1194,16 +1242,17 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 	}
+ 
+ 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+ 	public MeshData GetMeshPoolForPass(int textureid, EnumChunkRenderPass renderPass, int lodLevel)
+ 	{
++		MeshData[][][] modeldataByRenderPassByLodLevel = OptimumConfig.RouteChiselLodMeshes ? currentOptimumChiselModeldataByRenderPassByLodLevel : currentModeldataByRenderPassByLodLevel;
+ 		int num = 0;
+ 		do
+ 		{
+ 			if (TextureIdToReturnNum[num] == textureid)
+ 			{
+-				return currentModeldataByRenderPassByLodLevel[lodLevel][(int)renderPass][num];
++				return modeldataByRenderPassByLodLevel[lodLevel][(int)renderPass][num];
+ 			}
+ 		}
+ 		while (++num < quantityAtlasses);
+ 		return null;
+ 	}

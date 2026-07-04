@@ -1,8 +1,17 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs b/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs
-index 8bd2a90..0ff8b5e 100644
+index 8bd2a90..a24f3f0 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs
-@@ -16,14 +16,16 @@ public class HudEntityNameTags : HudElement
+@@ -1,7 +1,8 @@
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class HudEntityNameTags : HudElement
+ {
+@@ -16,18 +17,25 @@ public class HudEntityNameTags : HudElement
  		game = (ClientMain)capi.World;
  	}
  
@@ -17,7 +26,16 @@ index 8bd2a90..0ff8b5e 100644
 -			if (game.frustumCuller.SphereInFrustum((float)value2.Pos.X, (float)(value2.Pos.Y + value2.LocalEyePos.Y), (float)value2.Pos.Z, 0.5) && value2.Pos.Dimension == dimension)
 +			if (value2.IsRendered)
  			{
++				OptimumDiagnostics.HudEntityNameTags.Hit();
  				game.EntityRenderers.TryGetValue(value2.EntityId, out var value);
  				value?.DoRender2D(deltaTime);
  			}
++			else
++			{
++				OptimumDiagnostics.HudEntityNameTags.Skip();
++			}
  		}
+ 	}
+ 
+ 	public override bool TryClose()
+ 	{

@@ -1,30 +1,46 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-index 8f0a63f..47dc2c9 100644
+index 8f0a63f..6d907b9 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-@@ -180,15 +180,28 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+@@ -180,15 +180,44 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
  		TargetReverbness = (float)num;
  		RoomLocation = new Cuboidi(vec3d2.AsBlockPos, vec3d3.AsBlockPos).GrowBy(10, 10, 10);
  		scanning = false;
  	}
  
-+	// Optimum: skip the platform audio listener update when stationary.
++	// Optimum: skip the platform audio listener update when stationary. Was
++	// an exact-equality check, which floating-point position drift makes an
++	// almost-never-true guard in practice; a movement/rotation threshold
++	// plus a periodic forced refresh (matching audio-listener-benchmark)
++	// actually skips redundant updates while standing still.
 +	private double _lastListenerX, _lastListenerY, _lastListenerZ;
 +	private float _lastListenerDirX, _lastListenerDirZ;
++	private int _listenerFramesSinceUpdate = 10;
++	private const double ListenerMoveThresholdSq = 0.0025;
++	private const float ListenerDirThresholdSq = 0.000001f;
++	private const int ListenerRefreshFrames = 10;
 +
  	public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
  	{
  		Vec3f viewVector = game.EntityPlayer.Pos.GetViewVector();
  		Vec3d vec3d = game.EntityPlayer.Pos.XYZ.Add(game.EntityPlayer.LocalEyePos);
 -		game.Platform.UpdateAudioListener((float)vec3d.X, (float)vec3d.Y, (float)vec3d.Z, viewVector.X, 0f, viewVector.Z);
-+		if (vec3d.X != _lastListenerX || vec3d.Y != _lastListenerY || vec3d.Z != _lastListenerZ ||
-+		    viewVector.X != _lastListenerDirX || viewVector.Z != _lastListenerDirZ)
++		double dx = vec3d.X - _lastListenerX;
++		double dy = vec3d.Y - _lastListenerY;
++		double dz = vec3d.Z - _lastListenerZ;
++		float ddx = viewVector.X - _lastListenerDirX;
++		float ddz = viewVector.Z - _lastListenerDirZ;
++		_listenerFramesSinceUpdate++;
++		if (dx * dx + dy * dy + dz * dz >= ListenerMoveThresholdSq
++			|| ddx * ddx + ddz * ddz >= ListenerDirThresholdSq
++			|| _listenerFramesSinceUpdate >= ListenerRefreshFrames)
 +		{
 +			_lastListenerX = vec3d.X;
 +			_lastListenerY = vec3d.Y;
 +			_lastListenerZ = vec3d.Z;
 +			_lastListenerDirX = viewVector.X;
 +			_lastListenerDirZ = viewVector.Z;
++			_listenerFramesSinceUpdate = 0;
 +			game.Platform.UpdateAudioListener((float)vec3d.X, (float)vec3d.Y, (float)vec3d.Z, viewVector.X, 0f, viewVector.Z);
 +		}
  		NowReverbness += (TargetReverbness - NowReverbness) * deltaTime / 1.5f;

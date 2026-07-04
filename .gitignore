@@ -39,3 +39,4 @@ Optimum.app/
 
 # Vanilla client zips (cached downloads)
 .vanilla-zips/
+obj/

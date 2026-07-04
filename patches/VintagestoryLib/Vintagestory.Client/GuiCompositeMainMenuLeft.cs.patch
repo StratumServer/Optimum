@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs b/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs
-index 5f68dc1..c7a15d0 100644
+index 5f68dc1..9de1918 100644
 --- a/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs
 +++ b/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs
-@@ -71,11 +71,13 @@ public class GuiCompositeMainMenuLeft : GuiComposite
+@@ -71,11 +71,18 @@ public class GuiCompositeMainMenuLeft : GuiComposite
  		elementBounds2.fixedHeight = fontExtents.Height / (double)ClientSettings.GUIScale + 2.0 * GuiElementTextButton.Padding + 5.0;
  		CairoFont cairoFont2 = CairoFont.WhiteSmallText();
  		cairoFont2.Color = GuiStyle.ButtonTextColor;
@@ -11,7 +11,12 @@ index 5f68dc1..c7a15d0 100644
 -		string text = Lang.Get("mainmenu-loggedin", ClientSettings.PlayerName);
 +		// Optimum: insert Optimum link before the vanilla login block.
 +		string loginText = Lang.Get("mainmenu-loggedin", ClientSettings.PlayerName);
-+		string text = loginText.Replace("<font lineHeight=\"1.15\">", "<font lineHeight=\"1.15\"><a href=\"" + Optimum.OptimumInfo.Url + "\">" + Optimum.OptimumInfo.DisplayTag + "</a><br>");
++		string optimumTag = Optimum.OptimumInfo.DisplayTag;
++		if (Optimum.OptimumUpdateChecker.UpdateAvailable)
++		{
++			optimumTag += " <font color=\"#8cdb6a\">(" + Lang.Get("optimum-update-available", Optimum.OptimumUpdateChecker.LatestVersion) + ")</font>";
++		}
++		string text = loginText.Replace("<font lineHeight=\"1.15\">", "<font lineHeight=\"1.15\"><a href=\"" + Optimum.OptimumUpdateChecker.ReleaseUrl + "\">" + optimumTag + "</a><br>");
  		if (screenManager.ClientIsOffline)
  		{
  			text = text + "<br>" + Lang.Get("mainmenu-offline");

@@ -1,0 +1,29 @@
+# Source patches whose release effect ships via the Mono.Cecil transplant
+# (Optimum.Patcher/Program.cs), not via a recompiled VintagestoryLib.dll.
+# check-patches.sh checks these against build/ (the donor) same as any other
+# patch, reverse-apply proves the donor source carries the change, but reports
+# them under their own "cecil" counter instead of the ordinary applied/pending
+# split. A patch on this list that fails reverse-apply is still a conflict:
+# the list changes what a passing patch is called, not whether it passes.
+#
+# check-patches.sh cross-checks this list against Program.cs's own target,
+# member-injection, and IL-hook type lists and fails loud on drift in either
+# direction, so keep the two in sync by hand when Program.cs changes.
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch

@@ -79,7 +79,7 @@ try {
 
     # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
     $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.1.2'
+    $optVer = '0.2.0'
     if (Test-Path $infoFile) {
         $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($match.Success) { $optVer = $match.Groups[1].Value }
@@ -110,6 +110,27 @@ try {
     $shaderDst = Join-Path $stageDir 'assets/game/shaders'
     if (Test-Path $shaderSrc) {
         Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
+    }
+
+    # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
+    $langSrc = Join-Path $repoRoot 'sources/lang'
+    $langDst = Join-Path $stageDir 'assets/game/lang'
+    if (Test-Path $langSrc) {
+        foreach ($srcFile in (Get-ChildItem $langSrc -Filter '*.json')) {
+            $dstFile = Join-Path $langDst $srcFile.Name
+            if (-not (Test-Path $dstFile)) { continue }
+            $lines = (Get-Content $srcFile.FullName) | Where-Object { $_ -match '^\s*"optimum-' }
+            if ($lines.Count -eq 0) { continue }
+            $dstText = Get-Content $dstFile -Raw
+            $insertion = ($lines -join "`r`n")
+            $dstText = $dstText.TrimEnd()
+            if ($dstText.EndsWith('}')) {
+                $dstText = $dstText.Substring(0, $dstText.Length - 1).TrimEnd()
+                if (-not $dstText.EndsWith(',')) { $dstText += ',' }
+                $dstText += "`r`n" + $insertion + "`r`n}"
+            }
+            Set-Content $dstFile -Value $dstText -Encoding UTF8
+        }
     }
 
     # Use the built apphost. It embeds the Optimum app.ico, unlike the vanilla

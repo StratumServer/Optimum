@@ -1,0 +1,29 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
+index c29a2bc..92d31c3 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
+@@ -19,10 +19,12 @@ public class TesselatedChunkPart
+ 
+ 	internal MeshData modelDataLod2Far;
+ 
+ 	internal EnumChunkRenderPass pass;
+ 
++	internal bool optimumUseChiselLodDistance;
++
+ 	internal void AddToPools(ChunkRenderer cr, List<ModelDataPoolLocation> locations, Vec3i chunkOrigin, int dimension, Sphere boundingSphere, Bools cullVisible)
+ 	{
+ 		bool flag = dimension == 1 && BlockAccessorMovable.IsTransparent(chunkOrigin);
+ 		MeshDataPoolManager pools = cr.poolsByRenderPass[flag ? Math.Max(3, (int)pass) : ((int)pass)][atlasNumber];
+ 		if (modelDataLod0 != null)
+@@ -53,10 +55,11 @@ public class TesselatedChunkPart
+ 		ModelDataPoolLocation modelDataPoolLocation = pools.AddModel(modeldata, modelOrigin, dimension, frustumCullSphere);
+ 		if (modelDataPoolLocation != null)
+ 		{
+ 			modelDataPoolLocation.CullVisible = cullVisible;
+ 			modelDataPoolLocation.LodLevel = lodLevel;
++			modelDataPoolLocation.OptimumUseChiselLodDistance = optimumUseChiselLodDistance;
+ 			locations.Add(modelDataPoolLocation);
+ 		}
+ 	}
+ 
+ 	internal void Dispose()

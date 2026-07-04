@@ -1,0 +1,38 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
+index bdcda35..dbcee65 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
+@@ -56,11 +56,16 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+ 	{
+ 		if (centerParts != null)
+ 		{
+ 			bool hiddenState = hostChunk.GetHiddenState(ref hostChunk.centerModelPoolLocations);
+ 			chunk.RemoveCenterDataPoolLocations(chunkRenderer);
+-			List<ModelDataPoolLocation> list = new List<ModelDataPoolLocation>(centerParts.Length);
++			// Optimum: reuse a scratch list on the (singleton) ChunkRenderer
++			// instead of allocating one per chunk upload. Fully consumed
++			// into hostChunk.SetPoolLocations(..., list.ToArray(), ...)
++			// below before the next call reuses it.
++			List<ModelDataPoolLocation> list = (chunkRenderer.centerPoolLocationsScratch ??= new List<ModelDataPoolLocation>(centerParts.Length));
++			list.Clear();
+ 			for (int i = 0; i < centerParts.Length; i++)
+ 			{
+ 				centerParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
+ 			}
+ 			hostChunk.SetPoolLocations(ref hostChunk.centerModelPoolLocations, list.ToArray(), hiddenState);
+@@ -73,11 +78,14 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+ 	{
+ 		if (edgeParts != null)
+ 		{
+ 			bool hiddenState = hostChunk.GetHiddenState(ref hostChunk.edgeModelPoolLocations);
+ 			chunkRenderer.QuantityRenderingChunks -= chunk.RemoveEdgeDataPoolLocations(chunkRenderer);
+-			List<ModelDataPoolLocation> list = new List<ModelDataPoolLocation>(edgeParts.Length);
++			// Optimum: reuse a scratch list on the (singleton) ChunkRenderer
++			// instead of allocating one per chunk upload.
++			List<ModelDataPoolLocation> list = (chunkRenderer.edgePoolLocationsScratch ??= new List<ModelDataPoolLocation>(edgeParts.Length));
++			list.Clear();
+ 			for (int i = 0; i < edgeParts.Length; i++)
+ 			{
+ 				edgeParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
+ 			}
+ 			hostChunk.SetPoolLocations(ref hostChunk.edgeModelPoolLocations, list.ToArray(), hiddenState);
