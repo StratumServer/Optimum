@@ -191,14 +191,34 @@ if [[ "$refresh" == "1" ]]; then
   rm -rf "$vanilla_dir" "$snapshot_dir"
 fi
 
+# Invalidate the completion stamp for the duration of this run; the end of the
+# script recreates it. See the note next to the touch at the bottom.
+rm -f "$repo_root/.bootstrap-complete"
+
 # 1. Download and extract client.
 if [[ -z "$client_archive" ]]; then
   client_archive="$(download_client_archive "$zip_cache_dir")"
 fi
 
+# `make deploy` overwrites $vanilla_dir/vintagestory/VintagestoryLib.dll with
+# the Cecil-patched output, since that directory doubles as the client folder
+# used for testing (`make run`). Optimum.Patcher's own vanilla input reads
+# from a separate, protected copy made once right after a fresh extraction,
+# when the file is guaranteed clean, so a second `patch-il` run after a
+# `deploy` never transplants onto its own prior output instead of true
+# vanilla.
+vanilla_lib_pristine="$vanilla_dir/vintagestory/VintagestoryLib.vanilla.dll"
+
 if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
+  cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+elif [[ ! -f "$vanilla_lib_pristine" ]]; then
+  echo "WARNING: $vanilla_lib_pristine is missing." >&2
+  echo "  If \$vanilla_dir/vintagestory/VintagestoryLib.dll has ever been" >&2
+  echo "  overwritten by 'make deploy', it may no longer be pristine vanilla." >&2
+  echo "  Re-run with --refresh, or restore VintagestoryLib.vanilla.dll from" >&2
+  echo "  \$zip_cache_dir manually before running 'make patch-il'." >&2
 fi
 
 # 2. Decompile closed-source DLLs.
@@ -283,8 +303,10 @@ fi
 echo "Applying post-decompile fixups..."
 
 # Normalize CRLF across all decompiled .cs files FIRST (ilspycmd on Windows emits CRLF).
-# sed $ anchors fail on lines with \r, so this must run before any fixup.
-find "$repo_root/build" -name '*.cs' -print0 | xargs -0 -r sed -i 's/\r$//'
+# Anchored fixup patterns fail on lines that end with \r, so this must run before any fixup.
+# perl -pi instead of sed -i: macOS BSD sed reads GNU-style -i arguments as the backup
+# suffix and then parses the target path as its script, which aborts the bootstrap.
+find "$repo_root/build" -name '*.cs' -print0 | xargs -0 perl -pi -e 's/\r$//'
 
 vanilla_lib="$repo_root/.vanilla/win-x64/vintagestory/Lib"
 
@@ -403,7 +425,7 @@ done
 
 # csvorbis.Block ambiguity in OggDecoder.
 ogg="$lib/Vintagestory.Client.NoObf/OggDecoder.cs"
-[[ -f "$ogg" ]] && sed -i 's/\bBlock val/csvorbis.Block val/g; s/\bnew Block(/new csvorbis.Block(/g' "$ogg"
+[[ -f "$ogg" ]] && perl -pi -e 's/\bBlock val/csvorbis.Block val/g; s/\bnew Block\(/new csvorbis.Block(/g' "$ogg"
 
 # SystemRenderSunMoon: GL.GenQueries/GetQueryObject needs out not ref.
 sun="$lib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs"
@@ -415,13 +437,13 @@ sun="$lib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs"
 # Global RuntimeFieldHandle fixup: ILSpy cannot decompile inline array initializers (ldtoken for
 # field handles that carry preinitialized byte blobs). Comment out all occurrences across the tree.
 # Arrays remain zero-initialized; specific high-value arrays get correct values in fixups below.
-find "$lib" -name '*.cs' -exec sed -i 's/RuntimeHelpers\.InitializeArray([^;]*RuntimeFieldHandle[^;]*);/\/\/ ILSpy: inline array init not supported/g' {} +
+find "$lib" -name '*.cs' -exec perl -pi -e 's{RuntimeHelpers\.InitializeArray\([^;]*RuntimeFieldHandle[^;]*\);}{// ILSpy: inline array init not supported}g' {} +
 
 
 
 # SystemRenderOITLayers: RuntimeFieldHandle (ILSpy can not decompile inline array init).
 oit="$lib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs"
-[[ -f "$oit" ]] && sed -i 's/RuntimeHelpers\.InitializeArray.*RuntimeFieldHandle.*LdMemberToken.*/\/\/ ILSpy: inline array init not supported/' "$oit"
+[[ -f "$oit" ]] && perl -pi -e 's{RuntimeHelpers\.InitializeArray.*RuntimeFieldHandle.*LdMemberToken.*}{// ILSpy: inline array init not supported}' "$oit"
 
 # DrawBuffersEnum inline array fixups: ILSpy emits zeroed arrays because it cannot decompile
 # RuntimeFieldHandle-based array initializers. Inject the correct enum values from vanilla.
@@ -432,7 +454,7 @@ fi
 # ClientPlatformWindows: remaining RuntimeFieldHandle occurrences + VSyncMode bool cast + ErrorCode ambiguity
 # + BufferAccessMask|int cast + Keys→int cast + FramebufferErrorCode int cast + ref→out GL calls + Path ambiguity.
 if [[ -f "$cpw" ]]; then
-  sed -i 's/RuntimeHelpers\.InitializeArray(array[0-9]*, (RuntimeFieldHandle)\/\*OpCode not supported: LdMemberToken\*\/);/\/\/ ILSpy: inline array init not supported/g' "$cpw"
+  perl -pi -e 's{RuntimeHelpers\.InitializeArray\(array[0-9]*, \(RuntimeFieldHandle\)/\*OpCode not supported: LdMemberToken\*/\);}{// ILSpy: inline array init not supported}g' "$cpw"
   # DrawBuffersEnum inline array fixups: replace zeroed arrays with correct initializers.
   # Pattern: new DrawBuffersEnum[N]; // ILSpy... arrayY = (cast)arrayX; → initialized array
   perl -0777 -pi -e '
@@ -440,7 +462,7 @@ if [[ -f "$cpw" ]]; then
     s/DrawBuffersEnum\[\] (\w+) = new DrawBuffersEnum\[3\];\s*\/\/ ILSpy: inline array init not supported\s*DrawBuffersEnum\[\] (\w+) = \(DrawBuffersEnum\[\]\)\(object\)\1;/DrawBuffersEnum[] $2 = new DrawBuffersEnum[3] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2 };/g;
     s/DrawBuffersEnum\[\] (\w+) = new DrawBuffersEnum\[4\];\s*\/\/ ILSpy: inline array init not supported\s*(\w+) = \(DrawBuffersEnum\[\]\)\(object\)\1;/$2 = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };/g;
   ' "$cpw"
-  sed -i 's/(VSyncMode)enabled/enabled ? VSyncMode.On : VSyncMode.Off/g' "$cpw"
+  perl -pi -e 's/\(VSyncMode\)enabled/enabled ? VSyncMode.On : VSyncMode.Off/g' "$cpw"
   perl -pi -e 's/(?<![.\w])ErrorCode(?= error| val)/OpenTK.Graphics.OpenGL.ErrorCode/g' "$cpw"
   perl -pi -e 's/error != ErrorCode\.NoError/error != OpenTK.Graphics.OpenGL.ErrorCode.NoError/g' "$cpw"
   # FramebufferErrorCode: cast int result and fix switch subtraction
@@ -453,7 +475,7 @@ if [[ -f "$cpw" ]]; then
   # BufferAccessMask: val | int needs cast on the int literal or wrap in (int)val
   perl -pi -e 's/\(BufferAccessMask\)\(val \| (0x[0-9a-fA-F]+)\)/(BufferAccessMask)((int)val | $1)/g' "$cpw"
   # Keys enum to int: both the dictionary result AND the indexer need casts
-  sed -i 's/= KeyConverter\.NewKeysToGlKeys\[e\.Key\]/= (int)KeyConverter.NewKeysToGlKeys[(int)e.Key]/g' "$cpw"
+  perl -pi -e 's/= KeyConverter\.NewKeysToGlKeys\[e\.Key\]/= (int)KeyConverter.NewKeysToGlKeys[(int)e.Key]/g' "$cpw"
 fi
 
 # 6g-extra: LoadedSoundNative.cs + AudioOpenAl.cs - OpenTK AL ref→out, EFX using alias, ALFormat int cast.
@@ -463,13 +485,13 @@ lsn="$repo_root/build/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs"
 if [[ -f "$lsn" ]]; then
   # Add EFX using alias after the OpenTK.Audio.OpenAL using (only if not present)
   if ! grep -q 'using EFX = ' "$lsn"; then
-    sed -i '/^using OpenTK.Audio.OpenAL;$/a using EFX = OpenTK.Audio.OpenAL.ALC.EFX;' "$lsn"
+    perl -pi -e 's/^using OpenTK\.Audio\.OpenAL;$/$&\nusing EFX = OpenTK.Audio.OpenAL.ALC.EFX;/' "$lsn"
   fi
   # AL.GetSource/GetBuffer: ref → out
   perl -pi -e 's/AL\.GetSource\(([^,]+), ([^,]+), ref /AL.GetSource($1, $2, out /g' "$lsn"
   perl -pi -e 's/AL\.GetBuffer\(([^,]+), ([^,]+), ref /AL.GetBuffer($1, $2, out /g' "$lsn"
   # ALFormat - int arithmetic: soundFormat - 4354 needs (int) cast
-  sed -i 's/soundFormat - 4354/((int)soundFormat - 4354)/g' "$lsn"
+  perl -pi -e 's/soundFormat - 4354/((int)soundFormat - 4354)/g' "$lsn"
   # Vector3 constructor: ((Vector3)(ref val))._002Ector(...) → val = new Vector3(...)
   perl -pi -e 's/\(\(Vector3\)\(ref (\w+)\)\)\._002Ector\(/$1 = new Vector3(/g' "$lsn"
 fi
@@ -478,7 +500,7 @@ fi
 aoa="$repo_root/build/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs"
 if [[ -f "$aoa" ]]; then
   if ! grep -q 'using EFX = ' "$aoa"; then
-    sed -i '/^using OpenTK.Audio.OpenAL;$/a using EFX = OpenTK.Audio.OpenAL.ALC.EFX;' "$aoa"
+    perl -pi -e 's/^using OpenTK\.Audio\.OpenAL;$/$&\nusing EFX = OpenTK.Audio.OpenAL.ALC.EFX;/' "$aoa"
   fi
 fi
 
@@ -488,21 +510,21 @@ cprog="$repo_root/build/VintagestoryLib/Vintagestory.Client/ClientProgram.cs"
 if [[ -f "$cprog" ]]; then
   # Add ErrorCallback using alias after OpenTK.Windowing.GraphicsLibraryFramework using
   if ! grep -q 'using ErrorCallback = ' "$cprog"; then
-    sed -i '/^using OpenTK.Windowing.GraphicsLibraryFramework;$/a using ErrorCallback = OpenTK.Windowing.GraphicsLibraryFramework.GLFWCallbacks.ErrorCallback;' "$cprog"
+    perl -pi -e 's/^using OpenTK\.Windowing\.GraphicsLibraryFramework;$/$&\nusing ErrorCallback = OpenTK.Windowing.GraphicsLibraryFramework.GLFWCallbacks.ErrorCallback;/' "$cprog"
   fi
   # VSyncMode: (VSyncMode)(expr != 0) → expr != 0 ? VSyncMode.On : VSyncMode.Off
-  sed -i 's/(VSyncMode)(ClientSettings\.VsyncMode != 0)/ClientSettings.VsyncMode != 0 ? VSyncMode.On : VSyncMode.Off/g' "$cprog"
+  perl -pi -e 's/\(VSyncMode\)\(ClientSettings\.VsyncMode != 0\)/ClientSettings.VsyncMode != 0 ? VSyncMode.On : VSyncMode.Off/g' "$cprog"
 fi
 
 # 6g-extra: ClientPlatformWindows.cs - Ext.CheckFramebufferStatus → GL.CheckFramebufferStatus,
 # pointer cast simplification, FramebufferErrorCode subtraction needs (int) cast.
 if [[ -f "$cpw" ]]; then
   # Ext.CheckFramebufferStatus → GL.CheckFramebufferStatus (Ext is not a real type)
-  sed -i 's/Ext\.CheckFramebufferStatus/GL.CheckFramebufferStatus/g' "$cpw"
+  perl -pi -e 's/Ext\.CheckFramebufferStatus/GL.CheckFramebufferStatus/g' "$cpw"
   # FramebufferErrorCode pointer ToString: simplify the constrained prefix cast
   perl -pi -e 's/\(\(object\)\(\*\(FramebufferErrorCode\*\)\(\&val\)\)\/\*cast due to constrained\. prefix\*\/\)\.ToString\(\)/val.ToString()/g' "$cpw"
   # FramebufferErrorCode switch subtraction needs (int) cast
-  sed -i 's/switch (val - 36053)/switch ((int)val - 36053)/' "$cpw"
+  perl -pi -e 's/switch \(val - 36053\)/switch ((int)val - 36053)/' "$cpw"
   # ErrorCode pointer cast in GlGetError: qualify the pointer type
   perl -pi -e 's/\*\(ErrorCode\*\)\(\&error\)\)/*(OpenTK.Graphics.OpenGL.ErrorCode*)(\&error))/g' "$cpw"
 fi
@@ -520,9 +542,9 @@ python3 "$script_dir/fix-base-ctor-calls.py" "$repo_root/build/VintagestoryLib" 
 # ClientLinux.cs uses Vintagestory.Client namespace which lives in the VintagestoryLib project.
 vs_entry_csproj="$repo_root/build/Vintagestory/Vintagestory.csproj"
 if [[ -f "$vs_entry_csproj" ]]; then
-  sed -i 's|<Reference Include="VintagestoryLib">|<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj">|' "$vs_entry_csproj"
-  sed -i 's|<HintPath>[^<]*VintagestoryLib.dll</HintPath>||' "$vs_entry_csproj"
-  sed -i 's|</Reference>|</ProjectReference>|' "$vs_entry_csproj"
+  perl -pi -e 's|<Reference Include="VintagestoryLib">|<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj">|' "$vs_entry_csproj"
+  perl -pi -e 's|<HintPath>[^<]*VintagestoryLib\.dll</HintPath>||' "$vs_entry_csproj"
+  perl -pi -e 's|</Reference>|</ProjectReference>|' "$vs_entry_csproj"
 fi
 
 # 6h: Restore serialization metadata lost by ILSpy.
@@ -538,8 +560,8 @@ for pf in \
   "$lib/Vintagestory.Common.Network.Packets/BulkAnimationPacket.cs" \
   "$lib/Vintagestory.Common.Network.Packets/EntityTagPacket.cs" \
   "$lib/Vintagestory.Common.Network.Packets/MountAnimationPacket.cs"; do
-  [[ -f "$pf" ]] && sed -i 's/\[ProtoContract\]/[ProtoContract(ImplicitFields = ImplicitFields.AllFields)]/' "$pf"
-  [[ -f "$pf" ]] && sed -i 's/\[ProtoContract(\/\*Could not decode attribute arguments\.\*\/)\]/[ProtoContract(ImplicitFields = ImplicitFields.AllFields)]/' "$pf"
+  [[ -f "$pf" ]] && perl -pi -e 's/\[ProtoContract\]/[ProtoContract(ImplicitFields = ImplicitFields.AllFields)]/' "$pf"
+  [[ -f "$pf" ]] && perl -pi -e 's{\[ProtoContract\(/\*Could not decode attribute arguments\.\*/\)\]}{[ProtoContract(ImplicitFields = ImplicitFields.AllFields)]}' "$pf"
 done
 
 # JsonObject: settings/config classes need MemberSerialization.OptIn
@@ -553,15 +575,15 @@ for jf in \
   "$lib/Vintagestory.Server/ServerConfig.cs" \
   "$lib/Vintagestory.Server/ServerPlayerData.cs" \
   "$lib/Vintagestory.Server/ServerSettings.cs"; do
-  [[ -f "$jf" ]] && sed -i 's/\[JsonObject\]/[JsonObject(MemberSerialization.OptIn)]/' "$jf"
-  [[ -f "$jf" ]] && sed -i 's/\[JsonObject(\/\*Could not decode attribute arguments\.\*\/)\]/[JsonObject(MemberSerialization.OptIn)]/' "$jf"
+  [[ -f "$jf" ]] && perl -pi -e 's/\[JsonObject\]/[JsonObject(MemberSerialization.OptIn)]/' "$jf"
+  [[ -f "$jf" ]] && perl -pi -e 's{\[JsonObject\(/\*Could not decode attribute arguments\.\*/\)\]}{[JsonObject(MemberSerialization.OptIn)]}' "$jf"
 done
 
 # GltfAccessor: restore JsonProperty name + NullValueHandling args
 gltf="$lib/Vintagestory.Client.NoObf/GltfAccessor.cs"
 if [[ -f "$gltf" ]]; then
-  sed -i '/\[JsonProperty(\/\*Could not decode attribute arguments\.\*\/)\]/{N;s/\[JsonProperty(\/\*Could not decode attribute arguments\.\*\/)\]\n\(\s*public double\[\] Max\)/[JsonProperty("max", NullValueHandling = NullValueHandling.Ignore)]\n\1/}' "$gltf"
-  sed -i '/\[JsonProperty(\/\*Could not decode attribute arguments\.\*\/)\]/{N;s/\[JsonProperty(\/\*Could not decode attribute arguments\.\*\/)\]\n\(\s*public double\[\] Min\)/[JsonProperty("min", NullValueHandling = NullValueHandling.Ignore)]\n\1/}' "$gltf"
+  perl -0777 -pi -e 's{\[JsonProperty\(/\*Could not decode attribute arguments\.\*/\)\]\n([ \t]*public double\[\] Max)}{[JsonProperty("max", NullValueHandling = NullValueHandling.Ignore)]\n$1}g' "$gltf"
+  perl -0777 -pi -e 's{\[JsonProperty\(/\*Could not decode attribute arguments\.\*/\)\]\n([ \t]*public double\[\] Min)}{[JsonProperty("min", NullValueHandling = NullValueHandling.Ignore)]\n$1}g' "$gltf"
 fi
 
 echo "Serialization metadata restored."
@@ -1117,8 +1139,24 @@ vanilla_patch_projects="VintagestoryLib Vintagestory"
 
 if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit | grep -q .; then
 
-  # Stage into git index for cleaner apply diagnostics.
-  git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>/dev/null
+  # ZIP downloads (non-clone) lack a .git/ directory. git add and git apply
+  # both exit 128 without one. Create a temporary repo so patches can apply.
+  # A marker file tags the temporary repo: when an interrupted run leaves it
+  # behind, its stale index and lock files make the next git add die with a
+  # silent exit 128 under set -e, so throw it away and start clean.
+  _optimum_tmp_git=false
+  if [[ -f "$repo_root/.git/optimum-bootstrap-tmp" ]]; then
+    rm -rf "$repo_root/.git"
+  fi
+  if [[ ! -d "$repo_root/.git" ]]; then
+    git init -q "$repo_root"
+    touch "$repo_root/.git/optimum-bootstrap-tmp"
+    _optimum_tmp_git=true
+  fi
+
+  # Stage into git index for cleaner apply diagnostics. Staging failures are
+  # not fatal: git apply reports per-patch failures below on its own.
+  git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>/dev/null || true
 
   failed=()
   applied=0
@@ -1162,7 +1200,12 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
   done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort -z)
 
   # Unstage: the index staging was temporary.
-  git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1
+  git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true
+
+  # Remove the temporary .git/ created for ZIP-download users.
+  if [[ "$_optimum_tmp_git" == true ]]; then
+    rm -rf "$repo_root/.git"
+  fi
 
   echo "Patches: $applied applied, $skipped skipped, ${#failed[@]} failed (filter: $patch_filter)"
   if [[ "${#failed[@]}" -gt 0 ]]; then
@@ -1179,6 +1222,12 @@ if [[ -d "$sources_dir" ]]; then
     rel="${src#$sources_dir/}"
     # For vanilla (decompiled) projects, the working tree is under build/.
     top_proj="$(echo "$rel" | cut -d/ -f1)"
+    # lang/ and shaders/ are deploy-time asset overlays, not project source.
+    # deploy and the package scripts read them from sources/ directly; copying
+    # them here dumped stray lang/ and shaders/ dirs at the repo root.
+    case "$top_proj" in
+      lang|shaders) continue ;;
+    esac
     if echo "$vanilla_patch_projects" | grep -qw "$top_proj"; then
       target="$repo_root/build/$rel"
     else
@@ -1195,5 +1244,10 @@ perl "$repo_root/scripts/fix-closure-class.pl" \
   "$lib/Vintagestory.Client/GuiScreenRunningGame.cs"
 
 fi
+
+# Completion stamp: make build reruns bootstrap while this file is missing, so
+# a run that dies halfway cannot wedge the tree in a half-bootstrapped state
+# where build/ exists but the forks never got their patches.
+touch "$repo_root/.bootstrap-complete"
 
 echo "Bootstrap complete. Run: dotnet build VintageStory.slnx -c Release"

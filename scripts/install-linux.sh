@@ -88,7 +88,7 @@ check_dotnet10() {
 get_required_vs_version() {
     local forks="$REPO_ROOT/forks.json"
     if [[ -f "$forks" ]]; then
-        grep -oP '"vintageStoryVersion"\s*:\s*"\K[^"]+' "$forks" || echo "1.22.3"
+        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.3"
     else
         echo "1.22.3"
     fi
@@ -182,7 +182,7 @@ detect_prereqs() {
         local ilspy_ver="10.1.0.8386"
         if [[ -f "$REPO_ROOT/.config/dotnet-tools.json" ]]; then
             local parsed
-            parsed=$(grep -oP '"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"\K[^"]+' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
+            parsed=$(perl -0777 -ne 'if (/"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/s) { print $1; exit }' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
             if [[ -n "$parsed" ]]; then ilspy_ver="$parsed"; fi
         fi
         PREREQ_INSTALL_CMD[ilspycmd]="dotnet tool install -g ilspycmd --version $ilspy_ver"
@@ -369,6 +369,8 @@ guard_install_dir() {
     fi
 }
 
+# Sets BUILT_DIR to the staged package path. Runs in the foreground so the
+# user sees build output; do not call via command substitution.
 build_and_package() {
     cd "$REPO_ROOT"
 
@@ -392,7 +394,7 @@ build_and_package() {
     if [[ -z "$built_dir" ]]; then
         die "Linux package folder not found under $stage_root"
     fi
-    echo "$built_dir"
+    BUILT_DIR="$built_dir"
 }
 
 install_from_dir() {
@@ -530,7 +532,9 @@ main() {
     local temp_source=""
 
     if [[ -z "$source_dir" ]]; then
-        temp_source="$(build_and_package)"
+        BUILT_DIR=""
+        build_and_package
+        temp_source="$BUILT_DIR"
         source_dir="$temp_source"
     fi
 

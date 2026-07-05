@@ -16,24 +16,44 @@ if [[ ! -d "$baseline_dir" ]]; then
   exit 1
 fi
 
-# Clear old patches and auto-generated sources (regenerated from scratch).
-# Preserve manually-maintained files in sources/ (shaders, csproj overlays)
-# by saving them, clearing, then restoring.
+# Clear old patches and auto-generated sources (regenerated from scratch),
+# but keep every hand-maintained file the regeneration below cannot rebuild.
+# The regeneration writes two kinds of output: *.patch files under patches/,
+# and files under sources/<project>/ where <project> has a .baseline/ dir and
+# the file is new against that baseline. Everything else is hand-maintained
+# and must survive the wipe: patches/cecil-owned.list, sources/lang/,
+# sources/shaders/, icon overlays like sources/Vintagestory/app.ico, and the
+# csproj/props/targets overlays, which bootstrap.sh folds into the baseline
+# so they never show up as new files here.
 preserved_dir="$(mktemp -d)"
+if [[ -d "$patches_dir" ]]; then
+  while IFS= read -r -d '' f; do
+    rel="${f#$patches_dir/}"
+    mkdir -p "$(dirname "$preserved_dir/patches/$rel")"
+    cp -f "$f" "$preserved_dir/patches/$rel"
+  done < <(find "$patches_dir" -type f -not -name '*.patch' -print0)
+fi
 if [[ -d "$sources_dir" ]]; then
-  # Preserve non-.cs files (shaders, csproj) that are hand-maintained
-  find "$sources_dir" -type f \( -name '*.fsh' -o -name '*.vsh' -o -name '*.csproj' -o -name '*.glsl' \) -print0 | \
-    while IFS= read -r -d '' f; do
-      rel="${f#$sources_dir/}"
-      mkdir -p "$(dirname "$preserved_dir/$rel")"
-      cp -f "$f" "$preserved_dir/$rel"
-    done
+  while IFS= read -r -d '' f; do
+    rel="${f#$sources_dir/}"
+    top="${rel%%/*}"
+    case "$f" in
+      *.cs|*.json|*.xml)
+        # Regenerated below when the project has a baseline; skip those.
+        if [[ -d "$baseline_dir/$top" ]]; then continue; fi ;;
+    esac
+    mkdir -p "$(dirname "$preserved_dir/sources/$rel")"
+    cp -f "$f" "$preserved_dir/sources/$rel"
+  done < <(find "$sources_dir" -type f -print0)
 fi
 rm -rf "$patches_dir" "$sources_dir"
 mkdir -p "$patches_dir" "$sources_dir"
 # Restore preserved files
-if [[ -d "$preserved_dir" ]] && find "$preserved_dir" -type f -print -quit | grep -q .; then
-  cp -a "$preserved_dir"/. "$sources_dir"/
+if [[ -d "$preserved_dir/patches" ]]; then
+  cp -a "$preserved_dir/patches/." "$patches_dir"/
+fi
+if [[ -d "$preserved_dir/sources" ]]; then
+  cp -a "$preserved_dir/sources/." "$sources_dir"/
 fi
 rm -rf "$preserved_dir"
 

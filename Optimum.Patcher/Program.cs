@@ -23,6 +23,7 @@ Console.WriteLine($"Patching {Path.GetFileName(vanillaPath)}...");
 var typesToInject = new List<string>
 {
     "Optimum.OptimumInfo",
+    "Optimum.OptimumUpdateChecker",
 };
 
 // --- Phase 2b: Members to inject into existing types ---
@@ -187,6 +188,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkRenderer", "AddTesselatedChunk", 2),
     new("Vintagestory.Client.NoObf.TesselatedChunk", "AddCenterToPools", 5),
     new("Vintagestory.Client.NoObf.TesselatedChunk", "AddEdgeToPools", 5),
+    // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),
 };
 
 int total = ILPatcher.PatchWithInjection(

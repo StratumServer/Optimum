@@ -1,7 +1,40 @@
+# Working tree (reconstructed by bootstrap)
+.bootstrap-complete
+.vanilla/
+.vanilla/archives/
+.vanilla/linux-x64/
+.vanilla/win-x64/
+.vanilla/
+.vanilla/osx-arm64/
+.vanilla-*/
+baseline/
+build/
+build/snapshot/
+build/*/bin/
+build/*/obj/
+.baseline/
+# Anchored to the repo root so the reconstructed fork trees are ignored but
+# their patches under patches/<fork>/ stay tracked.
+/VintagestoryApi/
+/Cairo/
+/VSCreativeMod/
+/VSEssentials/
+/VSSurvivalMod/
+
+# Bootstrap tooling and package artifacts
+.tools/
+*.zip
+*.tar.gz
+*.dmg
+pkg-log.txt
+Optimum-v*-win-x64/
+Optimum-v*-linux-x64/
+Optimum-v*-mac-*/
+*.app/
+
 # Build output
 bin/
 obj/
-build/
 
 # IDE
 .vs/
@@ -17,26 +50,10 @@ Thumbs.db
 *.nettrace
 *.etl
 BenchmarkDotNet.Artifacts/
-
-# Bootstrap artifacts (generated at build time)
-.vanilla/
-.vanilla-*/
-.tools/
-.baseline/
-baseline/
-/VintagestoryApi/
-/Cairo/
-/VSEssentials/
-/VSSurvivalMod/
-/VSCreativeMod/
-
-# Packaging output
-Optimum-v*/
-Optimum.app/
-*.tar.gz
-*.zip
-*.dmg
-
-# Vanilla client zips (cached downloads)
-.vanilla-zips/
-obj/
+dist/
+.baseline_copy/
+research/*.nettrace*
+research/*.etlx
+research/*.speedscope*
+ref/source/
+research/benchmark-artifacts/

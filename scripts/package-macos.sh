@@ -48,6 +48,7 @@ if [[ ! -f "$LIB_OUT/VintagestoryLib.dll" ]]; then
     echo "Error: build output not found. Run: dotnet build VintageStory.slnx -c Release" >&2
     exit 1
 fi
+PATCHED_LIB="$LIB_OUT/VintagestoryLib-patched.dll"
 
 ICNS="$REPO_ROOT/logo.icns"
 if [[ ! -f "$ICNS" ]]; then
@@ -88,12 +89,13 @@ if [[ ! -d "$BASE_APP" ]]; then
     echo "Error: extraction failed, 'Vintage Story.app' not found" >&2
     exit 1
 fi
+dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$BASE_APP/VintagestoryLib.dll" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
 # 3. Version from OptimumInfo.cs.
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.0"
+OPT_VER="0.2.1"
 if [[ -f "$INFO_FILE" ]]; then
-    MATCH=$(grep -oP 'Version\s*=\s*"\K[^"]+' "$INFO_FILE" || true)
+    MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
 fi
 
@@ -116,7 +118,7 @@ cp -a "$BASE_APP" "$APP_DIR"
 
 # 5. Overlay optimized DLLs (platform-agnostic IL).
 cp -f "$BUILD_OUT/Vintagestory.dll" "$APP_DIR/"
-cp -f "$LIB_OUT/VintagestoryLib.dll" "$APP_DIR/"
+cp -f "$PATCHED_LIB" "$APP_DIR/VintagestoryLib.dll"
 cp -f "$MOD_OUT/VintagestoryAPI.dll" "$APP_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"

@@ -60,7 +60,7 @@ public static class ILHook
                 // hookMethod should return the same type (pass-through)
                 // or we reload from local:
                 il.InsertBefore(ret, il.Create(OpCodes.Ldloc, retLocal));
-                // Remove the original value load? No — ret expects one value.
+                // Remove the original value load? No - ret expects one value.
                 // Actually: stloc pops the value, then we ldloc before ret puts it back.
                 // The call in between is void. Let me rethink.
             }

@@ -35,42 +35,45 @@ done
 OS_TYPE="$(uname -s)"
 
 # Host capability detection (mirrors _hostcaps.ps1 logic)
-declare -A CAP_QUALITY
-declare -A CAP_NOTE
+# macOS ships bash 3.2, which has no associative arrays, so the three maps
+# (CAP_QUALITY, CAP_NOTE, RESULTS) live in dynamic variable names instead.
+_map_var() { printf '%s_%s' "$1" "$(printf '%s' "$2" | tr - _)"; }
+map_set() { printf -v "$(_map_var "$1" "$2")" '%s' "$3"; }
+map_get() { local v; v="$(_map_var "$1" "$2")"; printf '%s' "${!v:-${3:-}}"; }
 
 # Linux target: needs tar
 if command -v tar &>/dev/null; then
-    CAP_QUALITY[linux-x64]="Full"
-    CAP_NOTE[linux-x64]="overlay DLLs on vanilla linux client"
+    map_set CAP_QUALITY linux-x64 "Full"
+    map_set CAP_NOTE linux-x64 "overlay DLLs on vanilla linux client"
 else
-    CAP_QUALITY[linux-x64]="Blocked"
-    CAP_NOTE[linux-x64]="tar not found"
+    map_set CAP_QUALITY linux-x64 "Blocked"
+    map_set CAP_NOTE linux-x64 "tar not found"
 fi
 
 # macOS targets
 for arch in x64 arm64; do
     if [[ "$OS_TYPE" == "Darwin" ]] && command -v hdiutil &>/dev/null; then
-        CAP_QUALITY["osx-$arch"]="Full"
-        CAP_NOTE["osx-$arch"]="hdiutil .dmg (notarizable)"
+        map_set CAP_QUALITY "osx-$arch" "Full"
+        map_set CAP_NOTE "osx-$arch" "hdiutil .dmg (notarizable)"
     elif [[ "$OS_TYPE" == "Linux" ]] && { command -v mkisofs &>/dev/null || command -v genisoimage &>/dev/null; } && command -v cmake &>/dev/null && command -v git &>/dev/null; then
-        CAP_QUALITY["osx-$arch"]="Degraded"
-        CAP_NOTE["osx-$arch"]="unsigned .dmg via libdmg-hfsplus"
+        map_set CAP_QUALITY "osx-$arch" "Degraded"
+        map_set CAP_NOTE "osx-$arch" "unsigned .dmg via libdmg-hfsplus"
     else
-        CAP_QUALITY["osx-$arch"]="Degraded"
-        CAP_NOTE["osx-$arch"]=".app assembled, .tar.gz fallback (no .dmg toolchain)"
+        map_set CAP_QUALITY "osx-$arch" "Degraded"
+        map_set CAP_NOTE "osx-$arch" ".app assembled, .tar.gz fallback (no .dmg toolchain)"
     fi
 done
 
 # Windows target
 if command -v innoextract &>/dev/null && command -v dotnet &>/dev/null; then
-    CAP_QUALITY[win-x64]="Degraded"
-    CAP_NOTE[win-x64]="cross-build Optimum.exe + innoextract vanilla installer"
+    map_set CAP_QUALITY win-x64 "Degraded"
+    map_set CAP_NOTE win-x64 "cross-build Optimum.exe + innoextract vanilla installer"
 elif [[ -d "$REPO_ROOT/.vanilla/win-x64/vintagestory" ]] && command -v dotnet &>/dev/null; then
-    CAP_QUALITY[win-x64]="Degraded"
-    CAP_NOTE[win-x64]="cross-build Optimum.exe + cached Windows client"
+    map_set CAP_QUALITY win-x64 "Degraded"
+    map_set CAP_NOTE win-x64 "cross-build Optimum.exe + cached Windows client"
 else
-    CAP_QUALITY[win-x64]="Blocked"
-    CAP_NOTE[win-x64]="need innoextract + dotnet for off-platform Windows packaging"
+    map_set CAP_QUALITY win-x64 "Blocked"
+    map_set CAP_NOTE win-x64 "need innoextract + dotnet for off-platform Windows packaging"
 fi
 
 # Print capability report
@@ -78,7 +81,7 @@ echo ""
 echo "Host: $OS_TYPE - packaging capability"
 ALL_TARGETS=(linux-x64 osx-x64 osx-arm64 win-x64)
 for t in "${ALL_TARGETS[@]}"; do
-    printf "  %-12s %-9s %s\n" "$t" "${CAP_QUALITY[$t]}" "${CAP_NOTE[$t]}"
+    printf "  %-12s %-9s %s\n" "$t" "$(map_get CAP_QUALITY "$t")" "$(map_get CAP_NOTE "$t")"
 done
 echo ""
 
@@ -93,11 +96,11 @@ fi
 RUNNABLE=()
 for t in "${REQUESTED[@]}"; do
     t="$(echo "$t" | tr -d ' ')"
-    q="${CAP_QUALITY[$t]:-Blocked}"
+    q="$(map_get CAP_QUALITY "$t" "Blocked")"
     if [[ "$q" == "Full" || "$q" == "Degraded" ]]; then
         RUNNABLE+=("$t")
     else
-        echo "Skipping $t ($q): ${CAP_NOTE[$t]:-unknown}" >&2
+        echo "Skipping $t ($q): $(map_get CAP_NOTE "$t" "unknown")" >&2
     fi
 done
 
@@ -107,7 +110,6 @@ if [[ ${#RUNNABLE[@]} -eq 0 ]]; then
 fi
 
 # Run each target
-declare -A RESULTS
 FAILED=0
 
 for target in "${RUNNABLE[@]}"; do
@@ -115,30 +117,30 @@ for target in "${RUNNABLE[@]}"; do
     case "$target" in
         linux-x64)
             if bash "$SCRIPT_DIR/package-linux.sh" --output "$OUTPUT_DIR" --version "$VERSION"; then
-                RESULTS[$target]="OK"
+                map_set RESULTS "$target" "OK"
             else
-                RESULTS[$target]="FAILED"; FAILED=1
+                map_set RESULTS "$target" "FAILED"; FAILED=1
             fi
             ;;
         osx-x64|osx-arm64)
             arch="${target#osx-}"
             if bash "$SCRIPT_DIR/package-macos.sh" --arch "$arch" --output "$OUTPUT_DIR" --version "$VERSION"; then
-                RESULTS[$target]="OK"
+                map_set RESULTS "$target" "OK"
             else
-                RESULTS[$target]="FAILED"; FAILED=1
+                map_set RESULTS "$target" "FAILED"; FAILED=1
             fi
             ;;
         win-x64)
             # Windows packaging still uses the PowerShell script (requires pwsh)
             if command -v pwsh &>/dev/null; then
                 if pwsh "$SCRIPT_DIR/package.ps1" -OutputDir "$OUTPUT_DIR" -Zip -Version "$VERSION"; then
-                    RESULTS[$target]="OK"
+                    map_set RESULTS "$target" "OK"
                 else
-                    RESULTS[$target]="FAILED"; FAILED=1
+                    map_set RESULTS "$target" "FAILED"; FAILED=1
                 fi
             else
                 echo "  win-x64 packaging requires pwsh (PowerShell). Skipping." >&2
-                RESULTS[$target]="SKIPPED"
+                map_set RESULTS "$target" "SKIPPED"
             fi
             ;;
     esac
@@ -148,7 +150,7 @@ done
 echo ""
 echo "Summary:"
 for target in "${RUNNABLE[@]}"; do
-    status="${RESULTS[$target]:-UNKNOWN}"
+    status="$(map_get RESULTS "$target" "UNKNOWN")"
     printf "  %-12s %s\n" "$target" "$status"
 done
 

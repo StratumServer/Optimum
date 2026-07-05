@@ -23,5 +23,9 @@
 	"optimum-chisellod": "Simplify Distant Chiseled Blocks",
 	"optimum-chisellod-tooltip": "Render chiseled blocks as solid cubes beyond the threshold.",
 	"optimum-chiselloddist": "Chisel LOD Distance",
-	"optimum-update-available": "v{0} available"
+	"optimum-update-available": "v{0} available",
+	"optimum-cmd-description": "Optimum status and diagnostics",
+	"optimum-cmd-status": "List every Optimum toggle and its current value, plus diagnostics",
+	"optimum-cmd-reset": "Reset every Optimum diagnostics counter",
+	"optimum-cmd-reset-done": "Optimum diagnostics counters reset."
 }

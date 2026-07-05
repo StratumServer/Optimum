@@ -472,11 +472,17 @@ try {
             Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             throw "innounp timed out after 5 minutes. Kill any innounp.exe in Task Manager and retry."
         }
-        if ($innounpProc.ExitCode -ne 0) { throw "innounp failed (exit $($innounpProc.ExitCode))." }
+        $innounpExitCode = $innounpProc.ExitCode
         $appDir = Join-Path $extractTarget '{app}'
         if (Test-Path $appDir) {
             Get-ChildItem -Path $appDir | Move-Item -Destination $extractTarget -Force
             Remove-Item -Force $appDir
+        }
+        if ($innounpExitCode -ne 0 -and -not (Test-Path (Join-Path $extractTarget 'Vintagestory.exe'))) {
+            throw "innounp failed (exit $innounpExitCode)."
+        }
+        if ($innounpExitCode -ne 0) {
+            Write-Warning "innounp exited with code $innounpExitCode after extracting Vintagestory.exe; continuing."
         }
         if (-not (Test-Path (Join-Path $extractTarget 'Vintagestory.exe'))) {
             throw "Extraction failed: Vintagestory.exe not found"
