@@ -59,8 +59,8 @@ check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
 
-build: ## Build Release (runs bootstrap if working tree is missing)
-	@if [ ! -d build/VintagestoryLib ]; then $(MAKE) bootstrap; fi
+build: ## Build Release (runs bootstrap if missing or incomplete)
+	@if [ ! -f .bootstrap-complete ]; then $(MAKE) bootstrap; fi
 	unset Platform; dotnet build VintageStory.slnx -c $(CONFIGURATION)
 
 clean: ## Remove intermediate build files
@@ -75,8 +75,8 @@ patches: ## Extract patches from working tree
 
 patch-il: build ## Run Cecil patcher: vanilla DLL + compiled donor → patched output
 	@echo "Running IL patcher..."
-	@dotnet run --project Optimum.Patcher -c $(CONFIGURATION) --no-build -- \
-		.vanilla/linux-x64/vintagestory/VintagestoryLib.dll \
+	@dotnet run --project Optimum.Patcher -c $(CONFIGURATION) -- \
+		$(VANILLA_DIR)/VintagestoryLib.vanilla.dll \
 		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib.dll \
 		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll
 	@echo ""

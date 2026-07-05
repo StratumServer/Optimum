@@ -1,7 +1,6 @@
 using System;
 using System.Net.Http;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Optimum;
 
@@ -33,36 +32,41 @@ public static class OptimumUpdateChecker
     public static void CheckAsync()
     {
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
-        Task.Run(async () =>
+        Thread thread = new Thread(new ThreadStart(CheckForUpdates));
+        thread.IsBackground = true;
+        thread.Name = "Optimum update checker";
+        thread.Start();
+    }
+
+    private static void CheckForUpdates()
+    {
+        try
         {
-            try
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+            client.DefaultRequestHeaders.Add("User-Agent", "Optimum/" + OptimumInfo.Version);
+            var json = client.GetStringAsync(ReleasesUrl).GetAwaiter().GetResult();
+
+            var tagName = ExtractTagName(json);
+            if (tagName == null) return;
+
+            LatestVersion = tagName.TrimStart('v', 'V');
+            ReleaseUrl = OptimumInfo.Url + "/releases/tag/" + tagName;
+
+            if (CompareVersions(LatestVersion, OptimumInfo.Version) > 0)
             {
-                using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromSeconds(5);
-                client.DefaultRequestHeaders.Add("User-Agent", "Optimum/" + OptimumInfo.Version);
-                var json = await client.GetStringAsync(ReleasesUrl);
-
-                var tagName = ExtractTagName(json);
-                if (tagName == null) return;
-
-                LatestVersion = tagName.TrimStart('v', 'V');
-                ReleaseUrl = OptimumInfo.Url + "/releases/tag/" + tagName;
-
-                if (CompareVersions(LatestVersion, OptimumInfo.Version) > 0)
-                {
-                    UpdateAvailable = true;
-                }
+                UpdateAvailable = true;
             }
-            catch
-            {
-                // Network failure, timeout, parse error: silent. No update badge.
-            }
-        });
+        }
+        catch
+        {
+            // Network failure, timeout, parse error: silent. No update badge.
+        }
     }
 
     /// <summary>
     /// Extract "tag_name" value from the JSON response without pulling in a JSON library.
-    /// The GitHub API response has "tag_name": "v0.2.0" near the top.
+    /// The GitHub API response has "tag_name": "v0.2.1" near the top.
     /// </summary>
     private static string ExtractTagName(string json)
     {

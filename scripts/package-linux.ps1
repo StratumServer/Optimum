@@ -71,10 +71,13 @@ try {
         tar -xzf $ClientArchive -C $baseRoot
     }
     if (-not (Test-Path $vanillaDir)) { throw "Extraction failed: $vanillaDir not found" }
+    $patchedLib = Join-Path $libOut 'VintagestoryLib-patched.dll'
+    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- (Join-Path $vanillaDir 'VintagestoryLib.dll') (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
+    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
 
     # 3. Version from OptimumInfo.cs.
     $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.0'
+    $optVer = '0.2.1'
     if (Test-Path $infoFile) {
         $m = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($m.Success) { $optVer = $m.Groups[1].Value }
@@ -91,7 +94,7 @@ try {
 
     # 5. Overlay optimized DLLs (platform-agnostic IL).
     Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll')    $stageDir
-    Copy-Item -Force (Join-Path $libOut   'VintagestoryLib.dll') $stageDir
+    Copy-Item -Force $patchedLib (Join-Path $stageDir 'VintagestoryLib.dll')
     Copy-Item -Force (Join-Path $modOut 'VintagestoryAPI.dll') $stageDir
     Copy-Item -Force (Join-Path $modOut 'VSEssentials.dll') (Join-Path $stageDir 'Mods')
     Copy-Item -Force (Join-Path $modOut 'VSSurvivalMod.dll') (Join-Path $stageDir 'Mods')

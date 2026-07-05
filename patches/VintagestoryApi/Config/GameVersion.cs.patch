@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Config/GameVersion.cs b/VintagestoryApi/Config/GameVersion.cs
-index a7911ea..e9428b2 100644
+index a7911ea..9bb5469 100644
 --- a/VintagestoryApi/Config/GameVersion.cs
 +++ b/VintagestoryApi/Config/GameVersion.cs
 @@ -36,11 +36,16 @@ namespace Vintagestory.API.Config
@@ -14,7 +14,7 @@ index a7911ea..e9428b2 100644
 +        /// <summary>
 +        /// Optimum version tag appended to the game version display.
 +        /// </summary>
-+        public const string OptimumVersion = "0.2.0";
++        public const string OptimumVersion = "0.2.1";
  
          /// <summary>
          /// Whether this is a stable or unstable version

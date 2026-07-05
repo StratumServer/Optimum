@@ -53,6 +53,19 @@ $ToolUrls = @{
 # Detection helpers
 # ===========================================================================
 
+function Get-VsExeVersion {
+    param([string]$Dir)
+    $exePath = Join-Path $Dir 'Vintagestory.exe'
+    if (-not (Test-Path $exePath)) { return $null }
+    try {
+        $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
+        $raw = $fvi.ProductVersion
+        if (-not $raw) { $raw = $fvi.FileVersion }
+        if ($raw -and $raw -match '^(\d+\.\d+\.\d+)') { return $Matches[1] }
+        return $raw
+    } catch { return $null }
+}
+
 function Find-VintageStory {
     $keys = @('{70364653-036D-49B3-8B80-AF39665F29C1}_is1', 'Vintage Story_is1')
     $hives = @(
@@ -67,17 +80,19 @@ function Find-VintageStory {
             $dir = $reg.InstallLocation
             if ($dir) { $dir = $dir.TrimEnd('\') }
             if ($dir -and (Test-Path (Join-Path $dir 'Vintagestory.exe'))) {
-                return @{ Path = $dir; Version = $reg.DisplayVersion }
+                # The in-game updater replaces the game files without rewriting
+                # the Inno uninstall entry, so DisplayVersion goes stale after
+                # any auto-update. The exe on disk is the authority; the
+                # registry only locates it.
+                $ver = Get-VsExeVersion -Dir $dir
+                if (-not $ver) { $ver = $reg.DisplayVersion }
+                return @{ Path = $dir; Version = $ver }
             }
         }
     }
     $dir = Join-Path $env:APPDATA 'Vintagestory'
     if (Test-Path (Join-Path $dir 'Vintagestory.exe')) {
-        # Fallback: extract version from the exe FileVersionInfo
-        $exePath = Join-Path $dir 'Vintagestory.exe'
-        $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
-        $ver = $fvi.ProductVersion
-        return @{ Path = $dir; Version = $ver }
+        return @{ Path = $dir; Version = (Get-VsExeVersion -Dir $dir) }
     }
     return $null
 }
@@ -302,7 +317,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) {
             $VsPath = $vsInfo.Path
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version), Optimum 0.2.0 requires $requiredVer. Update or reinstall VS $requiredVer."
+                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.1 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
             }
         }
     }
@@ -343,16 +358,20 @@ function Invoke-OptimumBuild {
             Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             throw "innounp timed out after 5 minutes. Kill any innounp.exe processes in Task Manager and retry."
         }
-        if ($innounpProc.ExitCode -ne 0) {
-            $errText = if (Test-Path "$env:TEMP\innounp-out.txt") { Get-Content "$env:TEMP\innounp-out.txt" -Raw } else { "" }
-            throw "innounp failed (exit $($innounpProc.ExitCode)): $errText"
-        }
-        Remove-Item -Force "$env:TEMP\innounp-out.txt" -ErrorAction SilentlyContinue
+        $innounpExitCode = $innounpProc.ExitCode
+        $errText = if (Test-Path "$env:TEMP\innounp-out.txt") { Get-Content "$env:TEMP\innounp-out.txt" -Raw } else { "" }
         $appDir = Join-Path $vanillaDir '{app}'
         if (Test-Path $appDir) {
             Get-ChildItem -Path $appDir | Move-Item -Destination $vanillaDir -Force
             Remove-Item -Force $appDir
         }
+        if ($innounpExitCode -ne 0 -and -not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
+            throw "innounp failed (exit $innounpExitCode): $errText"
+        }
+        if ($innounpExitCode -ne 0) {
+            Write-Log "innounp exited with code $innounpExitCode after extracting Vintagestory.exe; continuing."
+        }
+        Remove-Item -Force "$env:TEMP\innounp-out.txt" -ErrorAction SilentlyContinue
         if (-not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
             throw "Extraction failed: Vintagestory.exe not found"
         }
@@ -506,7 +525,7 @@ function Invoke-OptimumBuild {
         $regKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1'
         New-Item -Path $regKey -Force | Out-Null
         Set-ItemProperty -Path $regKey -Name 'DisplayName' -Value "Optimum $requiredVer"
-        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.0'
+        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.1'
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
@@ -690,7 +709,9 @@ function Update-PrereqStatus {
             $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $requiredVer)"
             $script:lblVsStatus.ForeColor = $colOrange
             Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
-            $script:btnVsBrowse.Visible = $false
+            # Keep the browse button so the user can point at another install
+            # when the detected one has the wrong version.
+            $script:btnVsBrowse.Visible = $true
             $script:txtVsPath.Text = ''
         } else {
             $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $($vsInfo.Path)"
@@ -1139,7 +1160,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = 'vs1.22.3+v0.2.0'
+$lblVersion.Text = 'vs1.22.3+v0.2.1'
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1396,7 +1417,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             $existingSemver = ($fvi.ProductVersion -split '\+')[0]
         }
 
-        $thisVer = '0.2.0'
+        $thisVer = '0.2.1'
         if ($existingSemver) {
             if ([version]$existingSemver -lt [version]$thisVer) {
                 $r = [System.Windows.Forms.MessageBox]::Show(

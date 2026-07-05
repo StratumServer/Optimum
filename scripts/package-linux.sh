@@ -146,6 +146,7 @@ if [[ ! -f "$LIB_OUT/VintagestoryLib.dll" ]]; then
     echo "Error: build output not found. Run: dotnet build VintageStory.slnx -c Release" >&2
     exit 1
 fi
+PATCHED_LIB="$LIB_OUT/VintagestoryLib-patched.dll"
 
 # ============================================================================
 # 1. Acquire the official Linux client archive
@@ -183,15 +184,16 @@ if [[ ! -d "$VANILLA_DIR" ]]; then
     echo "Error: extraction failed, $VANILLA_DIR not found" >&2
     exit 1
 fi
+dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_DIR/VintagestoryLib.dll" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
 # ============================================================================
 # 3. Version from OptimumInfo.cs
 # ============================================================================
 
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.0"
+OPT_VER="0.2.1"
 if [[ -f "$INFO_FILE" ]]; then
-    MATCH=$(grep -oP 'Version\s*=\s*"\K[^"]+' "$INFO_FILE" || true)
+    MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
 fi
 
@@ -211,7 +213,7 @@ cp -a "$VANILLA_DIR" "$STAGE_DIR"
 # ============================================================================
 
 cp -f "$BUILD_OUT/Vintagestory.dll" "$STAGE_DIR/"
-cp -f "$LIB_OUT/VintagestoryLib.dll" "$STAGE_DIR/"
+cp -f "$PATCHED_LIB" "$STAGE_DIR/VintagestoryLib.dll"
 cp -f "$MOD_OUT/VintagestoryAPI.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
@@ -256,7 +258,7 @@ fi
 
 # run.sh launches ./Vintagestory; point it at ./Optimum.
 if [[ -f "$STAGE_DIR/run.sh" ]]; then
-    sed -i 's|\./Vintagestory |./Optimum |g' "$STAGE_DIR/run.sh"
+    perl -pi -e 's|\./Vintagestory |./Optimum |g' "$STAGE_DIR/run.sh"
 fi
 
 # The .desktop entry and the window both read assets/gameicon.png.

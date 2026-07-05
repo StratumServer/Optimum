@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build Optimum for Linux x64 in one step.
-# Produces: Optimum-v0.2.0-linux-x64/ (ready to run)
+# Produces: Optimum-v0.2.1-linux-x64/ (ready to run)
 # Requirements: .NET 10 SDK, bash, python3, git, curl, perl
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,11 +27,16 @@ pwsh ./scripts/package-linux.ps1 2>/dev/null && echo "Done." && exit 0
 # Fallback if pwsh is not installed.
 echo "pwsh not found, using fallback package path..."
 make deploy
-STAGE="Optimum-v0.2.0-linux-x64"
+STAGE="Optimum-v0.2.1-linux-x64"
+PATCHED_LIB="build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll"
+dotnet run --project Optimum.Patcher -c Release -- \
+    .vanilla/linux-x64/vintagestory/VintagestoryLib.dll \
+    build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll \
+    "$PATCHED_LIB"
 rm -rf "$STAGE"
 cp -r .vanilla/linux-x64/vintagestory "$STAGE"
 cp build/Vintagestory/bin/Release/net10.0/Vintagestory.dll "$STAGE/"
-cp build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll "$STAGE/"
+cp "$PATCHED_LIB" "$STAGE/VintagestoryLib.dll"
 cp bin/Release/net10.0/VintagestoryAPI.dll "$STAGE/"
 cp bin/Release/net10.0/VSEssentials.dll "$STAGE/Mods/"
 cp bin/Release/net10.0/VSSurvivalMod.dll "$STAGE/Mods/"
@@ -40,6 +45,6 @@ cp bin/Release/net10.0/cairo-sharp.dll "$STAGE/Lib/"
 cp sources/shaders/*.fsh sources/shaders/*.vsh "$STAGE/assets/game/shaders/"
 EXE="$STAGE/Vintagestory"
 [ -f "$EXE" ] && mv "$EXE" "$STAGE/Optimum" && chmod +x "$STAGE/Optimum"
-sed -i 's|./Vintagestory |./Optimum |' "$STAGE/run.sh" 2>/dev/null || true
+perl -pi -e 's|\./Vintagestory |./Optimum |' "$STAGE/run.sh" 2>/dev/null || true
 echo "Done: $STAGE/"
 echo "Run with: cd $STAGE && ./Optimum"

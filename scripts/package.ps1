@@ -76,10 +76,13 @@ try {
     if (-not (Test-Path (Join-Path $libOut 'VintagestoryLib.dll'))) {
         throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
     }
+    $patchedLib = Join-Path $libOut 'VintagestoryLib-patched.dll'
+    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- (Join-Path $vanillaDir 'VintagestoryLib.dll') (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
+    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
 
     # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
     $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.0'
+    $optVer = '0.2.1'
     if (Test-Path $infoFile) {
         $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($match.Success) { $optVer = $match.Groups[1].Value }
@@ -97,7 +100,7 @@ try {
     # Apply optimized DLLs over the copy.
     Write-Host "Applying optimized DLLs..."
     Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll') $stageDir
-    Copy-Item -Force (Join-Path $libOut 'VintagestoryLib.dll') $stageDir
+    Copy-Item -Force $patchedLib (Join-Path $stageDir 'VintagestoryLib.dll')
     $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
     Copy-Item -Force (Join-Path $apiOut 'VintagestoryAPI.dll') $stageDir
     Copy-Item -Force (Join-Path $apiOut 'VSEssentials.dll') (Join-Path $stageDir 'Mods')
