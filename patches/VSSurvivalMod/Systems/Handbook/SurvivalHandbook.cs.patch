@@ -1,0 +1,31 @@
+diff --git a/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs b/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs
+index 0d88b9f..e29104b 100644
+--- a/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs
++++ b/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs
+@@ -119,12 +119,22 @@ namespace Vintagestory.GameContent
+             {
+                 if (capi.IsShuttingDown) break;
+ 
+-                GuiHandbookItemStackPage elem = new GuiHandbookItemStackPage(capi, stack)
++                // Optimum: a mod exception thrown from GetHeldItemInfo (via the
++                // GuiHandbookItemStackPage constructor) on this background thread
++                // kills the handbook loading entirely. Catch per-item and skip.
++                try
+                 {
+-                    Visible = true
+-                };
++                    GuiHandbookItemStackPage elem = new GuiHandbookItemStackPage(capi, stack)
++                    {
++                        Visible = true
++                    };
+ 
+-                pages.Add(elem);
++                    pages.Add(elem);
++                }
++                catch (System.Exception ex)
++                {
++                    capi.Logger.Warning("Handbook page creation failed for {0}, skipping. A mod's GetHeldItemInfo is likely at fault: {1}", stack?.Collectible?.Code, ex.Message);
++                }
+             }
+ 
+             return pages;
