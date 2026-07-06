@@ -683,7 +683,7 @@ fi
 # `var` can't reach, but a same-named-but-different-collection bare Enumerator<...>
 # can appear more than once in one file (e.g. ChatCommandApi.cs has both a
 # Dictionary.Enumerator and a Dictionary.ValueCollection.Enumerator site sharing
-# the identical bare shorthand) - running the per-file fix first would blanket
+# the identical bare shorthand) — running the per-file fix first would blanket
 # every occurrence with one file-wide type, silently breaking the other one.
 find "${decompiled_dirs[@]}" -name '*.cs' -print0 | xargs -0 perl -pi -e '
   s/\bEnumerator<[^;=]+>(\s+\w+\s*=\s*[^;]*\.GetEnumerator\(\));/var$1;/g;
@@ -828,7 +828,7 @@ find "${decompiled_dirs[@]}" -name '*.cs' -print0 | xargs -0 perl -pi -e '
   s/(?:System\.)?\b((?:Memory|ReadOnlyMemory|ReadOnlySpan|Span)<[^<>]*>|decimal|Index)\.op_Implicit\(((?:[^()]|\((?:[^()]|\([^()]*\))*\))*)\)/(($1)($2))/g;
 '
 
-# 6r-4b: `new System.ReadOnlySpan<char>(ref (char)expr)` - ReadOnlySpan<char>'s
+# 6r-4b: `new System.ReadOnlySpan<char>(ref (char)expr)` — ReadOnlySpan<char>'s
 # single-value constructor takes `in`, and a cast result is not an addressable
 # lvalue, so `ref` can never bind here (CS1510). `in` parameters accept a
 # temporary computed from any expression and do not require writing `in`
@@ -940,7 +940,7 @@ for f in \
 done
 
 # 6w: `TYPE val = default(TYPE);` immediately followed by `val._002Ector(args);`
-# - the value-type equivalent of the ref-cast constructor pattern 6e already
+# — the value-type equivalent of the ref-cast constructor pattern 6e already
 # handles, but without the `((Type)(ref var))` wrapper 6e's regex expects, so it
 # needs its own pass. Replaces both statements with a single `TYPE val = new
 # TYPE(args);`, matching parens/braces properly so multi-line constructor

@@ -47,14 +47,14 @@ public static class SelfConsistencyVerifier
                     {
                         case MethodReference mr when IsSelfScoped(mr.DeclaringType, selfName):
                             if (!ResolvesInModule(allTypes, mr))
-                                errors.Add($"{type.FullName}::{method.Name} references missing method " +
+                                errors.Add($"{type.FullName}::{method.Name} references missing or signature-mismatched method " +
                                            $"{mr.DeclaringType.FullName}::{mr.Name}({mr.Parameters.Count} params) at IL_{instr.Offset:X4}");
                             break;
 
                         case FieldReference fr when IsSelfScoped(fr.DeclaringType, selfName):
-                            if (!ResolvesInModule(allTypes, fr))
-                                errors.Add($"{type.FullName}::{method.Name} references missing field " +
-                                           $"{fr.DeclaringType.FullName}::{fr.Name} at IL_{instr.Offset:X4}");
+                            var fieldError = FieldResolutionError(allTypes, fr);
+                            if (fieldError != null)
+                                errors.Add($"{type.FullName}::{method.Name} references {fieldError} at IL_{instr.Offset:X4}");
                             break;
                     }
                 }
@@ -96,18 +96,40 @@ public static class SelfConsistencyVerifier
         var type = allTypes.FirstOrDefault(t => t.FullName == mr.DeclaringType.FullName);
         if (type == null) return false;
 
+        // The CLR resolves a method MemberRef by name plus full signature,
+        // return type included, so the check must too.
         return type.Methods.Any(m =>
             m.Name == mr.Name &&
             m.Parameters.Count == mr.Parameters.Count &&
+            m.ReturnType.FullName == mr.ReturnType.FullName &&
             m.Parameters.Select(p => p.ParameterType.FullName)
                 .SequenceEqual(mr.Parameters.Select(p => p.ParameterType.FullName)));
     }
 
-    private static bool ResolvesInModule(List<TypeDefinition> allTypes, FieldReference fr)
+    /// <summary>
+    /// Returns a description of why the field reference cannot resolve against
+    /// the module's own type table, or null when it resolves. The CLR resolves
+    /// a field MemberRef by name plus signature (the field's type), so a field
+    /// that exists under the right name but with a different type still throws
+    /// MissingFieldException at JIT time. That is exactly what shipped in
+    /// 0.2.1: the transplanted ChunkCuller.CullInvisibleChunks referenced
+    /// ClientWorldMap.chunksLock as System.Threading.Lock while the vanilla
+    /// field is object, and every world load killed the chunkculling thread.
+    /// </summary>
+    private static string? FieldResolutionError(List<TypeDefinition> allTypes, FieldReference fr)
     {
         var type = allTypes.FirstOrDefault(t => t.FullName == fr.DeclaringType.FullName);
-        if (type == null) return false;
+        if (type == null)
+            return $"field on missing type {fr.DeclaringType.FullName}::{fr.Name}";
 
-        return type.Fields.Any(f => f.Name == fr.Name);
+        var field = type.Fields.FirstOrDefault(f => f.Name == fr.Name);
+        if (field == null)
+            return $"missing field {fr.DeclaringType.FullName}::{fr.Name}";
+
+        if (field.FieldType.FullName != fr.FieldType.FullName)
+            return $"field {fr.DeclaringType.FullName}::{fr.Name} with mismatched type " +
+                   $"(reference says {fr.FieldType.FullName}, module defines {field.FieldType.FullName})";
+
+        return null;
     }
 }

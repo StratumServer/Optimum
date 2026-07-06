@@ -130,11 +130,13 @@ patch_has_unavailable_target() {
 }
 
 cecil_type_to_patch() {
-  local type="$1" ns class subdir
+  local type="$1" ns class
   class="${type##*.}"
   ns="${type%.*}"
-  subdir="Vintagestory.Client${ns#Vintagestory.Client}"
-  echo "patches/VintagestoryLib/$subdir/$class.cs.patch"
+  # The decompiled tree mirrors namespaces as directories, so the namespace
+  # itself is the patch subdirectory (Vintagestory.Client.NoObf,
+  # Vintagestory.Client, Vintagestory.Common, ...).
+  echo "patches/VintagestoryLib/$ns/$class.cs.patch"
 }
 
 check_cecil_cross_reference() {
@@ -157,7 +159,7 @@ check_cecil_cross_reference() {
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.Client(\.NoObf)?\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
+  done < <(grep -oE '"Vintagestory\.(Client(\.NoObf)?|Common)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
   for rel in "${!cecil_owned[@]}"; do
     if [[ -z "${expected["$rel"]:-}" ]]; then

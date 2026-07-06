@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks for the tools the bootstrap/packaging scripts need.
-# Reports only - never installs. Exit 0 if all required tools are present,
+# Reports only — never installs. Exit 0 if all required tools are present,
 # exit 1 if any required tool is missing (optional tools never fail the run).
 set -uo pipefail
 
@@ -13,7 +13,7 @@ missing_optional=0
 
 # name | required(1/0) | used by | hint
 checks=(
-  "dotnet|1|bootstrap.sh, build|.NET SDK 10 - https://dotnet.microsoft.com/download"
+  "dotnet|1|bootstrap.sh, build|.NET SDK 10 — https://dotnet.microsoft.com/download"
   "git|1|bootstrap.sh, extract-patches.sh, package-macos.ps1|apt-get install git"
   "perl|1|bootstrap.sh, extract-patches.sh|apt-get install perl"
   "python3|1|bootstrap.sh|apt-get install python3"
@@ -29,7 +29,7 @@ checks=(
   "innoextract|0|package.ps1 (Windows package on Linux/macOS hosts)|apt-get install innoextract"
 )
 
-printf '%s\n\n' "$(yellow 'Optimum prerequisite check (report only - nothing is installed)')"
+printf '%s\n\n' "$(yellow 'Optimum prerequisite check (report only — nothing is installed)')"
 printf '%-14s %-10s %s\n' "TOOL" "STATUS" "USED BY"
 printf '%-14s %-10s %s\n' "----" "------" "-------"
 
@@ -52,7 +52,7 @@ done
 
 echo
 if [[ "$missing_required" -gt 0 ]]; then
-  printf '%s\n' "$(red "$missing_required required tool(s) missing - install them before bootstrap/packaging.")"
+  printf '%s\n' "$(red "$missing_required required tool(s) missing — install them before bootstrap/packaging.")"
   exit 1
 fi
 if [[ "$missing_optional" -gt 0 ]]; then

@@ -191,7 +191,7 @@ dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_DIR/Vi
 # ============================================================================
 
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.1"
+OPT_VER="0.2.2"
 if [[ -f "$INFO_FILE" ]]; then
     MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
@@ -235,10 +235,14 @@ if [[ -d "$LANG_SRC" ]]; then
         [[ -f "$src_file" ]] || continue
         dst_file="$LANG_DST/$(basename "$src_file")"
         [[ -f "$dst_file" ]] || continue
+        # Explicit encoding='utf-8' on every open(): python3's default is the
+        # locale's preferred encoding, which is ASCII/C on a minimal/C-locale
+        # system and would mangle the lang files' non-ASCII characters
+        # (accented letters, the degree sign) on read.
         python3 -c "
 import json, sys
-with open(sys.argv[1]) as f: src = json.load(f)
-with open(sys.argv[2]) as f: dst = json.load(f)
+with open(sys.argv[1], encoding='utf-8') as f: src = json.load(f)
+with open(sys.argv[2], encoding='utf-8') as f: dst = json.load(f)
 dst.update(src)
 with open(sys.argv[2], 'w', encoding='utf-8') as f: json.dump(dst, f, ensure_ascii=False, indent='\t'); f.write('\n')
 " "$src_file" "$dst_file"
@@ -246,6 +250,24 @@ with open(sys.argv[2], 'w', encoding='utf-8') as f: json.dump(dst, f, ensure_asc
 fi
 
 # ============================================================================
+# Validate the staged assets: zero-byte or truncated files from a bad
+# vanilla extraction surface in-game as opaque GL crashes ("blur.vsh ...
+# unexpected \$end at <EOF>"). Fail the package instead.
+EMPTY_ASSETS=$(find "$STAGE_DIR/assets" -type f -size 0 ! -name 'version-*.txt' || true)
+if [[ -n "$EMPTY_ASSETS" ]]; then
+    echo "Error: staged assets contain zero-byte file(s); the vanilla extraction is corrupt:" >&2
+    echo "$EMPTY_ASSETS" >&2
+    exit 1
+fi
+BAD_SHADERS=""
+while IFS= read -r -d '' f; do
+    grep -q 'void[[:space:]]*main' "$f" || BAD_SHADERS="$BAD_SHADERS $f"
+done < <(find "$SHADER_DST" -maxdepth 1 -type f \( -name '*.vsh' -o -name '*.fsh' -o -name '*.gsh' \) -print0)
+if [[ -n "$BAD_SHADERS" ]]; then
+    echo "Error: staged shader(s) truncated or corrupt (no 'void main'):$BAD_SHADERS" >&2
+    exit 1
+fi
+
 # 6. Rebrand: rename launcher, repoint run.sh, swap icon, brand .desktop
 # ============================================================================
 

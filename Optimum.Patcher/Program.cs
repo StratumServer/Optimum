@@ -4,9 +4,24 @@ using System.IO;
 using Mono.Cecil;
 using Optimum.Patcher;
 
+// Verification mode for check-vanilla-compat.sh: report decompiler
+// type-misbinding artifacts (same-named cast target bound to the wrong
+// namespace, the EventHelper System.Func/API Func class of bug).
+if (args.Length == 3 && args[0] == "--compare-casts")
+{
+    if (!File.Exists(args[1])) { Console.Error.WriteLine($"Not found: {args[1]}"); return 1; }
+    if (!File.Exists(args[2])) { Console.Error.WriteLine($"Not found: {args[2]}"); return 1; }
+    var divergences = CastComparer.Compare(args[1], args[2]);
+    foreach (var d in divergences)
+        Console.Error.WriteLine($"  CAST DIVERGENCE: {d}");
+    Console.WriteLine($"{divergences.Count} cast divergence(s) between {Path.GetFileName(args[1])} and {Path.GetFileName(args[2])}");
+    return divergences.Count == 0 ? 0 : 1;
+}
+
 if (args.Length < 3)
 {
     Console.Error.WriteLine("Usage: Optimum.Patcher <vanilla.dll> <compiled.dll> <output.dll>");
+    Console.Error.WriteLine("       Optimum.Patcher --compare-casts <vanilla.dll> <compiled.dll>");
     return 1;
 }
 
@@ -190,6 +205,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.TesselatedChunk", "AddEdgeToPools", 5),
     // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
     new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),
+    // Mod-crash containment: a mod exception in GetHeldItemInfo during the
+    // background search-cache build otherwise kills the client (SmithingPlus
+    // shutdown race, unhandled on the TyronThreadPool thread).
+    new("Vintagestory.Common.CreativeTab", "CreateSearchCache", 1),
 };
 
 int total = ILPatcher.PatchWithInjection(

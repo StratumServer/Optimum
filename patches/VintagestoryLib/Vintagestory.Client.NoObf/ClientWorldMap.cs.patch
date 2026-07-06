@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
-index 5212420..c397c98 100644
+index 5212420..f11722a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
 @@ -1,8 +1,11 @@
@@ -14,20 +14,25 @@ index 5212420..c397c98 100644
  using Vintagestory.API.Common.Entities;
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
-@@ -34,11 +37,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+@@ -34,10 +37,17 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
  
  	internal ConcurrentDictionary<long, ClientMapRegion> MapRegions = new ConcurrentDictionary<long, ClientMapRegion>(4, 32);
  
  	internal Dictionary<long, ClientMapChunk> MapChunks = new Dictionary<long, ClientMapChunk>();
  
--	internal object chunksLock = new object();
-+	internal readonly Lock chunksLock = new();
++	// Optimum: must stay object, not System.Threading.Lock. ChunkCuller.
++	// CullInvisibleChunks is cecil-transplanted into the vanilla assembly,
++	// where this field keeps its vanilla type; a Lock-typed reference in the
++	// transplanted body fails member resolution at JIT time (MissingFieldException,
++	// "Field not found: chunksLock", the 0.2.1 chunkculling thread crash), and
++	// Lock.EnterScope would not interoperate with the Monitor locking the
++	// untransplanted vanilla methods still use on this field.
+ 	internal object chunksLock = new object();
  
  	internal Dictionary<long, ClientChunk> chunks = new Dictionary<long, ClientChunk>();
  
  	internal Dictionary<int, IMiniDimension> dimensions = new Dictionary<int, IMiniDimension>();
- 
-@@ -54,11 +57,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+@@ -54,11 +64,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
  
  	private int prevChunkZ = -1;
  
@@ -40,7 +45,7 @@ index 5212420..c397c98 100644
  
  	public IBlockAccessor RelaxedBlockAccess;
  
-@@ -68,11 +71,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+@@ -68,11 +78,11 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
  
  	public IBlockAccessor NoRelightBulkBlockAccess;
  

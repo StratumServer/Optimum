@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# fix-closure-class.pl - Replace _003C_003Ec async state machine stubs with no-op lambdas.
+# fix-closure-class.pl — Replace _003C_003Ec async state machine stubs with no-op lambdas.
 # ILSpy decompiles async lambdas referencing the compiler-generated <>c singleton class,
 # which doesn't exist in the decompiled source. Replace with async Task.CompletedTask.
 

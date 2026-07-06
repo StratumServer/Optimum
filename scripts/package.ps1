@@ -82,7 +82,7 @@ try {
 
     # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
     $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.1'
+    $optVer = '0.2.2'
     if (Test-Path $infoFile) {
         $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($match.Success) { $optVer = $match.Groups[1].Value }
@@ -116,15 +116,24 @@ try {
     }
 
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
+    # Read/write explicitly as UTF-8 via .NET, not Get-Content/Set-Content:
+    # Windows PowerShell 5.1 (what the Windows installer launches) defaults
+    # those cmdlets to the system codepage when a file has no BOM, silently
+    # mangling every non-ASCII character the vanilla lang files contain -
+    # the degree sign turned "°C" into "Â°C" in the shipped
+    # 0.2.2 build. File.ReadAllText/WriteAllText with an explicit encoding
+    # is not PowerShell-version-dependent.
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $langSrc = Join-Path $repoRoot 'sources/lang'
     $langDst = Join-Path $stageDir 'assets/game/lang'
     if (Test-Path $langSrc) {
         foreach ($srcFile in (Get-ChildItem $langSrc -Filter '*.json')) {
             $dstFile = Join-Path $langDst $srcFile.Name
             if (-not (Test-Path $dstFile)) { continue }
-            $lines = (Get-Content $srcFile.FullName) | Where-Object { $_ -match '^\s*"optimum-' }
+            $lines = [System.IO.File]::ReadAllLines($srcFile.FullName, [System.Text.Encoding]::UTF8) |
+                Where-Object { $_ -match '^\s*"optimum-' }
             if ($lines.Count -eq 0) { continue }
-            $dstText = Get-Content $dstFile -Raw
+            $dstText = [System.IO.File]::ReadAllText($dstFile, [System.Text.Encoding]::UTF8)
             $insertion = ($lines -join "`r`n")
             $dstText = $dstText.TrimEnd()
             if ($dstText.EndsWith('}')) {
@@ -132,8 +141,29 @@ try {
                 if (-not $dstText.EndsWith(',')) { $dstText += ',' }
                 $dstText += "`r`n" + $insertion + "`r`n}"
             }
-            Set-Content $dstFile -Value $dstText -Encoding UTF8
+            [System.IO.File]::WriteAllText($dstFile, $dstText, $utf8NoBom)
         }
+    }
+
+    # Validate the staged assets before shipping them. A tolerated-partial
+    # innounp extraction or a poisoned .vanilla cache carries zero-byte or
+    # truncated files into the stage, and a truncated shader then kills the
+    # game at startup with an opaque GL error (the 0.2.1 "blur.vsh ...
+    # unexpected $end at <EOF>" reports). Fail the package with a clear
+    # message instead.
+    $stageAssets = Join-Path $stageDir 'assets'
+    $zeroByte = @(Get-ChildItem -Path $stageAssets -Recurse -File |
+        Where-Object { $_.Length -eq 0 -and $_.Name -notlike 'version-*.txt' })
+    if ($zeroByte.Count -gt 0) {
+        $names = ($zeroByte | Select-Object -First 10 | ForEach-Object { $_.FullName }) -join "`n  "
+        throw "Staged assets contain $($zeroByte.Count) zero-byte file(s); the vanilla extraction is corrupt. Delete '$vanillaDir' and re-run to re-extract.`n  $names"
+    }
+    $badShaders = @(Get-ChildItem -Path (Join-Path $stageAssets 'game/shaders') -File |
+        Where-Object { $_.Extension -in '.vsh', '.fsh', '.gsh' } |
+        Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'void\s+main' })
+    if ($badShaders.Count -gt 0) {
+        $names = ($badShaders | ForEach-Object { $_.Name }) -join ', '
+        throw "Staged shader(s) truncated or corrupt (no 'void main'): $names. Delete '$vanillaDir' and re-run to re-extract."
     }
 
     # Use the built apphost. It embeds the Optimum app.ico, unlike the vanilla
