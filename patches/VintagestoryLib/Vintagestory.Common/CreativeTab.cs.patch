@@ -1,0 +1,47 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/CreativeTab.cs b/VintagestoryLib/Vintagestory.Common/CreativeTab.cs
+index a9cbc83..a3867af 100644
+--- a/VintagestoryLib/Vintagestory.Common/CreativeTab.cs
++++ b/VintagestoryLib/Vintagestory.Common/CreativeTab.cs
+@@ -1,5 +1,6 @@
++using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Util;
+ using Vintagestory.Client.NoObf;
+ 
+@@ -35,13 +36,34 @@ public class CreativeTab
+ 			}
+ 			ItemSlot itemSlot = Inventory[i];
+ 			ItemStack itemstack = itemSlot.Itemstack;
+ 			if (itemstack != null)
+ 			{
++				// Optimum: a mod exception thrown from GetHeldItemInfo here
++				// (e.g. SmithingPlus reading its config after mod Dispose
++				// nulled it, when the client tears down while this task is
++				// still running on the thread pool) is unhandled on the
++				// TyronThreadPool thread and kills the whole client. The
++				// disposed check above already acknowledges this shutdown
++				// race but cannot cover a call already in flight. Degrade to
++				// a name-only search entry for the offending item instead.
+ 				string name = itemstack.GetName();
+ 				dictionary2[i] = name.ToSearchFriendly().ToLowerInvariant();
+-				dictionary[i] = name + " " + ((itemstack.Collectible as ISearchTextProvider)?.GetSearchText(world, itemSlot) ?? itemstack.GetDescription(world, itemSlot).ToSearchFriendly().ToLowerInvariant());
++				try
++				{
++					dictionary[i] = name + " " + ((itemstack.Collectible as ISearchTextProvider)?.GetSearchText(world, itemSlot) ?? itemstack.GetDescription(world, itemSlot).ToSearchFriendly().ToLowerInvariant());
++				}
++				catch (Exception e)
++				{
++					if (((ClientCoreAPI)world.Api).disposed)
++					{
++						break;
++					}
++					dictionary[i] = name;
++					world.Logger.Warning("Exception thrown while building the creative search cache for {0}, using its name only. A mod's GetHeldItemInfo/GetSearchText is likely at fault:", itemstack.Collectible?.Code);
++					world.Logger.Warning(e);
++				}
+ 			}
+ 		}
+ 		SearchCacheNames = dictionary2;
+ 		SearchCache = dictionary;
+ 		return SearchCache;

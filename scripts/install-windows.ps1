@@ -317,7 +317,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) {
             $VsPath = $vsInfo.Path
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.1 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
+                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.2 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
             }
         }
     }
@@ -374,6 +374,17 @@ function Invoke-OptimumBuild {
         Remove-Item -Force "$env:TEMP\innounp-out.txt" -ErrorAction SilentlyContinue
         if (-not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
             throw "Extraction failed: Vintagestory.exe not found"
+        }
+        # A tolerated nonzero innounp exit can leave zero-byte or truncated
+        # assets behind. They persist in this cache across reinstalls and
+        # surface in-game as opaque GL crashes ("blur.vsh ... unexpected
+        # $end at <EOF>"), so verify now and discard a bad extraction.
+        $corrupt = @(Get-ChildItem -Path (Join-Path $vanillaDir 'assets') -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -eq 0 -and $_.Name -notlike 'version-*.txt' })
+        if ($corrupt.Count -gt 0) {
+            $names = ($corrupt | Select-Object -First 10 | ForEach-Object { $_.FullName }) -join "`n  "
+            Remove-Item -Recurse -Force $vanillaDir -ErrorAction SilentlyContinue
+            throw "innounp produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run the installer to retry.`n  $names"
         }
         $VsPath = $vanillaDir
     }
@@ -447,7 +458,13 @@ function Invoke-OptimumBuild {
             $ErrorActionPreference = 'Continue'
             try {
                 Write-Phase "Decompiling and patching the engine..."
+                $global:LASTEXITCODE = 0
                 & "$buildRoot/scripts/bootstrap.ps1" -ClientArchive '__skip__' *>&1 | ForEach-Object { Write-Log ([string]$_) }
+                # A failed patch makes bootstrap exit 1 before it syncs the
+                # sources/ overlay; building anyway then fails hundreds of
+                # lines later with misleading CS0103 errors about Optimum
+                # types. Stop at the real failure instead.
+                if ($LASTEXITCODE -ne 0) { throw "Decompile/patch step failed (bootstrap exit code $LASTEXITCODE). Check the lines above for the failing patch or file." }
 
                 Write-Phase "Building Optimum (this takes a moment)..."
                 # Strip test project from slnx (not needed for installer)
@@ -525,7 +542,7 @@ function Invoke-OptimumBuild {
         $regKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1'
         New-Item -Path $regKey -Force | Out-Null
         Set-ItemProperty -Path $regKey -Name 'DisplayName' -Value "Optimum $requiredVer"
-        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.1'
+        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.2'
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
@@ -1160,7 +1177,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = 'vs1.22.3+v0.2.1'
+$lblVersion.Text = 'vs1.22.3+v0.2.2'
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1417,7 +1434,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             $existingSemver = ($fvi.ProductVersion -split '\+')[0]
         }
 
-        $thisVer = '0.2.1'
+        $thisVer = '0.2.2'
         if ($existingSemver) {
             if ([version]$existingSemver -lt [version]$thisVer) {
                 $r = [System.Windows.Forms.MessageBox]::Show(

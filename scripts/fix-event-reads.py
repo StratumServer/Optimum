@@ -50,7 +50,7 @@ def main(roots):
                 continue
             # Match an optional `qualifier.` prefix so it can be inspected: only
             # rewrite a bare reference (no qualifier) or one qualified by `this`
-            # or a this-alias - never `SomeOtherType.Name`, which is a different
+            # or a this-alias — never `SomeOtherType.Name`, which is a different
             # member entirely (e.g. an enum value) that happens to share the
             # event's name.
             read_re = re.compile(

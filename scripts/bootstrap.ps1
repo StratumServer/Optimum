@@ -424,6 +424,7 @@ try {
     #      placed .vanilla via junction; verify it exists and move on
     #   c) Normal: download the installer and extract with innounp
     $skipDownload = ($ClientArchive -eq '__skip__')
+    $freshExtract = $false
     if (Test-Path (Join-Path $winVanillaDir 'Vintagestory.exe')) {
         Write-Host "Using existing $winVanillaDir"
     } elseif ($skipDownload) {
@@ -487,7 +488,35 @@ try {
         if (-not (Test-Path (Join-Path $extractTarget 'Vintagestory.exe'))) {
             throw "Extraction failed: Vintagestory.exe not found"
         }
+        $freshExtract = $true
         Write-Host "Extraction complete."
+    }
+
+    # Validate the vanilla tree before building against it. A tolerated
+    # partial innounp extraction (nonzero exit above) or a stale .vanilla
+    # cache left by an older failed run carries zero-byte or truncated
+    # assets that only surface later, in-game, as opaque GL crashes
+    # ("blur.vsh ... unexpected $end at <EOF>"). Catch them here instead.
+    $vanillaAssets = Join-Path $winVanillaDir 'assets'
+    $corrupt = @(Get-ChildItem -Path $vanillaAssets -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Length -eq 0 -and $_.Name -notlike 'version-*.txt' })
+    $vanillaShaders = Join-Path $vanillaAssets 'game/shaders'
+    if (Test-Path $vanillaShaders) {
+        $corrupt += @(Get-ChildItem -Path $vanillaShaders -File |
+            Where-Object { $_.Extension -in '.vsh', '.fsh', '.gsh' } |
+            Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'void\s+main' })
+    } else {
+        throw "Vanilla client at $winVanillaDir has no assets/game/shaders; the extraction or install is incomplete."
+    }
+    if ($corrupt.Count -gt 0) {
+        $names = ($corrupt | Select-Object -First 10 | ForEach-Object { $_.FullName }) -join "`n  "
+        if ($freshExtract) {
+            # Wipe the poisoned extraction so the next run re-extracts
+            # instead of reusing it via the "Using existing" fast path.
+            Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+            throw "innounp produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run to retry.`n  $names"
+        }
+        throw "Vanilla client files are corrupt ($($corrupt.Count) empty/truncated file(s)):`n  $names`nIf $winVanillaDir is Optimum's own cache, delete it and retry; if it points at your Vintage Story install, repair or reinstall Vintage Story $Version first."
     }
 
     # --- 2. Decompile closed-source DLLs ---
@@ -1427,3 +1456,7 @@ try {
 } finally {
     Pop-Location
 }
+# Explicit success code: install-windows.ps1 gates on $LASTEXITCODE after
+# invoking this script, and without this it would hold whatever the last
+# native command happened to return.
+exit 0

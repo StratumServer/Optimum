@@ -89,10 +89,32 @@ check_patch_content() {
   done < <(find "$patches_dir" -type f -name '*.patch' -print0)
 }
 
+# Decompiler type-misbinding check: compare castclass/isinst targets in the
+# compiled donor against the vanilla assembly. ilspy can bind a same-named
+# type to the wrong namespace and the recompile accepts it silently; a wrong
+# cast target only fails at runtime (EventHelper cast handlers to System.Func
+# where vanilla IL uses Vintagestory.API.Common.Func, so every cancellable
+# event handler threw InvalidCastException in full-compiled builds).
+check_cast_divergences() {
+  local vanilla_dll="$repo_root/.vanilla/win-x64/vintagestory/VintagestoryLib.vanilla.dll"
+  local donor_dll="$repo_root/build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll"
+
+  if [[ ! -f "$vanilla_dll" || ! -f "$donor_dll" ]]; then
+    skip "cast divergence check: vanilla or compiled VintagestoryLib.dll not built"
+    return
+  fi
+
+  if ! dotnet run --project "$repo_root/Optimum.Patcher" -c Release -- \
+      --compare-casts "$vanilla_dll" "$donor_dll"; then
+    fail "compiled VintagestoryLib casts diverge from vanilla IL (decompiler misbinding), see above"
+  fi
+}
+
 cd "$repo_root"
 
 check_patch_targets
 check_patch_content
+check_cast_divergences
 
 check_contains \
   "$repo_root/build/VintagestoryLib/Vintagestory.Client/ClientPackets.cs" \

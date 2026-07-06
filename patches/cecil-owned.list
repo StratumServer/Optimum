@@ -28,3 +28,4 @@ patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch

@@ -88,7 +88,7 @@ check_dotnet10() {
 get_required_vs_version() {
     local forks="$REPO_ROOT/forks.json"
     if [[ -f "$forks" ]]; then
-        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.3"
+        grep -oP '"vintageStoryVersion"\s*:\s*"\K[^"]+' "$forks" || echo "1.22.3"
     else
         echo "1.22.3"
     fi
@@ -182,7 +182,7 @@ detect_prereqs() {
         local ilspy_ver="10.1.0.8386"
         if [[ -f "$REPO_ROOT/.config/dotnet-tools.json" ]]; then
             local parsed
-            parsed=$(perl -0777 -ne 'if (/"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/s) { print $1; exit }' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
+            parsed=$(grep -oP '"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"\K[^"]+' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
             if [[ -n "$parsed" ]]; then ilspy_ver="$parsed"; fi
         fi
         PREREQ_INSTALL_CMD[ilspycmd]="dotnet tool install -g ilspycmd --version $ilspy_ver"
