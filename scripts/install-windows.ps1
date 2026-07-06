@@ -66,7 +66,15 @@ function Get-VsExeVersion {
     } catch { return $null }
 }
 
-function Find-VintageStory {
+function Find-AllVintageStory {
+    # Collect every VS install candidate: registry entries + common paths.
+    # Returns an array of @{ Path; Version } hashtables, deduplicated by
+    # resolved path. The exe on disk is the version authority (the in-game
+    # updater rewrites the exe without touching the Inno registry entry).
+    $seen = @{}
+    $results = @()
+
+    # 1. Registry (Inno Setup uninstall entries).
     $keys = @('{70364653-036D-49B3-8B80-AF39665F29C1}_is1', 'Vintage Story_is1')
     $hives = @(
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -80,21 +88,51 @@ function Find-VintageStory {
             $dir = $reg.InstallLocation
             if ($dir) { $dir = $dir.TrimEnd('\') }
             if ($dir -and (Test-Path (Join-Path $dir 'Vintagestory.exe'))) {
-                # The in-game updater replaces the game files without rewriting
-                # the Inno uninstall entry, so DisplayVersion goes stale after
-                # any auto-update. The exe on disk is the authority; the
-                # registry only locates it.
-                $ver = Get-VsExeVersion -Dir $dir
-                if (-not $ver) { $ver = $reg.DisplayVersion }
-                return @{ Path = $dir; Version = $ver }
+                $resolved = (Resolve-Path $dir).Path
+                if (-not $seen.ContainsKey($resolved)) {
+                    $seen[$resolved] = $true
+                    $ver = Get-VsExeVersion -Dir $dir
+                    if (-not $ver) { $ver = $reg.DisplayVersion }
+                    $results += @{ Path = $dir; Version = $ver }
+                }
             }
         }
     }
-    $dir = Join-Path $env:APPDATA 'Vintagestory'
-    if (Test-Path (Join-Path $dir 'Vintagestory.exe')) {
-        return @{ Path = $dir; Version = (Get-VsExeVersion -Dir $dir) }
+
+    # 2. Common filesystem locations (covers unregistered/manual installs).
+    $probePaths = @(
+        (Join-Path $env:APPDATA 'Vintagestory')
+        (Join-Path $env:ProgramFiles 'Vintage Story')
+        (Join-Path ${env:ProgramFiles(x86)} 'Vintage Story')
+        (Join-Path $env:LOCALAPPDATA 'Vintage Story')
+    )
+    foreach ($dir in $probePaths) {
+        if (-not $dir) { continue }
+        if (-not (Test-Path (Join-Path $dir 'Vintagestory.exe'))) { continue }
+        $resolved = (Resolve-Path $dir).Path
+        if ($seen.ContainsKey($resolved)) { continue }
+        $seen[$resolved] = $true
+        $results += @{ Path = $dir; Version = (Get-VsExeVersion -Dir $dir) }
     }
-    return $null
+
+    return $results
+}
+
+function Find-VintageStory {
+    # Returns the best single candidate: prefers the install whose version
+    # matches forks.json (requiredVer). Falls back to the first found install
+    # when none matches (preserves old behavior for single-install users).
+    $requiredVer = Get-RequiredVsVersion
+    $all = @(Find-AllVintageStory)
+    if ($all.Count -eq 0) { return $null }
+
+    # Prefer exact version match.
+    foreach ($c in $all) {
+        if ($c.Version -eq $requiredVer) { return $c }
+    }
+
+    # No match: return the first candidate (caller handles mismatch error).
+    return $all[0]
 }
 
 function Get-RequiredVsVersion {
@@ -317,7 +355,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) {
             $VsPath = $vsInfo.Path
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.2 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
+                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.3 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
             }
         }
     }
@@ -381,6 +419,12 @@ function Invoke-OptimumBuild {
         # $end at <EOF>"), so verify now and discard a bad extraction.
         $corrupt = @(Get-ChildItem -Path (Join-Path $vanillaDir 'assets') -Recurse -File -ErrorAction SilentlyContinue |
             Where-Object { $_.Length -eq 0 -and $_.Name -notlike 'version-*.txt' })
+        $vanillaShaders = Join-Path $vanillaDir 'assets/game/shaders'
+        if (Test-Path $vanillaShaders) {
+            $corrupt += @(Get-ChildItem -Path $vanillaShaders -File |
+                Where-Object { $_.Extension -in '.vsh', '.fsh', '.gsh' } |
+                Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'void\s+main' })
+        }
         if ($corrupt.Count -gt 0) {
             $names = ($corrupt | Select-Object -First 10 | ForEach-Object { $_.FullName }) -join "`n  "
             Remove-Item -Recurse -Force $vanillaDir -ErrorAction SilentlyContinue
@@ -393,6 +437,19 @@ function Invoke-OptimumBuild {
         throw "Vintage Story install not found. Point the installer to your VS folder or enable Download."
     }
     Write-Log "Using Vintage Story from: $VsPath"
+
+    # Validate shaders in the user's VS install. A previous partial extraction
+    # or corrupted install surfaces later as "blur.vsh ... unexpected $end".
+    $vsShaders = Join-Path $VsPath 'assets/game/shaders'
+    if (Test-Path $vsShaders) {
+        $badShaders = @(Get-ChildItem -Path $vsShaders -File |
+            Where-Object { $_.Extension -in '.vsh', '.fsh', '.gsh' } |
+            Where-Object { $_.Length -eq 0 -or ((Get-Content $_.FullName -Raw) -notmatch 'void\s+main') })
+        if ($badShaders.Count -gt 0) {
+            $names = ($badShaders | Select-Object -First 5 | ForEach-Object { $_.Name }) -join ', '
+            throw "Vintage Story shaders are corrupt ($names). Reinstall Vintage Story or delete the Optimum .vanilla cache and retry."
+        }
+    }
 
     if (-not (Find-ILSpyCmd)) {
         Write-Phase "Installing decompiler tool..."
@@ -542,7 +599,7 @@ function Invoke-OptimumBuild {
         $regKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1'
         New-Item -Path $regKey -Force | Out-Null
         Set-ItemProperty -Path $regKey -Name 'DisplayName' -Value "Optimum $requiredVer"
-        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.2'
+        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.3'
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
@@ -718,32 +775,53 @@ function Set-MissingActionCheckBox {
 function Update-PrereqStatus {
     # VS install
     $requiredVer = Get-RequiredVsVersion
-    $vsInfo = Find-VintageStory
-    if ($vsInfo) {
-        $script:detectedVsPath = $vsInfo.Path
-        $script:detectedVsVer = $vsInfo.Version
-        if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-            $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $requiredVer)"
-            $script:lblVsStatus.ForeColor = $colOrange
-            Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
-            # Keep the browse button so the user can point at another install
-            # when the detected one has the wrong version.
-            $script:btnVsBrowse.Visible = $true
-            $script:txtVsPath.Text = ''
-        } else {
-            $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $($vsInfo.Path)"
+
+    # Respect a path the user already browsed to: if txtVsPath holds a valid
+    # exe and its version matches, skip auto-detection entirely.
+    $userBrowsed = $script:txtVsPath.Text.Trim()
+    if ($userBrowsed -and (Test-Path (Join-Path $userBrowsed 'Vintagestory.exe'))) {
+        $browseVer = Get-VsExeVersion -Dir $userBrowsed
+        if ($browseVer -eq $requiredVer) {
+            $script:detectedVsPath = $userBrowsed
+            $script:detectedVsVer = $browseVer
+            $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $userBrowsed"
             $script:lblVsStatus.ForeColor = $colGreen
-            $script:txtVsPath.Text = $vsInfo.Path
             Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $false
             $script:btnVsBrowse.Visible = $false
+        } else {
+            $script:detectedVsPath = $userBrowsed
+            $script:detectedVsVer = $browseVer
+            $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $browseVer (need $requiredVer) - browse or download"
+            $script:lblVsStatus.ForeColor = $colOrange
+            Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
+            $script:btnVsBrowse.Visible = $true
         }
     } else {
-        $script:detectedVsPath = $null
-        $script:detectedVsVer = $null
-        $script:lblVsStatus.Text = [char]0x2717 + '  Vintage Story'
-        $script:lblVsStatus.ForeColor = $colRed
-        Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
-        $script:btnVsBrowse.Visible = $true
+        $vsInfo = Find-VintageStory
+        if ($vsInfo) {
+            $script:detectedVsPath = $vsInfo.Path
+            $script:detectedVsVer = $vsInfo.Version
+            if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
+                $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $requiredVer) - browse or download"
+                $script:lblVsStatus.ForeColor = $colOrange
+                Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
+                $script:btnVsBrowse.Visible = $true
+                $script:txtVsPath.Text = ''
+            } else {
+                $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $($vsInfo.Path)"
+                $script:lblVsStatus.ForeColor = $colGreen
+                $script:txtVsPath.Text = $vsInfo.Path
+                Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $false
+                $script:btnVsBrowse.Visible = $false
+            }
+        } else {
+            $script:detectedVsPath = $null
+            $script:detectedVsVer = $null
+            $script:lblVsStatus.Text = [char]0x2717 + '  Vintage Story'
+            $script:lblVsStatus.ForeColor = $colRed
+            Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
+            $script:btnVsBrowse.Visible = $true
+        }
     }
 
     # .NET 10 SDK
@@ -1177,7 +1255,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = 'vs1.22.3+v0.2.2'
+$lblVersion.Text = 'vs1.22.3+v0.2.3'
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1289,9 +1367,10 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $agreeForm.MinimizeBox = $false
     $agreeForm.BackColor = $colBg
 
-    $txt = New-Object System.Windows.Forms.RichTextBox
+    $txt = New-Object System.Windows.Forms.TextBox
     $txt.ReadOnly = $true
-    $txt.ScrollBars = [System.Windows.Forms.RichTextBoxScrollBars]::Vertical
+    $txt.Multiline = $true
+    $txt.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
     $txt.Location = New-Object System.Drawing.Point(16, 16)
     $txt.Size = New-Object System.Drawing.Size(492, 290)
     $txt.Text = $disclaimer -replace "`n", "`r`n"
@@ -1300,7 +1379,6 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $txt.Font = New-Object System.Drawing.Font('Segoe UI', 9)
     $txt.SelectionStart = 0
     $txt.SelectionLength = 0
-    $txt.DetectUrls = $false
     $agreeForm.Controls.Add($txt)
 
     $chk = New-Object System.Windows.Forms.CheckBox
@@ -1309,20 +1387,11 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $chk.AutoSize = $true
     $chk.ForeColor = $colText
     $chk.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-    $chk.Visible = $false
+    $chk.Visible = $true
     $agreeForm.Controls.Add($chk)
 
-    # Show the checkbox only after the user scrolls to the bottom.
-    $script:eulaScrolledToEnd = $false
-    $txt.Add_VScroll({
-        $pos = $txt.GetPositionFromCharIndex($txt.TextLength)
-        if ($pos.Y -le $txt.ClientSize.Height) {
-            if (-not $script:eulaScrolledToEnd) {
-                $script:eulaScrolledToEnd = $true
-                $chk.Visible = $true
-            }
-        }
-    })
+    # Checkbox visible immediately (TextBox has no VScroll event).
+    $script:eulaScrolledToEnd = $true
 
     $btnAccept = New-FlatButton -Text 'Continue' -W 110 -H 34
     $btnAccept.Location = New-Object System.Drawing.Point(270, 355)
@@ -1434,7 +1503,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             $existingSemver = ($fvi.ProductVersion -split '\+')[0]
         }
 
-        $thisVer = '0.2.2'
+        $thisVer = '0.2.3'
         if ($existingSemver) {
             if ([version]$existingSemver -lt [version]$thisVer) {
                 $r = [System.Windows.Forms.MessageBox]::Show(

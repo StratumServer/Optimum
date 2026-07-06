@@ -93,7 +93,7 @@ dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$BASE_APP/Vinta
 
 # 3. Version from OptimumInfo.cs.
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.2"
+OPT_VER="0.2.3"
 if [[ -f "$INFO_FILE" ]]; then
     MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
@@ -140,14 +140,14 @@ if [[ -d "$LANG_SRC" ]]; then
         [[ -f "$src_file" ]] || continue
         dst_file="$LANG_DST/$(basename "$src_file")"
         [[ -f "$dst_file" ]] || continue
-        # Explicit encoding='utf-8' on every open(): python3's default is the
-        # locale's preferred encoding, which is ASCII/C on a minimal/C-locale
-        # system and would mangle the lang files' non-ASCII characters
-        # (accented letters, the degree sign) on read.
+        # Read with utf-8-sig (strips BOM if present; vanilla lang files have one).
+        # Write with utf-8 (no BOM on output). Python's default encoding is the
+        # locale's preferred encoding (ASCII on a minimal/C-locale system),
+        # which would mangle non-ASCII characters.
         python3 -c "
 import json, sys
-with open(sys.argv[1], encoding='utf-8') as f: src = json.load(f)
-with open(sys.argv[2], encoding='utf-8') as f: dst = json.load(f)
+with open(sys.argv[1], encoding='utf-8-sig') as f: src = json.load(f)
+with open(sys.argv[2], encoding='utf-8-sig') as f: dst = json.load(f)
 dst.update(src)
 with open(sys.argv[2], 'w', encoding='utf-8') as f: json.dump(dst, f, ensure_ascii=False, indent='\t'); f.write('\n')
 " "$src_file" "$dst_file"
