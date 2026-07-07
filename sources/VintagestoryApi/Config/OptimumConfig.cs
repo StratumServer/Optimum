@@ -23,7 +23,7 @@ public static class OptimumConfig
     /// VSSurvivalMod) reference this assembly, not the Lib donor, so the version
     /// string can't come from one shared constant; update both on release.
     /// </summary>
-    public const string Version = "0.2.3";
+    public const string Version = "0.2.4";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;

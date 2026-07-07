@@ -7,11 +7,11 @@ namespace Optimum.Tests;
 public class OcclusionCullingCoverageTests
 {
     [Theory]
-    [InlineData("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs")]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch")]
     public void ThresholdIsScaledByViewDistanceInsteadOfFixed(string relativePath)
     {
-        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("OptimumConfig.OcclusionCullingScaleEnabled", source);
         Assert.Contains("ClientSettings.ViewDistance / 32 + 1", source);

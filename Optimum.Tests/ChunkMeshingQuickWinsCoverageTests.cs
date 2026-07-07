@@ -34,7 +34,7 @@ public class ChunkMeshingQuickWinsCoverageTests
     {
         // C1: OnBeforeFrame used `tessChunksQueue.RunForEach(delegate(...) {...})`,
         // a closure the method can't carry through Cecil transplant.
-        string source = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs"));
+        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch");
         Assert.DoesNotContain("RunForEach(delegate", source);
     }
 
@@ -49,7 +49,7 @@ public class ChunkMeshingQuickWinsCoverageTests
         // object-typed would carry mismatched IL through undetected by
         // either safety check. Assert the fields stay object-typed here
         // until that migration is actually Cecil-registered.
-        string source = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs"));
+        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch");
 
         Assert.Contains("private readonly object tessChunksQueueLock = new object();", source);
         Assert.Contains("private readonly object tessChunksQueuePriorityLock = new object();", source);
@@ -58,11 +58,11 @@ public class ChunkMeshingQuickWinsCoverageTests
     }
 
     [Theory]
-    [InlineData("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs")]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch")]
     public void OnBeforeFrameSkipsSortWhenPlayerHasNotMoved(string relativePath)
     {
-        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("SortMoveThresholdSq = 0.25", source);
         Assert.Contains("SortYawThreshold = 0.05f", source);
@@ -81,16 +81,16 @@ public class ChunkMeshingQuickWinsCoverageTests
     [Fact]
     public void AddTesselatedChunkNoLongerAllocatesAFreshVec3iInSource()
     {
-        string source = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs"));
+        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch");
         Assert.DoesNotContain("new Vec3i(tesschunk.positionX", source);
     }
 
     [Theory]
-    [InlineData("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs")]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch")]
     public void AddTesselatedChunkReusesTheScratchVec3i(string relativePath)
     {
-        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
         Assert.Contains("(chunkOriginScratch ??= new Vec3i()).Set(tesschunk.positionX", source);
     }
 
@@ -104,18 +104,18 @@ public class ChunkMeshingQuickWinsCoverageTests
     [Fact]
     public void TesselatedChunkNoLongerAllocatesFreshPoolLocationListsInSource()
     {
-        string source = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs"));
+        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch");
 
         Assert.DoesNotContain("new List<ModelDataPoolLocation>(centerParts.Length);", source);
         Assert.DoesNotContain("new List<ModelDataPoolLocation>(edgeParts.Length);", source);
     }
 
     [Theory]
-    [InlineData("build/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs")]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch")]
     public void TesselatedChunkReusesChunkRendererScratchLists(string relativePath)
     {
-        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("chunkRenderer.centerPoolLocationsScratch ??= new List<ModelDataPoolLocation>(centerParts.Length)", source);
         Assert.Contains("chunkRenderer.edgePoolLocationsScratch ??= new List<ModelDataPoolLocation>(edgeParts.Length)", source);

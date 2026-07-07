@@ -81,14 +81,31 @@ done
 
 check_cmd() { command -v "$1" &>/dev/null; }
 
+DOTNET_BIN=""  # set by check_dotnet10 on success
+
 check_dotnet10() {
-    check_cmd dotnet && dotnet --list-sdks 2>/dev/null | grep -q '^10\.'
+    # Probe known .NET install locations (PATH, dotnet-install.sh, system packages, snap).
+    DOTNET_BIN=""
+    if command -v dotnet &>/dev/null; then
+        DOTNET_BIN="dotnet"
+    elif [[ -x "$HOME/.dotnet/dotnet" ]]; then
+        DOTNET_BIN="$HOME/.dotnet/dotnet"
+    elif [[ -x "/usr/share/dotnet/dotnet" ]]; then
+        DOTNET_BIN="/usr/share/dotnet/dotnet"
+    elif [[ -x "/usr/lib/dotnet/dotnet" ]]; then
+        DOTNET_BIN="/usr/lib/dotnet/dotnet"
+    elif [[ -x "/snap/dotnet-sdk/current/dotnet" ]]; then
+        DOTNET_BIN="/snap/dotnet-sdk/current/dotnet"
+    fi
+
+    [[ -z "$DOTNET_BIN" ]] && return 1
+    "$DOTNET_BIN" --list-sdks 2>/dev/null | grep -q '^10\.'
 }
 
 get_required_vs_version() {
     local forks="$REPO_ROOT/forks.json"
     if [[ -f "$forks" ]]; then
-        grep -oP '"vintageStoryVersion"\s*:\s*"\K[^"]+' "$forks" || echo "1.22.3"
+        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.3"
     else
         echo "1.22.3"
     fi
@@ -105,8 +122,11 @@ detect_prereqs() {
     if check_dotnet10; then
         PREREQ_STATUS[dotnet]="ok"
         local ver
-        ver=$(dotnet --version 2>/dev/null || echo "10.x")
+        ver=$("$DOTNET_BIN" --version 2>/dev/null || echo "10.x")
         PREREQ_LABEL[dotnet]=".NET 10 SDK ($ver)"
+        if [[ "$DOTNET_BIN" != "dotnet" ]]; then
+            PREREQ_LABEL[dotnet]="${PREREQ_LABEL[dotnet]} [found at $DOTNET_BIN, not on PATH]"
+        fi
     else
         PREREQ_STATUS[dotnet]="missing"
         PREREQ_LABEL[dotnet]=".NET 10 SDK"
@@ -182,7 +202,7 @@ detect_prereqs() {
         local ilspy_ver="10.1.0.8386"
         if [[ -f "$REPO_ROOT/.config/dotnet-tools.json" ]]; then
             local parsed
-            parsed=$(grep -oP '"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"\K[^"]+' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
+            parsed=$(perl -0777 -ne 'if (/"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/s) { print $1; exit }' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
             if [[ -n "$parsed" ]]; then ilspy_ver="$parsed"; fi
         fi
         PREREQ_INSTALL_CMD[ilspycmd]="dotnet tool install -g ilspycmd --version $ilspy_ver"

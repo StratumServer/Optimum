@@ -1,3 +1,4 @@
+#if !NO_DONOR
 using System.Reflection;
 using Vintagestory.Client.NoObf;
 using Xunit;
@@ -27,3 +28,4 @@ public class CecilTransplantBoundaryTests
         Assert.Equal(typeof(object), field.FieldType);
     }
 }
+#endif

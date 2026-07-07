@@ -41,7 +41,7 @@ ifneq ($(VERSION),1.22.3)
   BOOTSTRAP_ARGS += --version $(VERSION)
 endif
 
-.PHONY: help check check-patches check-compat bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
+.PHONY: help check check-patches check-compat check-shaders bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-linux package-appimage package-macos package-win
 
 help: ## Show available targets
@@ -55,6 +55,9 @@ check-patches: ## Verify patch files against the current working tree
 
 check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
 	bash scripts/check-vanilla-compat.sh
+
+check-shaders: ## Verify optimized shader overlays are not truncated
+	bash scripts/validate-shader-assets.sh sources/shaders
 
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
@@ -81,7 +84,7 @@ patch-il: build ## Run Cecil patcher: vanilla DLL + compiled donor → patched o
 		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll
 	@echo ""
 
-deploy: patch-il ## Deploy Cecil-patched DLLs into vanilla client dir and install dir
+deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client dir and install dir
 	@echo "Deploying to $(VANILLA_DIR)..."
 	@cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(VANILLA_DIR)/VintagestoryLib.dll
 	@cp $(BUILD_OUT)/Vintagestory.dll $(VANILLA_DIR)/
@@ -92,7 +95,7 @@ deploy: patch-il ## Deploy Cecil-patched DLLs into vanilla client dir and instal
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
 	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
-	@if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(VANILLA_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1])); d=json.load(open(sys.argv[2])); d.update(s); json.dump(d,open(sys.argv[2],'w'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi
+	@if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(VANILLA_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi
 	@if [ -d "$(INSTALL_DIR)" ]; then \
 		echo "Deploying to $(INSTALL_DIR)..."; \
 		cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(INSTALL_DIR)/VintagestoryLib.dll; \
@@ -104,7 +107,7 @@ deploy: patch-il ## Deploy Cecil-patched DLLs into vanilla client dir and instal
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp sources/shaders/*.fsh sources/shaders/*.vsh $(INSTALL_DIR)/assets/game/shaders/; \
-		if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(INSTALL_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1])); d=json.load(open(sys.argv[2])); d.update(s); json.dump(d,open(sys.argv[2],'w'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi; \
+		if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(INSTALL_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi; \
 	fi
 	@echo "Deploy complete."
 

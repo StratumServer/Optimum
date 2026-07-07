@@ -9,7 +9,7 @@ public class EntityItemRendererCoverageTests
     [Fact]
     public void DoRender3DOpaqueGatesOnDistanceBeforeTheModuloSkip()
     {
-        string source = File.ReadAllText(FindRepositoryFile("VSEssentials/EntityRenderer/EntityItemRenderer.cs"));
+        string source = File.ReadAllText(FindRepositoryFile("patches/VSEssentials/EntityRenderer/EntityItemRenderer.cs.patch"));
 
         Assert.Contains("64.0 * 64.0", source);
         Assert.Contains("RunWittySkipRenderAlgorithm", source);

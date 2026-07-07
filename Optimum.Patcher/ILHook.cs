@@ -104,6 +104,11 @@ public static class ILHook
         int inserted = 0;
         foreach (var call in targetCalls)
         {
+            if (AlreadyCallsHook(call.Next, hookMethodName))
+            {
+                continue;
+            }
+
             // After the target call: its return value (GuiComposer) is on the stack.
             // Insert AFTER the call: stloc tmp; ldarg.0; ldloc tmp; call hook; [result back on stack]
             var retLocal = new VariableDefinition(vanillaAsm.MainModule.ImportReference(hookMethod.ReturnType));
@@ -123,6 +128,22 @@ public static class ILHook
         method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, method.Body.MaxStackSize + 2);
         Console.WriteLine($"  HOOKED: {typeName}::{methodName} after {targetCallName} → {hookMethodName} ({inserted} sites)");
         return true;
+    }
+
+    private static bool AlreadyCallsHook(Instruction? start, string hookMethodName)
+    {
+        Instruction? cursor = start;
+        for (int i = 0; i < 6 && cursor != null; i++, cursor = cursor.Next)
+        {
+            if ((cursor.OpCode == OpCodes.Call || cursor.OpCode == OpCodes.Callvirt) &&
+                cursor.Operand is MethodReference method &&
+                method.Name == hookMethodName)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
