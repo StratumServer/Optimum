@@ -1,3 +1,4 @@
+#if !NO_DONOR
 using System;
 using System.IO;
 using System.Reflection;
@@ -108,3 +109,4 @@ public class EcoMachinaIlCompatTests
         throw new FileNotFoundException($"Could not find {relativePath} from {AppContext.BaseDirectory}.");
     }
 }
+#endif

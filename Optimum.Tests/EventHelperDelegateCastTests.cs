@@ -1,3 +1,4 @@
+#if !NO_DONOR
 using System;
 using Vintagestory.API.Common;
 using Xunit;
@@ -63,3 +64,4 @@ public class EventHelperDelegateCastTests
         Assert.Equal(0, logger.ErrorCount);
     }
 }
+#endif

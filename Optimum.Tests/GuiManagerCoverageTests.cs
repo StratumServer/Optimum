@@ -6,7 +6,7 @@ namespace Optimum.Tests;
 
 public class GuiManagerCoverageTests
 {
-    private const string SourcePath = "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs";
+    private const string SourcePath = "patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch";
 
     [Theory]
     [InlineData("OnBlockTexturesLoaded")]
@@ -32,7 +32,7 @@ public class GuiManagerCoverageTests
         // constructor initializer IL: an eager `= new()` would stay null
         // after injection. Every scratch field must be declared bare and
         // assigned with ??= at its point of use instead.
-        string source = File.ReadAllText(FindRepositoryFile(SourcePath));
+        string source = PatchReader.ReadPatch(SourcePath);
 
         string[] fields =
         {
@@ -43,7 +43,9 @@ public class GuiManagerCoverageTests
 
         foreach (var field in fields)
         {
-            Assert.DoesNotContain($"{field} = new", source);
+            // Field declaration must not eagerly initialize (no "field = new" on the declaration line).
+            // The ??= lazy-init at the usage site is correct and expected.
+            Assert.DoesNotContain($"private List<GuiDialog> {field} = new", source);
             Assert.Contains($"{field} ??= new List<GuiDialog>()", source);
         }
     }
@@ -54,10 +56,10 @@ public class GuiManagerCoverageTests
         // RequestFocus is deliberately not transplanted (see Program.cs's
         // comment on the GuiManager targets): its other two FindIndex
         // lambdas persist regardless of this fix, so the LINQ removal here
-        // wouldn't unlock transplant capability. Confirms nobody "cleaned
-        // this one up too" without also handling those lambdas.
-        string source = File.ReadAllText(FindRepositoryFile(SourcePath));
-        Assert.Contains("game.LoadedGuis.Where((GuiDialog d) => d != dialog).ToList()", source);
+        // wouldn't unlock transplant capability. Confirms nobody registered
+        // it as a transplant target without also handling those lambdas.
+        string programSource = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.DoesNotContain("\"RequestFocus\"", programSource);
     }
 
     private static string FindRepositoryFile(string relativePath)

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..c02d2a0 100644
+index 4d08f84..f44112a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -184,7 +184,7 @@ index 4d08f84..c02d2a0 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1902,22 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1902,24 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
@@ -194,16 +194,18 @@ index 4d08f84..c02d2a0 100644
 +	// ponytail: helper for IL hook. Cecil inserts call after EndIf.
 +	private Vintagestory.API.Client.GuiComposer _AddOptimumTab(Vintagestory.API.Client.GuiComposer c)
 +	{
++		CairoFont font = CairoFont.ButtonText();
++		TextExtents ext = font.GetTextExtents(Lang.Get("optimum-tab-header"));
++		double w = ext.Width / (double)ClientSettings.GUIScale + 15.0;
 +		if (oButtonBounds == null)
 +		{
-+			CairoFont font = CairoFont.ButtonText();
-+			TextExtents ext = font.GetTextExtents(Lang.Get("optimum-tab-header"));
-+			double w = ext.Width / (double)ClientSettings.GUIScale + 15.0;
 +			oButtonBounds = ElementBounds.Fixed(0.0, 0.0, w, 40.0).WithFixedPadding(0.0, 3.0);
-+			ElementBounds anchor = ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds;
-+			if (anchor != null) oButtonBounds.FixedRightOf(anchor, 15.0);
-+			if (anchor?.ParentBounds != null) oButtonBounds.ParentBounds = anchor.ParentBounds;
 +		}
++		ElementBounds anchor = ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds;
++		oButtonBounds.WithFixedWidth(w);
++		if (anchor != null) oButtonBounds.FixedRightOf(anchor, 15.0);
++		if (anchor?.ParentBounds != null) oButtonBounds.ParentBounds = anchor.ParentBounds;
++		backButtonBounds.FixedRightOf(oButtonBounds, 25.0);
 +		return GuiComposerHelpers.AddToggleButton(c, Lang.Get("optimum-tab-header"), CairoFont.ButtonText(), OnOptimumOptions, oButtonBounds, "optimum");
 +	}
  }

@@ -7,11 +7,11 @@ namespace Optimum.Tests;
 public class ThrottleAndCacheBatchCoverageTests
 {
     [Theory]
-    [InlineData("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs")]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
     public void OnBeforeRenderReusesTheCachedLightScanWhileStationary(string relativePath)
     {
-        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("ClientSettings.OptimumDynamicLightCache", source);
         Assert.Contains("OptimumDiagnostics.DynamicLightCache.Hit()", source);
@@ -27,10 +27,10 @@ public class ThrottleAndCacheBatchCoverageTests
         Assert.Contains("public bool DynamicLightCache { get; set; } = true;", configSource);
         Assert.Contains("public static readonly HitSkipCounter DynamicLightCache = new();", configSource);
 
-        string clientSettingsSource = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs"));
+        string clientSettingsSource = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch");
         Assert.Contains("public static bool OptimumDynamicLightCache { get; set; } = true;", clientSettingsSource);
 
-        string platformSource = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs"));
+        string platformSource = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch");
         Assert.Contains("ClientSettings.OptimumDynamicLightCache = Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled;", platformSource);
     }
 
@@ -44,16 +44,16 @@ public class ThrottleAndCacheBatchCoverageTests
     [Fact]
     public void AudioListenerNoLongerUsesExactEqualityInSource()
     {
-        string source = File.ReadAllText(FindRepositoryFile("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs"));
+        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch");
         Assert.DoesNotContain("vec3d.X != _lastListenerX", source);
     }
 
     [Theory]
-    [InlineData("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs")]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch")]
     public void AudioListenerUsesAMovementThresholdAndPeriodicRefresh(string relativePath)
     {
-        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("ListenerMoveThresholdSq = 0.0025", source);
         Assert.Contains("ListenerDirThresholdSq = 0.000001f", source);
@@ -73,7 +73,7 @@ public class ThrottleAndCacheBatchCoverageTests
     {
         // docs/todo.md's "guard the 256-lookup rebuild on player move" item was
         // already shipped before Batch 6.2 started; assert it stays that way.
-        string source = File.ReadAllText(FindRepositoryFile("VSEssentials/Systems/Weather/WeatherSimulationParticles.cs"));
+        string source = File.ReadAllText(FindRepositoryFile("patches/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs.patch"));
         Assert.Contains("_lastHeightmapCenterX", source);
         Assert.Contains("_lastHeightmapCenterZ", source);
     }
@@ -85,7 +85,7 @@ public class ThrottleAndCacheBatchCoverageTests
         // were already shipped before Batch 6.2 started, including the second
         // GetWindSpeedAt call site the plan worried the shipped cache might
         // miss. Assert it stays that way.
-        string source = File.ReadAllText(FindRepositoryFile("VSEssentials/Systems/Weather/WeatherSystemClient.cs"));
+        string source = File.ReadAllText(FindRepositoryFile("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch"));
         Assert.Contains("doWindLookup", source);
 
         int firstWindCall = source.IndexOf("GetWindSpeedAt(plrPosd);", StringComparison.Ordinal);

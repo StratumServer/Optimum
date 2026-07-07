@@ -14,7 +14,7 @@ index a7911ea..08d1975 100644
 +        /// <summary>
 +        /// Optimum version tag appended to the game version display.
 +        /// </summary>
-+        public const string OptimumVersion = "0.2.3";
++        public const string OptimumVersion = "0.2.4";
  
          /// <summary>
          /// Whether this is a stable or unstable version
