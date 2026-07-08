@@ -8,7 +8,6 @@ public class OcclusionCullingCoverageTests
 {
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch")]
     public void ThresholdIsScaledByViewDistanceInsteadOfFixed(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));

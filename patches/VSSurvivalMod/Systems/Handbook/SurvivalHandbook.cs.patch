@@ -2,7 +2,9 @@ diff --git a/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs b/VSSurvivalMod/
 index 0d88b9f..e29104b 100644
 --- a/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs
 +++ b/VSSurvivalMod/Systems/Handbook/SurvivalHandbook.cs
-@@ -119,12 +119,22 @@ namespace Vintagestory.GameContent
+@@ -117,16 +117,26 @@ namespace Vintagestory.GameContent
+ 
+             foreach (ItemStack stack in ObjectCacheUtil.TryGet<ItemStack[]>(capi, "handbookallstacks"))
              {
                  if (capi.IsShuttingDown) break;
  
@@ -29,3 +31,5 @@ index 0d88b9f..e29104b 100644
              }
  
              return pages;
+         }
+ 

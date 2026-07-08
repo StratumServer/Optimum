@@ -1,0 +1,50 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
+index 25daa7f..c9911f8 100644
+--- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
++++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
+@@ -46,10 +46,45 @@ public class ClientProgram
+ 
+ 	public static ScreenManager screenManager;
+ 
+ 	public static void Main(string[] rawArgs)
+ 	{
++		// Optimum: if no --dataPath argument was passed, check for a datapath.cfg
++		// file next to the executable. The installer writes this file when the user
++		// selects a separate data folder, so double-clicking the game executable
++		// works the same as launching from the shortcut that carries the argument.
++		// This lives here (not in the per-platform entry shim) because the entry
++		// class differs per OS: ClientLinux, ClientWindows, ClientMac. Written
++		// lambda-free so the body survives the Mono.Cecil transplant (Optimum.Patcher).
++		bool hasDataPathArg = false;
++		foreach (string arg in rawArgs)
++		{
++			if (arg.StartsWith("--dataPath", StringComparison.OrdinalIgnoreCase))
++			{
++				hasDataPathArg = true;
++				break;
++			}
++		}
++		if (!hasDataPathArg)
++		{
++			string exeDir = AppContext.BaseDirectory;
++			if (!string.IsNullOrEmpty(exeDir))
++			{
++				string cfgFile = Path.Combine(exeDir, "datapath.cfg");
++				if (File.Exists(cfgFile))
++				{
++					string cfgPath = File.ReadAllText(cfgFile).Trim();
++					if (cfgPath.Length > 0 && Directory.Exists(cfgPath))
++					{
++						string[] array = new string[rawArgs.Length + 1];
++						rawArgs.CopyTo(array, 0);
++						array[rawArgs.Length] = "--dataPath=" + cfgPath;
++						rawArgs = array;
++					}
++				}
++			}
++		}
+ 		AppDomain.CurrentDomain.AssemblyResolve += AssemblyResolver.AssemblyResolve;
+ 		ClientProgram.rawArgs = rawArgs;
+ 		new ClientProgram(rawArgs);
+ 	}
+ 

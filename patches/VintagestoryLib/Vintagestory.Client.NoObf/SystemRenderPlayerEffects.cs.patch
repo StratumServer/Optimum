@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..4c2e97f 100644
+index 2eca300..287d586 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 2eca300..4c2e97f 100644
  namespace Vintagestory.Client.NoObf;
  
  public class SystemRenderPlayerEffects : ClientSystem
-@@ -31,18 +33,75 @@ public class SystemRenderPlayerEffects : ClientSystem
+@@ -31,22 +33,80 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
@@ -91,4 +91,9 @@ index 2eca300..4c2e97f 100644
  		foreach (Entity entity in array)
  		{
  			byte[] lightHsv = entity.LightHsv;
++			if (lightHsv == null || entity.Pos == null) continue;
  			AddPointLight(lightHsv, entity.Pos);
+ 		}
+ 		for (int num2 = 0; num2 < game.pointlights.Count; num2++)
+ 		{
+ 			IPointLight pointLight = game.pointlights[num2];

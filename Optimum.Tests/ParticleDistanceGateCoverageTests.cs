@@ -33,7 +33,6 @@ public class ParticleDistanceGateCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch")]
     public void SpawnParticlesGateReferencesTheRightConfigAndDiagnostics(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));

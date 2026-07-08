@@ -291,3 +291,20 @@ fi
 if [[ "$strict_unavailable" == "1" && "$unavailable" -gt 0 ]]; then
   exit 1
 fi
+
+# Orphan check: every VintagestoryLib patch must be in cecil-owned.list.
+# The recompiled VintagestoryLib.dll never ships (ILSpy loses FieldRVA),
+# so a Lib patch not on the cecil list never reaches players.
+orphans=0
+while IFS= read -r -d '' patch; do
+  rel="${patch#$repo_root/}"
+  if [[ -z "${cecil_owned["$rel"]:-}" ]]; then
+    echo "ORPHAN: $rel (not in cecil-owned.list, will not ship)" >&2
+    orphans=$((orphans+1))
+  fi
+done < <(find "$patches_dir/VintagestoryLib" -type f -name '*.patch' -print0 2>/dev/null | sort -z)
+
+if [[ "$orphans" -gt 0 ]]; then
+  echo "$orphans orphaned VintagestoryLib patch(es) found. Add to cecil-owned.list or remove." >&2
+  exit 1
+fi

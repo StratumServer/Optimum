@@ -8,7 +8,6 @@ public class ChiselLodCoverageTests
 {
     [Theory]
     [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
-    [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
     public void ChiselLodRegistersFullMeshForMediumRange(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -22,7 +21,6 @@ public class ChiselLodCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
     [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
     public void ChiselLodBuildsProxyFromMajorityMaterial(string relativePath)
     {
@@ -49,7 +47,6 @@ public class ChiselLodCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch")]
     public void ChiselLodRoutesIntoSeparateChunkPools(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -75,7 +72,6 @@ public class ChiselLodCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch")]
     public void ChiselLodPoolsAreAllocatedInTransplantedAtlasUpdate(string relativePath)
     {
@@ -136,7 +132,6 @@ public class ChiselLodCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
     [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
     public void ChiselLodMicroblockRecordsDiagnostics(string relativePath)
     {

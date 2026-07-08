@@ -140,6 +140,20 @@ var membersToInject = new Dictionary<string, List<string>>
         "_lastSortPlayerPos",
         "_lastSortYaw",
     },
+    // ChunkTesselator: chisel LOD pool routing helpers and fields
+    ["Vintagestory.Client.NoObf.ChunkTesselator"] = new()
+    {
+        "currentOptimumChiselModeldataByRenderPassByLodLevel",
+        "centerOptimumChiselModeldataByRenderPassByLodLevel",
+        "edgeOptimumChiselModeldataByRenderPassByLodLevel",
+        "MergeTesselatedChunkParts",
+        "populateTesselatedChunkPart",
+    },
+    // TesselatedChunkPart: carry chisel LOD distance choice into pool locations
+    ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()
+    {
+        "optimumUseChiselLodDistance",
+    },
 };
 
 // --- Phase 1: Method bodies to transplant ---
@@ -203,8 +217,19 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkRenderer", "AddTesselatedChunk", 2),
     new("Vintagestory.Client.NoObf.TesselatedChunk", "AddCenterToPools", 5),
     new("Vintagestory.Client.NoObf.TesselatedChunk", "AddEdgeToPools", 5),
+    // Chisel LOD: route microblock meshes into separate LOD pools and propagate distance flags
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "UpdateForAtlasses", 1),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "NowProcessChunk", 5),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons", 3),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons_EdgeOnly", 3),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildDecorPolygons", 5),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "GetMeshPoolForPass", 3),
+    new("Vintagestory.Client.NoObf.TesselatedChunkPart", "AddModelAndStoreLocation", 8),
     // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
     new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),
+    // datapath.cfg support: entry shims (ClientLinux/ClientWindows/ClientMac) all
+    // funnel into this Main, so the arg injection lives here (lambda-free)
+    new("Vintagestory.Client.ClientProgram", "Main", 1),
     // Mod-crash containment: a mod exception in GetHeldItemInfo during the
     // background search-cache build otherwise kills the client (SmithingPlus
     // shutdown race, unhandled on the TyronThreadPool thread).

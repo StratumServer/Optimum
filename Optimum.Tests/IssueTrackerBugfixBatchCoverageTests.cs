@@ -23,7 +23,6 @@ public class IssueTrackerBugfixBatchCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch")]
     public void RenderMultiTextureMeshSkipsDisposedMeshrefs(string relativePath)
     {
         // #8881/#8950/#8982-class: rendering a disposed meshref feeds freed

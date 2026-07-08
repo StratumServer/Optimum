@@ -836,7 +836,7 @@ try {
     Repair-BaseCtorCalls -Roots @((Join-Path $repoRoot 'build/VintagestoryLib'), (Join-Path $repoRoot 'build/Vintagestory'))
 
     # Vintagestory.csproj - needs ProjectReference to VintagestoryLib (not vanilla DLL).
-    # ClientLinux.cs uses Vintagestory.Client namespace which lives in the VintagestoryLib project.
+    # The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
     $vsEntryCsproj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
     Update-FileInPlace $vsEntryCsproj {
         param($t)
