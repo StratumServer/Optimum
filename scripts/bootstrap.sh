@@ -539,7 +539,7 @@ fi
 python3 "$script_dir/fix-base-ctor-calls.py" "$repo_root/build/VintagestoryLib" "$repo_root/build/Vintagestory"
 
 # 6g-extra: Vintagestory.csproj - needs ProjectReference to VintagestoryLib (not vanilla DLL).
-# ClientLinux.cs uses Vintagestory.Client namespace which lives in the VintagestoryLib project.
+# The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
 vs_entry_csproj="$repo_root/build/Vintagestory/Vintagestory.csproj"
 if [[ -f "$vs_entry_csproj" ]]; then
   perl -pi -e 's|<Reference Include="VintagestoryLib">|<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj">|' "$vs_entry_csproj"

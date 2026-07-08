@@ -8,7 +8,6 @@ public class ThrottleAndCacheBatchCoverageTests
 {
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
     public void OnBeforeRenderReusesTheCachedLightScanWhileStationary(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -49,7 +48,6 @@ public class ThrottleAndCacheBatchCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch")]
     public void AudioListenerUsesAMovementThresholdAndPeriodicRefresh(string relativePath)
     {

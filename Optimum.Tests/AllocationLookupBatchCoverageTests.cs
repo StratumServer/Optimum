@@ -22,7 +22,6 @@ public class AllocationLookupBatchCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch")]
     public void UpdateFreeMouseUsesASinglePassOverOpenedGuis(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -44,7 +43,6 @@ public class AllocationLookupBatchCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch")]
     public void OnBeforeRenderReadsPlayerXZDirectly(string relativePath)
     {
@@ -77,7 +75,6 @@ public class AllocationLookupBatchCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
     public void AmbientManagerScratchFieldsAreLazilyConstructed(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -107,7 +104,6 @@ public class AllocationLookupBatchCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
     public void SetWaterColorsUsesNonAllocatingColorUtilOverloadsAndMutatesWaterMurkColorInPlace(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -126,7 +122,6 @@ public class AllocationLookupBatchCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
     public void UpdateDaylightReusesScratchBlockPosWithDimensionAwareSet(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -144,7 +139,6 @@ public class AllocationLookupBatchCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch")]
     public void UpdateColorGradingValuesUsesSetAndCorrectDimension(string relativePath)
     {
@@ -173,7 +167,6 @@ public class AllocationLookupBatchCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch")]
     public void OnRenderFrame3DReusesScratchVectorsInsteadOfAllocatingEveryFrame(string relativePath)
     {

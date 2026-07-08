@@ -59,7 +59,6 @@ public class ChunkMeshingQuickWinsCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch")]
     public void OnBeforeFrameSkipsSortWhenPlayerHasNotMoved(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -87,7 +86,6 @@ public class ChunkMeshingQuickWinsCoverageTests
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch")]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch")]
     public void AddTesselatedChunkReusesTheScratchVec3i(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -111,7 +109,6 @@ public class ChunkMeshingQuickWinsCoverageTests
     }
 
     [Theory]
-    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch")]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch")]
     public void TesselatedChunkReusesChunkRendererScratchLists(string relativePath)
     {
