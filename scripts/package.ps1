@@ -63,6 +63,7 @@ function Resolve-WindowsVanilla {
     if (-not (Test-Path (Join-Path $winDir 'Vintagestory.exe'))) {
         throw "Extraction failed: Vintagestory.exe not found under $winDir"
     }
+    Copy-Item -Force (Join-Path $winDir 'VintagestoryLib.dll') (Join-Path $winDir 'VintagestoryLib.vanilla.dll')
     return $winDir
 }
 
@@ -77,12 +78,16 @@ try {
         throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
     }
     $patchedLib = Join-Path $libOut 'VintagestoryLib-patched.dll'
-    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- (Join-Path $vanillaDir 'VintagestoryLib.dll') (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
+    $vanillaLib = Join-Path $vanillaDir 'VintagestoryLib.vanilla.dll'
+    if (-not (Test-Path $vanillaLib)) {
+        throw "Pristine vanilla VintagestoryLib.vanilla.dll not found in $vanillaDir. Delete the matching .vanilla cache and re-run packaging."
+    }
+    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
     if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
 
     # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
     $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.3'
+    $optVer = '0.2.5'
     if (Test-Path $infoFile) {
         $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($match.Success) { $optVer = $match.Groups[1].Value }
@@ -100,6 +105,7 @@ try {
     # Apply optimized DLLs over the copy.
     Write-Host "Applying optimized DLLs..."
     Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll') $stageDir
+    Copy-Item -Force (Join-Path $buildOut 'Vintagestory.runtimeconfig.json') $stageDir
     Copy-Item -Force $patchedLib (Join-Path $stageDir 'VintagestoryLib.dll')
     $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
     Copy-Item -Force (Join-Path $apiOut 'VintagestoryAPI.dll') $stageDir

@@ -398,6 +398,7 @@ build_and_package() {
         log "Building Optimum..."
         local make_args=()
         if [[ -n "$VERSION" ]]; then make_args+=(VERSION="$VERSION"); fi
+        make "${make_args[@]}" refresh
         make "${make_args[@]}" build
     fi
 
@@ -444,6 +445,8 @@ write_launcher() {
     local launcher="$INSTALL_DIR/optimum-launch.sh"
     if [[ -n "$DATA_PATH" ]]; then
         mkdir -p "$DATA_PATH"
+        # Write datapath.cfg so the .NET launcher reads it on direct exe launch.
+        printf '%s' "$DATA_PATH" > "$INSTALL_DIR/datapath.cfg"
         cat > "$launcher" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -451,6 +454,7 @@ cd "\$(dirname "\${BASH_SOURCE[0]}")"
 exec ./run.sh --dataPath $(printf '%q' "$DATA_PATH") "\$@"
 EOF
     else
+        rm -f "$INSTALL_DIR/datapath.cfg"
         cat > "$launcher" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail

@@ -65,19 +65,28 @@ try {
     # 2. Extract the base install (vintagestory/) once.
     $baseRoot   = Join-Path $repoRoot '.vanilla/linux-x64'
     $vanillaDir = Join-Path $baseRoot 'vintagestory'
+    $extractedFresh = $false
     if (-not (Test-Path $vanillaDir)) {
         New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
         Write-Host "Extracting to $baseRoot"
         tar -xzf $ClientArchive -C $baseRoot
+        $extractedFresh = $true
     }
     if (-not (Test-Path $vanillaDir)) { throw "Extraction failed: $vanillaDir not found" }
+    if ($extractedFresh) {
+        Copy-Item -Force (Join-Path $vanillaDir 'VintagestoryLib.dll') (Join-Path $vanillaDir 'VintagestoryLib.vanilla.dll')
+    }
     $patchedLib = Join-Path $libOut 'VintagestoryLib-patched.dll'
-    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- (Join-Path $vanillaDir 'VintagestoryLib.dll') (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
+    $vanillaLib = Join-Path $vanillaDir 'VintagestoryLib.vanilla.dll'
+    if (-not (Test-Path $vanillaLib)) {
+        throw "Pristine vanilla VintagestoryLib.vanilla.dll not found in $vanillaDir. Delete the matching .vanilla cache and re-run packaging."
+    }
+    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
     if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
 
     # 3. Version from OptimumInfo.cs.
     $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.3'
+    $optVer = '0.2.5'
     if (Test-Path $infoFile) {
         $m = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
         if ($m.Success) { $optVer = $m.Groups[1].Value }
