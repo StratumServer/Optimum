@@ -1,0 +1,57 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/SlideshowGridRecipeTextComponent.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/SlideshowGridRecipeTextComponent.cs
+index 5fb4cdb..02b79bb 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/SlideshowGridRecipeTextComponent.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/SlideshowGridRecipeTextComponent.cs
+@@ -34,10 +34,13 @@ namespace Vintagestory.API.Client
+         private readonly double size;
+         private readonly Dictionary<string, ItemStack[]> resolvedIngredientsCache = [];
+         private readonly Dictionary<int, LoadedTexture> extraTexts = [];
+         private readonly ItemSlot currentVisibleOutputSlot = new DummySlot();
+         private readonly ItemSlot[] currentVisibleInputs = [new DummySlot(), new DummySlot(), new DummySlot(), new DummySlot(), new DummySlot(), new DummySlot(), new DummySlot(), new DummySlot(), new DummySlot()];
++        // ponytail: reuse 9 ElementBounds per frame instead of allocating 18 objects (9 bounds + 9 empty parents).
++        // Ceiling: 9 fixed slots. A grid larger than 3x3 would need resizing, but VS recipes are always 3x3.
++        private readonly ElementBounds[] scissorBoundsCache = InitScissorBoundsCache();
+         private LoadedTexture? hoverTexture;
+         private int secondCounter = 0;
+         private float secondsVisible = 1;
+         private int currentItemIndex;
+         private static readonly int[][,] variantDisplaySequence = new int[30][,];
+@@ -51,10 +54,21 @@ namespace Vintagestory.API.Client
+         /// <param name="gridRecipes"></param>
+         /// <param name="size"></param>
+         /// <param name="floatType"></param>
+         /// <param name="onStackClicked"></param>
+         /// <param name="allStacks">If set, will resolve wildcards based on this list, otherwise will search all available blocks/items</param>
++        private static ElementBounds[] InitScissorBoundsCache()
++        {
++            var cache = new ElementBounds[9];
++            var sharedParent = new ElementEmptyBounds();
++            for (int i = 0; i < 9; i++)
++            {
++                cache[i] = new ElementBounds { BothSizing = ElementSizing.Fixed, ParentBounds = sharedParent };
++            }
++            return cache;
++        }
++
+         public SlideshowGridRecipeTextComponent(ICoreClientAPI api, GridRecipe[] gridRecipes, double size, EnumFloat floatType, Action<ItemStack>? onStackClicked = null, ItemStack[]? allStacks = null) : base(api)
+         {
+             size = GuiElement.scaled(size);
+             double innerMargin = GuiElement.scaled(3);
+ 
+@@ -199,11 +213,15 @@ namespace Vintagestory.API.Client
+ 
+                     rx = renderX + bounds.X + x * (size + GuiElement.scaled(3));
+                     ry = renderY + bounds.Y + y * (size + GuiElement.scaled(3));
+ 
+                     float scale = RuntimeEnv.GUIScale;
+-                    ElementBounds scissorBounds = ElementBounds.Fixed(rx / scale, ry / scale, size / scale, size / scale).WithEmptyParent();
++                    ElementBounds scissorBounds = scissorBoundsCache[x + y * 3];
++                    scissorBounds.fixedX = rx / scale;
++                    scissorBounds.fixedY = ry / scale;
++                    scissorBounds.fixedWidth = size / scale;
++                    scissorBounds.fixedHeight = size / scale;
+                     scissorBounds.CalcWorldBounds();
+ 
+                     if (mouseover)
+                     {
+                         //capi.Render.Render2DTexture(hoverTexture.TextureId, (float)(scissorBounds.renderX), (float)(scissorBounds.renderY), (float)scissorBounds.InnerWidth, (float)scissorBounds.InnerHeight, (float)renderZ);

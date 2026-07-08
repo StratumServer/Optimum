@@ -8,10 +8,13 @@ namespace Vintagestory.GameContent;
 
 public class OptimumStatusModSystem : ModSystem
 {
+    private ICoreClientAPI api;
+
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
 
     public override void StartClientSide(ICoreClientAPI api)
     {
+        this.api = api;
         api.ChatCommands.GetOrCreate("optimum")
             .WithDescription(Lang.Get("optimum-cmd-description"))
             .RequiresPrivilege(Privilege.chat)
@@ -26,6 +29,27 @@ public class OptimumStatusModSystem : ModSystem
                     OptimumDiagnostics.ResetAllCounters();
                     return TextCommandResult.Success(Lang.Get("optimum-cmd-reset-done"));
                 })
+            .EndSubCommand()
+            .BeginSubCommand("chisel")
+                .WithDescription("Chisel LOD diagnostics")
+                .BeginSubCommand("lodstats")
+                    .WithDescription("Show chisel LOD counters")
+                    .HandleWith(_ =>
+                    {
+                        string summary = OptimumDiagnostics.GetChiselLodSummary();
+                        api.Logger.Notification("[Optimum] chisel lodstats:\n" + summary);
+                        return TextCommandResult.Success(summary);
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("lodreset")
+                    .WithDescription("Reset chisel LOD counters")
+                    .HandleWith(_ =>
+                    {
+                        OptimumDiagnostics.ResetChiselLod();
+                        api.Logger.Notification("[Optimum] chisel LOD diagnostics reset");
+                        return TextCommandResult.Success("Chisel LOD diagnostics reset.");
+                    })
+                .EndSubCommand()
             .EndSubCommand();
     }
 

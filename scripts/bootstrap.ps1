@@ -567,7 +567,9 @@ try {
                 Convert-ToLf $base
             }
 
-            Copy-TreeFresh $base (Join-Path $repoRoot $name)
+            $dst = Join-Path $repoRoot $name
+            Copy-TreeFresh $base $dst
+            Convert-ToLf $dst
         }
 
         # --- 3b. Clone reference repos (for code reading, not compilation). ---
