@@ -103,7 +103,7 @@ dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "
 
 # 3. Version from OptimumInfo.cs.
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.6"
+OPT_VER="0.2.7"
 if [[ -f "$INFO_FILE" ]]; then
     MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi

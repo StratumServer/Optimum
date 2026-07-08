@@ -140,8 +140,17 @@ public class ChiselLodCoverageTests
         Assert.Contains("RouteChiselLodMeshes = true", source);
         Assert.Contains("RouteChiselLodMeshes = false", source);
         Assert.Contains("OptimumDiagnostics.RecordChiselLod", source);
+    }
+
+    [Fact]
+    public void ChiselLodCommandsRegisteredClientSide()
+    {
+        string source = File.ReadAllText(FindRepositoryFile("sources/VSEssentials/Systems/OptimumStatus.cs"));
+
         Assert.Contains("lodstats", source);
         Assert.Contains("lodreset", source);
+        Assert.Contains("GetChiselLodSummary", source);
+        Assert.Contains("ResetChiselLod", source);
     }
 
     private static string FindRepositoryFile(string relativePath)
