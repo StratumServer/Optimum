@@ -10,6 +10,10 @@
          (CS8600-series), so it silences CS8632 without new noise. -->
     <Nullable>annotations</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Enable long path support on Windows. ILSpy's source generators emit
+         filenames exceeding 260 chars (regex generated sources with hashes).
+         Builds under deep %TEMP% paths (usernames with spaces) fail without this. -->
+    <LongPathAware>true</LongPathAware>
     <NoWarn>$(NoWarn);CS1591;CS1572;CS1573;CS1570;CS0649;CS0414;CS0169;CS0162;CS0168;CS0067;NU1904</NoWarn>
     <!-- NU1904: System.Drawing.Common 4.5.0 CVE. Vanilla pins this version.
          VS uses SkiaSharp for all image processing; System.Drawing is never

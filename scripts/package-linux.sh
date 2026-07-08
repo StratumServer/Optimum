@@ -173,25 +173,35 @@ fi
 
 BASE_ROOT="$REPO_ROOT/.vanilla/linux-x64"
 VANILLA_DIR="$BASE_ROOT/vintagestory"
+EXTRACTED_FRESH=0
 
 if [[ ! -d "$VANILLA_DIR" ]]; then
     mkdir -p "$BASE_ROOT"
     echo "Extracting to $BASE_ROOT"
     tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
+    EXTRACTED_FRESH=1
 fi
 
 if [[ ! -d "$VANILLA_DIR" ]]; then
     echo "Error: extraction failed, $VANILLA_DIR not found" >&2
     exit 1
 fi
-dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_DIR/VintagestoryLib.dll" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
+if [[ "$EXTRACTED_FRESH" == "1" ]]; then
+    cp -f "$VANILLA_DIR/VintagestoryLib.dll" "$VANILLA_DIR/VintagestoryLib.vanilla.dll"
+fi
+VANILLA_LIB="$VANILLA_DIR/VintagestoryLib.vanilla.dll"
+if [[ ! -f "$VANILLA_LIB" ]]; then
+    echo "Error: pristine vanilla VintagestoryLib.vanilla.dll not found in $VANILLA_DIR. Delete the matching .vanilla cache and re-run packaging." >&2
+    exit 1
+fi
+dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
 # ============================================================================
 # 3. Version from OptimumInfo.cs
 # ============================================================================
 
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.3"
+OPT_VER="0.2.5"
 if [[ -f "$INFO_FILE" ]]; then
     MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
@@ -213,6 +223,7 @@ cp -a "$VANILLA_DIR" "$STAGE_DIR"
 # ============================================================================
 
 cp -f "$BUILD_OUT/Vintagestory.dll" "$STAGE_DIR/"
+cp -f "$BUILD_OUT/Vintagestory.runtimeconfig.json" "$STAGE_DIR/Vintagestory.runtimeconfig.json"
 cp -f "$PATCHED_LIB" "$STAGE_DIR/VintagestoryLib.dll"
 cp -f "$MOD_OUT/VintagestoryAPI.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"

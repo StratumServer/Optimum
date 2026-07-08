@@ -78,22 +78,32 @@ fi
 # 2. Extract the base bundle (Vintage Story.app) once.
 BASE_ROOT="$REPO_ROOT/.vanilla/osx-${ARCH}"
 BASE_APP="$BASE_ROOT/Vintage Story.app"
+EXTRACTED_FRESH=0
 
 if [[ ! -d "$BASE_APP" ]]; then
     mkdir -p "$BASE_ROOT"
     echo "Extracting to $BASE_ROOT"
     tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
+    EXTRACTED_FRESH=1
 fi
 
 if [[ ! -d "$BASE_APP" ]]; then
     echo "Error: extraction failed, 'Vintage Story.app' not found" >&2
     exit 1
 fi
-dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$BASE_APP/VintagestoryLib.dll" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
+if [[ "$EXTRACTED_FRESH" == "1" ]]; then
+    cp -f "$BASE_APP/VintagestoryLib.dll" "$BASE_APP/VintagestoryLib.vanilla.dll"
+fi
+VANILLA_LIB="$BASE_APP/VintagestoryLib.vanilla.dll"
+if [[ ! -f "$VANILLA_LIB" ]]; then
+    echo "Error: pristine vanilla VintagestoryLib.vanilla.dll not found in $BASE_APP. Delete the matching .vanilla cache and re-run packaging." >&2
+    exit 1
+fi
+dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
 # 3. Version from OptimumInfo.cs.
 INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.3"
+OPT_VER="0.2.5"
 if [[ -f "$INFO_FILE" ]]; then
     MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
     if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
@@ -118,6 +128,7 @@ cp -a "$BASE_APP" "$APP_DIR"
 
 # 5. Overlay optimized DLLs (platform-agnostic IL).
 cp -f "$BUILD_OUT/Vintagestory.dll" "$APP_DIR/"
+cp -f "$BUILD_OUT/Vintagestory.runtimeconfig.json" "$APP_DIR/Vintagestory.runtimeconfig.json"
 cp -f "$PATCHED_LIB" "$APP_DIR/VintagestoryLib.dll"
 cp -f "$MOD_OUT/VintagestoryAPI.dll" "$APP_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"

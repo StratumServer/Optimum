@@ -6,7 +6,7 @@
 # with the reason on the line above.
 
 # LongGameVersion's display string interpolates the existing ShortGameVersion
-# constant to build a UI label ("v1.22.3 (Stable) + Optimum v0.2.2"). The
+# constant to build a UI label ("v1.22.3 (Stable) + Optimum v0.2.5"). The
 # constant's own value is untouched; the actual protocol-relevant assignments
 # live in ClientPackets.cs and ServerMain.cs, neither touched by this patch.
 patches/VintagestoryApi/Config/GameVersion.cs.patch

@@ -71,6 +71,7 @@ function Find-AllVintageStory {
     # Returns an array of @{ Path; Version } hashtables, deduplicated by
     # resolved path. The exe on disk is the version authority (the in-game
     # updater rewrites the exe without touching the Inno registry entry).
+    $ErrorActionPreference = 'SilentlyContinue'
     $seen = @{}
     $results = @()
 
@@ -99,16 +100,49 @@ function Find-AllVintageStory {
         }
     }
 
-    # 2. Common filesystem locations (covers unregistered/manual installs).
+    # 2. Common filesystem locations (covers unregistered/manual installs,
+    #    Steam, GOG, custom drives, portable extractions).
     $probePaths = @(
         (Join-Path $env:APPDATA 'Vintagestory')
         (Join-Path $env:ProgramFiles 'Vintage Story')
         (Join-Path ${env:ProgramFiles(x86)} 'Vintage Story')
         (Join-Path $env:LOCALAPPDATA 'Vintage Story')
+        (Join-Path $env:LOCALAPPDATA 'Programs\Vintage Story')
+        (Join-Path $env:USERPROFILE 'Games\Vintage Story')
+        (Join-Path $env:USERPROFILE 'Vintage Story')
     )
+    # Steam library paths (common locations and libraryfolders.vdf).
+    $steamLibs = @(
+        "$env:ProgramFiles\Steam\steamapps\common\Vintage Story"
+        "${env:ProgramFiles(x86)}\Steam\steamapps\common\Vintage Story"
+        "$env:LOCALAPPDATA\Steam\steamapps\common\Vintage Story"
+    )
+    # Parse Steam libraryfolders.vdf for extra library paths.
+    $steamVdf = "${env:ProgramFiles(x86)}\Steam\steamapps\libraryfolders.vdf"
+    if (Test-Path $steamVdf) {
+        $vdfContent = Get-Content $steamVdf -Raw -ErrorAction SilentlyContinue
+        if ($vdfContent) {
+            [regex]::Matches($vdfContent, '"path"\s+"([^"]+)"') | ForEach-Object {
+                $steamLibs += Join-Path $_.Groups[1].Value 'steamapps\common\Vintage Story'
+            }
+        }
+    }
+    $probePaths += $steamLibs
+    # GOG Galaxy.
+    $probePaths += "$env:ProgramFiles\GOG Galaxy\Games\Vintage Story"
+    $probePaths += "${env:ProgramFiles(x86)}\GOG Galaxy\Games\Vintage Story"
+    # Custom drive roots — only probe drives that exist on this machine.
+    $existingDrives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' })
+    foreach ($drive in $existingDrives) {
+        $probePaths += "$drive\Vintage Story"
+        $probePaths += "$drive\Games\Vintage Story"
+        $probePaths += "$drive\Program Files\Vintage Story"
+        $probePaths += "$drive\Vintagestory"
+        $probePaths += "$drive\Games\Vintagestory"
+    }
     foreach ($dir in $probePaths) {
         if (-not $dir) { continue }
-        if (-not (Test-Path (Join-Path $dir 'Vintagestory.exe'))) { continue }
+        if (-not (Test-Path (Join-Path $dir 'Vintagestory.exe') -ErrorAction SilentlyContinue)) { continue }
         $resolved = (Resolve-Path $dir).Path
         if ($seen.ContainsKey($resolved)) { continue }
         $seen[$resolved] = $true
@@ -153,13 +187,41 @@ function Resolve-DotNetPath {
     # If dotnet already resolves, nothing to do.
     if (Get-Command dotnet -ErrorAction SilentlyContinue) { return }
 
-    # Probe known install locations (order: most common first).
+    $ErrorActionPreference = 'SilentlyContinue'
+
+    # Probe known install locations: official installer, dotnet-install.ps1,
+    # Visual Studio bundled, Scoop, Chocolatey, winget, custom drives.
     $candidates = @(
         (Join-Path $env:ProgramFiles 'dotnet')
         (Join-Path ${env:ProgramFiles(x86)} 'dotnet')
         (Join-Path $env:USERPROFILE '.dotnet')
         (Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet')
+        (Join-Path $env:LOCALAPPDATA 'Programs\dotnet')
     )
+    # Visual Studio bundled SDKs.
+    $vsBase = Join-Path $env:ProgramFiles 'Microsoft Visual Studio'
+    if (Test-Path $vsBase) {
+        Get-ChildItem $vsBase -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            $dotnetInVs = Join-Path $_.FullName 'dotnet'
+            if (Test-Path (Join-Path $dotnetInVs 'dotnet.exe')) { $candidates += $dotnetInVs }
+        }
+    }
+    # Scoop.
+    $candidates += "$env:USERPROFILE\scoop\apps\dotnet-sdk\current"
+    $candidates += "$env:USERPROFILE\scoop\shims"
+    # Chocolatey.
+    if ($env:ChocolateyInstall) {
+        $candidates += "$env:ChocolateyInstall\bin"
+        $candidates += "$env:ChocolateyInstall\lib\dotnet-sdk\tools"
+    }
+    $candidates += "C:\tools\dotnet"
+    # Custom drive roots — only probe drives that exist.
+    $existingDrives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' })
+    foreach ($drive in $existingDrives) {
+        $candidates += "$drive\dotnet"
+        $candidates += "$drive\Program Files\dotnet"
+    }
+
     foreach ($dir in $candidates) {
         if ($dir -and (Test-Path (Join-Path $dir 'dotnet.exe'))) {
             $env:PATH = "$dir;$env:PATH"
@@ -175,7 +237,7 @@ function Resolve-DotNetPath {
     )
     foreach ($regPath in $regPaths) {
         if (-not $regPath) { continue }
-        foreach ($entry in $regPath.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)) {
+        foreach ($entry in $regPath.Split([char[]]@(';'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
             if (Test-Path (Join-Path $entry 'dotnet.exe')) {
                 $env:PATH = "$entry;$env:PATH"
                 return
@@ -191,14 +253,101 @@ function Test-DotNet10 {
 }
 
 function Test-Git {
-    return [bool](Get-Command git -ErrorAction SilentlyContinue)
+    $ErrorActionPreference = 'SilentlyContinue'
+    if (Get-Command git -ErrorAction SilentlyContinue) { return $true }
+    # Git may be installed but not on PATH (fresh install without restart,
+    # or "Git from Git Bash only" option during setup).
+    # Probe every known install location: official installer, portable,
+    # Scoop, Chocolatey, winget, GitHub Desktop bundled, and custom drives.
+    $probes = @(
+        "$env:ProgramFiles\Git\cmd\git.exe"
+        "${env:ProgramFiles(x86)}\Git\cmd\git.exe"
+        "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe"
+        "$env:USERPROFILE\scoop\shims\git.exe"
+        "$env:USERPROFILE\scoop\apps\git\current\cmd\git.exe"
+        "C:\tools\git\cmd\git.exe"
+        "$env:ChocolateyInstall\bin\git.exe"
+        "$env:LOCALAPPDATA\GitHubDesktop\app-*\resources\app\git\cmd\git.exe"
+    )
+    # Also check all existing drive roots where users install Git.
+    $existingDrives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' })
+    foreach ($drive in $existingDrives) {
+        $probes += "$drive\Git\cmd\git.exe"
+        $probes += "$drive\Program Files\Git\cmd\git.exe"
+    }
+    foreach ($p in $probes) {
+        # Resolve wildcards (GitHub Desktop uses app-<version>).
+        $resolved = Resolve-Path $p -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($resolved -and (Test-Path $resolved.Path)) {
+            $gitDir = Split-Path $resolved.Path
+            $env:PATH = "$gitDir;$env:PATH"
+            return $true
+        }
+    }
+    # Last resort: read Machine and User PATH from the registry (picks up
+    # installs done after the current PowerShell session started).
+    $regPaths = @(
+        [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+        [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+    )
+    foreach ($regPath in $regPaths) {
+        if (-not $regPath) { continue }
+        foreach ($entry in $regPath.Split([char[]]@(';'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            if (Test-Path (Join-Path $entry 'git.exe')) {
+                $env:PATH = "$entry;$env:PATH"
+                return $true
+            }
+        }
+    }
+    return $false
 }
 
 function Test-WindowsPowerShell51 {
+    $ErrorActionPreference = 'SilentlyContinue'
+    # Try PATH first.
     $cmd = Get-Command powershell.exe -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        # Probe known locations: System32, SysWOW64, custom installs.
+        $probes = @(
+            "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+            "$env:SystemRoot\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
+            "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+            "$env:ProgramFiles\PowerShell\6\pwsh.exe"
+            "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
+            "$env:USERPROFILE\scoop\apps\powershell\current\pwsh.exe"
+            "$env:USERPROFILE\scoop\shims\pwsh.exe"
+        )
+        if ($env:ChocolateyInstall) {
+            $probes += "$env:ChocolateyInstall\bin\pwsh.exe"
+        }
+        foreach ($p in $probes) {
+            if (Test-Path $p) {
+                $cmd = Get-Item $p
+                break
+            }
+        }
+        # Registry PATH fallback.
+        if (-not $cmd) {
+            $regPaths = @(
+                [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+                [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+            )
+            foreach ($regPath in $regPaths) {
+                if (-not $regPath) { continue }
+                foreach ($entry in $regPath.Split([char[]]@(';'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+                    $candidate = Join-Path $entry 'powershell.exe'
+                    if (Test-Path $candidate) { $cmd = Get-Item $candidate; break }
+                    $candidate = Join-Path $entry 'pwsh.exe'
+                    if (Test-Path $candidate) { $cmd = Get-Item $candidate; break }
+                }
+                if ($cmd) { break }
+            }
+        }
+    }
     if (-not $cmd) { return $false }
+    $exe = if ($cmd.Source) { $cmd.Source } elseif ($cmd.FullName) { $cmd.FullName } else { "$cmd" }
     try {
-        $versionText = & $cmd.Source -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>$null | Select-Object -First 1
+        $versionText = & $exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()' 2>$null | Select-Object -First 1
         if (-not $versionText) { return $false }
         return ([version]$versionText -ge [version]'5.1')
     } catch {
@@ -221,9 +370,44 @@ function Get-MissingRequiredTools {
 }
 
 function Find-ILSpyCmd {
+    $ErrorActionPreference = 'SilentlyContinue'
     if (Get-Command ilspycmd -ErrorAction SilentlyContinue) { return 'ilspycmd' }
-    $toolPath = Join-Path $env:USERPROFILE '.dotnet\tools\ilspycmd.exe'
-    if (Test-Path $toolPath) { return $toolPath }
+    # Probe known .NET tool install locations.
+    $probes = @(
+        (Join-Path $env:USERPROFILE '.dotnet\tools\ilspycmd.exe')
+        (Join-Path $env:USERPROFILE '.dotnet\tools\.store\ilspycmd')
+        (Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\tools\ilspycmd.exe')
+        (Join-Path $env:ProgramFiles 'dotnet\tools\ilspycmd.exe')
+    )
+    # Scoop and Chocolatey.
+    $probes += "$env:USERPROFILE\scoop\shims\ilspycmd.exe"
+    if ($env:ChocolateyInstall) {
+        $probes += "$env:ChocolateyInstall\bin\ilspycmd.exe"
+    }
+    foreach ($p in $probes) {
+        if (Test-Path $p) {
+            $toolDir = Split-Path $p
+            if ($toolDir -notin ($env:PATH -split ';')) {
+                $env:PATH += ";$toolDir"
+            }
+            return $p
+        }
+    }
+    # Registry PATH fallback.
+    $regPaths = @(
+        [System.Environment]::GetEnvironmentVariable('PATH', 'Machine')
+        [System.Environment]::GetEnvironmentVariable('PATH', 'User')
+    )
+    foreach ($regPath in $regPaths) {
+        if (-not $regPath) { continue }
+        foreach ($entry in $regPath.Split([char[]]@(';'), [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            $candidate = Join-Path $entry 'ilspycmd.exe'
+            if (Test-Path $candidate) {
+                $env:PATH += ";$entry"
+                return $candidate
+            }
+        }
+    }
     return $null
 }
 
@@ -355,7 +539,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) {
             $VsPath = $vsInfo.Path
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.3 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
+                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.5 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
             }
         }
     }
@@ -459,9 +643,30 @@ function Invoke-OptimumBuild {
 
     $srcRoot   = $Root
     # Clean up previous build temps (enabled by default)
-    Get-ChildItem $env:TEMP -Directory -Filter 'Optimum-build-*' -ErrorAction SilentlyContinue |
+    # Use a short root path to avoid Windows MAX_PATH (260 chars). ILSpy generates
+    # files like System.Text.RegularExpressions.Generated\-RegexGenerator_g-<hash>.cs
+    # which easily exceed 260 chars under %TEMP% (deep on usernames with spaces).
+    # Priority: C:\opt-bld (shortest, may need admin) > %LOCALAPPDATA%\opt-bld
+    # (always writable, shorter than %TEMP%) > %TEMP% (last resort).
+    $shortRoot = $null
+    foreach ($candidate in @('C:\opt-bld', $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'opt-bld' } else { $null }))) {
+        if (-not $candidate) { continue }
+        if (Test-Path $candidate) { $shortRoot = $candidate; break }
+        try {
+            New-Item -ItemType Directory -Force -Path $candidate -ErrorAction Stop | Out-Null
+            $shortRoot = $candidate; break
+        } catch { }
+    }
+    if (-not $shortRoot) { $shortRoot = $env:TEMP }
+    Get-ChildItem $shortRoot -Directory -Filter 'Optimum-*' -ErrorAction SilentlyContinue |
         ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
-    $buildRoot = Join-Path $env:TEMP ('Optimum-build-' + [guid]::NewGuid().ToString('N'))
+    # Also clean legacy temp dir locations.
+    if ($shortRoot -ne $env:TEMP) {
+        Get-ChildItem $env:TEMP -Directory -Filter 'Optimum-build-*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    $buildId = [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $buildRoot = Join-Path $shortRoot "Optimum-$buildId"
     Write-Phase "Setting up build workspace..."
     Write-Log  "Build dir: $buildRoot"
     New-Item -ItemType Directory -Force -Path $buildRoot | Out-Null
@@ -507,6 +712,15 @@ function Invoke-OptimumBuild {
             Remove-Item -Recurse -Force (Split-Path $vanillaLink) -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force -Path $vanillaLink | Out-Null
             robocopy "$VsPath" "$vanillaLink" /E /NFL /NDL /NJH /NJS /NP *>&1 | Out-Null
+        }
+
+        # package.ps1 expects a pristine copy of VintagestoryLib.dll saved as
+        # VintagestoryLib.vanilla.dll. The innoextract path in package.ps1
+        # creates this, but the junction/copy path here skips it.
+        $vanillaLibSrc = Join-Path $vanillaLink 'VintagestoryLib.dll'
+        $vanillaLibDst = Join-Path $vanillaLink 'VintagestoryLib.vanilla.dll'
+        if ((Test-Path $vanillaLibSrc) -and -not (Test-Path $vanillaLibDst)) {
+            Copy-Item -Force $vanillaLibSrc $vanillaLibDst
         }
 
         Push-Location $buildRoot
@@ -566,6 +780,16 @@ function Invoke-OptimumBuild {
         if ($DataPath) {
             Write-Phase "Configuring data folder..."
             New-Item -ItemType Directory -Force -Path $DataPath | Out-Null
+            # Write datapath.cfg so Optimum.exe reads it on startup even
+            # without --dataPath on the command line (double-click launch).
+            [System.IO.File]::WriteAllText(
+                (Join-Path $InstallDir 'datapath.cfg'),
+                $DataPath,
+                (New-Object System.Text.UTF8Encoding($false)))
+        } else {
+            # No separate data folder: remove stale cfg from a previous install.
+            $stale = Join-Path $InstallDir 'datapath.cfg'
+            if (Test-Path $stale) { Remove-Item -Force $stale }
         }
 
         if ($Shortcut) {
@@ -599,7 +823,7 @@ function Invoke-OptimumBuild {
         $regKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1'
         New-Item -Path $regKey -Force | Out-Null
         Set-ItemProperty -Path $regKey -Name 'DisplayName' -Value "Optimum $requiredVer"
-        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.3'
+        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.5'
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
@@ -825,47 +1049,75 @@ function Update-PrereqStatus {
     }
 
     # .NET 10 SDK
+    $dotnetUserPath = $script:txtDotnetPath.Text.Trim()
+    if ($dotnetUserPath -and (Test-Path (Join-Path $dotnetUserPath 'dotnet.exe'))) {
+        $env:PATH = "$dotnetUserPath;$env:PATH"
+    }
     if (Test-DotNet10) {
         $script:lblDotnetStatus.Text = [char]0x2713 + '  .NET 10 SDK'
         $script:lblDotnetStatus.ForeColor = $colGreen
         Set-MissingActionCheckBox -CheckBox $script:chkDotnetDl -Visible $false
+        $script:btnDotnetBrowse.Visible = $false
     } else {
         $script:lblDotnetStatus.Text = [char]0x2717 + '  .NET 10 SDK'
         $script:lblDotnetStatus.ForeColor = $colRed
         Set-MissingActionCheckBox -CheckBox $script:chkDotnetDl -Visible $true
+        $script:btnDotnetBrowse.Visible = $true
     }
 
     # Git for Windows
+    $gitUserPath = $script:txtGitPath.Text.Trim()
+    if ($gitUserPath) {
+        $gitCmd = Join-Path $gitUserPath 'cmd'
+        if (Test-Path (Join-Path $gitCmd 'git.exe')) { $env:PATH = "$gitCmd;$env:PATH" }
+        elseif (Test-Path (Join-Path $gitUserPath 'git.exe')) { $env:PATH = "$gitUserPath;$env:PATH" }
+    }
     if (Test-Git) {
         $script:lblGitStatus.Text = [char]0x2713 + '  Git for Windows'
         $script:lblGitStatus.ForeColor = $colGreen
         Set-MissingActionCheckBox -CheckBox $script:chkGitDl -Visible $false
+        $script:btnGitBrowse.Visible = $false
     } else {
         $script:lblGitStatus.Text = [char]0x2717 + '  Git for Windows'
         $script:lblGitStatus.ForeColor = $colRed
         Set-MissingActionCheckBox -CheckBox $script:chkGitDl -Visible $true
+        $script:btnGitBrowse.Visible = $true
     }
 
     # Windows PowerShell 5.1
+    $psUserPath = $script:txtPsPath.Text.Trim()
+    if ($psUserPath -and (Test-Path $psUserPath)) {
+        $psDir = Split-Path $psUserPath
+        $env:PATH = "$psDir;$env:PATH"
+    }
     if (Test-WindowsPowerShell51) {
         $script:lblPowerShellStatus.Text = [char]0x2713 + '  Windows PowerShell 5.1'
         $script:lblPowerShellStatus.ForeColor = $colGreen
         Set-MissingActionCheckBox -CheckBox $script:chkPowerShellDl -Visible $false
+        $script:btnPsBrowse.Visible = $false
     } else {
         $script:lblPowerShellStatus.Text = [char]0x2717 + '  Windows PowerShell 5.1'
         $script:lblPowerShellStatus.ForeColor = $colRed
         Set-MissingActionCheckBox -CheckBox $script:chkPowerShellDl -Visible $true
+        $script:btnPsBrowse.Visible = $true
     }
 
     # ilspycmd
+    $ilspyUserPath = $script:txtIlspyPath.Text.Trim()
+    if ($ilspyUserPath -and (Test-Path $ilspyUserPath)) {
+        $ilDir = Split-Path $ilspyUserPath
+        if ($ilDir -notin ($env:PATH -split ';')) { $env:PATH += ";$ilDir" }
+    }
     if (Find-ILSpyCmd) {
         $script:lblIlspyStatus.Text = [char]0x2713 + '  ilspycmd'
         $script:lblIlspyStatus.ForeColor = $colGreen
         Set-MissingActionCheckBox -CheckBox $script:chkIlspyDl -Visible $false
+        $script:btnIlspyBrowse.Visible = $false
     } else {
         $script:lblIlspyStatus.Text = [char]0x2717 + '  ilspycmd'
         $script:lblIlspyStatus.ForeColor = $colOrange
         Set-MissingActionCheckBox -CheckBox $script:chkIlspyDl -Visible $true
+        $script:btnIlspyBrowse.Visible = $true
     }
 
     # innounp (needed to extract VS installer if downloading)
@@ -1038,6 +1290,30 @@ $script:chkDotnetDl.Checked = $true
 $script:chkDotnetDl.Visible = $false
 $script:chkDotnetDl.Add_CheckedChanged({ Update-PrereqStatus })
 $form.Controls.Add($script:chkDotnetDl)
+
+$script:btnDotnetBrowse = New-FlatButton -Text 'Browse' -W 58 -H 20
+$script:btnDotnetBrowse.Location = New-Object System.Drawing.Point(564, ($y - 1))
+$script:btnDotnetBrowse.Visible = $false
+$script:btnDotnetBrowse.Add_Click({
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = 'Select the folder containing dotnet.exe (e.g. C:\Program Files\dotnet)'
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        if (Test-Path (Join-Path $dlg.SelectedPath 'dotnet.exe')) {
+            $script:txtDotnetPath.Text = $dlg.SelectedPath
+            $env:PATH = "$($dlg.SelectedPath);$env:PATH"
+            Update-PrereqStatus
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "dotnet.exe not found in that folder.",
+                'Invalid folder', 'OK', 'Warning') | Out-Null
+        }
+    }
+})
+$form.Controls.Add($script:btnDotnetBrowse)
+
+$script:txtDotnetPath = New-Object System.Windows.Forms.TextBox
+$script:txtDotnetPath.Visible = $false
+$form.Controls.Add($script:txtDotnetPath)
 $y += 26
 
 # -- Git for Windows --
@@ -1058,6 +1334,33 @@ $script:chkGitDl.Checked = $true
 $script:chkGitDl.Visible = $false
 $script:chkGitDl.Add_CheckedChanged({ Update-PrereqStatus })
 $form.Controls.Add($script:chkGitDl)
+
+$script:btnGitBrowse = New-FlatButton -Text 'Browse' -W 58 -H 20
+$script:btnGitBrowse.Location = New-Object System.Drawing.Point(564, ($y - 1))
+$script:btnGitBrowse.Visible = $false
+$script:btnGitBrowse.Add_Click({
+    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dlg.Description = 'Select the Git install folder (containing cmd\git.exe)'
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $gitExe = Join-Path $dlg.SelectedPath 'cmd\git.exe'
+        $gitExeRoot = Join-Path $dlg.SelectedPath 'git.exe'
+        if ((Test-Path $gitExe) -or (Test-Path $gitExeRoot)) {
+            $script:txtGitPath.Text = $dlg.SelectedPath
+            $gitCmd = if (Test-Path $gitExe) { Split-Path $gitExe } else { $dlg.SelectedPath }
+            $env:PATH = "$gitCmd;$env:PATH"
+            Update-PrereqStatus
+        } else {
+            [System.Windows.Forms.MessageBox]::Show(
+                "git.exe not found in that folder (checked root and cmd\ subfolder).",
+                'Invalid folder', 'OK', 'Warning') | Out-Null
+        }
+    }
+})
+$form.Controls.Add($script:btnGitBrowse)
+
+$script:txtGitPath = New-Object System.Windows.Forms.TextBox
+$script:txtGitPath.Visible = $false
+$form.Controls.Add($script:txtGitPath)
 $y += 26
 
 # -- Windows PowerShell --
@@ -1078,6 +1381,26 @@ $script:chkPowerShellDl.Checked = $true
 $script:chkPowerShellDl.Visible = $false
 $script:chkPowerShellDl.Add_CheckedChanged({ Update-PrereqStatus })
 $form.Controls.Add($script:chkPowerShellDl)
+
+$script:btnPsBrowse = New-FlatButton -Text 'Browse' -W 58 -H 20
+$script:btnPsBrowse.Location = New-Object System.Drawing.Point(564, ($y - 1))
+$script:btnPsBrowse.Visible = $false
+$script:btnPsBrowse.Add_Click({
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Title = 'Select powershell.exe or pwsh.exe'
+    $dlg.Filter = 'PowerShell|powershell.exe;pwsh.exe|All|*.*'
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $script:txtPsPath.Text = $dlg.FileName
+        $psDir = Split-Path $dlg.FileName
+        $env:PATH = "$psDir;$env:PATH"
+        Update-PrereqStatus
+    }
+})
+$form.Controls.Add($script:btnPsBrowse)
+
+$script:txtPsPath = New-Object System.Windows.Forms.TextBox
+$script:txtPsPath.Visible = $false
+$form.Controls.Add($script:txtPsPath)
 $y += 26
 
 # -- ilspycmd --
@@ -1098,6 +1421,26 @@ $script:chkIlspyDl.Checked = $true
 $script:chkIlspyDl.Visible = $false
 $script:chkIlspyDl.Add_CheckedChanged({ Update-PrereqStatus })
 $form.Controls.Add($script:chkIlspyDl)
+
+$script:btnIlspyBrowse = New-FlatButton -Text 'Browse' -W 58 -H 20
+$script:btnIlspyBrowse.Location = New-Object System.Drawing.Point(564, ($y - 1))
+$script:btnIlspyBrowse.Visible = $false
+$script:btnIlspyBrowse.Add_Click({
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Title = 'Select ilspycmd.exe'
+    $dlg.Filter = 'ilspycmd|ilspycmd.exe|All|*.*'
+    if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $script:txtIlspyPath.Text = $dlg.FileName
+        $ilDir = Split-Path $dlg.FileName
+        $env:PATH = "$ilDir;$env:PATH"
+        Update-PrereqStatus
+    }
+})
+$form.Controls.Add($script:btnIlspyBrowse)
+
+$script:txtIlspyPath = New-Object System.Windows.Forms.TextBox
+$script:txtIlspyPath.Visible = $false
+$form.Controls.Add($script:txtIlspyPath)
 $y += 26
 
 # -- innounp (extractor, needed when downloading VS) --
@@ -1255,7 +1598,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = 'vs1.22.3+v0.2.3'
+$lblVersion.Text = 'vs1.22.3+v0.2.5'
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1503,7 +1846,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             $existingSemver = ($fvi.ProductVersion -split '\+')[0]
         }
 
-        $thisVer = '0.2.3'
+        $thisVer = '0.2.5'
         if ($existingSemver) {
             if ([version]$existingSemver -lt [version]$thisVer) {
                 $r = [System.Windows.Forms.MessageBox]::Show(
