@@ -199,7 +199,7 @@ detect_prereqs() {
         PREREQ_STATUS[ilspycmd]="missing"
         PREREQ_LABEL[ilspycmd]="ilspycmd (decompiler)"
         # Read pinned version from dotnet-tools.json
-        local ilspy_ver="10.1.0.8386"
+        local ilspy_ver="10.1.1.8388"
         if [[ -f "$REPO_ROOT/.config/dotnet-tools.json" ]]; then
             local parsed
             parsed=$(perl -0777 -ne 'if (/"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/s) { print $1; exit }' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)

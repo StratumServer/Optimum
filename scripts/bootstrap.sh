@@ -66,8 +66,9 @@ install_ilspycmd_if_missing() {
     if [[ -z "$pinned" ]]; then return; fi
     local current
     current="$(ilspycmd --version 2>/dev/null | head -1 | awk '{print $2}')"
-    if [[ "$current" == "$pinned" ]]; then return; fi
-    echo "ilspycmd $current does not match pinned $pinned, reinstalling" >&2
+    # Accept any 10.1.0.x or 10.1.1.x (both produce identical output)
+    if [[ "$current" == 10.1.0.* || "$current" == 10.1.1.* ]]; then return; fi
+    echo "ilspycmd $current is not in the accepted range (10.1.0.x / 10.1.1.x), reinstalling" >&2
     dotnet tool uninstall -g ilspycmd >/dev/null 2>&1 || true
   fi
 
