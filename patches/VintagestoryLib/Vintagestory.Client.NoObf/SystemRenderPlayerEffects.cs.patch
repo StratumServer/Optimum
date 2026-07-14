@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..287d586 100644
+index 2eca300..707d868 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 2eca300..287d586 100644
  namespace Vintagestory.Client.NoObf;
  
  public class SystemRenderPlayerEffects : ClientSystem
-@@ -31,22 +33,80 @@ public class SystemRenderPlayerEffects : ClientSystem
+@@ -31,22 +33,128 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
@@ -30,23 +30,27 @@ index 2eca300..287d586 100644
 +	};
 +
 +	// Optimum: static predicate avoids lambda allocation and <>c cache field.
++	// Still used for the GetEntitiesAround fallback path when the K-nearest
++	// scratch runs into edge cases.
 +	private static bool HasLight(Entity e) => e.LightHsv != null && e.LightHsv[2] > 0;
 +
-+	// Optimum: sort key stored in a field so the sort delegate is static (no DisplayClass).
-+	private Vec3d _sortOrigin;
-+	private double SortByDistance(Entity e) => e.Pos.SquareDistanceTo(_sortOrigin);
-+
-+	// Optimum: dynamic-light entity scan cache. The scan result (which
-+	// entities are in range) is reused while the player is roughly
-+	// stationary; each entity's light still reads its live .Pos/.LightHsv
-+	// when added below, so this only risks a brief delay picking up
-+	// entities that just crossed into or out of range, never a stale
-+	// light position or color for entities already in the cached set.
++	// Optimum: dynamic-light entity scan cache. Refreshes every 15 frames
++	// stationary, or when the player moves >= 2 blocks, with a hard floor of
++	// 5 frames between movement-triggered scans. Staleness bound: creative
++	// flight at 30 blocks/s covers 2.5 blocks in 5 frames at 60 FPS; a light
++	// 2.5 blocks stale at the rim of a 35-block radius is below perception.
 +	private Entity[] _cachedLightEntities;
 +	private Vec3d _lastLightScanPos;
 +	private int _lightScanFramesSinceRefresh;
 +	private const int LightScanRefreshFrames = 15;
++	private const int LightScanMinFrames = 5;
 +	private const double LightScanMoveThresholdSq = 4.0;
++
++	// Optimum: K-nearest scratch arrays for alloc-free over-capacity handling.
++	// maxDynLights is single digits; an O(K) replace beats any sort allocation.
++	private Entity[] _lightScratch;
++	private double[] _lightScratchDistSq;
++	private int _lightScratchCount;
 +
  	private void onBeforeRender(float dt)
  	{
@@ -61,19 +65,59 @@ index 2eca300..287d586 100644
 +
 +		bool cacheEnabled = ClientSettings.OptimumDynamicLightCache;
 +		_lightScanFramesSinceRefresh++;
++		// B2: movement cannot force a scan more often than every 5 frames.
++		// The 15-frame cap bounds stationary staleness. Together they keep
++		// the cache valid during sprint (threshold fires ~every 20 frames)
++		// and bound creative flight to 12 scans/s.
 +		bool needsRefresh = !cacheEnabled || _cachedLightEntities == null
 +			|| _lightScanFramesSinceRefresh >= LightScanRefreshFrames
-+			|| plrPos.SquareDistanceTo(_lastLightScanPos ?? plrPos) >= LightScanMoveThresholdSq;
++			|| (_lightScanFramesSinceRefresh >= LightScanMinFrames
++				&& plrPos.SquareDistanceTo(_lastLightScanPos ?? plrPos) >= LightScanMoveThresholdSq);
 +
 +		Entity[] array;
 +		if (needsRefresh)
 +		{
 +			OptimumDiagnostics.DynamicLightCache.Hit();
++			// B3: alloc-free K-nearest. GetEntitiesAround still allocates
++			// internally (GameMain owns that code), but we avoid the sort
++			// allocation and read LightHsv once per entity in the add loop.
 +			array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, HasLight);
 +			if (array.Length > maxDynLights)
 +			{
-+				_sortOrigin = plrPos;
-+				array = array.OrderBy((Func<Entity, double>)SortByDistance).ToArray();
++				// K-nearest selection into scratch arrays, no LINQ, no delegate.
++				if (_lightScratch == null || _lightScratch.Length < maxDynLights)
++				{
++					_lightScratch = new Entity[maxDynLights];
++					_lightScratchDistSq = new double[maxDynLights];
++				}
++				_lightScratchCount = 0;
++				for (int i = 0; i < array.Length; i++)
++				{
++					Entity ent = array[i];
++					if (ent?.Pos == null) continue;
++					double distSq = ent.Pos.SquareDistanceTo(plrPos);
++					if (_lightScratchCount < maxDynLights)
++					{
++						_lightScratch[_lightScratchCount] = ent;
++						_lightScratchDistSq[_lightScratchCount] = distSq;
++						_lightScratchCount++;
++					}
++					else
++					{
++						int farthest = 0;
++						double farthestDist = _lightScratchDistSq[0];
++						for (int k = 1; k < _lightScratchCount; k++)
++						{
++							if (_lightScratchDistSq[k] > farthestDist) { farthest = k; farthestDist = _lightScratchDistSq[k]; }
++						}
++						if (distSq < farthestDist)
++						{
++							_lightScratch[farthest] = ent;
++							_lightScratchDistSq[farthest] = distSq;
++						}
++					}
++				}
++				array = _lightScratch;
 +			}
 +			if (cacheEnabled)
 +			{
@@ -88,8 +132,13 @@ index 2eca300..287d586 100644
 +			OptimumDiagnostics.DynamicLightCache.Skip();
 +			array = _cachedLightEntities;
  		}
- 		foreach (Entity entity in array)
+-		foreach (Entity entity in array)
++		// Consumer loop: read live .Pos and .LightHsv once per entity.
++		int limit = (array == _lightScratch) ? _lightScratchCount : array.Length;
++		for (int i = 0; i < limit; i++)
  		{
++			Entity entity = array[i];
++			if (entity == null) continue;
  			byte[] lightHsv = entity.LightHsv;
 +			if (lightHsv == null || entity.Pos == null) continue;
  			AddPointLight(lightHsv, entity.Pos);

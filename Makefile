@@ -42,7 +42,7 @@ ifneq ($(VERSION),1.22.3)
 endif
 
 .PHONY: help check check-patches check-compat check-shaders bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-linux package-appimage package-macos package-win
+        package package-linux package-appimage package-macos package-win bench-scaling
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -145,6 +145,11 @@ settings: ## Open client settings in editor
 
 test: build ## Run unit tests (separate from release build)
 	dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-restore --verbosity quiet
+
+bench-scaling: build ## Run the four scaling benchmarks as a regression guard
+	dotnet run --project Optimum.Benchmarks -c Release -- \
+		-f '*AnimBlockLOD*' '*DynamicLightCache*' '*EntityRenderDistCull*' '*ChiselLodRouting*' \
+		-e json
 
 package: build ## Build every package this host can produce (Linux/macOS/Windows)
 	bash scripts/package-all.sh --version $(VERSION)

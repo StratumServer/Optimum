@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 4909b4b..1d9f14c 100644
+index 4909b4b..2288925 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -45,10 +45,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -45,10 +45,86 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private AssetManager assetManager;
  
@@ -13,12 +13,58 @@ index 4909b4b..1d9f14c 100644
 +	private const double OptimumUndershootPercent = 0.075;
 +	private const double OptimumYieldThresholdMs = 0.25;
 +	private const int OptimumSpinIterations = 32;
++	// A scene transition (e.g. entering a world) can make NativeWindow.IsFocused read false for a
++	// single frame with no real focus loss. Require the loss to persist past this threshold before
++	// clamping to OptimumBgMaxFps, so that flicker doesn't misfire the background cap.
++	private const long OptimumBgFpsFocusDebounceMs = 300;
++	// Below this many logical processors, a render-thread busy-spin tail is more likely to starve
++	// sibling threads (audio, tesselation) or trigger power/thermal throttling than to help
++	// precision, so PreciseFramePacing falls back to Yield-only pacing instead of SpinWait.
++	private const int OptimumSpinTailMinProcessorCount = 5;
 +	private static bool _optimumSettingsInitialized;
++	private static bool _optimumTimerResolutionRaised;
++	private Stopwatch _optimumFocusLostStopwatch;
++
++	[DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
++	private static extern uint OptimumTimeBeginPeriod(uint uPeriod);
++
++	[DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
++	private static extern uint OptimumTimeEndPeriod(uint uPeriod);
++
++	// Thread.Sleep's default granularity on Windows (commonly 15.6ms, and Windows 11 22H2+ leaves
++	// the 1ms system timer off unless an app requests it) makes the coarse-sleep phase of frame
++	// pacing overshoot unpredictably. Raising it to 1ms shrinks that overshoot for every sleep call
++	// in the process, not just this one, with no measurable downside.
++	private static void EnsureOptimumTimerResolution()
++	{
++		if (_optimumTimerResolutionRaised) return;
++		_optimumTimerResolutionRaised = true;
++		if (!OperatingSystem.IsWindows()) return;
++		OptimumTimeBeginPeriod(1);
++		// A plain "+= OptimumOnProcessExit" method-group conversion makes the C# compiler emit a
++		// hidden static delegate-cache class (<>O) to avoid reallocating the delegate on repeated
++		// calls; the Cecil patcher's self-reference check can't resolve that compiler-generated
++		// type against the vanilla target and rejects the transplant (same "lambda-freedom"
++		// constraint docs/todo.md documents for Packet_Server). Building the delegate through
++		// reflection instead avoids the method-group conversion entirely, so no cache class is
++		// generated, and we get the documented timeBeginPeriod/timeEndPeriod pairing for free.
++		System.Reflection.MethodInfo exitHandlerMethod = typeof(ClientPlatformWindows).GetMethod(
++			"OptimumOnProcessExit",
++			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
++		EventHandler exitHandler = (EventHandler)Delegate.CreateDelegate(typeof(EventHandler), exitHandlerMethod);
++		AppDomain.CurrentDomain.ProcessExit += exitHandler;
++	}
++
++	private static void OptimumOnProcessExit(object sender, EventArgs e)
++	{
++		OptimumTimeEndPeriod(1);
++	}
 +
 +	private static void EnsureOptimumDefaults()
 +	{
 +		if (_optimumSettingsInitialized) return;
 +		_optimumSettingsInitialized = true;
++		EnsureOptimumTimerResolution();
 +		Vintagestory.API.Config.OptimumConfig.SetDataPath(Vintagestory.API.Config.GamePaths.DataPath);
 +		Vintagestory.API.Config.OptimumConfig.Load();
 +		ClientSettings.OptimumEntityShadowCull = Vintagestory.API.Config.OptimumConfig.EntityShadowCull;
@@ -43,7 +89,7 @@ index 4909b4b..1d9f14c 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -478,21 +508,67 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,21 +554,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -57,12 +103,28 @@ index 4909b4b..1d9f14c 100644
  		ScreenManager.FrameProfiler.Begin(null);
 -		if (ClientSettings.VsyncMode != 1 && base.MaxFps > 10f && base.MaxFps < 241f)
 +
-+		// Optimum: cap FPS when window loses focus.
++		// Optimum: cap FPS when window loses focus, debounced so a single-frame focus flicker
++		// (e.g. the main-menu-to-world-view transition) doesn't misfire the background cap.
 +		float effectiveMaxFps = base.MaxFps;
-+		if (ClientSettings.OptimumBackgroundFpsLimit && !((NativeWindow)window).IsFocused && OptimumBgMaxFps > 0)
++		bool isFocused = ((NativeWindow)window).IsFocused;
++		if (!isFocused)
  		{
 -			int num = (int)(1000f / base.MaxFps - 1000f * (float)frameStopWatch.ElapsedTicks / (float)Stopwatch.Frequency);
 -			if (num > 0)
++			if (_optimumFocusLostStopwatch == null)
++				_optimumFocusLostStopwatch = Stopwatch.StartNew();
++			else if (!_optimumFocusLostStopwatch.IsRunning)
++				_optimumFocusLostStopwatch.Restart();
++		}
++		else if (_optimumFocusLostStopwatch != null)
++		{
++			_optimumFocusLostStopwatch.Reset();
++		}
++
++		bool focusLossSustained = !isFocused && _optimumFocusLostStopwatch != null
++			&& _optimumFocusLostStopwatch.ElapsedMilliseconds >= OptimumBgFpsFocusDebounceMs;
++		if (ClientSettings.OptimumBackgroundFpsLimit && focusLossSustained && OptimumBgMaxFps > 0)
++		{
 +			effectiveMaxFps = OptimumBgMaxFps;
 +			Vintagestory.API.Config.OptimumDiagnostics.BackgroundFpsLimiter.Skip();
 +		}
@@ -96,9 +158,14 @@ index 4909b4b..1d9f14c 100644
 +					}
 +
 +					long yieldThresholdTicks = (long)(Stopwatch.Frequency * (OptimumYieldThresholdMs / 1000.0));
++					// Hard-spinning (SpinWait) pins this thread's core at 100% for the tail of every
++					// frame. On systems with few logical processors that reliably regresses stutter
++					// instead of fixing it (starves audio/tesselation threads, invites throttling), so
++					// only spin above the core-count threshold; otherwise Yield the whole tail.
++					bool allowSpin = Environment.ProcessorCount > OptimumSpinTailMinProcessorCount;
 +					while ((remainingTicks = targetTicks - frameStopWatch.ElapsedTicks) > 0)
 +					{
-+						if (remainingTicks > yieldThresholdTicks)
++						if (!allowSpin || remainingTicks > yieldThresholdTicks)
 +							Thread.Yield();
 +						else
 +							Thread.SpinWait(OptimumSpinIterations);

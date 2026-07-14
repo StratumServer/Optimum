@@ -46,8 +46,13 @@ public class OptimumDiagnosticsCountersTests
             "ShadowFarVegetation",
             "RepulseAgents",
             "WeatherWindThrottle",
-            "AnimBlockLod",
+            "AnimBlockLodNear",
+            "AnimBlockLodMid",
+            "AnimBlockLodFar",
+            "AnimBlockLodDeferred",
             "ParticleDistanceGate",
+            "EntityLightBatch",
+            "EntityShaderStateCache",
         };
 
         foreach (var name in expected)

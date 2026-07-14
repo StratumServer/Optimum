@@ -1,0 +1,33 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
+index 4a24e75..9292ff9 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
+@@ -333,10 +333,28 @@ public class ShaderRegistry
+ 		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
+ 		fragmentShader8 = program.VertexShader;
+ 		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
+ 		Shader vertexShader9 = program.VertexShader;
+ 		vertexShader9.PrefixCode = vertexShader9.PrefixCode + "#define MAXANIMATEDELEMENTS " + GlobalConstants.MaxAnimatedElements + "\r\n";
++		// Optimum: compile the greedy-mesh tile decode into the chunk
++		// shaders only when the feature is on. With #define GREEDYMESH 0
++		// the patched chunkopaque.vsh/.fsh preprocess to bit-identical
++		// vanilla shaders, so the feature costs nothing when disabled.
++		// The flag tells the emitter what the live shaders can decode, so
++		// a config/shader mismatch degrades to no merging instead of
++		// feeding sentinel bits to a shader that would misread them.
++		bool greedy = OptimumConfig.GreedyMeshEnabled;
++		Shader optimumFrag = program.FragmentShader;
++		optimumFrag.PrefixCode = optimumFrag.PrefixCode + "#define GREEDYMESH " + (greedy ? 1 : 0) + "\r\n";
++		// GREEDYMESH_GRAD picks the merged-quad sampler: 1 = textureGrad
++		// with unwrapped-UV derivatives (seamless mips), 0 = plain
++		// texture() (cheaper on some GPUs, mip seams possible at tile
++		// boundaries). Fragment-only; exists to A/B the ON cost.
++		optimumFrag.PrefixCode = optimumFrag.PrefixCode + "#define GREEDYMESH_GRAD " + (OptimumConfig.GreedyMeshTextureGrad ? 1 : 0) + "\r\n";
++		Shader optimumVert = program.VertexShader;
++		optimumVert.PrefixCode = optimumVert.PrefixCode + "#define GREEDYMESH " + (greedy ? 1 : 0) + "\r\n";
++		OptimumConfig.GreedyMeshShadersCompiledOn = greedy;
+ 	}
+ 
+ 	private static string HandleIncludes(ShaderProgram program, string shaderCode, HashSet<string> filenames = null)
+ 	{
+ 		if (filenames == null)

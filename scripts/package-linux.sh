@@ -197,14 +197,13 @@ fi
 dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
 # ============================================================================
-# 3. Version from OptimumInfo.cs
+# 3. Optimum release version
 # ============================================================================
 
-INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.7"
-if [[ -f "$INFO_FILE" ]]; then
-    MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
-    if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
+OPT_VER="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
+if [[ -z "$OPT_VER" ]]; then
+    echo "Error: VERSION contains no release version." >&2
+    exit 1
 fi
 
 NAME="Optimum-v${OPT_VER}-linux-x64"
@@ -229,7 +228,12 @@ cp -f "$MOD_OUT/VintagestoryAPI.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
-cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/"
+# cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches (source
+# is byte-identical to the vanilla decompile), so rebuilding it only introduces a different
+# compiler/SDK's codegen with no behavior change. That recompiled DLL was shipped in 0.2.7 and
+# earlier and caused subtle glyph-hinting differences on Linux (see
+# docs/bugs/linux-font-hinting-review-2026-07-14.md); leave the pristine vanilla copy already
+# staged in step 4 in place so text rendering matches upstream exactly.
 
 # 5b. Overlay optimized shaders.
 SHADER_SRC="$REPO_ROOT/sources/shaders"

@@ -620,6 +620,14 @@ find "${decompiled_dirs[@]}" -name '*.cs' -print0 | xargs -0 perl -pi -e '
   s/System\.Func<IServerPlayer, ActiveSlotChangeEventArgs, EnumHandling>/Vintagestory.API.Common.Func<IServerPlayer, ActiveSlotChangeEventArgs, EnumHandling>/g;
 '
 
+# ILSpy binds the cancellable EventHelper casts to System.Func, while vanilla IL uses Vintagestory.API.Common.Func.
+# Run this exception after the Func qualification pass so full donor builds invoke handlers and patch extraction does not recreate an orphan patch.
+evh="$lib/Vintagestory.API.Common/EventHelper.cs"
+[[ -f "$evh" ]] && perl -pi -e '
+  s/\(System\.Func<T, EnumHandling>\)handler/(Vintagestory.API.Common.Func<T, EnumHandling>)handler/;
+  s/\(System\.Func<T0, T1, EnumHandling>\)handler/(Vintagestory.API.Common.Func<T0, T1, EnumHandling>)handler/;
+' "$evh"
+
 # 6j: ILSpy decompiles compiler-generated async state machines with plain
 # `private void MoveNext()` / `private void SetStateMachine(...)` instead of explicit
 # IAsyncStateMachine interface implementations, so the containing struct/class no

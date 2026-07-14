@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..f44112a 100644
+index 4d08f84..e76edb6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..f44112a 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,84 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,139 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -107,7 +107,9 @@ index 4d08f84..f44112a 100644
  
 +	private void OnOptimumOptions(bool on)
 +	{
-+		double rowH = 45.0;
++		// The feature-flag build uses 21 rows inside the fixed 740px dialog.
++		// The 30px interval places the last row at 717px.
++		double rowH = 30.0;
 +		double y0 = 87.0;
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
@@ -146,6 +148,32 @@ index 4d08f84..f44112a 100644
 +			.AddSwitch(onOptimumChiselLodChanged, ElementBounds.Fixed(450, y0 + rowH * 11 + 2, 200, 20), "optChiselLod")
 +			.AddStaticText(Lang.Get("optimum-chiselloddist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 12, 400, 30))
 +			.AddSlider(onOptimumChiselLodDistChanged, ElementBounds.Fixed(450, y0 + rowH * 12 + 2, 200, 20), "optChiselLodDist")
++			.AddStaticText(Lang.Get("optimum-occlusionscale"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 13, 400, 30))
++			.AddHoverText(Lang.Get("optimum-occlusionscale-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 13, 400, 25))
++			.AddSwitch(onOptimumOcclusionScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 13 + 2, 200, 20), "optOcclusionScale")
++			.AddStaticText(Lang.Get("optimum-dynlightcache"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 14, 400, 30))
++			.AddHoverText(Lang.Get("optimum-dynlightcache-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 14, 400, 25))
++			.AddSwitch(onOptimumDynLightCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 14 + 2, 200, 20), "optDynLightCache")
++			.AddStaticText(Lang.Get("optimum-entitylightbatch"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 15, 400, 30))
++			.AddHoverText(Lang.Get("optimum-entitylightbatch-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 15, 400, 25))
++			.AddSwitch(onOptimumEntityLightBatchChanged, ElementBounds.Fixed(450, y0 + rowH * 15 + 2, 200, 20), "optEntityLightBatch")
++			.AddStaticText(Lang.Get("optimum-entityshadercache"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 16, 400, 30))
++			.AddHoverText(Lang.Get("optimum-entityshadercache-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 16, 400, 25))
++			.AddSwitch(onOptimumEntityShaderCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 16 + 2, 200, 20), "optEntityShaderCache")
++#if OPTIMUM_GREEDY_MESH
++			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
++			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 17 + 2, 200, 20), "optGreedyMesh")
++			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
++			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 18 + 2, 200, 20), "optGreedySpan")
++			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
++			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 19 + 2, 200, 20), "optGreedyLightTol")
++			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
++			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 20), "optGreedyFarDist")
++#endif
 +			.EndChildElements()
 +			.Compose();
 +		handler.LoadComposer(composer);
@@ -163,6 +191,16 @@ index 4d08f84..f44112a 100644
 +		composer.GetSwitch("optParticleDist").SetValue(ClientSettings.OptimumParticleDistanceGate);
 +		composer.GetSwitch("optChiselLod").SetValue(ClientSettings.OptimumChiselLod);
 +		composer.GetSlider("optChiselLodDist").SetValues(ClientSettings.OptimumChiselLodDistance, 32, 256, 16, " blocks");
++		composer.GetSwitch("optOcclusionScale").SetValue(Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled);
++		composer.GetSwitch("optDynLightCache").SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
++		composer.GetSwitch("optEntityLightBatch").SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
++		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
++#if OPTIMUM_GREEDY_MESH
++		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
++		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
++		composer.GetSlider("optGreedyLightTol").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance, 0, 4, 1);
++		composer.GetSlider("optGreedyFarDist").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance, 0, 256, 16, " blocks");
++#endif
 +	}
 +
 +	private void onOptimumBackgroundFpsChanged(bool on) { ClientSettings.OptimumBackgroundFpsLimit = on; Vintagestory.API.Config.OptimumConfig.BackgroundFpsLimit = on; Vintagestory.API.Config.OptimumConfig.Save(); }
@@ -179,12 +217,29 @@ index 4d08f84..f44112a 100644
 +	private void onOptimumChiselLodChanged(bool on) { ClientSettings.OptimumChiselLod = on; Vintagestory.API.Config.OptimumConfig.ChiselLodEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private bool onOptimumChiselLodDistChanged(int val) { ClientSettings.OptimumChiselLodDistance = val; Vintagestory.API.Config.OptimumConfig.SetChiselLodDistance(val); Vintagestory.API.Config.OptimumConfig.Save(); return true; }
 +
++	// The rows below bind straight to OptimumConfig: nothing reads them
++	// per-frame from ClientSettings, so no mirror property is needed.
++	private void onOptimumOcclusionScaleChanged(bool on) { Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private void onOptimumDynLightCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private void onOptimumEntityLightBatchChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private void onOptimumEntityShaderCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++#if OPTIMUM_GREEDY_MESH
++	// Chunk shaders are stamped at compile time (GREEDYMESH define), so a
++	// mid-session toggle only takes full effect after a restart; until
++	// then the GreedyMeshShadersCompiledOn guard keeps emitter and shader
++	// consistent (worst case: no merging).
++	private void onOptimumGreedyMeshChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private bool onOptimumGreedySpanChanged(int val) { Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth = val; Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeHeight = val; Vintagestory.API.Config.OptimumConfig.Save(); return true; }
++	private bool onOptimumGreedyLightTolChanged(int val) { Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance = val; Vintagestory.API.Config.OptimumConfig.Save(); return true; }
++	private bool onOptimumGreedyFarDistChanged(int val) { Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance = val; Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistanceSq = (double)val * val; Vintagestory.API.Config.OptimumConfig.Save(); return true; }
++#endif
++
  	private void onErrorReporterChanged(bool on)
  	{
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1902,24 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1957,24 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

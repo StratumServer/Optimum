@@ -39,6 +39,8 @@ var typesToInject = new List<string>
 {
     "Optimum.OptimumInfo",
     "Optimum.OptimumUpdateChecker",
+    "Optimum.EntityLightBatchBuffer",
+    "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
 };
 
 // --- Phase 2b: Members to inject into existing types ---
@@ -65,17 +67,36 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "GetOptimumLightRadius",
         "HasLight",
-        "SortByDistance",
-        "_sortOrigin",
     },
     ["Vintagestory.Client.NoObf.SystemRenderEntities"] = new()
     {
         "ShadowCullDistanceSq",
+        "OptimumEntityLightBatchSize",
+        "OptimumEntityLightMinimumSamples",
+        "optimumEntityLightBatchBuffer",
+        "optimumEntityLightPreviousSampleCount",
+        "optimumEntityLightBatchDisabled",
+        "optimumEntityShaderCacheDisabled",
+        "optimumEntityShaderFailureLogged",
+        "PublishOptimumEntityLightSample",
+        "PrepareOptimumEntityLights",
+        "BeginOptimumEntityShaderSegment",
+        "EndOptimumEntityShaderSegment",
+    },
+    ["Vintagestory.Client.NoObf.ClientChunk"] = new()
+    {
+        "OptimumReadLightBatch",
     },
     ["Vintagestory.Client.NoObf.ClientPlatformWindows"] = new()
     {
         "_optimumSettingsInitialized",
         "EnsureOptimumDefaults",
+        "_optimumTimerResolutionRaised",
+        "OptimumTimeBeginPeriod",
+        "OptimumTimeEndPeriod",
+        "EnsureOptimumTimerResolution",
+        "OptimumOnProcessExit",
+        "_optimumFocusLostStopwatch",
     },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
@@ -96,6 +117,16 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumParticleDistChanged",
         "onOptimumChiselLodChanged",
         "onOptimumChiselLodDistChanged",
+        "onOptimumOcclusionScaleChanged",
+        "onOptimumDynLightCacheChanged",
+        "onOptimumEntityLightBatchChanged",
+        "onOptimumEntityShaderCacheChanged",
+#if OPTIMUM_GREEDY_MESH
+        "onOptimumGreedyMeshChanged",
+        "onOptimumGreedySpanChanged",
+        "onOptimumGreedyLightTolChanged",
+        "onOptimumGreedyFarDistChanged",
+#endif
     },
     // GuiManager: reusable scratch buffers replacing per-call .ToList() snapshots
     ["Vintagestory.Client.NoObf.GuiManager"] = new()
@@ -227,6 +258,13 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.TesselatedChunkPart", "AddModelAndStoreLocation", 8),
     // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
     new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),
+    // Greedy mesh V0.1: stamps #define GREEDYMESH 0/1 into every shader's
+    // prefix code from OptimumConfig.GreedyMeshEnabled (same mechanism as
+    // vanilla's USESSBO stamp in this same method), so the chunkopaque
+    // tile-decode compiles out entirely when the feature is off. Also sets
+    // OptimumConfig.GreedyMeshShadersCompiledOn so the emitter never emits
+    // sentinel bits a live shader can't decode.
+    new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderCodePrefixes", 2),
     // datapath.cfg support: entry shims (ClientLinux/ClientWindows/ClientMac) all
     // funnel into this Main, so the arg injection lives here (lambda-free)
     new("Vintagestory.Client.ClientProgram", "Main", 1),

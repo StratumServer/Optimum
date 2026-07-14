@@ -1,5 +1,5 @@
 diff --git a/Vintagestory/Vintagestory.csproj b/Vintagestory/Vintagestory.csproj
-index eb3ebf7..d979bc6 100644
+index eb3ebf7..85369e3 100644
 --- a/Vintagestory/Vintagestory.csproj
 +++ b/Vintagestory/Vintagestory.csproj
 @@ -1,23 +1,31 @@
@@ -16,7 +16,7 @@ index eb3ebf7..d979bc6 100644
 +    <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
 +    <GenerateAssemblyVersionAttribute>false</GenerateAssemblyVersionAttribute>
 +    <Product>Optimum</Product>
-+    <Version>0.2.7</Version>
++    <Version>0.2.8</Version>
      <OutputType>WinExe</OutputType>
      <TargetFramework>net10.0</TargetFramework>
      <PlatformTarget>x64</PlatformTarget>

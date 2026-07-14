@@ -1,0 +1,45 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
+index 7be6b24..4c02195 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
+@@ -215,10 +215,40 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+ 			return base.blocksCompressed != null;
+ 		}
+ 		return true;
+ 	}
+ 
++	internal bool OptimumReadLightBatch(int[] localIndices, int[] order, ushort[] packedLights, byte[] saturations, int offset, int count)
++	{
++		if (Disposed)
++		{
++			return false;
++		}
++		lock (packUnpackLock)
++		{
++			if (Disposed)
++			{
++				return false;
++			}
++			Unpack_ReadOnly();
++			ChunkData chunkData = chunkdata;
++			if (chunkData == null)
++			{
++				return false;
++			}
++			int end = offset + count;
++			for (int i = offset; i < end; i++)
++			{
++				int requestIndex = order[i];
++				int saturation;
++				packedLights[requestIndex] = chunkData.ReadLight(localIndices[requestIndex], out saturation);
++				saturations[requestIndex] = (byte)saturation;
++			}
++			return true;
++		}
++	}
++
+ 	internal void SetVisible(bool visible)
+ 	{
+ 		CullVisible[(bufIndex + 1) % 2] = visible;
+ 	}
+ 

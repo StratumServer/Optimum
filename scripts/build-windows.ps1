@@ -1,5 +1,5 @@
 # Build Optimum for Windows x64 in one step.
-# Produces: Optimum-v0.2.7-win-x64/ (ready to run)
+# Produces: Optimum-v<VERSION>-win-x64/ (ready to run)
 # Requirements: .NET 10 SDK, PowerShell 5.1+
 #
 # Usage: Right-click > Run with PowerShell, or from terminal:
@@ -38,5 +38,5 @@ Write-Host "Packaging Windows x64..."
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host ""
-Write-Host "Done: Optimum-v0.2.7-win-x64/"
+Write-Host "Done: Optimum-v$((Get-Content (Join-Path $PSScriptRoot '..\\VERSION') -Raw).Trim())-win-x64/"
 Write-Host "Run Optimum.exe from that folder."

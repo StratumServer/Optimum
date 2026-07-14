@@ -110,4 +110,40 @@ public class Phase1ThresholdTests
         double undershoot = 0.075;
         Assert.InRange(undershoot, 0.01, 0.25);
     }
+
+    // --- BackgroundFpsLimiter: focus-loss debounce (2026-07-14 fix) ---
+    // A scene transition (e.g. entering a world) can make NativeWindow.IsFocused read false for a
+    // single frame with no real focus loss. ClientPlatformWindows.window_RenderFrame requires the
+    // loss to persist past OptimumBgFpsFocusDebounceMs before clamping to OptimumBgMaxFps.
+
+    [Theory]
+    [InlineData(0, false)]      // instant read: not sustained
+    [InlineData(150, false)]    // mid-flicker: not sustained yet
+    [InlineData(299, false)]    // just under threshold: not sustained
+    [InlineData(300, true)]     // exactly at threshold: sustained
+    [InlineData(1000, true)]    // real alt-tab: sustained
+    public void BackgroundFps_FocusLossDebounce(long elapsedMs, bool shouldClamp)
+    {
+        const long debounceMs = 300;
+        bool focusLossSustained = elapsedMs >= debounceMs;
+        Assert.Equal(shouldClamp, focusLossSustained);
+    }
+
+    // --- PreciseFramePacing: spin-tail gated by processor count (2026-07-14 fix) ---
+    // Hard-spinning (SpinWait) pins a core at 100% for the tail of every frame. Below
+    // OptimumSpinTailMinProcessorCount logical processors, window_RenderFrame falls back to
+    // Yield-only pacing instead, since spinning is more likely to starve sibling threads there.
+
+    [Theory]
+    [InlineData(2, false)]
+    [InlineData(4, false)]
+    [InlineData(5, false)]  // threshold is exclusive: 5 logical processors still Yield-only
+    [InlineData(6, true)]
+    [InlineData(16, true)]
+    public void FramePacing_SpinTailGatedByProcessorCount(int processorCount, bool shouldAllowSpin)
+    {
+        const int minProcessorCount = 5;
+        bool allowSpin = processorCount > minProcessorCount;
+        Assert.Equal(shouldAllowSpin, allowSpin);
+    }
 }

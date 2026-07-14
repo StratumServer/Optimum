@@ -39,6 +39,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
+$optimumBuildVer = (Get-Content (Join-Path $Root 'VERSION') -Raw).Trim()
 $Self = $PSCommandPath
 $InstallUrls = @{
     DotNet = 'https://dotnet.microsoft.com/download/dotnet/10.0'
@@ -539,7 +540,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) {
             $VsPath = $vsInfo.Path
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum 0.2.7 requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
+                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum $optimumBuildVer requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
             }
         }
     }
@@ -663,7 +664,6 @@ function Invoke-OptimumBuild {
         Get-ChildItem $env:TEMP -Directory -Filter 'Optimum-build-*' -ErrorAction SilentlyContinue |
             ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    $optimumBuildVer = '0.2.7'
     $buildId = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $buildRoot = Join-Path $shortRoot "Optimum-$optimumBuildVer-$buildId"
     # Clean dirs from OTHER versions (stale caches with different decompiler output).
@@ -826,7 +826,7 @@ function Invoke-OptimumBuild {
         $regKey = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1'
         New-Item -Path $regKey -Force | Out-Null
         Set-ItemProperty -Path $regKey -Name 'DisplayName' -Value "Optimum $requiredVer"
-        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value '0.2.7'
+        Set-ItemProperty -Path $regKey -Name 'DisplayVersion' -Value $optimumBuildVer
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
@@ -1601,7 +1601,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = 'vs1.22.3+v0.2.7'
+$lblVersion.Text = "vs1.22.3+v$optimumBuildVer"
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1849,7 +1849,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
             $existingSemver = ($fvi.ProductVersion -split '\+')[0]
         }
 
-        $thisVer = '0.2.7'
+        $thisVer = $optimumBuildVer
         if ($existingSemver) {
             if ([version]$existingSemver -lt [version]$thisVer) {
                 $r = [System.Windows.Forms.MessageBox]::Show(

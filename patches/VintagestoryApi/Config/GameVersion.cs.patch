@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Config/GameVersion.cs b/VintagestoryApi/Config/GameVersion.cs
-index a7911ea..9a6e0fb 100644
+index a7911ea..d5037d7 100644
 --- a/VintagestoryApi/Config/GameVersion.cs
 +++ b/VintagestoryApi/Config/GameVersion.cs
-@@ -36,11 +36,16 @@ namespace Vintagestory.API.Config
+@@ -36,11 +36,17 @@ namespace Vintagestory.API.Config
          public const string OverallMajorMinor = "1.22";
  
          /// <summary>
@@ -13,14 +13,15 @@ index a7911ea..9a6e0fb 100644
 +
 +        /// <summary>
 +        /// Optimum version tag appended to the game version display.
++        /// OptimumConfig.Version supplies the managed assembly version.
 +        /// </summary>
-+        public const string OptimumVersion = "0.2.7";
++        public const string OptimumVersion = OptimumConfig.Version;
  
          /// <summary>
          /// Whether this is a stable or unstable version
          /// </summary>
          public const EnumGameBranch Branch = EnumGameBranch.Stable;
-@@ -53,11 +58,11 @@ namespace Vintagestory.API.Config
+@@ -53,11 +59,11 @@ namespace Vintagestory.API.Config
          public static EnumReleaseType ReleaseType => GetReleaseType(ShortGameVersion);
  
          /// <summary>

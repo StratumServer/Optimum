@@ -84,13 +84,8 @@ try {
     dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
     if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
 
-    # 3. Version from OptimumInfo.cs.
-    $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.7'
-    if (Test-Path $infoFile) {
-        $m = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
-        if ($m.Success) { $optVer = $m.Groups[1].Value }
-    }
+    # 3. Optimum release version.
+    $optVer = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
 
     if (-not $OutputDir) { $OutputDir = $repoRoot }
     $name     = "Optimum-v$optVer-linux-x64"

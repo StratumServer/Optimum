@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-index 9592e54..0748396 100644
+index 9592e54..be7db19 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -180,10 +180,21 @@ index 9592e54..0748396 100644
  						array[num2 + k] = 0;
  					}
  					else
-@@ -717,10 +779,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -715,12 +777,22 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			{
+ 				currentChunkDraw32[i] &= 223;
  				currentChunkDrawFluids[i] &= 223;
  			}
  		}
++		// Optimum: greedy mesh pass for eligible interior Cube blocks. Runs
++		// before the per-block loop, emits merged quads directly into the
++		// center pool (never edge - BuildBlockPolygons_EdgeOnly has no greedy
++		// pass, see bug B2 in the greedy-mesh fix plan), and zeroes consumed
++		// faceFlags so the loop below skips those faces. Takes the pool array
++		// directly instead of reading currentModeldataByRenderPassByLodLevel
++		// (bug B1: that field isn't assigned until the next line).
++		OptimumGreedyMeshEmitter.EmitGreedyQuads(this, chunkX, chunkZ, currentChunkDraw32,
++			currentChunkBlocksExt, centerModeldataByRenderPassByLodLevel[1]);
  		TCTCache tCTCache = vars;
  		currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
 +		currentOptimumChiselModeldataByRenderPassByLodLevel = edgeOptimumChiselModeldataByRenderPassByLodLevel;
@@ -192,7 +203,7 @@ index 9592e54..0748396 100644
  		{
  			int num5 = (j + 1) * 34 + 1;
  			tCTCache.posY = num + j;
-@@ -731,20 +794,23 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -731,20 +803,23 @@ public class ChunkTesselator : IMeshPoolSupplier
  			do
  			{
  				tCTCache.lz = num7;
@@ -216,7 +227,7 @@ index 9592e54..0748396 100644
  			while (++num7 < 32);
  		}
  	}
-@@ -761,10 +827,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -761,10 +836,11 @@ public class ChunkTesselator : IMeshPoolSupplier
  			{
  				currentChunkDraw32[i] &= 223;
  			}
@@ -228,7 +239,7 @@ index 9592e54..0748396 100644
  		for (int j = 0; j < 32; j++)
  		{
  			int num5 = (j + 1) * 34 + 1;
-@@ -838,18 +905,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -838,18 +914,20 @@ public class ChunkTesselator : IMeshPoolSupplier
  			int num7 = num5 / 32 / 32;
  			int num8 = num5 / 32 % 32;
  			if (num6 * (num6 ^ num) * num7 * (num7 ^ num) * num8 * (num8 ^ num) == 0)
@@ -249,7 +260,7 @@ index 9592e54..0748396 100644
  			tCTCache.index3d = num5;
  			Vec3i normali = blockFacing.Normali;
  			num7 += normali.Y;
-@@ -1194,16 +1263,17 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -1194,16 +1272,17 @@ public class ChunkTesselator : IMeshPoolSupplier
  	}
  
  	[MethodImpl(MethodImplOptions.AggressiveInlining)]

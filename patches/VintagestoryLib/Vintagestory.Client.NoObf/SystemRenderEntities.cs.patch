@@ -1,11 +1,13 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..425a53c 100644
+index 374f827..7817839 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -1,15 +1,20 @@
+@@ -1,15 +1,36 @@
  using System;
  using System.Collections.Generic;
++using System.Diagnostics;
  using Vintagestory.API.Client;
++using Vintagestory.API.Common;
  using Vintagestory.API.Common.Entities;
 +using Vintagestory.API.Config;
  using Vintagestory.API.MathTools;
@@ -18,16 +20,200 @@ index 374f827..425a53c 100644
 +	// area in shadow map. Skip them.
 +	private static double ShadowCullDistanceSq => (double)ClientSettings.OptimumShadowCullDistance * ClientSettings.OptimumShadowCullDistance;
 +
++	private const int OptimumEntityLightBatchSize = 256;
++
++	private const int OptimumEntityLightMinimumSamples = 4;
++
++	private Optimum.EntityLightBatchBuffer optimumEntityLightBatchBuffer;
++
++	private int optimumEntityLightPreviousSampleCount;
++
++	private bool optimumEntityLightBatchDisabled;
++
++	private bool optimumEntityShaderCacheDisabled;
++
++	private bool optimumEntityShaderFailureLogged;
++
  	public override string Name => "ree";
  
  	public SystemRenderEntities(ClientMain game)
  		: base(game)
  	{
-@@ -23,23 +28,33 @@ public class SystemRenderEntities : ClientSystem
+@@ -20,26 +41,212 @@ public class SystemRenderEntities : ClientSystem
+ 		game.eventManager.RegisterRenderer(OnRenderFrame2D, EnumRenderStage.Ortho, Name, 0.4);
+ 		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowFar, Name, 0.4);
+ 		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowNear, Name, 0.4);
  	}
  
++	private bool PublishOptimumEntityLightSample(IOptimumEntityLightSampler sampler, int batchId, int sampleIndex, int x, int y, int z, IWorldChunk sourceChunk, ushort packedLight, int saturation)
++	{
++		try
++		{
++			OptimumEntityLightConverter.FromPackedLight(packedLight, saturation, game.WorldMap.hueLevels, game.WorldMap.satLevels, game.WorldMap.BlockLightLevels, game.WorldMap.SunLightLevels, out var red, out var green, out var blue, out var sunlight);
++			sampler.SetOptimumLightSample(batchId, sampleIndex, x, y, z, sourceChunk, red, green, blue, sunlight);
++			return true;
++		}
++		catch (Exception)
++		{
++			return false;
++		}
++	}
++
++	private int PrepareOptimumEntityLights()
++	{
++		Optimum.EntityLightBatchBuffer buffer = optimumEntityLightBatchBuffer ??= new Optimum.EntityLightBatchBuffer();
++		int batchId = buffer.NextBatchId();
++		bool measureBatchTime = (batchId & 63) == 0;
++		long startedAt = measureBatchTime ? Stopwatch.GetTimestamp() : 0;
++		int requestCount = 0;
++		int sampleCount = 0;
++		int preparedCount = 0;
++		int chunkGroupCount = 0;
++		int failedChunkGroupCount = 0;
++		int lockBatchCount = 0;
++		int maxBatchSize = 0;
++		try
++		{
++			foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
++			{
++				EntityRenderer renderer = entityRenderer.Value;
++				if (!renderer.entity.IsRendered || renderer is not IOptimumEntityLightSampler sampler)
++				{
++					continue;
++				}
++				int rendererSampleCount = sampler.OptimumLightSampleCount;
++				for (int sampleIndex = 0; sampleIndex < rendererSampleCount; sampleIndex++)
++				{
++					sampleCount++;
++					sampler.GetOptimumLightSampleCoordinates(sampleIndex, out var x, out var y, out var z);
++					if (!game.WorldMap.IsValidPos(x, y, z))
++					{
++						if (PublishOptimumEntityLightSample(sampler, batchId, sampleIndex, x, y, z, null, (ushort)game.WorldMap.SunBrightness, 0))
++						{
++							preparedCount++;
++						}
++						continue;
++					}
++
++					int requestIndex = requestCount;
++					buffer.EnsureCapacity(requestIndex + 1);
++					requestCount = requestIndex + 1;
++					buffer.Samplers[requestIndex] = sampler;
++					buffer.SampleIndexes[requestIndex] = sampleIndex;
++					buffer.X[requestIndex] = x;
++					buffer.Y[requestIndex] = y;
++					buffer.Z[requestIndex] = z;
++					buffer.LocalIndices[requestIndex] = MapUtil.Index3d(x & game.WorldMap.ChunkSizeMask, y & game.WorldMap.ChunkSizeMask, z & game.WorldMap.ChunkSizeMask, 32, 32);
++					buffer.ChunkKeys[requestIndex] = game.WorldMap.ChunkIndex3D(x / 32, y / 32, z / 32);
++					buffer.Order[requestIndex] = requestIndex;
++				}
++			}
++
++			if (requestCount > 1)
++			{
++				Array.Sort(buffer.ChunkKeys, buffer.Order, 0, requestCount);
++			}
++
++			int groupOffset = 0;
++			while (groupOffset < requestCount)
++			{
++				long chunkKey = buffer.ChunkKeys[groupOffset];
++				int groupEnd = groupOffset + 1;
++				while (groupEnd < requestCount && buffer.ChunkKeys[groupEnd] == chunkKey)
++				{
++					groupEnd++;
++				}
++				chunkGroupCount++;
++				IWorldChunk worldChunk = game.WorldMap.GetChunk(chunkKey);
++				if (worldChunk is ClientChunk clientChunk)
++				{
++					int batchOffset = groupOffset;
++					while (batchOffset < groupEnd)
++					{
++						int batchCount = Math.Min(OptimumEntityLightBatchSize, groupEnd - batchOffset);
++						lockBatchCount++;
++						maxBatchSize = Math.Max(maxBatchSize, batchCount);
++						if (!clientChunk.OptimumReadLightBatch(buffer.LocalIndices, buffer.Order, buffer.PackedLights, buffer.Saturations, batchOffset, batchCount))
++						{
++							failedChunkGroupCount++;
++							break;
++						}
++						int batchEnd = batchOffset + batchCount;
++						for (int i = batchOffset; i < batchEnd; i++)
++						{
++							int requestIndex = buffer.Order[i];
++							if (PublishOptimumEntityLightSample(buffer.Samplers[requestIndex], batchId, buffer.SampleIndexes[requestIndex], buffer.X[requestIndex], buffer.Y[requestIndex], buffer.Z[requestIndex], worldChunk, buffer.PackedLights[requestIndex], buffer.Saturations[requestIndex]))
++							{
++								preparedCount++;
++							}
++						}
++						batchOffset = batchEnd;
++					}
++				}
++				else if (worldChunk != null)
++				{
++					failedChunkGroupCount++;
++				}
++				groupOffset = groupEnd;
++			}
++		}
++		catch (Exception e)
++		{
++			batchId = 0;
++			preparedCount = 0;
++			optimumEntityLightBatchDisabled = true;
++			failedChunkGroupCount++;
++			if (!buffer.FailureLogged)
++			{
++				buffer.FailureLogged = true;
++				game.Logger.Warning("Optimum entity light batch failed: {0}", e);
++			}
++		}
++		finally
++		{
++			buffer.ClearSamplers(requestCount);
++			long elapsedTicks = measureBatchTime ? Stopwatch.GetTimestamp() - startedAt : 0;
++			OptimumDiagnostics.RecordEntityLightBatch(sampleCount, preparedCount, chunkGroupCount, failedChunkGroupCount, lockBatchCount, maxBatchSize, elapsedTicks);
++		}
++		return batchId;
++	}
++
++	private bool BeginOptimumEntityShaderSegment(ShaderProgramEntityanimated shader)
++	{
++		try
++		{
++			if (!shader.UBOs.TryGetValue("Animation", out var animationUbo) || animationUbo == null || animationUbo.Disposed)
++			{
++				return false;
++			}
++			shader.ViewMatrix = game.api.Render.CurrentModelviewMatrix;
++			shader.WaterWaveCounter = game.api.Render.ShaderUniforms.WaterWaveCounter;
++			OptimumEntityShaderState.Begin(shader, animationUbo);
++			return true;
++		}
++		catch (Exception e)
++		{
++			OptimumEntityShaderState.End();
++			optimumEntityShaderCacheDisabled = true;
++			if (!optimumEntityShaderFailureLogged)
++			{
++				optimumEntityShaderFailureLogged = true;
++				game.Logger.Warning("Optimum entity shader cache failed: {0}", e);
++			}
++			return false;
++		}
++	}
++
++	private void EndOptimumEntityShaderSegment()
++	{
++		int useCount = OptimumEntityShaderState.End();
++		OptimumDiagnostics.RecordEntityShaderSegment(useCount);
++	}
++
  	private void OnBeforeRender(float dt)
  	{
++		int optimumLightBatchId = OptimumConfig.EntityLightBatchEnabled && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0;
++		int optimumLightSampleCount = 0;
  		int num = ClientSettings.ViewDistance * ClientSettings.ViewDistance;
 -		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
 +		// Optimum: .XYZ allocates a new Vec3d every call; the loop only
@@ -48,18 +234,87 @@ index 374f827..425a53c 100644
  			{
  				entity.IsRendered = true;
 +				OptimumDiagnostics.EntityRenderCull.Hit();
++				if (entityRenderer.Value is IOptimumEntityLightSampler sampler)
++				{
++					optimumLightSampleCount += sampler.OptimumLightSampleCount;
++					sampler.ActivateOptimumLightBatch(optimumLightBatchId);
++				}
  				entityRenderer.Value.BeforeRender(dt);
  			}
  			else
  			{
  				entity.IsRendered = false;
 +				OptimumDiagnostics.EntityRenderCull.Skip();
++				if (entityRenderer.Value is IOptimumEntityLightSampler sampler)
++				{
++					sampler.ActivateOptimumLightBatch(0);
++				}
  			}
  			game.api.World.FrameProfiler.Mark("esr-beforeanim");
  			try
  			{
  				entity.AnimManager?.OnClientFrame(dt);
-@@ -127,10 +142,24 @@ public class SystemRenderEntities : ClientSystem
+@@ -49,10 +256,11 @@ public class SystemRenderEntities : ClientSystem
+ 				game.Logger.Error("Animations error for entity " + entity.Code.ToShortString() + " at " + entity.Pos.AsBlockPos);
+ 				throw;
+ 			}
+ 			game.api.World.FrameProfiler.Mark("esr-afteranim");
+ 		}
++		optimumEntityLightPreviousSampleCount = optimumLightSampleCount;
+ 	}
+ 
+ 	public void OnRenderOpaque3D(float deltaTime)
+ 	{
+ 		RuntimeStats.renderedEntities = 0;
+@@ -82,15 +290,44 @@ public class SystemRenderEntities : ClientSystem
+ 		game.Platform.GlDisableCullFace();
+ 		game.GlMatrixModeModelView();
+ 		game.GlPushMatrix();
+ 		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+ 		game.Platform.GlToggleBlend(on: true);
+-		foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
++		OptimumEntityShaderState.End();
++		bool shaderStateCacheEnabled = OptimumConfig.EntityShaderStateCacheEnabled && !optimumEntityShaderCacheDisabled;
++		bool shaderSegmentActive = false;
++		bool shaderSegmentUnavailable = false;
++		try
++		{
++			foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
++			{
++				if (entityRenderer2.Value.entity.IsRendered)
++				{
++					bool supportsShaderStateCache = shaderStateCacheEnabled && !shaderSegmentUnavailable && entityRenderer2.Value is IOptimumEntityShaderRenderer shaderRenderer && shaderRenderer.OptimumShaderStateCompatible;
++					if (supportsShaderStateCache && !shaderSegmentActive)
++					{
++						shaderSegmentActive = BeginOptimumEntityShaderSegment(entityanimated);
++						shaderSegmentUnavailable = !shaderSegmentActive;
++					}
++					else if (!supportsShaderStateCache && shaderSegmentActive)
++					{
++						EndOptimumEntityShaderSegment();
++						shaderSegmentActive = false;
++					}
++					entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
++				}
++			}
++		}
++		finally
+ 		{
+-			if (entityRenderer2.Value.entity.IsRendered)
++			if (shaderSegmentActive)
+ 			{
+-				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
++				EndOptimumEntityShaderSegment();
++			}
++			else
++			{
++				OptimumEntityShaderState.End();
+ 			}
+ 		}
+ 		game.GlPopMatrix();
+ 		entityanimated.Stop();
+ 		ScreenManager.FrameProfiler.Mark("ree-op-b");
+@@ -127,10 +364,24 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
