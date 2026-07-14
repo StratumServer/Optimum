@@ -15,6 +15,11 @@
          Builds under deep %TEMP% paths (usernames with spaces) fail without this. -->
     <LongPathAware>true</LongPathAware>
     <NoWarn>$(NoWarn);CS1591;CS1572;CS1573;CS1570;CS0649;CS0414;CS0169;CS0162;CS0168;CS0067;NU1904</NoWarn>
+    <!-- Feature flag for greedy mesh UI and config exposure. Uncomment to
+         show the controls in Settings Extra and persist them to optimum.json.
+         The compiler includes meshing code in every build. This flag controls
+         access to the settings. -->
+    <!-- <DefineConstants>$(DefineConstants);OPTIMUM_GREEDY_MESH</DefineConstants> -->
     <!-- NU1904: System.Drawing.Common 4.5.0 CVE. Vanilla pins this version.
          VS uses SkiaSharp for all image processing; System.Drawing is never
          fed untrusted input. Suppressed until upstream bumps the dep. -->

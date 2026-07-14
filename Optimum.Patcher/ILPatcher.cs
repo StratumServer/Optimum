@@ -108,6 +108,15 @@ public static class ILPatcher
             return -1;
         }
 
+        var pinvokeErrors = SelfConsistencyVerifier.VerifyPInvokeIntegrity(vanillaAsm.MainModule);
+        if (pinvokeErrors.Count > 0)
+        {
+            Console.Error.WriteLine($"\n  {pinvokeErrors.Count} PInvoke integrity error(s), output not written:");
+            foreach (var err in pinvokeErrors)
+                Console.Error.WriteLine($"    {err}");
+            return -1;
+        }
+
         vanillaAsm.Write(outputPath);
         return injectedTypes + injectedMembers + patched;
     }

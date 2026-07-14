@@ -1,10 +1,11 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
-index 59421c6..dde07d8 100644
+index 59421c6..d4d1b84 100644
 --- a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
 +++ b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
-@@ -1,8 +1,9 @@
+@@ -1,8 +1,10 @@
  using System;
  using System.Collections.Generic;
++using System.Diagnostics;
  using Vintagestory.API.Client;
 +using Vintagestory.API.Config;
  using Vintagestory.API.MathTools;
@@ -12,7 +13,7 @@ index 59421c6..dde07d8 100644
  #nullable disable
  
  namespace Vintagestory.API.Common
-@@ -17,10 +18,18 @@ namespace Vintagestory.API.Common
+@@ -17,10 +19,30 @@ namespace Vintagestory.API.Common
          protected ICoreClientAPI capi;
          protected Vec3d position;
          protected Vec3f soundPosition;
@@ -20,26 +21,42 @@ index 59421c6..dde07d8 100644
  
 +        // Optimum: animation LOD for distant animated block-entities.
 +        // Skip OnFrame beyond far threshold; stride every 4th frame
-+        // between near and far. Saves animator work for forges,
-+        // querns, barrels outside close range.
++        // between near and far, phase-spread per block so blocks loaded
++        // in the same batch don't all land on the same stride frame.
++        // Saves animator work for forges, querns, barrels outside close range.
++        // Set SkipAnimLod for atmospheric renderers such as GearRenderer.
++        // The Thunderlord and rift gears orbit beyond the far threshold and
++        // require animation updates at every distance.
++        public bool SkipAnimLod;
 +        private const double AnimLodNearSq = 24.0 * 24.0;
 +        private const double AnimLodFarSq = 48.0 * 48.0;
 +        private int _animFrameCounter;
++        private int _animPhase = -1;
++        private float _animDeferredDt;
++
++        // Optimum: hard cap on animator updates per frame, shared across
++        // every animated block on the render thread.
++        private static long _animBudgetStampMs = -1;
++        private static int _animBudgetUsed;
 +
          [Obsolete]
          protected virtual int RenderTextureId => capi.BlockTextureAtlas.AtlasTextures[0].TextureId;
  
          public double RenderOrder => 1;
          public int RenderRange => 99;
-@@ -90,10 +99,37 @@ namespace Vintagestory.API.Common
+@@ -90,11 +112,72 @@ namespace Vintagestory.API.Common
          {
              if (animator == null || renderer == null || (api as ICoreClientAPI)?.IsGamePaused == true) return; // not initialized yet
  
              if (activeAnimationsByAnimCode.Count > 0 || animator.ActiveAnimationCount > 0)
              {
-+                // Optimum: animation LOD. Skip animator work for
-+                // distant animated blocks (forges, querns, etc).
-+                if (OptimumConfig.AnimBlockLodEnabled)
++                // Optimum: animation LOD. Skip or stride animator work for
++                // distant animated blocks (forges, querns, etc). Tracks which
++                // tier counter to credit; stays Near when the gate is disabled
++                // since every block then runs at full rate.
++                var tierCounter = OptimumDiagnostics.AnimBlockLodNear;
++
++                if (OptimumConfig.AnimBlockLodEnabled && !SkipAnimLod)
 +                {
 +                    var plrPos = capi.World.Player.Entity.Pos;
 +                    double dx = position.X - plrPos.X;
@@ -48,24 +65,55 @@ index 59421c6..dde07d8 100644
 +
 +                    if (distSq > AnimLodFarSq)
 +                    {
-+                        OptimumDiagnostics.AnimBlockLod.Skip();
++                        // Far tier freezes at the last pose. Drop any pending
++                        // deferred time so a block resumes instead of fast-forwarding
++                        // once it comes back into mid range.
++                        _animDeferredDt = 0f;
++                        OptimumDiagnostics.AnimBlockLodFar.Skip();
 +                        return;
 +                    }
++
 +                    if (distSq > AnimLodNearSq)
 +                    {
++                        tierCounter = OptimumDiagnostics.AnimBlockLodMid;
++
++                        if (_animPhase < 0) _animPhase = OptimumAnimLod.Phase((int)position.X, (int)position.Y, (int)position.Z);
 +                        _animFrameCounter++;
-+                        if ((_animFrameCounter & 3) != 0)
++                        if (!OptimumAnimLod.MidTierDue(_animFrameCounter, _animPhase))
 +                        {
-+                            OptimumDiagnostics.AnimBlockLod.Skip();
++                            _animDeferredDt = Math.Min(_animDeferredDt + deltaTime, 0.25f);
++                            OptimumDiagnostics.AnimBlockLodMid.Skip();
 +                            return;
 +                        }
-+                        deltaTime *= 4f;
 +                    }
 +                }
 +
-+                OptimumDiagnostics.AnimBlockLod.Hit();
++                // Optimum: hard per-frame cap on animator updates, independent
++                // of the distance tiers above. Over-budget blocks defer through
++                // the same accumulator the mid tier uses and catch up once
++                // their turn comes. Known limitation: deferral order follows
++                // renderer iteration order, so under sustained over-budget load
++                // the same tail defers every frame. Their time still accumulates
++                // in coarser steps, capped at 0.25s, and AnimBlockLodDeferred
++                // makes the starvation visible. A rotating start offset is the
++                // follow-up if a playtest shows this, not handled here.
++                int budget = OptimumConfig.AnimBlockLodFrameBudget;
++                if (budget > 0 && !OptimumAnimLod.BudgetWindow(capi.ElapsedMilliseconds, ref _animBudgetStampMs, ref _animBudgetUsed, budget))
++                {
++                    _animDeferredDt = Math.Min(_animDeferredDt + deltaTime, 0.25f);
++                    OptimumDiagnostics.AnimBlockLodDeferred.Skip();
++                    return;
++                }
++
++                deltaTime += _animDeferredDt;
++                _animDeferredDt = 0f;
++                tierCounter.Hit();
++
++                long animStartTicks = Stopwatch.GetTimestamp();
                  animator.OnFrame(activeAnimationsByAnimCode, deltaTime);
++                OptimumDiagnostics.RecordAnimBlockTicks(Stopwatch.GetTimestamp() - animStartTicks);
              }
  
              if (activeAnimationsByAnimCode.Count == 0 && animator.ActiveAnimationCount == 0 && renderer.ShouldRender && !stopRenderTriggered)
              {
+                 stopRenderTriggered = true;

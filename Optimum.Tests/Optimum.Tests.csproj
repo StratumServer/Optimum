@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\VintagestoryApi\VintagestoryAPI.csproj" />
+    <ProjectReference Include="..\VSEssentials\VSEssentialsMod.csproj" />
     <!-- VintagestoryLib (the decompiled donor) only compiles after a full bootstrap with
          all patches applied. Tests that reference its types live behind DONOR_AVAILABLE. -->
     <ProjectReference Include="..\build\VintagestoryLib\VintagestoryLib.csproj" Condition="'$(DonorAvailable)' == 'true'" />

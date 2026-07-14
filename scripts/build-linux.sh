@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build Optimum for Linux x64 in one step.
-# Produces: Optimum-v0.2.7-linux-x64/ (ready to run)
+# Produces: Optimum-v<VERSION>-linux-x64/ (ready to run)
 # Requirements: .NET 10 SDK, bash, python3, git, curl, perl
 set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +27,7 @@ pwsh ./scripts/package-linux.ps1 2>/dev/null && echo "Done." && exit 0
 # Fallback if pwsh is not installed.
 echo "pwsh not found, using fallback package path..."
 make deploy
-STAGE="Optimum-v0.2.7-linux-x64"
+STAGE="Optimum-v$(tr -d '[:space:]' < "$repo_root/VERSION")-linux-x64"
 PATCHED_LIB="build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll"
 dotnet run --project Optimum.Patcher -c Release -- \
     .vanilla/linux-x64/vintagestory/VintagestoryLib.vanilla.dll \

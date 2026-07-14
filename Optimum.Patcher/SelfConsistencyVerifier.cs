@@ -64,6 +64,39 @@ public static class SelfConsistencyVerifier
         return errors;
     }
 
+    /// <summary>
+    /// Catches an injected extern method (e.g. [DllImport]) that round-tripped through
+    /// MemberInjector without its PInvokeInfo/ImplMap metadata. A method whose Attributes
+    /// claim MethodAttributes.PInvokeImpl but which carries no matching PInvokeInfo is
+    /// metadata-inconsistent: it has no IL body (correctly, since PInvokeImpl implies
+    /// HasBody == false) and no ImplMap row backing the "this is a native call" flag either.
+    /// The CLR loader falls back to treating that combination as an internal call (ECall),
+    /// which is reserved for system-trusted assemblies and throws
+    /// "ECall methods must be packaged into a system module" the first time the method runs
+    /// — a crash-on-launch if it sits on the startup path, as it did for
+    /// ClientPlatformWindows.OptimumTimeBeginPeriod in 0.2.8 (see
+    /// docs/bugs/precise-frame-pacing-spin-tail-2026-07-14.md).
+    /// </summary>
+    public static List<string> VerifyPInvokeIntegrity(ModuleDefinition module)
+    {
+        var errors = new List<string>();
+
+        foreach (var type in FlattenAll(module))
+        {
+            foreach (var method in type.Methods)
+            {
+                if (method.IsPInvokeImpl && method.PInvokeInfo == null)
+                {
+                    errors.Add($"{type.FullName}::{method.Name} is flagged PInvokeImpl but has no " +
+                               "PInvokeInfo (missing ImplMap) — will throw \"ECall methods must be " +
+                               "packaged into a system module\" at runtime instead of calling the native DLL");
+                }
+            }
+        }
+
+        return errors;
+    }
+
     private static IEnumerable<TypeDefinition> FlattenAll(ModuleDefinition module)
     {
         foreach (var t in module.Types)

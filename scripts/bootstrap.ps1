@@ -931,6 +931,15 @@ try {
         $t
     }
 
+    # ILSpy binds the cancellable EventHelper casts to System.Func, while vanilla IL uses Vintagestory.API.Common.Func.
+    # Run this exception after the Func qualification pass so full donor builds invoke handlers and patch extraction does not recreate an orphan patch.
+    Update-FileInPlace (Join-Path $lib 'Vintagestory.API.Common/EventHelper.cs') {
+        param($t)
+        $t = $t -creplace '\(System\.Func<T, EnumHandling>\)handler', '(Vintagestory.API.Common.Func<T, EnumHandling>)handler'
+        $t = $t -creplace '\(System\.Func<T0, T1, EnumHandling>\)handler', '(Vintagestory.API.Common.Func<T0, T1, EnumHandling>)handler'
+        $t
+    }
+
     # 6j: ILSpy decompiles compiler-generated async state machines with plain
     # `private void MoveNext()` / `private void SetStateMachine(...)` instead of explicit
     # IAsyncStateMachine interface implementations.

@@ -101,12 +101,11 @@ if [[ ! -f "$VANILLA_LIB" ]]; then
 fi
 dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
-# 3. Version from OptimumInfo.cs.
-INFO_FILE="$REPO_ROOT/build/VintagestoryLib/Optimum/OptimumInfo.cs"
-OPT_VER="0.2.7"
-if [[ -f "$INFO_FILE" ]]; then
-    MATCH=$(perl -ne 'if (/Version\s*=\s*"([^"]+)"/) { print $1; exit }' "$INFO_FILE" || true)
-    if [[ -n "$MATCH" ]]; then OPT_VER="$MATCH"; fi
+# 3. Optimum release version.
+OPT_VER="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
+if [[ -z "$OPT_VER" ]]; then
+    echo "Error: VERSION contains no release version." >&2
+    exit 1
 fi
 
 APP_DIR="$OUTPUT_DIR/Optimum.app"
@@ -134,7 +133,10 @@ cp -f "$MOD_OUT/VintagestoryAPI.dll" "$APP_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$APP_DIR/Mods/"
-cp -f "$MOD_OUT/cairo-sharp.dll" "$APP_DIR/Lib/"
+# cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches, so
+# rebuilding it only introduces a different compiler/SDK's codegen with no behavior change (see
+# docs/bugs/linux-font-hinting-review-2026-07-14.md). Leave the pristine vanilla copy already
+# staged above in place so text rendering matches upstream exactly.
 
 # 5b. Overlay optimized shaders.
 SHADER_SRC="$REPO_ROOT/sources/shaders"

@@ -66,7 +66,7 @@ public static class OptimumUpdateChecker
 
     /// <summary>
     /// Extract "tag_name" value from the JSON response without pulling in a JSON library.
-    /// The GitHub API response has "tag_name": "v0.2.7" near the top.
+    /// The GitHub API response has "tag_name": "v0.x.y" near the top.
     /// </summary>
     private static string ExtractTagName(string json)
     {

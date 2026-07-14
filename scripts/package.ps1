@@ -85,13 +85,8 @@ try {
     dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
     if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
 
-    # Read Optimum version from OptimumInfo.cs (distinct from the VS -Version).
-    $infoFile = Join-Path $repoRoot 'build/VintagestoryLib/Optimum/OptimumInfo.cs'
-    $optVer = '0.2.7'
-    if (Test-Path $infoFile) {
-        $match = [regex]::Match((Get-Content $infoFile -Raw), 'Version\s*=\s*"([^"]+)"')
-        if ($match.Success) { $optVer = $match.Groups[1].Value }
-    }
+    # Read the Optimum release version. The -Version parameter selects the Vintage Story release.
+    $optVer = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
 
     if (-not $OutputDir) { $OutputDir = $repoRoot }
     $name = "Optimum-v$optVer-win-x64"
@@ -112,7 +107,10 @@ try {
     Copy-Item -Force (Join-Path $apiOut 'VSEssentials.dll') (Join-Path $stageDir 'Mods')
     Copy-Item -Force (Join-Path $apiOut 'VSSurvivalMod.dll') (Join-Path $stageDir 'Mods')
     Copy-Item -Force (Join-Path $apiOut 'VSCreativeMod.dll') (Join-Path $stageDir 'Mods')
-    Copy-Item -Force (Join-Path $apiOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib')
+    # cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches, so
+    # rebuilding it only introduces a different compiler/SDK's codegen with no behavior change
+    # (see docs/bugs/linux-font-hinting-review-2026-07-14.md). Leave the pristine vanilla copy
+    # already staged above in place so text rendering matches upstream exactly.
 
     # Apply optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'

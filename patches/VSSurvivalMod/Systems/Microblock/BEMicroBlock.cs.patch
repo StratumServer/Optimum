@@ -1,32 +1,50 @@
 diff --git a/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs b/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs
-index 4e4704b..3554ddc 100644
+index 4e4704b..ffd3f87 100644
 --- a/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs
 +++ b/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs
-@@ -35,10 +35,11 @@ namespace Vintagestory.GameContent
+@@ -35,10 +35,19 @@ namespace Vintagestory.GameContent
                      .BeginSubCommand("genshape")
                          .WithDescription("Export a json model file from a chiseled block")
                          .WithArgs(api.ChatCommands.Parsers.WorldPosition("pos"))
                          .HandleWith(onGenShape)
                      .EndSubCommand()
 +
++                    .BeginSubCommand("lodstats")
++                        .WithDescription("Show Optimum chisel LOD diagnostics")
++                        .HandleWith(onLodStats)
++                    .EndSubCommand()
++                    .BeginSubCommand("lodreset")
++                        .WithDescription("Reset Optimum chisel LOD diagnostics")
++                        .HandleWith(onLodReset)
++                    .EndSubCommand()
                  .EndSubCommand()
              ;
          }
  
          private TextCommandResult onGenShape(TextCommandCallingArgs args)
-@@ -67,10 +68,11 @@ namespace Vintagestory.GameContent
+@@ -67,10 +76,21 @@ namespace Vintagestory.GameContent
              ;
  
              File.WriteAllText("microblockshapefile.json", text);
              return TextCommandResult.Success("shape file microblockshapefile.json generated");
          }
 +
++        private TextCommandResult onLodStats(TextCommandCallingArgs args)
++        {
++            return TextCommandResult.Success(OptimumDiagnostics.GetChiselLodSummary());
++        }
++
++        private TextCommandResult onLodReset(TextCommandCallingArgs args)
++        {
++            OptimumDiagnostics.ResetChiselLod();
++            return TextCommandResult.Success("Optimum chisel LOD diagnostics reset");
++        }
      }
  
      public partial class BlockEntityMicroBlock : BlockEntity, IRotatable, IAcceptsDecor, IMaterialExchangeable
      {
          protected static ThreadLocal<CuboidWithMaterial[]> tmpCuboidTL = new ThreadLocal<CuboidWithMaterial[]>(() =>
-@@ -2465,18 +2467,68 @@ namespace Vintagestory.GameContent
+@@ -2465,18 +2485,71 @@ namespace Vintagestory.GameContent
              {
                  Mesh = GenMesh();
              }
@@ -36,9 +54,7 @@ index 4e4704b..3554ddc 100644
 +
 +            ICoreClientAPI capi = Api as ICoreClientAPI;
 +            if (capi == null)
-             {
--                var cmapdata = (Api as ICoreClientAPI).World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
--                mesher.AddMeshData(Mesh, cmapdata);
++            {
 +                mesher.AddMeshData(Mesh);
 +                Block = Api.World.BlockAccessor.GetBlock(Pos);
 +                return true;
@@ -47,8 +63,13 @@ index 4e4704b..3554ddc 100644
 +            // Optimum: chiseled block LOD via the engine's native lodLevel system.
 +            // lodLevel 2 keeps the full chisel visible through short and medium range.
 +            // lodLevel 3 swaps to the material proxy at long range.
-+            if (OptimumConfig.ChiselLodEnabled && BlockIds != null && BlockIds.Length > 0)
-+            {
++            // VS Roofing sets canChisel false on roof blocks. Those blocks reuse
++            // BlockEntityMicroBlock after players chisel the base, but retain a roof mesh.
++            bool canChisel = Block.Attributes?["canChisel"].AsBool(true) ?? true;
++            if (OptimumConfig.ChiselLodEnabled && canChisel && BlockIds != null && BlockIds.Length > 0)
+             {
+-                var cmapdata = (Api as ICoreClientAPI).World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
+-                mesher.AddMeshData(Mesh, cmapdata);
 +                long startTicks = Stopwatch.GetTimestamp();
 +                int primaryBlockId = GetMajorityMaterialId();
 +                Block primaryBlock = Api.World.GetBlock(primaryBlockId);

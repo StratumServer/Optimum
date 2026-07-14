@@ -1,0 +1,16 @@
+diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
+index d1f563b..4873bda 100644
+--- a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
++++ b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
+@@ -70,10 +70,11 @@ namespace Vintagestory.GameContent
+             capi.Render.GetOrLoadTexture(loc, ref rustTexture);
+ 
+             shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
+ 
+             tripodAnim = new AnimationUtil(capi, tripodPos);
++            tripodAnim.SkipAnimLod = true;
+             tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
+             tripodAnim.StartAnimation(new AnimationMetaData() { Animation = "walk", Code = "walk", BlendMode = EnumAnimationBlendMode.Average, AnimationSpeed = 0.1f });
+             tripodAnim.renderer.ScaleX = 30;
+             tripodAnim.renderer.ScaleY = 30;
+             tripodAnim.renderer.ScaleZ = 30;

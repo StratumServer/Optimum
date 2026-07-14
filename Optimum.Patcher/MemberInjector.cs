@@ -232,7 +232,26 @@ public static class MemberInjector
                 targetModule.ImportReference(param.ParameterType)));
         }
 
-        if (src.HasBody)
+        // extern P/Invoke methods (e.g. [DllImport]) have no IL body: MethodAttributes.PInvokeImpl
+        // is already copied above via src.Attributes, but without a matching PInvokeInfo/ImplMap
+        // row the method's flags claim PInvoke with nothing backing it. The CLR loader then treats
+        // it as an internal ECall, which is only legal in system-trusted assemblies and throws
+        // "ECall methods must be packaged into a system module" at runtime. Reconstruct the
+        // PInvokeInfo (target-module ModuleReference + entry point + calling convention/charset)
+        // and ImplAttributes so the injected method round-trips as a real P/Invoke.
+        if (src.IsPInvokeImpl && src.PInvokeInfo != null)
+        {
+            var srcModuleRef = src.PInvokeInfo.Module;
+            var targetModuleRef = targetModule.ModuleReferences.FirstOrDefault(m => m.Name == srcModuleRef.Name);
+            if (targetModuleRef == null)
+            {
+                targetModuleRef = new ModuleReference(srcModuleRef.Name);
+                targetModule.ModuleReferences.Add(targetModuleRef);
+            }
+            newMethod.PInvokeInfo = new PInvokeInfo(src.PInvokeInfo.Attributes, src.PInvokeInfo.EntryPoint, targetModuleRef);
+            newMethod.ImplAttributes = src.ImplAttributes;
+        }
+        else if (src.HasBody)
         {
             newMethod.Body.InitLocals = src.Body.InitLocals;
             newMethod.Body.MaxStackSize = src.Body.MaxStackSize;

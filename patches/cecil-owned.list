@@ -10,6 +10,7 @@
 # member-injection, and IL-hook type lists and fails loud on drift in either
 # direction, so keep the two in sync by hand when Program.cs changes.
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
@@ -29,5 +30,6 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patc
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
