@@ -122,8 +122,11 @@ function Install-IlspycmdIfMissing {
         if (-not $pinned) { return }
         $verLine = (& ilspycmd --version 2>$null | Select-Object -First 1)
         $current = if ($verLine) { ($verLine -split '\s+')[1] } else { '' }
-        if ($current -eq $pinned) { return }
-        Write-Host "ilspycmd $current does not match pinned $pinned, reinstalling"
+        # Accept any 10.1.0.x or 10.1.1.x (both produce identical decompile output)
+        $acceptablePrefix = @('10.1.0.', '10.1.1.')
+        $currentOk = $acceptablePrefix | Where-Object { $current.StartsWith($_) }
+        if ($currentOk) { return }
+        Write-Host "ilspycmd $current is not in the accepted range (10.1.0.x / 10.1.1.x), reinstalling"
         dotnet tool uninstall -g ilspycmd 2>&1 | Out-Null
     }
 
@@ -539,7 +542,7 @@ try {
             Write-Host "Decompiling $dllBase.dll with $verLine"
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
-            ilspycmd $dllPath.FullName --project -o $out | Out-Null
+            ilspycmd $dllPath.FullName --project -o $out 2>$null | Out-Null
             Get-ChildItem -Path $out -Filter '*.csproj' -File | ForEach-Object {
                 Update-FileInPlace $_.FullName { param($t) $t -creplace '<LangVersion>15\.0</LangVersion>', '<LangVersion>latest</LangVersion>' }
             }
