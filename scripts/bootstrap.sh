@@ -53,6 +53,23 @@ pinned_ilspycmd_version() {
   python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['tools']['ilspycmd']['version'])" "$manifest"
 }
 
+ilspycmd_accepted_prefixes() {
+  local manifest="$repo_root/.config/ilspycmd-compat.json"
+  if [[ -f "$manifest" ]]; then
+    grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\."' "$manifest" | tr -d '"'
+    return
+  fi
+  printf '%s\n' '10.1.0.' '10.1.1.'
+}
+
+ilspycmd_version_supported() {
+  local current="$1" prefix
+  while IFS= read -r prefix; do
+    [[ -n "$prefix" && "$current" == "$prefix"* ]] && return 0
+  done < <(ilspycmd_accepted_prefixes)
+  return 1
+}
+
 install_ilspycmd_if_missing() {
   local dotnet_tools="$HOME/.dotnet/tools"
   if [[ -x "$dotnet_tools/ilspycmd" ]]; then
@@ -66,9 +83,8 @@ install_ilspycmd_if_missing() {
     if [[ -z "$pinned" ]]; then return; fi
     local current
     current="$(ilspycmd --version 2>/dev/null | head -1 | awk '{print $2}')"
-    # Accept any 10.1.0.x or 10.1.1.x (both produce identical output)
-    if [[ "$current" == 10.1.0.* || "$current" == 10.1.1.* ]]; then return; fi
-    echo "ilspycmd $current is not in the accepted range (10.1.0.x / 10.1.1.x), reinstalling" >&2
+    if ilspycmd_version_supported "$current"; then return; fi
+    echo "ilspycmd $current is unsupported by this patch set, installing $pinned" >&2
     dotnet tool uninstall -g ilspycmd >/dev/null 2>&1 || true
   fi
 

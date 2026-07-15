@@ -46,6 +46,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/_exec.ps1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $gitInstallUrl = 'https://git-scm.com/download/win'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -109,6 +110,13 @@ function Get-PinnedIlspycmdVersion {
     return $json.tools.ilspycmd.version
 }
 
+function Get-AcceptedIlspycmdPrefixes {
+    $manifest = Join-Path $repoRoot '.config/ilspycmd-compat.json'
+    if (-not (Test-Path $manifest)) { return @('10.1.0.', '10.1.1.') }
+    $json = Get-Content $manifest -Raw | ConvertFrom-Json
+    return @($json.acceptedPrefixes)
+}
+
 function Install-IlspycmdIfMissing {
     $dotnetTools = Join-Path $HOME '.dotnet/tools'
     if (Test-Path (Join-Path $dotnetTools 'ilspycmd.exe')) {
@@ -120,22 +128,21 @@ function Install-IlspycmdIfMissing {
 
     if ($existing) {
         if (-not $pinned) { return }
-        $verLine = (& ilspycmd --version 2>$null | Select-Object -First 1)
+        $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
         $current = if ($verLine) { ($verLine -split '\s+')[1] } else { '' }
-        # Accept any 10.1.0.x or 10.1.1.x (both produce identical decompile output)
-        $acceptablePrefix = @('10.1.0.', '10.1.1.')
+        $acceptablePrefix = Get-AcceptedIlspycmdPrefixes
         $currentOk = $acceptablePrefix | Where-Object { $current.StartsWith($_) }
         if ($currentOk) { return }
-        Write-Host "ilspycmd $current is not in the accepted range (10.1.0.x / 10.1.1.x), reinstalling"
-        dotnet tool uninstall -g ilspycmd 2>&1 | Out-Null
+        Write-Host "ilspycmd $current is unsupported by this patch set, installing $pinned"
+        Invoke-NativeStep { dotnet tool uninstall -g ilspycmd 2>&1 | Out-Null }
     }
 
     if ($pinned) {
         Write-Host "Installing ilspycmd $pinned"
-        dotnet tool install -g ilspycmd --version $pinned | Out-Null
+        Invoke-NativeStep { dotnet tool install -g ilspycmd --version $pinned | Out-Null }
     } else {
         Write-Host "Installing ilspycmd (latest)"
-        dotnet tool install -g ilspycmd | Out-Null
+        Invoke-NativeStep { dotnet tool install -g ilspycmd | Out-Null }
     }
     $env:PATH = "$dotnetTools;$env:PATH"
 }
@@ -443,7 +450,7 @@ try {
         if (-not (Test-Path $ClientArchive)) {
             $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
             Write-Host "Downloading $url (~570MB)"
-            curl.exe -L --fail --progress-bar -o $ClientArchive $url
+            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $ClientArchive $url }
             if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
         } else {
             Write-Host "Using cached $ClientArchive"
@@ -456,7 +463,8 @@ try {
             New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
             $innounpZip = Join-Path $toolsDir 'innounp-2.zip'
             Write-Host "Downloading innounp"
-            curl.exe -L --fail --silent -o $innounpZip "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip"
+            Invoke-NativeStep { curl.exe -L --fail --silent -o $innounpZip "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip" }
+            if ($LASTEXITCODE -ne 0) { throw "Download failed: innounp-2.zip" }
             Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
             $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
             if ($found -and $found.FullName -ne $innounp) {
@@ -538,12 +546,20 @@ try {
 
         $out = Join-Path $snapshotDir $dllBase
         if (-not (Test-Path $out) -or $Refresh) {
-            $verLine = (& ilspycmd --version 2>$null | Select-Object -First 1)
+            $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
             Write-Host "Decompiling $dllBase.dll with $verLine"
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
-            ilspycmd $dllPath.FullName --project -o $out 2>$null | Out-Null
-            Get-ChildItem -Path $out -Filter '*.csproj' -File | ForEach-Object {
+            Invoke-NativeStep { ilspycmd $dllPath.FullName --project -o $out 2>$null | Out-Null }
+            # Don't trust ilspycmd's exit code alone: it has a known bug
+            # (icsharpcode/ILSpy#3101) where it reports failure via a bogus
+            # "not using the latest version" self-check even after a fully
+            # successful decompile. Verify the real artifact instead.
+            $producedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
+            if ($producedProjects.Count -eq 0) {
+                throw "ilspycmd produced no .csproj for $dllBase.dll (exit code $LASTEXITCODE). Delete $out and retry, or reinstall ilspycmd."
+            }
+            $producedProjects | ForEach-Object {
                 Update-FileInPlace $_.FullName { param($t) $t -creplace '<LangVersion>15\.0</LangVersion>', '<LangVersion>latest</LangVersion>' }
             }
         }
@@ -564,8 +580,10 @@ try {
             if (-not (Test-Path $base) -or $Refresh) {
                 if (Test-Path $base) { Remove-Item -Recurse -Force $base }
                 Write-Host "Cloning $name at $($fork.ref)"
-                git clone --quiet $fork.url $base 2>$null
-                git -C $base checkout --quiet $fork.ref
+                Invoke-NativeStep { git clone --quiet $fork.url $base 2>$null }
+                if ($LASTEXITCODE -ne 0) { throw "git clone failed for $name ($($fork.url))." }
+                Invoke-NativeStep { git -C $base checkout --quiet $fork.ref }
+                if ($LASTEXITCODE -ne 0) { throw "git checkout $($fork.ref) failed for $name." }
                 Remove-Item -Recurse -Force (Join-Path $base '.git')
                 Convert-ToLf $base
             }
@@ -583,8 +601,8 @@ try {
                 $dest = Join-Path $refDir $r.name
                 if (-not (Test-Path $dest)) {
                     Write-Host "Cloning reference: $($r.name)"
-                    git clone --quiet --depth=1 $r.url $dest 2>$null
-                    git -C $dest checkout --quiet $r.ref 2>$null
+                    Invoke-NativeStep { git clone --quiet --depth=1 $r.url $dest 2>$null }
+                    Invoke-NativeStep { git -C $dest checkout --quiet $r.ref 2>$null }
                 }
             }
         }

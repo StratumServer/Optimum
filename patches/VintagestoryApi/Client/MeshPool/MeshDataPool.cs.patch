@@ -1,10 +1,18 @@
-diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..78c63aa 100644
---- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-+++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-@@ -363,30 +363,46 @@ namespace Vintagestory.API.Client
-         /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
-         /// <param name="frustumCullMode">The mode of the culling.</param>
+--- .baseline/VintagestoryApi/Client/MeshPool/MeshDataPool.cs	2026-07-07 21:58:42.146652200 -0300
++++ VintagestoryApi/Client/MeshPool/MeshDataPool.cs	2026-07-14 15:25:37.717509500 -0300
+@@ -282,7 +282,11 @@
+             }
+ 
+             // Load into graphics card
++            long uploadStart = System.Diagnostics.Stopwatch.GetTimestamp();
+             capi.Render.UpdateChunkMesh(modelRef, modeldata);
++            long uploadTicks = System.Diagnostics.Stopwatch.GetTimestamp() - uploadStart;
++            int uploadBytes = modeldata.VerticesCount * (12 + 8 + 4 + 4) + modeldata.IndicesCount * 4;
++            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkUpload(uploadBytes, uploadTicks);
+             
+             
+             // Assign a location to it
+@@ -365,26 +369,42 @@
          public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
          {
              indicesGroupsCount = 0;
@@ -56,11 +64,7 @@ index f9128b4..78c63aa 100644
          }
  
          public void SetFullyVisible()
-         {
-             indicesGroupsCount = 0;
-@@ -513,10 +529,12 @@ namespace Vintagestory.API.Client
- 
-         public Bools CullVisible = new Bools(true, true);
+@@ -515,6 +535,8 @@
  
          public int LodLevel = 0;
  
@@ -69,11 +73,7 @@ index f9128b4..78c63aa 100644
          public bool Hide;
  
          /// <summary>
-         /// Used for models with movements (like a door).
-         /// </summary>
-@@ -541,11 +559,11 @@ namespace Vintagestory.API.Client
- 
-                 case EnumFrustumCullMode.CullInstantShadowPassFar:
+@@ -543,7 +565,7 @@
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustumShadowPass(FrustumCullSphere) && LodLevel >= 1;
  
                  case EnumFrustumCullMode.CullNormal:
@@ -82,5 +82,3 @@ index f9128b4..78c63aa 100644
  
                  default:
                      return !Hide;
-             }
- 

@@ -17,6 +17,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
+if [[ -x "$HOME/.dotnet/dotnet" ]]; then
+    export DOTNET_ROOT="$HOME/.dotnet"
+    export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+fi
+
 # Defaults
 INSTALL_DIR=""
 DATA_PATH=""
@@ -82,24 +87,127 @@ done
 check_cmd() { command -v "$1" &>/dev/null; }
 
 DOTNET_BIN=""  # set by check_dotnet10 on success
+ILSPY_BIN=""   # set by check_ilspycmd on success
 
 check_dotnet10() {
-    # Probe known .NET install locations (PATH, dotnet-install.sh, system packages, snap).
     DOTNET_BIN=""
+    local candidates=()
     if command -v dotnet &>/dev/null; then
-        DOTNET_BIN="dotnet"
-    elif [[ -x "$HOME/.dotnet/dotnet" ]]; then
-        DOTNET_BIN="$HOME/.dotnet/dotnet"
-    elif [[ -x "/usr/share/dotnet/dotnet" ]]; then
-        DOTNET_BIN="/usr/share/dotnet/dotnet"
-    elif [[ -x "/usr/lib/dotnet/dotnet" ]]; then
-        DOTNET_BIN="/usr/lib/dotnet/dotnet"
-    elif [[ -x "/snap/dotnet-sdk/current/dotnet" ]]; then
-        DOTNET_BIN="/snap/dotnet-sdk/current/dotnet"
+        candidates+=("$(command -v dotnet)")
     fi
+    candidates+=(
+        "$HOME/.dotnet/dotnet"
+        "/usr/share/dotnet/dotnet"
+        "/usr/lib/dotnet/dotnet"
+        "/snap/dotnet-sdk/current/dotnet"
+    )
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        [[ -x "$candidate" ]] || continue
+        if "$candidate" --list-sdks 2>/dev/null | grep -q '^10\.'; then
+            DOTNET_BIN="$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
 
-    [[ -z "$DOTNET_BIN" ]] && return 1
-    "$DOTNET_BIN" --list-sdks 2>/dev/null | grep -q '^10\.'
+activate_user_dotnet() {
+    if [[ -x "$HOME/.dotnet/dotnet" ]]; then
+        export DOTNET_ROOT="$HOME/.dotnet"
+        export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+    else
+        export PATH="$HOME/.dotnet/tools:$PATH"
+    fi
+    hash -r
+}
+
+pinned_ilspycmd_version() {
+    local manifest="$REPO_ROOT/.config/dotnet-tools.json"
+    local fallback="10.1.1.8388"
+    [[ -f "$manifest" ]] || { printf '%s\n' "$fallback"; return; }
+    local parsed
+    parsed=$(grep -A 4 '"ilspycmd"' "$manifest" | grep -m 1 '"version"' | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)
+    printf '%s\n' "${parsed:-$fallback}"
+}
+
+ilspycmd_accepted_prefixes() {
+    local manifest="$REPO_ROOT/.config/ilspycmd-compat.json"
+    if [[ -f "$manifest" ]]; then
+        grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\."' "$manifest" | tr -d '"'
+        return
+    fi
+    printf '%s\n' '10.1.0.' '10.1.1.'
+}
+
+ilspycmd_version_supported() {
+    local current="$1" prefix
+    while IFS= read -r prefix; do
+        [[ -n "$prefix" && "$current" == "$prefix"* ]] && return 0
+    done < <(ilspycmd_accepted_prefixes)
+    return 1
+}
+
+find_ilspycmd() {
+    ILSPY_BIN=""
+    if command -v ilspycmd &>/dev/null; then
+        ILSPY_BIN="$(command -v ilspycmd)"
+    elif [[ -x "$HOME/.dotnet/tools/ilspycmd" ]]; then
+        ILSPY_BIN="$HOME/.dotnet/tools/ilspycmd"
+    fi
+    [[ -n "$ILSPY_BIN" ]]
+}
+
+check_ilspycmd() {
+    find_ilspycmd || return 1
+    local version
+    version=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
+    ilspycmd_version_supported "$version"
+}
+
+system_install_command() {
+    local package="$1"
+    if check_cmd apt-get; then
+        printf 'sudo apt-get install -y %q' "$package"
+    elif check_cmd dnf; then
+        printf 'sudo dnf install -y %q' "$package"
+    elif check_cmd pacman; then
+        printf 'sudo pacman -S --needed --noconfirm %q' "$package"
+    elif check_cmd zypper; then
+        printf 'sudo zypper --non-interactive install %q' "$package"
+    fi
+}
+
+install_dotnet10() {
+    local installer
+    installer=$(mktemp)
+    if check_cmd curl; then
+        curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$installer"
+    elif check_cmd wget; then
+        wget -q https://dot.net/v1/dotnet-install.sh -O "$installer"
+    else
+        rm -f "$installer"
+        die "Installing .NET 10 requires curl or wget."
+    fi
+    if ! bash "$installer" --channel 10.0 --install-dir "$HOME/.dotnet"; then
+        rm -f "$installer"
+        die "The .NET 10 installer failed."
+    fi
+    rm -f "$installer"
+    activate_user_dotnet
+    check_dotnet10 || die ".NET 10 installation finished without a usable 10.x SDK."
+}
+
+install_ilspycmd() {
+    check_dotnet10 || die "ilspycmd requires the .NET 10 SDK."
+    local pinned
+    pinned=$(pinned_ilspycmd_version)
+    if ! "$DOTNET_BIN" tool update -g ilspycmd --version "$pinned"; then
+        "$DOTNET_BIN" tool install -g ilspycmd --version "$pinned"
+    fi
+    export PATH="$HOME/.dotnet/tools:$PATH"
+    hash -r
+    check_ilspycmd || die "ilspycmd $pinned installation failed."
 }
 
 get_required_vs_version() {
@@ -141,7 +249,7 @@ detect_prereqs() {
     else
         PREREQ_STATUS[git]="missing"
         PREREQ_LABEL[git]="git"
-        PREREQ_INSTALL_CMD[git]="sudo apt install git"
+        PREREQ_INSTALL_CMD[git]="$(system_install_command git)"
     fi
 
     # curl
@@ -151,7 +259,7 @@ detect_prereqs() {
     else
         PREREQ_STATUS[curl]="missing"
         PREREQ_LABEL[curl]="curl"
-        PREREQ_INSTALL_CMD[curl]="sudo apt install curl"
+        PREREQ_INSTALL_CMD[curl]="$(system_install_command curl)"
     fi
 
     # python3
@@ -161,7 +269,7 @@ detect_prereqs() {
     else
         PREREQ_STATUS[python3]="missing"
         PREREQ_LABEL[python3]="python3"
-        PREREQ_INSTALL_CMD[python3]="sudo apt install python3"
+        PREREQ_INSTALL_CMD[python3]="$(system_install_command python3)"
     fi
 
     # perl
@@ -171,7 +279,7 @@ detect_prereqs() {
     else
         PREREQ_STATUS[perl]="missing"
         PREREQ_LABEL[perl]="perl"
-        PREREQ_INSTALL_CMD[perl]="sudo apt install perl"
+        PREREQ_INSTALL_CMD[perl]="$(system_install_command perl)"
     fi
 
     # bash (always present if running this script)
@@ -185,32 +293,31 @@ detect_prereqs() {
     else
         PREREQ_STATUS[tar]="missing"
         PREREQ_LABEL[tar]="tar"
-        PREREQ_INSTALL_CMD[tar]="sudo apt install tar"
+        PREREQ_INSTALL_CMD[tar]="$(system_install_command tar)"
     fi
 
     # ilspycmd
-    if check_cmd ilspycmd; then
+    local current
+    if check_ilspycmd; then
         PREREQ_STATUS[ilspycmd]="ok"
-        PREREQ_LABEL[ilspycmd]="ilspycmd ($(ilspycmd --version 2>/dev/null || echo 'installed'))"
-    elif [[ -f "$HOME/.dotnet/tools/ilspycmd" ]]; then
-        PREREQ_STATUS[ilspycmd]="ok"
-        PREREQ_LABEL[ilspycmd]="ilspycmd (~/.dotnet/tools/)"
+        current=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
+        PREREQ_LABEL[ilspycmd]="ilspycmd ($current)"
     else
         PREREQ_STATUS[ilspycmd]="missing"
-        PREREQ_LABEL[ilspycmd]="ilspycmd (decompiler)"
-        # Read pinned version from dotnet-tools.json
-        local ilspy_ver="10.1.1.8388"
-        if [[ -f "$REPO_ROOT/.config/dotnet-tools.json" ]]; then
-            local parsed
-            parsed=$(perl -0777 -ne 'if (/"ilspycmd"\s*:\s*\{[^}]*"version"\s*:\s*"([^"]+)"/s) { print $1; exit }' "$REPO_ROOT/.config/dotnet-tools.json" 2>/dev/null || true)
-            if [[ -n "$parsed" ]]; then ilspy_ver="$parsed"; fi
+        local ilspy_ver
+        ilspy_ver=$(pinned_ilspycmd_version)
+        if find_ilspycmd; then
+            current=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
+            PREREQ_LABEL[ilspycmd]="ilspycmd $current (unsupported, needs $ilspy_ver)"
+        else
+            PREREQ_LABEL[ilspycmd]="ilspycmd $ilspy_ver (decompiler)"
         fi
-        PREREQ_INSTALL_CMD[ilspycmd]="dotnet tool install -g ilspycmd --version $ilspy_ver"
+        PREREQ_INSTALL_CMD[ilspycmd]="${DOTNET_BIN:-$HOME/.dotnet/dotnet} tool update -g ilspycmd --version $ilspy_ver"
     fi
 }
 
 print_prereqs() {
-    local order=(dotnet git curl python3 perl tar ilspycmd)
+    local order=(git curl python3 perl tar dotnet ilspycmd)
     printf "\n${BOLD}  PREREQUISITES${RESET}\n\n"
     for key in "${order[@]}"; do
         local status="${PREREQ_STATUS[$key]}"
@@ -226,7 +333,7 @@ print_prereqs() {
 
 get_missing_prereqs() {
     local missing=()
-    local order=(dotnet git curl python3 perl tar ilspycmd)
+    local order=(git curl python3 perl tar dotnet ilspycmd)
     for key in "${order[@]}"; do
         if [[ "${PREREQ_STATUS[$key]}" == "missing" ]]; then
             missing+=("$key")
@@ -275,7 +382,13 @@ offer_install_missing() {
             fi
 
             printf "    ${CYAN}Installing %s...${RESET}\n" "${PREREQ_LABEL[$key]}"
-            if eval "$cmd"; then
+            local installed=0
+            case "$key" in
+                dotnet) install_dotnet10 && installed=1 ;;
+                ilspycmd) install_ilspycmd && installed=1 ;;
+                *) eval "$cmd" && installed=1 ;;
+            esac
+            if [[ "$installed" -eq 1 ]]; then
                 printf "    ${GREEN}✓${RESET} %s installed\n" "${PREREQ_LABEL[$key]}"
             else
                 printf "    ${RED}✗${RESET} Failed to install %s\n" "${PREREQ_LABEL[$key]}"
@@ -283,9 +396,7 @@ offer_install_missing() {
             fi
         done
 
-        # Re-check after installation
-        # Refresh PATH for dotnet tools
-        export PATH="$HOME/.dotnet:$HOME/.dotnet/tools:$PATH"
+        activate_user_dotnet
         detect_prereqs
         local still_missing
         read -ra still_missing <<< "$(get_missing_prereqs)"
@@ -611,4 +722,6 @@ main() {
     printf "\n"
 }
 
-main
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main
+fi

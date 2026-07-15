@@ -8,7 +8,7 @@ set -euo pipefail
 
 DURATION="${1:-20}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OPTIMUM_DIR="/home/vitorpn/.local/share/optimum"
+OPTIMUM_DIR="${HOME}/.local/share/optimum"
 CONFIG="$HOME/.config/VintagestoryData/ModConfig/optimum.json"
 OUTPUT_DIR="$REPO_ROOT/benchmarks/renderscale-$(date +%Y%m%d-%H%M%S)"
 

@@ -9,7 +9,7 @@ set -euo pipefail
 
 DURATION="${1:-30}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OPTIMUM_DIR="/home/vitorpn/.local/share/optimum"
+OPTIMUM_DIR="${HOME}/.local/share/optimum"
 VANILLA_DIR="$REPO_ROOT/.vanilla-linux/vintagestory"
 OUTPUT_DIR="$REPO_ROOT/benchmarks/frametime-$(date +%Y%m%d-%H%M%S)"
 

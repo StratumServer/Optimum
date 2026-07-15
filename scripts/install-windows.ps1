@@ -38,6 +38,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. "$PSScriptRoot/_exec.ps1"
 $Root = Split-Path -Parent $PSScriptRoot
 $optimumBuildVer = (Get-Content (Join-Path $Root 'VERSION') -Raw).Trim()
 $Self = $PSCommandPath
@@ -248,6 +249,7 @@ function Resolve-DotNetPath {
 }
 
 function Test-DotNet10 {
+    $ErrorActionPreference = 'SilentlyContinue'
     Resolve-DotNetPath
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { return $false }
     return [bool](dotnet --list-sdks 2>$null | Where-Object { $_ -match '^10\.' })
@@ -425,9 +427,9 @@ function Install-ILSpyCmd {
     if (Test-Path $manifest) {
         $json = Get-Content $manifest -Raw | ConvertFrom-Json
         $ver = $json.tools.ilspycmd.version
-        dotnet tool install -g ilspycmd --version $ver 2>&1 | Out-Null
+        Invoke-NativeStep { dotnet tool install -g ilspycmd --version $ver 2>&1 | Out-Null }
     } else {
-        dotnet tool install -g ilspycmd 2>&1 | Out-Null
+        Invoke-NativeStep { dotnet tool install -g ilspycmd 2>&1 | Out-Null }
     }
     $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
 }

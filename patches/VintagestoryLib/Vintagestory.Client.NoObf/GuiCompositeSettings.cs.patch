@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..e76edb6 100644
+index 4d08f84..7e7cc6b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..e76edb6 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,139 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,164 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -160,6 +160,9 @@ index 4d08f84..e76edb6 100644
 +			.AddStaticText(Lang.Get("optimum-entityshadercache"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 16, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-entityshadercache-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 16, 400, 25))
 +			.AddSwitch(onOptimumEntityShaderCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 16 + 2, 200, 20), "optEntityShaderCache")
++			.AddStaticText(Lang.Get("optimum-renderscale"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
++			.AddHoverText(Lang.Get("optimum-renderscale-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
++			.AddDropDown(new string[] { "1.0", "0.85", "0.77", "0.67" }, new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, 0, onOptimumRenderScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 17 + 2, 200, 25), "optRenderScale")
 +#if OPTIMUM_GREEDY_MESH
 +			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
@@ -195,6 +198,8 @@ index 4d08f84..e76edb6 100644
 +		composer.GetSwitch("optDynLightCache").SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
 +		composer.GetSwitch("optEntityLightBatch").SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
 +		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
++		int renderScaleIdx = ClientSettings.OptimumRenderScale >= 1.0f ? 0 : ClientSettings.OptimumRenderScale >= 0.85f ? 1 : ClientSettings.OptimumRenderScale >= 0.77f ? 2 : 3;
++		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
 +#if OPTIMUM_GREEDY_MESH
 +		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
 +		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
@@ -221,6 +226,26 @@ index 4d08f84..e76edb6 100644
 +	// per-frame from ClientSettings, so no mirror property is needed.
 +	private void onOptimumOcclusionScaleChanged(bool on) { Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumDynLightCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++
++	private void onOptimumRenderScaleChanged(string code, bool selected)
++	{
++		float scale = float.Parse(code, System.Globalization.CultureInfo.InvariantCulture);
++		ClientSettings.OptimumRenderScale = scale;
++		Vintagestory.API.Config.OptimumConfig.RenderScale = scale;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		// FSR render scale works by lowering SSAA below 1.0 and upscaling.
++		// Override SSAA when render scale < 1.0; restore to 1.0 when native.
++		if (scale < 1.0f)
++		{
++			ClientSettings.SSAA = scale;
++		}
++		else
++		{
++			ClientSettings.SSAA = 1.0f;
++		}
++		ScreenManager.Platform.RebuildFrameBuffers();
++		handler.ReloadShaders();
++	}
 +	private void onOptimumEntityLightBatchChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
@@ -239,7 +264,7 @@ index 4d08f84..e76edb6 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1957,24 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1982,24 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

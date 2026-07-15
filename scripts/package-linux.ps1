@@ -37,6 +37,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . "$PSScriptRoot/_hostcaps.ps1"
+. "$PSScriptRoot/_exec.ps1"
 Push-Location $repoRoot
 try {
     Show-HostCaps -Only 'linux-x64' | Out-Null
@@ -56,7 +57,7 @@ try {
     if (-not (Test-Path $ClientArchive)) {
         $url = "https://cdn.vintagestory.at/gamefiles/stable/vs_client_linux-x64_$Version.tar.gz"
         Write-Host "Downloading $url"
-        curl -L --fail -o $ClientArchive $url
+        Invoke-NativeStep { curl -L --fail -o $ClientArchive $url }
         if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
     } else {
         Write-Host "Using cached $ClientArchive"
@@ -69,7 +70,8 @@ try {
     if (-not (Test-Path $vanillaDir)) {
         New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
         Write-Host "Extracting to $baseRoot"
-        tar -xzf $ClientArchive -C $baseRoot
+        Invoke-NativeStep { tar -xzf $ClientArchive -C $baseRoot }
+        if ($LASTEXITCODE -ne 0) { throw "tar extraction failed on $ClientArchive" }
         $extractedFresh = $true
     }
     if (-not (Test-Path $vanillaDir)) { throw "Extraction failed: $vanillaDir not found" }
@@ -81,8 +83,8 @@ try {
     if (-not (Test-Path $vanillaLib)) {
         throw "Pristine vanilla VintagestoryLib.vanilla.dll not found in $vanillaDir. Delete the matching .vanilla cache and re-run packaging."
     }
-    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
-    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
+    Invoke-NativeStep { dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib }
+    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed (exit code $LASTEXITCODE)." }
 
     # 3. Optimum release version.
     $optVer = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
@@ -195,7 +197,8 @@ try {
     } else {
         $out = Join-Path $OutputDir "$name.tar.gz"
         if (Test-Path $out) { Remove-Item -Force $out }
-        tar -czf $out -C $OutputDir $name
+        Invoke-NativeStep { tar -czf $out -C $OutputDir $name }
+        if ($LASTEXITCODE -ne 0) { throw "tar packaging failed for $out" }
     }
     $size = [math]::Round((Get-Item $out).Length / 1MB)
     Write-Host "Done: $out (${size}MB)" -ForegroundColor Green
