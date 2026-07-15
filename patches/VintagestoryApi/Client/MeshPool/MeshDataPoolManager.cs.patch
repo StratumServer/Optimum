@@ -1,0 +1,38 @@
+--- .baseline/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs	2026-07-07 21:58:42.155158000 -0300
++++ VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs	2026-07-14 13:36:06.139824400 -0300
+@@ -112,6 +112,7 @@
+         public void Render(Vec3d playerpos, string originUniformName, EnumFrustumCullMode frustumCullMode = EnumFrustumCullMode.CullNormal)
+         {
+             int count = pools.Count;
++            int poolsRenderedThisPass = 0;
+             for (int i = 0; i < count; i++)
+             {
+                 MeshDataPool pool = pools[i];
+@@ -171,22 +172,27 @@
+                 }
+                 else
+                 {
++                    long cullStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                     pool.FrustumCull(frustumCuller, frustumCullMode);
++                    OptimumDiagnostics.RecordChunkFrustumCullTicks(System.Diagnostics.Stopwatch.GetTimestamp() - cullStart);
+ 
+                     if (pool.indicesGroupsCount == 0)
+                     {
+                         continue;
+                     }
+ 
++                    poolsRenderedThisPass++;
+                     capi.Render.CurrentActiveShader.Uniform(originUniformName, tmp.Set(
+                         (float)(pool.poolOrigin.X - playerpos.X),
+                         (float)(pool.poolOrigin.Y + pool.dimensionId * BlockPos.DimensionBoundary - playerpos.Y),
+                         (float)(pool.poolOrigin.Z - playerpos.Z)
+                     ));
+ 
++                    OptimumDiagnostics.RecordChunkDrawCall(pool.indicesGroupsCount);
+                     pool.RenderMesh(capi.Render);
+                 }
+             }
++            OptimumDiagnostics.RecordChunkRenderPass(poolsRenderedThisPass);
+         }
+ 
+         /// <summary>

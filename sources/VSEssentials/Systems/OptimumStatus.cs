@@ -58,10 +58,46 @@ public class OptimumStatusModSystem : ModSystem
                 .EndSubCommand()
             .EndSubCommand()
             .BeginSubCommand("chunk")
-                .WithDescription("Chunk data capture for benchmarks")
+                .WithDescription("Chunk data capture and render diagnostics")
                 .BeginSubCommand("dumpblocks")
                     .WithDescription("Export block data from the current chunk for the greedy meshing harness")
                     .HandleWith(_ => DumpChunkBlocks())
+                .EndSubCommand()
+                .BeginSubCommand("renderstats")
+                    .WithDescription("Show chunk render diagnostics (draw calls, pools, frustum cull time)")
+                    .HandleWith(_ =>
+                    {
+                        string summary = OptimumDiagnostics.GetChunkRenderSummary();
+                        api.Logger.Notification("[Optimum] chunk renderstats:\n" + summary);
+                        return TextCommandResult.Success(summary);
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("renderreset")
+                    .WithDescription("Reset chunk render counters")
+                    .HandleWith(_ =>
+                    {
+                        OptimumDiagnostics.ResetChunkRender();
+                        api.Logger.Notification("[Optimum] chunk render diagnostics reset");
+                        return TextCommandResult.Success("Chunk render diagnostics reset.");
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("uploadstats")
+                    .WithDescription("Show chunk upload diagnostics (bytes, time, calls)")
+                    .HandleWith(_ =>
+                    {
+                        string summary = OptimumDiagnostics.GetChunkUploadSummary();
+                        api.Logger.Notification("[Optimum] chunk uploadstats:\n" + summary);
+                        return TextCommandResult.Success(summary);
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("uploadreset")
+                    .WithDescription("Reset chunk upload counters")
+                    .HandleWith(_ =>
+                    {
+                        OptimumDiagnostics.ResetChunkUpload();
+                        api.Logger.Notification("[Optimum] chunk upload diagnostics reset");
+                        return TextCommandResult.Success("Chunk upload diagnostics reset.");
+                    })
                 .EndSubCommand()
             .EndSubCommand()
             .BeginSubCommand("greedy")
@@ -166,6 +202,9 @@ public class OptimumStatusModSystem : ModSystem
         string outDir = Path.Combine(api.DataBasePath, "benchmarks", "meshes");
         Directory.CreateDirectory(outDir);
         int exported = 0;
+        int beCount = 0;
+        int microBlockCount = 0;
+        int nullMeshCount = 0;
 
         for (int lx = 0; lx < chunkSize; lx++)
         for (int ly = 0; ly < chunkSize; ly++)
@@ -174,27 +213,26 @@ public class OptimumStatusModSystem : ModSystem
             var pos = new BlockPos(cx * chunkSize + lx, cy * chunkSize + ly, cz * chunkSize + lz);
             var be = api.World.BlockAccessor.GetBlockEntity(pos);
             if (be == null) continue;
-            // ChiselBlock stores its mesh in BEBehaviorMicroBlock. Find by type name
-            // since we reference VSEssentials but not VSSurvivalMod.
-            BlockEntityBehavior mb = null;
-            for (int b = 0; b < be.Behaviors.Count; b++)
+            beCount++;
+            // BlockEntityMicroBlock is the BE type for chiseled blocks (in VSSurvivalMod).
+            // Check by type name since VSEssentials does not reference VSSurvivalMod.
+            var beType = be.GetType();
+            bool isMicroBlock = false;
+            var t = beType;
+            while (t != null)
             {
-                if (be.Behaviors[b].GetType().Name == "BEBehaviorMicroBlock")
-                {
-                    mb = be.Behaviors[b];
-                    break;
-                }
+                if (t.Name == "BlockEntityMicroBlock") { isMicroBlock = true; break; }
+                t = t.BaseType;
             }
-            if (mb == null) continue;
+            if (!isMicroBlock) continue;
+            microBlockCount++;
 
-            // Trigger a mesh rebuild so we get fresh data, then grab it via reflection.
-            // The mesh is a MeshData stored in a private field. This is dev-only tooling;
-            // production code never calls this path.
-            var meshField = mb.GetType().GetField("currentMesh",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            // Mesh is a public field on BlockEntityMicroBlock.
+            var meshField = beType.GetField("Mesh",
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             if (meshField == null) continue;
-            var mesh = meshField.GetValue(mb) as MeshData;
-            if (mesh == null || mesh.VerticesCount == 0) continue;
+            var mesh = meshField.GetValue(be) as MeshData;
+            if (mesh == null || mesh.VerticesCount == 0) { nullMeshCount++; continue; }
 
             string filename = $"chisel_{pos.X}_{pos.Y}_{pos.Z}.bin";
             string filePath = Path.Combine(outDir, filename);
@@ -228,7 +266,7 @@ public class OptimumStatusModSystem : ModSystem
             exported++;
         }
 
-        string msg = $"Exported {exported} chisel mesh(es) to {outDir}";
+        string msg = $"Exported {exported} chisel mesh(es) to {outDir} [chunk({cx},{cy},{cz}) blockEntities={beCount} microBlocks={microBlockCount} nullMesh={nullMeshCount}]";
         api.Logger.Notification("[Optimum] " + msg);
         return TextCommandResult.Success(msg);
     }

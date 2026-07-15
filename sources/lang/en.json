@@ -43,5 +43,11 @@
 	"optimum-cmd-description": "Optimum status and diagnostics",
 	"optimum-cmd-status": "List every Optimum toggle and its current value, plus diagnostics",
 	"optimum-cmd-reset": "Reset every Optimum diagnostics counter",
-	"optimum-cmd-reset-done": "Optimum diagnostics counters reset."
+	"optimum-cmd-reset-done": "Optimum diagnostics counters reset.",
+	"optimum-renderscale": "Render Scale (FSR)",
+	"optimum-renderscale-tooltip": "Render the world at reduced resolution and upscale with AMD FSR edge-aware filtering. Lower scales give more FPS at the cost of some softness. Native = no upscaling.",
+	"optimum-renderscale-native": "Native (1.0x)",
+	"optimum-renderscale-quality": "Quality (0.85x)",
+	"optimum-renderscale-balanced": "Balanced (0.77x)",
+	"optimum-renderscale-performance": "Performance (0.67x)"
 }

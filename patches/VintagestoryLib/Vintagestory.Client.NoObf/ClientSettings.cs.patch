@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-index c1e2c75..8b6c986 100644
+index c1e2c75..1e55a52 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-@@ -2192,6 +2192,22 @@ public class ClientSettings : SettingsBase
+@@ -2192,6 +2192,23 @@ public class ClientSettings : SettingsBase
  
  	public virtual bool DefaultSSBOsSetting()
  	{
@@ -24,4 +24,5 @@ index c1e2c75..8b6c986 100644
 +	public static bool OptimumChiselLod { get; set; } = true;
 +	public static int OptimumChiselLodDistance { get; set; } = 48;
 +	public static bool OptimumDynamicLightCache { get; set; } = true;
++	public static float OptimumRenderScale { get; set; } = 1.0f;
  }

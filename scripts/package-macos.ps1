@@ -41,6 +41,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . "$PSScriptRoot/_hostcaps.ps1"
+. "$PSScriptRoot/_exec.ps1"
 Push-Location $repoRoot
 try {
     Show-HostCaps -Only "osx-$Arch" | Out-Null
@@ -62,7 +63,7 @@ try {
     if (-not (Test-Path $ClientArchive)) {
         $url = "https://cdn.vintagestory.at/gamefiles/stable/vs_client_osx-$Arch`_$Version.tar.gz"
         Write-Host "Downloading $url"
-        curl -L --fail -o $ClientArchive $url
+        Invoke-NativeStep { curl -L --fail -o $ClientArchive $url }
         if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
     } else {
         Write-Host "Using cached $ClientArchive"
@@ -75,7 +76,8 @@ try {
     if (-not (Test-Path $baseApp)) {
         New-Item -ItemType Directory -Force -Path $baseRoot | Out-Null
         Write-Host "Extracting to $baseRoot"
-        tar -xzf $ClientArchive -C $baseRoot
+        Invoke-NativeStep { tar -xzf $ClientArchive -C $baseRoot }
+        if ($LASTEXITCODE -ne 0) { throw "tar extraction failed on $ClientArchive" }
         $extractedFresh = $true
     }
     if (-not (Test-Path $baseApp)) { throw "Extraction failed: 'Vintage Story.app' not found" }
@@ -87,8 +89,8 @@ try {
     if (-not (Test-Path $vanillaLib)) {
         throw "Pristine vanilla VintagestoryLib.vanilla.dll not found in $baseApp. Delete the matching .vanilla cache and re-run packaging."
     }
-    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
-    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
+    Invoke-NativeStep { dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib }
+    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed (exit code $LASTEXITCODE)." }
 
     # 3. Optimum release version.
     $optVer = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
@@ -212,7 +214,8 @@ try {
         New-Item -ItemType Directory -Force -Path $dmgStage | Out-Null
         Copy-Item -Recurse -Force $appDir (Join-Path $dmgStage 'Optimum.app')
         ln -s /Applications (Join-Path $dmgStage 'Applications')
-        hdiutil create -volname 'Optimum' -srcfolder $dmgStage -ov -format UDZO $dmg
+        Invoke-NativeStep { hdiutil create -volname 'Optimum' -srcfolder $dmgStage -ov -format UDZO $dmg }
+        if ($LASTEXITCODE -ne 0) { throw "hdiutil failed to create $dmg" }
         Remove-Item -Recurse -Force $dmgStage
         Write-Host "Done: $dmg" -ForegroundColor Green
     } else {
@@ -227,26 +230,26 @@ try {
             Write-Host "Building libdmg-hfsplus (one time)..."
             $src = Join-Path $repoRoot '.tools/libdmg-hfsplus'
             if (-not (Test-Path $src)) {
-                git clone --depth 1 https://github.com/fanquake/libdmg-hfsplus.git $src
+                Invoke-NativeStep { git clone --depth 1 https://github.com/fanquake/libdmg-hfsplus.git $src }
             }
             Push-Location $src
             try {
-                cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 . | Out-Null
-                make | Out-Null
+                Invoke-NativeStep { cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 . | Out-Null }
+                Invoke-NativeStep { make | Out-Null }
             } finally { Pop-Location }
         }
         if ($mkiso -and (Test-Path $dmgTool)) {
             $iso = Join-Path $OutputDir "Optimum-$Arch.iso"
             if (Test-Path $iso) { Remove-Item -Force $iso }
-            & $mkiso.Source -hfs -V 'Optimum' -D -no-pad -r -file-mode 0755 -o $iso $appDir
-            & $dmgTool $iso $dmg
+            Invoke-NativeStep { & $mkiso.Source -hfs -V 'Optimum' -D -no-pad -r -file-mode 0755 -o $iso $appDir }
+            Invoke-NativeStep { & $dmgTool $iso $dmg }
             Remove-Item -Force $iso
             Write-Warning "Built an UNSIGNED .dmg with libdmg-hfsplus. Gatekeeper warns (right-click > Open), and it may not mount on every macOS version. Run on macOS for a notarizable .dmg."
             Write-Host "Done: $dmg" -ForegroundColor Green
         } else {
             $tgz = Join-Path $OutputDir "Optimum-v$optVer-mac-$Arch.tar.gz"
             if (Test-Path $tgz) { Remove-Item -Force $tgz }
-            tar -czf $tgz -C $OutputDir 'Optimum.app'
+            Invoke-NativeStep { tar -czf $tgz -C $OutputDir 'Optimum.app' }
             Write-Warning "No .dmg toolchain (need macOS hdiutil, or cdrtools mkisofs + cmake + git). Wrote $tgz instead."
         }
     }

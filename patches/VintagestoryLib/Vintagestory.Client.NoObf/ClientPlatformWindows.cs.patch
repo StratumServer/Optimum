@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 4909b4b..2288925 100644
+index 4909b4b..f22ac0a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -45,10 +45,86 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -45,10 +45,92 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private AssetManager assetManager;
  
@@ -81,6 +81,12 @@ index 4909b4b..2288925 100644
 +		ClientSettings.OptimumChiselLod = Vintagestory.API.Config.OptimumConfig.ChiselLodEnabled;
 +		ClientSettings.OptimumChiselLodDistance = Vintagestory.API.Config.OptimumConfig.ChiselLodDistance;
 +		ClientSettings.OptimumDynamicLightCache = Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled;
++		ClientSettings.OptimumRenderScale = Vintagestory.API.Config.OptimumConfig.RenderScale;
++		// FSR: force SSAA to the render scale value so FBOs shrink on startup.
++		if (Vintagestory.API.Config.OptimumConfig.RenderScale < 1.0f)
++		{
++			ClientSettings.SSAA = Vintagestory.API.Config.OptimumConfig.RenderScale;
++		}
 +		Optimum.OptimumUpdateChecker.CheckAsync();
 +	}
 +
@@ -89,7 +95,20 @@ index 4909b4b..2288925 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -478,21 +554,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +175,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	private List<string> drawCallStacks = new List<string>();
+ 
+ 	private List<FrameBufferRef> frameBuffers;
+ 
++	private const int OptimumFsrFramebufferIndex = 18;
++
+ 	private MeshRef screenQuad;
+ 
+ 	private bool serverRunning;
+ 
+ 	private bool gamepause;
+@@ -478,21 +562,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -182,3 +201,95 @@ index 4909b4b..2288925 100644
  		float dt = (float)frameStopWatch.ElapsedTicks / (float)Stopwatch.Frequency;
  		frameStopWatch.Restart();
  		ScreenManager.FrameProfiler.Mark("sleep");
+@@ -1210,11 +1361,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
+ 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
+ 		GL.DepthFunc((DepthFunction)513);
+-		frameBufferRef3.ColorTextureIds = ArrayUtil.CreateFilled(SetupSSAO ? 4 : 2, (int n) => GL.GenTexture());
++		frameBufferRef3.ColorTextureIds = new int[SetupSSAO ? 4 : 2];
++		for (int j = 0; j < frameBufferRef3.ColorTextureIds.Length; j++)
++		{
++			frameBufferRef3.ColorTextureIds[j] = GL.GenTexture();
++		}
+ 		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
+ 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
+ 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
+@@ -1436,10 +1591,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+ 		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
++		if (ClientSettings.OptimumRenderScale < 1.0f)
++		{
++			int nativeWidth = ((NativeWindow)window).ClientSize.X;
++			int nativeHeight = ((NativeWindow)window).ClientSize.Y;
++			frameBufferRef = (list[OptimumFsrFramebufferIndex] = new FrameBufferRef
++			{
++				FboId = GL.GenFramebuffer(),
++				Width = nativeWidth,
++				Height = nativeHeight
++			});
++			frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
++			frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
++			setupAttachment(frameBufferRef3, nativeWidth, nativeHeight, 0, val, (PixelInternalFormat)32856);
++			GL.DrawBuffer((DrawBufferMode)36064);
++			FramebufferErrorCode optimumFsrStatus = GL.CheckFramebufferStatus((FramebufferTarget)36160);
++			if ((int)optimumFsrStatus != 36053)
++			{
++				logger.Error("Optimum disabled FSR: native intermediate framebuffer returned {0}.", optimumFsrStatus);
++				GL.DeleteTexture(frameBufferRef3.ColorTextureIds[0]);
++				GL.DeleteFramebuffer(frameBufferRef3.FboId);
++				list[OptimumFsrFramebufferIndex] = null;
++			}
++		}
+ 		frameBufferRef = (list[5] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+ 			Width = num / 4,
+ 			Height = num2 / 4
+@@ -2030,10 +2208,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
+ 		if (OffscreenBuffer)
+ 		{
+ 			int scene2D = frameBuffers[0].ColorTextureIds[0];
++			FrameBufferRef optimumFsrFramebuffer = frameBuffers[OptimumFsrFramebufferIndex];
++			ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
++			ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
++			bool useFsr = ClientSettings.OptimumRenderScale < 1.0f
++				&& optimumFsrFramebuffer != null
++				&& fsrEasu != null
++				&& fsrRcas != null
++				&& !fsrEasu.LoadError
++				&& !fsrRcas.LoadError;
++			if (useFsr)
++			{
++				GlToggleBlend(on: false);
++				CurrentFrameBufferKeepVw = optimumFsrFramebuffer;
++				GL.Viewport(0, 0, optimumFsrFramebuffer.Width, optimumFsrFramebuffer.Height);
++				GL.DrawBuffer((DrawBufferMode)36064);
++				fsrEasu.Use();
++				fsrEasu.BindTexture2D("inputScene", scene2D, 0);
++				fsrEasu.Uniform("inputTexelSize", 1f / (float)frameBuffers[0].Width, 1f / (float)frameBuffers[0].Height);
++				RenderFullscreenTriangle(screenQuad);
++				fsrEasu.Stop();
++
++				LoadFrameBuffer(EnumFrameBuffer.Default);
++				fsrRcas.Use();
++				fsrRcas.BindTexture2D("inputScene", optimumFsrFramebuffer.ColorTextureIds[0], 0);
++				fsrRcas.Uniform("inputTexelSize", 1f / (float)optimumFsrFramebuffer.Width, 1f / (float)optimumFsrFramebuffer.Height);
++				RenderFullscreenTriangle(screenQuad);
++				fsrRcas.Stop();
++				GlToggleBlend(on: true);
++				return;
++			}
+ 			LoadFrameBuffer(EnumFrameBuffer.Default);
+ 			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
+ 			ShaderProgramBlit blit = ShaderPrograms.Blit;
+ 			blit.Use();
+ 			blit.Scene2D = scene2D;

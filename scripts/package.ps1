@@ -25,6 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . "$PSScriptRoot/_hostcaps.ps1"
+. "$PSScriptRoot/_exec.ps1"
 
 # Resolve a Windows vanilla install. Bootstrap extracts the Windows client into
 # .vanilla/win-x64/. Off-Windows, this keeps native libs from another platform
@@ -47,7 +48,7 @@ function Resolve-WindowsVanilla {
     if (-not (Test-Path $installer)) {
         $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
         Write-Host "Downloading $url (~570MB)"
-        curl -L --fail -o $installer $url
+        Invoke-NativeStep { curl -L --fail -o $installer $url }
         if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
     } else { Write-Host "Using cached $installer" }
 
@@ -55,7 +56,7 @@ function Resolve-WindowsVanilla {
     if (Test-Path $parent) { Remove-Item -Recurse -Force $parent }
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     Write-Host "Extracting Windows client with innoextract..."
-    innoextract -s -d $parent $installer | Out-Null
+    Invoke-NativeStep { innoextract -s -d $parent $installer | Out-Null }
     if ($LASTEXITCODE -ne 0) { throw "innoextract failed on $installer" }
     # innoextract writes the install tree under app/.
     $appDir = Join-Path $parent 'app'
@@ -82,8 +83,8 @@ try {
     if (-not (Test-Path $vanillaLib)) {
         throw "Pristine vanilla VintagestoryLib.vanilla.dll not found in $vanillaDir. Delete the matching .vanilla cache and re-run packaging."
     }
-    dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib
-    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed." }
+    Invoke-NativeStep { dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib }
+    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed (exit code $LASTEXITCODE)." }
 
     # Read the Optimum release version. The -Version parameter selects the Vintage Story release.
     $optVer = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
@@ -180,7 +181,7 @@ try {
         if (-not (Test-Path $ridExe)) {
             Write-Host "Cross-building win-x64 launcher (Optimum.exe apphost)..."
             $proj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
-            dotnet build $proj -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo
+            Invoke-NativeStep { dotnet build $proj -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo }
             if ($LASTEXITCODE -ne 0) { Write-Warning "Cross-build failed; will keep vanilla launcher." }
         }
         if (Test-Path $ridExe) { $builtExe = $ridExe }

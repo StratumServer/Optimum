@@ -1,8 +1,89 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..9292ff9 100644
+index 4a24e75..f2d94f2 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-@@ -333,10 +333,28 @@ public class ShaderRegistry
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Text.RegularExpressions;
++using OpenTK.Graphics.OpenGL;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.Common;
+ 
+@@ -181,10 +182,25 @@ public class ShaderRegistry
+ 		registerDefaultShaderPrograms();
+ 		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
+ 		{
+ 			Oit = true
+ 		});
++		RegisterOptimumShaderProgram("fsr-easu", ShaderPrograms.FsrEasu = new ShaderProgram());
++		RegisterOptimumShaderProgram("fsr-rcas", ShaderPrograms.FsrRcas = new ShaderProgram());
++	}
++
++	private static void RegisterOptimumShaderProgram(string name, ShaderProgram program)
++	{
++		if (!shaderIdsByName.TryGetValue(name, out int passId))
++		{
++			passId = nextPassId++;
++			shaderIdsByName[name] = passId;
++		}
++		program.PassId = passId;
++		program.PassName = name;
++		shaderNames[passId] = name;
++		shaderPrograms[passId] = program;
+ 	}
+ 
+ 	private static bool loadRegisteredShaderPrograms()
+ 	{
+ 		ScreenManager.Platform.Logger.Notification("Loading shaders...");
+@@ -200,17 +216,30 @@ public class ShaderRegistry
+ 		{
+ 			ShaderProgram shaderProgram = shaderPrograms[i];
+ 			if (shaderProgram != null)
+ 			{
+ 				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
+-				flag = shaderProgram.Compile() && flag;
++				bool compiled = shaderProgram.Compile();
++				if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
++				{
++					shaderProgram.LoadError |= !compiled;
++				}
++				else
++				{
++					flag = compiled && flag;
++				}
+ 			}
+ 		}
+ 		ShaderPrograms.Chunkopaque.SetCustomSampler("terrainTex", isLinear: false);
+ 		ShaderPrograms.Chunkopaque.SetCustomSampler("terrainTexLinear", isLinear: true);
+ 		ShaderPrograms.Chunktopsoil.SetCustomSampler("terrainTex", isLinear: false);
+ 		ShaderPrograms.Chunktopsoil.SetCustomSampler("terrainTexLinear", isLinear: true);
++		float terrainLodBias = MathF.Log2(Math.Clamp(ClientSettings.OptimumRenderScale, 0.5f, 1.0f));
++		GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
++		GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
++		GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
++		GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
+ 		return flag;
+ 	}
+ 
+ 	private static void LoadShaderProgram(ShaderProgram program, bool useSSBOs)
+ 	{
+@@ -296,11 +325,11 @@ public class ShaderRegistry
+ 	}
+ 
+ 	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
+ 	{
+ 		Shader fragmentShader = program.FragmentShader;
+-		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA ? 1 : 0) + "\r\n";
++		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && ClientSettings.OptimumRenderScale >= 1.0f ? 1 : 0) + "\r\n";
+ 		Shader fragmentShader2 = program.FragmentShader;
+ 		fragmentShader2.PrefixCode = fragmentShader2.PrefixCode + "#define SSAOLEVEL " + ClientSettings.SSAOQuality + "\r\n";
+ 		Shader fragmentShader3 = program.FragmentShader;
+ 		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
+ 		Shader fragmentShader4 = program.FragmentShader;
+@@ -333,10 +362,28 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";

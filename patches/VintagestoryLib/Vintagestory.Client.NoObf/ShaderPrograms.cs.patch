@@ -1,0 +1,19 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
+index f19d524..64a9dd4 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
+@@ -40,10 +40,14 @@ public static class ShaderPrograms
+ 
+ 	public static ShaderProgramEntityanimated Entityanimated;
+ 
+ 	public static ShaderProgramFinal Final;
+ 
++	public static ShaderProgram FsrEasu;
++
++	public static ShaderProgram FsrRcas;
++
+ 	public static ShaderProgramFindbright Findbright;
+ 
+ 	public static ShaderProgramGodrays Godrays;
+ 
+ 	public static ShaderProgramGui Gui;

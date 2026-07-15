@@ -57,3 +57,16 @@ research/*.etlx
 research/*.speedscope*
 ref/source/
 research/benchmark-artifacts/
+
+# LLM Wiki
+.wiki/
+
+# Build staging artifacts
+/lang/
+/shaders/
+
+# MCP tool state
+.playwright-mcp/
+
+graphify-out/
+__pycache__/

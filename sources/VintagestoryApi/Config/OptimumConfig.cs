@@ -22,7 +22,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.2.8";
+    public const string Version = "0.2.10";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -154,6 +154,12 @@ public static class OptimumConfig
     public static bool PreciseFramePacing = true;
     public static bool ShadowFarVegetation = true;
 
+    /// <summary>
+    /// FSR render scale: 1.0 = native (off), 0.85 = quality, 0.77 = balanced, 0.67 = performance.
+    /// Multiplies ssaaLevel in SetupDefaultFrameBuffers. Disables FXAA when < 1.0.
+    /// </summary>
+    public static float RenderScale = 1.0f;
+
     private static string? _configPath;
 
     public static void SetRepulsionDistance(int blocks)
@@ -201,6 +207,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshLightTolerance), GreedyMeshLightTolerance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshFarDistance), GreedyMeshFarDistance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
+        (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
     };
 
     /// <summary>
@@ -267,6 +274,7 @@ public static class OptimumConfig
             GreedyMeshFarDistance = Math.Max(0, data.GreedyMeshFarDistance);
             GreedyMeshFarDistanceSq = (double)GreedyMeshFarDistance * GreedyMeshFarDistance;
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
+            RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
         }
         catch (Exception)
         {
@@ -312,6 +320,7 @@ public static class OptimumConfig
             GreedyMeshLightTolerance = GreedyMeshLightTolerance,
             GreedyMeshFarDistance = GreedyMeshFarDistance,
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
+            RenderScale = RenderScale,
         };
 
         try
@@ -358,6 +367,7 @@ internal sealed class OptimumConfigData
     public int GreedyMeshLightTolerance { get; set; } = 0;
     public int GreedyMeshFarDistance { get; set; } = 0;
     public bool GreedyMeshTextureGrad { get; set; } = true;
+    public float RenderScale { get; set; } = 1.0f;
 }
 
 public static class OptimumDiagnostics
@@ -648,6 +658,114 @@ public static class OptimumDiagnostics
         ResetAnimBlock();
         ResetGreedyMesh();
         ResetEntityRenderP0();
+    }
+
+    // Chunk render diagnostics (Phase 1 for rank 2 command batching evaluation)
+    private static long _chunkRenderFrames;
+    private static long _chunkDrawCalls;
+    private static long _chunkPoolsRendered;
+    private static long _chunkVisibleGroups;
+    private static long _chunkFrustumCullTicks;
+
+    /// <summary>
+    /// Called once per MeshDataPool.RenderMesh invocation (one MultiDrawElements call).
+    /// </summary>
+    public static void RecordChunkDrawCall(int groupCount)
+    {
+        Interlocked.Increment(ref _chunkDrawCalls);
+        Interlocked.Add(ref _chunkVisibleGroups, groupCount);
+    }
+
+    /// <summary>
+    /// Called once per MeshDataPoolManager.Render (one per pass+atlas combination).
+    /// poolsRendered = pools with groupCount > 0.
+    /// </summary>
+    public static void RecordChunkRenderPass(int poolsRendered)
+    {
+        Interlocked.Increment(ref _chunkRenderFrames);
+        Interlocked.Add(ref _chunkPoolsRendered, poolsRendered);
+    }
+
+    /// <summary>
+    /// Accumulates frustum cull time across all pools in one frame.
+    /// </summary>
+    public static void RecordChunkFrustumCullTicks(long ticks)
+    {
+        Interlocked.Add(ref _chunkFrustumCullTicks, ticks);
+    }
+
+    public static void ResetChunkRender()
+    {
+        Interlocked.Exchange(ref _chunkRenderFrames, 0);
+        Interlocked.Exchange(ref _chunkDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkPoolsRendered, 0);
+        Interlocked.Exchange(ref _chunkVisibleGroups, 0);
+        Interlocked.Exchange(ref _chunkFrustumCullTicks, 0);
+    }
+
+    // Chunk upload diagnostics (Phase 1 for rank 3 persistent mapped upload)
+    private static long _chunkUploadFrames;
+    private static long _chunkUploadBytes;
+    private static long _chunkUploadCalls;
+    private static long _chunkUploadTicks;
+
+    /// <summary>
+    /// Called per updateVAO invocation on the persistent path.
+    /// </summary>
+    public static void RecordChunkUpload(int bytes, long ticks)
+    {
+        Interlocked.Increment(ref _chunkUploadCalls);
+        Interlocked.Add(ref _chunkUploadBytes, bytes);
+        Interlocked.Add(ref _chunkUploadTicks, ticks);
+    }
+
+    /// <summary>
+    /// Called once per frame from the upload limiter to mark frame boundaries.
+    /// </summary>
+    public static void RecordChunkUploadFrame()
+    {
+        Interlocked.Increment(ref _chunkUploadFrames);
+    }
+
+    public static void ResetChunkUpload()
+    {
+        Interlocked.Exchange(ref _chunkUploadFrames, 0);
+        Interlocked.Exchange(ref _chunkUploadBytes, 0);
+        Interlocked.Exchange(ref _chunkUploadCalls, 0);
+        Interlocked.Exchange(ref _chunkUploadTicks, 0);
+    }
+
+    public static string GetChunkUploadSummary()
+    {
+        long frames = Interlocked.Read(ref _chunkRenderFrames); // reuse render frame counter as proxy
+        long bytes = Interlocked.Read(ref _chunkUploadBytes);
+        long calls = Interlocked.Read(ref _chunkUploadCalls);
+        long ticks = Interlocked.Read(ref _chunkUploadTicks);
+        double ms = ticks * 1000.0 / Stopwatch.Frequency;
+
+        double bytesPerFrame = frames == 0 ? 0 : (double)bytes / frames;
+        double callsPerFrame = frames == 0 ? 0 : (double)calls / frames;
+        double msPerFrame = frames == 0 ? 0 : ms / frames;
+        double mbTotal = bytes / (1024.0 * 1024.0);
+
+        return $"Optimum chunk upload: frames={frames}, calls/frame={callsPerFrame:0.0}, KB/frame={bytesPerFrame / 1024:0.0}, uploadMs/frame={msPerFrame:0.###}, totalMB={mbTotal:0.0}, totalMs={ms:0.###}";
+    }
+
+    public static string GetChunkRenderSummary()
+    {
+        long frames = Interlocked.Read(ref _chunkRenderFrames);
+        long draws = Interlocked.Read(ref _chunkDrawCalls);
+        long pools = Interlocked.Read(ref _chunkPoolsRendered);
+        long groups = Interlocked.Read(ref _chunkVisibleGroups);
+        long cullTicks = Interlocked.Read(ref _chunkFrustumCullTicks);
+        double cullMs = cullTicks * 1000.0 / Stopwatch.Frequency;
+
+        double drawsPerFrame = frames == 0 ? 0 : (double)draws / frames;
+        double poolsPerFrame = frames == 0 ? 0 : (double)pools / frames;
+        double groupsPerFrame = frames == 0 ? 0 : (double)groups / frames;
+        double cullMsPerFrame = frames == 0 ? 0 : cullMs / frames;
+
+        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}";
     }
 
     public static string GetCountersSummary()
