@@ -158,10 +158,21 @@ find_ilspycmd() {
     [[ -n "$ILSPY_BIN" ]]
 }
 
+# Reads ilspycmd's full --version output before parsing it, and bounds the
+# call with a timeout. Piping the tool's live stdout straight into `head -n1`
+# can hang: `head` exits after one line and closes its end of the pipe, and
+# a .NET global tool writing further output into a closed pipe can block
+# instead of erroring out (SIGPIPE is ignored by the runtime by default).
+ilspycmd_version() {
+    local raw
+    raw=$(timeout 5 "$ILSPY_BIN" --version 2>/dev/null || true)
+    printf '%s\n' "$raw" | head -n 1 | awk '{print $2}'
+}
+
 check_ilspycmd() {
     find_ilspycmd || return 1
     local version
-    version=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
+    version=$(ilspycmd_version)
     ilspycmd_version_supported "$version"
 }
 
@@ -202,7 +213,16 @@ install_ilspycmd() {
     check_dotnet10 || die "ilspycmd requires the .NET 10 SDK."
     local pinned
     pinned=$(pinned_ilspycmd_version)
-    if ! "$DOTNET_BIN" tool update -g ilspycmd --version "$pinned"; then
+    # --allow-downgrade: `tool update --version` refuses to move to an older
+    # or NuGet-considered-newer version otherwise ("This cannot be used to
+    # downgrade versions, you must uninstall newer versions first" -
+    # https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-update).
+    # If update still fails, uninstall before falling back to a fresh
+    # install: `tool install` always refuses when the tool ID already
+    # exists, so retrying it without removing the old one first can never
+    # succeed.
+    if ! "$DOTNET_BIN" tool update -g ilspycmd --version "$pinned" --allow-downgrade; then
+        "$DOTNET_BIN" tool uninstall -g ilspycmd || true
         "$DOTNET_BIN" tool install -g ilspycmd --version "$pinned"
     fi
     export PATH="$HOME/.dotnet/tools:$PATH"
@@ -300,14 +320,14 @@ detect_prereqs() {
     local current
     if check_ilspycmd; then
         PREREQ_STATUS[ilspycmd]="ok"
-        current=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
+        current=$(ilspycmd_version)
         PREREQ_LABEL[ilspycmd]="ilspycmd ($current)"
     else
         PREREQ_STATUS[ilspycmd]="missing"
         local ilspy_ver
         ilspy_ver=$(pinned_ilspycmd_version)
         if find_ilspycmd; then
-            current=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
+            current=$(ilspycmd_version)
             PREREQ_LABEL[ilspycmd]="ilspycmd $current (unsupported, needs $ilspy_ver)"
         else
             PREREQ_LABEL[ilspycmd]="ilspycmd $ilspy_ver (decompiler)"

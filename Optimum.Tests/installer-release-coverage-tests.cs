@@ -17,7 +17,7 @@ public class InstallerReleaseCoverageTests
         string project = Read("build/Vintagestory/Vintagestory.csproj");
         string readme = Read("README.md");
 
-        Assert.Equal("0.2.10", version);
+        Assert.Equal("0.2.11", version);
         Assert.Equal(version, Match(config, "public const string Version = \"([^\"]+)\""));
         Assert.Equal(version, Match(project, "<Version>([^<]+)</Version>"));
         Assert.Contains($"Optimum-v{version}-linux-x64.AppImage", readme);

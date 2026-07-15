@@ -62,6 +62,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumChiselLod",
         "OptimumChiselLodDistance",
         "OptimumDynamicLightCache",
+        "OptimumRenderScale",
     },
     ["Vintagestory.Client.NoObf.SystemRenderPlayerEffects"] = new()
     {
@@ -98,6 +99,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumOnProcessExit",
         "_optimumFocusLostStopwatch",
     },
+    ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
+    {
+        "FsrEasu",
+        "FsrRcas",
+    },
+    ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
+    {
+        "RegisterOptimumShaderProgram",
+    },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
     {
@@ -121,6 +131,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumDynLightCacheChanged",
         "onOptimumEntityLightBatchChanged",
         "onOptimumEntityShaderCacheChanged",
+        "onOptimumRenderScaleChanged",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",
@@ -164,6 +175,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "chunkOriginScratch",
         "centerPoolLocationsScratch",
         "edgePoolLocationsScratch",
+        "optimumTextureLodBias",
+        "ApplyOptimumTextureLodBias",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
     ["Vintagestory.Client.NoObf.ChunkTesselatorManager"] = new()
@@ -201,6 +214,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
+    // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "OnBeforeRenderOpaque", 1),
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "RuntimeAddBlockTextureAtlas", 1),
     // ClientMain: mouse wheel fix (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)
@@ -209,6 +225,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderPlayerEffects", "onBeforeRender", 1),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
+    // FSR: allocate the native intermediate and replace the final bilinear blit.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BlitPrimaryToDefault", 0),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop
@@ -265,6 +284,8 @@ var targets = new List<MethodTarget>
     // OptimumConfig.GreedyMeshShadersCompiledOn so the emitter never emits
     // sentinel bits a live shader can't decode.
     new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderCodePrefixes", 2),
+    new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderProgramsPre", 0),
+    new("Vintagestory.Client.NoObf.ShaderRegistry", "loadRegisteredShaderPrograms", 0),
     // datapath.cfg support: entry shims (ClientLinux/ClientWindows/ClientMac) all
     // funnel into this Main, so the arg injection lives here (lambda-free)
     new("Vintagestory.Client.ClientProgram", "Main", 1),
