@@ -1274,6 +1274,7 @@ $form.Controls.Add($script:btnVsBrowse)
 # Hidden field for the VS path
 $script:txtVsPath = New-Object System.Windows.Forms.TextBox
 $script:txtVsPath.Visible = $false
+if ($VsPath) { $script:txtVsPath.Text = $VsPath.TrimEnd('\') }
 $form.Controls.Add($script:txtVsPath)
 $y += 26
 
