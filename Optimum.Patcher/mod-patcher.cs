@@ -163,6 +163,9 @@ public static class ModPatcher
             Types:
             [
                 "Vintagestory.GameContent.CrucibleInFirepitRenderer",
+                "Vintagestory.GameContent.OptimumOutfitShapeCache",
+                "Vintagestory.GameContent.OptimumOutfitAnimatorCache",
+                "Vintagestory.GameContent.OptimumOutfitTexturePrewarmerModSystem",
             ],
             Members: new()
             {
@@ -196,6 +199,10 @@ public static class ModPatcher
                     "GetRendererWhenInFirepit",
                     "GetDesiredFirepitModel",
                 ],
+                ["Vintagestory.GameContent.EntityDressedHumanoid"] =
+                [
+                    "optimumAnimatorCacheKey",
+                ],
             },
             Interfaces: new()
             {
@@ -212,6 +219,8 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.ItemProspectingPick", "ProbeBlockNodeMode", 5),
                 new("Vintagestory.GameContent.BlockCookingContainer", "GetCookingStacks", 2),
                 new("Vintagestory.GameContent.Mechanics.MechanicalPowerMod", "OnServerGameTick", 1),
+                new("Vintagestory.GameContent.EntityDressedHumanoid", "OnTesselation", 2),
+                new("Vintagestory.GameContent.EntityDressedHumanoid", "OnTesselation", 3),
             ]);
     }
 

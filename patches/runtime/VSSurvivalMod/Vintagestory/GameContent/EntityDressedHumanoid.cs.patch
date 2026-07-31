@@ -1,0 +1,181 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
+index 19b1334..65dcf75 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
+@@ -124,54 +124,150 @@ public class EntityDressedHumanoid : EntityHumanoid
+ 			fastSmallDictionary[texture.Key] = texture.Value;
+ 			texture.Value.Bake(coreClientAPI.Assets);
+ 		}
+-		Shape entityShape2 = (entityShape = entityShape.Clone());
+ 		string[] outfitCodes = OutfitCodes;
+-		TexturedWeightedCompositeShape[] array = humanoidOutfits.Outfit2Shapes(OutfitConfigFileName, OutfitCodes);
+ 		string[] outfitSlots = OutfitSlots;
+-		if (outfitSlots != null)
++		string optimumOutfitCacheKey = OptimumOutfitShapeCache.Enabled ? OptimumOutfitShapeCache.BuildKey(Code.ToString(), OutfitConfigFileName.ToString(), outfitSlots, outfitCodes) : null;
++		Shape optimumCachedShape;
++		FastSmallDictionary<string, CompositeTexture> optimumCachedTextures;
++		if (optimumOutfitCacheKey != null && OptimumOutfitShapeCache.TryGet(optimumOutfitCacheKey, out optimumCachedShape, out optimumCachedTextures))
+ 		{
+-			for (int i = 0; i < outfitSlots.Length && i < array.Length; i++)
++			entityShape = optimumCachedShape;
++			foreach (KeyValuePair<string, CompositeTexture> texture3 in optimumCachedTextures)
+ 			{
+-				TexturedWeightedCompositeShape texturedWeightedCompositeShape = array[i];
+-				if (texturedWeightedCompositeShape != null && !(texturedWeightedCompositeShape.Base == null))
++				fastSmallDictionary[texture3.Key] = texture3.Value;
++			}
++		}
++		else
++		{
++			Shape entityShape2 = (entityShape = entityShape.Clone());
++			TexturedWeightedCompositeShape[] array = humanoidOutfits.Outfit2Shapes(OutfitConfigFileName, OutfitCodes);
++			if (outfitSlots != null)
++			{
++				for (int i = 0; i < outfitSlots.Length && i < array.Length; i++)
++				{
++					TexturedWeightedCompositeShape texturedWeightedCompositeShape = array[i];
++					if (texturedWeightedCompositeShape != null && !(texturedWeightedCompositeShape.Base == null))
++					{
++						addGearToShape(outfitSlots[i], texturedWeightedCompositeShape, entityShape2, shapePathForLogging, null, texturedWeightedCompositeShape.Textures);
++					}
++				}
++				foreach (KeyValuePair<string, AssetLocation> texture2 in entityShape.Textures)
+ 				{
+-					addGearToShape(outfitSlots[i], texturedWeightedCompositeShape, entityShape2, shapePathForLogging, null, texturedWeightedCompositeShape.Textures);
++					if (!fastSmallDictionary.ContainsKey(texture2.Key))
++					{
++						CompositeTexture compositeTexture = new CompositeTexture(texture2.Value);
++						compositeTexture.Bake(coreClientAPI.Assets);
++						fastSmallDictionary[texture2.Key] = compositeTexture;
++					}
+ 				}
+ 			}
+-			foreach (KeyValuePair<string, AssetLocation> texture2 in entityShape.Textures)
++			for (int j = 0; j < outfitCodes.Length; j++)
+ 			{
+-				if (!fastSmallDictionary.ContainsKey(texture2.Key))
++				TexturedWeightedCompositeShape texturedWeightedCompositeShape2 = array[j];
++				if (texturedWeightedCompositeShape2 == null)
+ 				{
+-					CompositeTexture compositeTexture = new CompositeTexture(texture2.Value);
+-					compositeTexture.Bake(coreClientAPI.Assets);
+-					fastSmallDictionary[texture2.Key] = compositeTexture;
++					continue;
++				}
++				if (texturedWeightedCompositeShape2.DisableElements != null)
++				{
++					entityShape.RemoveElements(texturedWeightedCompositeShape2.DisableElements);
++				}
++				if (texturedWeightedCompositeShape2.OverrideTextures == null)
++				{
++					continue;
++				}
++				foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
++				{
++					AssetLocation value = overrideTexture.Value;
++					entityShape.Textures[overrideTexture.Key] = value;
++					fastSmallDictionary[overrideTexture.Key] = CreateCompositeTexture(value, coreClientAPI, new SourceStringComponents("Outfit config file {0}, Outfit slot {1}, Outfit type {2}, Override Texture {3}", OutfitConfigFileName, OutfitSlots[j], OutfitCodes[j], overrideTexture.Key));
+ 				}
+ 			}
++			if (optimumOutfitCacheKey != null)
++			{
++				OptimumOutfitShapeCache.Store(optimumOutfitCacheKey, entityShape, fastSmallDictionary);
++			}
+ 		}
+-		for (int j = 0; j < outfitCodes.Length; j++)
++		optimumAnimatorCacheKey = optimumOutfitCacheKey;
++		bool shapeIsCloned = true;
++		base.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned);
++	}
++
++	private string optimumAnimatorCacheKey;
++
++	protected override void OnTesselation(ref Shape entityShape, string shapePathForLogging, ref bool shapeIsCloned)
++	{
++		if (!OptimumOutfitAnimatorCache.Enabled)
++		{
++			base.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned);
++			return;
++		}
++		shapeFresh = true;
++		CompositeShape cshape = base.Properties.Client.Shape;
++		if (cshape?.Overlays != null && cshape.Overlays.Length > 0)
+ 		{
+-			TexturedWeightedCompositeShape texturedWeightedCompositeShape2 = array[j];
+-			if (texturedWeightedCompositeShape2 == null)
++			shapeIsCloned = true;
++			entityShape = entityShape.Clone();
++			IDictionary<string, CompositeTexture> textures = base.Properties.Client.Textures;
++			foreach (CompositeShape overlay in cshape.Overlays)
+ 			{
+-				continue;
++				Shape overlayShape = Api.Assets.TryGet(overlay.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"))?.ToObject<Shape>();
++				if (overlayShape == null)
++				{
++					Api.Logger.Error("Entity {0} defines a shape overlay {1}, but no such file found. Will ignore.", Code, overlay.Base);
++					continue;
++				}
++				string texturePrefixCode = null;
++				if (base.Properties.Attributes?["wearableTexturePrefixCode"].Exists == true)
++				{
++					texturePrefixCode = base.Properties.Attributes["wearableTexturePrefixCode"].AsString();
++				}
++				entityShape.StepParentShape(overlayShape, overlay.Base.ToShortString(), shapePathForLogging, Api.Logger, delegate(string texcode, AssetLocation tloc)
++				{
++					if (Api is ICoreClientAPI capi)
++					{
++						if (texturePrefixCode == null && textures.ContainsKey(texcode))
++						{
++							return;
++						}
++						CompositeTexture cmpt = (textures[texturePrefixCode + "-" + texcode] = new CompositeTexture(tloc));
++						cmpt.Bake(Api.Assets);
++						capi.EntityTextureAtlas.GetOrInsertTexture(cmpt.Baked.TextureFilenames[0], out var textureSubid, out var _);
++						cmpt.Baked.TextureSubId = textureSubid;
++					}
++				});
+ 			}
+-			if (texturedWeightedCompositeShape2.DisableElements != null)
++		}
++		string[] willDisableElements = null;
++		if (base.Properties.Attributes?["disableElements"].Exists == true)
++		{
++			willDisableElements = base.Properties.Attributes["disableElements"].AsArray<string>();
++		}
++		IEnumerable<EntityBehavior> bhs = (World.Side == EnumAppSide.Server) ? base.Properties.Server?.Behaviors : base.Properties.Client?.Behaviors;
++		if (bhs != null)
++		{
++			foreach (EntityBehavior bh in bhs)
+ 			{
+-				entityShape.RemoveElements(texturedWeightedCompositeShape2.DisableElements);
++				bh.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned, ref willDisableElements);
+ 			}
+-			if (texturedWeightedCompositeShape2.OverrideTextures == null)
++		}
++		if (willDisableElements != null && willDisableElements.Length > 0)
++		{
++			if (!shapeIsCloned)
+ 			{
+-				continue;
++				entityShape = entityShape.Clone();
++				shapeIsCloned = true;
+ 			}
+-			foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
++			entityShape.RemoveElements(willDisableElements);
++		}
++		if (optimumAnimatorCacheKey == null || !OptimumOutfitAnimatorCache.TryApply(optimumAnimatorCacheKey, Api, this, entityShape, AnimManager.Animator?.Animations, requirePosesOnServer, willDisableElements, new string[1] { "head" }))
++		{
++			AnimManager.LoadAnimator(World.Api, this, entityShape, AnimManager.Animator?.Animations, requirePosesOnServer, willDisableElements, "head");
++			if (optimumAnimatorCacheKey != null)
+ 			{
+-				AssetLocation value = overrideTexture.Value;
+-				entityShape.Textures[overrideTexture.Key] = value;
+-				fastSmallDictionary[overrideTexture.Key] = CreateCompositeTexture(value, coreClientAPI, new SourceStringComponents("Outfit config file {0}, Outfit slot {1}, Outfit type {2}, Override Texture {3}", OutfitConfigFileName, OutfitSlots[j], OutfitCodes[j], overrideTexture.Key));
++				OptimumOutfitAnimatorCache.Store(optimumAnimatorCacheKey, entityShape, AnimManager.Animator);
+ 			}
+ 		}
+-		bool shapeIsCloned = true;
+-		base.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned);
+ 	}
+ 
+ 	private CompositeTexture CreateCompositeTexture(AssetLocation loc, ICoreClientAPI capi, SourceStringComponents sourceForLogging)

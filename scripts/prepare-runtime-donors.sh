@@ -234,6 +234,15 @@ if [[ " ${eligible_projects[*]} " == *" VSSurvivalMod "* ]]; then
     cp -f \
         "$repo_root/sources/VSSurvivalMod/BlockEntityRenderer/CrucibleInFirepitRenderer.cs" \
         "$runtime_root/VSSurvivalMod/Vintagestory/GameContent/CrucibleInFirepitRenderer.cs"
+    cp -f \
+        "$repo_root/sources/VSSurvivalMod/Lore/Village/OptimumOutfitShapeCache.cs" \
+        "$runtime_root/VSSurvivalMod/Vintagestory/GameContent/OptimumOutfitShapeCache.cs"
+    cp -f \
+        "$repo_root/sources/VSSurvivalMod/Lore/Village/OptimumOutfitAnimatorCache.cs" \
+        "$runtime_root/VSSurvivalMod/Vintagestory/GameContent/OptimumOutfitAnimatorCache.cs"
+    cp -f \
+        "$repo_root/sources/VSSurvivalMod/Lore/Village/OptimumOutfitTexturePrewarmer.cs" \
+        "$runtime_root/VSSurvivalMod/Vintagestory/GameContent/OptimumOutfitTexturePrewarmer.cs"
 fi
 
 echo "Building exact runtime donors..."

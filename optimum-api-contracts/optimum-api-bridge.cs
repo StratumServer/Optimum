@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -139,16 +140,31 @@ public static class OptimumApiBridge
         {
             return baseResult;
         }
-        if (!ChiselLodLocations.TryGetValue(location, out _))
-        {
-            return baseResult;
-        }
 
-        double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
-        double chiselDistance = ChiselDistanceSqTo(culler, location.FrustumCullSphere);
-        return lodLevel == 2
-            ? chiselDistance <= chiselDistanceSq
-            : chiselDistance > chiselDistanceSq;
+        // Timed from here down: TryGetValue plus the reflection-based playerPos read in
+        // ChiselDistanceSqTo are the actual per-call cost of this hook (see
+        // docs/benchmarking.md / ChiselLodShadowBenchmark for the isolated measurement).
+        long start = Stopwatch.GetTimestamp();
+        try
+        {
+            if (!ChiselLodLocations.TryGetValue(location, out _))
+            {
+                return baseResult;
+            }
+
+            double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
+            double chiselDistance = ChiselDistanceSqTo(culler, location.FrustumCullSphere);
+            return lodLevel == 2
+                ? chiselDistance <= chiselDistanceSq
+                : chiselDistance > chiselDistanceSq;
+        }
+        finally
+        {
+            if (OptimumDiagnostics.StutterWatchEnabled)
+            {
+                OptimumDiagnostics.RecordChiselShadowCull(Stopwatch.GetTimestamp() - start);
+            }
+        }
     }
 
     private static double ChiselDistanceSqTo(FrustumCulling culler, Sphere sphere)

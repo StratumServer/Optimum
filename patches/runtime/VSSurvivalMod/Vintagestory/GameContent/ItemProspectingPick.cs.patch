@@ -7,9 +7,9 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs b/VSS
  
  public class ItemProspectingPick : Item
  {
-+	private readonly Dictionary<string, int> optimumNodeQuantityFound = new Dictionary<string, int>();
++	private Dictionary<string, int> optimumNodeQuantityFound;
 +
-+	private readonly List<KeyValuePair<string, int>> optimumNodeResultsSorted = new List<KeyValuePair<string, int>>();
++	private List<KeyValuePair<string, int>> optimumNodeResultsSorted;
 +
  	private ProPickWorkSpace ppws;
  
@@ -23,7 +23,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs b/VSS
  		}
  		BlockPos blockPos = blockSel.Position.Copy();
 -		Dictionary<string, int> quantityFound = new Dictionary<string, int>();
-+		Dictionary<string, int> quantityFound = optimumNodeQuantityFound;
++		Dictionary<string, int> quantityFound = optimumNodeQuantityFound ??= new Dictionary<string, int>();
 +		quantityFound.Clear();
  		api.World.BlockAccessor.WalkBlocks(blockPos.AddCopy(radius, radius, radius), blockPos.AddCopy(-radius, -radius, -radius), delegate(Block nblock, int x, int y, int z)
  		{
@@ -35,7 +35,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs b/VSS
  			}
  		});
 -		List<KeyValuePair<string, int>> list = quantityFound.OrderByDescending((KeyValuePair<string, int> val) => val.Value).ToList();
-+		List<KeyValuePair<string, int>> list = optimumNodeResultsSorted;
++		List<KeyValuePair<string, int>> list = optimumNodeResultsSorted ??= new List<KeyValuePair<string, int>>();
 +		list.Clear();
 +		foreach (KeyValuePair<string, int> result in quantityFound)
 +		{

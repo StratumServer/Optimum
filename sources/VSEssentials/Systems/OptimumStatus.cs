@@ -22,9 +22,25 @@ public class OptimumStatusModSystem : ModSystem
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
 
+        CommandArgumentParsers parsers = api.ChatCommands.Parsers;
         api.ChatCommands.GetOrCreate("optimum")
             .WithDescription(Lang.Get("optimum-cmd-description"))
             .RequiresPrivilege(Privilege.chat)
+            .BeginSubCommand("stutterwatch")
+                .WithDescription("Toggle per-frame stutter diagnostics: logs an Optimum subsystem breakdown for every frame at or above the given threshold (ms, default 25) to the client log")
+                .WithArgs(parsers.OptionalInt("thresholdMs", 25))
+                .HandleWith(args =>
+                {
+                    OptimumDiagnostics.StutterWatchEnabled = !OptimumDiagnostics.StutterWatchEnabled;
+                    OptimumDiagnostics.StutterWatchThresholdMs = (int)args[0];
+                    OptimumDiagnostics.ResetPerFrameStutterCounters();
+                    string msg = "Optimum stutter watch now " + (OptimumDiagnostics.StutterWatchEnabled
+                        ? "on, threshold " + OptimumDiagnostics.StutterWatchThresholdMs + " ms"
+                        : "off");
+                    api.Logger.Notification("[Optimum] " + msg);
+                    return TextCommandResult.Success(msg);
+                })
+            .EndSubCommand()
             .BeginSubCommand("status")
                 .WithDescription(Lang.Get("optimum-cmd-status"))
                 .HandleWith(_ => TextCommandResult.Success(BuildStatus()))

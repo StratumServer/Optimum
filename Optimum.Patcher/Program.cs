@@ -52,6 +52,7 @@ var typesToInject = new List<string>
     "Optimum.OptimumInfo",
     "Optimum.OptimumUpdateChecker",
     "Optimum.EntityLightBatchBuffer",
+    "Optimum.OptimumOptiTimeGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
 };
 

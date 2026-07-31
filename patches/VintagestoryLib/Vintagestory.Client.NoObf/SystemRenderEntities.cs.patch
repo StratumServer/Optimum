@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..7817839 100644
+index 374f827..6c47d26 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -1,15 +1,36 @@
+@@ -1,13 +1,34 @@
  using System;
  using System.Collections.Generic;
 +using System.Diagnostics;
@@ -37,11 +37,7 @@ index 374f827..7817839 100644
  	public override string Name => "ree";
  
  	public SystemRenderEntities(ClientMain game)
- 		: base(game)
- 	{
-@@ -20,26 +41,212 @@ public class SystemRenderEntities : ClientSystem
- 		game.eventManager.RegisterRenderer(OnRenderFrame2D, EnumRenderStage.Ortho, Name, 0.4);
- 		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowFar, Name, 0.4);
+@@ -22,22 +43,209 @@ public class SystemRenderEntities : ClientSystem
  		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowNear, Name, 0.4);
  	}
  
@@ -212,6 +208,7 @@ index 374f827..7817839 100644
 +
  	private void OnBeforeRender(float dt)
  	{
++		OptimumDiagnostics.ResetEntityTesselationBudget();
 +		int optimumLightBatchId = OptimumConfig.EntityLightBatchEnabled && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0;
 +		int optimumLightSampleCount = 0;
  		int num = ClientSettings.ViewDistance * ClientSettings.ViewDistance;
@@ -252,11 +249,7 @@ index 374f827..7817839 100644
  			}
  			game.api.World.FrameProfiler.Mark("esr-beforeanim");
  			try
- 			{
- 				entity.AnimManager?.OnClientFrame(dt);
-@@ -49,10 +256,11 @@ public class SystemRenderEntities : ClientSystem
- 				game.Logger.Error("Animations error for entity " + entity.Code.ToShortString() + " at " + entity.Pos.AsBlockPos);
- 				throw;
+@@ -51,6 +259,7 @@ public class SystemRenderEntities : ClientSystem
  			}
  			game.api.World.FrameProfiler.Mark("esr-afteranim");
  		}
@@ -264,11 +257,7 @@ index 374f827..7817839 100644
  	}
  
  	public void OnRenderOpaque3D(float deltaTime)
- 	{
- 		RuntimeStats.renderedEntities = 0;
-@@ -82,15 +290,44 @@ public class SystemRenderEntities : ClientSystem
- 		game.Platform.GlDisableCullFace();
- 		game.GlMatrixModeModelView();
+@@ -84,11 +293,40 @@ public class SystemRenderEntities : ClientSystem
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
  		game.Platform.GlToggleBlend(on: true);
@@ -312,11 +301,7 @@ index 374f827..7817839 100644
  			}
  		}
  		game.GlPopMatrix();
- 		entityanimated.Stop();
- 		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -127,10 +364,24 @@ public class SystemRenderEntities : ClientSystem
- 			shaderProgramChunkshadowmap.Use();
- 		}
+@@ -129,6 +367,20 @@ public class SystemRenderEntities : ClientSystem
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
  			Entity entity = entityRenderer.Value.entity;
@@ -337,5 +322,3 @@ index 374f827..7817839 100644
  			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
  			{
  				entity.IsShadowRendered = true;
- 				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
- 			}
