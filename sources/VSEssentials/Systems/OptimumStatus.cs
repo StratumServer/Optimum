@@ -17,6 +17,11 @@ public class OptimumStatusModSystem : ModSystem
     public override void StartClientSide(ICoreClientAPI api)
     {
         this.api = api;
+
+        // Log Optimum startup status
+        api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
+        LogFeatureStatus(api);
+
         api.ChatCommands.GetOrCreate("optimum")
             .WithDescription(Lang.Get("optimum-cmd-description"))
             .RequiresPrivilege(Privilege.chat)
@@ -165,7 +170,7 @@ public class OptimumStatusModSystem : ModSystem
             for (int face = 0; face < 6; face++)
                 if (block.SideOpaque[face]) sideOpaquePacked |= (byte)(1 << face);
             byte renderPass = (byte)block.RenderPass;
-            byte randomDrawOffset = (byte)block.RandomDrawOffset;
+            byte randomDrawOffset = (byte)(System.Convert.ToInt32(block.RandomDrawOffset) != 0 ? 1 : 0);
             bool usesColormap = block.ShapeUsesColormap || block.LoadColorMapAnyway;
 
             bw.Write(blockId);
@@ -284,5 +289,51 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetAnimBlockSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
+    }
+
+    private static void LogFeatureStatus(ICoreClientAPI api)
+    {
+        var toggles = OptimumConfig.DescribeToggles();
+        int enabled = 0;
+        int total = 0;
+        foreach (var (name, value) in toggles)
+        {
+            total++;
+            if (value == "True")
+                enabled++;
+        }
+        api.Logger.Notification("[Optimum] Features: {0}/{1} enabled", enabled, total);
+
+        if (OptimumConfig.RepulsionGateEnabled)
+            api.Logger.Debug("[Optimum] Repulsion gate: ON (distance={0})", OptimumConfig.RepulsionDistance);
+        if (OptimumConfig.AnimBlockLodEnabled)
+            api.Logger.Debug("[Optimum] Animated block LOD: ON (budget={0})", OptimumConfig.AnimBlockLodFrameBudget);
+        if (OptimumConfig.WeatherWindThrottleEnabled)
+            api.Logger.Debug("[Optimum] Weather wind throttle: ON");
+        if (OptimumConfig.ParticleDistanceGateEnabled)
+            api.Logger.Debug("[Optimum] Particle distance gate: ON");
+        if (OptimumConfig.ChiselLodEnabled)
+            api.Logger.Debug("[Optimum] Chisel LOD: ON (distance={0})", OptimumConfig.ChiselLodDistance);
+        if (OptimumConfig.GreedyMeshEnabled)
+            api.Logger.Debug("[Optimum] Greedy mesh: ON (maxWidth={0})", OptimumConfig.GreedyMeshMaxMergeWidth);
+        if (OptimumConfig.OcclusionCullingScaleEnabled)
+            api.Logger.Debug("[Optimum] Occlusion culling scale: ON");
+        if (OptimumConfig.DynamicLightCacheEnabled)
+            api.Logger.Debug("[Optimum] Dynamic light cache: ON");
+        if (OptimumConfig.EntityLightBatchEnabled)
+            api.Logger.Debug("[Optimum] Entity light batch: ON");
+        if (OptimumConfig.EntityShaderStateCacheEnabled)
+            api.Logger.Debug("[Optimum] Entity shader state cache: ON");
+        if (OptimumConfig.MapPageCacheEnabled)
+            api.Logger.Debug("[Optimum] Map page cache (FastMap): ON (maxLayers={0}, bc7={1})",
+                OptimumConfig.MapPageCacheMaxLayers, OptimumConfig.MapPageCacheBc7);
+        if (OptimumConfig.AdaptiveRadiusEnabled)
+            api.Logger.Debug("[Optimum] Adaptive radius: ON");
+        if (OptimumConfig.RandomTickSliceEnabled)
+            api.Logger.Debug("[Optimum] Random tick slice: ON (server-side)");
+        if (OptimumConfig.WorldgenWorkStealingEnabled)
+            api.Logger.Debug("[Optimum] Worldgen work stealing: ON (server-side)");
+        if (OptimumConfig.ChunkReadPoolEnabled)
+            api.Logger.Debug("[Optimum] Chunk read pool: ON (server-side)");
     }
 }

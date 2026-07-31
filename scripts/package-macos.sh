@@ -21,7 +21,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Defaults
 ARCH="arm64"
 OUTPUT_DIR="$REPO_ROOT"
-VERSION="1.22.3"
+VERSION="$(python3 -c "import json;print(json.load(open('$(dirname "$0")/../forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
 CLIENT_ARCHIVE=""
 
 while [[ $# -gt 0 ]]; do
@@ -101,6 +101,15 @@ if [[ ! -f "$VANILLA_LIB" ]]; then
 fi
 dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
+# 2b. Patch VintagestoryAPI.dll (adds version label, chisel LOD hooks, etc.)
+VANILLA_API="$BASE_APP/VintagestoryAPI.dll"
+PATCHED_API="$LIB_OUT/VintagestoryAPI-patched.dll"
+if [[ ! -f "$VANILLA_API" ]]; then
+    echo "Error: vanilla VintagestoryAPI.dll not found in $BASE_APP." >&2
+    exit 1
+fi
+dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- --api "$VANILLA_API" "$MOD_OUT/Optimum.Api.Contracts.dll" "$PATCHED_API"
+
 # 3. Optimum release version.
 OPT_VER="$(tr -d '[:space:]' < "$REPO_ROOT/VERSION")"
 if [[ -z "$OPT_VER" ]]; then
@@ -129,10 +138,26 @@ cp -a "$BASE_APP" "$APP_DIR"
 cp -f "$BUILD_OUT/Vintagestory.dll" "$APP_DIR/"
 cp -f "$BUILD_OUT/Vintagestory.runtimeconfig.json" "$APP_DIR/Vintagestory.runtimeconfig.json"
 cp -f "$PATCHED_LIB" "$APP_DIR/VintagestoryLib.dll"
-cp -f "$MOD_OUT/VintagestoryAPI.dll" "$APP_DIR/"
+cp -f "$PATCHED_API" "$APP_DIR/VintagestoryAPI.dll"
+cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$APP_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$APP_DIR/Mods/"
+
+# 5a. Set up runtime donors for the launcher.
+# The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
+# It also needs the vanilla mod DLLs in .optimum/vanilla/Mods/ as baselines.
+DONOR_DIR="$APP_DIR/.optimum/donors"
+VANILLA_MOD_DIR="$APP_DIR/.optimum/vanilla/Mods"
+mkdir -p "$DONOR_DIR" "$VANILLA_MOD_DIR"
+
+cp -f "$LIB_OUT/VintagestoryLib.dll" "$DONOR_DIR/VintagestoryLib.Donor.dll"
+cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$DONOR_DIR/VintagestoryAPI.Contracts.dll"
+cp -f "$MOD_OUT/VSEssentials.dll" "$DONOR_DIR/VSEssentials.Donor.dll"
+cp -f "$MOD_OUT/VSSurvivalMod.dll" "$DONOR_DIR/VSSurvivalMod.Donor.dll"
+# Vanilla mods as baseline for mod patching.
+cp -f "$BASE_APP/Mods/VSEssentials.dll" "$VANILLA_MOD_DIR/"
+cp -f "$BASE_APP/Mods/VSSurvivalMod.dll" "$VANILLA_MOD_DIR/"
 # cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches, so
 # rebuilding it only introduces a different compiler/SDK's codegen with no behavior change (see
 # docs/bugs/linux-font-hinting-review-2026-07-14.md). Leave the pristine vanilla copy already

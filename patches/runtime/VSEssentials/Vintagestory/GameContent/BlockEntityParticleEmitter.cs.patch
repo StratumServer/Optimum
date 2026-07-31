@@ -1,0 +1,32 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs b/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs
+--- a/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs
++++ b/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs
+@@ -1,7 +1,8 @@
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ 
+ namespace Vintagestory.GameContent;
+ 
+ public class BlockEntityParticleEmitter : BlockEntity
+ {
+@@ -25,11 +26,18 @@ public class BlockEntityParticleEmitter : BlockEntity
+ 		Api.World.UnregisterGameTickListener(listenerId);
+ 	}
+ 
+ 	private void OnGameTick(float dt)
+ 	{
+-		if (((IClientWorldAccessor)Api.World).Player.Entity.Pos.InRangeOf(Pos, 16384f) && block != null && block.ParticleProperties != null)
++		float rangeSq = OptimumConfig.ParticleDistanceGateEnabled ? 2304f : 16384f;
++		if (!((IClientWorldAccessor)Api.World).Player.Entity.Pos.InRangeOf(Pos, rangeSq))
++		{
++			OptimumDiagnostics.ParticleDistanceGate.Skip();
++			return;
++		}
++		OptimumDiagnostics.ParticleDistanceGate.Hit();
++		if (block != null && block.ParticleProperties != null)
+ 		{
+ 			for (int i = 0; i < block.ParticleProperties.Length; i++)
+ 			{
+ 				AdvancedParticleProperties advancedParticleProperties = block.ParticleProperties[i];
+ 				advancedParticleProperties.basePos.X = (float)Pos.X + block.TopMiddlePos.X;

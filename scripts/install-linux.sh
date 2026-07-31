@@ -134,14 +134,15 @@ pinned_ilspycmd_version() {
 ilspycmd_accepted_prefixes() {
     local manifest="$REPO_ROOT/.config/ilspycmd-compat.json"
     if [[ -f "$manifest" ]]; then
-        grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\."' "$manifest" | tr -d '"'
+        grep -oE '"[0-9]+(\.[0-9]+)+\."' "$manifest" | tr -d '"'
         return
     fi
-    printf '%s\n' '10.1.0.' '10.1.1.'
+    printf '%s\n' '10.0.' '10.1.'
 }
 
 ilspycmd_version_supported() {
     local current="$1" prefix
+    [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
     while IFS= read -r prefix; do
         [[ -n "$prefix" && "$current" == "$prefix"* ]] && return 0
     done < <(ilspycmd_accepted_prefixes)
@@ -233,9 +234,9 @@ install_ilspycmd() {
 get_required_vs_version() {
     local forks="$REPO_ROOT/forks.json"
     if [[ -f "$forks" ]]; then
-        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.3"
+        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.5"
     else
-        echo "1.22.3"
+        echo "1.22.5"
     fi
 }
 
@@ -455,14 +456,57 @@ prompt_install_dir() {
 
 prompt_data_path() {
     if [[ -n "$DATA_PATH" ]]; then return; fi
-    if [[ "$INTERACTIVE" -eq 0 ]]; then return; fi
 
-    printf "    Separate data folder? (leave blank for default) [${DIM}~/.config/OptimumVintagestoryData${RESET}]: "
+    # Detect existing Vintage Story data folder.
+    # Priority: folder with a logged-in session > folder that exists > nothing.
+    local detected=""
+    local candidates=(
+        "$HOME/.config/VintagestoryData"
+        "$HOME/.config/OptimumVintagestoryData"
+        "$HOME/ApplicationData/vintagestorydata"
+    )
+
+    # First pass: find one with an active session (playeruid in clientsettings.json).
+    for dir in "${candidates[@]}"; do
+        if [[ -f "$dir/clientsettings.json" ]] && grep -q '"playeruid"' "$dir/clientsettings.json" 2>/dev/null; then
+            detected="$dir"
+            break
+        fi
+    done
+
+    # Second pass: fall back to any that exists.
+    if [[ -z "$detected" ]]; then
+        for dir in "${candidates[@]}"; do
+            if [[ -d "$dir" ]]; then
+                detected="$dir"
+                break
+            fi
+        done
+    fi
+
+    if [[ "$INTERACTIVE" -eq 0 ]]; then
+        if [[ -n "$detected" ]]; then
+            DATA_PATH="$detected"
+        fi
+        return
+    fi
+
+    if [[ -n "$detected" ]]; then
+        printf "    Game data folder [${GREEN}✓ detected${RESET}]: ${DIM}%s${RESET}\n" "$detected"
+        printf "    Use this? (Enter = yes, or type a different path): "
+    else
+        printf "    Game data folder (Enter = Vintage Story default): "
+    fi
+
     local reply
     read -r reply
     if [[ -n "$reply" ]]; then
         DATA_PATH="${reply/#\~/$HOME}"
+    elif [[ -n "$detected" ]]; then
+        DATA_PATH="$detected"
     fi
+    # If still empty, the game uses its own default (~/.config/VintagestoryData)
+    # and the launcher does not pass --dataPath.
 }
 
 prompt_shortcuts() {

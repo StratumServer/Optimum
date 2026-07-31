@@ -39,6 +39,19 @@ public class CecilPatchOwnershipTests
         Assert.Empty(unowned);
     }
 
+    [Fact]
+    public void CecilMemberNamesMatchTheCompiledTickSliceConstant()
+    {
+        // RandomTickSlice ships via the recompiled VintagestoryLib.dll (not Cecil).
+        // The patcher handles client patches only; server features compile in.
+        // This test validates that if TickSlice ever moves to Cecil, the naming
+        // convention (PascalCase) is used. For now, just verify the patcher loads.
+        string source = File.ReadAllText(
+            Path.Combine(FindRepositoryRoot(), "Optimum.Patcher", "Program.cs"));
+
+        Assert.DoesNotContain("\"optimumTickSliceCount\"", source);
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);

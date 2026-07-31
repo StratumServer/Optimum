@@ -1,0 +1,17 @@
+diff --git a/VSSurvivalMod/Systems/Trading/EntityTrader.cs b/VSSurvivalMod/Systems/Trading/EntityTrader.cs
+index f8be2f0..2bce564 100644
+--- a/VSSurvivalMod/Systems/Trading/EntityTrader.cs
++++ b/VSSurvivalMod/Systems/Trading/EntityTrader.cs
+@@ -19,11 +19,11 @@ namespace Vintagestory.GameContent
+         EntityTalkUtil TalkUtil { get; }
+     }
+ 
+     public class EntityTrader : EntityTradingHumanoid, ITalkUtil
+     {
+-        public static API.Datastructures.OrderedDictionary<string, TraderPersonality> Personalities = new ()
++        public static Vintagestory.API.Datastructures.OrderedDictionary<string, TraderPersonality> Personalities = new ()
+         {
+             { "formal", new TraderPersonality(1 * 1.5f, 1, 0.9f) },
+             { "balanced", new TraderPersonality(1.2f * 1.5f, 0.9f, 1.1f) },
+             { "lazy", new TraderPersonality(1.65f * 1.5f, 0.7f, 0.9f) },
+             { "rowdy", new TraderPersonality(0.75f * 1.5f, 1f, 1.8f) },

@@ -27,6 +27,8 @@ public static class ILHook
 
         var method = type.Methods.FirstOrDefault(m => m.Name == methodName && m.Parameters.Count == paramCount);
         if (method == null) { Console.Error.WriteLine($"  HOOK SKIP: method not found {typeName}::{methodName}"); return false; }
+        method.DebugInformation.SequencePoints.Clear();
+        method.DebugInformation.Scope = null;
 
         var hookMethod = type.Methods.FirstOrDefault(m => m.Name == hookMethodName);
         if (hookMethod == null) { Console.Error.WriteLine($"  HOOK SKIP: hook method not found {typeName}::{hookMethodName}"); return false; }
@@ -60,7 +62,7 @@ public static class ILHook
                 // hookMethod should return the same type (pass-through)
                 // or we reload from local:
                 il.InsertBefore(ret, il.Create(OpCodes.Ldloc, retLocal));
-                // Remove the original value load? No — ret expects one value.
+                // Remove the original value load? No - ret expects one value.
                 // Actually: stloc pops the value, then we ldloc before ret puts it back.
                 // The call in between is void. Let me rethink.
             }
@@ -85,6 +87,8 @@ public static class ILHook
 
         var method = type.Methods.FirstOrDefault(m => m.Name == methodName && m.Parameters.Count == paramCount);
         if (method == null) { Console.Error.WriteLine($"  HOOK SKIP: method not found {typeName}::{methodName}"); return false; }
+        method.DebugInformation.SequencePoints.Clear();
+        method.DebugInformation.Scope = null;
 
         var hookMethod = type.Methods.FirstOrDefault(m => m.Name == hookMethodName);
         if (hookMethod == null) { Console.Error.WriteLine($"  HOOK SKIP: hook method not found {typeName}::{hookMethodName}"); return false; }

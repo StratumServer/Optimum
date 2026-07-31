@@ -1,0 +1,18 @@
+diff --git a/VintagestoryApi/Datastructures/IMergeable.cs b/VintagestoryApi/Datastructures/IMergeable.cs
+index 701c996..efea36d 100644
+--- a/VintagestoryApi/Datastructures/IMergeable.cs
++++ b/VintagestoryApi/Datastructures/IMergeable.cs
+@@ -1,9 +1,6 @@
+-﻿
+-#nullable disable
+-namespace Vintagestory.API.Datastructures
++namespace Vintagestory.API.Datastructures;
++
++public interface IMergeable<T>
+ {
+-    public interface IMergeable<T>
+-    {
+-        bool MergeIfEqual(T target);
+-    }
++	bool MergeIfEqual(T target);
+ }

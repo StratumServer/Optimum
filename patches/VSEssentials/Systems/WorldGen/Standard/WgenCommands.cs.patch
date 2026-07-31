@@ -1,0 +1,17 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/WgenCommands.cs b/VSEssentials/Systems/WorldGen/Standard/WgenCommands.cs
+index b3dc4ea..65b694e 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/WgenCommands.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/WgenCommands.cs
+@@ -1289,11 +1289,11 @@ namespace Vintagestory.ServerMods
+                         int rockStrataId = -1;
+                         float strataThickness = 0;
+                         RockStratum stratum = null;
+ 
+ 
+-                        API.Datastructures.OrderedDictionary<int, int> stratathicknesses = new ();
++                        Vintagestory.API.Datastructures.OrderedDictionary<int, int> stratathicknesses = new ();
+ 
+                         while (ylower <= yupper)
+                         {
+                             if (--strataThickness <= 0)
+                             {

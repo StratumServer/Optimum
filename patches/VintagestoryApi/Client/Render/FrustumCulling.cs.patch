@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/Render/FrustumCulling.cs b/VintagestoryApi/Client/Render/FrustumCulling.cs
-index f9dfad8..6e2652f 100644
+index f9dfad8..f816a86 100644
 --- a/VintagestoryApi/Client/Render/FrustumCulling.cs
 +++ b/VintagestoryApi/Client/Render/FrustumCulling.cs
 @@ -11,10 +11,11 @@
@@ -14,20 +14,44 @@ index f9dfad8..6e2652f 100644
  #nullable disable
  
  namespace Vintagestory.API.Client
-@@ -136,11 +137,11 @@ namespace Vintagestory.API.Client
+@@ -136,11 +137,35 @@ namespace Vintagestory.API.Client
              if (frustum[5].AABBisOutside(sphere)) return false;
              return true;// && lodLevel == 1) || (distx < shadowRangeX * lodBias + 24 && distz < shadowRangeZ * lodBias + 24);
          }
  
  
 -        public bool InFrustumAndRange(Sphere sphere, bool nowVisible, int lodLevel = 0)
++        /// <summary>
++        /// Optimum: shared chisel-LOD distance split. Returns false when this location's LOD level
++        /// is the wrong one for the current distance to the player (LOD 2 = real carved mesh, near;
++        /// LOD 3 = cheap full-cube proxy, far). Returns true for anything not chisel-LOD tracked, so
++        /// callers can simply AND it onto their existing visibility expression.
++        /// </summary>
++        public bool OptimumChiselLodVisible(Sphere sphere, int lodLevel, bool optimumUseChiselLodDistance)
++        {
++            if (!optimumUseChiselLodDistance || !OptimumConfig.ChiselLodEnabled) return true;
++
++            double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
++            double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
++            switch (lodLevel)
++            {
++                case 2:
++                    return distance <= chiselDistanceSq;
++                case 3:
++                    return distance > chiselDistanceSq;
++                default:
++                    return true;
++            }
++        }
++
++
 +        public bool InFrustumAndRange(Sphere sphere, bool nowVisible, int lodLevel = 0, bool optimumUseChiselLodDistance = false)
          {
              if (frustum[0].AABBisOutside(sphere)) return false;
              if (frustum[1].AABBisOutside(sphere)) return false;
              if (frustum[2].AABBisOutside(sphere)) return false;
              if (frustum[3].AABBisOutside(sphere)) return false;
-@@ -153,10 +154,22 @@ namespace Vintagestory.API.Client
+@@ -153,10 +178,22 @@ namespace Vintagestory.API.Client
              // Lod level 1: drawn at all view distance
              // Lod level 0: only high detail stuff
  

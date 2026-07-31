@@ -1,0 +1,33 @@
+diff --git a/Cairo/util/SurfaceTransformBlur.cs b/Cairo/util/SurfaceTransformBlur.cs
+index 075e62d..747929f 100644
+--- a/Cairo/util/SurfaceTransformBlur.cs
++++ b/Cairo/util/SurfaceTransformBlur.cs
+@@ -5,10 +5,28 @@ using System.Collections.Generic;
+ 
+ namespace Cairo
+ {
+     public static class SurfaceTransformBlur
+     {
++        // Compatibility aliases for the older open-source call sites. The
++        // corresponding 1.22.5 binary call sites use BlurFull for both the
++        // one-argument form and every (range, true) form.
++        public static void Blur(this ImageSurface surface, double range)
++        {
++            surface.BlurFull(range);
++        }
++
++        public static void Blur(this ImageSurface surface, double range, bool useFullSurface)
++        {
++            surface.BlurFull(range);
++        }
++
++        public static void Blur(this ImageSurface surface, double range, int x1, int y1, int x2, int y2)
++        {
++            surface.BlurPartial(range, 0, x1, y1, x2, y2);
++        }
++
+         public unsafe static void BlurPartial(this ImageSurface surface, double range, int blurOnlyEdgeWidth)
+         {
+             BlurPartial(surface, range, blurOnlyEdgeWidth, 0, 0, surface.Width, surface.Height);
+         }
+         public unsafe static void BlurPartial(this ImageSurface surface, double range, int blurOnlyEdgeWidth, int x1, int y1, int x2, int y2)

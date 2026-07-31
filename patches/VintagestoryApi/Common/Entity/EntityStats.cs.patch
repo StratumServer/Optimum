@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Common/Entity/EntityStats.cs b/VintagestoryApi/Common/Entity/EntityStats.cs
+index 883e616..4408444 100644
+--- a/VintagestoryApi/Common/Entity/EntityStats.cs
++++ b/VintagestoryApi/Common/Entity/EntityStats.cs
+@@ -188,11 +188,11 @@ namespace Vintagestory.API.Common
+         WeightedOverlay
+     }
+ 
+     public class EntityFloatStats
+     {
+-        public Datastructures.OrderedDictionary<string, EntityStat<float>> ValuesByKey = new ();
++        public Vintagestory.API.Datastructures.OrderedDictionary<string, EntityStat<float>> ValuesByKey = new ();
+         public EnumStatBlendType BlendType = EnumStatBlendType.WeightedSum;
+         public EntityFloatStats()
+         {
+             ValuesByKey["base"] = new EntityStat<float>() { Value = 1, Persistent = true };
+         }

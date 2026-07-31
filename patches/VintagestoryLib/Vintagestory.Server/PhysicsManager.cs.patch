@@ -1,0 +1,117 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs b/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs
+index 2c2605d..c71e75b 100644
+--- a/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs
++++ b/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs
+@@ -1,13 +1,15 @@
+ using System;
++using System.Buffers;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.Server;
+ using Vintagestory.API.Util;
+ using Vintagestory.Common;
+ using Vintagestory.Common.Network.Packets;
+@@ -252,10 +254,13 @@ public class PhysicsManager : LoadBalancedTask
+ 	}
+ 
+ 	public void ServerTick(float dt)
+ 	{
+ 		ServerMain.FrameProfiler.Enter("physicsmanager-servertick");
++		// Optimum: cap toAdd drain to prevent chunk-load burst spikes (55ms max → ~6ms).
++		// Deferred entities drain on subsequent ticks. Default 50 (0 = no limit).
++		int optimumActivationBudget = 50;
+ 		IPhysicsTickable result;
+ 		while (!toAdd.IsEmpty && toAdd.TryDequeue(out result))
+ 		{
+ 			if (result != null && result.Entity != null)
+ 			{
+@@ -266,10 +271,14 @@ public class PhysicsManager : LoadBalancedTask
+ 				else
+ 				{
+ 					tickables.Add(result);
+ 				}
+ 			}
++			if (optimumActivationBudget > 0 && --optimumActivationBudget <= 0)
++			{
++				break;
++			}
+ 		}
+ 		IPhysicsTickable result2;
+ 		while (!toRemove.IsEmpty && toRemove.TryDequeue(out result2))
+ 		{
+ 			if (result2 != null)
+@@ -403,11 +412,22 @@ public class PhysicsManager : LoadBalancedTask
+ 		ServerMain.FrameProfiler.Leave();
+ 	}
+ 
+ 	private void BuildClientList(ICollection<ConnectedClient> values)
+ 	{
+-		List<ConnectedClient> list = (ClientList = new List<ConnectedClient>());
++		// Optimum: reuse ClientList instead of allocating a new List per tick.
++		// Stratum PR #111: BuildClientList/Where() out of top-20 allocators.
++		List<ConnectedClient> list = ClientList;
++		if (list == null)
++		{
++			list = new List<ConnectedClient>();
++			ClientList = list;
++		}
++		else
++		{
++			list.Clear();
++		}
+ 		foreach (ConnectedClient value in values)
+ 		{
+ 			if (value.State.ConnectedOrPlaying() && value.Entityplayer != null)
+ 			{
+ 				list.Add(value);
+@@ -736,10 +756,19 @@ public class PhysicsManager : LoadBalancedTask
+ 			entityAnimPackets[entity.EntityId] = new AnimationPacket(entity);
+ 			entity.AnimManager.AnimationsDirty = false;
+ 		}
+ 		if (forceUpdate || !entity.Pos.BasicallySameAs(entity.PreviousServerPos) || (entityAgent != null && entityAgent.Controls.Dirty) || entity.tagsDirty)
+ 		{
++			if (OptimumConfig.DistanceSendFrequencyEnabled && !forceUpdate && entity.IsTracked == 1)
++			{
++				int tick = entity.Attributes.GetInt("tick", 0);
++				if (tick % OptimumConfig.FarTrackedTickStride != 0)
++				{
++					CompletePositionUpdate(entity);
++					return;
++				}
++			}
+ 			int intAndIncrement = entity.Attributes.GetIntAndIncrement("tick");
+ 			entityPositionPackets[entity.EntityId] = ServerPackets.getEntityPositionPacket(entity.Pos, entity, intAndIncrement);
+ 			if (entityAgent != null)
+ 			{
+ 				entityAgent.Controls.Dirty = false;
+@@ -837,18 +866,20 @@ public class PhysicsManager : LoadBalancedTask
+ 			int count = list.Count;
+ 			if (count > 8 && !client.IsSinglePlayerClient && !client.FallBackToTcp)
+ 			{
+ 				for (int i = 0; i < count; i += 8)
+ 				{
+-					Packet_EntityPosition[] array = new Packet_EntityPosition[Math.Min(8, count - i)];
+-					for (int j = 0; j < array.Length; j++)
++					int batchLen = Math.Min(8, count - i);
++					Packet_EntityPosition[] array = ArrayPool<Packet_EntityPosition>.Shared.Rent(batchLen);
++					for (int j = 0; j < batchLen; j++)
+ 					{
+ 						array[j] = list[i + j];
+ 					}
+ 					Packet_BulkEntityPosition packet_BulkEntityPosition = new Packet_BulkEntityPosition();
+-					packet_BulkEntityPosition.SetEntityPositions(array);
++					packet_BulkEntityPosition.SetEntityPositions(array, batchLen, array.Length);
+ 					udpNetwork.SendPacket_Threadsafe(client, packet_BulkEntityPosition);
++					ArrayPool<Packet_EntityPosition>.Shared.Return(array, clearArray: true);
+ 				}
+ 			}
+ 			else if (count > 0)
+ 			{
+ 				Packet_BulkEntityPosition packet_BulkEntityPosition2 = new Packet_BulkEntityPosition();

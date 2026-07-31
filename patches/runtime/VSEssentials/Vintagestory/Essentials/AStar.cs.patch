@@ -1,0 +1,87 @@
+diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintagestory/Essentials/AStar.cs
+--- a/VSEssentials/Vintagestory/Essentials/AStar.cs
++++ b/VSEssentials/Vintagestory/Essentials/AStar.cs
+@@ -33,6 +33,62 @@ public class AStar
+ 
+ 	protected Cuboidd tmpCub = new Cuboidd();
+ 
++	private PathNode[] optimumNodePool;
++
++	private int optimumNodePoolIndex;
++
++	private PathNode OptimumRentNode(PathNode parent, Cardinal cardinal)
++	{
++		optimumNodePool ??= new PathNode[4096];
++		if (optimumNodePoolIndex >= optimumNodePool.Length)
++		{
++			return new PathNode(parent, cardinal);
++		}
++		int index = optimumNodePoolIndex++;
++		PathNode node = optimumNodePool[index];
++		if (node == null)
++		{
++			node = new PathNode(parent, cardinal);
++			optimumNodePool[index] = node;
++			return node;
++		}
++		node.Set(parent.X + cardinal.Normali.X, parent.Y + cardinal.Normali.Y, parent.Z + cardinal.Normali.Z);
++		node.dimension = parent.dimension;
++		node.gCost = 0f;
++		node.hCost = 0f;
++		node.Parent = null;
++		node.pathLength = 0;
++		node.HeapIndex = 0;
++		node.Action = EnumTraverseAction.Walk;
++		return node;
++	}
++
++	private PathNode OptimumRentNode(BlockPos pos)
++	{
++		optimumNodePool ??= new PathNode[4096];
++		if (optimumNodePoolIndex >= optimumNodePool.Length)
++		{
++			return new PathNode(pos);
++		}
++		int index = optimumNodePoolIndex++;
++		PathNode node = optimumNodePool[index];
++		if (node == null)
++		{
++			node = new PathNode(pos);
++			optimumNodePool[index] = node;
++			return node;
++		}
++		node.Set(pos.X, pos.Y, pos.Z);
++		node.dimension = pos.dimension;
++		node.gCost = 0f;
++		node.hCost = 0f;
++		node.Parent = null;
++		node.pathLength = 0;
++		node.HeapIndex = 0;
++		node.Action = EnumTraverseAction.Walk;
++		return node;
++	}
++
+ 	public AStar(ICoreServerAPI api)
+ 	{
+ 		this.api = api;
+@@ -67,8 +123,9 @@ public class AStar
+ 		centerOffsetX = 0.3 + api.World.Rand.NextDouble() * 0.4;
+ 		centerOffsetZ = 0.3 + api.World.Rand.NextDouble() * 0.4;
+ 		NodesChecked = 0;
+-		PathNode pathNode = new PathNode(start);
+-		PathNode pathNode2 = new PathNode(endOrAvoidPos);
++		optimumNodePoolIndex = 0;
++		PathNode pathNode = OptimumRentNode(start);
++		PathNode pathNode2 = OptimumRentNode(endOrAvoidPos);
+ 		float num = modeMinFleeDistance * modeMinFleeDistance;
+ 		openSet.Clear();
+ 		closedSet.Clear();
+@@ -95,7 +152,7 @@ public class AStar
+ 			for (int i = 0; i < Cardinal.ALL.Length; i++)
+ 			{
+ 				Cardinal cardinal = Cardinal.ALL[i];
+-				PathNode pathNode4 = new PathNode(pathNode3, cardinal);
++				PathNode pathNode4 = OptimumRentNode(pathNode3, cardinal);
+ 				float extraCost = 0f;
+ 				PathNode pathNode5 = openSet.TryFindValue(pathNode4);
+ 				if ((object)pathNode5 != null)

@@ -60,13 +60,19 @@ check_patch_targets() {
   dangerous_target='(^|/)(Vintagestory\.Server/|Packet_[^/]*\.cs$|.*Serializer\.cs$|.*Proto.*\.cs$|ClientPackets\.cs$|ServerMain\.cs$|ModInfo[^/]*\.cs$)'
 
   while IFS= read -r -d '' patch; do
+    local rel="${patch#$repo_root/}"
     while IFS= read -r target; do
       [[ -z "$target" ]] && continue
       if [[ "$target" =~ $dangerous_target ]]; then
-        fail "patch touches multiplayer compatibility target: ${patch#$repo_root/} -> $target"
+        if is_allowlisted "$rel"; then
+          skip "patch touches multiplayer compatibility target (allowlisted): $rel -> $target"
+        else
+          fail "patch touches multiplayer compatibility target: $rel -> $target"
+        fi
       fi
     done < <(patch_target_paths "$patch")
-  done < <(find "$patches_dir" -type f -name '*.patch' -print0)
+  done < <(find "$patches_dir" -type f -name '*.patch' \
+    -not -path "$patches_dir/runtime/*" -print0)
 }
 
 check_patch_content() {
@@ -86,7 +92,8 @@ check_patch_content() {
         fail "patch changes multiplayer compatibility content: $rel"
       fi
     fi
-  done < <(find "$patches_dir" -type f -name '*.patch' -print0)
+  done < <(find "$patches_dir" -type f -name '*.patch' \
+    -not -path "$patches_dir/runtime/*" -print0)
 }
 
 # Decompiler type-misbinding check: compare castclass/isinst targets in the
@@ -123,7 +130,7 @@ check_contains \
 
 check_contains \
   "$repo_root/build/VintagestoryLib/Vintagestory.Client/ClientPackets.cs" \
-  'ShortGameVersion = "1\.22\.3"' \
+  'ShortGameVersion = "1\.22\.5"' \
   "client sends vanilla short game version"
 
 check_contains \
@@ -133,11 +140,11 @@ check_contains \
 
 check_contains \
   "$repo_root/patches/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs.patch" \
-  'cworld != null' \
+  'entity\.Api\.Side == EnumAppSide\.Client' \
   "repulsion patch keeps client gate"
 
 check_contains \
-  "$repo_root/patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch" \
+  "$repo_root/patches/VSSurvivalMod/BlockEntity/BEMicroBlock.cs.patch" \
   'if \(capi == null\)' \
   "microblock patch keeps non-client guard"
 

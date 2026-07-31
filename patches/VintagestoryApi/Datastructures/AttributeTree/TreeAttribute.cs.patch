@@ -1,0 +1,21 @@
+diff --git a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
+index ac15150..435bc72 100644
+--- a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
++++ b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
+@@ -1035,14 +1035,14 @@ namespace Vintagestory.API.Datastructures
+             {
+                 dstTree.attributes[srcKey] = srcAttr.Clone();
+             }
+         }
+ 
+-        public OrderedDictionary<string, IAttribute> SortedCopy(bool recursive = false)
++        public Vintagestory.API.Datastructures.OrderedDictionary<string, IAttribute> SortedCopy(bool recursive = false)
+         {
+             var sorted = attributes.OrderBy(x => x.Key);
+-            var sortedTree = new OrderedDictionary<string, IAttribute>();
++            var sortedTree = new Vintagestory.API.Datastructures.OrderedDictionary<string, IAttribute>();
+             foreach (var entry in sorted)
+             {
+                 var attribute = entry.Value;
+                 if (attribute is TreeAttribute tree && recursive) attribute = tree.ConsistentlyOrderedCopy();
+                 sortedTree.Add(entry.Key, attribute);

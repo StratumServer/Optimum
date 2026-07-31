@@ -10,6 +10,8 @@
     <Project Path="build/Vintagestory/Vintagestory.csproj" />
     <Project Path="VintagestoryApi/VintagestoryAPI.csproj" />
     <Project Path="Cairo/Cairo.csproj" />
+    <Project Path="optimum-api-contracts/optimum-api-contracts.csproj" />
+    <Project Path="optimum-game-content/optimum-game-content.csproj" />
   </Folder>
   <Folder Name="/Forks/">
     <Project Path="VSEssentials/VSEssentialsMod.csproj" />
@@ -18,5 +20,12 @@
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="Optimum.Tests/Optimum.Tests.csproj" />
+    <Project Path="Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Launcher/">
+    <!-- Runtime patcher: applies Cecil patches at launch, caches result.
+         No VS assembly references at compile time — loads everything via reflection. -->
+    <Project Path="Optimum.Launcher/Optimum.Launcher.csproj" />
+    <Project Path="Optimum.Patcher/Optimum.Patcher.csproj" />
   </Folder>
 </Solution>

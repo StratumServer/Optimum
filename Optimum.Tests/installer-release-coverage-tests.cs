@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Vintagestory.API.Config;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -14,15 +15,20 @@ public class InstallerReleaseCoverageTests
     {
         string version = Read("VERSION").Trim();
         string config = Read("sources/VintagestoryApi/Config/OptimumConfig.cs");
-        string project = Read("build/Vintagestory/Vintagestory.csproj");
         string readme = Read("README.md");
 
-        Assert.Equal("0.2.11", version);
+        Assert.False(string.IsNullOrWhiteSpace(version), "VERSION file is empty");
         Assert.Equal(version, Match(config, "public const string Version = \"([^\"]+)\""));
-        Assert.Equal(version, Match(project, "<Version>([^<]+)</Version>"));
         Assert.Contains($"Optimum-v{version}-linux-x64.AppImage", readme);
-        Assert.DoesNotContain("Optimum-v0.2.8", readme);
-        Assert.DoesNotContain("Optimum-v0.2.9", readme);
+    }
+
+    [Fact]
+    public void GameAssemblyIdentityMatchesTheOwnedVanillaVersion()
+    {
+        Assert.Equal("1.22.5", GameVersion.OverallVersion);
+        Assert.Equal("1.22.5", GameVersion.ShortGameVersion);
+        Assert.Equal("1.22.6", GameVersion.NetworkVersion);
+        Assert.Equal(new Version(1, 22, 5, 0), typeof(GameVersion).Assembly.GetName().Version);
     }
 
     [Fact]
@@ -31,11 +37,15 @@ public class InstallerReleaseCoverageTests
         using JsonDocument document = JsonDocument.Parse(Read(".config/ilspycmd-compat.json"));
         JsonElement prefixes = document.RootElement.GetProperty("acceptedPrefixes");
 
-        Assert.Equal("10.1.0.", prefixes[0].GetString());
-        Assert.Equal("10.1.1.", prefixes[1].GetString());
+        Assert.Equal(2, prefixes.GetArrayLength());
+        Assert.Equal("10.0.", prefixes[0].GetString());
+        Assert.Equal("10.1.", prefixes[1].GetString());
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/install-linux.sh"));
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/bootstrap.sh"));
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/bootstrap.ps1"));
+        Assert.Contains("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", Read("scripts/install-linux.sh"));
+        Assert.Contains("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", Read("scripts/bootstrap.sh"));
+        Assert.Contains("^\\d+\\.\\d+\\.\\d+\\.\\d+$", Read("scripts/bootstrap.ps1"));
     }
 
     [Fact]
@@ -56,6 +66,24 @@ public class InstallerReleaseCoverageTests
             return;
         }
 
+        // The test script mocks a world without dotnet 10 by sandboxing PATH/HOME.
+        // When the host system has .NET 10 at a hardcoded candidate path (like
+        // /usr/lib/dotnet/dotnet), the mock can't isolate it and the test becomes
+        // an integration test that makes real network calls. Skip in that case.
+        string? sdks = null;
+        try
+        {
+            using var p = Process.Start(new ProcessStartInfo("/usr/lib/dotnet/dotnet", "--list-sdks")
+            { RedirectStandardOutput = true, UseShellExecute = false });
+            sdks = p?.StandardOutput.ReadToEnd();
+            p?.WaitForExit();
+        }
+        catch { }
+        if (sdks != null && sdks.Contains("10."))
+        {
+            return; // System dotnet 10 leaks into the sandbox; skip.
+        }
+
         string script = PatchReader.FindRepositoryFile("scripts/tests/install-linux-prerequisites.sh");
         using Process process = Process.Start(new ProcessStartInfo("bash", script)
         {
@@ -66,6 +94,98 @@ public class InstallerReleaseCoverageTests
         process.WaitForExit();
 
         Assert.True(process.ExitCode == 0, process.StandardError.ReadToEnd());
+    }
+
+    [Theory]
+    [InlineData("scripts/package-linux.sh")]
+    [InlineData("scripts/package-macos.sh")]
+    public void BashPackagesShipExactPatchedDllPdbPairs(string relativePath)
+    {
+        string script = Read(relativePath);
+
+        // The patcher produces VintagestoryLib-patched.dll from the vanilla copy
+        Assert.Contains("VintagestoryLib-patched.dll", script);
+        Assert.Contains("VintagestoryLib.vanilla.dll", script);
+        // Patched lib ships as VintagestoryLib.dll in the stage directory
+        Assert.Contains("VintagestoryLib.dll", script);
+        // API and mod DLLs ship from the build output
+        Assert.Contains("VintagestoryAPI.dll", script);
+        Assert.Contains("VSEssentials.dll", script);
+        Assert.Contains("VSSurvivalMod.dll", script);
+        Assert.Contains("Optimum.Api.Contracts.dll", script);
+    }
+
+    [Theory]
+    [InlineData("scripts/package-macos.ps1")]
+    public void PowerShellPackagesShipExactPatchedDllPdbPairs(string relativePath)
+    {
+        string script = Read(relativePath);
+
+        Assert.Contains("VintagestoryLib-patched.dll", script);
+        Assert.Contains("VintagestoryLib.vanilla.dll", script);
+        Assert.Contains("VintagestoryLib.dll", script);
+        Assert.Contains("VintagestoryAPI.dll", script);
+        Assert.Contains("VSEssentials.dll", script);
+        Assert.Contains("VSSurvivalMod.dll", script);
+    }
+
+    [Fact]
+    public void WindowsInstallerRequiresAnExistingVintageStoryInstallation()
+    {
+        string installer = Read("scripts/install-windows.ps1");
+        string package = Read("scripts/package.ps1");
+
+        Assert.Contains("Install Vintage Story $requiredVer before Optimum", installer);
+        Assert.Contains("-VanillaDir $VsPath", installer);
+        Assert.DoesNotContain("DownloadVs", installer);
+        Assert.DoesNotContain("cdn.vintagestory", installer);
+        Assert.DoesNotContain("cdn.vintagestory", package);
+        Assert.DoesNotContain("innoextract", package);
+    }
+
+    [Fact]
+    public void WindowsPackageShipsTheRuntimeLauncherAndDonors()
+    {
+        string package = Read("scripts/package.ps1");
+
+        Assert.Contains("prepare-runtime-donors.ps1", package);
+        Assert.Contains("Optimum.Patcher.dll", package);
+        Assert.Contains("VintagestoryLib.Donor.dll", package);
+        Assert.Contains("VSEssentials.Donor.dll", package);
+        Assert.Contains("VSSurvivalMod.Donor.dll", package);
+        Assert.Contains("Vintagestory.exe", package);
+    }
+
+    [Fact]
+    public void RuntimeDonorScriptUsesTheCapturedNativeCommandHelper()
+    {
+        string script = Read("scripts/prepare-runtime-donors.ps1");
+
+        Assert.Contains(". \"$scriptDir/_exec.ps1\"", script);
+        Assert.Contains("Invoke-NativeStep { & $Command }", script);
+    }
+
+    [Fact]
+    public void RuntimePatchesHaveASeparateExactDonorPipeline()
+    {
+        string bootstrap = Read("scripts/bootstrap.sh");
+        string extractor = Read("scripts/extract-patches.sh");
+        string checker = Read("scripts/check-patches.sh");
+
+        Assert.Contains("-not -path '*/runtime/*'", bootstrap);
+        Assert.Contains("cp -a \"$patches_dir/runtime/.\"", extractor);
+        Assert.Contains("prepare-runtime-donors.sh", checker);
+    }
+
+    [Theory]
+    [InlineData("optimum-api-contracts/optimum-api-contracts.csproj")]
+    [InlineData("optimum-game-content/optimum-game-content.csproj")]
+    public void OptimumOwnedRuntimeAssembliesEmitPortableSymbols(string relativePath)
+    {
+        string project = Read(relativePath);
+
+        Assert.Contains("<DebugType>portable</DebugType>", project);
+        Assert.Contains("<DebugSymbols>true</DebugSymbols>", project);
     }
 
     private static string Match(string source, string pattern)

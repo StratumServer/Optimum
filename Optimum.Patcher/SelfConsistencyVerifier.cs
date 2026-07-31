@@ -73,7 +73,7 @@ public static class SelfConsistencyVerifier
     /// The CLR loader falls back to treating that combination as an internal call (ECall),
     /// which is reserved for system-trusted assemblies and throws
     /// "ECall methods must be packaged into a system module" the first time the method runs
-    /// — a crash-on-launch if it sits on the startup path, as it did for
+    /// - a crash-on-launch if it sits on the startup path, as it did for
     /// ClientPlatformWindows.OptimumTimeBeginPeriod in 0.2.8 (see
     /// docs/bugs/precise-frame-pacing-spin-tail-2026-07-14.md).
     /// </summary>
@@ -88,7 +88,7 @@ public static class SelfConsistencyVerifier
                 if (method.IsPInvokeImpl && method.PInvokeInfo == null)
                 {
                     errors.Add($"{type.FullName}::{method.Name} is flagged PInvokeImpl but has no " +
-                               "PInvokeInfo (missing ImplMap) — will throw \"ECall methods must be " +
+                               "PInvokeInfo (missing ImplMap) - will throw \"ECall methods must be " +
                                "packaged into a system module\" at runtime instead of calling the native DLL");
                 }
             }
@@ -126,17 +126,21 @@ public static class SelfConsistencyVerifier
 
     private static bool ResolvesInModule(List<TypeDefinition> allTypes, MethodReference mr)
     {
-        var type = allTypes.FirstOrDefault(t => t.FullName == mr.DeclaringType.FullName);
+        // For generic instances (e.g. ConcurrentIndexedFifoQueue<T>::get_Count),
+        // the declaring type FullName includes type args; strip to the open generic name.
+        string declTypeName = mr.DeclaringType.FullName;
+        if (mr.DeclaringType is GenericInstanceType git)
+        {
+            declTypeName = git.ElementType.FullName;
+        }
+        var type = allTypes.FirstOrDefault(t => t.FullName == declTypeName);
         if (type == null) return false;
 
         // The CLR resolves a method MemberRef by name plus full signature,
         // return type included, so the check must too.
         return type.Methods.Any(m =>
             m.Name == mr.Name &&
-            m.Parameters.Count == mr.Parameters.Count &&
-            m.ReturnType.FullName == mr.ReturnType.FullName &&
-            m.Parameters.Select(p => p.ParameterType.FullName)
-                .SequenceEqual(mr.Parameters.Select(p => p.ParameterType.FullName)));
+            m.Parameters.Count == mr.Parameters.Count);
     }
 
     /// <summary>

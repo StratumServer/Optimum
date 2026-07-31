@@ -1,0 +1,33 @@
+diff --git a/VSSurvivalMod/Item/ItemShears.cs b/VSSurvivalMod/Item/ItemShears.cs
+index b86487b..51e5dcb 100644
+--- a/VSSurvivalMod/Item/ItemShears.cs
++++ b/VSSurvivalMod/Item/ItemShears.cs
+@@ -34,11 +34,11 @@ namespace Vintagestory.GameContent
+             Block block = player.Entity.World.BlockAccessor.GetBlock(blockSel.Position);
+ 
+             if (!CanMultiBreak(block)) return;
+ 
+             Vec3d hitPos = blockSel.Position.ToVec3d().Add(blockSel.HitPosition);
+-            OrderedDictionary<BlockPos, float> dict = GetNearblyMultibreakables(player.Entity.World, blockSel.Position, hitPos);
++            Vintagestory.API.Datastructures.OrderedDictionary<BlockPos, float> dict = GetNearblyMultibreakables(player.Entity.World, blockSel.Position, hitPos);
+             var orderedPositions = dict.OrderBy(x => x.Value).Select(x => x.Key);
+ 
+             int q = Math.Min(MultiBreakQuantity, leftDurability);
+             foreach (var pos in orderedPositions)
+             {
+@@ -96,13 +96,13 @@ namespace Vintagestory.GameContent
+             api.World.BlockAccessor.BreakBlock(pos, plr);
+             api.World.BlockAccessor.MarkBlockDirty(pos);
+         }
+ 
+ 
+-        OrderedDictionary<BlockPos, float> GetNearblyMultibreakables(IWorldAccessor world, BlockPos pos, Vec3d hitPos)
++        Vintagestory.API.Datastructures.OrderedDictionary<BlockPos, float> GetNearblyMultibreakables(IWorldAccessor world, BlockPos pos, Vec3d hitPos)
+         {
+-            OrderedDictionary<BlockPos, float> positions = new OrderedDictionary<BlockPos, float>();
++            Vintagestory.API.Datastructures.OrderedDictionary<BlockPos, float> positions = new Vintagestory.API.Datastructures.OrderedDictionary<BlockPos, float>();
+ 
+             for (int dx = -1; dx <= 1; dx++)
+             {
+                 for (int dy = -1; dy <= 1; dy++)
+                 {

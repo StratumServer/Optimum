@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Optimum.GameContent</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputPath>..\bin\$(Configuration)</OutputPath>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>annotations</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumBc7Support.cs" Link="OptimumBc7Support.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapLodGenerator.cs" Link="OptimumMapLodGenerator.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapPageCache.cs" Link="OptimumMapPageCache.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapPageRenderer.cs" Link="OptimumMapPageRenderer.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapTextureArray.cs" Link="OptimumMapTextureArray.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumTerrainSampler.cs" Link="OptimumTerrainSampler.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+    <Reference Include="VintagestoryAPI">
+      <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Graphics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Graphics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

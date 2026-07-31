@@ -8,7 +8,7 @@
 #   ./scripts/package-linux.sh
 #   ./scripts/package-linux.sh --format zip --output ~/releases
 #   ./scripts/package-linux.sh --format appimage
-#   ./scripts/package-linux.sh --client-archive /path/to/vs_client_linux-x64_1.22.3.tar.gz
+#   ./scripts/package-linux.sh --client-archive /path/to/vs_client_linux-x64_1.22.5.tar.gz
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ RESET='\033[0m'
 # Defaults
 FORMAT="targz"
 OUTPUT_DIR="$REPO_ROOT"
-VERSION="1.22.3"
+VERSION="$(python3 -c "import json;print(json.load(open('$(dirname "$0")/../forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
 CLIENT_ARCHIVE=""
 
 while [[ $# -gt 0 ]]; do
@@ -196,6 +196,15 @@ if [[ ! -f "$VANILLA_LIB" ]]; then
 fi
 dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
+# 2b. Patch VintagestoryAPI.dll (adds version label, chisel LOD hooks, etc.)
+VANILLA_API="$VANILLA_DIR/VintagestoryAPI.dll"
+PATCHED_API="$LIB_OUT/VintagestoryAPI-patched.dll"
+if [[ ! -f "$VANILLA_API" ]]; then
+    echo "Error: vanilla VintagestoryAPI.dll not found in $VANILLA_DIR." >&2
+    exit 1
+fi
+dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- --api "$VANILLA_API" "$MOD_OUT/Optimum.Api.Contracts.dll" "$PATCHED_API"
+
 # ============================================================================
 # 3. Optimum release version
 # ============================================================================
@@ -217,6 +226,11 @@ echo "Staging $STAGE_DIR"
 rm -rf "$STAGE_DIR"
 cp -a "$VANILLA_DIR" "$STAGE_DIR"
 
+# Fix fontconfig ambiguous-path warning on the vanilla fonts.conf.
+if [[ -f "$STAGE_DIR/fonts.conf" ]]; then
+    sed -i 's|<dir>assets/game/fonts</dir>|<dir prefix="cwd">assets/game/fonts</dir>|' "$STAGE_DIR/fonts.conf"
+fi
+
 # ============================================================================
 # 5. Overlay optimized DLLs (platform-agnostic IL)
 # ============================================================================
@@ -224,10 +238,26 @@ cp -a "$VANILLA_DIR" "$STAGE_DIR"
 cp -f "$BUILD_OUT/Vintagestory.dll" "$STAGE_DIR/"
 cp -f "$BUILD_OUT/Vintagestory.runtimeconfig.json" "$STAGE_DIR/Vintagestory.runtimeconfig.json"
 cp -f "$PATCHED_LIB" "$STAGE_DIR/VintagestoryLib.dll"
-cp -f "$MOD_OUT/VintagestoryAPI.dll" "$STAGE_DIR/"
+cp -f "$PATCHED_API" "$STAGE_DIR/VintagestoryAPI.dll"
+cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
+
+# 5a. Set up runtime donors for the launcher.
+# The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
+# It also needs the vanilla mod DLLs in .optimum/vanilla/Mods/ as baselines.
+DONOR_DIR="$STAGE_DIR/.optimum/donors"
+VANILLA_MOD_DIR="$STAGE_DIR/.optimum/vanilla/Mods"
+mkdir -p "$DONOR_DIR" "$VANILLA_MOD_DIR"
+
+cp -f "$LIB_OUT/VintagestoryLib.dll" "$DONOR_DIR/VintagestoryLib.Donor.dll"
+cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$DONOR_DIR/VintagestoryAPI.Contracts.dll"
+cp -f "$MOD_OUT/VSEssentials.dll" "$DONOR_DIR/VSEssentials.Donor.dll"
+cp -f "$MOD_OUT/VSSurvivalMod.dll" "$DONOR_DIR/VSSurvivalMod.Donor.dll"
+# Vanilla mods as baseline for mod patching.
+cp -f "$VANILLA_DIR/Mods/VSEssentials.dll" "$VANILLA_MOD_DIR/"
+cp -f "$VANILLA_DIR/Mods/VSSurvivalMod.dll" "$VANILLA_MOD_DIR/"
 # cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches (source
 # is byte-identical to the vanilla decompile), so rebuilding it only introduces a different
 # compiler/SDK's codegen with no behavior change. That recompiled DLL was shipped in 0.2.7 and

@@ -3,6 +3,7 @@
     <FrameworkVersion>net10.0</FrameworkVersion>
     <LangVersion>latest</LangVersion>
     <DebugType>embedded</DebugType>
+    <OptimumVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</OptimumVersion>
     <!-- Decompiled and upstream source carries #nullable-style annotations
          (string?, etc) without the projects ever opting into a nullable
          context, which is CS8632 on every such line. "annotations" makes
@@ -14,7 +15,7 @@
          filenames exceeding 260 chars (regex generated sources with hashes).
          Builds under deep %TEMP% paths (usernames with spaces) fail without this. -->
     <LongPathAware>true</LongPathAware>
-    <NoWarn>$(NoWarn);CS1591;CS1572;CS1573;CS1570;CS0649;CS0414;CS0169;CS0162;CS0168;CS0067;NU1904</NoWarn>
+    <NoWarn>$(NoWarn);CS1591;CS1572;CS1573;CS1570;CS0649;CS0414;CS0169;CS0162;CS0168;CS0067;CS1066;CS8632;NU1904</NoWarn>
     <!-- Feature flag for greedy mesh UI and config exposure. Uncomment to
          show the controls in Settings Extra and persist them to optimum.json.
          The compiler includes meshing code in every build. This flag controls

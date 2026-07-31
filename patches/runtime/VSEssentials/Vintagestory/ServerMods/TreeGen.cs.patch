@@ -1,0 +1,41 @@
+diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
+--- a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
++++ b/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
+@@ -22,6 +22,10 @@ public class TreeGen : ITreeGenerator
+ 
+ 	private readonly ForestFloorSystem forestFloor;
+ 
++	private BlockPos vineScratchPos;
++
++	private BlockPos[] positionStack;
++
+ 	public TreeGen(TreeGenConfig config, int seed, ForestFloorSystem ffs)
+ 	{
+ 		this.config = config;
+@@ -76,7 +80,13 @@ public class TreeGen : ITreeGenerator
+ 		float num5 = curWidth / num;
+ 		int num6 = 0;
+ 		float num7 = 1f / (curWidth / num);
+-		BlockPos blockPos = new BlockPos(basePos.dimension);
++		positionStack ??= new BlockPos[32];
++		BlockPos blockPos = positionStack[depth];
++		if (blockPos == null)
++		{
++			blockPos = new BlockPos(basePos.dimension);
++			positionStack[depth] = blockPos;
++		}
+ 		while (curWidth > 0f && num6++ < 5000)
+ 		{
+ 			curWidth -= num;
+@@ -201,7 +211,10 @@ public class TreeGen : ITreeGenerator
+ 			return;
+ 		}
+ 		BlockFacing blockFacing2 = BlockFacing.HORIZONTALS[rand.NextInt(4)];
+-		BlockPos blockPos = currentPos.AddCopy(blockFacing2);
++		vineScratchPos ??= new BlockPos(0);
++		vineScratchPos.Set(currentPos.X + blockFacing2.Normali.X, currentPos.Y + blockFacing2.Normali.Y, currentPos.Z + blockFacing2.Normali.Z);
++		vineScratchPos.dimension = currentPos.dimension;
++		BlockPos blockPos = vineScratchPos;
+ 		float num7 = 1f + (float)rand.NextInt(11) * (treeGenParams.vinesGrowthChance + 0.2f);
+ 		while (blockAccessor.GetBlockId(blockPos) == 0 && num7-- > 0f)
+ 		{

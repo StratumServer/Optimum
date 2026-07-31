@@ -159,7 +159,7 @@ check_cecil_cross_reference() {
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.(Client(\.NoObf)?|Common)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
+  done < <(grep -oE '"Vintagestory\.(Client(\.NoObf)?|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
   for rel in "${!cecil_owned[@]}"; do
     if [[ -z "${expected["$rel"]:-}" ]]; then
@@ -273,9 +273,29 @@ while IFS= read -r -d '' patch; do
       printf '  %s\n' "$(printf '%s\n' "$patch_error" | head -1)"
     fi
   fi
-done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort -z)
+done < <(find "$patches_dir" -type f -name '*.patch' \
+  -not -path "$patches_dir/runtime/*" -print0 | sort -z)
 
 echo "Patches: $applied applied, $cecil cecil, $pending pending, $unavailable unavailable, $conflict conflict, $total total"
+
+# Runtime patches intentionally target source decompiled locally from the
+# user's exact 1.22.5 mod assemblies, not the repository donor trees. Validate
+# that the full exact-donor pipeline can apply and compile them.
+runtime_total="$(find "$patches_dir/runtime" -type f -name '*.patch' 2>/dev/null | wc -l)"
+if [[ "$runtime_total" -gt 0 ]]; then
+  runtime_log="$(mktemp)"
+  if VANILLA_DIR="${VANILLA_DIR:-$repo_root/.vanilla/win-x64/vintagestory}" \
+      CONFIGURATION="${CONFIGURATION:-Release}" \
+      bash "$repo_root/scripts/prepare-runtime-donors.sh" >"$runtime_log" 2>&1; then
+    rm -f "$runtime_log"
+    echo "Runtime patches: $runtime_total applied and exact donors compiled"
+  else
+    echo "Runtime patches: exact-donor validation failed" >&2
+    cat "$runtime_log" >&2
+    rm -f "$runtime_log"
+    exit 1
+  fi
+fi
 
 if [[ "$cecil_cross_reference_mismatch" == "1" ]]; then
   echo "cecil-owned.list and Optimum.Patcher/Program.cs disagree, see warnings above." >&2

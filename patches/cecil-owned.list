@@ -34,3 +34,32 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
+# Pending Program.cs wiring (v0.2.12): field-type upgrades (object→Lock) and
+# method body changes that improve lock contention and fix mod SVG icon loss.
+# The patches ship in the decompiled donor tree and are validated here, but
+# Cecil transplant entries in Program.cs are deferred because ClientWorldMap
+# and SystemClientTickingBlocks require ~25 method transplants each (every
+# method touching the renamed lock fields). ParticleManager is import-only.
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs.patch
+# Server-side worldgen scheduler and chunk read pool (Cecil-transplanted into
+# VintagestoryLib.dll at launcher startup, same as client patches above).
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch

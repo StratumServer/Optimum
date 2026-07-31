@@ -22,7 +22,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.2.11";
+    public const string Version = "0.3.0";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -155,6 +155,126 @@ public static class OptimumConfig
     public static bool ShadowFarVegetation = true;
 
     /// <summary>
+    /// T3: Reduce position-packet send frequency for distant entities (IsTracked==1,
+    /// beyond ~50 blocks). Default OFF: this changes observable network behavior.
+    /// FarTrackedTickStride=2 sends at 15Hz instead of 30Hz. Fast-moving entities
+    /// and EntityItems bypass the throttle.
+    /// </summary>
+    public static bool DistanceSendFrequencyEnabled = false;
+    public static int FarTrackedTickStride = 2;
+
+    /// <summary>
+    /// T4: Split the random tick pass into N sub-passes (default 8) at
+    /// BlockTickInterval/N intervals. Each pass processes only 1/N of chunks
+    /// (modulo filtering). Reduces tick-time sawtooth from ~48ms max to ~6ms
+    /// per pass. Chunks still receive the same aggregate tick rate per cycle.
+    /// Default ON: pure scheduling change, no gameplay logic change.
+    /// </summary>
+    public static bool RandomTickSliceEnabled = true;
+
+    /// <summary>
+    /// Lets singleplayer world generation share passes across worker threads.
+    /// The scheduler owns one pass per worker and returns to the vanilla chunk
+    /// thread when it detects a scheduler fault. Default ON: the statistical
+    /// parity gate showed the divergence from serial generation matches what
+    /// vanilla's own multithreaded worldgen (MaxWorldgenThreads > 1) produces,
+    /// and vanilla worldgen is not run-to-run deterministic to begin with (see
+    /// docs/superpowers/specs/2026-07-16-per-pass-mutual-exclusion.md).
+    /// </summary>
+    public static bool WorldgenWorkStealingEnabled = true;
+
+    /// <summary>
+    /// Replace the vanilla ChunkMapLayer upload pipeline with a page-cached
+    /// renderer. Pages (8x8 chunks, 256x256 pixels) persist to disk as
+    /// zstd-compressed RGBA and upload to a GL_TEXTURE_2D_ARRAY for
+    /// single-draw-call rendering. Explored chunks never re-generate on map
+    /// open: the cache serves them in sub-100ms. Default true.
+    /// </summary>
+    public static bool MapPageCacheEnabled = true;
+
+    /// <summary>
+    /// Number of layers in the GL_TEXTURE_2D_ARRAY used for map page
+    /// rendering. Each layer holds one 256x256 page. 128 covers most
+    /// viewport sizes at normal zoom; raise for extreme view distances.
+    /// </summary>
+    public static int MapPageCacheMaxLayers = 128;
+
+    /// <summary>
+    /// Use BC7 compressed textures (GL_ARB_texture_compression_bptc) for
+    /// map pages when the GPU supports it. Cuts VRAM 4x and upload bandwidth
+    /// proportionally. Falls back to RGBA8 when the extension is absent.
+    /// </summary>
+    public static bool MapPageCacheBc7 = true;
+
+    /// <summary>
+    /// Runtime flag: true when the GPU reports GL_ARB_texture_compression_bptc.
+    /// Set at startup, not persisted.
+    /// </summary>
+    public static volatile bool MapPageCacheBc7Supported;
+
+    /// <summary>
+    /// Generate approximate biome-colored map tiles for chunks the player
+    /// has not explored. Uses the world seed plus climate, ocean, and forest
+    /// region maps to produce a low-fidelity terrain overview. The pregen
+    /// pixels carry a desaturation tint so the player can distinguish them
+    /// from real explored terrain at a glance. Default false (opt-in).
+    /// </summary>
+    public static bool MapPageCachePregen = false;
+
+    /// <summary>
+    /// Enables the parallel read-only SQLite connection pool for chunk column
+    /// loading (OptimumChunkReadPool). In singleplayer, DB I/O dominates chunk
+    /// thread time; the pool fans the per-Y-level SELECT queries out across
+    /// several read-only connections in WAL mode. Default true.
+    /// </summary>
+    public static bool ChunkReadPoolEnabled = true;
+
+    /// <summary>
+    /// Number of read-only SQLite connections in the chunk read pool.
+    /// Clamped to [1, 8] by OptimumChunkReadPool itself. Default 4.
+    /// </summary>
+    public static int ChunkReadPoolWorkers = 4;
+
+    /// <summary>
+    /// Adaptive chunk generation radius: reduces the effective view radius
+    /// under gen-queue pressure (player exploring fast) so fewer columns
+    /// queue at once. Recovers to full radius when the queue drains.
+    /// Default ON in singleplayer. Multiplayer servers already have dedicated
+    /// gen threads and a capped MaxChunkRadius, so this mostly helps SP.
+    /// </summary>
+    public static bool AdaptiveRadiusEnabled = true;
+
+    /// <summary>
+    /// Floor radius in chunks: the controller never drops below this value.
+    /// 4 chunks = 128 blocks = still enough to avoid visible pop-in at
+    /// normal walk speed.
+    /// </summary>
+    public static int AdaptiveRadiusFloor = 4;
+
+    /// <summary>
+    /// When the EWMA-smoothed queue depth exceeds this count, the controller
+    /// shrinks the radius by 1 per tick. Default 60 = ~2x the typical
+    /// steady-state queue when walking at normal speed.
+    /// </summary>
+    public static int AdaptiveRadiusHighThreshold = 60;
+
+    /// <summary>
+    /// When the smoothed queue depth falls below this count, the controller
+    /// recovers the radius by 1 per tick. Default 20 = the queue has drained
+    /// enough to safely grow the radius back.
+    /// </summary>
+    public static int AdaptiveRadiusLowThreshold = 20;
+
+    /// <summary>
+    /// Runtime-only: the current effective max chunk radius after adaptive
+    /// scaling. Written by OptimumAdaptiveRadiusController.Tick(), read by
+    /// ServerSystemSendChunks to cap how far out it requests chunks. When
+    /// AdaptiveRadiusEnabled is false, stays at int.MaxValue (no cap).
+    /// Not persisted.
+    /// </summary>
+    public static volatile int AdaptiveRadiusEffective = int.MaxValue;
+
+    /// <summary>
     /// FSR render scale: 1.0 = native (off), 0.85 = quality, 0.77 = balanced, 0.67 = performance.
     /// Multiplies ssaaLevel in SetupDefaultFrameBuffers. Disables FXAA when < 1.0.
     /// </summary>
@@ -172,6 +292,57 @@ public static class OptimumConfig
     {
         ChiselLodDistance = blocks;
         ChiselLodDistanceSq = (double)blocks * blocks;
+    }
+
+    /// <summary>
+    /// Worker count policy derived from benchmark data (6-core WSL2, 2026-07-16):
+    ///   serial=30s, 1w=23s(1.30x), 2w=17s(1.76x), 3w=15s(2.00x), 4w=17s(regress), 5w=16s.
+    /// Three workers saturate the E.2 illuminator lock; adding more just piles up
+    /// contention without reducing generation time. The chunk thread itself needs
+    /// one core, so the policy keeps workers at floor(cores/2) capped at 3.
+    ///
+    /// During spawn-chunk generation (before RunGame), returns the conservative
+    /// count (2 for 5-6 cores) to avoid starving the client renderer on the same
+    /// CPU. After RunGame, the adaptive controller raises to the ceiling.
+    /// </summary>
+    public static int GetWorldgenWorkerCount(int logicalProcessors, bool reducedServerThreads)
+    {
+        if (!WorldgenWorkStealingEnabled || reducedServerThreads)
+        {
+            return 0;
+        }
+
+        // 4 cores or fewer: overhead exceeds gains (1-worker barely breaks even on 6c)
+        if (logicalProcessors <= 4)
+        {
+            return 0;
+        }
+
+        // 5-6 cores: start with 2 during spawn (client is loading, GPU busy).
+        // Post-spawn, the adaptive controller raises to GetWorldgenWorkerCeiling().
+        if (logicalProcessors <= 6)
+        {
+            return 2;
+        }
+
+        // 7-8 cores: start with 2, ceiling at 3
+        return 2;
+    }
+
+    /// <summary>
+    /// Maximum worker count the adaptive controller may raise to after spawn
+    /// chunks finish. The benchmark-proven ceiling for the hardware.
+    /// </summary>
+    public static int GetWorldgenWorkerCeiling(int logicalProcessors, bool reducedServerThreads)
+    {
+        if (!WorldgenWorkStealingEnabled || reducedServerThreads)
+        {
+            return 0;
+        }
+
+        if (logicalProcessors <= 4) return 0;
+        if (logicalProcessors <= 6) return 3;  // 2.00x measured on 6c
+        return 3;  // E.2 lock caps useful parallelism at 3 regardless of core count
     }
 
     /// <summary>
@@ -208,6 +379,17 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshFarDistance), GreedyMeshFarDistance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
+        (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
+        (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
+        (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
+        (nameof(OptimumConfigData.RandomTickSlice), RandomTickSliceEnabled.ToString()),
+        (nameof(OptimumConfigData.WorldgenWorkStealing), WorldgenWorkStealingEnabled.ToString()),
+        (nameof(OptimumConfigData.ChunkReadPoolEnabled), ChunkReadPoolEnabled.ToString()),
+        (nameof(OptimumConfigData.ChunkReadPoolWorkers), ChunkReadPoolWorkers.ToString()),
+        (nameof(OptimumConfigData.AdaptiveRadius), AdaptiveRadiusEnabled.ToString()),
+        (nameof(OptimumConfigData.AdaptiveRadiusFloor), AdaptiveRadiusFloor.ToString()),
+        (nameof(OptimumConfigData.AdaptiveRadiusHighThreshold), AdaptiveRadiusHighThreshold.ToString()),
+        (nameof(OptimumConfigData.AdaptiveRadiusLowThreshold), AdaptiveRadiusLowThreshold.ToString()),
     };
 
     /// <summary>
@@ -275,6 +457,17 @@ public static class OptimumConfig
             GreedyMeshFarDistanceSq = (double)GreedyMeshFarDistance * GreedyMeshFarDistance;
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
+            MapPageCacheEnabled = data.MapPageCache;
+            MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
+            MapPageCacheBc7 = data.MapPageCacheBc7;
+            RandomTickSliceEnabled = data.RandomTickSlice;
+            WorldgenWorkStealingEnabled = data.WorldgenWorkStealing;
+            ChunkReadPoolEnabled = data.ChunkReadPoolEnabled;
+            ChunkReadPoolWorkers = Math.Clamp(data.ChunkReadPoolWorkers, 1, 8);
+            AdaptiveRadiusEnabled = data.AdaptiveRadius;
+            AdaptiveRadiusFloor = Math.Clamp(data.AdaptiveRadiusFloor, 1, 12);
+            AdaptiveRadiusHighThreshold = Math.Max(1, data.AdaptiveRadiusHighThreshold);
+            AdaptiveRadiusLowThreshold = Math.Max(1, data.AdaptiveRadiusLowThreshold);
         }
         catch (Exception)
         {
@@ -321,6 +514,17 @@ public static class OptimumConfig
             GreedyMeshFarDistance = GreedyMeshFarDistance,
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
+            MapPageCache = MapPageCacheEnabled,
+            MapPageCacheMaxLayers = MapPageCacheMaxLayers,
+            MapPageCacheBc7 = MapPageCacheBc7,
+            RandomTickSlice = RandomTickSliceEnabled,
+            WorldgenWorkStealing = WorldgenWorkStealingEnabled,
+            ChunkReadPoolEnabled = ChunkReadPoolEnabled,
+            ChunkReadPoolWorkers = ChunkReadPoolWorkers,
+            AdaptiveRadius = AdaptiveRadiusEnabled,
+            AdaptiveRadiusFloor = AdaptiveRadiusFloor,
+            AdaptiveRadiusHighThreshold = AdaptiveRadiusHighThreshold,
+            AdaptiveRadiusLowThreshold = AdaptiveRadiusLowThreshold,
         };
 
         try
@@ -368,10 +572,65 @@ internal sealed class OptimumConfigData
     public int GreedyMeshFarDistance { get; set; } = 0;
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
+    public bool MapPageCache { get; set; } = true;
+    public int MapPageCacheMaxLayers { get; set; } = 128;
+    public bool MapPageCacheBc7 { get; set; } = true;
+    public bool RandomTickSlice { get; set; } = true;
+    public bool WorldgenWorkStealing { get; set; } = true;
+    public bool ChunkReadPoolEnabled { get; set; } = true;
+    public int ChunkReadPoolWorkers { get; set; } = 4;
+    public bool AdaptiveRadius { get; set; } = true;
+    public int AdaptiveRadiusFloor { get; set; } = 4;
+    public int AdaptiveRadiusHighThreshold { get; set; } = 60;
+    public int AdaptiveRadiusLowThreshold { get; set; } = 20;
 }
 
 public static class OptimumDiagnostics
 {
+    // Stratum-ported optimization counters (server-side ports)
+    private static long _serverTickCount;
+    private static long _collisionFastPathHits;
+    private static long _collisionFastPathSkips;
+    private static long _pathNodePoolRents;
+    private static long _pathNodePoolOverflows;
+    private static long _collectEntitiesStridedSkips;
+    private static long _mechPowerTickCount;
+
+    public static long ServerTickCount => Interlocked.Read(ref _serverTickCount);
+    public static long CollisionFastPathHits => Interlocked.Read(ref _collisionFastPathHits);
+    public static long CollisionFastPathSkips => Interlocked.Read(ref _collisionFastPathSkips);
+    public static long PathNodePoolRents => Interlocked.Read(ref _pathNodePoolRents);
+    public static long PathNodePoolOverflows => Interlocked.Read(ref _pathNodePoolOverflows);
+    public static long CollectEntitiesStridedSkips => Interlocked.Read(ref _collectEntitiesStridedSkips);
+    public static long MechPowerTickCount => Interlocked.Read(ref _mechPowerTickCount);
+
+    public static void RecordServerTick() => Interlocked.Increment(ref _serverTickCount);
+    public static void RecordCollisionFastPathHit() => Interlocked.Increment(ref _collisionFastPathHits);
+    public static void RecordCollisionFastPathSkip() => Interlocked.Increment(ref _collisionFastPathSkips);
+    public static void RecordPathNodePoolRent() => Interlocked.Increment(ref _pathNodePoolRents);
+    public static void RecordPathNodePoolOverflow() => Interlocked.Increment(ref _pathNodePoolOverflows);
+    public static void RecordCollectEntitiesStridedSkip() => Interlocked.Increment(ref _collectEntitiesStridedSkips);
+    public static void RecordMechPowerTick() => Interlocked.Increment(ref _mechPowerTickCount);
+
+    public static void ResetStratumCounters()
+    {
+        Interlocked.Exchange(ref _serverTickCount, 0);
+        Interlocked.Exchange(ref _collisionFastPathHits, 0);
+        Interlocked.Exchange(ref _collisionFastPathSkips, 0);
+        Interlocked.Exchange(ref _pathNodePoolRents, 0);
+        Interlocked.Exchange(ref _pathNodePoolOverflows, 0);
+        Interlocked.Exchange(ref _collectEntitiesStridedSkips, 0);
+        Interlocked.Exchange(ref _mechPowerTickCount, 0);
+    }
+
+    public static string GetStratumSummary()
+    {
+        return $"[Optimum Stratum ports] ticks={ServerTickCount} collFP={CollisionFastPathHits}/{CollisionFastPathSkips} " +
+               $"pathPool={PathNodePoolRents}/{PathNodePoolOverflows} collectSkips={CollectEntitiesStridedSkips} " +
+               $"mechTicks={MechPowerTickCount}";
+    }
+
+    // Optimum-native optimization counters (client-side)
     private static long _chiselLodBlocks;
     private static long _chiselLodFullMeshContributions;
     private static long _chiselLodProxyMeshContributions;

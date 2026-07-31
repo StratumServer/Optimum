@@ -1,0 +1,62 @@
+diff --git a/VSEssentials/Loading/RegistryObjectTypeLoader.cs b/VSEssentials/Loading/RegistryObjectTypeLoader.cs
+index 07a34c5..c27b560 100644
+--- a/VSEssentials/Loading/RegistryObjectTypeLoader.cs
++++ b/VSEssentials/Loading/RegistryObjectTypeLoader.cs
+@@ -24,11 +24,11 @@ namespace Vintagestory.ServerMods.NoObf
+         public List<string> Types;
+     }
+ 
+     public class ResolvedVariant
+     {
+-        public API.Datastructures.OrderedDictionary<string, string> CodeParts = new ();
++        public Vintagestory.API.Datastructures.OrderedDictionary<string, string> CodeParts = new ();
+ 
+         public AssetLocation Code;
+ 
+         public void ResolveCode(AssetLocation baseCode)
+         {
+@@ -498,11 +498,11 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+         List<ResolvedVariant> GatherVariants(AssetLocation baseCode, RegistryObjectVariantGroup[] variantgroups, AssetLocation location, AssetLocation[] allowedVariants, AssetLocation[] skipVariants)
+         {
+             List<ResolvedVariant> variantsFinal = new List<ResolvedVariant>();
+ 
+-            API.Datastructures.OrderedDictionary<string, VariantEntry[]> variantsMul = new ();
++            Vintagestory.API.Datastructures.OrderedDictionary<string, VariantEntry[]> variantsMul = new ();
+ 
+ 
+             // 1. Collect all types
+             for (int i = 0; i < variantgroups.Length; i++)
+             {
+@@ -615,11 +615,11 @@ namespace Vintagestory.ServerMods.NoObf
+             }
+ 
+             return variantsFinal;
+         }
+ 
+-        private void CollectFromStateList(RegistryObjectVariantGroup variantGroup, RegistryObjectVariantGroup[] variantgroups, API.Datastructures.OrderedDictionary<string, VariantEntry[]> variantsMul, List<ResolvedVariant> blockvariantsFinal, AssetLocation filename)
++        private void CollectFromStateList(RegistryObjectVariantGroup variantGroup, RegistryObjectVariantGroup[] variantgroups, Vintagestory.API.Datastructures.OrderedDictionary<string, VariantEntry[]> variantsMul, List<ResolvedVariant> blockvariantsFinal, AssetLocation filename)
+         {
+             if (variantGroup.Code == null)
+             {
+                 api.Server.LogError(
+                     "Error in itemtype {0}, a variantgroup using a state list must have a code. Ignoring.",
+@@ -698,16 +698,16 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+             }
+         }
+ 
+ 
+-        private void CollectFromWorldProperties(RegistryObjectVariantGroup variantGroup, RegistryObjectVariantGroup[] variantgroups, API.Datastructures.OrderedDictionary<string, VariantEntry[]> blockvariantsMul, List<ResolvedVariant> blockvariantsFinal, AssetLocation location)
++        private void CollectFromWorldProperties(RegistryObjectVariantGroup variantGroup, RegistryObjectVariantGroup[] variantgroups, Vintagestory.API.Datastructures.OrderedDictionary<string, VariantEntry[]> blockvariantsMul, List<ResolvedVariant> blockvariantsFinal, AssetLocation location)
+         {
+             CollectFromWorldPropertiesCombine(new AssetLocation[] { variantGroup.LoadFromProperties }, variantGroup, variantgroups, blockvariantsMul, blockvariantsFinal, location);
+         }
+ 
+-        private void CollectFromWorldPropertiesCombine(AssetLocation[] propList, RegistryObjectVariantGroup variantGroup, RegistryObjectVariantGroup[] variantgroups, API.Datastructures.OrderedDictionary<string, VariantEntry[]> blockvariantsMul, List<ResolvedVariant> blockvariantsFinal, AssetLocation location)
++        private void CollectFromWorldPropertiesCombine(AssetLocation[] propList, RegistryObjectVariantGroup variantGroup, RegistryObjectVariantGroup[] variantgroups, Vintagestory.API.Datastructures.OrderedDictionary<string, VariantEntry[]> blockvariantsMul, List<ResolvedVariant> blockvariantsFinal, AssetLocation location)
+         {
+             if (propList.Length > 1 && variantGroup.Code == null)
+             {
+                 api.Server.LogError(
+                     "Error in item or block {0}, defined a variantgroup with loadFromPropertiesCombine (first element: {1}), but did not explicitly declare a code for this variant group, hence I do not know which code to use. Ignoring.",

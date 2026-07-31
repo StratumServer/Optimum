@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..2309259 100644
+index 431e51a..9d4a5e8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -41,7 +41,7 @@ index 431e51a..2309259 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +123,28 @@ public class ChunkRenderer
+@@ -105,10 +123,45 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -52,7 +52,24 @@ index 431e51a..2309259 100644
 +
 +	private void ApplyOptimumTextureLodBias()
 +	{
-+		float textureLodBias = MathF.Log2(Math.Clamp(ClientSettings.OptimumRenderScale, 0.5f, 1.0f));
++		// Only apply LOD bias when FSR is active (RenderScale < 1.0).
++		// At 1.0, skip TexParameter calls entirely to match vanilla behavior.
++		if (ClientSettings.OptimumRenderScale >= 1.0f)
++		{
++			if (!float.IsNaN(optimumTextureLodBias))
++			{
++				GL.ActiveTexture((TextureUnit)33984);
++				for (int i = 0; i < textureIds.Length; i++)
++				{
++					GL.BindTexture((TextureTarget)3553, textureIds[i]);
++					GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, 0f);
++				}
++				GL.BindTexture((TextureTarget)3553, 0);
++				optimumTextureLodBias = float.NaN;
++			}
++			return;
++		}
++		float textureLodBias = MathF.Log2(ClientSettings.OptimumRenderScale);
 +		if (Math.Abs(textureLodBias - optimumTextureLodBias) < 0.0001f)
 +		{
 +			return;
@@ -70,7 +87,7 @@ index 431e51a..2309259 100644
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -170,10 +206,11 @@ public class ChunkRenderer
+@@ -170,10 +223,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -82,7 +99,7 @@ index 431e51a..2309259 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,14 +245,25 @@ public class ChunkRenderer
+@@ -208,14 +262,25 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -111,7 +128,7 @@ index 431e51a..2309259 100644
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -442,11 +490,11 @@ public class ChunkRenderer
+@@ -442,11 +507,11 @@ public class ChunkRenderer
  		masterPool.DisposeAllPools(game.api);
  	}
  

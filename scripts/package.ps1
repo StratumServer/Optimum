@@ -9,82 +9,99 @@ Where to create the output folder (and zip). Default: repo root.
 .PARAMETER Zip
 Also compress the folder into Optimum-v<version>-win-x64.zip.
 
+.PARAMETER VanillaDir
+Path to an existing Vintage Story Windows installation.
+
 .EXAMPLE
-.\scripts\package.ps1                          # folder only
-.\scripts\package.ps1 -Zip                     # folder + zip
-.\scripts\package.ps1 -OutputDir D:\releases -Zip
+.\scripts\package.ps1 -VanillaDir C:\Games\VintageStory
+.\scripts\package.ps1 -VanillaDir C:\Games\VintageStory -Zip
+.\scripts\package.ps1 -VanillaDir C:\Games\VintageStory -OutputDir D:\releases -Zip
 #>
 
 [CmdletBinding()]
 param(
     [string]$OutputDir,
     [switch]$Zip,
-    [string]$Version = '1.22.3'
+    [string]$Version,
+    [string]$VanillaDir
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Resolve VS version from forks.json if not passed explicitly.
+if (-not $Version) {
+    $forksFile = Join-Path $repoRoot 'forks.json'
+    if (Test-Path $forksFile) { $Version = (Get-Content $forksFile -Raw | ConvertFrom-Json).vintageStoryVersion }
+    else { $Version = '1.22.5' }
+}
 . "$PSScriptRoot/_hostcaps.ps1"
 . "$PSScriptRoot/_exec.ps1"
 
-# Resolve a Windows vanilla install. Bootstrap extracts the Windows client into
-# .vanilla/win-x64/. Off-Windows, this keeps native libs from another platform
-# out of the win-x64 package.
+# Resolve a local Windows vanilla install. This script does not download
+# Vintage Story.
 function Resolve-WindowsVanilla {
-    param([string]$RepoRoot, [string]$Version)
+    param([string]$RepoRoot)
     $winDir = Join-Path (Join-Path $RepoRoot '.vanilla/win-x64') 'vintagestory'
     if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
 
     $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
     if (($IsWindows -or ($env:OS -eq 'Windows_NT')) -and (Test-Path (Join-Path $legacyWin 'Vintagestory.exe'))) { return $legacyWin }
 
-    if (-not (Test-Cmd innoextract)) {
-        throw "Cannot build a win-x64 package on this host: innoextract not found (needed to unpack vs_install_win-x64_$Version.exe). Install it (apt-get install innoextract) or run package.ps1 on Windows."
-    }
-    $zipCache = Join-Path $RepoRoot '.vanilla/archives'
-    New-Item -ItemType Directory -Force -Path $zipCache | Out-Null
-    $exeName = "vs_install_win-x64_$Version.exe"
-    $installer = Join-Path $zipCache $exeName
-    if (-not (Test-Path $installer)) {
-        $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
-        Write-Host "Downloading $url (~570MB)"
-        Invoke-NativeStep { curl -L --fail -o $installer $url }
-        if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
-    } else { Write-Host "Using cached $installer" }
-
-    $parent = Split-Path -Parent $winDir
-    if (Test-Path $parent) { Remove-Item -Recurse -Force $parent }
-    New-Item -ItemType Directory -Force -Path $parent | Out-Null
-    Write-Host "Extracting Windows client with innoextract..."
-    Invoke-NativeStep { innoextract -s -d $parent $installer | Out-Null }
-    if ($LASTEXITCODE -ne 0) { throw "innoextract failed on $installer" }
-    # innoextract writes the install tree under app/.
-    $appDir = Join-Path $parent 'app'
-    if (Test-Path $appDir) { Rename-Item -Path $appDir -NewName 'vintagestory' -Force }
-    if (-not (Test-Path (Join-Path $winDir 'Vintagestory.exe'))) {
-        throw "Extraction failed: Vintagestory.exe not found under $winDir"
-    }
-    Copy-Item -Force (Join-Path $winDir 'VintagestoryLib.dll') (Join-Path $winDir 'VintagestoryLib.vanilla.dll')
-    return $winDir
+    throw 'Vintage Story installation not found. Pass -VanillaDir with the folder that contains Vintagestory.exe.'
 }
 
 Push-Location $repoRoot
 try {
     Show-HostCaps -Only 'win-x64' | Out-Null
-    $vanillaDir = Resolve-WindowsVanilla -RepoRoot $repoRoot -Version $Version
-    $buildOut = Join-Path $repoRoot 'build/Vintagestory/bin/Release/net10.0'
+    $vanillaDir = if ($VanillaDir) { [IO.Path]::GetFullPath($VanillaDir) } else { Resolve-WindowsVanilla -RepoRoot $repoRoot }
+    if (-not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
+        throw "Vanilla Windows install not found: $vanillaDir"
+    }
     $libOut = Join-Path $repoRoot 'build/VintagestoryLib/bin/Release/net10.0'
+    $launcherOut = Join-Path $repoRoot 'Optimum.Launcher/bin/Release/net10.0'
+    $patcherOut = Join-Path $repoRoot 'Optimum.Patcher/bin/Release/net10.0'
 
     if (-not (Test-Path (Join-Path $libOut 'VintagestoryLib.dll'))) {
         throw "Build output not found. Run: dotnet build VintageStory.slnx -c Release"
     }
-    $patchedLib = Join-Path $libOut 'VintagestoryLib-patched.dll'
-    $vanillaLib = Join-Path $vanillaDir 'VintagestoryLib.vanilla.dll'
-    if (-not (Test-Path $vanillaLib)) {
-        throw "Pristine vanilla VintagestoryLib.vanilla.dll not found in $vanillaDir. Delete the matching .vanilla cache and re-run packaging."
+    # Use the compiled engine as the donor for the launcher's runtime transplant.
+    # The staged game keeps its local vanilla engine intact.
+    $compiledLib = Join-Path $libOut 'VintagestoryLib.dll'
+
+    $launcherExe = Join-Path $launcherOut 'Optimum.exe'
+    if (-not (Test-Path $launcherExe)) {
+        $launcherOut = Join-Path $launcherOut 'win-x64'
+        $launcherExe = Join-Path $launcherOut 'Optimum.exe'
+        if (-not (Test-Path $launcherExe)) {
+            Write-Host 'Building the win-x64 Optimum launcher...'
+            $launcherProject = Join-Path $repoRoot 'Optimum.Launcher/Optimum.Launcher.csproj'
+            Invoke-NativeStep { dotnet build $launcherProject -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo }
+            if ($LASTEXITCODE -ne 0) { throw 'Could not build the win-x64 Optimum launcher.' }
+        }
     }
-    Invoke-NativeStep { dotnet run --project (Join-Path $repoRoot 'Optimum.Patcher') -c Release -- $vanillaLib (Join-Path $libOut 'VintagestoryLib.dll') $patchedLib }
-    if ($LASTEXITCODE -ne 0) { throw "Optimum.Patcher failed (exit code $LASTEXITCODE)." }
+    foreach ($requiredLauncherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
+        if (-not (Test-Path (Join-Path $launcherOut $requiredLauncherFile))) {
+            throw "Launcher output not found: $requiredLauncherFile"
+        }
+    }
+    foreach ($requiredPatcherFile in @('Optimum.Patcher.dll', 'Optimum.Patcher.deps.json', 'Optimum.Patcher.runtimeconfig.json', 'Mono.Cecil.dll')) {
+        if (-not (Test-Path (Join-Path $patcherOut $requiredPatcherFile))) {
+            throw "Patcher output not found: $requiredPatcherFile"
+        }
+    }
+
+    Write-Host 'Preparing runtime donors...'
+    & (Join-Path $PSScriptRoot 'prepare-runtime-donors.ps1') -VanillaDir $vanillaDir -Configuration Release
+    if ($LASTEXITCODE -ne 0) { throw 'Runtime donor preparation failed.' }
+    $runtimeDonorRoot = Join-Path $repoRoot '.build/runtime-donors'
+    $essentialsDonor = Get-ChildItem -Path (Join-Path $runtimeDonorRoot 'VSEssentials') -Recurse -Filter 'VSEssentials.dll' -File |
+        Where-Object { $_.FullName -notmatch '[/\\]obj[/\\]' } | Select-Object -First 1 -ExpandProperty FullName
+    $survivalDonor = Get-ChildItem -Path (Join-Path $runtimeDonorRoot 'VSSurvivalMod') -Recurse -Filter 'VSSurvivalMod.dll' -File |
+        Where-Object { $_.FullName -notmatch '[/\\]obj[/\\]' } | Select-Object -First 1 -ExpandProperty FullName
+    if (-not $essentialsDonor -or -not $survivalDonor) {
+        throw 'Runtime mod donor output not found.'
+    }
 
     # Read the Optimum release version. The -Version parameter selects the Vintage Story release.
     $optVer = (Get-Content (Join-Path $repoRoot 'VERSION') -Raw).Trim()
@@ -98,20 +115,52 @@ try {
     if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
     Copy-Item -Recurse -Force $vanillaDir $stageDir
 
-    # Apply optimized DLLs over the copy.
-    Write-Host "Applying optimized DLLs..."
-    Copy-Item -Force (Join-Path $buildOut 'Vintagestory.dll') $stageDir
-    Copy-Item -Force (Join-Path $buildOut 'Vintagestory.runtimeconfig.json') $stageDir
-    Copy-Item -Force $patchedLib (Join-Path $stageDir 'VintagestoryLib.dll')
+    # Keep the engine and built-in mods vanilla. The launcher patches copies at startup.
+    Write-Host 'Installing launcher, patcher, and runtime donors...'
     $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
-    Copy-Item -Force (Join-Path $apiOut 'VintagestoryAPI.dll') $stageDir
-    Copy-Item -Force (Join-Path $apiOut 'VSEssentials.dll') (Join-Path $stageDir 'Mods')
-    Copy-Item -Force (Join-Path $apiOut 'VSSurvivalMod.dll') (Join-Path $stageDir 'Mods')
-    Copy-Item -Force (Join-Path $apiOut 'VSCreativeMod.dll') (Join-Path $stageDir 'Mods')
-    # cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches, so
-    # rebuilding it only introduces a different compiler/SDK's codegen with no behavior change
-    # (see docs/bugs/linux-font-hinting-review-2026-07-14.md). Leave the pristine vanilla copy
-    # already staged above in place so text rendering matches upstream exactly.
+    Copy-Item -Force (Join-Path $apiOut 'Optimum.Api.Contracts.dll') $stageDir
+    Copy-Item -Force (Join-Path $apiOut 'Optimum.GameContent.dll') $stageDir
+
+    foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
+        Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
+    }
+    # Native assets for the launcher's patch-progress splash screen (OpenTK's
+    # GLFW, SkiaSharp's text renderer). .NET's default native resolver looks
+    # for these under runtimes/<rid>/native/ relative to the app base
+    # directory, so the folder structure must be preserved, not flattened.
+    $launcherRuntimes = Join-Path $launcherOut 'runtimes'
+    if (Test-Path $launcherRuntimes) {
+        Copy-Item -Recurse -Force $launcherRuntimes $stageDir
+    }
+    foreach ($patcherFile in @('Optimum.Patcher.dll', 'Optimum.Patcher.deps.json', 'Optimum.Patcher.runtimeconfig.json')) {
+        Copy-Item -Force (Join-Path $patcherOut $patcherFile) $stageDir
+    }
+    Get-ChildItem -Path $patcherOut -Filter 'Mono.Cecil*.dll' -File |
+        ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
+
+    $optimumDir = Join-Path $stageDir '.optimum'
+    $donorDir = Join-Path $optimumDir 'donors'
+    $vanillaModDir = Join-Path $optimumDir 'vanilla/Mods'
+    New-Item -ItemType Directory -Force -Path $donorDir, $vanillaModDir | Out-Null
+
+    $donorFiles = @(
+        @($compiledLib, 'VintagestoryLib.Donor.dll'),
+        @((Join-Path $apiOut 'Optimum.Api.Contracts.dll'), 'VintagestoryAPI.Contracts.dll'),
+        @($essentialsDonor, 'VSEssentials.Donor.dll'),
+        @($survivalDonor, 'VSSurvivalMod.Donor.dll')
+    )
+    foreach ($donor in $donorFiles) {
+        Copy-Item -Force $donor[0] (Join-Path $donorDir $donor[1])
+        $sourcePdb = [IO.Path]::ChangeExtension($donor[0], '.pdb')
+        if (Test-Path $sourcePdb) {
+            Copy-Item -Force $sourcePdb (Join-Path $donorDir ([IO.Path]::ChangeExtension($donor[1], '.pdb')))
+        }
+    }
+    foreach ($modName in @('VSEssentials', 'VSSurvivalMod')) {
+        Copy-Item -Force (Join-Path $stageDir "Mods/$modName.dll") $vanillaModDir
+        $modPdb = Join-Path $stageDir "Mods/$modName.pdb"
+        if (Test-Path $modPdb) { Copy-Item -Force $modPdb $vanillaModDir }
+    }
 
     # Apply optimized shaders.
     $shaderSrc = Join-Path $repoRoot 'sources/shaders'
@@ -171,38 +220,24 @@ try {
         throw "Staged shader(s) truncated or corrupt (no 'void main'): $names. Delete '$vanillaDir' and re-run to re-extract."
     }
 
-    # Use the built apphost. It embeds the Optimum app.ico, unlike the vanilla
-    # launcher. On a non-Windows host `dotnet build` produces no Vintagestory.exe,
-    # so cross-build the win-x64 apphost on demand. Fall back to the vanilla
-    # launcher (vanilla icon) only if even that is unavailable.
-    $builtExe = Join-Path $buildOut 'Vintagestory.exe'
-    if (-not (Test-Path $builtExe)) {
-        $ridExe = Join-Path (Join-Path $buildOut 'win-x64') 'Vintagestory.exe'
-        if (-not (Test-Path $ridExe)) {
-            Write-Host "Cross-building win-x64 launcher (Optimum.exe apphost)..."
-            $proj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
-            Invoke-NativeStep { dotnet build $proj -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo }
-            if ($LASTEXITCODE -ne 0) { Write-Warning "Cross-build failed; will keep vanilla launcher." }
-        }
-        if (Test-Path $ridExe) { $builtExe = $ridExe }
-    }
-    if (Test-Path $builtExe) {
-        Copy-Item -Force $builtExe $stageDir
-    } else {
-        Write-Warning "Vintagestory.exe not found and cross-build unavailable; keeping vanilla launcher (vanilla icon)."
-    }
-
     # Remove installer artifacts.
     Get-ChildItem -Path $stageDir -Filter 'unins000.*' | Remove-Item -Force
 
-    # Brand the launcher: Vintagestory.exe -> Optimum.exe. The apphost still
-    # loads Vintagestory.dll by name, so the dll keeps its name.
-    $exe = Join-Path $stageDir 'Vintagestory.exe'
-    if (Test-Path $exe) {
-        Rename-Item -Path $exe -NewName 'Optimum.exe' -Force
-        Write-Host "Renamed launcher to Optimum.exe"
-    } else {
-        Write-Warning "Vintagestory.exe not found; launcher not renamed."
+    foreach ($requiredStageFile in @(
+        'Optimum.exe',
+        'Optimum.dll',
+        'Optimum.Patcher.dll',
+        'Vintagestory.exe',
+        '.optimum/donors/VintagestoryLib.Donor.dll',
+        '.optimum/donors/VintagestoryAPI.Contracts.dll',
+        '.optimum/donors/VSEssentials.Donor.dll',
+        '.optimum/donors/VSSurvivalMod.Donor.dll',
+        '.optimum/vanilla/Mods/VSEssentials.dll',
+        '.optimum/vanilla/Mods/VSSurvivalMod.dll'
+    )) {
+        if (-not (Test-Path (Join-Path $stageDir $requiredStageFile))) {
+            throw "Required package file not found: $requiredStageFile"
+        }
     }
 
     Write-Host "Folder ready: $stageDir" -ForegroundColor Green

@@ -1,0 +1,60 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs
+@@ -10,10 +10,16 @@ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.GameContent;
+ 
+ public class BlockCookingContainer : Block, IInFirepitRendererSupplier, IAttachableToEntity, IContainedCustomName
+ {
++	[ThreadStatic]
++	private static List<ItemStack> optimumCookingStacks;
++
++	[ThreadStatic]
++	private static int optimumCookingStacksDepth;
++
+ 	public int MaxServingSize = 6;
+ 
+ 	private Cuboidi? attachmentArea;
+ 
+ 	private IAttachableToEntity? attrAtta;
+@@ -327,20 +333,33 @@ public class BlockCookingContainer : Block, IInFirepitRendererSupplier, IAttacha
+ 		return num;
+ 	}
+ 
+ 	public ItemStack[] GetCookingStacks(ISlotProvider cookingSlotsProvider, bool clone = true)
+ 	{
+-		List<ItemStack> list = new List<ItemStack>(4);
+-		for (int i = 0; i < cookingSlotsProvider.Slots.Length; i++)
++		bool reuse = optimumCookingStacksDepth == 0;
++		optimumCookingStacksDepth++;
++		List<ItemStack> list = reuse ? (optimumCookingStacks ??= new List<ItemStack>(4)) : new List<ItemStack>(4);
++		if (reuse)
++		{
++			list.Clear();
++		}
++		try
+ 		{
+-			ItemStack itemstack = cookingSlotsProvider.Slots[i].Itemstack;
+-			if (itemstack != null)
++			for (int i = 0; i < cookingSlotsProvider.Slots.Length; i++)
+ 			{
+-				list.Add(clone ? itemstack.Clone() : itemstack);
++				ItemStack itemstack = cookingSlotsProvider.Slots[i].Itemstack;
++				if (itemstack != null)
++				{
++					list.Add(clone ? itemstack.Clone() : itemstack);
++				}
+ 			}
++			return list.ToArray();
++		}
++		finally
++		{
++			optimumCookingStacksDepth--;
+ 		}
+-		return list.ToArray();
+ 	}
+ 
+ 	public IInFirepitRenderer GetRendererWhenInFirepit(ItemStack stack, BlockEntityFirepit firepit, bool forOutputSlot)
+ 	{
+ 		return new PotInFirepitRenderer(api as ICoreClientAPI, stack, firepit.Pos, forOutputSlot);

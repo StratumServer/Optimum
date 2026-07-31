@@ -1,0 +1,11 @@
+diff --git a/VSEssentials/Systems/Weather/WeatherCommands.cs b/VSEssentials/Systems/Weather/WeatherCommands.cs
+index 5a43434..5a2d9fb 100644
+--- a/VSEssentials/Systems/Weather/WeatherCommands.cs
++++ b/VSEssentials/Systems/Weather/WeatherCommands.cs
+@@ -1,5 +1,6 @@
++#pragma warning disable CA1416 // Historical donor-only debug export uses System.Drawing; this assembly is never shipped.
+ using System;
+ using System.Drawing;
+ using System.Linq;
+ using System.Runtime.InteropServices;
+ using System.Text;

@@ -20,7 +20,7 @@ SCRIPT_DIR="$REPO_ROOT/scripts"
 # Defaults
 OUTPUT_DIR="$REPO_ROOT"
 TARGETS=""
-VERSION="1.22.3"
+VERSION="$(python3 -c "import json;print(json.load(open('$(dirname "$0")/../forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

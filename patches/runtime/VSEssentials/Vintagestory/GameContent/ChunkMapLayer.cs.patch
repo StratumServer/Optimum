@@ -1,0 +1,345 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs
+--- a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs
++++ b/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs
+@@ -107,10 +107,22 @@ public class ChunkMapLayer : RGBMapLayer
+ 
+ 	private MapDB mapdb;
+ 
+ 	private ICoreClientAPI capi;
+ 
++	private OptimumMapPageCache pageCache;
++
++	private OptimumTerrainSampler terrainSampler;
++
++	private OptimumMapTextureArray pageTextureArray;
++
++	private OptimumMapPageRenderer pageRenderer;
++
++	private OptimumMapPagePriorityQueue loadQueue = new OptimumMapPagePriorityQueue();
++
++	private HashSet<long> coveredPages = new HashSet<long>();
++
+ 	private bool colorAccurate;
+ 
+ 	private float colorRandomizationWeight = 0.6f;
+ 
+ 	private float mtThread1secAccum;
+@@ -176,10 +188,18 @@ public class ChunkMapLayer : RGBMapLayer
+ 			mapdb.OpenOrCreate(mapDbFilePath, ref errorMessage, requireWriteAccess: true, corruptionProtection: true, doIntegrityCheck: false);
+ 			if (errorMessage != null)
+ 			{
+ 				throw new Exception($"Cannot open {mapDbFilePath}, possibly corrupted. Please fix manually or delete this file to continue playing");
+ 			}
++			if (OptimumConfig.MapPageCacheEnabled)
++			{
++				pageCache = new OptimumMapPageCache(capi, api.World.SavegameIdentifier);
++				if (OptimumConfig.MapPageCachePregen)
++				{
++					terrainSampler = new OptimumTerrainSampler(capi);
++				}
++			}
+ 			api.ChatCommands.GetOrCreate("map").BeginSubCommand("purgedb").WithDescription("purge the map db")
+ 				.HandleWith(delegate
+ 				{
+ 					mapdb.Purge();
+ 					return TextCommandResult.Success("Ok, db purged");
+@@ -237,10 +257,15 @@ public class ChunkMapLayer : RGBMapLayer
+ 			{
+ 				FastVec2i key = new FastVec2i(chunkCoord.X / 3, chunkCoord.Z / 3);
+ 				FastVec2i item = new FastVec2i(chunkCoord.X, chunkCoord.Z);
+ 				if (loadedMapData.ContainsKey(key) || curVisibleChunks.Contains(item))
+ 				{
++					pageCache?.InvalidateChunk(chunkCoord.X, chunkCoord.Z);
++					pageCache?.InvalidateChunk(chunkCoord.X, chunkCoord.Z - 1);
++					pageCache?.InvalidateChunk(chunkCoord.X - 1, chunkCoord.Z);
++					pageCache?.InvalidateChunk(chunkCoord.X, chunkCoord.Z + 1);
++					pageCache?.InvalidateChunk(chunkCoord.X + 1, chunkCoord.Z + 1);
+ 					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X, chunkCoord.Z));
+ 					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X, chunkCoord.Z - 1));
+ 					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X - 1, chunkCoord.Z));
+ 					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X, chunkCoord.Z + 1));
+ 					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X + 1, chunkCoord.Z + 1));
+@@ -284,19 +309,28 @@ public class ChunkMapLayer : RGBMapLayer
+ 	}
+ 
+ 	public override void OnMapOpenedClient()
+ 	{
+ 		colorAccurate = api.World.Config.GetAsBool("colorAccurateWorldmap") || capi.World.Player.Privileges.IndexOf("colorAccurateWorldmap") != -1;
++		if (OptimumConfig.MapPageCacheEnabled && pageTextureArray == null)
++		{
++			pageTextureArray = new OptimumMapTextureArray(OptimumConfig.MapPageCacheMaxLayers);
++			pageRenderer = new OptimumMapPageRenderer(capi, pageTextureArray);
++		}
+ 	}
+ 
+ 	public override void OnMapClosedClient()
+ 	{
+ 		lock (chunksToGenLock)
+ 		{
+ 			chunksToGen.Clear();
+ 		}
+ 		curVisibleChunks.Clear();
++		pageRenderer?.Dispose();
++		pageRenderer = null;
++		pageTextureArray?.Dispose();
++		pageTextureArray = null;
+ 	}
+ 
+ 	public override void Dispose()
+ 	{
+ 		if (loadedMapData != null)
+@@ -311,10 +345,11 @@ public class ChunkMapLayer : RGBMapLayer
+ 	}
+ 
+ 	public override void OnShutDown()
+ 	{
+ 		MultiChunkMapComponent.tmpTexture?.Dispose();
++		pageCache?.Dispose();
+ 		mapdb?.Dispose();
+ 	}
+ 
+ 	public override void OnOffThreadTick(float dt)
+ 	{
+@@ -346,14 +381,24 @@ public class ChunkMapLayer : RGBMapLayer
+ 			IMapChunk mapChunk = api.World.BlockAccessor.GetMapChunk(fastVec2i.X, fastVec2i.Y);
+ 			if (mapChunk == null)
+ 			{
+ 				try
+ 				{
++					if (pageCache != null)
++					{
++						int[] cachedPixels = pageCache.GetCachedChunkPixels(fastVec2i.X, fastVec2i.Y);
++						if (cachedPixels != null)
++						{
++							loadFromChunkPixels(fastVec2i, cachedPixels);
++							continue;
++						}
++					}
+ 					MapPieceDB mapPiece = mapdb.GetMapPiece(fastVec2i);
+ 					if (mapPiece?.Pixels != null)
+ 					{
+ 						loadFromChunkPixels(fastVec2i, mapPiece.Pixels);
++						pageCache?.WriteChunk(fastVec2i.X, fastVec2i.Y, mapPiece.Pixels);
+ 					}
+ 				}
+ 				catch (ProtoException)
+ 				{
+ 					api.Logger.Warning("Failed loading map db section {0}/{1}, a protobuf exception was thrown. Will ignore.", fastVec2i.X, fastVec2i.Y);
+@@ -377,10 +422,11 @@ public class ChunkMapLayer : RGBMapLayer
+ 				toSaveList[fastVec2i.Copy()] = new MapPieceDB
+ 				{
+ 					Pixels = array
+ 				};
+ 				loadFromChunkPixels(fastVec2i, array);
++				pageCache?.WriteChunk(fastVec2i.X, fastVec2i.Y, array);
+ 			}
+ 		}
+ 		if (toSaveList.Count > 100 || diskSaveAccum > 4f)
+ 		{
+ 			diskSaveAccum = 0f;
+@@ -389,10 +435,51 @@ public class ChunkMapLayer : RGBMapLayer
+ 		}
+ 	}
+ 
+ 	public override void OnTick(float dt)
+ 	{
++		if (pageCache != null && pageTextureArray != null)
++		{
++			while (pageCache.TryGetReadResult(out PageReadResult result))
++			{
++				long pageKey = OptimumMapPageCache.PackPageCoord(result.PageX, result.PageZ);
++				pageTextureArray.UploadPage(pageKey, result.Pixels);
++				for (int bit = 0; bit < 64; bit++)
++				{
++					if ((result.Bitmask & (1UL << bit)) == 0UL)
++					{
++						continue;
++					}
++					int chunkX = result.PageX * OptimumMapPageCache.PageLen + bit % OptimumMapPageCache.PageLen;
++					int chunkZ = result.PageZ * OptimumMapPageCache.PageLen + bit / OptimumMapPageCache.PageLen;
++					int[] cachedPixels = pageCache.GetCachedChunkPixels(chunkX, chunkZ);
++					if (cachedPixels != null)
++					{
++						loadFromChunkPixels(new FastVec2i(chunkX, chunkZ), cachedPixels);
++					}
++				}
++			}
++		}
++		if (pageCache != null && loadQueue.Count > 0)
++		{
++			int pageLoads = Math.Min(loadQueue.Count, 4);
++			for (int i = 0; i < pageLoads; i++)
++			{
++				long pageKey = loadQueue.Dequeue();
++				if (pageKey < 0)
++				{
++					break;
++				}
++				int pageX = (int)(uint)(pageKey >> 32);
++				int pageZ = (int)(uint)pageKey;
++				pageCache.TryReadPage(pageX, pageZ);
++				if (terrainSampler != null)
++				{
++					pageCache.FillPregenChunks(pageX, pageZ, terrainSampler);
++				}
++			}
++		}
+ 		if (!readyMapPieces.IsEmpty)
+ 		{
+ 			int num = Math.Min(readyMapPieces.Count, 200);
+ 			List<MultiChunkMapComponent> list = new List<MultiChunkMapComponent>();
+ 			while (num-- > 0)
+@@ -401,10 +488,11 @@ public class ChunkMapLayer : RGBMapLayer
+ 				{
+ 					FastVec2i key = new FastVec2i(result.Cord.X / 3, result.Cord.Y / 3);
+ 					FastVec2i baseCord = new FastVec2i(key.X * 3, key.Y * 3);
+ 					MultiChunkMapComponent orAdd = loadedMapData.GetOrAdd(key, (FastVec2i mcord) => new MultiChunkMapComponent(api as ICoreClientAPI, baseCord));
+ 					orAdd.setChunk(result.Cord.X - baseCord.X, result.Cord.Y - baseCord.Y, result.Pixels);
++					UploadChunkToPageArray(result.Cord.X, result.Cord.Y);
+ 					list.Add(orAdd);
+ 				}
+ 			}
+ 			foreach (MultiChunkMapComponent item in list)
+ 			{
+@@ -440,22 +528,84 @@ public class ChunkMapLayer : RGBMapLayer
+ 			loadedMapData.TryRemove(item2, out var _);
+ 		}
+ 		mtThread1secAccum = 0f;
+ 	}
+ 
++	private void UploadChunkToPageArray(int chunkX, int chunkZ)
++	{
++		if (pageTextureArray == null || pageCache == null)
++		{
++			return;
++		}
++		(int pageX, int pageZ) = OptimumMapPageCache.ChunkToPage(chunkX, chunkZ);
++		long pageKey = OptimumMapPageCache.PackPageCoord(pageX, pageZ);
++		if (pageCache.TryGetPagePixels(pageKey, out int[] pagePixels))
++		{
++			pageTextureArray.UploadPage(pageKey, pagePixels);
++		}
++	}
++
+ 	public override void Render(GuiElementMap mapElem, float dt)
+ 	{
+ 		if (!base.Active)
+ 		{
+ 			return;
+ 		}
++		if (pageRenderer != null && pageRenderer.Ready && pageTextureArray != null && pageTextureArray.UsedLayers > 0)
++		{
++			RenderWithPageArray(mapElem, dt);
++			return;
++		}
+ 		foreach (KeyValuePair<FastVec2i, MultiChunkMapComponent> loadedMapDatum in loadedMapData)
+ 		{
+ 			loadedMapDatum.Value.Render(mapElem, dt);
+ 		}
+ 	}
+ 
++	private void RenderWithPageArray(GuiElementMap mapElem, float dt)
++	{
++		pageRenderer.BeginFrame();
++		float pageScreenSize = OptimumMapPageCache.PageLen * 32 * mapElem.ZoomLevel;
++		Vec2f viewPos = new Vec2f();
++		Vec3d worldPos = new Vec3d();
++		coveredPages.Clear();
++		foreach (FastVec2i chunkCoord in curVisibleChunks)
++		{
++			(int pageX, int pageZ) = OptimumMapPageCache.ChunkToPage(chunkCoord.X, chunkCoord.Y);
++			long pageKey = OptimumMapPageCache.PackPageCoord(pageX, pageZ);
++			int layer = pageTextureArray.GetLayer(pageKey);
++			if (layer < 0 || !coveredPages.Add(pageKey))
++			{
++				continue;
++			}
++			worldPos.X = pageX * OptimumMapPageCache.PageLen * 32;
++			worldPos.Z = pageZ * OptimumMapPageCache.PageLen * 32;
++			mapElem.TranslateWorldPosToViewPos(worldPos, ref viewPos);
++			float screenX = (float)mapElem.Bounds.renderX + viewPos.X;
++			float screenY = (float)mapElem.Bounds.renderY + viewPos.Y;
++			pageRenderer.AddPage(screenX, screenY, pageScreenSize, pageScreenSize, layer);
++		}
++		foreach (KeyValuePair<FastVec2i, MultiChunkMapComponent> item in loadedMapData)
++		{
++			FastVec2i baseCoord = item.Value.chunkCoord;
++			bool allCovered = true;
++			for (int dx = 0; dx < 3 && allCovered; dx++)
++			{
++				for (int dz = 0; dz < 3 && allCovered; dz++)
++				{
++					(int pageX, int pageZ) = OptimumMapPageCache.ChunkToPage(baseCoord.X + dx, baseCoord.Y + dz);
++					allCovered = coveredPages.Contains(OptimumMapPageCache.PackPageCoord(pageX, pageZ));
++				}
++			}
++			if (!allCovered)
++			{
++				item.Value.Render(mapElem, dt);
++			}
++		}
++		pageRenderer.EndFrame(capi.Render.FrameWidth, capi.Render.FrameHeight);
++	}
++
+ 	public override void OnMouseMoveClient(MouseEvent args, GuiElementMap mapElem, StringBuilder hoverText)
+ 	{
+ 		if (!base.Active)
+ 		{
+ 			return;
+@@ -495,19 +645,56 @@ public class ChunkMapLayer : RGBMapLayer
+ 		}
+ 		foreach (FastVec2i item2 in nowHidden)
+ 		{
+ 			curVisibleChunks.Remove(item2);
+ 		}
++		int centerChunkX = 0;
++		int centerChunkZ = 0;
++		if (curVisibleChunks.Count > 0)
++		{
++			long sumX = 0L;
++			long sumZ = 0L;
++			foreach (FastVec2i item in curVisibleChunks)
++			{
++				sumX += item.X;
++				sumZ += item.Y;
++			}
++			centerChunkX = (int)(sumX / curVisibleChunks.Count);
++			centerChunkZ = (int)(sumZ / curVisibleChunks.Count);
++		}
++		(int centerPageX, int centerPageZ) = OptimumMapPageCache.ChunkToPage(centerChunkX, centerChunkZ);
++		if (pageCache != null && OptimumConfig.MapPageCacheEnabled)
++		{
++			HashSet<long> queuedPages = new HashSet<long>();
++			foreach (FastVec2i item in nowVisible)
++			{
++				(int pageX, int pageZ) = OptimumMapPageCache.ChunkToPage(item.X, item.Y);
++				long pageKey = OptimumMapPageCache.PackPageCoord(pageX, pageZ);
++				if (queuedPages.Add(pageKey) && pageTextureArray != null && !pageTextureArray.HasPage(pageKey))
++				{
++					loadQueue.Enqueue(pageKey, pageX, pageZ, centerPageX, centerPageZ);
++				}
++			}
++		}
+ 		lock (chunksToGenLock)
+ 		{
+ 			foreach (FastVec2i item3 in nowVisible)
+ 			{
+ 				FastVec2i key = new FastVec2i(item3.X / 3, item3.Y / 3);
+ 				int num = item3.X % 3;
+ 				int num2 = item3.Y % 3;
+ 				if (num >= 0 && num2 >= 0 && (!loadedMapData.TryGetValue(key, out var value) || !value.IsChunkSet(num, num2)))
+ 				{
++					if (pageCache != null && pageCache.IsChunkCached(item3.X, item3.Y))
++					{
++						int[] cachedPixels = pageCache.GetCachedChunkPixels(item3.X, item3.Y);
++						if (cachedPixels != null)
++						{
++							loadFromChunkPixels(item3, cachedPixels);
++							continue;
++						}
++					}
+ 					chunksToGen.Enqueue(item3.Copy());
+ 				}
+ 			}
+ 		}
+ 		foreach (FastVec2i item4 in nowHidden)

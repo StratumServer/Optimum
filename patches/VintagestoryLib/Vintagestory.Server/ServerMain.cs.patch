@@ -1,0 +1,132 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerMain.cs b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
+index 1103a72..6b2d635 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerMain.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
+@@ -413,16 +413,64 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	public string WorldName => SaveGameData.WorldName;
+ 
+ 	public Vintagestory.API.Datastructures.OrderedDictionary<AssetLocation, ITreeGenerator> TreeGenerators => TreeGeneratorsByTreeCode;
+ 
+-	public IPlayer[] AllOnlinePlayers => (from c in Clients.Values
+-		select c.Player into c
+-		where c != null
+-		select c).ToArray();
++	// Optimum: per-tick cache for AllOnlinePlayers (avoids LINQ Select+Where+ToArray per access).
++	// TickPosition increments each server tick; first access after a tick rebuilds the array.
++	// No field initializer: Cecil field injection never runs it (the vanilla
++	// .ctor is not a transplant target), so the array fields default to null,
++	// not Array.Empty<IPlayer>(), and the tick fields default to 0, not -1.
++	// The null check below (not just the tick comparison) is load-bearing: it
++	// covers the case where the very first access happens to land on
++	// TickPosition == 0, where a tick-only comparison would wrongly treat the
++	// still-null array as already cached and return null instead of rebuilding.
++	private IPlayer[] optimumCachedOnlinePlayers;
++	private int optimumCachedOnlinePlayersTick;
++	private IPlayer[] optimumCachedAllPlayers;
++	private int optimumCachedAllPlayersTick;
++
++	public IPlayer[] AllOnlinePlayers
++	{
++		get
++		{
++			int tick = TickPosition;
++			if (optimumCachedOnlinePlayers == null || tick != optimumCachedOnlinePlayersTick)
++			{
++				// Rebuild: plain foreach, no LINQ, no closure allocation
++				var clients = Clients.Values;
++				int count = 0;
++				foreach (var c in clients)
++				{
++					if (c.Player != null) count++;
++				}
++				var result = new IPlayer[count];
++				int idx = 0;
++				foreach (var c in clients)
++				{
++					if (c.Player != null) result[idx++] = c.Player;
++				}
++				optimumCachedOnlinePlayers = result;
++				optimumCachedOnlinePlayersTick = tick;
++			}
++			return optimumCachedOnlinePlayers;
++		}
++	}
+ 
+-	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
++	public IPlayer[] AllPlayers
++	{
++		get
++		{
++			int tick = TickPosition;
++			if (optimumCachedAllPlayers == null || tick != optimumCachedAllPlayersTick)
++			{
++				optimumCachedAllPlayers = PlayersByUid.Values.ToArray();
++				optimumCachedAllPlayersTick = tick;
++			}
++			return optimumCachedAllPlayers;
++		}
++	}
+ 
+ 	public bool EntityDebugMode => Config.EntityDebugMode;
+ 
+ 	IClassRegistryAPI IWorldAccessor.ClassRegistry => api.ClassRegistry;
+ 
+@@ -4244,11 +4292,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	internal void BroadcastArbitraryPacket(byte[] data, params IServerPlayer[] skipPlayers)
+ 	{
+ 		foreach (ConnectedClient client in Clients.Values)
+ 		{
+-			if (client.State != EnumClientState.Offline && client.State != EnumClientState.Queued && (skipPlayers == null || !skipPlayers.Any((IServerPlayer plr) => plr?.ClientId == client.Id)))
++			if (client.State != EnumClientState.Offline && client.State != EnumClientState.Queued && !OptimumShouldSkipClient(skipPlayers, client.Id))
+ 			{
+ 				SendPacket(client.Player, data);
+ 			}
+ 		}
+ 	}
+@@ -4258,11 +4306,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		Serialize_(packet);
+ 		byte[] array = null;
+ 		bool compressed = false;
+ 		foreach (ConnectedClient client in Clients.Values)
+ 		{
+-			if (client.State != EnumClientState.Offline && client.State != EnumClientState.Queued && (skipPlayers == null || !skipPlayers.Any((IServerPlayer plr) => plr?.ClientId == client.Id)))
++			if (client.State != EnumClientState.Offline && client.State != EnumClientState.Queued && !OptimumShouldSkipClient(skipPlayers, client.Id))
+ 			{
+ 				if (array == null)
+ 				{
+ 					array = client.Socket.PreparePacketForSending(reusableBuffer, Config.CompressPackets, out compressed);
+ 				}
+@@ -4277,17 +4325,30 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	internal void BroadcastArbitraryUdpPacket(Packet_UdpPacket data, params IServerPlayer[] skipPlayers)
+ 	{
+ 		foreach (ConnectedClient client in Clients.Values)
+ 		{
+-			if (client.State != EnumClientState.Offline && client.State != EnumClientState.Queued && (skipPlayers == null || skipPlayers.All((IServerPlayer plr) => plr?.ClientId != client.Id)))
++			if (client.State != EnumClientState.Offline && client.State != EnumClientState.Queued && !OptimumShouldSkipClient(skipPlayers, client.Id))
+ 			{
+ 				SendPacket(client, data);
+ 			}
+ 		}
+ 	}
+ 
++	private static bool OptimumShouldSkipClient(IServerPlayer[] skipPlayers, int clientId)
++	{
++		if (skipPlayers == null) return false;
++		for (int i = 0; i < skipPlayers.Length; i++)
++		{
++			if (skipPlayers[i] != null && skipPlayers[i].ClientId == clientId)
++			{
++				return true;
++			}
++		}
++		return false;
++	}
++
+ 	private void recordInBenchmark(int packetId, int dataLength)
+ 	{
+ 		if (packetBenchmark.ContainsKey(packetId))
+ 		{
+ 			packetBenchmark[packetId]++;

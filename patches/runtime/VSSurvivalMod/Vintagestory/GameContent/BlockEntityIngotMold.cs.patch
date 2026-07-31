@@ -1,0 +1,73 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityIngotMold.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityIngotMold.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityIngotMold.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityIngotMold.cs
+@@ -134,11 +134,12 @@ public class BlockEntityIngotMold : BlockEntity, ILiquidMetalSink, ITemperatureS
+ 			}
+ 			return MoldRight;
+ 		}
+ 		set
+ 		{
+-			IsRightSideSelected ? ref MoldRight : ref MoldLeft = value;
++			if (IsRightSideSelected) MoldRight = value;
++			else MoldLeft = value;
+ 		}
+ 	}
+ 
+ 	public ItemStack? SelectedContents
+ 	{
+@@ -150,11 +151,12 @@ public class BlockEntityIngotMold : BlockEntity, ILiquidMetalSink, ITemperatureS
+ 			}
+ 			return ContentsRight;
+ 		}
+ 		set
+ 		{
+-			IsRightSideSelected ? ref ContentsRight : ref ContentsLeft = value;
++			if (IsRightSideSelected) ContentsRight = value;
++			else ContentsLeft = value;
+ 		}
+ 	}
+ 
+ 	public int SelectedFillLevel
+ 	{
+@@ -166,11 +168,12 @@ public class BlockEntityIngotMold : BlockEntity, ILiquidMetalSink, ITemperatureS
+ 			}
+ 			return FillLevelRight;
+ 		}
+ 		set
+ 		{
+-			IsRightSideSelected ? ref FillLevelRight : ref FillLevelLeft = value;
++			if (IsRightSideSelected) FillLevelRight = value;
++			else FillLevelLeft = value;
+ 		}
+ 	}
+ 
+ 	public bool SelectedShattered
+ 	{
+@@ -182,11 +185,12 @@ public class BlockEntityIngotMold : BlockEntity, ILiquidMetalSink, ITemperatureS
+ 			}
+ 			return ShatteredRight;
+ 		}
+ 		set
+ 		{
+-			IsRightSideSelected ? ref ShatteredRight : ref ShatteredLeft = value;
++			if (IsRightSideSelected) ShatteredRight = value;
++			else ShatteredLeft = value;
+ 		}
+ 	}
+ 
+ 	public float SelectedTemperature
+ 	{
+@@ -956,11 +960,12 @@ public class BlockEntityIngotMold : BlockEntity, ILiquidMetalSink, ITemperatureS
+ 	public void ShatterMoldSided(bool shatterRight)
+ 	{
+ 		Api.World.PlaySoundAt(new AssetLocation("sounds/block/ceramicbreak"), Pos, -0.4);
+ 		(shatterRight ? MoldRight : MoldLeft)?.Block.SpawnBlockBrokenParticles(Pos);
+ 		(shatterRight ? MoldRight : MoldLeft)?.Block.SpawnBlockBrokenParticles(Pos);
+-		shatterRight ? ref ShatteredRight : ref ShatteredLeft = true;
++		if (shatterRight) ShatteredRight = true;
++		else ShatteredLeft = true;
+ 		MarkDirty(redrawOnClient: true);
+ 	}
+ 
+ 	public void CoolNow(float amountRel, OnStackToCool onStackToCoolCallback)
+ 	{

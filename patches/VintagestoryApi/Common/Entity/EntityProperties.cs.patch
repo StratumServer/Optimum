@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Common/Entity/EntityProperties.cs b/VintagestoryApi/Common/Entity/EntityProperties.cs
+index 5b34292..41b7aae 100644
+--- a/VintagestoryApi/Common/Entity/EntityProperties.cs
++++ b/VintagestoryApi/Common/Entity/EntityProperties.cs
+@@ -27,11 +27,11 @@ namespace Vintagestory.API.Common.Entities
+         public AssetLocation Code;
+ 
+         /// <summary>
+         /// Variant values as resolved from blocktype/itemtype or entitytype
+         /// </summary>
+-        public Datastructures.OrderedDictionary<string, string> Variant = new ();
++        public Vintagestory.API.Datastructures.OrderedDictionary<string, string> Variant = new ();
+ 
+         /// <summary>
+         /// The classification of the entity.
+         /// </summary>
+         public string Class;

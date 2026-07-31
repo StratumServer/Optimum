@@ -1,0 +1,99 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs b/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs
+--- a/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs
++++ b/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs
+@@ -39,6 +39,14 @@ public class WeatherSimulationSound
+ 
+ 	private float curRainVolumeLeafless;
+ 
++	private float lastSetWindVolumeLeafy;
++
++	private float lastSetWindVolumeLeafless;
++
++	private float lastSetRainVolumeLeafy;
++
++	private float lastSetRainVolumeLeafless;
++
+ 	private float curRainPitch = 1f;
+ 
+ 	private float curHailVolume;
+@@ -154,7 +162,25 @@ public class WeatherSimulationSound
+ 	{
+ 		if (!soundsReady)
+ 		{
+-			if (!lowTrembleSound.IsReady || !hailSound.IsReady || !rainSoundsLeafless.All((ILoadedSound s) => s.IsReady) || !rainSoundsLeafy.All((ILoadedSound s) => s.IsReady) || !windSoundLeafy.IsReady || !windSoundLeafless.IsReady)
++			bool allRainLeaflessReady = true;
++			for (int rainReadyIdx = 0; rainReadyIdx < rainSoundsLeafless.Length; rainReadyIdx++)
++			{
++				if (!rainSoundsLeafless[rainReadyIdx].IsReady)
++				{
++					allRainLeaflessReady = false;
++					break;
++				}
++			}
++			bool allRainLeafyReady = true;
++			for (int rainReadyIdx2 = 0; rainReadyIdx2 < rainSoundsLeafy.Length; rainReadyIdx2++)
++			{
++				if (!rainSoundsLeafy[rainReadyIdx2].IsReady)
++				{
++					allRainLeafyReady = false;
++					break;
++				}
++			}
++			if (!lowTrembleSound.IsReady || !hailSound.IsReady || !allRainLeaflessReady || !allRainLeafyReady || !windSoundLeafy.IsReady || !windSoundLeafless.IsReady)
+ 			{
+ 				return;
+ 			}
+@@ -243,14 +269,30 @@ public class WeatherSimulationSound
+ 		curTremblePitch += (num5 - curTremblePitch) * dt;
+ 		if (rainSoundsOn)
+ 		{
++			bool updateRainLeafless = Math.Abs(curRainVolumeLeafless - lastSetRainVolumeLeafless) > 0.01f;
++			if (updateRainLeafless)
++			{
++				lastSetRainVolumeLeafless = curRainVolumeLeafless;
++			}
+ 			for (int num11 = 0; num11 < rainSoundsLeafless.Length; num11++)
+ 			{
+-				rainSoundsLeafless[num11]?.SetVolume(curRainVolumeLeafless);
++				if (updateRainLeafless)
++				{
++					rainSoundsLeafless[num11]?.SetVolume(curRainVolumeLeafless);
++				}
+ 				rainSoundsLeafless[num11]?.SetPitch(curRainPitch);
+ 			}
++			bool updateRainLeafy = Math.Abs(curRainVolumeLeafy - lastSetRainVolumeLeafy) > 0.01f;
++			if (updateRainLeafy)
++			{
++				lastSetRainVolumeLeafy = curRainVolumeLeafy;
++			}
+ 			for (int num12 = 0; num12 < rainSoundsLeafy.Length; num12++)
+ 			{
+-				rainSoundsLeafy[num12]?.SetVolume(curRainVolumeLeafy);
++				if (updateRainLeafy)
++				{
++					rainSoundsLeafy[num12]?.SetVolume(curRainVolumeLeafy);
++				}
+ 				rainSoundsLeafy[num12]?.SetPitch(curRainPitch);
+ 			}
+ 		}
+@@ -291,8 +333,18 @@ public class WeatherSimulationSound
+ 			float num17 = (1f - num8) * 1.2f * num15;
+ 			curWindVolumeLeafy += (num16 - curWindVolumeLeafy) * dt;
+ 			curWindVolumeLeafless += (num17 - curWindVolumeLeafless) * dt;
+-			windSoundLeafy?.SetVolume(Math.Max(0f, curWindVolumeLeafy));
+-			windSoundLeafless?.SetVolume(Math.Max(0f, curWindVolumeLeafless));
++			float leafyVol = Math.Max(0f, curWindVolumeLeafy);
++			if (Math.Abs(leafyVol - lastSetWindVolumeLeafy) > 0.01f)
++			{
++				windSoundLeafy?.SetVolume(leafyVol);
++				lastSetWindVolumeLeafy = leafyVol;
++			}
++			float leaflessVol = Math.Max(0f, curWindVolumeLeafless);
++			if (Math.Abs(leaflessVol - lastSetWindVolumeLeafless) > 0.01f)
++			{
++				windSoundLeafless?.SetVolume(leaflessVol);
++				lastSetWindVolumeLeafless = leaflessVol;
++			}
+ 		}
+ 		else if (windSoundsOn)
+ 		{

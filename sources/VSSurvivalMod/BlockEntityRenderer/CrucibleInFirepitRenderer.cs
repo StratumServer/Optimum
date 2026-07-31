@@ -38,6 +38,11 @@ namespace Vintagestory.GameContent
             rpi.GlDisableCullFace();
             rpi.GlToggleBlend(true);
 
+            int itemp = (int)temp;
+            Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs(pos.X, pos.Y, pos.Z);
+            float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(itemp);
+            int extraGlow = GameMath.Clamp((itemp - 550) / 2, 0, 255);
+
             IStandardShaderProgram prog = rpi.PreparedStandardShader(pos.X, pos.Y, pos.Z);
 
             prog.DontWarpVertices = 0;
@@ -53,14 +58,9 @@ namespace Vintagestory.GameContent
             prog.AlphaTest = 0.05f;
             prog.OverlayOpacity = 0;
 
-            Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs(pos.X, pos.Y, pos.Z);
-            float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f((int)temp);
-            lightrgbs[0] += glowColor[0];
-            lightrgbs[1] += glowColor[1];
-            lightrgbs[2] += glowColor[2];
-
             prog.RgbaLightIn = lightrgbs;
-            prog.ExtraGlow = (int)GameMath.Clamp((temp - 500) / 4, 0, 255);
+            prog.RgbaGlowIn = new Vec4f(glowColor[0], glowColor[1], glowColor[2], extraGlow / 255f);
+            prog.ExtraGlow = extraGlow;
 
             prog.ModelMatrix = ModelMat
                 .Identity()

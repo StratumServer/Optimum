@@ -70,8 +70,13 @@ public class FsrPipelineCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
 
-        Assert.Contains("MathF.Log2(Math.Clamp(ClientSettings.OptimumRenderScale, 0.5f, 1.0f))", chunkRenderer);
+        // Bias must be skipped entirely at native res (RenderScale >= 1.0) so
+        // rendering matches vanilla exactly - vanilla never sets these
+        // TexParameter/SamplerParameter calls at all.
+        Assert.Contains("if (ClientSettings.OptimumRenderScale >= 1.0f)", chunkRenderer);
+        Assert.Contains("MathF.Log2(ClientSettings.OptimumRenderScale)", chunkRenderer);
         Assert.Contains("(TextureParameterName)34049, textureLodBias", chunkRenderer);
+        Assert.Contains("if (ClientSettings.OptimumRenderScale < 1.0f)", shaderRegistry);
         Assert.Contains("(SamplerParameterName)34049, terrainLodBias", shaderRegistry);
         Assert.Contains("terrainTexLinear", shaderRegistry);
     }

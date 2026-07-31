@@ -1,0 +1,15 @@
+diff --git a/Cairo/Cairo.csproj b/Cairo/Cairo.csproj
+index c709e6e..35b39cd 100644
+--- a/Cairo/Cairo.csproj
++++ b/Cairo/Cairo.csproj
+@@ -8,9 +8,9 @@
+         <Configurations>Debug;Release;PerfTest</Configurations>
+         <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+     </PropertyGroup>
+ 
+     <ItemGroup>
+-        <PackageReference Include="SkiaSharp" Version="3.116.1" />
++        <PackageReference Include="SkiaSharp" Version="3.119.1" />
+     </ItemGroup>
+ 
+ </Project>

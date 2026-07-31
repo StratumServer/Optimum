@@ -1,0 +1,47 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
+--- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
+@@ -9,10 +9,14 @@ using Vintagestory.API.Server;
+ namespace Vintagestory.GameContent;
+ 
+ [DocumentAsJson]
+ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entity)
+ {
++	public static int OptimumCollectStrideInterval = 3;
++
++	private float optimumAccumulatedDelta;
++
+ 	private int waitTicks;
+ 
+ 	private int lastCollectedEntityIndex;
+ 
+ 	private Vec3d tmp = new Vec3d();
+@@ -45,15 +49,28 @@ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entit
+ 		{
+ 			if (waitTicks-- > 0 || (player != null && player.WorldData.CurrentGameMode == EnumGameMode.Spectator))
+ 			{
+ 				return;
+ 			}
++			int stride = OptimumCollectStrideInterval;
++			if (stride > 1)
++			{
++				long tickIndex = base.entity.World.ElapsedMilliseconds / 33L;
++				if ((tickIndex + base.entity.EntityId) % stride != 0L)
++				{
++					optimumAccumulatedDelta += deltaTime;
++					return;
++				}
++				deltaTime += optimumAccumulatedDelta;
++				optimumAccumulatedDelta = 0f;
++			}
+ 			tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
+ 			Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
+ 			if (entitiesAround.Length == 0)
+ 			{
+ 				unconsumedDeltaTime = 0f;
++				waitTicks = 2;
+ 				return;
+ 			}
+ 			deltaTime = Math.Min(1f, deltaTime + unconsumedDeltaTime);
+ 			while (deltaTime - 1f / itemsPerSecond > 0f)
+ 			{

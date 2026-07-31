@@ -1,0 +1,20 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
+--- a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
+@@ -62,10 +62,16 @@ public class EntityItemRenderer : EntityRenderer
+ 	{
+ 		if ((isShadowPass && !entity.IsRendered) || entityitem.Itemstack == null)
+ 		{
+ 			return;
+ 		}
++		double dx = entity.Pos.X - capi.World.Player.Entity.Pos.X;
++		double dz = entity.Pos.Z - capi.World.Player.Entity.Pos.Z;
++		if (dx * dx + dz * dz > 4096.0)
++		{
++			return;
++		}
+ 		if (RunWittySkipRenderAlgorithm)
+ 		{
+ 			int num = (int)entity.Pos.X;
+ 			int num2 = (int)entity.Pos.InternalY;
+ 			int num3 = (int)entity.Pos.Z;

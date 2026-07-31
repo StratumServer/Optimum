@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Optimum</AssemblyName>
+    <RootNamespace>Optimum.Launcher</RootNamespace>
+    <Nullable>enable</Nullable>
+    <AssemblyTitle>Optimum</AssemblyTitle>
+    <Description>Runtime patcher that applies Optimum optimizations on launch with caching.</Description>
+    <ApplicationIcon>..\docs\optimum.ico</ApplicationIcon>
+    <Version>$(OptimumVersion)</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="SkiaSharp" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />
+  </ItemGroup>
+</Project>

@@ -1,20 +1,12 @@
 # Working tree (reconstructed by bootstrap)
 .bootstrap-complete
 .vanilla/
-.vanilla/archives/
-.vanilla/linux-x64/
-.vanilla/win-x64/
-.vanilla/
-.vanilla/osx-arm64/
 .vanilla-*/
 baseline/
 build/
-build/snapshot/
-build/*/bin/
-build/*/obj/
 .baseline/
-# Anchored to the repo root so the reconstructed fork trees are ignored but
-# their patches under patches/<fork>/ stay tracked.
+
+# Anchored to repo root: reconstructed fork trees (patches stay tracked)
 /VintagestoryApi/
 /Cairo/
 /VSCreativeMod/
@@ -35,6 +27,7 @@ Optimum-v*-mac-*/
 # Build output
 bin/
 obj/
+dist/
 
 # IDE
 .vs/
@@ -46,27 +39,23 @@ obj/
 .DS_Store
 Thumbs.db
 
-# Profiling
+# Profiling and benchmark artifacts
 *.nettrace
 *.etl
 BenchmarkDotNet.Artifacts/
-dist/
 .baseline_copy/
 research/*.nettrace*
 research/*.etlx
 research/*.speedscope*
-ref/source/
 research/benchmark-artifacts/
-
-# LLM Wiki
-.wiki/
 
 # Build staging artifacts
 /lang/
 /shaders/
 
-# MCP tool state
+# Misc
+.build/
+.wiki/
 .playwright-mcp/
-
 graphify-out/
 __pycache__/

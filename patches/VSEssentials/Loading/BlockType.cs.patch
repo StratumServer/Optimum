@@ -1,0 +1,43 @@
+diff --git a/VSEssentials/Loading/BlockType.cs b/VSEssentials/Loading/BlockType.cs
+index 7494946..1417bf5 100644
+--- a/VSEssentials/Loading/BlockType.cs
++++ b/VSEssentials/Loading/BlockType.cs
+@@ -68,11 +68,11 @@ namespace Vintagestory.ServerMods.NoObf
+             TpHandTransform = ModelTransform.BlockDefaultTp();
+             GroundTransform = ModelTransform.BlockDefaultGround();
+             MaxStackSize = 64;
+         }
+ 
+-        internal override RegistryObjectType CreateAndPopulate(ICoreServerAPI api, AssetLocation fullcode, JObject jobject, JsonSerializer deserializer, API.Datastructures.OrderedDictionary<string, string> variant)
++        internal override RegistryObjectType CreateAndPopulate(ICoreServerAPI api, AssetLocation fullcode, JObject jobject, JsonSerializer deserializer, Vintagestory.API.Datastructures.OrderedDictionary<string, string> variant)
+         {
+             return CreateResolvedType<BlockType>(api, fullcode, jobject, deserializer, variant);
+         }
+ 
+         /// <summary>
+@@ -723,11 +723,11 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+         [ThreadStatic]
+         private static List<BlockBehavior> reusableBehaviorList;
+         [ThreadStatic]
+         private static List<CollectibleBehavior> reusableCollectibleBehaviorList;
+-        public void InitBlock(IClassRegistryAPI instancer, ILogger logger, Block block, API.Datastructures.OrderedDictionary<string, string> searchReplace)
++        public void InitBlock(IClassRegistryAPI instancer, ILogger logger, Block block, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace)
+         {
+             CollectibleBehaviorType[] behaviorTypes = Behaviors;
+ 
+             if (behaviorTypes != null)
+             {
+@@ -857,11 +857,11 @@ namespace Vintagestory.ServerMods.NoObf
+             }
+         }
+ 
+         [ThreadStatic]
+         private static List<string> reusableStringList;
+-        public static string[] GetCreativeTabs(AssetLocation code, Dictionary<string, string[]> CreativeInventory, API.Datastructures.OrderedDictionary<string, string> searchReplace)
++        public static string[] GetCreativeTabs(AssetLocation code, Dictionary<string, string[]> CreativeInventory, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace)
+         {
+             List<string> tabs = reusableStringList ??= new();
+             tabs.Clear();
+ 
+             foreach (var val in CreativeInventory)

@@ -71,26 +71,24 @@ public class ThrottleAndCacheBatchCoverageTests
     {
         // docs/todo.md's "guard the 256-lookup rebuild on player move" item was
         // already shipped before Batch 6.2 started; assert it stays that way.
-        string source = File.ReadAllText(FindRepositoryFile("patches/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs.patch"));
-        Assert.Contains("_lastHeightmapCenterX", source);
-        Assert.Contains("_lastHeightmapCenterZ", source);
+        string source = File.ReadAllText(FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs.patch"));
+        Assert.Contains("optimumLastHeightmapCenterX", source);
+        Assert.Contains("optimumLastHeightmapCenterZ", source);
     }
 
     [Fact]
     public void WindSpeedAndFogLightThrottlesAlreadyShipped()
     {
-        // Both docs/todo.md items ("wind speed calls" and "weather fog light")
-        // were already shipped before Batch 6.2 started, including the second
-        // GetWindSpeedAt call site the plan worried the shipped cache might
-        // miss. Assert it stays that way.
-        string source = File.ReadAllText(FindRepositoryFile("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch"));
+        // The 1.22.5 implementation has one wind lookup. Verify that it remains
+        // inside the four-frame throttle rather than running every frame.
+        string source = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch");
         Assert.Contains("doWindLookup", source);
 
-        int firstWindCall = source.IndexOf("GetWindSpeedAt(plrPosd);", StringComparison.Ordinal);
-        int secondWindCall = source.IndexOf("GetWindSpeedAt(plrPosd);", firstWindCall + 1, StringComparison.Ordinal);
-        Assert.True(firstWindCall > 0 && secondWindCall > 0, "Expected two GetWindSpeedAt call sites.");
+        const string windLookup = "WeatherDataAtPlayer.GetWindSpeed(plrPosd.Y);";
+        Assert.Equal(1, source.Split(windLookup, StringSplitOptions.None).Length - 1);
 
-        Assert.Contains("_windFrameCounter % 4 == 0", source);
+        Assert.Contains("private const int WindUpdateInterval = 4;", source);
+        Assert.Contains("_windFrameCounter % WindUpdateInterval == 0", source);
     }
 
     private static string FindRepositoryFile(string relativePath)

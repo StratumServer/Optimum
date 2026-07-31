@@ -8,4 +8,7 @@
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Optimum.Tests" />
+  </ItemGroup>
 </Project>

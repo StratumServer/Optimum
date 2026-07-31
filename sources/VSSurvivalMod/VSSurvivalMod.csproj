@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>VSSurvivalMod</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>$(FrameworkVersion)</TargetFramework>
+    <OutputPath>..\bin\$(Configuration)</OutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <Configurations>Debug;Release;PerfTest</Configurations>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- Exact donor only: retain vanilla System.Drawing diagnostics/export
+         paths and exception IL; the official runtime assembly is Cecil-patched
+         and remains the distributed binary. -->
+    <NoWarn>$(NoWarn);CA1416;CA2200</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='PerfTest|AnyCPU'">
+    <DefineConstants>TRACE;PERFTEST</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="protobuf-net" Version="2.4.9" />
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <Reference Include="Tavis.JsonPatch">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\Tavis.JsonPatch.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cairo\Cairo.csproj" />
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+    <ProjectReference Include="..\VintagestoryApi\VintagestoryAPI.csproj" />
+    <ProjectReference Include="..\VSCreativeMod\VSCreativeMod.csproj" />
+    <ProjectReference Include="..\VSEssentials\VSEssentialsMod.csproj" />
+  </ItemGroup>
+</Project>

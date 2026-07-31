@@ -1,0 +1,30 @@
+diff --git a/VSEssentials/Loading/ItemType.cs b/VSEssentials/Loading/ItemType.cs
+index 2cd8bdd..459eeaa 100644
+--- a/VSEssentials/Loading/ItemType.cs
++++ b/VSEssentials/Loading/ItemType.cs
+@@ -60,11 +60,11 @@ namespace Vintagestory.ServerMods.NoObf
+             TpHandTransform = ModelTransform.ItemDefaultTp();
+             TpOffHandTransform = null;
+             GroundTransform = ModelTransform.ItemDefaultGround();
+         }
+ 
+-        internal override RegistryObjectType CreateAndPopulate(ICoreServerAPI api, AssetLocation fullcode, JObject jobject, JsonSerializer deserializer, API.Datastructures.OrderedDictionary<string, string> variant)
++        internal override RegistryObjectType CreateAndPopulate(ICoreServerAPI api, AssetLocation fullcode, JObject jobject, JsonSerializer deserializer, Vintagestory.API.Datastructures.OrderedDictionary<string, string> variant)
+         {
+             ItemType resolvedType = CreateResolvedType<ItemType>(api, fullcode, jobject, deserializer, variant);
+ 
+             // Special code to rotate our 3D items in inventory by default, unless they expressly set GuiTransform.Rotate to false
+             if (resolvedType.Shape != null && !resolvedType.Shape.VoxelizeTexture)
+@@ -76,11 +76,11 @@ namespace Vintagestory.ServerMods.NoObf
+                 }
+             }
+             return resolvedType;
+         }
+ 
+-        public void InitItem(IClassRegistryAPI instancer, ILogger logger, Item item, API.Datastructures.OrderedDictionary<string, string> searchReplace)
++        public void InitItem(IClassRegistryAPI instancer, ILogger logger, Item item, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace)
+         {
+ 
+             item.CreativeInventoryTabs = BlockType.GetCreativeTabs(item.Code, CreativeInventory, searchReplace);
+ 
+ 

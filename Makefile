@@ -13,7 +13,7 @@
 
 # --- Configuration (override via env or make VAR=value) ---
 CONFIGURATION ?= Release
-VERSION ?= 1.22.3
+VERSION ?= $(shell python3 -c "import json;print(json.load(open('forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)
 CLIENT_ARCHIVE ?=
 
 # Paths (all overridable)
@@ -37,9 +37,7 @@ BOOTSTRAP_ARGS :=
 ifneq ($(CLIENT_ARCHIVE),)
   BOOTSTRAP_ARGS += --client-archive $(CLIENT_ARCHIVE)
 endif
-ifneq ($(VERSION),1.22.3)
-  BOOTSTRAP_ARGS += --version $(VERSION)
-endif
+BOOTSTRAP_ARGS := --version $(VERSION)
 
 .PHONY: help check check-patches check-compat check-shaders bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-linux package-appimage package-macos package-win bench-scaling
