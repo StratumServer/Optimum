@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eu
+if (set -o pipefail 2>/dev/null); then
+    set -o pipefail
+fi
+
+# sort -z is GNU coreutils; macOS sort lacks it. Fall back to plain sort
+# (patch filenames have no embedded newlines, so null-delimiting is
+# cosmetic and not required for correctness).
+if echo | sort -z 2>/dev/null; then
+    sort_z() { sort -z; }
+else
+    sort_z() { sort; }
+fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
@@ -49,6 +61,8 @@ decompile_mod() {
     for reference_dir in "$vanilla_dir" "$vanilla_dir/Lib" "$vanilla_dir/Mods"; do
         if [[ -d "$reference_dir" ]]; then
             reference_args+=(--referencepath "$reference_dir")
+        else
+            echo "WARNING: Vanilla reference directory not found: $reference_dir" >&2
         fi
     done
 
@@ -79,7 +93,7 @@ decompile_mod() {
     # the compiler's supported preview mode.
     VANILLA_HINT_ROOT="$vanilla_dir/" perl -0pi -e '
         s#<HintPath>\.vanilla/win-x64/vintagestory/#<HintPath>$ENV{VANILLA_HINT_ROOT}#g;
-        s#<LangVersion>15\.0</LangVersion>#<LangVersion>preview</LangVersion>#g;
+        s#<LangVersion>\d+\.\d+</LangVersion>#<LangVersion>preview</LangVersion>#g;
         s#</PropertyGroup>#  <Nullable>disable</Nullable>\n    <NoWarn>\$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>\n  </PropertyGroup>#;
     ' "$project_file"
 }
@@ -197,7 +211,7 @@ for project in VSEssentials VSSurvivalMod; do
             project_ready=0
             break
         fi
-    done < <(find "$repo_root/patches/runtime/$project" -name '*.patch' -print0 | sort -z)
+    done < <(find "$repo_root/patches/runtime/$project" -name '*.patch' -print0 | sort_z)
 
     if [[ "$project_ready" == "1" ]]; then
         while IFS= read -r -d '' patch; do
@@ -205,7 +219,7 @@ for project in VSEssentials VSSurvivalMod; do
                 --directory=".build/runtime-donors" \
                 --whitespace=nowarn \
                 "$patch"
-        done < <(find "$repo_root/patches/runtime/$project" -name '*.patch' -print0 | sort -z)
+        done < <(find "$repo_root/patches/runtime/$project" -name '*.patch' -print0 | sort_z)
         eligible_projects+=("$project")
     fi
 done
@@ -224,11 +238,23 @@ fi
 
 echo "Building exact runtime donors..."
 unset Platform
+build_errors=""
 if [[ " ${eligible_projects[*]} " == *" VSEssentials "* ]]; then
-    dotnet build "$essentials_project" -c "$configuration" --nologo
+    echo "  Building VSEssentials..."
+    if ! dotnet build "$essentials_project" -c "$configuration" --nologo; then
+        build_errors="${build_errors}VSEssentials "
+    fi
 fi
 if [[ " ${eligible_projects[*]} " == *" VSSurvivalMod "* ]]; then
-    dotnet build "$survival_project" -c "$configuration" --nologo
+    echo "  Building VSSurvivalMod..."
+    if ! dotnet build "$survival_project" -c "$configuration" --nologo; then
+        build_errors="${build_errors}VSSurvivalMod "
+    fi
+fi
+
+if [[ -n "$build_errors" ]]; then
+    echo "Runtime donor build failed: ${build_errors}" >&2
+    exit 1
 fi
 
 if [[ "${#eligible_projects[@]}" == "0" ]]; then
