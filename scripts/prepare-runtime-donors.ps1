@@ -231,6 +231,15 @@ Copy-Item -Force `
 Copy-Item -Force `
     (Join-Path $repoRoot 'sources/VSSurvivalMod/BlockEntityRenderer/CrucibleInFirepitRenderer.cs') `
     (Join-Path $runtimeRoot 'VSSurvivalMod/Vintagestory/GameContent/CrucibleInFirepitRenderer.cs')
+Copy-Item -Force `
+    (Join-Path $repoRoot 'sources/VSSurvivalMod/Lore/Village/OptimumOutfitShapeCache.cs') `
+    (Join-Path $runtimeRoot 'VSSurvivalMod/Vintagestory/GameContent/OptimumOutfitShapeCache.cs')
+Copy-Item -Force `
+    (Join-Path $repoRoot 'sources/VSSurvivalMod/Lore/Village/OptimumOutfitAnimatorCache.cs') `
+    (Join-Path $runtimeRoot 'VSSurvivalMod/Vintagestory/GameContent/OptimumOutfitAnimatorCache.cs')
+Copy-Item -Force `
+    (Join-Path $repoRoot 'sources/VSSurvivalMod/Lore/Village/OptimumOutfitTexturePrewarmer.cs') `
+    (Join-Path $runtimeRoot 'VSSurvivalMod/Vintagestory/GameContent/OptimumOutfitTexturePrewarmer.cs')
 
 Write-Host 'Building exact runtime donors...'
 $oldPlatform = $env:Platform

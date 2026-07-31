@@ -22,7 +22,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.3.0";
+    public const string Version = "0.3.2";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -141,6 +141,61 @@ public static class OptimumConfig
 
     public static bool EntityLightBatchEnabled = true;
     public static bool EntityShaderStateCacheEnabled = true;
+
+    /// <summary>
+    /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)
+    /// in a single frame. A re-tesselation's synchronous cost - shape parse, clone,
+    /// step-parenting, texture atlas insertion, animator rebuild - runs 50-230ms per entity for
+    /// geared/dressed humanoids (measured via .optimum stutterwatch), and a burst of entities
+    /// needing it at once (e.g. a trader caravan loading in) front-loads all of that into one
+    /// frame. Entities over budget simply retry next frame - ShapeFresh stays false, no state
+    /// to unwind. An entity's very first tesselation (no mesh yet) is never gated, so newly
+    /// spawned/loaded entities don't sit invisible waiting for a budget slot. 0 disables the cap.
+    /// </summary>
+    public static int EntityTesselationFrameBudget = 2;
+
+    /// <summary>
+    /// Caches the fully assembled outfit shape (post gear step-parenting) and resolved texture
+    /// set for EntityDressedHumanoid.OnTesselation, keyed by outfit signature - see
+    /// OptimumOutfitShapeCache in VSSurvivalMod for the full mechanism and why it's safe (every
+    /// consumer gets an independent Shape.Clone(), never a shared mutable instance). Deliberately
+    /// does NOT share the animator/InitForAnimations output the way vanilla's own AnimationCache
+    /// does for undressed entities - that needs a cache key vanilla's AnimationCache doesn't have,
+    /// and is a separate, higher-risk follow-up. Default OFF until played with real gameplay:
+    /// this is new code on the entity-appearance path, and only compile/unit-test verified so far.
+    /// </summary>
+    public static bool EntityOutfitShapeCacheEnabled = false;
+
+    /// <summary>
+    /// The higher-risk follow-up scoped out of EntityOutfitShapeCacheEnabled: shares the
+    /// animator build (ClientAnimator/ServerAnimator RootElements+RootPoses+Animations) across
+    /// entities with the same outfit signature, mirroring vanilla's own AnimationCache - see
+    /// OptimumOutfitAnimatorCache in VSSurvivalMod. Vanilla's own cache keys only on
+    /// entity.Code + base shape, which can't tell outfits apart, so EntityDressedHumanoid always
+    /// takes the uncached AnimManager.LoadAnimator path (Shape.InitForAnimations +
+    /// ClientAnimator.CreateForEntity's full element-tree walk) - this is the single largest
+    /// remaining cost in the stutter this file's other outfit settings target (measured
+    /// 7-8ms/call even with the shape+texture cache and prewarm enabled). Requires duplicating
+    /// Entity.OnTesselation(ref Shape, string, ref bool)'s overlay/behavior/willDisableElements
+    /// handling in EntityDressedHumanoid to intercept only the final animator build - safe today
+    /// (trader/villager entity types have no shape overlays and no client behaviors that mutate
+    /// the shape) but higher-risk than the other outfit settings if that ever changes. Default
+    /// OFF pending real gameplay testing: only compile/unit-test verified so far.
+    /// </summary>
+    public static bool EntityOutfitAnimatorCacheEnabled = false;
+
+    /// <summary>
+    /// Prewarms the entity texture atlas with every outfit variant's textures, for every
+    /// entity type with an outfit config, once during the loading screen (capi.Event.LevelFinalize)
+    /// - see OptimumOutfitTexturePrewarmerModSystem in VSSurvivalMod for the full mechanism.
+    /// Uses the same GetOrInsertTexture call EntityDressedHumanoid already makes at runtime;
+    /// this only changes WHEN that cost is paid (loading screen, invisible) vs mid-gameplay
+    /// (a 111-231ms single-call outlier the first time any NPC wears a given outfit piece,
+    /// measured via .optimum stutterwatch). Default OFF pending real gameplay testing: this
+    /// extends loading time by an amount proportional to outfit variant count, and is only
+    /// compile/unit-test verified so far.
+    /// </summary>
+    public static bool EntityOutfitTexturePrewarmEnabled = false;
 
     [ThreadStatic]
     public static bool RouteChiselLodMeshes;
@@ -372,6 +427,10 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
+        (nameof(OptimumConfigData.EntityTesselationFrameBudget), EntityTesselationFrameBudget.ToString()),
+        (nameof(OptimumConfigData.EntityOutfitShapeCache), EntityOutfitShapeCacheEnabled.ToString()),
+        (nameof(OptimumConfigData.EntityOutfitAnimatorCache), EntityOutfitAnimatorCacheEnabled.ToString()),
+        (nameof(OptimumConfigData.EntityOutfitTexturePrewarm), EntityOutfitTexturePrewarmEnabled.ToString()),
         (nameof(OptimumConfigData.GreedyMeshEnabled), GreedyMeshEnabled.ToString()),
         (nameof(OptimumConfigData.GreedyMeshMaxMergeWidth), GreedyMeshMaxMergeWidth.ToString()),
         (nameof(OptimumConfigData.GreedyMeshMaxMergeHeight), GreedyMeshMaxMergeHeight.ToString()),
@@ -446,6 +505,10 @@ public static class OptimumConfig
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
+            EntityTesselationFrameBudget = Math.Max(0, data.EntityTesselationFrameBudget);
+            EntityOutfitShapeCacheEnabled = data.EntityOutfitShapeCache;
+            EntityOutfitAnimatorCacheEnabled = data.EntityOutfitAnimatorCache;
+            EntityOutfitTexturePrewarmEnabled = data.EntityOutfitTexturePrewarm;
             GreedyMeshEnabled = data.GreedyMeshEnabled;
             // Clamped to the tile-count encoding's ceiling (3 bits, max 8)
             // so a hand-edited optimum.json can't request a merge wider
@@ -507,6 +570,10 @@ public static class OptimumConfig
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
+            EntityTesselationFrameBudget = EntityTesselationFrameBudget,
+            EntityOutfitShapeCache = EntityOutfitShapeCacheEnabled,
+            EntityOutfitAnimatorCache = EntityOutfitAnimatorCacheEnabled,
+            EntityOutfitTexturePrewarm = EntityOutfitTexturePrewarmEnabled,
             GreedyMeshEnabled = GreedyMeshEnabled,
             GreedyMeshMaxMergeWidth = GreedyMeshMaxMergeWidth,
             GreedyMeshMaxMergeHeight = GreedyMeshMaxMergeHeight,
@@ -565,6 +632,10 @@ internal sealed class OptimumConfigData
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;
+    public int EntityTesselationFrameBudget { get; set; } = 2;
+    public bool EntityOutfitShapeCache { get; set; } = false;
+    public bool EntityOutfitAnimatorCache { get; set; } = false;
+    public bool EntityOutfitTexturePrewarm { get; set; } = false;
     public bool GreedyMeshEnabled { get; set; } = false;
     public int GreedyMeshMaxMergeWidth { get; set; } = 8;
     public int GreedyMeshMaxMergeHeight { get; set; } = 8;
@@ -810,6 +881,116 @@ public static class OptimumDiagnostics
         return $"Optimum chisel LOD: blocks={blocks}, fullMeshes={fullMeshes}, proxyMeshes={proxyMeshes}, proxyRate={proxyRate:0.0}%, fallbackMeshes={fallbackMeshes}, fullTriangles={fullTriangles}, proxyTriangles={proxyTriangles}, microblockTesselationMs={elapsedMs:0.###}";
     }
 
+    // Chisel LOD shadow-pass cull diagnostics (OptimumApiBridge.InFrustumShadowPass, added
+    // 92a4c72). Reset once per frame by the stutter watch below, so the summary always
+    // reflects only the current frame's cost rather than a lifetime total.
+    private static long _chiselShadowCullCalls;
+    private static long _chiselShadowCullTicks;
+
+    public static void RecordChiselShadowCull(long elapsedTicks)
+    {
+        Interlocked.Increment(ref _chiselShadowCullCalls);
+        Interlocked.Add(ref _chiselShadowCullTicks, elapsedTicks);
+    }
+
+    public static void ResetChiselShadowCull()
+    {
+        Interlocked.Exchange(ref _chiselShadowCullCalls, 0);
+        Interlocked.Exchange(ref _chiselShadowCullTicks, 0);
+    }
+
+    public static string GetChiselShadowCullSummary()
+    {
+        long calls = Interlocked.Read(ref _chiselShadowCullCalls);
+        long ticks = Interlocked.Read(ref _chiselShadowCullTicks);
+        double elapsedMs = ticks * 1000.0 / Stopwatch.Frequency;
+        return $"Optimum chisel shadow cull: calls={calls}, elapsedMs={elapsedMs:0.###}";
+    }
+
+    /// <summary>
+    /// Opt-in per-frame stutter diagnostic. When enabled, ClientPlatformWindows logs
+    /// <see cref="BuildStutterReport"/> to the client log for every frame at or above
+    /// <see cref="StutterWatchThresholdMs"/>, attributing the frame to Optimum's own
+    /// per-frame subsystems so a slow frame can be traced without an external profiler.
+    /// Session-only: not persisted, toggled via the ".optimum stutterwatch" command.
+    /// </summary>
+    public static volatile bool StutterWatchEnabled;
+    public static volatile int StutterWatchThresholdMs = 25;
+
+    /// <summary>
+    /// Attributes ONLY the Optimum-owned per-frame subsystems below (each counter is reset
+    /// every frame by <see cref="ResetPerFrameStutterCounters"/>, so every number here is
+    /// this frame's cost, not a lifetime total). It cannot see vanilla's own baseline render
+    /// cost, GC pauses, disk I/O, or GPU/driver stalls - a stutter with none of these
+    /// subsystems standing out did NOT come from Optimum's own code, and needs vanilla's
+    /// own frame profiler (".debug logticks &lt;ms&gt;", logs the full vanilla+Optimum stage
+    /// breakdown to the client log) or an external trace to localize.
+    /// </summary>
+    public static string BuildStutterReport(double frameMs)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"[Optimum stutter-watch] frame took {frameMs:0.##} ms (threshold {StutterWatchThresholdMs} ms) - Optimum-owned subsystems only, see \".debug logticks\" for the full vanilla+Optimum breakdown:");
+        sb.Append("\n  ").Append(GetChiselShadowCullSummary());
+        sb.Append("\n  ").Append(GetChiselLodSummary());
+        sb.Append("\n  ").Append(GetAnimBlockSummary());
+        sb.Append("\n  ").Append(GetGreedyMeshSummary());
+        sb.Append("\n  ").Append(GetChunkRenderSummary());
+        sb.Append("\n  ").Append(GetChunkUploadSummary());
+        {
+            var (hits, skips) = EntityTesselationBudget.Snapshot();
+            sb.Append($"\n  Optimum entity tesselation budget: tesselated={hits}, deferred={skips}");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Resets every counter fed into <see cref="BuildStutterReport"/>. Called once per frame
+    /// by ClientPlatformWindows when stutter-watch is enabled, so each counter always
+    /// reflects only the frame that just ended rather than an accumulating lifetime total.
+    /// </summary>
+    public static void ResetPerFrameStutterCounters()
+    {
+        ResetChiselShadowCull();
+        ResetChiselLod();
+        ResetAnimBlock();
+        ResetGreedyMesh();
+        ResetChunkRender();
+        ResetChunkUpload();
+        EntityTesselationBudget.Reset();
+    }
+
+    // Entity re-tesselation frame budget (EntityTesselationFrameBudget). Reset once per frame
+    // from SystemRenderEntities.OnBeforeRender; consumed by EntityShapeRenderer.BeforeRender
+    // before calling TesselateShape() on an entity that already has a mesh (first tesselation
+    // is never gated). Interlocked since entity rendering only runs on the render thread today,
+    // but the check-and-decrement must still be atomic against itself for correctness.
+    private static int _entityTesselationBudgetRemaining;
+
+    public static void ResetEntityTesselationBudget()
+    {
+        Volatile.Write(ref _entityTesselationBudgetRemaining, OptimumConfig.EntityTesselationFrameBudget);
+    }
+
+    /// <summary>
+    /// Returns true if a re-tesselation is allowed this frame (and consumes one unit of
+    /// budget), false if the frame's budget is already spent. A budget of 0 disables the cap
+    /// entirely (always returns true).
+    /// </summary>
+    public static bool TryConsumeEntityTesselationBudget()
+    {
+        if (OptimumConfig.EntityTesselationFrameBudget <= 0) return true;
+
+        while (true)
+        {
+            int current = Volatile.Read(ref _entityTesselationBudgetRemaining);
+            if (current <= 0) return false;
+            if (Interlocked.CompareExchange(ref _entityTesselationBudgetRemaining, current - 1, current) == current)
+            {
+                return true;
+            }
+        }
+    }
+
     /// <summary>
     /// Accumulates the animator.OnFrame cost for animated blocks that actually
     /// ran this frame (near tier, or mid tier on a due frame). Two timestamp
@@ -878,6 +1059,9 @@ public static class OptimumDiagnostics
     public static readonly HitSkipCounter ChunkUploadSort = new();
     public static readonly HitSkipCounter EntityLightBatch = new();
     public static readonly HitSkipCounter EntityShaderStateCache = new();
+    public static readonly HitSkipCounter EntityTesselationBudget = new();
+    public static readonly HitSkipCounter EntityOutfitShapeCache = new();
+    public static readonly HitSkipCounter EntityOutfitAnimatorCache = new();
 
     /// <summary>
     /// Every hit/skip counter above, keyed by name, for .optimum status and
@@ -905,6 +1089,9 @@ public static class OptimumDiagnostics
         [nameof(ChunkUploadSort)] = ChunkUploadSort,
         [nameof(EntityLightBatch)] = EntityLightBatch,
         [nameof(EntityShaderStateCache)] = EntityShaderStateCache,
+        [nameof(EntityTesselationBudget)] = EntityTesselationBudget,
+        [nameof(EntityOutfitShapeCache)] = EntityOutfitShapeCache,
+        [nameof(EntityOutfitAnimatorCache)] = EntityOutfitAnimatorCache,
     };
 
     public static void ResetAllCounters()

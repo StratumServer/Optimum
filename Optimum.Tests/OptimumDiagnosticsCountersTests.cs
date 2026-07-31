@@ -53,6 +53,8 @@ public class OptimumDiagnosticsCountersTests
             "ParticleDistanceGate",
             "EntityLightBatch",
             "EntityShaderStateCache",
+            "EntityTesselationBudget",
+            "EntityOutfitShapeCache",
         };
 
         foreach (var name in expected)

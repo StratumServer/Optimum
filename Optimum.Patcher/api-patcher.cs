@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -71,6 +72,7 @@ public static class ApiPatcher
         int loggerInitializers = PatchLoggerInitializer(vanilla.MainModule);
         int gameVersionLabels = PatchGameVersionLabel(vanilla.MainModule, optimumVersion);
         int mat4fInlined = PatchMat4fInlining(vanilla.MainModule);
+        int animatorComparerSites = PatchAnimatorAnimCodeComparer(vanilla.MainModule);
 
         if (inventoryHooks != 2)
         {
@@ -102,6 +104,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected at least 7 Mat4f inlined methods, applied {mat4fInlined}.");
         }
+        if (animatorComparerSites != 3)
+        {
+            throw new InvalidOperationException(
+                $"Expected 3 AnimatorBase animsByCode comparer sites, applied {animatorComparerSites}.");
+        }
 
         var selfReferenceErrors = SelfConsistencyVerifier.VerifySelfReferences(vanilla.MainModule);
         if (selfReferenceErrors.Count > 0)
@@ -121,7 +128,8 @@ public static class ApiPatcher
             $"API patch complete: {inventoryHooks} inventory hooks, {chiselHooks} chisel LOD hook, " +
             $"{chiselShadowHooks} chisel LOD shadow hooks, " +
             $"{loggerInitializers} symbol-independent logger initializer, " +
-            $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined.");
+            $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined, " +
+            $"{animatorComparerSites} AnimatorBase comparer sites.");
         return true;
     }
 
@@ -369,6 +377,87 @@ public static class ApiPatcher
         if (patched > 0)
             Console.WriteLine($"  API PATCHED: Mat4f [{patched} methods] → AggressiveInlining");
         return patched;
+    }
+
+    /// <summary>
+    /// AnimatorBase.animsByCode was built with the default ordinal comparer, so
+    /// GetAnimationState and OnFrame both call code.ToLowerInvariant() on every lookup - an
+    /// allocation per active animation, per frame. Rebuilding the dictionary with
+    /// StringComparer.OrdinalIgnoreCase makes the lowercasing unnecessary; this patch does
+    /// both: the constructor picks up the comparer, and the two lookup sites drop the now
+    /// redundant ToLowerInvariant() call. This mirrors patches/VintagestoryApi/Common/Model/
+    /// Animation/AnimatorBase.cs.patch, which was compiling into the runtime-donor tree but
+    /// had no Cecil target, so it never reached the player's actual game assembly.
+    /// </summary>
+    internal static int PatchAnimatorAnimCodeComparer(ModuleDefinition module)
+    {
+        var animatorBase = module.GetType("Vintagestory.API.Common.AnimatorBase")
+            ?? throw new InvalidOperationException("AnimatorBase is missing from the vanilla API.");
+
+        var ctor = animatorBase.Methods.Single(method =>
+            method.IsConstructor && !method.IsStatic && method.Parameters.Count == 3);
+        ClearDebugInformation(ctor);
+
+        var dictCtorCall = ctor.Body.Instructions.Single(instruction =>
+            instruction.OpCode == OpCodes.Newobj &&
+            instruction.Operand is MethodReference method &&
+            method.Name == ".ctor" &&
+            method.DeclaringType.Name == "Dictionary`2" &&
+            method.Parameters.Count == 1);
+
+        var dictionaryType = (GenericInstanceType)((MethodReference)dictCtorCall.Operand).DeclaringType;
+        var keyType = dictionaryType.GenericArguments[0];
+
+        var equalityComparerOpen = module.ImportReference(typeof(IEqualityComparer<>));
+        var equalityComparerOfKey = new GenericInstanceType(equalityComparerOpen);
+        equalityComparerOfKey.GenericArguments.Add(keyType);
+
+        var comparerCtor = new MethodReference(".ctor", module.TypeSystem.Void, dictionaryType)
+        {
+            HasThis = true,
+        };
+        comparerCtor.Parameters.Add(new ParameterDefinition(module.TypeSystem.Int32));
+        comparerCtor.Parameters.Add(new ParameterDefinition(equalityComparerOfKey));
+
+        var ordinalIgnoreCaseGetter = module.ImportReference(
+            typeof(StringComparer).GetProperty(nameof(StringComparer.OrdinalIgnoreCase))!.GetGetMethod());
+
+        var ctorProcessor = ctor.Body.GetILProcessor();
+        ctorProcessor.InsertBefore(dictCtorCall, Instruction.Create(OpCodes.Call, ordinalIgnoreCaseGetter));
+        dictCtorCall.Operand = comparerCtor;
+
+        var getAnimationState = animatorBase.Methods.Single(method =>
+            method.Name == "GetAnimationState" && method.Parameters.Count == 1);
+        var onFrame = animatorBase.Methods.Single(method =>
+            method.Name == "OnFrame" && method.Parameters.Count == 2);
+
+        int sites = 0;
+        sites += RemoveToLowerInvariantBeforeTryGetValue(getAnimationState);
+        sites += RemoveToLowerInvariantBeforeTryGetValue(onFrame);
+
+        Console.WriteLine(
+            $"  API PATCHED: {animatorBase.FullName} animsByCode OrdinalIgnoreCase comparer " +
+            $"(ctor + {sites} lookup sites)");
+        return 1 + sites;
+    }
+
+    private static int RemoveToLowerInvariantBeforeTryGetValue(MethodDefinition method)
+    {
+        ClearDebugInformation(method);
+
+        var toLowerCalls = method.Body.Instructions.Where(instruction =>
+            (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
+            instruction.Operand is MethodReference callee &&
+            callee.Name == "ToLowerInvariant" &&
+            callee.DeclaringType.FullName == "System.String" &&
+            callee.Parameters.Count == 0).ToArray();
+
+        var processor = method.Body.GetILProcessor();
+        foreach (var call in toLowerCalls)
+        {
+            processor.Remove(call);
+        }
+        return toLowerCalls.Length;
     }
 
     private static void ClearDebugInformation(MethodDefinition method)

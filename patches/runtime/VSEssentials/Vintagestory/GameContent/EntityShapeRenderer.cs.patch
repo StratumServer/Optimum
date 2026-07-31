@@ -1,7 +1,8 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
+index acdf1b9..729e14d 100644
 --- a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
-@@ -1,18 +1,20 @@
+@@ -1,16 +1,18 @@
  using System;
  using System.Collections.Generic;
  using System.Linq;
@@ -21,11 +22,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  {
  	protected long listenerId;
  
- 	protected LoadedTexture debugTagTexture;
- 
-@@ -36,10 +38,50 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
- 
- 	protected ITexPositionSource defaultTexSource;
+@@ -38,6 +40,46 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
  
  	protected Vec4f lightrgbs;
  
@@ -72,11 +69,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  	protected float intoxIntensity;
  
  	public bool DoRenderHeldItem;
- 
- 	public int AddRenderFlags;
-@@ -128,14 +170,24 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
- 
- 	public Size2i AtlasSize => capi.EntityTextureAtlas.Size;
+@@ -130,10 +172,20 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
  
  	public virtual TextureAtlasPosition this[string textureCode] => defaultTexSource[textureCode] ?? skinTexPos;
  
@@ -97,12 +90,27 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  		eagent = entity as EntityAgent;
  		DoRenderHeldItem = true;
  		glitchAffected = true;
- 		waterBobbing = entity.Properties.Attributes?["waterBobbing"].AsBool() ?? false;
- 		glitchFlicker = entity.Properties.Attributes?["glitchFlicker"].AsBool() ?? false;
-@@ -354,17 +406,29 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -353,16 +405,43 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 	{
  		if (!entity.ShapeFresh)
  		{
- 			TesselateShape();
+-			TesselateShape();
++			// Optimum: cap re-tesselations per frame (EntityTesselationFrameBudget). A
++			// re-tesselation's synchronous cost - shape parse, clone, step-parenting, texture
++			// atlas insertion, animator rebuild - runs 50-230ms per geared/dressed humanoid
++			// (measured via .optimum stutterwatch), and a burst of entities needing it at once
++			// (e.g. a trader caravan loading in) front-loads all of that into one frame. An
++			// entity's very first tesselation (no mesh yet) is never gated, so newly
++			// spawned/loaded entities don't sit invisible waiting for a budget slot.
++			if (meshRefOpaque == null || OptimumDiagnostics.TryConsumeEntityTesselationBudget())
++			{
++				TesselateShape();
++				OptimumDiagnostics.EntityTesselationBudget.Hit();
++			}
++			else
++			{
++				OptimumDiagnostics.EntityTesselationBudget.Skip();
++			}
  			capi.World.FrameProfiler.Mark("esr-tesseleateshape");
  		}
 -		lightrgbs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
@@ -132,11 +140,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  			}
  		}
  		if (meshRefOpaque == null)
- 		{
- 			return;
-@@ -598,10 +662,11 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
- 	public override void DoRender3DOpaqueBatched(float dt, bool isShadowPass)
- 	{
+@@ -600,6 +679,7 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
  		if (!isSpectator && meshRefOpaque != null && entity.AnimManager?.Animator != null)
  		{
  			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
@@ -144,11 +148,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  			if (isShadowPass)
  			{
  				Mat4f.Mul(tmpMvMat, capi.Render.CurrentModelviewMatrix, ModelMat);
- 				currentActiveShader.UniformMatrix("modelViewMatrix", tmpMvMat);
- 			}
-@@ -610,11 +675,19 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
- 				frostAlpha += (targetFrostAlpha - frostAlpha) * dt / 6f;
- 				float value = (float)Math.Round(GameMath.Clamp(frostAlpha, 0f, 1f), 4);
+@@ -612,7 +692,15 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
  				currentActiveShader.Uniform("rgbaLightIn", lightrgbs);
  				currentActiveShader.Uniform("extraGlow", entity.Properties.Client.GlowLevel);
  				currentActiveShader.UniformMatrix("modelMatrix", ModelMat);
@@ -165,11 +165,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  				currentActiveShader.Uniform("addRenderFlags", AddRenderFlags);
  				currentActiveShader.Uniform("windWaveIntensity", (float)WindWaveIntensity);
  				currentActiveShader.Uniform("entityId", (int)entity.EntityId);
- 				currentActiveShader.Uniform("glitchFlicker", glitchFlicker ? 1 : 0);
- 				currentActiveShader.Uniform("frostAlpha", value);
-@@ -628,18 +701,119 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
- 				double val2 = capi.World.Player.Entity.WatchedAttributes.GetDouble("temporalStability", 1.0);
- 				double num = Math.Min(val, val2);
+@@ -630,7 +718,11 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
  				float value2 = (float)(glitchAffected ? Math.Max(0.0, 1.0 - 2.5 * num) : 0.0);
  				currentActiveShader.Uniform("glitchEffectStrength", value2);
  			}
@@ -182,7 +178,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  			if (meshRefOpaque != null)
  			{
  				capi.Render.RenderMultiTextureMesh(meshRefOpaque, "entityTex");
- 			}
+@@ -638,6 +730,103 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
  		}
  	}
  
@@ -286,5 +282,3 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEs
  	public override void DoRender2D(float dt)
  	{
  		if (isSpectator || (debugTagTexture == null && messageTextures == null))
- 		{
- 			return;

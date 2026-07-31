@@ -1,10 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index fbc7255..d177c53 100644
+index fbc7255..f508de0 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -45,10 +45,92 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 
- 	private AssetManager assetManager;
+@@ -47,6 +47,95 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private Stopwatch frameStopWatch;
  
@@ -88,16 +86,19 @@ index fbc7255..d177c53 100644
 +			ClientSettings.SSAA = Vintagestory.API.Config.OptimumConfig.RenderScale;
 +		}
 +		Optimum.OptimumUpdateChecker.CheckAsync();
++
++		// Optimum: log migration hint if OptiTime config remnants detected
++		string migrationMsg = Optimum.OptimumOptiTimeGuard.GetMigrationMessage();
++		if (migrationMsg != null)
++		{
++			System.Console.WriteLine("[Optimum] " + migrationMsg);
++		}
 +	}
 +
  	internal Stopwatch uptimeStopWatch = new Stopwatch();
  
  	private Logger logger;
- 
- 	private int doResize;
-@@ -93,10 +175,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 
- 	private List<string> drawCallStacks = new List<string>();
+@@ -95,6 +184,8 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<FrameBufferRef> frameBuffers;
  
@@ -106,11 +107,7 @@ index fbc7255..d177c53 100644
  	private MeshRef screenQuad;
  
  	private bool serverRunning;
- 
- 	private bool gamepause;
-@@ -478,21 +562,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		frameStopWatch.Start();
- 	}
+@@ -480,21 +571,102 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private void window_RenderFrame(FrameEventArgs e)
  	{
@@ -200,10 +197,24 @@ index fbc7255..d177c53 100644
  		}
  		float dt = (float)frameStopWatch.ElapsedTicks / (float)Stopwatch.Frequency;
  		frameStopWatch.Restart();
++
++		// Optimum: opt-in per-frame stutter diagnostic (".optimum stutterwatch <ms>").
++		// Logs a breakdown of Optimum's own per-frame subsystems whenever a frame is at or
++		// above the threshold, so a stutter can be attributed without an external profiler.
++		if (Vintagestory.API.Config.OptimumDiagnostics.StutterWatchEnabled)
++		{
++			double optimumFrameMs = dt * 1000.0;
++			if (optimumFrameMs >= Vintagestory.API.Config.OptimumDiagnostics.StutterWatchThresholdMs)
++			{
++				logger.Notification(Vintagestory.API.Config.OptimumDiagnostics.BuildStutterReport(optimumFrameMs));
++			}
++			Vintagestory.API.Config.OptimumDiagnostics.ResetPerFrameStutterCounters();
++		}
++
  		ScreenManager.FrameProfiler.Mark("sleep");
-@@ -1210,11 +1361,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
+ 		UpdateMousePosition();
+ 		RenderBloom = ClientSettings.Bloom && base.DoPostProcessingEffects;
+@@ -1212,7 +1384,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
  		GL.DepthFunc((DepthFunction)513);
@@ -216,11 +227,7 @@ index fbc7255..d177c53 100644
  		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
  		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
- 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1436,10 +1591,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
- 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+@@ -1438,6 +1614,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
  		GL.DrawBuffer((DrawBufferMode)36064);
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
@@ -250,11 +257,7 @@ index fbc7255..d177c53 100644
  		frameBufferRef = (list[5] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
- 			Width = num / 4,
- 			Height = num2 / 4
-@@ -2030,10 +2208,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
+@@ -2032,6 +2231,36 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		if (OffscreenBuffer)
  		{
  			int scene2D = frameBuffers[0].ColorTextureIds[0];
@@ -291,5 +294,3 @@ index fbc7255..d177c53 100644
  			LoadFrameBuffer(EnumFrameBuffer.Default);
  			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
- 			blit.Use();
- 			blit.Scene2D = scene2D;
