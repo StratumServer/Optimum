@@ -21,8 +21,10 @@ $gameContentDll = Join-Path $outputRoot 'Optimum.GameContent.dll'
 $ilspy = Get-Command ilspycmd -ErrorAction SilentlyContinue
 if (-not $ilspy) {
     $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
-    $toolName = if ($IsWindows) { 'ilspycmd.exe' } else { 'ilspycmd' }
-    $globalTool = Join-Path $profileRoot ".dotnet/tools/$toolName"
+    $globalTool = Join-Path $profileRoot '.dotnet/tools/ilspycmd'
+    if (-not (Test-Path $globalTool)) {
+        $globalTool = Join-Path $profileRoot '.dotnet/tools/ilspycmd.exe'
+    }
     if (-not (Test-Path $globalTool)) {
         throw 'ilspycmd is required. Run scripts/bootstrap.ps1 first.'
     }
@@ -71,6 +73,8 @@ function Decompile-Mod {
             (Join-Path $VanillaDir 'Mods'))) {
         if (Test-Path $referenceDir -PathType Container) {
             $referenceArgs += @('--referencepath', $referenceDir)
+        } else {
+            Write-Warning "Vanilla reference directory not found: $referenceDir"
         }
     }
     Invoke-Checked {
@@ -93,8 +97,8 @@ function Decompile-Mod {
     $text = $text.Replace(
         '<HintPath>.vanilla/win-x64/vintagestory/',
         "<HintPath>$hintRoot")
-    $text = $text.Replace(
-        '<LangVersion>15.0</LangVersion>',
+    $text = [regex]::Replace($text,
+        '<LangVersion>\d+\.\d+</LangVersion>',
         '<LangVersion>preview</LangVersion>')
     $text = [regex]::Replace(
         $text,
@@ -231,17 +235,26 @@ Copy-Item -Force `
 Write-Host 'Building exact runtime donors...'
 $oldPlatform = $env:Platform
 Remove-Item Env:Platform -ErrorAction SilentlyContinue
+$buildErrors = @()
 try {
-    Invoke-Checked {
-        dotnet build $essentialsProject -c $Configuration --nologo
-    } 'VSEssentials runtime donor build failed'
-    Invoke-Checked {
-        dotnet build $survivalProject -c $Configuration --nologo
-    } 'VSSurvivalMod runtime donor build failed'
+    Write-Host "  Building VSEssentials..."
+    Invoke-NativeStep { & dotnet build $essentialsProject -c $Configuration --nologo }
+    if ($LASTEXITCODE -ne 0) {
+        $buildErrors += 'VSEssentials'
+    }
+    Write-Host "  Building VSSurvivalMod..."
+    Invoke-NativeStep { & dotnet build $survivalProject -c $Configuration --nologo }
+    if ($LASTEXITCODE -ne 0) {
+        $buildErrors += 'VSSurvivalMod'
+    }
 } finally {
     if ($null -ne $oldPlatform) {
         $env:Platform = $oldPlatform
     }
+}
+
+if ($buildErrors.Count -gt 0) {
+    throw "Runtime donor build failed: $($buildErrors -join ', ')"
 }
 
 Write-Host 'Runtime donors ready under .build/runtime-donors.'
