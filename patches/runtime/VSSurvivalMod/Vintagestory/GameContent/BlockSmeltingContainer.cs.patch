@@ -1,0 +1,41 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockSmeltingContainer.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockSmeltingContainer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockSmeltingContainer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockSmeltingContainer.cs
+@@ -1,14 +1,15 @@
+ using System;
+ using System.Collections.Generic;
++using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.GameContent;
+ 
+-public class BlockSmeltingContainer : Block
++public class BlockSmeltingContainer : Block, IInFirepitRendererSupplier
+ {
+ 	public override bool TryPlaceBlock(IWorldAccessor world, IPlayer byPlayer, ItemStack itemstack, BlockSelection blockSel, ref string failureCode)
+ 	{
+ 		if (!byPlayer.Entity.Controls.ShiftKey)
+ 		{
+@@ -245,6 +246,20 @@ public class BlockSmeltingContainer : Block
+ 		{
+ 			array[i] = cookingSlotsProvider.Slots[i].Itemstack;
+ 		}
+ 		return array;
+ 	}
++
++	public IInFirepitRenderer GetRendererWhenInFirepit(ItemStack stack, BlockEntityFirepit firepit, bool forOutputSlot)
++	{
++		if (api is not ICoreClientAPI capi)
++		{
++			return null;
++		}
++		return new CrucibleInFirepitRenderer(capi, this, firepit.Pos);
++	}
++
++	public EnumFirepitModel GetDesiredFirepitModel(ItemStack stack, BlockEntityFirepit firepit, bool forOutputSlot)
++	{
++		return EnumFirepitModel.Wide;
++	}
+ }

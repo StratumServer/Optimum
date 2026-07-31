@@ -1,0 +1,31 @@
+diff --git a/VintagestoryApi/Common/Registry/RegistryObject.cs b/VintagestoryApi/Common/Registry/RegistryObject.cs
+index f095fbc..ac57834 100644
+--- a/VintagestoryApi/Common/Registry/RegistryObject.cs
++++ b/VintagestoryApi/Common/Registry/RegistryObject.cs
+@@ -211,14 +211,23 @@ namespace Vintagestory.API.Common
+         /// <param name="posFromRight"></param>
+         /// <returns></returns>
+         public string LastCodePart(int posFromRight = 0)
+         {
+             if (Code == null) return null;
+-            if (posFromRight == 0 && !Code.Path.Contains('-')) return Code.Path;
++            string path = Code.Path;
++            if (posFromRight == 0 && !path.Contains('-')) return path;
+ 
+-            string[] parts = Code.Path.Split('-');
+-            return parts.Length - 1 - posFromRight >= 0 ? parts[parts.Length - 1 - posFromRight] : null;
++            // Optimum: walk dashes from right instead of Split allocation
++            int end = path.Length;
++            for (int skip = 0; skip < posFromRight; skip++)
++            {
++                int dash = path.LastIndexOf('-', end - 1);
++                if (dash < 0) return null;
++                end = dash;
++            }
++            int start = path.LastIndexOf('-', end - 1) + 1;
++            return path.Substring(start, end - start);
+         }
+ 
+         /// <summary>
+         /// Returns the n-th code part. If the code contains no dash ('-') the whole code is returned. Returns null if posFromLeft is too high.
+         /// </summary>

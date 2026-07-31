@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Server/API/IServerWorldAccessor.cs b/VintagestoryApi/Server/API/IServerWorldAccessor.cs
+index b4a7268..cc5e02b 100644
+--- a/VintagestoryApi/Server/API/IServerWorldAccessor.cs
++++ b/VintagestoryApi/Server/API/IServerWorldAccessor.cs
+@@ -41,11 +41,11 @@ namespace Vintagestory.API.Server
+         void CreateExplosion(BlockPos pos, EnumBlastType blastType, double destructionRadius, double injureRadius, float blockDropChanceMultiplier = 1, string ignitedByPlayerUid = null);
+ 
+         /// <summary>
+         /// List of all loaded tree generators
+         /// </summary>
+-        Datastructures.OrderedDictionary<AssetLocation, ITreeGenerator> TreeGenerators { get; }
++        Vintagestory.API.Datastructures.OrderedDictionary<AssetLocation, ITreeGenerator> TreeGenerators { get; }
+ 
+         /// <summary>
+         /// Dictionary of entity codes to remap, old codes (which may be present in save files or schematics) as keys
+         /// </summary>
+         Dictionary<string, string> RemappedEntities { get; }

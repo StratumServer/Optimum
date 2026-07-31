@@ -1,0 +1,37 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs
+--- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs
+@@ -1,10 +1,11 @@
+ using System;
+ using Vintagestory.API;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.GameContent;
+ 
+@@ -79,10 +80,21 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+ 		Entity entity = base.entity;
+ 		if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable)
+ 		{
+ 			return;
+ 		}
++		if (OptimumConfig.RepulsionGateEnabled && cworld != null && entity != cworld.Player.Entity)
++		{
++			double dx = entity.Pos.X - cworld.Player.Entity.Pos.X;
++			double dz = entity.Pos.Z - cworld.Player.Entity.Pos.Z;
++			if (dx * dx + dz * dz > OptimumConfig.RepulsionDistanceSq)
++			{
++				OptimumDiagnostics.RepulseAgents.Skip();
++				return;
++			}
++		}
++		OptimumDiagnostics.RepulseAgents.Hit();
+ 		EntityAgent entityAgent = entity as EntityAgent;
+ 		if (entityAgent?.MountedOn != null || entity.World.ElapsedMilliseconds < 2000)
+ 		{
+ 			return;
+ 		}

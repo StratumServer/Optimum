@@ -1,0 +1,12 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
+@@ -82,7 +82,7 @@
+ 	private void sendAndEnqueueChunks(ConnectedClient client)
+ 	{
+ 		int val = (int)Math.Ceiling((float)client.WorldData.Viewdistance / (float)MagicNum.ServerChunkSize);
+-		int num = Math.Min(server.Config.MaxChunkRadius, val);
++		int num = Math.Min(Math.Min(server.Config.MaxChunkRadius, OptimumConfig.AdaptiveRadiusEffective), val);
+ 		if (client.CurrentChunkSentRadius > num && client.forceSendChunks.Count == 0 && client.forceSendMapChunks.Count == 0)
+ 		{
+ 			return;

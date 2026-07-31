@@ -1,0 +1,290 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
+--- a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
+@@ -1,18 +1,20 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
++using System.Reflection;
+ using System.Text;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.GameContent;
+ 
+-public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
++public class EntityShapeRenderer : EntityRenderer, ITexPositionSource, IOptimumEntityLightSampler, IOptimumEntityShaderRenderer
+ {
+ 	protected long listenerId;
+ 
+ 	protected LoadedTexture debugTagTexture;
+ 
+@@ -36,10 +38,50 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 
+ 	protected ITexPositionSource defaultTexSource;
+ 
+ 	protected Vec4f lightrgbs;
+ 
++	protected bool optimumShaderStateCompatible;
++
++	protected int optimumActiveLightBatchId;
++
++	protected int optimumBaseLightBatchId;
++
++	protected int optimumBaseLightX;
++
++	protected int optimumBaseLightY;
++
++	protected int optimumBaseLightZ;
++
++	protected IWorldChunk optimumBaseLightChunk;
++
++	protected float optimumBaseLightRed;
++
++	protected float optimumBaseLightGreen;
++
++	protected float optimumBaseLightBlue;
++
++	protected float optimumBaseLightSun;
++
++	protected int optimumUpperLightBatchId;
++
++	protected int optimumUpperLightX;
++
++	protected int optimumUpperLightY;
++
++	protected int optimumUpperLightZ;
++
++	protected IWorldChunk optimumUpperLightChunk;
++
++	protected float optimumUpperLightRed;
++
++	protected float optimumUpperLightGreen;
++
++	protected float optimumUpperLightBlue;
++
++	protected float optimumUpperLightSun;
++
+ 	protected float intoxIntensity;
+ 
+ 	public bool DoRenderHeldItem;
+ 
+ 	public int AddRenderFlags;
+@@ -128,14 +170,24 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 
+ 	public Size2i AtlasSize => capi.EntityTextureAtlas.Size;
+ 
+ 	public virtual TextureAtlasPosition this[string textureCode] => defaultTexSource[textureCode] ?? skinTexPos;
+ 
++	public int OptimumLightSampleCount => (entity.SelectionBox.Y2 > 1f) ? 2 : 1;
++
++	public bool OptimumShaderStateCompatible => optimumShaderStateCompatible;
++
+ 	public EntityShapeRenderer(Entity entity, ICoreClientAPI api)
+ 		: base(entity, api)
+ 	{
+ 		EntityShapeRenderer entityShapeRenderer = this;
++		MethodInfo shaderRenderMethod = GetType().GetMethod(nameof(DoRender3DOpaqueBatched), BindingFlags.Instance | BindingFlags.Public, null, new Type[2]
++		{
++			typeof(float),
++			typeof(bool)
++		}, null);
++		optimumShaderStateCompatible = shaderRenderMethod?.DeclaringType == typeof(EntityShapeRenderer);
+ 		eagent = entity as EntityAgent;
+ 		DoRenderHeldItem = true;
+ 		glitchAffected = true;
+ 		waterBobbing = entity.Properties.Attributes?["waterBobbing"].AsBool() ?? false;
+ 		glitchFlicker = entity.Properties.Attributes?["glitchFlicker"].AsBool() ?? false;
+@@ -354,17 +406,29 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 		if (!entity.ShapeFresh)
+ 		{
+ 			TesselateShape();
+ 			capi.World.FrameProfiler.Mark("esr-tesseleateshape");
+ 		}
+-		lightrgbs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
+-		if (entity.SelectionBox.Y2 > 1f)
++		int lightX = (int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1);
++		int lightY = (int)entity.Pos.InternalY;
++		int lightZ = (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1);
++		bool needsUpperSample = entity.SelectionBox.Y2 > 1f;
++		if (TryUseOptimumLightSamples(lightX, lightY, lightZ, needsUpperSample, out lightrgbs))
+ 		{
+-			Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY + 1, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
+-			if (lightRGBs.W > lightrgbs.W)
++			OptimumDiagnostics.EntityLightBatch.Skip();
++		}
++		else
++		{
++			OptimumDiagnostics.EntityLightBatch.Hit();
++			lightrgbs = capi.World.BlockAccessor.GetLightRGBs(lightX, lightY, lightZ);
++			if (needsUpperSample)
+ 			{
+-				lightrgbs = lightRGBs;
++				Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs(lightX, lightY + 1, lightZ);
++				if (lightRGBs.W > lightrgbs.W)
++				{
++					lightrgbs = lightRGBs;
++				}
+ 			}
+ 		}
+ 		if (meshRefOpaque == null)
+ 		{
+ 			return;
+@@ -598,10 +662,11 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 	public override void DoRender3DOpaqueBatched(float dt, bool isShadowPass)
+ 	{
+ 		if (!isSpectator && meshRefOpaque != null && entity.AnimManager?.Animator != null)
+ 		{
+ 			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
++			bool useOptimumShaderState = OptimumEntityShaderState.TryGetAnimationUbo(currentActiveShader, out UBORef animationUbo);
+ 			if (isShadowPass)
+ 			{
+ 				Mat4f.Mul(tmpMvMat, capi.Render.CurrentModelviewMatrix, ModelMat);
+ 				currentActiveShader.UniformMatrix("modelViewMatrix", tmpMvMat);
+ 			}
+@@ -610,11 +675,19 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 				frostAlpha += (targetFrostAlpha - frostAlpha) * dt / 6f;
+ 				float value = (float)Math.Round(GameMath.Clamp(frostAlpha, 0f, 1f), 4);
+ 				currentActiveShader.Uniform("rgbaLightIn", lightrgbs);
+ 				currentActiveShader.Uniform("extraGlow", entity.Properties.Client.GlowLevel);
+ 				currentActiveShader.UniformMatrix("modelMatrix", ModelMat);
+-				currentActiveShader.UniformMatrix("viewMatrix", capi.Render.CurrentModelviewMatrix);
++				if (useOptimumShaderState)
++				{
++					OptimumDiagnostics.EntityShaderStateCache.Skip();
++				}
++				else
++				{
++					OptimumDiagnostics.EntityShaderStateCache.Hit();
++					currentActiveShader.UniformMatrix("viewMatrix", capi.Render.CurrentModelviewMatrix);
++				}
+ 				currentActiveShader.Uniform("addRenderFlags", AddRenderFlags);
+ 				currentActiveShader.Uniform("windWaveIntensity", (float)WindWaveIntensity);
+ 				currentActiveShader.Uniform("entityId", (int)entity.EntityId);
+ 				currentActiveShader.Uniform("glitchFlicker", glitchFlicker ? 1 : 0);
+ 				currentActiveShader.Uniform("frostAlpha", value);
+@@ -628,18 +701,119 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 				double val2 = capi.World.Player.Entity.WatchedAttributes.GetDouble("temporalStability", 1.0);
+ 				double num = Math.Min(val, val2);
+ 				float value2 = (float)(glitchAffected ? Math.Max(0.0, 1.0 - 2.5 * num) : 0.0);
+ 				currentActiveShader.Uniform("glitchEffectStrength", value2);
+ 			}
+-			currentActiveShader.UBOs["Animation"].Update((object)entity.AnimManager.Animator.Matrices, 0, entity.AnimManager.Animator.MaxJointId * 16 * 4);
++			if (!useOptimumShaderState)
++			{
++				animationUbo = currentActiveShader.UBOs["Animation"];
++			}
++			animationUbo.Update((object)entity.AnimManager.Animator.Matrices, 0, entity.AnimManager.Animator.MaxJointId * 16 * 4);
+ 			if (meshRefOpaque != null)
+ 			{
+ 				capi.Render.RenderMultiTextureMesh(meshRefOpaque, "entityTex");
+ 			}
+ 		}
+ 	}
+ 
++	public void GetOptimumLightSampleCoordinates(int sampleIndex, out int x, out int y, out int z)
++	{
++		if ((uint)sampleIndex > 1u)
++		{
++			throw new ArgumentOutOfRangeException(nameof(sampleIndex));
++		}
++		x = (int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1);
++		y = (int)entity.Pos.InternalY + sampleIndex;
++		z = (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1);
++	}
++
++	public void SetOptimumLightSample(int batchId, int sampleIndex, int x, int y, int z, IWorldChunk sourceChunk, float red, float green, float blue, float sunlight)
++	{
++		if (sampleIndex == 0)
++		{
++			optimumBaseLightBatchId = batchId;
++			optimumBaseLightX = x;
++			optimumBaseLightY = y;
++			optimumBaseLightZ = z;
++			optimumBaseLightChunk = sourceChunk;
++			optimumBaseLightRed = red;
++			optimumBaseLightGreen = green;
++			optimumBaseLightBlue = blue;
++			optimumBaseLightSun = sunlight;
++			return;
++		}
++		if (sampleIndex == 1)
++		{
++			optimumUpperLightBatchId = batchId;
++			optimumUpperLightX = x;
++			optimumUpperLightY = y;
++			optimumUpperLightZ = z;
++			optimumUpperLightChunk = sourceChunk;
++			optimumUpperLightRed = red;
++			optimumUpperLightGreen = green;
++			optimumUpperLightBlue = blue;
++			optimumUpperLightSun = sunlight;
++			return;
++		}
++		throw new ArgumentOutOfRangeException(nameof(sampleIndex));
++	}
++
++	public void ActivateOptimumLightBatch(int batchId)
++	{
++		optimumActiveLightBatchId = batchId;
++		if (batchId == 0)
++		{
++			ClearOptimumLightSamples();
++		}
++	}
++
++	private void ClearOptimumLightSamples()
++	{
++		optimumBaseLightBatchId = 0;
++		optimumBaseLightChunk = null;
++		optimumUpperLightBatchId = 0;
++		optimumUpperLightChunk = null;
++	}
++
++	private bool TryUseOptimumLightSamples(int x, int y, int z, bool needsUpperSample, out Vec4f lightResult)
++	{
++		lightResult = null;
++		int batchId = optimumActiveLightBatchId;
++		optimumActiveLightBatchId = 0;
++		int baseLightBatchId = optimumBaseLightBatchId;
++		int upperLightBatchId = optimumUpperLightBatchId;
++		IWorldChunk baseChunk = optimumBaseLightChunk;
++		IWorldChunk upperChunk = optimumUpperLightChunk;
++		bool baseCoordinatesMatch = optimumBaseLightX == x && optimumBaseLightY == y && optimumBaseLightZ == z;
++		bool upperCoordinatesMatch = !needsUpperSample || (optimumUpperLightX == x && optimumUpperLightY == y + 1 && optimumUpperLightZ == z);
++		ClearOptimumLightSamples();
++		if (batchId == 0 || baseLightBatchId != batchId || (needsUpperSample && upperLightBatchId != batchId))
++		{
++			return false;
++		}
++		if (!baseCoordinatesMatch || !upperCoordinatesMatch)
++		{
++			OptimumDiagnostics.RecordEntityLightCoordinateMismatch();
++			return false;
++		}
++		if ((baseChunk != null && baseChunk.Disposed) || (needsUpperSample && upperChunk != null && upperChunk.Disposed))
++		{
++			OptimumDiagnostics.RecordEntityLightChunkInvalidation();
++			return false;
++		}
++		lightResult = new Vec4f();
++		if (needsUpperSample && optimumUpperLightSun > optimumBaseLightSun)
++		{
++			lightResult.Set(optimumUpperLightRed, optimumUpperLightGreen, optimumUpperLightBlue, optimumUpperLightSun);
++		}
++		else
++		{
++			lightResult.Set(optimumBaseLightRed, optimumBaseLightGreen, optimumBaseLightBlue, optimumBaseLightSun);
++		}
++		return true;
++	}
++
+ 	public override void DoRender2D(float dt)
+ 	{
+ 		if (isSpectator || (debugTagTexture == null && messageTextures == null))
+ 		{
+ 			return;

@@ -1,0 +1,46 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs b/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
+--- a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
++++ b/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
+@@ -17,10 +17,14 @@ public class WeatherSimulationParticles
+ 
+ 	private static int[,] lowResRainHeightMap;
+ 
+ 	private static BlockPos centerPos;
+ 
++	private int optimumLastHeightmapCenterX = int.MinValue;
++
++	private int optimumLastHeightmapCenterZ = int.MinValue;
++
+ 	public static int waterColor;
+ 
+ 	public static int lowStabColor;
+ 
+ 	public int rainParticleColor;
+@@ -307,17 +311,22 @@ public class WeatherSimulationParticles
+ 		particlePos.Set(capi.World.Player.Entity.Pos.X, rainMapHeightAt, capi.World.Player.Entity.Pos.Z);
+ 		int color = capi.World.ApplyColorMapOnRgba(lblock.ClimateColorMapResolved, lblock.SeasonColorMapResolved, -1, (int)particlePos.X, (int)particlePos.Y, (int)particlePos.Z, flipRb: false);
+ 		byte[] array = ColorUtil.ToBGRABytes(color);
+ 		color = ColorUtil.ToRgba(94, array[0], array[1], array[2]);
+ 		centerPos.Set((int)particlePos.X, 0, (int)particlePos.Z);
+-		for (int i = 0; i < 16; i++)
++		if (Math.Abs(centerPos.X - optimumLastHeightmapCenterX) >= 4 || Math.Abs(centerPos.Z - optimumLastHeightmapCenterZ) >= 4)
+ 		{
+-			int num = (i - 8) * 4;
+-			for (int j = 0; j < 16; j++)
++			optimumLastHeightmapCenterX = centerPos.X;
++			optimumLastHeightmapCenterZ = centerPos.Z;
++			for (int i = 0; i < 16; i++)
+ 			{
+-				int num2 = (j - 8) * 4;
+-				lowResRainHeightMap[i, j] = capi.World.BlockAccessor.GetRainMapHeightAt(centerPos.X + num, centerPos.Z + num2);
++				int num = (i - 8) * 4;
++				for (int j = 0; j < 16; j++)
++				{
++					int num2 = (j - 8) * 4;
++					lowResRainHeightMap[i, j] = capi.World.BlockAccessor.GetRainMapHeightAt(centerPos.X + num, centerPos.Z + num2);
++				}
+ 			}
+ 		}
+ 		windSpeed = capi.World.BlockAccessor.GetWindSpeedAt(pos.XYZ).ToVec3f();
+ 		windSpeedIntensity = windSpeed.Length();
+ 		parentVeloSnow.X = (0f - Math.Max(0f, windSpeed.X / 2f - 0.15f)) * 2f;

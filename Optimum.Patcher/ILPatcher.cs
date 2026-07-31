@@ -19,28 +19,97 @@ public static class ILPatcher
         return PatchWithInjection(vanillaPath, compiledPath, outputPath, new(), new(), targets);
     }
 
+    /// <summary>
+    /// Adds the first ancestor directory of <paramref name="startPath"/> that contains
+    /// VintagestoryAPI.dll (plus its Lib folder) to the resolver's search path. Returns
+    /// true if such a directory was found.
+    /// </summary>
+    internal static bool AddGameRootSearchDirectories(BaseAssemblyResolver resolver, string startPath)
+    {
+        string? current;
+        try
+        {
+            current = Path.GetDirectoryName(Path.GetFullPath(startPath));
+        }
+        catch
+        {
+            return false;
+        }
+
+        for (int depth = 0; current != null && depth < 8; depth++)
+        {
+            if (File.Exists(Path.Combine(current, "VintagestoryAPI.dll")))
+            {
+                resolver.AddSearchDirectory(current);
+                AddSearchDirectorySafe(resolver, Path.Combine(current, "Lib"));
+                return true;
+            }
+
+            current = Path.GetDirectoryName(current);
+        }
+
+        return false;
+    }
+
+    private static void AddSearchDirectorySafe(BaseAssemblyResolver resolver, string? directory)
+    {
+        if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
+        {
+            resolver.AddSearchDirectory(directory);
+        }
+    }
+
     public static int PatchWithInjection(
         string vanillaPath, string compiledPath, string outputPath,
         List<string> typesToInject,
         Dictionary<string, List<string>> membersToInject,
         List<MethodTarget> targets,
-        List<(string typeName, string methodName, int paramCount, string hookMethod, string targetCall)>? hooks = null)
+        List<(string typeName, string methodName, int paramCount, string hookMethod, string targetCall)>? hooks = null,
+        Dictionary<string, List<string>>? interfacesToInject = null,
+        bool requireAllTargets = false)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
         resolver.AddSearchDirectory(Path.Combine(Path.GetDirectoryName(vanillaPath)!, "Lib"));
         // Also search alongside the compiled DLL (for VintagestoryAPI.dll etc.)
         resolver.AddSearchDirectory(Path.GetDirectoryName(compiledPath)!);
+        // ...and alongside the output, which for the launcher's own patch loop is
+        // the cache dir holding the already-patched VintagestoryAPI.dll.
+        AddSearchDirectorySafe(resolver, Path.GetDirectoryName(outputPath));
+        // The mod pass reads its input from <game>/.optimum/vanilla/Mods and its
+        // donor from <game>/.optimum/donors - neither directory holds a
+        // VintagestoryAPI.dll, so Cecil cannot resolve the game assemblies from
+        // any of the directories above. That stays invisible until Cecil has to
+        // resolve a type to write it out (MetadataBuilder.GetConstantType, for a
+        // parameter default value on an injected member), at which point
+        // AssemblyDefinition.Write throws AssemblyResolutionException, the
+        // patcher process dies, and the launcher silently falls back to a
+        // vanilla (unpatched) launch. Walk up from both inputs to the first
+        // ancestor that actually contains VintagestoryAPI.dll - the game root.
+        AddGameRootSearchDirectories(resolver, vanillaPath);
+        AddGameRootSearchDirectories(resolver, compiledPath);
 
-        var readerParams = new ReaderParameters
+        string vanillaPdbPath = Path.ChangeExtension(vanillaPath, ".pdb");
+        bool preserveSymbols = File.Exists(vanillaPdbPath);
+        var vanillaReaderParams = new ReaderParameters
+        {
+            AssemblyResolver = resolver,
+            ReadWrite = false,
+            ReadSymbols = preserveSymbols
+        };
+        var compiledReaderParams = new ReaderParameters
         {
             AssemblyResolver = resolver,
             ReadWrite = false,
             ReadSymbols = false
         };
 
-        using var vanillaAsm = AssemblyDefinition.ReadAssembly(vanillaPath, readerParams);
-        using var compiledAsm = AssemblyDefinition.ReadAssembly(compiledPath, readerParams);
+        using var vanillaAsm = AssemblyDefinition.ReadAssembly(vanillaPath, vanillaReaderParams);
+        using var compiledAsm = AssemblyDefinition.ReadAssembly(compiledPath, compiledReaderParams);
+
+        int injectedInterfaces = interfacesToInject == null
+            ? 0
+            : MemberInjector.InjectInterfaces(vanillaAsm, compiledAsm, interfacesToInject);
 
         // Phase 2a: Inject new types
         int injectedTypes = MemberInjector.InjectTypes(vanillaAsm, compiledAsm, typesToInject);
@@ -61,11 +130,15 @@ public static class ILPatcher
 
             if (vanillaMethod == null)
             {
+                if (requireAllTargets)
+                    throw new InvalidOperationException($"Required vanilla method not found: {target}");
                 Console.Error.WriteLine($"  SKIP (not in vanilla): {target}");
                 continue;
             }
             if (compiledMethod == null)
             {
+                if (requireAllTargets)
+                    throw new InvalidOperationException($"Required compiled method not found: {target}");
                 Console.Error.WriteLine($"  SKIP (not in compiled): {target}");
                 continue;
             }
@@ -80,6 +153,11 @@ public static class ILPatcher
 
             // Auto-inject missing fields referenced by this method
             InjectMissingFieldsForMethod(compiledMethod, vanillaAsm);
+
+            // Auto-inject compiler-generated helper methods (typically lambdas)
+            // referenced by a transplanted method but absent from the exact
+            // vanilla type because the compiler-generated ordinal changed.
+            InjectMissingMethodsForMethod(compiledMethod, vanillaAsm, compiledAsm);
 
             TransplantBody(vanillaMethod, compiledMethod, vanillaAsm, compiledAsm);
             patched++;
@@ -97,7 +175,7 @@ public static class ILPatcher
             }
         }
 
-        Console.WriteLine($"\n  Summary: {injectedTypes} types, {injectedMembers} members injected, {patched}/{targets.Count} methods patched, {hooked} hooks.");
+        Console.WriteLine($"\n  Summary: {injectedTypes} types, {injectedMembers} members, {injectedInterfaces} interfaces injected, {patched}/{targets.Count} methods patched, {hooked} hooks.");
 
         var selfRefErrors = SelfConsistencyVerifier.VerifySelfReferences(vanillaAsm.MainModule);
         if (selfRefErrors.Count > 0)
@@ -117,8 +195,12 @@ public static class ILPatcher
             return -1;
         }
 
-        vanillaAsm.Write(outputPath);
-        return injectedTypes + injectedMembers + patched;
+        vanillaAsm.Write(outputPath, new WriterParameters { WriteSymbols = preserveSymbols });
+        if (preserveSymbols)
+        {
+            Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");
+        }
+        return injectedTypes + injectedMembers + injectedInterfaces + patched;
     }
 
 
@@ -227,6 +309,40 @@ public static class ILPatcher
             if (srcField.HasConstant) newField.Constant = srcField.Constant;
             vanillaType.Fields.Add(newField);
             Console.WriteLine($"    INJECTED FIELD: {declaringType.FullName}::{srcField.Name}");
+        }
+    }
+
+    private static void InjectMissingMethodsForMethod(
+        MethodDefinition compiledMethod,
+        AssemblyDefinition vanillaAsm,
+        AssemblyDefinition compiledAsm)
+    {
+        if (!compiledMethod.HasBody) return;
+
+        var missingNames = new HashSet<string>();
+        foreach (var instruction in compiledMethod.Body.Instructions)
+        {
+            if (instruction.Operand is not MethodReference methodRef) continue;
+            if (methodRef.DeclaringType.FullName != compiledMethod.DeclaringType.FullName) continue;
+
+            var targetType = vanillaAsm.MainModule.GetType(methodRef.DeclaringType.FullName);
+            if (targetType == null) continue;
+            bool exists = targetType.Methods.Any(method =>
+                method.Name == methodRef.Name &&
+                method.Parameters.Count == methodRef.Parameters.Count);
+            if (!exists)
+            {
+                missingNames.Add(methodRef.Name);
+            }
+        }
+
+        foreach (string name in missingNames)
+        {
+            MemberInjector.InjectStaticMembers(
+                vanillaAsm,
+                compiledAsm,
+                compiledMethod.DeclaringType.FullName,
+                new List<string> { name });
         }
     }
 
@@ -351,6 +467,8 @@ public static class ILPatcher
         AssemblyDefinition vanillaAsm,
         AssemblyDefinition compiledAsm)
     {
+        vanilla.DebugInformation.SequencePoints.Clear();
+        vanilla.DebugInformation.Scope = null;
         var body = vanilla.Body;
         body.Instructions.Clear();
         body.Variables.Clear();

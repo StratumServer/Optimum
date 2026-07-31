@@ -1,0 +1,134 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/EventManager.cs b/VintagestoryLib/Vintagestory.Common/EventManager.cs
+index 842d31f..7309654 100644
+--- a/VintagestoryLib/Vintagestory.Common/EventManager.cs
++++ b/VintagestoryLib/Vintagestory.Common/EventManager.cs
+@@ -27,10 +27,26 @@ public abstract class EventManager
+ 
+ 	internal Dictionary<BlockPos, DelayedCallbackBlock> SingleDelayedCallbacksBlock = new Dictionary<BlockPos, DelayedCallbackBlock>();
+ 
+ 	private List<DelayedCallback> deletable = new List<DelayedCallback>();
+ 
++	// Optimum: reuse list instead of new List<BlockPos>(dict.Keys) per tick.
++	// No field initializer: Cecil field injection adds the field but never
++	// runs initializer IL (the vanilla .ctor is not a transplant target), so
++	// this defaulted to null at runtime - TriggerGameTick's unconditional
++	// .Clear() crashed with NRE on literally the first tick every time.
++	// Lazily created with ??= at each use site below (both call sites run on
++	// the single server tick thread, so no race).
++	private List<BlockPos> singleDelayedCallbackBlockKeys;
++
++	// Optimum: cache GetInvocationList results. Multicast delegates are immutable:
++	// comparing the delegate reference detects handler add/remove.
++	private OnGetClimateDelegate optimumCachedClimateDelegate;
++	private Delegate[] optimumCachedClimateInvocations = Array.Empty<Delegate>();
++	private OnGetWindSpeedDelegate optimumCachedWindDelegate;
++	private Delegate[] optimumCachedWindInvocations = Array.Empty<Delegate>();
++
+ 	public abstract ILogger Logger { get; }
+ 
+ 	public abstract string CommandPrefix { get; }
+ 
+ 	public abstract long InWorldEllapsedMs { get; }
+@@ -88,15 +104,22 @@ public abstract class EventManager
+ 		}
+ 	}
+ 
+ 	public virtual void TriggerOnGetClimate(ref ClimateCondition climate, BlockPos pos, EnumGetClimateMode mode = EnumGetClimateMode.WorldGenValues, double totalDays = 0.0)
+ 	{
+-		if (this.OnGetClimate == null)
++		OnGetClimateDelegate current = this.OnGetClimate;
++		if (current == null)
+ 		{
+ 			return;
+ 		}
+-		Delegate[] invocationList = this.OnGetClimate.GetInvocationList();
++		// Optimum: cache the invocation list. Rebuild only when the delegate reference changes.
++		if (!ReferenceEquals(current, optimumCachedClimateDelegate))
++		{
++			optimumCachedClimateInvocations = current.GetInvocationList();
++			optimumCachedClimateDelegate = current;
++		}
++		Delegate[] invocationList = optimumCachedClimateInvocations;
+ 		for (int i = 0; i < invocationList.Length; i++)
+ 		{
+ 			OnGetClimateDelegate onGetClimateDelegate = (OnGetClimateDelegate)invocationList[i];
+ 			try
+ 			{
+@@ -110,15 +133,22 @@ public abstract class EventManager
+ 		}
+ 	}
+ 
+ 	public virtual void TriggerOnGetWindSpeed(Vec3d pos, ref Vec3d windSpeed)
+ 	{
+-		if (this.OnGetWindSpeed == null)
++		OnGetWindSpeedDelegate current = this.OnGetWindSpeed;
++		if (current == null)
+ 		{
+ 			return;
+ 		}
+-		Delegate[] invocationList = this.OnGetWindSpeed.GetInvocationList();
++		// Optimum: cache the invocation list. Rebuild only when the delegate reference changes.
++		if (!ReferenceEquals(current, optimumCachedWindDelegate))
++		{
++			optimumCachedWindInvocations = current.GetInvocationList();
++			optimumCachedWindDelegate = current;
++		}
++		Delegate[] invocationList = optimumCachedWindInvocations;
+ 		for (int i = 0; i < invocationList.Length; i++)
+ 		{
+ 			OnGetWindSpeedDelegate onGetWindSpeedDelegate = (OnGetWindSpeedDelegate)invocationList[i];
+ 			try
+ 			{
+@@ -182,19 +212,24 @@ public abstract class EventManager
+ 			}
+ 		}
+ 		Dictionary<BlockPos, DelayedCallbackBlock> singleDelayedCallbacksBlock = SingleDelayedCallbacksBlock;
+ 		if (singleDelayedCallbacksBlock.Count > 0)
+ 		{
+-			foreach (BlockPos item3 in new List<BlockPos>(singleDelayedCallbacksBlock.Keys))
++			// Optimum: reuse list instead of new List<BlockPos>(dict.Keys) per tick
++			singleDelayedCallbackBlockKeys ??= new List<BlockPos>();
++			singleDelayedCallbackBlockKeys.Clear();
++			singleDelayedCallbackBlockKeys.AddRange(singleDelayedCallbacksBlock.Keys);
++			foreach (BlockPos item3 in singleDelayedCallbackBlockKeys)
+ 			{
+ 				DelayedCallbackBlock delayedCallbackBlock2 = singleDelayedCallbacksBlock[item3];
+ 				if (ellapsedMilliseconds - delayedCallbackBlock2.CallAtEllapsedMilliseconds >= 0)
+ 				{
+ 					singleDelayedCallbacksBlock.Remove(item3);
+ 					delayedCallbackBlock2.Handler(world, delayedCallbackBlock2.Pos, (float)(ellapsedMilliseconds - delayedCallbackBlock2.CallAtEllapsedMilliseconds) / 1000f);
+ 				}
+ 			}
++			singleDelayedCallbackBlockKeys.Clear();
+ 		}
+ 		frameProfiler.Mark("tick-dcblock");
+ 	}
+ 
+ 	public virtual void TriggerGameTickDebug(long ellapsedMilliseconds, IWorldAccessor world)
+@@ -249,20 +284,25 @@ public abstract class EventManager
+ 		Dictionary<BlockPos, DelayedCallbackBlock> singleDelayedCallbacksBlock = SingleDelayedCallbacksBlock;
+ 		if (singleDelayedCallbacksBlock.Count <= 0)
+ 		{
+ 			return;
+ 		}
+-		foreach (BlockPos item3 in new List<BlockPos>(singleDelayedCallbacksBlock.Keys))
++		// Optimum: reuse list instead of new List<BlockPos>(dict.Keys) per tick
++		singleDelayedCallbackBlockKeys ??= new List<BlockPos>();
++		singleDelayedCallbackBlockKeys.Clear();
++		singleDelayedCallbackBlockKeys.AddRange(singleDelayedCallbacksBlock.Keys);
++		foreach (BlockPos item3 in singleDelayedCallbackBlockKeys)
+ 		{
+ 			DelayedCallbackBlock delayedCallbackBlock2 = singleDelayedCallbacksBlock[item3];
+ 			if (ellapsedMilliseconds - delayedCallbackBlock2.CallAtEllapsedMilliseconds >= 0)
+ 			{
+ 				singleDelayedCallbacksBlock.Remove(item3);
+ 				delayedCallbackBlock2.Handler(world, delayedCallbackBlock2.Pos, (float)(ellapsedMilliseconds - delayedCallbackBlock2.CallAtEllapsedMilliseconds) / 1000f);
+ 				world.FrameProfiler.Mark("sdcb", delayedCallbackBlock2.ProfileName);
+ 			}
+ 		}
++		singleDelayedCallbackBlockKeys.Clear();
+ 	}
+ 
+ 	public virtual long AddGameTickListener(Action<float> handler, int millisecondInterval, int initialDelayOffsetMs = 0)
+ 	{
+ 		return AddGameTickListener(handler, null, millisecondInterval, initialDelayOffsetMs);

@@ -1,0 +1,34 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs
+index a8590af..6a28029 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs
+@@ -20,10 +20,14 @@ internal class ServerSystemCompressChunks(ServerMain server) : ServerSystem(serv
+ 
+ 	private object clientIdsLock = new object();
+ 
+ 	private List<int> clientIds = new List<int>();
+ 
++	// Optimum: reusable player position list for FindFreeableMemory (runs every 4s)
++	// No field initializer: Cecil field injection never runs it. See ??= below.
++	private List<BlockPos> optimumPlayerChunkPositions;
++
+ 	public override void OnPlayerJoin(ServerPlayer player)
+ 	{
+ 		lock (clientIdsLock)
+ 		{
+ 			clientIds.Add(player.ClientId);
+@@ -57,11 +61,13 @@ internal class ServerSystemCompressChunks(ServerMain server) : ServerSystem(serv
+ 		}
+ 	}
+ 
+ 	private void FindFreeableMemory()
+ 	{
+-		List<BlockPos> list = new List<BlockPos>();
++		// Optimum: reuse list instead of allocating per call.
++		List<BlockPos> list = optimumPlayerChunkPositions ??= new List<BlockPos>();
++		list.Clear();
+ 		lock (clientIdsLock)
+ 		{
+ 			foreach (int clientId in clientIds)
+ 			{
+ 				if (server.Clients.TryGetValue(clientId, out var value) && value.State == EnumClientState.Playing)

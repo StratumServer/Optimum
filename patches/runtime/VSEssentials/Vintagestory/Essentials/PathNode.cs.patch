@@ -1,0 +1,18 @@
+diff --git a/VSEssentials/Vintagestory/Essentials/PathNode.cs b/VSEssentials/Vintagestory/Essentials/PathNode.cs
+--- a/VSEssentials/Vintagestory/Essentials/PathNode.cs
++++ b/VSEssentials/Vintagestory/Essentials/PathNode.cs
+@@ -31,10 +31,14 @@ public class PathNode : BlockPos, IEquatable<PathNode>
+ 		dimension = pos.dimension;
+ 	}
+ 
+ 	public bool Equals(PathNode other)
+ 	{
++		if (other == null)
++		{
++			return false;
++		}
+ 		if (other.X == X && other.Y == Y)
+ 		{
+ 			return other.Z == Z;
+ 		}
+ 		return false;

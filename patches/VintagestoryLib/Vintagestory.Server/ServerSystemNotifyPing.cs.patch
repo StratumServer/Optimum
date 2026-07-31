@@ -1,0 +1,34 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs
+index 7229dd4..5a9be63 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs
+@@ -8,10 +8,14 @@ public class ServerSystemNotifyPing : ServerSystem
+ 	{
+ 		Interval = 1.0,
+ 		MaxDeltaTime = 5.0
+ 	};
+ 
++	// Optimum: reusable timeout list for PingTimerTick
++	// No field initializer: Cecil field injection never runs it. See ??= below.
++	private List<int> optimumPingTimeouts;
++
+ 	public ServerSystemNotifyPing(ServerMain server)
+ 		: base(server)
+ 	{
+ 		server.RegisterGameTickListener(OnEveryFewSeconds, 5000);
+ 		server.PacketHandlers[2] = HandlePingReply;
+@@ -39,11 +43,13 @@ public class ServerSystemNotifyPing : ServerSystem
+ 		if (server.exitState.Exit)
+ 		{
+ 			return;
+ 		}
+ 		long elapsedMilliseconds = server.totalUnpausedTime.ElapsedMilliseconds;
+-		List<int> list = new List<int>();
++		// Optimum: reuse list instead of allocating per ping cycle.
++		List<int> list = optimumPingTimeouts ??= new List<int>();
++		list.Clear();
+ 		foreach (var (num2, connectedClient2) in server.Clients)
+ 		{
+ 			if (!connectedClient2.Ping.DidReplyOnLastPing)
+ 			{
+ 				if (connectedClient2.Ping.DidTimeout(elapsedMilliseconds) && !connectedClient2.IsSinglePlayerClient)

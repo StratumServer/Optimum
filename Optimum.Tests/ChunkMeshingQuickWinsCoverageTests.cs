@@ -65,7 +65,8 @@ public class ChunkMeshingQuickWinsCoverageTests
 
         Assert.Contains("SortMoveThresholdSq = 0.25", source);
         Assert.Contains("SortYawThreshold = 0.05f", source);
-        Assert.Contains("tessChunksQueue.ItemAt(i).RecalcPriority(game.player);", source);
+        Assert.Contains("tessChunksQueue.RunForEach(_optimumRecalcPriority ??= OptimumRecalcPriority);", source);
+        Assert.Contains("chunk.RecalcPriority(game.player);", source);
         Assert.Contains("OptimumDiagnostics.ChunkUploadSort.Hit()", source);
         Assert.Contains("OptimumDiagnostics.ChunkUploadSort.Skip()", source);
     }

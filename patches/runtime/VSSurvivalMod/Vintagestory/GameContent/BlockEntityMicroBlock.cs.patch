@@ -1,0 +1,61 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs
+@@ -2351,18 +2351,52 @@ public class BlockEntityMicroBlock : BlockEntity, IRotatable, IAcceptsDecor, IMa
+ 		if (Mesh == null)
+ 		{
+ 			Mesh = GenMesh();
+ 		}
+ 		base.OnTesselation(mesher, tesselator);
+-		if (withColorMapData)
+-		{
+-			ColorMapData colorMapData = (Api as ICoreClientAPI).World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
+-			mesher.AddMeshData(Mesh, colorMapData);
++		ICoreClientAPI capi = Api as ICoreClientAPI;
++		bool canChisel = base.Block.Attributes?["canChisel"].AsBool(defaultValue: true) ?? true;
++		if (capi != null && OptimumConfig.ChiselLodEnabled && canChisel && BlockIds != null && BlockIds.Length > 0)
++		{
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			int primaryBlockId = GetMajorityMaterialId();
++			Block primaryBlock = Api.World.GetBlock(primaryBlockId);
++			MeshData lodMesh = capi.TesselatorManager.GetDefaultBlockMesh(primaryBlock)?.Clone();
++			bool fallback = lodMesh == null;
++			lodMesh ??= Mesh;
++			try
++			{
++				OptimumConfig.RouteChiselLodMeshes = true;
++				if (withColorMapData)
++				{
++					ColorMapData colorMapData = capi.World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
++					mesher.AddMeshData(Mesh, colorMapData, 2);
++					mesher.AddMeshData(lodMesh, colorMapData, 3);
++				}
++				else
++				{
++					mesher.AddMeshData(Mesh, 2);
++					mesher.AddMeshData(lodMesh, 3);
++				}
++			}
++			finally
++			{
++				OptimumConfig.RouteChiselLodMeshes = false;
++			}
++			OptimumDiagnostics.RecordChiselLod(Mesh.IndicesCount / 3, lodMesh.IndicesCount / 3, fallback, System.Diagnostics.Stopwatch.GetTimestamp() - startTicks);
+ 		}
+ 		else
+ 		{
+-			mesher.AddMeshData(Mesh);
++			if (withColorMapData)
++			{
++				ColorMapData colorMapData = capi.World.GetColorMapData(Api.World.Blocks[BlockIds[0]], Pos.X, Pos.Y, Pos.Z);
++				mesher.AddMeshData(Mesh, colorMapData);
++			}
++			else
++			{
++				mesher.AddMeshData(Mesh);
++			}
+ 		}
+ 		base.Block = Api.World.BlockAccessor.GetBlock(Pos);
+ 		return true;
+ 	}
+ 

@@ -1,0 +1,15 @@
+{
+  "solution": {
+    "path": "VintageStory.slnx",
+    "projects": [
+      "VintagestoryApi/VintagestoryAPI.csproj",
+      "Cairo/Cairo.csproj",
+      "build/VintagestoryLib/VintagestoryLib.csproj",
+      "VSEssentials/VSEssentialsMod.csproj",
+      "VSSurvivalMod/VSSurvivalMod.csproj",
+      "VSCreativeMod/VSCreativeMod.csproj",
+      "optimum-api-contracts/optimum-api-contracts.csproj",
+      "optimum-game-content/optimum-game-content.csproj"
+    ]
+  }
+}

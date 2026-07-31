@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..7e7cc6b 100644
+index 4d08f84..2ecb761 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -114,59 +114,59 @@ index 4d08f84..7e7cc6b 100644
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-bgfps-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
-+			.AddSwitch(onOptimumBackgroundFpsChanged, ElementBounds.Fixed(450, y0 + 2, 200, 20), "optBgFps")
++			.AddSwitch(onOptimumBackgroundFpsChanged, ElementBounds.Fixed(450, y0 - 3, 200, 20), "optBgFps")
 +			.AddStaticText(Lang.Get("optimum-framepacing"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-framepacing-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH, 400, 25))
-+			.AddSwitch(onOptimumFramePacingChanged, ElementBounds.Fixed(450, y0 + rowH + 2, 200, 20), "optFramePacing")
++			.AddSwitch(onOptimumFramePacingChanged, ElementBounds.Fixed(450, y0 + rowH - 3, 200, 20), "optFramePacing")
 +			.AddStaticText(Lang.Get("optimum-shadowcull"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 2, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-shadowcull-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 2, 400, 25))
-+			.AddSwitch(onOptimumShadowCullChanged, ElementBounds.Fixed(450, y0 + rowH * 2 + 2, 200, 20), "optShadowCull")
++			.AddSwitch(onOptimumShadowCullChanged, ElementBounds.Fixed(450, y0 + rowH * 2 - 3, 200, 20), "optShadowCull")
 +			.AddStaticText(Lang.Get("optimum-shadowdist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 3, 400, 30))
 +			.AddSlider(onOptimumShadowDistChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 20), "optShadowDist")
 +			.AddStaticText(Lang.Get("optimum-repulsion"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 4, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-repulsion-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 4, 400, 25))
-+			.AddSwitch(onOptimumRepulsionChanged, ElementBounds.Fixed(450, y0 + rowH * 4 + 2, 200, 20), "optRepulsion")
++			.AddSwitch(onOptimumRepulsionChanged, ElementBounds.Fixed(450, y0 + rowH * 4 - 3, 200, 20), "optRepulsion")
 +			.AddStaticText(Lang.Get("optimum-repulsiondist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 400, 30))
 +			.AddSlider(onOptimumRepulsionDistChanged, ElementBounds.Fixed(450, y0 + rowH * 5 + 2, 200, 20), "optRepulsionDist")
 +			.AddStaticText(Lang.Get("optimum-dynlight"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-dynlight-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 400, 25))
-+			.AddSwitch(onOptimumDynLightChanged, ElementBounds.Fixed(450, y0 + rowH * 6 + 2, 200, 20), "optDynLight")
++			.AddSwitch(onOptimumDynLightChanged, ElementBounds.Fixed(450, y0 + rowH * 6 - 3, 200, 20), "optDynLight")
 +			.AddStaticText(Lang.Get("optimum-animblocklod"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 7, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-animblocklod-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 7, 400, 25))
-+			.AddSwitch(onOptimumAnimBlockLodChanged, ElementBounds.Fixed(450, y0 + rowH * 7 + 2, 200, 20), "optAnimBlockLod")
++			.AddSwitch(onOptimumAnimBlockLodChanged, ElementBounds.Fixed(450, y0 + rowH * 7 - 3, 200, 20), "optAnimBlockLod")
 +			.AddStaticText(Lang.Get("optimum-shadowfarveg"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 8, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-shadowfarveg-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 8, 400, 25))
-+			.AddSwitch(onOptimumShadowFarVegChanged, ElementBounds.Fixed(450, y0 + rowH * 8 + 2, 200, 20), "optShadowFarVeg")
++			.AddSwitch(onOptimumShadowFarVegChanged, ElementBounds.Fixed(450, y0 + rowH * 8 - 3, 200, 20), "optShadowFarVeg")
 +			.AddStaticText(Lang.Get("optimum-weatherwind"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 9, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-weatherwind-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 9, 400, 25))
-+			.AddSwitch(onOptimumWeatherWindChanged, ElementBounds.Fixed(450, y0 + rowH * 9 + 2, 200, 20), "optWeatherWind")
++			.AddSwitch(onOptimumWeatherWindChanged, ElementBounds.Fixed(450, y0 + rowH * 9 - 3, 200, 20), "optWeatherWind")
 +			.AddStaticText(Lang.Get("optimum-particledist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 10, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-particledist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 10, 400, 25))
-+			.AddSwitch(onOptimumParticleDistChanged, ElementBounds.Fixed(450, y0 + rowH * 10 + 2, 200, 20), "optParticleDist")
++			.AddSwitch(onOptimumParticleDistChanged, ElementBounds.Fixed(450, y0 + rowH * 10 - 3, 200, 20), "optParticleDist")
 +			.AddStaticText(Lang.Get("optimum-chisellod"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 11, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-chisellod-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 11, 400, 25))
-+			.AddSwitch(onOptimumChiselLodChanged, ElementBounds.Fixed(450, y0 + rowH * 11 + 2, 200, 20), "optChiselLod")
++			.AddSwitch(onOptimumChiselLodChanged, ElementBounds.Fixed(450, y0 + rowH * 11 - 3, 200, 20), "optChiselLod")
 +			.AddStaticText(Lang.Get("optimum-chiselloddist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 12, 400, 30))
 +			.AddSlider(onOptimumChiselLodDistChanged, ElementBounds.Fixed(450, y0 + rowH * 12 + 2, 200, 20), "optChiselLodDist")
 +			.AddStaticText(Lang.Get("optimum-occlusionscale"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 13, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-occlusionscale-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 13, 400, 25))
-+			.AddSwitch(onOptimumOcclusionScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 13 + 2, 200, 20), "optOcclusionScale")
++			.AddSwitch(onOptimumOcclusionScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 13 - 3, 200, 20), "optOcclusionScale")
 +			.AddStaticText(Lang.Get("optimum-dynlightcache"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 14, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-dynlightcache-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 14, 400, 25))
-+			.AddSwitch(onOptimumDynLightCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 14 + 2, 200, 20), "optDynLightCache")
++			.AddSwitch(onOptimumDynLightCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 14 - 3, 200, 20), "optDynLightCache")
 +			.AddStaticText(Lang.Get("optimum-entitylightbatch"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 15, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-entitylightbatch-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 15, 400, 25))
-+			.AddSwitch(onOptimumEntityLightBatchChanged, ElementBounds.Fixed(450, y0 + rowH * 15 + 2, 200, 20), "optEntityLightBatch")
++			.AddSwitch(onOptimumEntityLightBatchChanged, ElementBounds.Fixed(450, y0 + rowH * 15 - 3, 200, 20), "optEntityLightBatch")
 +			.AddStaticText(Lang.Get("optimum-entityshadercache"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 16, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-entityshadercache-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 16, 400, 25))
-+			.AddSwitch(onOptimumEntityShaderCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 16 + 2, 200, 20), "optEntityShaderCache")
++			.AddSwitch(onOptimumEntityShaderCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 16 - 3, 200, 20), "optEntityShaderCache")
 +			.AddStaticText(Lang.Get("optimum-renderscale"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-renderscale-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
 +			.AddDropDown(new string[] { "1.0", "0.85", "0.77", "0.67" }, new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, 0, onOptimumRenderScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 17 + 2, 200, 25), "optRenderScale")
 +#if OPTIMUM_GREEDY_MESH
 +			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
-+			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 17 + 2, 200, 20), "optGreedyMesh")
++			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 17 - 3, 200, 20), "optGreedyMesh")
 +			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
 +			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 18 + 2, 200, 20), "optGreedySpan")
@@ -264,7 +264,7 @@ index 4d08f84..7e7cc6b 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1982,24 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1982,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
@@ -283,9 +283,59 @@ index 4d08f84..7e7cc6b 100644
 +		}
 +		ElementBounds anchor = ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds;
 +		oButtonBounds.WithFixedWidth(w);
-+		if (anchor != null) oButtonBounds.FixedRightOf(anchor, 15.0);
++		if (anchor != null) oButtonBounds.FixedRightOf(anchor, 10.0);
 +		if (anchor?.ParentBounds != null) oButtonBounds.ParentBounds = anchor.ParentBounds;
-+		backButtonBounds.FixedRightOf(oButtonBounds, 25.0);
++		backButtonBounds.FixedRightOf(oButtonBounds, 15.0);
++		// Vanilla already sized this dialog before the hook ran, from a Back
++		// button that was still sitting directly right of Interface/Developer,
++		// so the tab row's own parent has to grow to fit the shifted Back
++		// button - but it can NEVER grow alone.
++		//
++		// GuiElementDialogBackground.ComposeElements() calls
++		//   surface.BlurPartial(r, 2r+1, (int)Bounds.bgDrawX, (int)Bounds.bgDrawY,
++		//                       (int)Bounds.OuterWidth, (int)Bounds.OuterHeight)
++		// where the last two arguments are the *absolute* right/bottom edge of
++		// the region to blur. Neither SurfaceTransformBlur.BlurPartial nor
++		// GaussianBlur.boxBlur{H,T}_4RGBPartial clamps them against the
++		// surface: the inner loops write destP[y * w + x] straight through raw
++		// int* for x in [xs, xe). The composer's Cairo surface is allocated
++		// from GuiComposer.Bounds.OuterWidth in GuiComposer.Compose(), so any
++		// background bounds wider than the composer bounds runs the blur past
++		// the end of the native pixel buffer - a heap overrun that surfaces as
++		// a 0xc0000005 access violation with no managed stack trace, anywhere
++		// from the same compose to a minute later. Vanilla keeps the two
++		// exactly equal (elementBounds3.fixedWidth = num - 2 *
++		// ElementToDialogPadding vs elementBounds2.fixedWidth = num); widening
++		// only elementBounds3 broke that invariant by w("Extra") + 3 *
++		// ElementToDialogPadding every single time the settings dialog
++		// composed in-game.
++		//
++		// So: grow the tab row's parent, then push the same delta up through
++		// every fixed-width ancestor until (and including) the composer's own
++		// bounds. FitToChildren ancestors re-measure themselves, so the walk
++		// stops at the first one; the window bounds (the only bounds with a
++		// null ParentBounds) is never touched.
++		double contentRight = (onMainscreen
++			? oButtonBounds.fixedX + oButtonBounds.fixedWidth
++			: backButtonBounds.fixedX + backButtonBounds.fixedWidth) + 15.0;
++		ElementBounds tabRowParent = oButtonBounds.ParentBounds;
++		if (tabRowParent != null && tabRowParent.fixedWidth < contentRight)
++		{
++			double grewBy = contentRight - tabRowParent.fixedWidth;
++			tabRowParent.fixedWidth = contentRight;
++			for (ElementBounds ancestor = tabRowParent.ParentBounds; ancestor != null && ancestor.ParentBounds != null; ancestor = ancestor.ParentBounds)
++			{
++				if (ancestor.horizontalSizing != ElementSizing.Fixed)
++				{
++					break;
++				}
++				ancestor.fixedWidth += grewBy;
++				if (ancestor == c.Bounds)
++				{
++					break;
++				}
++			}
++		}
 +		return GuiComposerHelpers.AddToggleButton(c, Lang.Get("optimum-tab-header"), CairoFont.ButtonText(), OnOptimumOptions, oButtonBounds, "optimum");
 +	}
  }

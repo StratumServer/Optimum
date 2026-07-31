@@ -11,19 +11,22 @@ set -euo pipefail
 # scripts/package-all.ps1 (or `make package`) after `dotnet build`. Run
 # scripts/check-prereqs.sh (or `make check`) to see what tools your host has.
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "$script_dir/.." && pwd)"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/bootstrap.sh [--version VERSION] [--client-archive PATH] [--refresh]
 
 Options:
-  --version VERSION        Vintage Story version. Default: 1.22.3
+  --version VERSION        Vintage Story version. Default: 1.22.5
   --client-archive PATH    Existing client archive (tar.gz or zip).
   --refresh                Force re-extract, re-decompile, re-clone.
   -h, --help               Show this help.
 EOF
 }
 
-version="1.22.3"
+version="$(python3 -c "import json;print(json.load(open('$repo_root/forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
 client_archive=""
 refresh=0
 
@@ -36,9 +39,6 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
-
-script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-repo_root="$(cd -- "$script_dir/.." && pwd)"
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -56,14 +56,15 @@ pinned_ilspycmd_version() {
 ilspycmd_accepted_prefixes() {
   local manifest="$repo_root/.config/ilspycmd-compat.json"
   if [[ -f "$manifest" ]]; then
-    grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\."' "$manifest" | tr -d '"'
+    grep -oE '"[0-9]+(\.[0-9]+)+\."' "$manifest" | tr -d '"'
     return
   fi
-  printf '%s\n' '10.1.0.' '10.1.1.'
+  printf '%s\n' '10.0.' '10.1.'
 }
 
 ilspycmd_version_supported() {
   local current="$1" prefix
+  [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
   while IFS= read -r prefix; do
     [[ -n "$prefix" && "$current" == "$prefix"* ]] && return 0
   done < <(ilspycmd_accepted_prefixes)
@@ -258,7 +259,7 @@ for entry in "${decompile_targets[@]}"; do
     echo "Decompiling $dll_base.dll with $(ilspycmd --version | head -1)"
     rm -rf "$out"
     mkdir -p "$out"
-    ilspycmd "$dll_path" --project -o "$out" >/dev/null
+    ilspycmd "$dll_path" --project -o "$out" >/dev/null 2>&1
     find "$out" -maxdepth 1 -name '*.csproj' -exec perl -0pi -e 's#<LangVersion>15\.0</LangVersion>#<LangVersion>latest</LangVersion>#g' {} \;
   fi
 
@@ -708,7 +709,7 @@ fi
 # `var` can't reach, but a same-named-but-different-collection bare Enumerator<...>
 # can appear more than once in one file (e.g. ChatCommandApi.cs has both a
 # Dictionary.Enumerator and a Dictionary.ValueCollection.Enumerator site sharing
-# the identical bare shorthand) — running the per-file fix first would blanket
+# the identical bare shorthand) - running the per-file fix first would blanket
 # every occurrence with one file-wide type, silently breaking the other one.
 find "${decompiled_dirs[@]}" -name '*.cs' -print0 | xargs -0 perl -pi -e '
   s/\bEnumerator<[^;=]+>(\s+\w+\s*=\s*[^;]*\.GetEnumerator\(\));/var$1;/g;
@@ -853,7 +854,7 @@ find "${decompiled_dirs[@]}" -name '*.cs' -print0 | xargs -0 perl -pi -e '
   s/(?:System\.)?\b((?:Memory|ReadOnlyMemory|ReadOnlySpan|Span)<[^<>]*>|decimal|Index)\.op_Implicit\(((?:[^()]|\((?:[^()]|\([^()]*\))*\))*)\)/(($1)($2))/g;
 '
 
-# 6r-4b: `new System.ReadOnlySpan<char>(ref (char)expr)` — ReadOnlySpan<char>'s
+# 6r-4b: `new System.ReadOnlySpan<char>(ref (char)expr)` - ReadOnlySpan<char>'s
 # single-value constructor takes `in`, and a cast result is not an addressable
 # lvalue, so `ref` can never bind here (CS1510). `in` parameters accept a
 # temporary computed from any expression and do not require writing `in`
@@ -965,7 +966,7 @@ for f in \
 done
 
 # 6w: `TYPE val = default(TYPE);` immediately followed by `val._002Ector(args);`
-# — the value-type equivalent of the ref-cast constructor pattern 6e already
+# - the value-type equivalent of the ref-cast constructor pattern 6e already
 # handles, but without the `((Type)(ref var))` wrapper 6e's regex expects, so it
 # needs its own pass. Replaces both statements with a single `TYPE val = new
 # TYPE(args);`, matching parens/braces properly so multi-line constructor
@@ -1162,6 +1163,40 @@ patches_dir="$repo_root/patches"
 patch_filter="${PATCH_FILTER:-all}"
 vanilla_patch_projects="VintagestoryLib Vintagestory"
 
+# The decompiled API assembly owns these types in aggregate source files.
+# Reject split source overlays and remove copies left by older workspaces.
+assembly_owned_api_files=(
+  "VintagestoryApi/Client/API/MultiTextureMeshRef.cs"
+  "VintagestoryApi/Client/Command/ChatCommandApi.cs"
+  "VintagestoryApi/Client/UBORef.cs"
+  "VintagestoryApi/Common/API/DummyLoggerException.cs"
+  "VintagestoryApi/Common/API/LoggerBase.cs"
+  "VintagestoryApi/Common/Command/TextCommandResult.cs"
+  "VintagestoryApi/Common/Model/Animation/IHeadController.cs"
+)
+for rel in "${assembly_owned_api_files[@]}"; do
+  if [[ -f "$sources_dir/$rel" ]]; then
+    echo "ERROR: sources/$rel duplicates a type from the decompiled VintagestoryAPI assembly." >&2
+    exit 1
+  fi
+  rm -f -- "$repo_root/$rel"
+done
+
+# One target must use either a source overlay or a patch.
+ownership_conflicts=()
+if [[ -d "$sources_dir" ]]; then
+  while IFS= read -r -d '' src; do
+    rel="${src#$sources_dir/}"
+    if [[ -f "$patches_dir/$rel.patch" ]]; then
+      ownership_conflicts+=("$rel")
+    fi
+  done < <(find "$sources_dir" -type f -print0)
+fi
+if [[ "${#ownership_conflicts[@]}" -gt 0 ]]; then
+  printf 'ERROR: source and patch ownership conflict:\n  %s\n' "${ownership_conflicts[@]}" >&2
+  exit 1
+fi
+
 if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit | grep -q .; then
 
   # ZIP downloads (non-clone) lack a .git/ directory. git add and git apply
@@ -1222,7 +1257,7 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
       fi
       ((applied++)) || true
     fi
-  done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort -z)
+  done < <(find "$patches_dir" -type f -name '*.patch' -not -path '*/runtime/*' -print0 | sort -z)
 
   # Unstage: the index staging was temporary.
   git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true

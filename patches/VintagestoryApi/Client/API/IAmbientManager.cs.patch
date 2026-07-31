@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/API/IAmbientManager.cs b/VintagestoryApi/Client/API/IAmbientManager.cs
+index 8faa220..1e9c09a 100644
+--- a/VintagestoryApi/Client/API/IAmbientManager.cs
++++ b/VintagestoryApi/Client/API/IAmbientManager.cs
+@@ -20,11 +20,11 @@ namespace Vintagestory.API.Common
+         AmbientModifier Base { get; }
+ 
+         /// <summary>
+         /// The list of modifiers that result in the blended values
+         /// </summary>
+-        OrderedDictionary<string, AmbientModifier> CurrentModifiers { get; }
++        Vintagestory.API.Datastructures.OrderedDictionary<string, AmbientModifier> CurrentModifiers { get; }
+ 
+ 
+         /// <summary>
+         /// The blended fog color, calculated every frame from the list of modifiers
+         /// </summary>

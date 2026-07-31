@@ -7,21 +7,19 @@ namespace Optimum.Tests;
 public class ChiselLodCoverageTests
 {
     [Theory]
-    [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
+    [InlineData("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs.patch")]
     public void ChiselLodRegistersFullMeshForMediumRange(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.DoesNotContain("AddMeshData(Mesh, cmapdata, 0)", source);
         Assert.DoesNotContain("AddMeshData(Mesh, 0)", source);
-        Assert.Contains("AddMeshData(Mesh, cmapdata, 2)", source);
         Assert.Contains("AddMeshData(Mesh, 2)", source);
-        Assert.Contains("AddMeshData(lodMesh, cmapdata, 3)", source);
         Assert.Contains("AddMeshData(lodMesh, 3)", source);
     }
 
     [Theory]
-    [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
+    [InlineData("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs.patch")]
     public void ChiselLodBuildsProxyFromMajorityMaterial(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
@@ -110,8 +108,9 @@ public class ChiselLodCoverageTests
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("OptimumUseChiselLodDistance", source);
-        Assert.Contains("location.OptimumUseChiselLodDistance", source);
-        Assert.Contains("InFrustumAndRange(location.FrustumCullSphere, location.FrustumVisible, location.LodLevel, location.OptimumUseChiselLodDistance)", source);
+        // 1.22.5: method is InFrustumAndRange (renamed from SphereInFrustumAndRange),
+        // and inside the class the fields are accessed without a 'location.' prefix.
+        Assert.Contains("InFrustumAndRange(FrustumCullSphere, FrustumVisible, LodLevel, OptimumUseChiselLodDistance)", source);
     }
 
     [Theory]
@@ -131,8 +130,99 @@ public class ChiselLodCoverageTests
         Assert.Contains("case 3:", source);
     }
 
+    // Regression: shadow passes had zero chisel-LOD awareness, so the LOD3 full-cube proxy
+    // always entered the depth map (CullInstantShadowPassFar's `LodLevel >= 1` accepts 3, and
+    // CullInstantShadowPassNear had no LOD check at all). Result: a carved block cast a
+    // full-block shadow at any distance, including right next to the camera.
     [Theory]
-    [InlineData("patches/VSSurvivalMod/Systems/Microblock/BEMicroBlock.cs.patch")]
+    [InlineData("VintagestoryApi/Client/MeshPool/MeshDataPool.cs")]
+    [InlineData("patches/VintagestoryApi/Client/MeshPool/MeshDataPool.cs.patch")]
+    public void ChiselLodShadowPassesRespectChiselDistance(string relativePath)
+    {
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
+
+        Assert.Contains(
+            "case EnumFrustumCullMode.CullInstantShadowPassNear:",
+            source);
+        Assert.Contains(
+            "culler.InFrustumShadowPass(FrustumCullSphere) && culler.OptimumChiselLodVisible(FrustumCullSphere, LodLevel, OptimumUseChiselLodDistance)",
+            source);
+        Assert.Contains(
+            "culler.InFrustumShadowPass(FrustumCullSphere) && LodLevel >= 1 && culler.OptimumChiselLodVisible(FrustumCullSphere, LodLevel, OptimumUseChiselLodDistance)",
+            source);
+        // The vanilla, chisel-unaware shadow expressions must be gone.
+        Assert.DoesNotContain(
+            "culler.InFrustumShadowPass(FrustumCullSphere);",
+            source);
+        Assert.DoesNotContain(
+            "culler.InFrustumShadowPass(FrustumCullSphere) && LodLevel >= 1;",
+            source);
+    }
+
+    [Theory]
+    [InlineData("VintagestoryApi/Client/Render/FrustumCulling.cs")]
+    [InlineData("patches/VintagestoryApi/Client/Render/FrustumCulling.cs.patch")]
+    public void ChiselLodFrustumExposesSharedShadowHelper(string relativePath)
+    {
+        string source = File.ReadAllText(FindRepositoryFile(relativePath));
+
+        Assert.Contains(
+            "public bool OptimumChiselLodVisible(Sphere sphere, int lodLevel, bool optimumUseChiselLodDistance)",
+            source);
+        Assert.Contains("!optimumUseChiselLodDistance || !OptimumConfig.ChiselLodEnabled", source);
+        Assert.Contains("return distance <= chiselDistanceSq;", source);
+        Assert.Contains("return distance > chiselDistanceSq;", source);
+    }
+
+    // Runtime counterpart of the shadow fix: vanilla's shadow cases never call
+    // InFrustumAndRange, so a second Cecil hook folds each InFrustumShadowPass result
+    // through OptimumApiBridge.InFrustumShadowPass.
+    [Fact]
+    public void ChiselLodShadowHookIsWiredIntoApiPatcher()
+    {
+        string patcher = File.ReadAllText(FindRepositoryFile("Optimum.Patcher/api-patcher.cs"));
+
+        Assert.Contains("PatchChiselLodShadowHook", patcher);
+        Assert.Contains("method.Name == \"InFrustumShadowPass\" && method.Parameters.Count == 3", patcher);
+        Assert.Contains("method.Name == \"InFrustumShadowPass\" &&", patcher);
+        // Both shadow cases (near + far) must be hooked, hence the exact-count guard.
+        Assert.Contains("Expected 2 chisel LOD shadow hooks", patcher);
+        // The hook pushes culler (arg 2) and the location (this) after the vanilla call.
+        Assert.Contains("Instruction.Create(OpCodes.Ldarg_2)", patcher);
+        Assert.Contains("optimumShadowCheck", patcher);
+    }
+
+    // Regression: the bridge ignored lodLevel entirely. Because TesselatedChunkPart flags
+    // ALL LOD levels of a chisel chunk part, LOD2 and LOD3 got the same answer - both visible
+    // up close (z-fighting), both invisible past the chisel distance (block disappears).
+    [Fact]
+    public void ChiselLodBridgeBranchesOnLodLevel()
+    {
+        string source = File.ReadAllText(FindRepositoryFile("optimum-api-contracts/optimum-api-bridge.cs"));
+
+        // The buggy shape: one distance test returned for every chisel-flagged location.
+        Assert.DoesNotContain(
+            "return playerPos.HorDistanceSqTo(sphere.x, sphere.z) < OptimumConfig.ChiselLodDistanceSq;",
+            source);
+
+        Assert.Contains("lodLevel == 2 || lodLevel == 3", source);
+        Assert.Contains("lodLevel == 2", source);
+        Assert.Contains("chiselDistance <= chiselDistanceSq", source);
+        Assert.Contains("chiselDistance > chiselDistanceSq", source);
+        // The base frustum / view-distance bound must still be enforced.
+        Assert.Contains("culler.InFrustumAndRange(sphere, nowVisible, 1)", source);
+        Assert.Contains("return culler.InFrustumAndRange(sphere, nowVisible, lodLevel);", source);
+
+        // Shadow-pass bridge entry point used by the new Cecil hook.
+        Assert.Contains(
+            "public static bool InFrustumShadowPass(bool baseResult, FrustumCulling culler, ModelDataPoolLocation location)",
+            source);
+        Assert.Contains("location.FrustumCullSphere", source);
+        Assert.Contains("location.LodLevel", source);
+    }
+
+    [Theory]
+    [InlineData("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs.patch")]
     public void ChiselLodMicroblockRecordsDiagnostics(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));

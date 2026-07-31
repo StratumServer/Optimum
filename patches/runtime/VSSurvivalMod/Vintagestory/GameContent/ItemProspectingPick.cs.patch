@@ -1,0 +1,65 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs b/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/ItemProspectingPick.cs
+@@ -13,10 +13,14 @@ using Vintagestory.ServerMods;
+ 
+ namespace Vintagestory.GameContent;
+ 
+ public class ItemProspectingPick : Item
+ {
++	private readonly Dictionary<string, int> optimumNodeQuantityFound = new Dictionary<string, int>();
++
++	private readonly List<KeyValuePair<string, int>> optimumNodeResultsSorted = new List<KeyValuePair<string, int>>();
++
+ 	private ProPickWorkSpace ppws;
+ 
+ 	private SkillItem[] toolModes;
+ 
+ 	public override void OnLoaded(ICoreAPI api)
+@@ -132,21 +136,28 @@ public class ItemProspectingPick : Item
+ 		if (!isPropickable(block) || !(player is IServerPlayer serverPlayer))
+ 		{
+ 			return;
+ 		}
+ 		BlockPos blockPos = blockSel.Position.Copy();
+-		Dictionary<string, int> quantityFound = new Dictionary<string, int>();
++		Dictionary<string, int> quantityFound = optimumNodeQuantityFound;
++		quantityFound.Clear();
+ 		api.World.BlockAccessor.WalkBlocks(blockPos.AddCopy(radius, radius, radius), blockPos.AddCopy(-radius, -radius, -radius), delegate(Block nblock, int x, int y, int z)
+ 		{
+ 			if (nblock.BlockMaterial == EnumBlockMaterial.Ore && nblock.Variant.ContainsKey("type"))
+ 			{
+ 				string key = "ore-" + nblock.Variant["type"];
+ 				quantityFound.TryGetValue(key, out var value);
+ 				quantityFound[key] = value + 1;
+ 			}
+ 		});
+-		List<KeyValuePair<string, int>> list = quantityFound.OrderByDescending((KeyValuePair<string, int> val) => val.Value).ToList();
++		List<KeyValuePair<string, int>> list = optimumNodeResultsSorted;
++		list.Clear();
++		foreach (KeyValuePair<string, int> result in quantityFound)
++		{
++			list.Add(result);
++		}
++		list.Sort(CompareNodeResults);
+ 		if (list.Count == 0)
+ 		{
+ 			serverPlayer.SendMessage(GlobalConstants.InfoLogChatGroup, Lang.GetL(serverPlayer.LanguageCode, "No ore node nearby"), EnumChatType.Notification);
+ 			return;
+ 		}
+@@ -157,10 +168,15 @@ public class ItemProspectingPick : Item
+ 			string l2 = Lang.GetL(serverPlayer.LanguageCode, resultTextByQuantity(item.Value), Lang.Get(item.Key));
+ 			serverPlayer.SendMessage(GlobalConstants.InfoLogChatGroup, Lang.GetL(serverPlayer.LanguageCode, l2, l), EnumChatType.Notification);
+ 		}
+ 	}
+ 
++	private static int CompareNodeResults(KeyValuePair<string, int> left, KeyValuePair<string, int> right)
++	{
++		return right.Value.CompareTo(left.Value);
++	}
++
+ 	private bool isPropickable(Block block)
+ 	{
+ 		if (block == null)
+ 		{
+ 			return false;

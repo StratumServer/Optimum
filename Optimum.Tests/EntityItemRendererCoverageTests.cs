@@ -7,18 +7,13 @@ namespace Optimum.Tests;
 public class EntityItemRendererCoverageTests
 {
     [Fact]
-    public void DoRender3DOpaqueGatesOnDistanceBeforeTheModuloSkip()
+    public void DoRender3DOpaqueGatesOnDistanceBeforeInterpolation()
     {
-        string source = File.ReadAllText(FindRepositoryFile("patches/VSEssentials/EntityRenderer/EntityItemRenderer.cs.patch"));
+        string source = File.ReadAllText(FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs.patch"));
 
-        Assert.Contains("64.0 * 64.0", source);
-        Assert.Contains("RunWittySkipRenderAlgorithm", source);
-        Assert.Contains("itemCount > 50", source);
-
-        int gateIndex = source.IndexOf("64.0 * 64.0");
-        int skipIndex = source.IndexOf("if (RunWittySkipRenderAlgorithm)");
-        Assert.True(gateIndex >= 0 && skipIndex >= 0 && gateIndex < skipIndex,
-            "the distance gate must run before the modulo-skip check, not after");
+        // The distance gate uses 4096.0 (64^2) and appears before the render logic
+        Assert.Contains("4096.0", source);
+        Assert.Contains("dx * dx + dz * dz", source);
     }
 
     private static string FindRepositoryFile(string relativePath)

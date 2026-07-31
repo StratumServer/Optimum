@@ -1,0 +1,174 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
+index 6b3cdd0..a47ea1d 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
+@@ -37,10 +37,24 @@ public class ServerSystemBlockSimulation : ServerSystem
+ 
+ 	private List<int> clientIds = new List<int>();
+ 
+ 	private Random rand = new Random();
+ 
++	private const int OptimumPosPoolSize = 2048;
++
++	// No field initializer: Cecil field injection never runs it (the vanilla
++	// .ctor is not a transplant target). Lazily created with ??= at each use
++	// site below (OnSeparateThreadTick runs on its own single dedicated
++	// thread, so a plain ??= is race-free).
++	private BlockPos[] optimumPosPool;
++
++	private int optimumPosPoolIndex;
++
++	private FluidBlockPos[] optimumFluidPosPool;
++
++	private int optimumFluidPosPoolIndex;
++
+ 	[ThreadStatic]
+ 	private static FastMemoryStream reusableSendingStream;
+ 
+ 	private List<Packet_BlockEntity> blockEntitiesPacked = new List<Packet_BlockEntity>();
+ 
+@@ -650,13 +664,28 @@ public class ServerSystemBlockSimulation : ServerSystem
+ 		return false;
+ 	}
+ 
+ 	public override int GetUpdateInterval()
+ 	{
+-		return server.Config.BlockTickInterval;
++		// Optimum: divide interval by slice count to spread tick work evenly.
++		// 8 slices at 37ms instead of 1 burst at 300ms. Same aggregate rate.
++		int interval = server.Config.BlockTickInterval;
++		if (OptimumTickSliceCount > 1)
++		{
++			return interval / OptimumTickSliceCount;
++		}
++		return interval;
+ 	}
+ 
++	// Optimum: random tick slice count (Stratum PR #125). A const, not a field:
++	// Cecil field injection never runs field initializers (the vanilla .ctor is
++	// not a transplant target), so `= 8` would silently read as 0 at runtime -
++	// which also silently disables slicing since both call sites below only
++	// activate when > 1. Nothing currently mutates this at runtime.
++	private const int OptimumTickSliceCount = 8;
++	private int optimumTickSliceIndex;
++
+ 	private void UpdateEvery100ms(float t1)
+ 	{
+ 		HandleDirtyAndUpdatedBlocks();
+ 		SendDirtyBlockEntities();
+ 	}
+@@ -822,10 +851,15 @@ public class ServerSystemBlockSimulation : ServerSystem
+ 	{
+ 		if (server.RunPhase != EnumServerRunPhase.RunGame)
+ 		{
+ 			return;
+ 		}
++		if (queuedTicks.IsEmpty)
++		{
++			optimumPosPoolIndex = 0;
++			optimumFluidPosPoolIndex = 0;
++		}
+ 		chunksToBeTicked.Clear();
+ 		int blockTickChunkRange = server.Config.BlockTickChunkRange;
+ 		lock (clientIdsLock)
+ 		{
+ 			foreach (int clientId in clientIds)
+@@ -864,20 +898,30 @@ public class ServerSystemBlockSimulation : ServerSystem
+ 				}
+ 			}
+ 		}
+ 		foreach (KeyValuePair<long, ServerChunk> item in chunksToBeTicked)
+ 		{
++			// Optimum: process only 1/N of chunks per pass (slice by index3d modulo).
++			if (OptimumTickSliceCount > 1 && (int)(item.Key % OptimumTickSliceCount) != optimumTickSliceIndex)
++			{
++				continue;
++			}
+ 			try
+ 			{
+ 				tickChunk(item.Key, item.Value);
+ 			}
+ 			catch (Exception e)
+ 			{
+ 				ServerMain.Logger.Warning("Exception thrown when trying to tick a chunk.");
+ 				ServerMain.Logger.Warning(e);
+ 			}
+ 		}
++		// Rotate slice index for next invocation.
++		if (OptimumTickSliceCount > 1)
++		{
++			optimumTickSliceIndex = (optimumTickSliceIndex + 1) % OptimumTickSliceCount;
++		}
+ 	}
+ 
+ 	private void tickChunk(long index3d, ServerChunk chunk)
+ 	{
+ 		ChunkPos chunkPos = server.WorldMap.ChunkPosFromChunkIndex3D(index3d);
+@@ -915,19 +959,66 @@ public class ServerSystemBlockSimulation : ServerSystem
+ 		{
+ 			return false;
+ 		}
+ 		if (extra == null)
+ 		{
+-			queuedTicks.Enqueue(atPos.Copy());
++			if (atPos is FluidBlockPos)
++			{
++				queuedTicks.Enqueue(OptimumGetPooledFluidPos(atPos));
++			}
++			else
++			{
++				queuedTicks.Enqueue(OptimumGetPooledPos(atPos));
++			}
+ 		}
+ 		else
+ 		{
+ 			queuedTicks.Enqueue(new BlockPosWithExtraObject(atPos.Copy(), extra));
+ 		}
+ 		return true;
+ 	}
+ 
++	private BlockPos OptimumGetPooledPos(BlockPos source)
++	{
++		int idx = optimumPosPoolIndex;
++		if (idx >= OptimumPosPoolSize)
++		{
++			return source.Copy();
++		}
++		optimumPosPoolIndex = idx + 1;
++		optimumPosPool ??= new BlockPos[OptimumPosPoolSize];
++		BlockPos pooled = optimumPosPool[idx];
++		if (pooled == null)
++		{
++			pooled = new BlockPos(0);
++			optimumPosPool[idx] = pooled;
++		}
++		pooled.Set(source.X, source.Y, source.Z);
++		pooled.SetDimension(source.dimension);
++		return pooled;
++	}
++
++	private FluidBlockPos OptimumGetPooledFluidPos(BlockPos source)
++	{
++		int idx = optimumFluidPosPoolIndex;
++		if (idx >= OptimumPosPoolSize)
++		{
++			return new FluidBlockPos(source.X, source.Y, source.Z, source.dimension);
++		}
++		optimumFluidPosPoolIndex = idx + 1;
++		optimumFluidPosPool ??= new FluidBlockPos[OptimumPosPoolSize];
++		FluidBlockPos pooled = optimumFluidPosPool[idx];
++		if (pooled == null)
++		{
++			pooled = new FluidBlockPos();
++			optimumFluidPosPool[idx] = pooled;
++		}
++		pooled.Set(source.X, source.Y, source.Z);
++		pooled.SetDimension(source.dimension);
++		return pooled;
++	}
++
+ 	private Packet_BlockEntity BlockEntityToPacket(BlockEntity blockEntity, FastMemoryStream ms)
+ 	{
+ 		ms.Reset();
+ 		BinaryWriter stream = new BinaryWriter(ms);
+ 		TreeAttribute treeAttribute = new TreeAttribute();

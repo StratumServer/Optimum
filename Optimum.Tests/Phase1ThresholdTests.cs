@@ -77,10 +77,10 @@ public class Phase1ThresholdTests
         Assert.Equal(shouldUpdate, update);
     }
 
-    // --- WeatherWind: every 4th frame ---
+    // --- WeatherWind: initialize immediately, then every 4th frame ---
 
     [Theory]
-    [InlineData(1, false)]
+    [InlineData(1, true)]
     [InlineData(2, false)]
     [InlineData(3, false)]
     [InlineData(4, true)]
@@ -88,7 +88,7 @@ public class Phase1ThresholdTests
     [InlineData(8, true)]
     public void WeatherWind_FrameThrottle(int frameCount, bool shouldLookup)
     {
-        bool lookup = frameCount % 4 == 0;
+        bool lookup = frameCount == 1 || frameCount % 4 == 0;
         Assert.Equal(shouldLookup, lookup);
     }
 

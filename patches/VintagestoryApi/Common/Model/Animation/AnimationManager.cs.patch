@@ -1,50 +1,40 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/AnimationManager.cs b/VintagestoryApi/Common/Model/Animation/AnimationManager.cs
-index 573ec12..4f77e06 100644
+index 573ec12..4b3dbae 100644
 --- a/VintagestoryApi/Common/Model/Animation/AnimationManager.cs
 +++ b/VintagestoryApi/Common/Model/Animation/AnimationManager.cs
-@@ -450,11 +450,11 @@ namespace Vintagestory.API.Common
+@@ -450,11 +450,16 @@ namespace Vintagestory.API.Common
          {
              if (Animator != null)
              {
                  Animator.CalculateMatrices = !entity.Alive || entity.requirePosesOnServer;
                  Animator.OnFrame(ActiveAnimationsByAnimCode, dt);
 -                AdjustCollisionBoxToAnimation = ActiveAnimationsByAnimCode.Any(anim => anim.Value.AdjustCollisionBox);
-+                AdjustCollisionBoxToAnimation = AnyAnimAdjustsCollisionBox(ActiveAnimationsByAnimCode);
++                // Optimum: foreach replaces LINQ enumerator allocation (runs every frame)
++                AdjustCollisionBoxToAnimation = false;
++                foreach (var anim in ActiveAnimationsByAnimCode)
++                {
++                    if (anim.Value.AdjustCollisionBox) { AdjustCollisionBoxToAnimation = true; break; }
++                }
              }
  
              runTriggers();
          }
  
-@@ -474,11 +474,11 @@ namespace Vintagestory.API.Common
+@@ -474,11 +479,16 @@ namespace Vintagestory.API.Common
              }
  
              if (entity.IsRendered || entity.IsShadowRendered || !entity.Alive)
              {
                  Animator.OnFrame(ActiveAnimationsByAnimCode, dt);
 -                AdjustCollisionBoxToAnimation = ActiveAnimationsByAnimCode.Any(anim => anim.Value.AdjustCollisionBox);
-+                AdjustCollisionBoxToAnimation = AnyAnimAdjustsCollisionBox(ActiveAnimationsByAnimCode);
++                // Optimum: foreach replaces LINQ enumerator allocation (runs every frame)
++                AdjustCollisionBoxToAnimation = false;
++                foreach (var anim in ActiveAnimationsByAnimCode)
++                {
++                    if (anim.Value.AdjustCollisionBox) { AdjustCollisionBoxToAnimation = true; break; }
++                }
                  runTriggers();
              }
  
              if (loopingSounds != null)
              {
-@@ -493,10 +493,19 @@ namespace Vintagestory.API.Common
-                     }
-                 }
-             }
-         }
- 
-+        private static bool AnyAnimAdjustsCollisionBox(Dictionary<string, AnimationMetaData> anims)
-+        {
-+            foreach (var kv in anims)
-+            {
-+                if (kv.Value.AdjustCollisionBox) return true;
-+            }
-+            return false;
-+        }
-+
-         public virtual void RegisterFrameCallback(AnimFrameCallback trigger)
-         {
-             if (Triggers == null) Triggers = new List<AnimFrameCallback>();
-             Triggers.Add(trigger);
-         }

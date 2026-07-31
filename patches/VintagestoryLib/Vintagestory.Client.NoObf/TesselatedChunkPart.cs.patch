@@ -1,8 +1,18 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
-index c29a2bc..92d31c3 100644
+index c29a2bc..79db2be 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
-@@ -19,10 +19,12 @@ public class TesselatedChunkPart
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.Common;
+ 
+ namespace Vintagestory.Client.NoObf;
+@@ -19,10 +20,12 @@ public class TesselatedChunkPart
  
  	internal MeshData modelDataLod2Far;
  
@@ -15,13 +25,13 @@ index c29a2bc..92d31c3 100644
  		bool flag = dimension == 1 && BlockAccessorMovable.IsTransparent(chunkOrigin);
  		MeshDataPoolManager pools = cr.poolsByRenderPass[flag ? Math.Max(3, (int)pass) : ((int)pass)][atlasNumber];
  		if (modelDataLod0 != null)
-@@ -53,10 +55,11 @@ public class TesselatedChunkPart
+@@ -53,10 +56,11 @@ public class TesselatedChunkPart
  		ModelDataPoolLocation modelDataPoolLocation = pools.AddModel(modeldata, modelOrigin, dimension, frustumCullSphere);
  		if (modelDataPoolLocation != null)
  		{
  			modelDataPoolLocation.CullVisible = cullVisible;
  			modelDataPoolLocation.LodLevel = lodLevel;
-+			modelDataPoolLocation.OptimumUseChiselLodDistance = optimumUseChiselLodDistance;
++			OptimumApiBridge.SetChiselLodDistance(modelDataPoolLocation, optimumUseChiselLodDistance);
  			locations.Add(modelDataPoolLocation);
  		}
  	}

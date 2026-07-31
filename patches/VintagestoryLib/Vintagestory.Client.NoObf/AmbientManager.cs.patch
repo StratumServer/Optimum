@@ -1,8 +1,20 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs
-index 03f3699..40fdbf0 100644
+index 03f3699..85209b8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs
-@@ -28,10 +28,23 @@ public class AmbientManager : IAmbientManager
+@@ -1,10 +1,11 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+@@ -28,10 +29,23 @@ public class AmbientManager : IAmbientManager
  
  	private float targetSepiaLevel;
  
@@ -26,7 +38,7 @@ index 03f3699..40fdbf0 100644
  	public Vec3f BlendedAmbientColor { get; set; }
  
  	public float BlendedFogDensity { get; set; }
-@@ -148,11 +161,13 @@ public class AmbientManager : IAmbientManager
+@@ -148,11 +162,13 @@ public class AmbientManager : IAmbientManager
  		AmbientModifier ambientModifier = ambientModifiers["night"];
  		float val = Math.Min(0.6f, 0f - game.Calendar.SunPositionNormalized.Y) - 0.75f * Math.Min(0.33f, game.Calendar.MoonLightStrength);
  		ambientModifier.FogBrightness.Weight = GameMath.Clamp(1f - game.Calendar.DayLightStrength + GameMath.Clamp(val, 0f, 0.5f) * 0.85f, 0f, 0.88f);
@@ -41,7 +53,7 @@ index 03f3699..40fdbf0 100644
  		float num3 = GameMath.Clamp(3f * smoothedLightLevel / 20f, 0f, 1f);
  		float num4 = (float)GameMath.Clamp(game.Player.Entity.Pos.Y / (double)game.SeaLevel, 0.0, 1.0);
  		num4 *= num4;
-@@ -182,26 +197,32 @@ public class AmbientManager : IAmbientManager
+@@ -182,26 +198,32 @@ public class AmbientManager : IAmbientManager
  	private void setWaterColors()
  	{
  		AmbientModifier ambientModifier = ambientModifiers["water"];
@@ -53,12 +65,12 @@ index 03f3699..40fdbf0 100644
 +		// existing WaterMurkColor instance instead of assigning a new
 +		// Vec4f. Runs every frame.
 +		int[] array = (_waterColorHsvScratch ??= new int[3]);
-+		ColorUtil.RgbToHsvInts(num2 & 0xFF, (num2 >> 8) & 0xFF, (num2 >> 16) & 0xFF, array);
++		OptimumApiBridge.RgbToHsvInts(num2 & 0xFF, (num2 >> 8) & 0xFF, (num2 >> 16) & 0xFF, array);
  		array[2] /= 2;
  		array[2] = (int)((float)array[2] * num);
 -		int[] array2 = ColorUtil.Hsv2RgbInts(array[0], array[1], array[2]);
 +		int[] array2 = (_waterColorRgbScratch ??= new int[3]);
-+		ColorUtil.Hsv2RgbInts(array[0], array[1], array[2], array2);
++		OptimumApiBridge.HsvToRgbInts(array[0], array[1], array[2], array2);
  		float[] value = ambientModifier.FogColor.Value;
  		value[0] = (float)array2[0] / 255f;
  		value[1] = (float)array2[1] / 255f;
@@ -71,14 +83,14 @@ index 03f3699..40fdbf0 100644
  		array[1] /= 2;
 -		array2 = ColorUtil.Hsv2RgbInts(array[0], array[1], array[2]);
 -		game.api.Render.ShaderUniforms.WaterMurkColor = new Vec4f((float)array2[0] / 255f, (float)array2[1] / 255f, (float)array2[2] / 255f, 1f);
-+		ColorUtil.Hsv2RgbInts(array[0], array[1], array[2], array2);
++		OptimumApiBridge.HsvToRgbInts(array[0], array[1], array[2], array2);
 +		game.api.Render.ShaderUniforms.WaterMurkColor.Set((float)array2[0] / 255f, (float)array2[1] / 255f, (float)array2[2] / 255f, 1f);
  	}
  
  	private void OnPlayerSightBeingChangedByLava(TrackedPlayerProperties oldValues, TrackedPlayerProperties newValues)
  	{
  		AmbientModifier ambientModifier = ambientModifiers["lava"];
-@@ -219,23 +240,22 @@ public class AmbientManager : IAmbientManager
+@@ -219,23 +241,22 @@ public class AmbientManager : IAmbientManager
  
  	public void UpdateAmbient(float dt)
  	{
@@ -114,7 +126,7 @@ index 03f3699..40fdbf0 100644
  		BlendedFlatFogDensity = BaseModifier.FlatFogDensity.Value;
  		BlendedFlatFogYOffset = BaseModifier.FlatFogYPos.Value;
  		BlendedCloudBrightness = BaseModifier.CloudBrightness.Value;
-@@ -304,11 +324,16 @@ public class AmbientManager : IAmbientManager
+@@ -304,11 +325,16 @@ public class AmbientManager : IAmbientManager
  				prevDynamicColourGrading = true;
  				shaderUniforms.ExtraContrastLevel = ClientSettings.ExtraContrastLevel;
  				shaderUniforms.SepiaLevel = ClientSettings.SepiaLevel;

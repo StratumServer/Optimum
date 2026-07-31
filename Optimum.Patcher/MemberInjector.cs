@@ -13,6 +13,47 @@ namespace Optimum.Patcher;
 /// </summary>
 public static class MemberInjector
 {
+    public static int InjectInterfaces(
+        AssemblyDefinition vanilla,
+        AssemblyDefinition compiled,
+        Dictionary<string, List<string>> interfacesToInject)
+    {
+        int injected = 0;
+        foreach (var (typeName, interfaceNames) in interfacesToInject)
+        {
+            var targetType = vanilla.MainModule.GetType(typeName)
+                ?? throw new InvalidOperationException($"Required target type not found: {typeName}");
+            var sourceType = compiled.MainModule.GetType(typeName);
+            if (sourceType is null)
+            {
+                Console.WriteLine($"  INTERFACE SKIPPED (type not in donor): {typeName}");
+                continue;
+            }
+
+            foreach (var interfaceName in interfaceNames)
+            {
+                var sourceInterface = sourceType.Interfaces.FirstOrDefault(item =>
+                    item.InterfaceType.FullName == interfaceName);
+                if (sourceInterface is null)
+                {
+                    Console.WriteLine($"  INTERFACE SKIPPED (not in donor): {typeName} -> {interfaceName}");
+                    continue;
+                }
+                if (targetType.Interfaces.Any(item => item.InterfaceType.FullName == interfaceName))
+                {
+                    continue;
+                }
+
+                targetType.Interfaces.Add(new InterfaceImplementation(
+                    vanilla.MainModule.ImportReference(sourceInterface.InterfaceType)));
+                injected++;
+                Console.WriteLine($"  INJECTED INTERFACE: {typeName} -> {interfaceName}");
+            }
+        }
+
+        return injected;
+    }
+
     /// <summary>
     /// Inject entire types that exist in compiled but not in vanilla.
     /// </summary>
@@ -31,8 +72,7 @@ public static class MemberInjector
             var srcType = compiled.MainModule.GetType(typeName);
             if (srcType == null)
             {
-                Console.Error.WriteLine($"  TYPE NOT FOUND in compiled: {typeName}");
-                continue;
+                throw new InvalidOperationException($"Required compiled type not found: {typeName}");
             }
 
             var newType = CloneType(srcType, vanilla.MainModule);
@@ -52,8 +92,7 @@ public static class MemberInjector
         var compiledType = compiled.MainModule.GetType(typeName);
         if (vanillaType == null || compiledType == null)
         {
-            Console.Error.WriteLine($"  TYPE NOT FOUND: {typeName}");
-            return 0;
+            throw new InvalidOperationException($"Required injection type not found: {typeName}");
         }
 
         int injected = 0;
@@ -61,8 +100,13 @@ public static class MemberInjector
         {
             // Try as field first
             var srcField = compiledType.Fields.FirstOrDefault(f => f.Name == name);
-            if (srcField != null && !vanillaType.Fields.Any(f => f.Name == name))
+            if (srcField != null)
             {
+                if (vanillaType.Fields.Any(f => f.Name == name))
+                {
+                    Console.WriteLine($"  MEMBER EXISTS: {typeName}::{name}");
+                    continue;
+                }
                 var newField = new FieldDefinition(
                     srcField.Name,
                     srcField.Attributes,
@@ -77,8 +121,13 @@ public static class MemberInjector
 
             // Try as property (inject backing field + property + getter/setter)
             var srcProp = compiledType.Properties.FirstOrDefault(p => p.Name == name);
-            if (srcProp != null && !vanillaType.Properties.Any(p => p.Name == name))
+            if (srcProp != null)
             {
+                if (vanillaType.Properties.Any(p => p.Name == name))
+                {
+                    Console.WriteLine($"  MEMBER EXISTS: {typeName}::{name}");
+                    continue;
+                }
                 InjectProperty(vanillaType, srcProp, vanilla.MainModule, compiled);
                 injected++;
                 Console.WriteLine($"  INJECTED PROPERTY: {typeName}::{name}");
@@ -86,16 +135,34 @@ public static class MemberInjector
             }
 
             // Try as method
-            var srcMethod = compiledType.Methods.FirstOrDefault(m => m.Name == name);
-            if (srcMethod != null && !vanillaType.Methods.Any(m => m.Name == name && m.Parameters.Count == srcMethod.Parameters.Count))
+            var sourceMethods = compiledType.Methods.Where(method => method.Name == name).ToArray();
+            if (sourceMethods.Length > 0)
             {
-                InjectMethod(vanillaType, srcMethod, vanilla.MainModule);
-                injected++;
-                Console.WriteLine($"  INJECTED METHOD: {typeName}::{name}");
+                int methodCount = 0;
+                foreach (var sourceMethod in sourceMethods)
+                {
+                    if (vanillaType.Methods.Any(method =>
+                        method.Name == name &&
+                        method.Parameters.Count == sourceMethod.Parameters.Count))
+                    {
+                        continue;
+                    }
+
+                    InjectMethod(vanillaType, sourceMethod, vanilla.MainModule);
+                    injected++;
+                    methodCount++;
+                    Console.WriteLine(
+                        $"  INJECTED METHOD: {typeName}::{name}({sourceMethod.Parameters.Count} params)");
+                }
+                if (methodCount == 0)
+                {
+                    Console.WriteLine($"  MEMBER EXISTS: {typeName}::{name}");
+                }
                 continue;
             }
 
-            Console.Error.WriteLine($"  NOT FOUND: {typeName}::{name}");
+            Console.WriteLine($"  MEMBER SKIPPED (not in donor): {typeName}::{name}");
+            continue;
         }
         return injected;
     }
@@ -108,7 +175,12 @@ public static class MemberInjector
             src.Attributes,
             src.BaseType != null ? targetModule.ImportReference(src.BaseType) : null);
 
-        // Clone fields
+        foreach (var implementedInterface in src.Interfaces)
+        {
+            newType.Interfaces.Add(new InterfaceImplementation(
+                targetModule.ImportReference(implementedInterface.InterfaceType)));
+        }
+
         foreach (var field in src.Fields)
         {
             var newField = new FieldDefinition(
@@ -119,7 +191,12 @@ public static class MemberInjector
             newType.Fields.Add(newField);
         }
 
-        // Clone methods
+        foreach (var nestedType in src.NestedTypes)
+        {
+            newType.NestedTypes.Add(CloneType(nestedType, targetModule));
+        }
+
+        var methodMap = new Dictionary<MethodDefinition, MethodDefinition>();
         foreach (var method in src.Methods)
         {
             var newMethod = new MethodDefinition(
@@ -135,19 +212,52 @@ public static class MemberInjector
                     targetModule.ImportReference(param.ParameterType)));
             }
 
+            if (method.IsPInvokeImpl && method.PInvokeInfo != null)
+            {
+                var sourceModule = method.PInvokeInfo.Module;
+                var targetModuleRef = targetModule.ModuleReferences.FirstOrDefault(
+                    item => item.Name == sourceModule.Name);
+                if (targetModuleRef == null)
+                {
+                    targetModuleRef = new ModuleReference(sourceModule.Name);
+                    targetModule.ModuleReferences.Add(targetModuleRef);
+                }
+                newMethod.PInvokeInfo = new PInvokeInfo(
+                    method.PInvokeInfo.Attributes,
+                    method.PInvokeInfo.EntryPoint,
+                    targetModuleRef);
+                newMethod.ImplAttributes = method.ImplAttributes;
+            }
+
+            newType.Methods.Add(newMethod);
+            methodMap[method] = newMethod;
+        }
+
+        foreach (var (method, newMethod) in methodMap)
+        {
             if (method.HasBody)
             {
                 newMethod.Body.InitLocals = method.Body.InitLocals;
                 newMethod.Body.MaxStackSize = method.Body.MaxStackSize;
 
+                var variableMap = new Dictionary<VariableDefinition, VariableDefinition>();
                 foreach (var v in method.Body.Variables)
-                    newMethod.Body.Variables.Add(new VariableDefinition(targetModule.ImportReference(v.VariableType)));
+                {
+                    var newVariable = new VariableDefinition(targetModule.ImportReference(v.VariableType));
+                    newMethod.Body.Variables.Add(newVariable);
+                    variableMap[v] = newVariable;
+                }
 
                 var instrMap = new Dictionary<Instruction, Instruction>();
                 var il = newMethod.Body.GetILProcessor();
                 foreach (var instr in method.Body.Instructions)
                 {
-                    var newInstr = CloneInstructionForInjection(instr, targetModule);
+                    var newInstr = CloneInstructionForInjection(
+                        instr,
+                        targetModule,
+                        variableMap,
+                        method,
+                        newMethod);
                     instrMap[instr] = newInstr;
                     il.Append(newInstr);
                 }
@@ -174,8 +284,26 @@ public static class MemberInjector
                     });
                 }
             }
+        }
 
-            newType.Methods.Add(newMethod);
+        foreach (var property in src.Properties)
+        {
+            var newProperty = new PropertyDefinition(
+                property.Name,
+                property.Attributes,
+                targetModule.ImportReference(property.PropertyType))
+            {
+                GetMethod = property.GetMethod != null ? methodMap.GetValueOrDefault(property.GetMethod) : null,
+                SetMethod = property.SetMethod != null ? methodMap.GetValueOrDefault(property.SetMethod) : null,
+            };
+            foreach (var parameter in property.Parameters)
+            {
+                newProperty.Parameters.Add(new ParameterDefinition(
+                    parameter.Name,
+                    parameter.Attributes,
+                    targetModule.ImportReference(parameter.ParameterType)));
+            }
+            newType.Properties.Add(newProperty);
         }
 
         return newType;
@@ -292,7 +420,12 @@ public static class MemberInjector
         target.Methods.Add(newMethod);
     }
 
-    private static Instruction CloneInstructionForInjection(Instruction src, ModuleDefinition targetModule)
+    private static Instruction CloneInstructionForInjection(
+        Instruction src,
+        ModuleDefinition targetModule,
+        Dictionary<VariableDefinition, VariableDefinition>? variableMap = null,
+        MethodDefinition? sourceMethod = null,
+        MethodDefinition? targetMethod = null)
     {
         var op = src.Operand;
         if (op == null) return Instruction.Create(src.OpCode);
@@ -308,8 +441,22 @@ public static class MemberInjector
         if (op is sbyte sb) return Instruction.Create(src.OpCode, sb);
         if (op is Instruction target) return Instruction.Create(src.OpCode, target);
         if (op is Instruction[] targets) return Instruction.Create(src.OpCode, targets);
-        if (op is VariableDefinition) return Instruction.Create(src.OpCode, (VariableDefinition)op);
-        if (op is ParameterDefinition) return Instruction.Create(src.OpCode, (ParameterDefinition)op);
+        if (op is VariableDefinition variable)
+        {
+            if (variableMap != null && variableMap.TryGetValue(variable, out var mappedVariable))
+                return Instruction.Create(src.OpCode, mappedVariable);
+            return Instruction.Create(src.OpCode, variable);
+        }
+        if (op is ParameterDefinition parameter)
+        {
+            if (sourceMethod != null && targetMethod != null)
+            {
+                int index = sourceMethod.Parameters.IndexOf(parameter);
+                if (index >= 0 && index < targetMethod.Parameters.Count)
+                    return Instruction.Create(src.OpCode, targetMethod.Parameters[index]);
+            }
+            return Instruction.Create(src.OpCode, parameter);
+        }
         return Instruction.Create(src.OpCode);
     }
 }

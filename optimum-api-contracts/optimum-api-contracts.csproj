@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Optimum.Api.Contracts</AssemblyName>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputPath>..\bin\$(Configuration)</OutputPath>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>annotations</Nullable>
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\sources\VintagestoryApi\Client\optimum-entity-render-batch.cs" Link="Client\optimum-entity-render-batch.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveWorkerController.cs" Link="Config\AdaptiveWorkerController.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumAdaptiveRadiusController.cs" Link="Config\OptimumAdaptiveRadiusController.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumAnimLod.cs" Link="Config\OptimumAnimLod.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumConfig.cs" Link="Config\OptimumConfig.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumGreedyMesher.cs" Link="Config\OptimumGreedyMesher.cs" />
+    <Compile Include="optimum-api-bridge.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI">
+      <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

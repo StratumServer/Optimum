@@ -1,0 +1,30 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs
+index 19f5199..536bbc5 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs
+@@ -1,8 +1,10 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ using Vintagestory.Common;
+ 
+@@ -205,10 +207,14 @@ internal class ServerSystemInventory : ServerSystem
+ 		}
+ 	}
+ 
+ 	private void SendDirtySlots(float dt)
+ 	{
++		if (!OptimumApiBridge.ConsumeAnySlotDirty())
++		{
++			return;
++		}
+ 		foreach (ConnectedClient value in server.Clients.Values)
+ 		{
+ 			if (!value.IsPlayingClient)
+ 			{
+ 				continue;

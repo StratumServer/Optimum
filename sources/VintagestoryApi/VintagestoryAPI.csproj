@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>VintagestoryAPI</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <TargetFramework>$(FrameworkVersion)</TargetFramework>
+    <OutputPath>..\bin\$(Configuration)</OutputPath>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <Configurations>Debug;Release;PerfTest</Configurations>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- The API project is an exact decompiler donor, not a shipped rebuild.
+         Preserve vanilla constructs while silencing warnings that are either
+         decompiler artifacts or intentional platform-specific API surfaces. -->
+    <NoWarn>$(NoWarn);CS0436;CS8073;CS0169;CA1416</NoWarn>
+    <!-- Disable implicit usings: vsapi source predates SDK-style projects and has
+         explicit using directives everywhere. The implicit System.Collections.Generic
+         import introduces an OrderedDictionary<,> ambiguity with VS's own type. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='PerfTest|AnyCPU'">
+    <DefineConstants>TRACE;PERFTEST</DefineConstants>
+  </PropertyGroup>
+
+  <!-- Exclude files not compiled by the upstream csproj (old-style explicit includes).
+       EntityType.cs: not part of VintagestoryAPI.dll (contains duplicate SpawnConditions + JsonAttributesConverter)
+       Common/Effect/AmbientModifier.cs: duplicate of Common/AmbientModifier.cs (upstream compiles the latter) -->
+  <ItemGroup>
+    <Compile Remove="Common\Entity\EntityType.cs" />
+    <Compile Remove="Common\Effect\AmbientModifier.cs" />
+    <Compile Remove="Client\optimum-entity-render-batch.cs" />
+    <Compile Remove="Config\AdaptiveWorkerController.cs" />
+    <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
+    <Compile Remove="Config\OptimumAnimLod.cs" />
+    <Compile Remove="Config\OptimumConfig.cs" />
+    <Compile Remove="Config\OptimumGreedyMesher.cs" />
+    <Compile Remove="Config\optimum-api-bridge.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="protobuf-net" Version="2.4.9" />
+    <PackageReference Include="OpenTK.Windowing.GraphicsLibraryFramework" Version="4.9.4" />
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.1" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.1" />
+    <Reference Include="ICSharpCode.SharpZipLib">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\ICSharpCode.SharpZipLib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Cairo\Cairo.csproj" />
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+  </ItemGroup>
+</Project>

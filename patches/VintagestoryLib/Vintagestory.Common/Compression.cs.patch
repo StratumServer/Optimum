@@ -1,0 +1,83 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/Compression.cs b/VintagestoryLib/Vintagestory.Common/Compression.cs
+index a563793..2e0bf34 100644
+--- a/VintagestoryLib/Vintagestory.Common/Compression.cs
++++ b/VintagestoryLib/Vintagestory.Common/Compression.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.IO;
++using System.Numerics;
+ 
+ namespace Vintagestory.Common;
+ 
+ public class Compression
+ {
+@@ -46,23 +47,19 @@ public class Compression
+ 		return ((version != 0) ? Compression1 : Compression0).Compress(data, length);
+ 	}
+ 
+ 	public static byte[] CompressAndCombine(int[] data, int[] intdata, int intLength)
+ 	{
+-		int num = 0;
+-		int num2 = intdata.Length;
+-		while ((num2 >>= 1) > 0)
+-		{
+-			num++;
+-		}
++		int num = (int)BitOperations.Log2((uint)intdata.Length);
+ 		int length = num * 1024;
+ 		if (Compression1 is CompressionZSTD compressionZSTD)
+ 		{
+ 			int length2 = compressionZSTD.CompressAndSize(data, length);
+ 			if (intLength > 18)
+ 			{
+-				return ArrayConvert.Build(compressionZSTD.Compress_To2ndBuffer(intdata, intLength), CompressionZSTD.reusableBuffer2, compressionZSTD.Buffer, length2);
++				int compressedIntLength = compressionZSTD.Compress_To2ndBuffer(intdata, intLength);
++				return ArrayConvert.Build(compressedIntLength, CompressionZSTD.reusableBuffer2, compressionZSTD.Buffer, length2);
+ 			}
+ 			return ArrayConvert.Build(intLength, intdata, compressionZSTD.Buffer, length2);
+ 		}
+ 		byte[] array = Compression1.Compress(data, length);
+ 		if (intLength > 18)
+@@ -123,29 +120,34 @@ public class Compression
+ 			num2 = num / 4;
+ 			if (num2 == 1)
+ 			{
+ 				return null;
+ 			}
+-			array = new int[ArrayConvert.GetRoundedUpSize(num2)];
++			int roundedSize = ArrayConvert.GetRoundedUpSize(num2);
++			array = GC.AllocateUninitializedArray<int>(roundedSize);
+ 			ArrayConvert.ByteToInt(blocksCompressed, 4, array, num2);
++			if (roundedSize > num2)
++			{
++				Array.Clear(array, num2, roundedSize - num2);
++			}
+ 		}
+ 		else
+ 		{
+ 			num2 = Compression1.DecompressAndSize(blocksCompressed, 4, num, out var buffer) / 4;
+ 			if (num2 <= 1)
+ 			{
+ 				return null;
+ 			}
+-			array = new int[ArrayConvert.GetRoundedUpSize(num2)];
++			int roundedSize = ArrayConvert.GetRoundedUpSize(num2);
++			array = GC.AllocateUninitializedArray<int>(roundedSize);
+ 			ArrayConvert.ByteToInt(buffer, array, num2);
++			if (roundedSize > num2)
++			{
++				Array.Clear(array, num2, roundedSize - num2);
++			}
+ 		}
+-		int num3 = 0;
+-		int num4 = array.Length;
+-		while ((num4 >>= 1) > 0)
+-		{
+-			num3++;
+-		}
++		int num3 = (int)BitOperations.Log2((uint)array.Length);
+ 		if (blocks == null)
+ 		{
+ 			blocks = new int[15][];
+ 		}
+ 		byte[] array2 = Compression1.Decompress(blocksCompressed, num + 4, blocksCompressed.Length - (num + 4));

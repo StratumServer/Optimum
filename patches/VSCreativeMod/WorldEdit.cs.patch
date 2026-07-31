@@ -1,0 +1,17 @@
+diff --git a/VSCreativeMod/WorldEdit.cs b/VSCreativeMod/WorldEdit.cs
+index 35a5289..021e2f2 100644
+--- a/VSCreativeMod/WorldEdit.cs
++++ b/VSCreativeMod/WorldEdit.cs
+@@ -425,11 +425,11 @@ namespace Vintagestory.ServerMods.WorldEdit
+         }
+ 
+         private TextCommandResult GenMarkedMultiblockCode(IServerPlayer player)
+         {
+             BlockPos centerPos = player.CurrentBlockSelection.Position;
+-            API.Datastructures.OrderedDictionary<int, int> blocks = new ();
++            Vintagestory.API.Datastructures.OrderedDictionary<int, int> blocks = new ();
+             List<Vec4i> offsets = new List<Vec4i>();
+ 
+             MultiblockStructure ms = new MultiblockStructure();
+             var workspace = workspaces[player.PlayerUID];
+ 

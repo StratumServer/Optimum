@@ -10,3 +10,71 @@
 # constant's own value is untouched; the actual protocol-relevant assignments
 # live in ClientPackets.cs and ServerMain.cs, neither touched by this patch.
 patches/VintagestoryApi/Config/GameVersion.cs.patch
+
+# Stratum server-port Tier 2 (2026-07-15): the 11 entries below all live under
+# Vintagestory.Server/, which trips check_patch_targets' blanket path match.
+# Each was read in full and confirmed to touch only internal server-side
+# allocation/threading/scheduling behavior, never NetworkVersion, packet field
+# layout, or serialization order. Two carry a narrower note where the diff
+# also touches a packet-adjacent call site.
+
+# AllOnlinePlayers/AllPlayers per-tick cache (LINQ->foreach) and
+# BroadcastArbitraryPacket/BroadcastArbitraryUdpPacket's skipPlayers.Any/All
+# LINQ replaced by an equivalent manual loop (OptimumShouldSkipClient). Same
+# predicate, same packets, same recipients; no wire-format change.
+patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch
+
+# BuildClientList list reuse and a physics activation-queue drain budget
+# (OptimumConfig-gated, delays activation under load, no packet change).
+# SendPositionsAndAnimations' distance-send-frequency skip is behavior-
+# adjacent but OptimumConfig-gated (OptimumConfig.DistanceSendFrequencyEnabled,
+# default off). BuildPositionPacket switched to ArrayPool<Packet_EntityPosition>
+# with the vanilla-provided SetEntityPositions(array, count, capacity) overload;
+# confirmed Packet_BulkEntityPositionSerializer.Serialize iterates strictly to
+# EntityPositionsCount (the real count), never EntityPositionsLength (pool
+# capacity) - no rented-buffer garbage reaches the wire.
+patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
+
+# GetBulkEntityAttributesPacket/GetBulkEntityDebugAttributesPacket reuse a
+# [ThreadStatic] Packet_BulkEntityAttributes/Packet_Server instead of
+# allocating per call. Packet Id (60/62) and field content unchanged, only
+# the wrapping object identity is pooled.
+patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch
+
+# Random-tick BlockPos/FluidBlockPos pool plus the tick-slice divisor
+# (GetUpdateInterval / optimumTickSliceCount) that spreads block-tick work
+# across sub-passes at the same aggregate rate. No network path touched.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch
+
+# FindFreeableMemory's per-call BlockPos list replaced with a reused field.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs.patch
+
+# SendDirtySlots early-returns when InventoryBase.OptimumAnySlotDirty is
+# unset (Volatile read/write), skipping a no-op scan. No packet format change.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs.patch
+
+# SaveAllDirty{MapRegions,MapChunks,LoadedChunks,GeneratingChunks} share one
+# reused DbChunk list (sequential under savingLock). Disk save path only, no
+# network involvement.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch
+
+# PingTimerTick's per-cycle timeout list replaced with a reused field.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs.patch
+
+# ProcessLightingTask's per-task dirty-chunk HashSet replaced with a reused
+# field. Lighting computation itself unchanged.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs.patch
+
+# FindUnloadableChunkColumnCandidates' candidate list deduped into a reused
+# HashSet (same membership, fewer duplicate entries); SendOutOfRangeChunkUnloads
+# and UnloadGeneratingChunkColumns' per-call lists replaced with reused fields.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
+
+# The singleplayer scheduler gives each worker exclusive ownership of one worldgen pass, while the chunk thread handles None and Done. The config disables the feature by default. Neither patch changes packets, serializers, recipients, protocol versions, or chunk data.
+patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
+
+# Worldgen passes can create entities concurrently. Interlocked.Increment
+# preserves unique server entity IDs without changing their representation,
+# serialization, packet layout, or recipient selection.
+patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch

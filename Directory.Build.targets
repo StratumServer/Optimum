@@ -1,0 +1,29 @@
+<Project>
+  <!-- Suppress upstream/decompiled warnings by project path.
+       This file survives bootstrap refresh (unlike per-fork Directory.Build.props). -->
+
+  <!-- Cairo (SkiaSharp obsolete APIs) -->
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('/Cairo/'))">
+    <NoWarn>$(NoWarn);CS0618</NoWarn>
+  </PropertyGroup>
+
+  <!-- VintagestoryApi fork (obsolete APIs, Stream.Read, ReferenceEquals on value types) -->
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('/VintagestoryApi/'))">
+    <NoWarn>$(NoWarn);CS0618;CS1711;CA2022;CA2013</NoWarn>
+  </PropertyGroup>
+
+  <!-- Decompiled vanilla (VintagestoryLib, Vintagestory) -->
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('/build/'))">
+    <NoWarn>$(NoWarn);CS0108;CS0612;CS0618;CS0219;CS0420;CS4014;CA2022;CA2200;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <!-- VSEssentials fork -->
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('/VSEssentials/'))">
+    <NoWarn>$(NoWarn);CS8602</NoWarn>
+  </PropertyGroup>
+
+  <!-- VSSurvivalMod fork -->
+  <PropertyGroup Condition="$(MSBuildProjectFullPath.Contains('/VSSurvivalMod/'))">
+    <NoWarn>$(NoWarn);CS0108;CS0618</NoWarn>
+  </PropertyGroup>
+</Project>

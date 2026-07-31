@@ -1,0 +1,24 @@
+diff --git a/VSEssentials/Systems/Weather/WeatherSystemConfig.cs b/VSEssentials/Systems/Weather/WeatherSystemConfig.cs
+index ab0e42c..8800860 100644
+--- a/VSEssentials/Systems/Weather/WeatherSystemConfig.cs
++++ b/VSEssentials/Systems/Weather/WeatherSystemConfig.cs
+@@ -19,17 +19,17 @@ namespace Vintagestory.GameContent
+         [JsonProperty]
+         public AssetLocation[] SnowLayerBlockCodes;
+         [JsonProperty]
+         public WeatherPatternConfig RainOverlayPattern;
+ 
+-        public OrderedDictionary<Block, int> SnowLayerBlocks;
++        public Vintagestory.API.Datastructures.OrderedDictionary<Block, int> SnowLayerBlocks;
+ 
+ 
+ 
+         internal void Init(IWorldAccessor world)
+         {
+-            SnowLayerBlocks = new OrderedDictionary<Block, int>();
++            SnowLayerBlocks = new Vintagestory.API.Datastructures.OrderedDictionary<Block, int>();
+ 
+             int i = 0;
+             foreach (var loc in SnowLayerBlockCodes)
+             {
+                 Block block = world.GetBlock(loc);

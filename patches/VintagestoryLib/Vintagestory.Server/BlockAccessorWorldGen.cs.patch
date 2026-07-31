@@ -1,0 +1,19 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs b/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs
+index 33c394d..634d7d3 100644
+--- a/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs
++++ b/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs
+@@ -317,11 +317,13 @@ public class BlockAccessorWorldGen : BlockAccessorBase, IWorldGenBlockAccessor,
+ 	public void AddEntity(Entity entity)
+ 	{
+ 		ServerChunk generatingChunkAtPos = chunkdbthread.GetGeneratingChunkAtPos(entity.Pos.AsBlockPos);
+ 		if (generatingChunkAtPos != null)
+ 		{
+-			entity.EntityId = ++server.SaveGameData.LastEntityId;
++			// Two worldgen passes can spawn entities concurrently (structures in
++			// pass 2, creatures in pass 5), so the id must be minted atomically.
++			entity.EntityId = System.Threading.Interlocked.Increment(ref server.SaveGameData.LastEntityId);
+ 			generatingChunkAtPos.AddEntity(entity);
+ 		}
+ 	}
+ 
+ 	public override BlockEntity GetBlockEntity(BlockPos position)

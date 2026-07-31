@@ -31,8 +31,32 @@
     </Reference>
   </ItemGroup>
 
+  <!-- Exclude files not compiled by the upstream csproj (old-style explicit includes).
+       BEAnimatable.cs / BEBehaviorCombinable.cs: superseded, not referenced by upstream's csproj.
+       Loading/BlockLoader/*.cs: superseded by Loading/*.cs (BlockType.cs, CollectibleType.cs,
+       ItemType.cs), not referenced by upstream's csproj; duplicate types if compiled alongside.
+       Loading/EntityTypeLoader.cs, Loading/ItemAndBlockLoader.cs: superseded by
+       RegistryObjectTypeLoader.cs, not referenced by upstream's csproj. -->
+  <ItemGroup>
+    <Compile Remove="BlockEntity\BEAnimatable.cs" />
+    <Compile Remove="BlockEntityBehavior\BEBehaviorCombinable.cs" />
+    <Compile Remove="Loading\BlockLoader\BlockType.cs" />
+    <Compile Remove="Loading\BlockLoader\CollectibleType.cs" />
+    <Compile Remove="Loading\BlockLoader\ItemType.cs" />
+    <Compile Remove="Loading\EntityTypeLoader.cs" />
+    <Compile Remove="Loading\ItemAndBlockLoader.cs" />
+    <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumBc7Support.cs" />
+    <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapLodGenerator.cs" />
+    <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapPageCache.cs" />
+    <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapPageRenderer.cs" />
+    <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapTextureArray.cs" />
+    <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumTerrainSampler.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Cairo\Cairo.csproj" />
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+    <ProjectReference Include="..\optimum-game-content\optimum-game-content.csproj" />
     <ProjectReference Include="..\VintagestoryApi\VintagestoryAPI.csproj" />
   </ItemGroup>
 </Project>

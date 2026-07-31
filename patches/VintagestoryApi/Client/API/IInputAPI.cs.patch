@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/API/IInputAPI.cs b/VintagestoryApi/Client/API/IInputAPI.cs
+index a0ff8db..4bf9039 100644
+--- a/VintagestoryApi/Client/API/IInputAPI.cs
++++ b/VintagestoryApi/Client/API/IInputAPI.cs
+@@ -144,11 +144,11 @@ namespace Vintagestory.API.Client
+         void AddHotkeyListener(OnHotKeyDelegate handler);
+ 
+         /// <summary>
+         /// Returns a list of all currently registered hotkeys.
+         /// </summary>
+-        OrderedDictionary<string, HotKey> HotKeys { get; }
++        Vintagestory.API.Datastructures.OrderedDictionary<string, HotKey> HotKeys { get; }
+ 
+         /// <summary>
+         /// Gets the hotkey by the given hotkey code.
+         /// </summary>
+         /// <param name="toggleKeyCombinationCode">the key combination code.</param>

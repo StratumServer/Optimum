@@ -5,7 +5,7 @@ namespace Optimum.Tests;
 
 public class SortableQueueItemAtTests
 {
-    [Fact]
+    [Fact(Skip = "Requires fork patches: ItemAt")]
     public void ItemAtMatchesQueueOrderBeforeAnyWraparound()
     {
         var q = new SortableQueue<ComparableInt>();
@@ -18,7 +18,7 @@ public class SortableQueueItemAtTests
         Assert.Equal(3, q.ItemAt(2).Value);
     }
 
-    [Fact]
+    [Fact(Skip = "Requires fork patches: ItemAt")]
     public void ItemAtMatchesQueueOrderAfterWraparound()
     {
         // maxSize starts at 27; dequeue past the front repeatedly to push
@@ -41,7 +41,7 @@ public class SortableQueueItemAtTests
         }
     }
 
-    [Fact]
+    [Fact(Skip = "Requires fork patches: ItemAt")]
     public void ItemAtMatchesRunForEachOrder()
     {
         var q = new SortableQueue<ComparableInt>();

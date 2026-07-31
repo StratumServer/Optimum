@@ -1,0 +1,42 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechanicalPowerMod.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechanicalPowerMod.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechanicalPowerMod.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechanicalPowerMod.cs
+@@ -28,10 +28,19 @@ public class MechanicalPowerMod : ModSystem, IRenderer, IDisposable
+ 
+ 	private bool allNetworksFullyLoaded = true;
+ 
+ 	private List<MechanicalNetwork> nowFullyLoaded = new List<MechanicalNetwork>();
+ 
++	// Optimum: reuse list instead of allocating a new List<MechanicalNetwork>
++	// per tick. Cecil field injection adds this field but never runs its
++	// initializer IL (the vanilla .ctor is not a transplant target), so a
++	// field initializer here silently produces null at runtime - see
++	// EventManager.cs's singleDelayedCallbackBlockKeys for the same failure
++	// mode. Lazily created with ??= in OnServerGameTick instead (that method
++	// runs on the single server tick thread only, so no race).
++	private List<MechanicalNetwork> optimumTickNetworks;
++
+ 	public double RenderOrder => 0.0;
+ 
+ 	public int RenderRange => 9999;
+ 
+ 	public override bool ShouldLoad(EnumAppSide side)
+@@ -92,11 +101,17 @@ public class MechanicalPowerMod : ModSystem, IRenderer, IDisposable
+ 	}
+ 
+ 	protected void OnServerGameTick(float dt)
+ 	{
+ 		data.tickNumber++;
+-		foreach (MechanicalNetwork item in data.networksById.Values.ToList())
++		optimumTickNetworks ??= new List<MechanicalNetwork>();
++		optimumTickNetworks.Clear();
++		foreach (MechanicalNetwork network in data.networksById.Values)
++		{
++			optimumTickNetworks.Add(network);
++		}
++		foreach (MechanicalNetwork item in optimumTickNetworks)
+ 		{
+ 			if (!item.fullyLoaded || item.nodes.Count <= 0)
+ 			{
+ 				continue;
+ 			}

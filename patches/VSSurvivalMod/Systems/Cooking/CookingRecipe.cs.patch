@@ -1,0 +1,44 @@
+diff --git a/VSSurvivalMod/Systems/Cooking/CookingRecipe.cs b/VSSurvivalMod/Systems/Cooking/CookingRecipe.cs
+index 5a0a317..eb666e2 100644
+--- a/VSSurvivalMod/Systems/Cooking/CookingRecipe.cs
++++ b/VSSurvivalMod/Systems/Cooking/CookingRecipe.cs
+@@ -26,21 +26,21 @@ namespace Vintagestory.GameContent
+         /// <param name="recipeCode">The recipe code.</param>
+         /// <param name="stacks">The stacks of items to add.</param>
+         /// <returns>The name of the food type.</returns>
+         public string GetNameForIngredients(IWorldAccessor worldForResolve, string recipeCode, ItemStack[] stacks)
+         {
+-            API.Datastructures.OrderedDictionary<ItemStack, int> quantitiesByStack = new ();
++            Vintagestory.API.Datastructures.OrderedDictionary<ItemStack, int> quantitiesByStack = new ();
+             quantitiesByStack = mergeStacks(worldForResolve, stacks);
+ 
+             CookingRecipe recipe = worldForResolve.Api.GetCookingRecipe(recipeCode);
+ 
+             if (recipeCode == null || recipe == null || quantitiesByStack.Count == 0) return Lang.Get("unknown");
+ 
+             return GetNameForMergedIngredients(worldForResolve, recipe, quantitiesByStack);
+         }
+ 
+-        protected virtual string GetNameForMergedIngredients(IWorldAccessor worldForResolve, CookingRecipe recipe, API.Datastructures.OrderedDictionary<ItemStack, int> quantitiesByStack)
++        protected virtual string GetNameForMergedIngredients(IWorldAccessor worldForResolve, CookingRecipe recipe, Vintagestory.API.Datastructures.OrderedDictionary<ItemStack, int> quantitiesByStack)
+         {
+             string recipeCode = recipe.Code!;
+ 
+             switch (recipeCode)
+             {
+@@ -525,13 +525,13 @@ namespace Vintagestory.GameContent
+             }
+ 
+             return Lang.Get(code, Lang.Get($"meal-ingredientlist-{ingredients1?.Count ?? 0}", ingredients1?.ToArray() ?? [""]), Lang.Get($"meal-ingredientlist-{ingredients2?.Count ?? 0}", ingredients2?.ToArray() ?? [""]));
+         }
+ 
+-        protected static API.Datastructures.OrderedDictionary<ItemStack, int> mergeStacks(IWorldAccessor worldForResolve, ItemStack[] stacks)
++        protected static Vintagestory.API.Datastructures.OrderedDictionary<ItemStack, int> mergeStacks(IWorldAccessor worldForResolve, ItemStack[] stacks)
+         {
+-            API.Datastructures.OrderedDictionary<ItemStack, int> dict = new ();
++            Vintagestory.API.Datastructures.OrderedDictionary<ItemStack, int> dict = new ();
+ 
+             List<ItemStack> stackslist = [.. stacks];
+             while (stackslist.Count > 0)
+             {
+                 ItemStack stack = stackslist[0];

@@ -108,8 +108,8 @@ public class AllocationLookupBatchCoverageTests
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
-        Assert.Contains("ColorUtil.RgbToHsvInts(num2 & 0xFF, (num2 >> 8) & 0xFF, (num2 >> 16) & 0xFF, array);", source);
-        Assert.Contains("ColorUtil.Hsv2RgbInts(array[0], array[1], array[2], array2);", source);
+        Assert.Contains("OptimumApiBridge.RgbToHsvInts(num2 & 0xFF, (num2 >> 8) & 0xFF, (num2 >> 16) & 0xFF, array);", source);
+        Assert.Contains("OptimumApiBridge.HsvToRgbInts(array[0], array[1], array[2], array2);", source);
         Assert.Contains("WaterMurkColor.Set(", source);
     }
 

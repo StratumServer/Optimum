@@ -1,0 +1,47 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
+index 754d8c2..2f93607 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
+@@ -21,12 +21,12 @@ namespace Vintagestory.API.Client
+     {
+         public static double unscaledSlotPadding = 3;
+ 
+         protected IInventory inventory;
+ 
+-        public Datastructures.OrderedDictionary<int, ItemSlot> availableSlots = new ();
+-        public Datastructures.OrderedDictionary<int, ItemSlot> renderedSlots = new ();
++        public Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot> availableSlots = new ();
++        public Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot> renderedSlots = new ();
+ 
+         protected int cols;
+         protected int rows;
+         protected int prevSlotQuantity;
+ 
+@@ -58,12 +58,12 @@ namespace Vintagestory.API.Client
+         bool isLeftMouseDownStartedInsideElem;
+ 
+         HashSet<int> wasMouseDownOnSlotIndex = new HashSet<int>();
+ 
+ 
+-        Datastructures.OrderedDictionary<int, int> distributeStacksPrevStackSizeBySlotId = new ();
+-        Datastructures.OrderedDictionary<int, int> distributeStacksAddedStackSizeBySlotId = new ();
++        Vintagestory.API.Datastructures.OrderedDictionary<int, int> distributeStacksPrevStackSizeBySlotId = new ();
++        Vintagestory.API.Datastructures.OrderedDictionary<int, int> distributeStacksAddedStackSizeBySlotId = new ();
+ 
+ 
+         ItemStack referenceDistributStack;
+ 
+         public CanClickSlotDelegate CanClickSlot;
+@@ -557,11 +557,11 @@ namespace Vintagestory.API.Client
+         {
+             searchText = text.ToSearchFriendly().ToLowerInvariant();
+ 
+             renderedSlots.Clear();
+ 
+-            Datastructures.OrderedDictionary<int, WeightedSlot> wSlots = new ();
++            Vintagestory.API.Datastructures.OrderedDictionary<int, WeightedSlot> wSlots = new ();
+ 
+             foreach (var val in availableSlots)
+             {
+                 ItemSlot slot = inventory[val.Key];
+ 

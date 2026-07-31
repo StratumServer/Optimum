@@ -1,76 +1,335 @@
 diff --git a/VintagestoryApi/Datastructures/SortableQueue.cs b/VintagestoryApi/Datastructures/SortableQueue.cs
-index b674310..59c1108 100644
+index b674310..2e54600 100644
 --- a/VintagestoryApi/Datastructures/SortableQueue.cs
 +++ b/VintagestoryApi/Datastructures/SortableQueue.cs
-@@ -9,10 +9,11 @@ namespace Vintagestory.API.Datastructures
-         public int Count = 0;
-         public int maxSize = 27;
-         protected int tail = 0;
-         protected int head = 0;
-         protected T[] array;
-+        protected T[] sortBuffer;
+@@ -1,169 +1,206 @@
+-﻿using System;
++using System;
  
-         public SortableQueue()
-         {
-             array = new T[maxSize];
+-#nullable disable
++namespace Vintagestory.API.Datastructures;
+ 
+-namespace Vintagestory.API.Datastructures
++public class SortableQueue<T> where T : IComparable<T>
+ {
+-    public class SortableQueue<T> where T : IComparable<T>
+-    {
+-        public int Count = 0;
+-        public int maxSize = 27;
+-        protected int tail = 0;
+-        protected int head = 0;
+-        protected T[] array;
++    public int Count;
+ 
+-        public SortableQueue()
+-        {
+-            array = new T[maxSize];
+-        }
++    public int maxSize = 27;
+ 
+-        public void Clear()
+-        {
+-            Count = 0;
+-            head = 0;
+-            tail = 0;
+-            Array.Clear(array, 0, maxSize);    // may assist garbage collector, not sure but can't hurt
+-        }
++    protected int tail;
+ 
+-        public void Enqueue(T v)
+-        {
+-            if (Count == maxSize)
+-            {
+-                expandArray();
+-            }
++    protected int head;
+ 
+-            array[tail++ % maxSize] = v;
+-            Count++;
++    protected T[] array;
++
++    // Optimum: reusable sort buffer eliminates per-Sort allocation.
++    // The pathfinder calls Sort() on every A* open-set expansion (~50-200x
++    // per pathfind). Each call allocated a fresh T[maxSize] just to linearize
++    // a wrapped ring buffer before sorting. This field persists across calls,
++    // only growing when maxSize increases (expandArray).
++    protected T[] sortBuffer;
++
++    public SortableQueue()
++    {
++        array = new T[maxSize];
++    }
++
++    public void Clear()
++    {
++        Count = 0;
++        head = 0;
++        tail = 0;
++        Array.Clear(array, 0, maxSize);
++        if (sortBuffer != null) Array.Clear(sortBuffer, 0, sortBuffer.Length);
++    }
++
++    public void Enqueue(T v)
++    {
++        if (Count == maxSize)
++        {
++            expandArray();
          }
-@@ -21,10 +22,11 @@ namespace Vintagestory.API.Datastructures
++        array[tail++ % maxSize] = v;
++        Count++;
++    }
+ 
+-        public void EnqueueOrMerge(T v)
++    public void EnqueueOrMerge(T v)
++    {
++        if (head % maxSize > tail % maxSize)
          {
-             Count = 0;
-             head = 0;
-             tail = 0;
-             Array.Clear(array, 0, maxSize);    // may assist garbage collector, not sure but can't hurt
-+            if (sortBuffer != null) Array.Clear(sortBuffer, 0, sortBuffer.Length);
+-            if (head % maxSize > tail % maxSize)
++            for (int i = head % maxSize; i < maxSize; i++)
+             {
+-                for (int j = head % maxSize; j < maxSize; j++)
++                if (((IMergeable<T>)(object)array[i]).MergeIfEqual(v))
+                 {
+-                    if (((IMergeable<T>)array[j]).MergeIfEqual(v)) return;
++                    return;
+                 }
+-                for (int j = 0; j < tail % maxSize; j++)
++            }
++            for (int j = 0; j < tail % maxSize; j++)
++            {
++                if (((IMergeable<T>)(object)array[j]).MergeIfEqual(v))
+                 {
+-                    if (((IMergeable<T>)array[j]).MergeIfEqual(v)) return;
++                    return;
+                 }
+             }
+-            else
++        }
++        else
++        {
++            for (int k = head % maxSize; k < tail % maxSize; k++)
+             {
+-                for (int j = head % maxSize; j < tail % maxSize; j++)
++                if (((IMergeable<T>)(object)array[k]).MergeIfEqual(v))
+                 {
+-                    if (((IMergeable<T>)array[j]).MergeIfEqual(v)) return;
++                    return;
+                 }
+             }
+-
+-            Enqueue(v);
          }
++        Enqueue(v);
++    }
  
-         public void Enqueue(T v)
-         {
-             if (Count == maxSize)
-@@ -75,18 +77,21 @@ namespace Vintagestory.API.Datastructures
+-        /// <summary>
+-        /// Will return invalid data if called when Count &lt;= 0: it is the responsibility of the calling code to check Count > 0
+-        /// </summary>
+-        /// <returns></returns>
+-        public T Dequeue()
+-        {
+-            Count--;
+-            int index = head++ % maxSize;
+-            T result = array[index];
+-            array[index] = default;
+-            return result;
+-        }
++    /// <summary>
++    /// Will return invalid data if called when Count &lt;= 0: it is the responsibility of the calling code to check Count > 0
++    /// </summary>
++    /// <returns></returns>
++    public T Dequeue()
++    {
++        Count--;
++        int num = head++ % maxSize;
++        T result = array[num];
++        array[num] = default(T);
++        return result;
++    }
  
-         public void Sort()
+-        public void Sort()
++    public void Sort()
++    {
++        if (head % maxSize > tail % maxSize)
          {
-             if (head % maxSize > tail % maxSize)
+-            if (head % maxSize > tail % maxSize)
++            // Optimum: reuse sort buffer instead of allocating a new array every Sort()
++            if (sortBuffer == null || sortBuffer.Length < maxSize)
              {
 -                T[] newArray = new T[maxSize];
-+                if (sortBuffer == null || sortBuffer.Length < maxSize)
-+                {
-+                    sortBuffer = new T[maxSize];
-+                }
-                 int lengthToCopy = maxSize - head % maxSize;
+-                int lengthToCopy = maxSize - head % maxSize;
 -                ArrayCopy(array, head % maxSize, newArray, 0, lengthToCopy);  // Begin at head and copy to the end of the array
 -                ArrayCopy(array, 0, newArray, lengthToCopy, tail % maxSize);  // Begin at the start of the array and copy to head
 -                Array.Clear(array, 0, maxSize);    // may assist garbage collector, not sure but can't hurt
 -                array = newArray;
-+                ArrayCopy(array, head % maxSize, sortBuffer, 0, lengthToCopy);  // Begin at head and copy to the end of the array
-+                ArrayCopy(array, 0, sortBuffer, lengthToCopy, tail % maxSize);  // Begin at the start of the array and copy to head
-+                ArrayCopy(sortBuffer, 0, array, 0, Count);
-+                Array.Clear(array, Count, maxSize - Count);    // may assist garbage collector, not sure but can't hurt
-                 head = 0;
+-                head = 0;
 -                tail = tail % maxSize + lengthToCopy;
-+                tail = Count;
++                sortBuffer = new T[maxSize];
              }
-             int start = head % maxSize;
-             Array.Sort(array, start, tail % maxSize - start);
+-            int start = head % maxSize;
+-            Array.Sort(array, start, tail % maxSize - start);
++            int lengthToCopy = maxSize - head % maxSize;
++            ArrayCopy(array, head % maxSize, sortBuffer, 0, lengthToCopy);
++            ArrayCopy(array, 0, sortBuffer, lengthToCopy, tail % maxSize);
++            ArrayCopy(sortBuffer, 0, array, 0, Count);
++            Array.Clear(array, Count, maxSize - Count);
++            head = 0;
++            tail = Count;
          }
++        int start = head % maxSize;
++        Array.Sort(array, start, tail % maxSize - start);
++    }
  
-@@ -101,10 +106,19 @@ namespace Vintagestory.API.Datastructures
+-        public void RunForEach(Action<T> action)
++    public void RunForEach(Action<T> action)
++    {
++        if (head % maxSize > tail % maxSize)
+         {
+-            if (head % maxSize > tail % maxSize)
++            for (int i = head % maxSize; i < maxSize; i++)
++            {
++                action(array[i]);
++            }
++            for (int j = 0; j < tail % maxSize; j++)
              {
-                 for (int j = head % maxSize; j < tail % maxSize; j++) action(array[j]);
+-                for (int j = head % maxSize; j < maxSize; j++) action(array[j]);
+-                for (int j = 0; j < tail % maxSize; j++) action(array[j]);
++                action(array[j]);
+             }
+-            else
++        }
++        else
++        {
++            for (int k = head % maxSize; k < tail % maxSize; k++)
+             {
+-                for (int j = head % maxSize; j < tail % maxSize; j++) action(array[j]);
++                action(array[k]);
              }
          }
- 
-+        /// <summary>
-+        /// Item at logical queue position i (0 = front, same order Dequeue() would return),
-+        /// for callers that need a delegate-free foreach instead of RunForEach(Action&lt;T&gt;).
-+        /// </summary>
-+        public T ItemAt(int i)
-+        {
-+            return array[(head + i) % maxSize];
-+        }
++    }
 +
-         /// <summary>
-         /// Will return invalid data if called when Count &lt;= 0: it is the responsibility of the calling code to check Count > 0
-         /// </summary>
-         /// <returns></returns>
-         public T DequeueLIFO()
++    /// <summary>
++    /// Optimum: Item at logical queue position i (0 = front, same order Dequeue() would return),
++    /// for callers that need a delegate-free foreach instead of RunForEach(Action&lt;T&gt;).
++    /// </summary>
++    public T ItemAt(int i)
++    {
++        return array[(head + i) % maxSize];
++    }
+ 
+-        /// <summary>
+-        /// Will return invalid data if called when Count &lt;= 0: it is the responsibility of the calling code to check Count > 0
+-        /// </summary>
+-        /// <returns></returns>
+-        public T DequeueLIFO()
++    /// <summary>
++    /// Will return invalid data if called when Count &lt;= 0: it is the responsibility of the calling code to check Count > 0
++    /// </summary>
++    /// <returns></returns>
++    public T DequeueLIFO()
++    {
++        Count--;
++        T result = array[tail-- % maxSize];
++        if (tail < 0)
+         {
+-            Count--;
+-            T result = array[tail-- % maxSize];
+-            if (tail < 0) tail += maxSize;
+-            return result;
++            tail += maxSize;
+         }
++        return result;
++    }
+ 
+-        private void expandArray()
++    private void expandArray()
++    {
++        head %= maxSize;
++        int num = maxSize;
++        maxSize = maxSize * 2 + 1;
++        T[] dest = new T[maxSize];
++        if (head == 0)
+         {
+-            head %= maxSize;          //normalise this
+-            int lengthToCopy = maxSize;
+-            maxSize = maxSize * 2 + 1;
+-            T[] newArray = new T[maxSize];
+-            if (head == 0)
+-            {
+-                // easy case, it's a straight copy
+-                ArrayCopy(array, 0, newArray, 0, lengthToCopy);
+-            }
+-            else
+-            {
+-                // all other cases, we need to unwrap it into the new array
+-                lengthToCopy -= head;
+-                ArrayCopy(array, head, newArray, 0, lengthToCopy);
+-                ArrayCopy(array, 0, newArray, lengthToCopy, head);
+-            }
+-            array = newArray;
+-            head = 0;
+-            tail = Count;
++            ArrayCopy(array, 0, dest, 0, num);
++        }
++        else
++        {
++            num -= head;
++            ArrayCopy(array, head, dest, 0, num);
++            ArrayCopy(array, 0, dest, num, head);
+         }
++        array = dest;
++        head = 0;
++        tail = Count;
++    }
+ 
+-        private void ArrayCopy(T[] src, int srcOffset, T[] dest, int destOffset, int len)
++    private void ArrayCopy(T[] src, int srcOffset, T[] dest, int destOffset, int len)
++    {
++        if (len > 128)
+         {
+-            if (len > 128)
+-            {
+-                Array.Copy(src, srcOffset, dest, destOffset, len);
+-            }
+-            else
+-            {
+-                int i = srcOffset;
+-                int j = destOffset;
+-                int lim = len / 4 * 4 + srcOffset;
+-                while (i < lim)
+-                {
+-                    dest[j] = src[i];   //According to MS docs, in native code the CPU can parallelise four simple instructions like this
+-                    dest[j + 1] = src[i + 1];
+-                    dest[j + 2] = src[i + 2];
+-                    dest[j + 3] = src[i + 3];
+-                    i += 4;
+-                    j += 4;
+-                }
+-                len += srcOffset;
+-                while (i < len)
+-                {
+-                    dest[j++] = src[i++];
+-                }
+-            }
++            Array.Copy(src, srcOffset, dest, destOffset, len);
++            return;
++        }
++        int num = srcOffset;
++        int num2 = destOffset;
++        int num3 = len / 4 * 4 + srcOffset;
++        while (num < num3)
++        {
++            dest[num2] = src[num];
++            dest[num2 + 1] = src[num + 1];
++            dest[num2 + 2] = src[num + 2];
++            dest[num2 + 3] = src[num + 3];
++            num += 4;
++            num2 += 4;
++        }
++        len += srcOffset;
++        while (num < len)
++        {
++            dest[num2++] = src[num++];
+         }
+     }
+ }

@@ -1,0 +1,17 @@
+diff --git a/VSEssentials/Loading/EntityType.cs b/VSEssentials/Loading/EntityType.cs
+index a48c534..be39168 100644
+--- a/VSEssentials/Loading/EntityType.cs
++++ b/VSEssentials/Loading/EntityType.cs
+@@ -288,11 +288,11 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+             return properties;
+         }
+ 
+ 
+-        internal override RegistryObjectType CreateAndPopulate(ICoreServerAPI api, AssetLocation fullcode, JObject jobject, JsonSerializer deserializer, API.Datastructures.OrderedDictionary<string, string> variant)
++        internal override RegistryObjectType CreateAndPopulate(ICoreServerAPI api, AssetLocation fullcode, JObject jobject, JsonSerializer deserializer, Vintagestory.API.Datastructures.OrderedDictionary<string, string> variant)
+         {
+             deserializer.Converters.Add(new SoundAttributeConverter(false, 24));
+             EntityType type = CreateResolvedType<EntityType>(api, fullcode, jobject, deserializer, variant);
+             try
+             {

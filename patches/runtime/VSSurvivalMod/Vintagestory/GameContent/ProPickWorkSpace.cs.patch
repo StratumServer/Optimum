@@ -1,0 +1,78 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/ProPickWorkSpace.cs b/VSSurvivalMod/Vintagestory/GameContent/ProPickWorkSpace.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/ProPickWorkSpace.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/ProPickWorkSpace.cs
+@@ -9,10 +9,14 @@ using Vintagestory.ServerMods;
+ 
+ namespace Vintagestory.GameContent;
+ 
+ public class ProPickWorkSpace
+ {
++	private DummyChunk[] optimumReusableChunks;
++
++	private int optimumReusableChunksHeight;
++
+ 	public class DummyChunk : IServerChunk, IWorldChunk
+ 	{
+ 		public class DummyChunkData : IChunkBlocks
+ 		{
+ 			public int[] blocks;
+@@ -36,14 +40,11 @@ public class ProPickWorkSpace
+ 				blocks = new int[chunksize * chunksize * chunksize];
+ 			}
+ 
+ 			public void ClearBlocks()
+ 			{
+-				for (int i = 0; i < blocks.Length; i++)
+-				{
+-					blocks[i] = 0;
+-				}
++				Array.Clear(blocks);
+ 			}
+ 
+ 			public void ClearBlocksAndPrepare()
+ 			{
+ 				ClearBlocks();
+@@ -555,21 +556,40 @@ public class ProPickWorkSpace
+ 		}
+ 	}
+ 
+ 	public virtual int[] GetRockColumn(int posX, int posZ)
+ 	{
+-		DummyChunk[] array = new DummyChunk[sapi.World.BlockAccessor.MapSizeY / 32];
++		int height = sapi.World.BlockAccessor.MapSizeY / 32;
++		DummyChunk[] array;
++		if (optimumReusableChunks != null && optimumReusableChunksHeight == height)
++		{
++			array = optimumReusableChunks;
++			for (int i = 0; i < array.Length; i++)
++			{
++				array[i].Blocks.ClearBlocksAndPrepare();
++				array[i].chunkY = i;
++			}
++		}
++		else
++		{
++			array = new DummyChunk[height];
++			for (int i = 0; i < array.Length; i++)
++			{
++				array[i] = new DummyChunk(32);
++				array[i].chunkY = i;
++			}
++			optimumReusableChunks = array;
++			optimumReusableChunksHeight = height;
++		}
+ 		int num = posX / 32;
+ 		int num2 = posZ / 32;
+ 		int num3 = posX % 32;
+ 		int num4 = posZ % 32;
+ 		IMapChunk mapChunk = sapi.World.BlockAccessor.GetMapChunk(new Vec2i(num, num2));
+ 		for (int i = 0; i < array.Length; i++)
+ 		{
+-			array[i] = new DummyChunk(32);
+ 			array[i].MapChunk = mapChunk;
+-			array[i].chunkY = i;
+ 		}
+ 		int num5 = mapChunk.WorldGenTerrainHeightMap[num4 * 32 + num3];
+ 		for (int j = 0; j < num5; j++)
+ 		{
+ 			int num6 = j / 32;

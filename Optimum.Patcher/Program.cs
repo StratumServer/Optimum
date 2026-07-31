@@ -18,10 +18,22 @@ if (args.Length == 3 && args[0] == "--compare-casts")
     return divergences.Count == 0 ? 0 : 1;
 }
 
+if (args.Length == 4 && args[0] == "--api")
+{
+    return ApiPatcher.Patch(args[1], args[2], args[3]) ? 0 : 1;
+}
+
+if (args.Length == 5 && args[0] == "--mod")
+{
+    return ModPatcher.Patch(args[1], args[2], args[3], args[4]) ? 0 : 1;
+}
+
 if (args.Length < 3)
 {
     Console.Error.WriteLine("Usage: Optimum.Patcher <vanilla.dll> <compiled.dll> <output.dll>");
     Console.Error.WriteLine("       Optimum.Patcher --compare-casts <vanilla.dll> <compiled.dll>");
+    Console.Error.WriteLine("       Optimum.Patcher --api <vanilla.dll> <contracts.dll> <output.dll>");
+    Console.Error.WriteLine("       Optimum.Patcher --mod <name> <vanilla.dll> <donor.dll> <output.dll>");
     return 1;
 }
 
@@ -289,10 +301,15 @@ var targets = new List<MethodTarget>
     // datapath.cfg support: entry shims (ClientLinux/ClientWindows/ClientMac) all
     // funnel into this Main, so the arg injection lives here (lambda-free)
     new("Vintagestory.Client.ClientProgram", "Main", 1),
+    new("Vintagestory.Client.ClientProgram", "Start", 2),
     // Mod-crash containment: a mod exception in GetHeldItemInfo during the
     // background search-cache build otherwise kills the client (SmithingPlus
     // shutdown race, unhandled on the TyronThreadPool thread).
     new("Vintagestory.Common.CreativeTab", "CreateSearchCache", 1),
+    // SvgLoader: reload SVG asset data when a mod holds a stale IAsset ref
+    // after the textures category is unloaded (waypoint icon packs, etc.).
+    // Vanilla throws; this reloads from Origin, keeping icons drawing.
+    new("Vintagestory.Client.NoObf.SvgLoader", "rasterizeSvg", 6),
 };
 
 int total = ILPatcher.PatchWithInjection(

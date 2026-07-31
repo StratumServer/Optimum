@@ -1,0 +1,3 @@
+# Unified diffs must preserve whitespace from the exact decompiled baseline,
+# including whitespace on removed lines, or they no longer apply faithfully.
+*.patch -whitespace

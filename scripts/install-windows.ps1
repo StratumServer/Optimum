@@ -3,8 +3,8 @@
 Optimum graphical installer for Windows x64.
 
 Detects prerequisites, shows their status in a branded dark-themed panel, and
-lets the user resolve missing items before building. Uses the local VS install
-for decompilation unless the user chooses the download option.
+lets the user resolve missing items before building. Requires an existing local
+Vintage Story installation for decompilation and packaging.
 
 .PARAMETER Silent
 Run headlessly (no window).
@@ -33,8 +33,7 @@ param(
     [switch]$Shortcut,
     [switch]$StartMenu,
     [string]$LogFile,
-    [string]$VsPath,
-    [switch]$DownloadVs
+    [string]$VsPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,9 +45,6 @@ $InstallUrls = @{
     DotNet = 'https://dotnet.microsoft.com/download/dotnet/10.0'
     Git = 'https://git-scm.com/download/win'
     PowerShell = 'https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows'
-}
-$ToolUrls = @{
-    Innounp = 'https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip'
 }
 
 # ===========================================================================
@@ -78,7 +74,7 @@ function Find-AllVintageStory {
     $results = @()
 
     # 1. Registry (Inno Setup uninstall entries).
-    $keys = @('{70364653-036D-49B3-8B80-AF39665F29C1}_is1', 'Vintage Story_is1')
+    $keys = @('{70364653-036D-49B3-8B80-AF39665F29C1}_is1', 'Vintage Story_is1', 'Vintagestory_is1')
     $hives = @(
         'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
@@ -102,45 +98,22 @@ function Find-AllVintageStory {
         }
     }
 
-    # 2. Common filesystem locations (covers unregistered/manual installs,
-    #    Steam, GOG, custom drives, portable extractions).
+    # 2. Common filesystem locations: both "Vintage Story" and "Vintagestory".
     $probePaths = @(
-        (Join-Path $env:APPDATA 'Vintagestory')
-        (Join-Path $env:ProgramFiles 'Vintage Story')
-        (Join-Path ${env:ProgramFiles(x86)} 'Vintage Story')
-        (Join-Path $env:LOCALAPPDATA 'Vintage Story')
-        (Join-Path $env:LOCALAPPDATA 'Programs\Vintage Story')
-        (Join-Path $env:USERPROFILE 'Games\Vintage Story')
-        (Join-Path $env:USERPROFILE 'Vintage Story')
+        (Join-Path $env:APPDATA 'Vintagestory'),        (Join-Path $env:APPDATA 'Vintage Story')
+        (Join-Path $env:LOCALAPPDATA 'Vintagestory'),   (Join-Path $env:LOCALAPPDATA 'Vintage Story')
+        (Join-Path $env:LOCALAPPDATA 'Programs\Vintage Story'), (Join-Path $env:LOCALAPPDATA 'Programs\Vintagestory')
+        (Join-Path $env:ProgramFiles 'Vintagestory'),   (Join-Path $env:ProgramFiles 'Vintage Story')
+        (Join-Path ${env:ProgramFiles(x86)} 'Vintage Story'), (Join-Path ${env:ProgramFiles(x86)} 'Vintagestory')
+        (Join-Path $env:USERPROFILE 'Vintagestory'),    (Join-Path $env:USERPROFILE 'Vintage Story')
+        (Join-Path $env:USERPROFILE 'Games\Vintagestory'), (Join-Path $env:USERPROFILE 'Games\Vintage Story')
     )
-    # Steam library paths (common locations and libraryfolders.vdf).
-    $steamLibs = @(
-        "$env:ProgramFiles\Steam\steamapps\common\Vintage Story"
-        "${env:ProgramFiles(x86)}\Steam\steamapps\common\Vintage Story"
-        "$env:LOCALAPPDATA\Steam\steamapps\common\Vintage Story"
-    )
-    # Parse Steam libraryfolders.vdf for extra library paths.
-    $steamVdf = "${env:ProgramFiles(x86)}\Steam\steamapps\libraryfolders.vdf"
-    if (Test-Path $steamVdf) {
-        $vdfContent = Get-Content $steamVdf -Raw -ErrorAction SilentlyContinue
-        if ($vdfContent) {
-            [regex]::Matches($vdfContent, '"path"\s+"([^"]+)"') | ForEach-Object {
-                $steamLibs += Join-Path $_.Groups[1].Value 'steamapps\common\Vintage Story'
-            }
-        }
-    }
-    $probePaths += $steamLibs
-    # GOG Galaxy.
-    $probePaths += "$env:ProgramFiles\GOG Galaxy\Games\Vintage Story"
-    $probePaths += "${env:ProgramFiles(x86)}\GOG Galaxy\Games\Vintage Story"
-    # Custom drive roots — only probe drives that exist on this machine.
+    # Custom drive roots.
     $existingDrives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' })
     foreach ($drive in $existingDrives) {
-        $probePaths += "$drive\Vintage Story"
-        $probePaths += "$drive\Games\Vintage Story"
+        $probePaths += "$drive\Vintage Story";     $probePaths += "$drive\Vintagestory"
+        $probePaths += "$drive\Games\Vintage Story"; $probePaths += "$drive\Games\Vintagestory"
         $probePaths += "$drive\Program Files\Vintage Story"
-        $probePaths += "$drive\Vintagestory"
-        $probePaths += "$drive\Games\Vintagestory"
     }
     foreach ($dir in $probePaths) {
         if (-not $dir) { continue }
@@ -217,7 +190,7 @@ function Resolve-DotNetPath {
         $candidates += "$env:ChocolateyInstall\lib\dotnet-sdk\tools"
     }
     $candidates += "C:\tools\dotnet"
-    # Custom drive roots — only probe drives that exist.
+    # Custom drive roots - only probe drives that exist.
     $existingDrives = @(Get-PSDrive -PSProvider FileSystem -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' })
     foreach ($drive in $existingDrives) {
         $candidates += "$drive\dotnet"
@@ -414,14 +387,6 @@ function Find-ILSpyCmd {
     return $null
 }
 
-function Get-InnounpPath {
-    return (Join-Path (Join-Path $Root '.tools') 'innounp.exe')
-}
-
-function Test-Innounp {
-    return (Test-Path (Get-InnounpPath))
-}
-
 function Install-ILSpyCmd {
     $manifest = Join-Path $Root '.config\dotnet-tools.json'
     if (Test-Path $manifest) {
@@ -528,14 +493,14 @@ function Assert-RequiredTools {
 }
 
 function Invoke-OptimumBuild {
-    param([string]$InstallDir, [string]$DataPath, [bool]$Shortcut, [bool]$StartMenu, [string]$VsPath, [bool]$DownloadVs)
+    param([string]$InstallDir, [string]$DataPath, [bool]$Shortcut, [bool]$StartMenu, [string]$VsPath)
 
     if (-not $InstallDir) { throw "InstallDir is required." }
 
     Write-Phase "Verifying tools..."
     Assert-RequiredTools
 
-    # Resolve VS path: use local install or download
+    # Resolve VS path from an existing local installation.
     $requiredVer = Get-RequiredVsVersion
     if (-not $VsPath) {
         $vsInfo = Find-VintageStory
@@ -546,82 +511,12 @@ function Invoke-OptimumBuild {
             }
         }
     }
-    if ((-not $VsPath -or -not (Test-Path (Join-Path $VsPath 'Vintagestory.exe'))) -and $DownloadVs) {
-        Write-Phase "Downloading Vintage Story (~570 MB)..."
-        $zipCache = Join-Path $Root '.vanilla/archives'
-        New-Item -ItemType Directory -Force -Path $zipCache | Out-Null
-        $exeName = 'vs_install_win-x64_1.22.3.exe'
-        $installer = Join-Path $zipCache $exeName
-        if (-not (Test-Path $installer)) {
-            $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
-            Write-Log "Downloading $url"
-            Invoke-NativeDownload -Uri $url -OutFile $installer
-        }
-        # Extract with innounp
-        $toolsDir = Join-Path $Root '.tools'
-        $innounp = Get-InnounpPath
-        if (-not (Test-Path $innounp)) {
-            Write-Phase "Downloading extraction tool..."
-            New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
-            $innounpZip = Join-Path $toolsDir 'innounp-2.zip'
-            Invoke-NativeDownload -Uri $ToolUrls.Innounp -OutFile $innounpZip -Quiet
-            Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
-            $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
-            if ($found -and $found.FullName -ne $innounp) { Copy-Item -Force $found.FullName $innounp }
-            Remove-Item -Force $innounpZip -ErrorAction SilentlyContinue
-        }
-        Write-Phase "Unpacking Vintage Story..."
-        $vanillaDir = Join-Path $Root '.vanilla\win-x64\vintagestory'
-        New-Item -ItemType Directory -Force -Path $vanillaDir | Out-Null
-        # Kill any leftover innounp processes from a previous failed run.
-        Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        $innounpArgs = '-x -d"{0}" -c"{{app}}" "{1}"' -f $vanillaDir, $installer
-        $innounpProc = Start-Process -FilePath $innounp -ArgumentList $innounpArgs -NoNewWindow -PassThru -RedirectStandardOutput "$env:TEMP\innounp-out.txt"
-        $exited = $innounpProc.WaitForExit(300000)  # 5 minute timeout
-        if (-not $exited) {
-            $innounpProc.Kill()
-            Get-Process -Name 'innounp' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            throw "innounp timed out after 5 minutes. Kill any innounp.exe processes in Task Manager and retry."
-        }
-        $innounpExitCode = $innounpProc.ExitCode
-        $errText = if (Test-Path "$env:TEMP\innounp-out.txt") { Get-Content "$env:TEMP\innounp-out.txt" -Raw } else { "" }
-        $appDir = Join-Path $vanillaDir '{app}'
-        if (Test-Path $appDir) {
-            Get-ChildItem -Path $appDir | Move-Item -Destination $vanillaDir -Force
-            Remove-Item -Force $appDir
-        }
-        if ($innounpExitCode -ne 0 -and -not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
-            throw "innounp failed (exit $innounpExitCode): $errText"
-        }
-        if ($innounpExitCode -ne 0) {
-            Write-Log "innounp exited with code $innounpExitCode after extracting Vintagestory.exe; continuing."
-        }
-        Remove-Item -Force "$env:TEMP\innounp-out.txt" -ErrorAction SilentlyContinue
-        if (-not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
-            throw "Extraction failed: Vintagestory.exe not found"
-        }
-        # A tolerated nonzero innounp exit can leave zero-byte or truncated
-        # assets behind. They persist in this cache across reinstalls and
-        # surface in-game as opaque GL crashes ("blur.vsh ... unexpected
-        # $end at <EOF>"), so verify now and discard a bad extraction.
-        $corrupt = @(Get-ChildItem -Path (Join-Path $vanillaDir 'assets') -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Length -eq 0 -and $_.Name -notlike 'version-*.txt' })
-        $vanillaShaders = Join-Path $vanillaDir 'assets/game/shaders'
-        if (Test-Path $vanillaShaders) {
-            $corrupt += @(Get-ChildItem -Path $vanillaShaders -File |
-                Where-Object { $_.Extension -in '.vsh', '.fsh', '.gsh' } |
-                Where-Object { (Get-Content $_.FullName -Raw) -notmatch 'void\s+main' })
-        }
-        if ($corrupt.Count -gt 0) {
-            $names = ($corrupt | Select-Object -First 10 | ForEach-Object { $_.FullName }) -join "`n  "
-            Remove-Item -Recurse -Force $vanillaDir -ErrorAction SilentlyContinue
-            throw "innounp produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run the installer to retry.`n  $names"
-        }
-        $VsPath = $vanillaDir
-    }
-
     if (-not $VsPath -or -not (Test-Path (Join-Path $VsPath 'Vintagestory.exe'))) {
-        throw "Vintage Story install not found. Point the installer to your VS folder or enable Download."
+        throw "Install Vintage Story $requiredVer before Optimum or pass -VsPath with the folder that contains Vintagestory.exe."
+    }
+    $actualVsVersion = Get-VsExeVersion -Dir $VsPath
+    if ($actualVsVersion -ne $requiredVer) {
+        throw "Vintage Story version mismatch: found $actualVsVersion at $VsPath, Optimum $optimumBuildVer requires $requiredVer. Update or reinstall Vintage Story before installing Optimum."
     }
     Write-Log "Using Vintage Story from: $VsPath"
 
@@ -719,21 +614,20 @@ function Invoke-OptimumBuild {
             robocopy "$VsPath" "$vanillaLink" /E /NFL /NDL /NJH /NJS /NP *>&1 | Out-Null
         }
 
-        # package.ps1 expects a pristine copy of VintagestoryLib.dll saved as
-        # VintagestoryLib.vanilla.dll. The innoextract path in package.ps1
-        # creates this, but the junction/copy path here skips it.
-        $vanillaLibSrc = Join-Path $vanillaLink 'VintagestoryLib.dll'
-        $vanillaLibDst = Join-Path $vanillaLink 'VintagestoryLib.vanilla.dll'
-        if ((Test-Path $vanillaLibSrc) -and -not (Test-Path $vanillaLibDst)) {
-            Copy-Item -Force $vanillaLibSrc $vanillaLibDst
-        }
-
         Push-Location $buildRoot
         try {
             $prevEAP = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
             try {
                 Write-Phase "Decompiling and patching the engine..."
+                # Bootstrap uses git apply for patches - needs a git repo.
+                Push-Location $buildRoot
+                if (-not (Test-Path (Join-Path $buildRoot '.git'))) {
+                    git init --quiet 2>$null | Out-Null
+                    git add -A 2>$null | Out-Null
+                    git commit --quiet -m 'init' --allow-empty 2>$null | Out-Null
+                }
+                Pop-Location
                 $global:LASTEXITCODE = 0
                 & "$buildRoot/scripts/bootstrap.ps1" -ClientArchive '__skip__' *>&1 | ForEach-Object { Write-Log ([string]$_) }
                 # A failed patch makes bootstrap exit 1 before it syncs the
@@ -743,10 +637,13 @@ function Invoke-OptimumBuild {
                 if ($LASTEXITCODE -ne 0) { throw "Decompile/patch step failed (bootstrap exit code $LASTEXITCODE). Check the lines above for the failing patch or file." }
 
                 Write-Phase "Building Optimum (this takes a moment)..."
-                # Strip test project from slnx (not needed for installer)
+                # Remove the test folder from the installer solution copy.
                 $slnx = Join-Path $buildRoot 'VintageStory.slnx'
                 $slnxContent = [System.IO.File]::ReadAllText($slnx)
-                $slnxContent = $slnxContent -replace '(?m)[^\r\n]*Optimum\.Tests[^\r\n]*(\r?\n)?', ''
+                $slnxContent = [regex]::Replace(
+                    $slnxContent,
+                    '(?s)\s*<Folder Name="/Tests/">.*?</Folder>\s*',
+                    [Environment]::NewLine)
                 [System.IO.File]::WriteAllText($slnx, $slnxContent)
                 # Clear Platform env var (HP and other vendors set it to values like 'HPD' which break MSBuild).
                 $savedPlatform = $env:Platform
@@ -764,7 +661,7 @@ function Invoke-OptimumBuild {
             $ErrorActionPreference = 'Continue'
             try {
                 Write-Phase "Assembling the final package..."
-                & "$buildRoot/scripts/package.ps1" -OutputDir $stage *>&1 | ForEach-Object { Write-Log ([string]$_) }
+                & "$buildRoot/scripts/package.ps1" -OutputDir $stage -VanillaDir $VsPath *>&1 | ForEach-Object { Write-Log ([string]$_) }
             } finally { $ErrorActionPreference = $prevEAP }
 
             $built = Get-ChildItem -Path $stage -Directory -Filter 'Optimum-v*-win-x64' | Select-Object -First 1
@@ -860,7 +757,7 @@ if ($Silent) {
         $script:LogWriter.AutoFlush = $true
     }
     try {
-        Invoke-OptimumBuild -InstallDir $InstallDir -DataPath $DataPath -Shortcut:$Shortcut.IsPresent -StartMenu:$StartMenu.IsPresent -VsPath $VsPath -DownloadVs:$DownloadVs.IsPresent
+        Invoke-OptimumBuild -InstallDir $InstallDir -DataPath $DataPath -Shortcut:$Shortcut.IsPresent -StartMenu:$StartMenu.IsPresent -VsPath $VsPath
         exit 0
     } catch {
         Write-Log "==PHASE== Failed."
@@ -1015,14 +912,12 @@ function Update-PrereqStatus {
             $script:detectedVsVer = $browseVer
             $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $userBrowsed"
             $script:lblVsStatus.ForeColor = $colGreen
-            Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $false
             $script:btnVsBrowse.Visible = $false
         } else {
             $script:detectedVsPath = $userBrowsed
             $script:detectedVsVer = $browseVer
-            $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $browseVer (need $requiredVer) - browse or download"
+            $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $browseVer (need $requiredVer) - browse"
             $script:lblVsStatus.ForeColor = $colOrange
-            Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
             $script:btnVsBrowse.Visible = $true
         }
     } else {
@@ -1031,16 +926,14 @@ function Update-PrereqStatus {
             $script:detectedVsPath = $vsInfo.Path
             $script:detectedVsVer = $vsInfo.Version
             if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $requiredVer) - browse or download"
+                $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $requiredVer) - browse"
                 $script:lblVsStatus.ForeColor = $colOrange
-                Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
                 $script:btnVsBrowse.Visible = $true
                 $script:txtVsPath.Text = ''
             } else {
                 $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $($vsInfo.Path)"
                 $script:lblVsStatus.ForeColor = $colGreen
                 $script:txtVsPath.Text = $vsInfo.Path
-                Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $false
                 $script:btnVsBrowse.Visible = $false
             }
         } else {
@@ -1048,7 +941,6 @@ function Update-PrereqStatus {
             $script:detectedVsVer = $null
             $script:lblVsStatus.Text = [char]0x2717 + '  Vintage Story'
             $script:lblVsStatus.ForeColor = $colRed
-            Set-MissingActionCheckBox -CheckBox $script:chkVsDl -Visible $true
             $script:btnVsBrowse.Visible = $true
         }
     }
@@ -1125,32 +1017,16 @@ function Update-PrereqStatus {
         $script:btnIlspyBrowse.Visible = $true
     }
 
-    # innounp (needed to extract VS installer if downloading)
-    $hasInnounp = Test-Innounp
-    if ($script:chkVsDl.Visible -and $script:chkVsDl.Checked) {
-        $script:lblInnounpStatus.Visible = $true
-        if ($hasInnounp) {
-            $script:lblInnounpStatus.Text = [char]0x2713 + '  innounp (extractor)'
-            $script:lblInnounpStatus.ForeColor = $colGreen
-            Set-MissingActionCheckBox -CheckBox $script:chkInnounpDl -Visible $false
-        } else {
-            $script:lblInnounpStatus.Text = [char]0x2717 + '  innounp (extractor)'
-            $script:lblInnounpStatus.ForeColor = $colOrange
-            Set-MissingActionCheckBox -CheckBox $script:chkInnounpDl -Visible $true
-        }
-    } else {
-        $script:lblInnounpStatus.Visible = $false
-        Set-MissingActionCheckBox -CheckBox $script:chkInnounpDl -Visible $false
-    }
-
-    # Enable Install: VS exists or download is selected; missing tool rows open their install pages.
-    $vsOk = [bool]$script:txtVsPath.Text.Trim() -or ($script:chkVsDl.Visible -and $script:chkVsDl.Checked)
+    # Enable Install when the selected local Vintage Story version matches.
+    $selectedVsPath = $script:txtVsPath.Text.Trim()
+    $vsOk = $selectedVsPath -and
+        (Test-Path (Join-Path $selectedVsPath 'Vintagestory.exe')) -and
+        ((Get-VsExeVersion -Dir $selectedVsPath) -eq $requiredVer)
     $dotnetOk = (Test-DotNet10) -or ($script:chkDotnetDl.Visible -and $script:chkDotnetDl.Checked)
     $gitOk = (Test-Git) -or ($script:chkGitDl.Visible -and $script:chkGitDl.Checked)
     $powerShellOk = (Test-WindowsPowerShell51) -or ($script:chkPowerShellDl.Visible -and $script:chkPowerShellDl.Checked)
     $ilspyOk = (Find-ILSpyCmd) -or ($script:chkIlspyDl.Visible -and $script:chkIlspyDl.Checked)
-    $innounpOk = (-not $script:lblInnounpStatus.Visible) -or (Test-Innounp) -or ($script:chkInnounpDl.Visible -and $script:chkInnounpDl.Checked)
-    $script:btnInstall.Enabled = ($vsOk -and $dotnetOk -and $gitOk -and $powerShellOk -and $ilspyOk -and $innounpOk)
+    $script:btnInstall.Enabled = ($vsOk -and $dotnetOk -and $gitOk -and $powerShellOk -and $ilspyOk)
 }
 
 # === Form ===
@@ -1240,17 +1116,6 @@ $script:lblVsStatus.Size = New-Object System.Drawing.Size(440, 18)
 $script:lblVsStatus.ForeColor = $colTextDim
 $script:lblVsStatus.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 $form.Controls.Add($script:lblVsStatus)
-
-$script:chkVsDl = New-Object System.Windows.Forms.CheckBox
-$script:chkVsDl.Text = 'Download'
-$script:chkVsDl.Location = New-Object System.Drawing.Point(494, ($y - 1))
-$script:chkVsDl.AutoSize = $true
-$script:chkVsDl.ForeColor = $colText
-$script:chkVsDl.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:chkVsDl.Checked = $true
-$script:chkVsDl.Visible = $false
-$script:chkVsDl.Add_CheckedChanged({ Update-PrereqStatus })
-$form.Controls.Add($script:chkVsDl)
 
 $script:btnVsBrowse = New-FlatButton -Text 'Browse' -W 70 -H 20
 $script:btnVsBrowse.Location = New-Object System.Drawing.Point(494, ($y - 1))
@@ -1449,27 +1314,6 @@ $script:txtIlspyPath.Visible = $false
 $form.Controls.Add($script:txtIlspyPath)
 $y += 26
 
-# -- innounp (extractor, needed when downloading VS) --
-$script:lblInnounpStatus = New-Object System.Windows.Forms.Label
-$script:lblInnounpStatus.Location = New-Object System.Drawing.Point(20, $y)
-$script:lblInnounpStatus.Size = New-Object System.Drawing.Size(440, 18)
-$script:lblInnounpStatus.ForeColor = $colTextDim
-$script:lblInnounpStatus.Font = New-Object System.Drawing.Font('Segoe UI', 9)
-$script:lblInnounpStatus.Visible = $false
-$form.Controls.Add($script:lblInnounpStatus)
-
-$script:chkInnounpDl = New-Object System.Windows.Forms.CheckBox
-$script:chkInnounpDl.Text = 'Download'
-$script:chkInnounpDl.Location = New-Object System.Drawing.Point(494, ($y - 1))
-$script:chkInnounpDl.AutoSize = $true
-$script:chkInnounpDl.ForeColor = $colText
-$script:chkInnounpDl.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
-$script:chkInnounpDl.Checked = $true
-$script:chkInnounpDl.Visible = $false
-$script:chkInnounpDl.Add_CheckedChanged({ Update-PrereqStatus })
-$form.Controls.Add($script:chkInnounpDl)
-$y += 30
-
 # Separator
 $pnlSep1 = New-Object System.Windows.Forms.Panel
 $pnlSep1.Location = New-Object System.Drawing.Point(20, $y)
@@ -1604,7 +1448,7 @@ $form.Controls.Add($script:txtLog)
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
 $lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = "vs1.22.3+v$optimumBuildVer"
+$lblVersion.Text = "vs1.22.5+v$optimumBuildVer"
 $lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
 $lblVersion.ForeColor = $colTextDim
 $lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
@@ -1829,15 +1673,14 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     }
 
     $vsP = $script:txtVsPath.Text.Trim().TrimEnd('\')
-    $downloadVs = ($script:chkVsDl.Visible -and $script:chkVsDl.Checked -and -not $vsP)
-
-    if (-not $downloadVs -and (-not $vsP -or -not (Test-Path (Join-Path $vsP 'Vintagestory.exe')))) {
-        [System.Windows.Forms.MessageBox]::Show('A valid Vintage Story install is required, or check the Download option.', 'Optimum', 'OK', 'Warning') | Out-Null
+    if (-not $vsP -or -not (Test-Path (Join-Path $vsP 'Vintagestory.exe'))) {
+        [System.Windows.Forms.MessageBox]::Show('Install Vintage Story before Optimum or select the folder that contains Vintagestory.exe.', 'Optimum', 'OK', 'Warning') | Out-Null
         return
     }
-
-    if ($downloadVs -and -not (Test-Innounp) -and -not $script:chkInnounpDl.Checked) {
-        [System.Windows.Forms.MessageBox]::Show('innounp is required to extract the Vintage Story installer. Check the download option or install it manually.', 'Optimum', 'OK', 'Warning') | Out-Null
+    $requiredVer = Get-RequiredVsVersion
+    $selectedVsVersion = Get-VsExeVersion -Dir $vsP
+    if ($selectedVsVersion -ne $requiredVer) {
+        [System.Windows.Forms.MessageBox]::Show("Vintage Story $requiredVer is required. Found $selectedVsVersion at $vsP. Update or reinstall Vintage Story before installing Optimum.", 'Optimum', 'OK', 'Warning') | Out-Null
         return
     }
 
@@ -1874,8 +1717,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
 
     $q = [char]34
     $argLine = "-NoProfile -ExecutionPolicy Bypass -File $q$Self$q -Silent -InstallDir $q$dir$q"
-    if ($vsP) { $argLine += " -VsPath $q$vsP$q" }
-    if ($downloadVs) { $argLine += ' -DownloadVs' }
+    $argLine += " -VsPath $q$vsP$q"
     if ($script:chkSep.Checked) {
         $data = $script:txtData.Text.Trim().TrimEnd('\')
         if (-not $data) {

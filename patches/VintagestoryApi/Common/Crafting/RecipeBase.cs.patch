@@ -1,0 +1,62 @@
+diff --git a/VintagestoryApi/Common/Crafting/RecipeBase.cs b/VintagestoryApi/Common/Crafting/RecipeBase.cs
+index 21b4330..5f40f3d 100644
+--- a/VintagestoryApi/Common/Crafting/RecipeBase.cs
++++ b/VintagestoryApi/Common/Crafting/RecipeBase.cs
+@@ -774,27 +774,55 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+         }
+ 
+         return true;
+     }
+ 
++    // Optimum: ThreadStatic list reuse for MatchesShapeLess (called hundreds of times
++    // per crafting attempt). Depth guard handles theoretical reentrancy.
++    [ThreadStatic] private static List<ItemStack>? _optimumSuppliedStacks;
++    [ThreadStatic] private static List<(ItemStack stack, IRecipeIngredient ingredient)>? _optimumIngredientStacks;
++    [ThreadStatic] private static int _optimumMatchDepth;
++
+     protected virtual bool MatchesShapeLess(ItemSlot[] suppliedSlots, IWorldAccessor world, IRecipeIngredient?[] ingredients)
+     {
+-        List<ItemStack> suppliedStacks = [];
++        int depth = ++_optimumMatchDepth;
++        List<ItemStack> suppliedStacks;
++        List<(ItemStack stack, IRecipeIngredient ingredient)> ingredientStacks;
++
++        if (depth == 1)
++        {
++            suppliedStacks = _optimumSuppliedStacks ??= new();
++            suppliedStacks.Clear();
++            ingredientStacks = _optimumIngredientStacks ??= new();
++            ingredientStacks.Clear();
++        }
++        else
++        {
++            suppliedStacks = new();
++            ingredientStacks = new();
++        }
++
++        try
++        {
+ 
+         MergeStacks(suppliedSlots, suppliedStacks);
+ 
+         if (!MatchWildcardIngredients(suppliedStacks, ingredients))
+         {
+             return false;
+         }
+ 
+-        List<(ItemStack stack, IRecipeIngredient ingredient)> ingredientStacks = [];
+         MergeIngredientStacks(suppliedSlots, ingredientStacks, ingredients, world);
+ 
+         if (ingredientStacks.Count != suppliedStacks.Count) return false;
+ 
+         return MatchIngredientStacks(ingredientStacks, suppliedStacks);
++        }
++        finally
++        {
++            _optimumMatchDepth--;
++        }
+     }
+ 
+     protected virtual void MergeStacks(ItemSlot[] slots, List<ItemStack> stacks)
+     {
+         foreach (ItemStack suppliedStack in slots.Select(slot => slot.Itemstack).OfType<ItemStack>())

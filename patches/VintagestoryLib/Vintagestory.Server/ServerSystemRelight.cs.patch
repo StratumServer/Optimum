@@ -1,0 +1,34 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs
+index 82aaf34..1d251cb 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs
+@@ -8,10 +8,14 @@ namespace Vintagestory.Server;
+ 
+ public class ServerSystemRelight : ServerSystem
+ {
+ 	public ChunkIlluminator chunkIlluminator;
+ 
++	// Optimum: reusable HashSet for ProcessLightingTask (30+ lighting tasks per block break).
++	// No field initializer: Cecil field injection never runs it. See ??= below.
++	private HashSet<long> optimumLightingDirtyChunks;
++
+ 	public ServerSystemRelight(ServerMain server)
+ 		: base(server)
+ 	{
+ 	}
+ 
+@@ -61,11 +65,13 @@ public class ServerSystemRelight : ServerSystem
+ 		int num2 = 0;
+ 		bool flag = false;
+ 		int x = task.pos.X;
+ 		int internalY = task.pos.InternalY;
+ 		int z = task.pos.Z;
+-		HashSet<long> hashSet = new HashSet<long>();
++		// Optimum: reuse HashSet instead of allocating per lighting task.
++		HashSet<long> hashSet = optimumLightingDirtyChunks ??= new HashSet<long>();
++		hashSet.Clear();
+ 		if (task.absorbUpdate)
+ 		{
+ 			num = task.oldAbsorb;
+ 			num2 = task.newAbsorb;
+ 		}

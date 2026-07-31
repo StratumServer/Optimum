@@ -23,7 +23,7 @@ This only reconstructs the dev tree. To build redistributable packages, run
 scripts/package-all.ps1 (or `make package`) after `dotnet build`.
 
 .PARAMETER Version
-Vintage Story version. Default: 1.22.3.
+Vintage Story version. Default: 1.22.5.
 
 .PARAMETER ClientArchive
 Path to an existing Windows installer (.exe). If omitted, downloads from cdn.vintagestory.at.
@@ -35,12 +35,12 @@ Force re-extract, re-decompile, re-clone.
 .EXAMPLE
 .\scripts\bootstrap.ps1
 .\scripts\bootstrap.ps1 -Refresh
-.\scripts\bootstrap.ps1 -ClientArchive C:\Downloads\vs_install_win-x64_1.22.3.exe
+.\scripts\bootstrap.ps1 -ClientArchive C:\Downloads\vs_install_win-x64_1.22.5.exe
 #>
 
 [CmdletBinding()]
 param(
-    [string]$Version = '1.22.3',
+    [string]$Version,
     [string]$ClientArchive,
     [switch]$Refresh
 )
@@ -48,6 +48,13 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/_exec.ps1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# Resolve VS version from forks.json if not passed explicitly.
+if (-not $Version) {
+    $forksFile = Join-Path $repoRoot 'forks.json'
+    if (Test-Path $forksFile) { $Version = (Get-Content $forksFile -Raw | ConvertFrom-Json).vintageStoryVersion }
+    else { $Version = '1.22.5' }
+}
 $gitInstallUrl = 'https://git-scm.com/download/win'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -112,7 +119,7 @@ function Get-PinnedIlspycmdVersion {
 
 function Get-AcceptedIlspycmdPrefixes {
     $manifest = Join-Path $repoRoot '.config/ilspycmd-compat.json'
-    if (-not (Test-Path $manifest)) { return @('10.1.0.', '10.1.1.') }
+    if (-not (Test-Path $manifest)) { return @('10.0.', '10.1.') }
     $json = Get-Content $manifest -Raw | ConvertFrom-Json
     return @($json.acceptedPrefixes)
 }
@@ -131,7 +138,8 @@ function Install-IlspycmdIfMissing {
         $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
         $current = if ($verLine) { ($verLine -split '\s+')[1] } else { '' }
         $acceptablePrefix = Get-AcceptedIlspycmdPrefixes
-        $currentOk = $acceptablePrefix | Where-Object { $current.StartsWith($_) }
+        $isStableVersion = $current -match '^\d+\.\d+\.\d+\.\d+$'
+        $currentOk = $isStableVersion -and [bool]($acceptablePrefix | Where-Object { $current.StartsWith($_) })
         if ($currentOk) { return }
         Write-Host "ilspycmd $current is unsupported by this patch set, installing $pinned"
         Invoke-NativeStep { dotnet tool uninstall -g ilspycmd 2>&1 | Out-Null }
@@ -1387,6 +1395,43 @@ try {
     $patchFilter = if ($env:PATCH_FILTER) { $env:PATCH_FILTER } else { 'all' }
     $vanillaPatchProjects = @('VintagestoryLib', 'Vintagestory')
 
+    # The decompiled API assembly owns these types in aggregate source files.
+    # Reject split source overlays and remove copies left by older workspaces.
+    $assemblyOwnedApiFiles = @(
+        'VintagestoryApi/Client/API/MultiTextureMeshRef.cs',
+        'VintagestoryApi/Client/Command/ChatCommandApi.cs',
+        'VintagestoryApi/Client/UBORef.cs',
+        'VintagestoryApi/Common/API/DummyLoggerException.cs',
+        'VintagestoryApi/Common/API/LoggerBase.cs',
+        'VintagestoryApi/Common/Command/TextCommandResult.cs',
+        'VintagestoryApi/Common/Model/Animation/IHeadController.cs'
+    )
+    foreach ($rel in $assemblyOwnedApiFiles) {
+        $overlay = Join-Path $sourcesDir $rel
+        if (Test-Path $overlay) {
+            Write-Error "sources/$rel duplicates a type from the decompiled VintagestoryAPI assembly."
+            exit 1
+        }
+
+        $workingCopy = Join-Path $repoRoot $rel
+        if (Test-Path $workingCopy) { Remove-Item -Force $workingCopy }
+    }
+
+    # One target must use either a source overlay or a patch.
+    $ownershipConflicts = @()
+    if (Test-Path $sourcesDir) {
+        Get-ChildItem -Path $sourcesDir -Recurse -File | ForEach-Object {
+            $rel = $_.FullName.Substring($sourcesDir.Length + 1) -creplace '\\', '/'
+            if (Test-Path (Join-Path $patchesDir ($rel + '.patch'))) {
+                $ownershipConflicts += $rel
+            }
+        }
+    }
+    if ($ownershipConflicts.Count -gt 0) {
+        Write-Error "Source and patch ownership conflict:`n  $($ownershipConflicts -join "`n  ")"
+        exit 1
+    }
+
     if ((Test-Path $patchesDir) -and (Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {
         # Stage into git index for cleaner apply diagnostics.
         $prevEAP = $ErrorActionPreference
@@ -1398,7 +1443,9 @@ try {
         $applied = 0
         $skipped = 0
 
-        $patches = Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File | Sort-Object FullName
+        $patches = Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File |
+            Where-Object { $_.FullName -notmatch '[/\\]runtime[/\\]' } |
+            Sort-Object FullName
         foreach ($patch in $patches) {
             $rel = $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
 

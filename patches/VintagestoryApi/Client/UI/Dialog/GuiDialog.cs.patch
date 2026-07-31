@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs b/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
-index be5e47c..c35e887 100644
+index be5e47c..302dfba 100644
 --- a/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
 +++ b/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
 @@ -571,10 +571,11 @@ namespace Vintagestory.API.Client
@@ -38,17 +38,15 @@ index be5e47c..c35e887 100644
                      args.Handled = true;
                      break;
                  }
-@@ -646,11 +649,12 @@ namespace Vintagestory.API.Client
+@@ -646,10 +649,11 @@ namespace Vintagestory.API.Client
  
              if (focused)
              {
                  foreach (GuiComposer composer in composers)
                  {
--                    if (composer.Bounds.PointInside(capi.Input.MouseX, capi.Input.MouseY))
 +                    if (!composer.Enabled) continue;
-+                if (composer.Bounds.PointInside(capi.Input.MouseX, capi.Input.MouseY))
+                     if (composer.Bounds.PointInside(capi.Input.MouseX, capi.Input.MouseY))
                      {
                          args.SetHandled(true);
                      }
                  }
-             }

@@ -22,29 +22,4 @@ echo "Building..."
 make build
 
 echo "Packaging Linux x64..."
-pwsh ./scripts/package-linux.ps1 2>/dev/null && echo "Done." && exit 0
-
-# Fallback if pwsh is not installed.
-echo "pwsh not found, using fallback package path..."
-make deploy
-STAGE="Optimum-v$(tr -d '[:space:]' < "$repo_root/VERSION")-linux-x64"
-PATCHED_LIB="build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll"
-dotnet run --project Optimum.Patcher -c Release -- \
-    .vanilla/linux-x64/vintagestory/VintagestoryLib.vanilla.dll \
-    build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll \
-    "$PATCHED_LIB"
-rm -rf "$STAGE"
-cp -r .vanilla/linux-x64/vintagestory "$STAGE"
-cp build/Vintagestory/bin/Release/net10.0/Vintagestory.dll "$STAGE/"
-cp "$PATCHED_LIB" "$STAGE/VintagestoryLib.dll"
-cp bin/Release/net10.0/VintagestoryAPI.dll "$STAGE/"
-cp bin/Release/net10.0/VSEssentials.dll "$STAGE/Mods/"
-cp bin/Release/net10.0/VSSurvivalMod.dll "$STAGE/Mods/"
-cp bin/Release/net10.0/VSCreativeMod.dll "$STAGE/Mods/"
-cp bin/Release/net10.0/cairo-sharp.dll "$STAGE/Lib/"
-cp sources/shaders/*.fsh sources/shaders/*.vsh "$STAGE/assets/game/shaders/"
-EXE="$STAGE/Vintagestory"
-[ -f "$EXE" ] && mv "$EXE" "$STAGE/Optimum" && chmod +x "$STAGE/Optimum"
-perl -pi -e 's|\./Vintagestory |./Optimum |' "$STAGE/run.sh" 2>/dev/null || true
-echo "Done: $STAGE/"
-echo "Run with: cd $STAGE && ./Optimum"
+exec bash ./scripts/package-linux.sh

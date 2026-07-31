@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-index 8f0a63f..6d907b9 100644
+index 8f0a63f..1b072e6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-@@ -180,15 +180,44 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+@@ -180,15 +180,50 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
  		TargetReverbness = (float)num;
  		RoomLocation = new Cuboidi(vec3d2.AsBlockPos, vec3d3.AsBlockPos).GrowBy(10, 10, 10);
  		scanning = false;
@@ -15,7 +15,13 @@ index 8f0a63f..6d907b9 100644
 +	// actually skips redundant updates while standing still.
 +	private double _lastListenerX, _lastListenerY, _lastListenerZ;
 +	private float _lastListenerDirX, _lastListenerDirZ;
-+	private int _listenerFramesSinceUpdate = 10;
++	// No field initializer: Cecil field injection never runs it (the vanilla
++	// .ctor is not a transplant target - a const initializer would not run
++	// either), so this is always 0 at runtime instead of 10. Harmless: it
++	// just delays the first audio-listener refresh by up to
++	// ListenerRefreshFrames frames on startup; every other reader here
++	// tolerates any value via the >= comparison below.
++	private int _listenerFramesSinceUpdate;
 +	private const double ListenerMoveThresholdSq = 0.0025;
 +	private const float ListenerDirThresholdSq = 0.000001f;
 +	private const int ListenerRefreshFrames = 10;

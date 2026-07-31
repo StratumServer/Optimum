@@ -1,0 +1,50 @@
+diff --git a/VSEssentials/Entity/Behavior/BehaviorCollectEntities.cs b/VSEssentials/Entity/Behavior/BehaviorCollectEntities.cs
+index 711b1bb..a600c37 100644
+--- a/VSEssentials/Entity/Behavior/BehaviorCollectEntities.cs
++++ b/VSEssentials/Entity/Behavior/BehaviorCollectEntities.cs
+@@ -14,10 +14,14 @@ namespace Vintagestory.GameContent
+     /// <br/>Uses the "collectitems" code
+     /// </summary>
+     [DocumentAsJson]
+     public class EntityBehaviorCollectEntities : EntityBehavior
+     {
++        // Optimum: stride-based spatial query throttling (reduces GetEntitiesAround calls 3x)
++        public static int OptimumCollectStrideInterval = 3;
++        private float _optimumAccumulatedDelta;
++
+         int waitTicks = 0;
+         int lastCollectedEntityIndex = 0;
+         Vec3d tmp = new Vec3d();
+ 
+         float itemsPerSecond = 23f;
+@@ -44,15 +48,30 @@ namespace Vintagestory.GameContent
+             }
+             if (waitTicks-- > 0) return;
+ 
+             if (player?.WorldData.CurrentGameMode == EnumGameMode.Spectator) return;
+ 
++            // Optimum: stride-based skip. Phase-offset by EntityId so not all entities scan the same tick.
++            int stride = OptimumCollectStrideInterval;
++            if (stride > 1)
++            {
++                long tickIndex = entity.World.ElapsedMilliseconds / 33L;
++                if ((tickIndex + entity.EntityId) % stride != 0)
++                {
++                    _optimumAccumulatedDelta += deltaTime;
++                    return;
++                }
++                deltaTime += _optimumAccumulatedDelta;
++                _optimumAccumulatedDelta = 0f;
++            }
++
+             tmp.Set(entity.Pos.X, entity.Pos.InternalY + entity.SelectionBox.Y1 + entity.SelectionBox.Y2 / 2, entity.Pos.Z);
+             Entity[] entities = entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
+             if (entities.Length == 0)
+             {
+                 unconsumedDeltaTime = 0;
++                waitTicks = 2; // Optimum: backoff when nothing nearby
+                 return;
+             }
+ 
+ 
+             deltaTime = System.Math.Min(1f, deltaTime + unconsumedDeltaTime);
