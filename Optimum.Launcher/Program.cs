@@ -2,8 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Reflection;
-using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Threading;
 
 namespace Optimum.Launcher;
@@ -14,6 +15,8 @@ namespace Optimum.Launcher;
 /// </summary>
 public static class Program
 {
+    private const string ValidateOnlyArgument = "--validate-only";
+
     private static readonly string Version =
         typeof(Program).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
             ?.InformationalVersion?.Split('+')[0] ?? "dev";
@@ -37,9 +40,11 @@ public static class Program
         }
         catch (Exception ex)
         {
+            if (!Logger.IsInitialized)
+                Logger.Init(AppContext.BaseDirectory);
             Logger.LogError($"[Optimum] Fatal error: {ex.Message}");
             Logger.LogError(ex.StackTrace ?? "(no stack trace)");
-            return LaunchVanillaFallback(args, ex.Message);
+            return 1;
         }
     }
 
@@ -54,13 +59,33 @@ public static class Program
         // Use the game's own data path resolution if possible, otherwise local.
         var dataPath = ResolveDataPath(args) ?? gameDir;
         Logger.Init(dataPath);
+        using var launchLock = AcquireLaunchLock(dataPath, gameDir);
         var cacheDir = Path.Combine(dataPath, CacheDirName, CacheSubDir);
         var donorDir = Path.Combine(gameDir, CacheDirName, "donors");
 
         var cache = new CacheManager(gameDir, cacheDir, donorDir, Version);
+        bool validateOnly = HasArgument(args, ValidateOnlyArgument);
 
         // --- Cache validation ---
-        var manifest = cache.ValidateCache();
+        var requiredAssemblies = PatchTargets.Select(target => target.AssemblyPath).ToArray();
+        CacheManifest? manifest;
+        try
+        {
+            manifest = validateOnly
+                ? null
+                : cache.ValidateCache(requiredAssemblies);
+
+            if (validateOnly)
+            {
+                Logger.Log("[Optimum] Validation mode: rebuilding the patched runtime.");
+                cache.Invalidate();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Optimum] Cache validation failed: {ex.Message}");
+            return AbortLaunch(gameDir, cache, ex.Message);
+        }
 
         if (manifest is not null)
         {
@@ -73,15 +98,48 @@ public static class Program
             // Cache miss - patch and save. Shows a splash screen styled after
             // the vanilla client's own loading screen while this runs, since
             // it can take a few seconds (see RunPatching).
-            var fallbackExitCode = RunPatching(args, gameDir, donorDir, cacheDir, cache, sw);
-            if (fallbackExitCode is int code)
+            int? patchExitCode;
+            try
+            {
+                patchExitCode = RunPatching(
+                    gameDir, donorDir, cacheDir, cache, sw, showSplash: !validateOnly);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Optimum] Runtime patch setup failed: {ex.Message}");
+                return AbortLaunch(gameDir, cache, ex.Message);
+            }
+            if (patchExitCode is int code)
             {
                 return code;
             }
         }
 
-        DeployPatchedMods(cacheDir, gameDir);
-        return LaunchGame(args, cacheDir, gameDir);
+        if (validateOnly)
+        {
+            try
+            {
+                ValidatePatchedRuntime(cacheDir, gameDir);
+                Logger.Log("[Optimum] Runtime patch validation succeeded.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Optimum] Runtime validation failed: {ex.Message}");
+                return AbortLaunch(gameDir, cache, ex.Message);
+            }
+        }
+
+        try
+        {
+            DeployPatchedMods(cacheDir, gameDir);
+            return LaunchGame(args, cacheDir, gameDir, cache);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Optimum] Runtime startup failed: {ex.Message}");
+            return AbortLaunch(gameDir, cache, ex.Message);
+        }
     }
 
     /// <summary>
@@ -95,12 +153,15 @@ public static class Program
     /// pumped, and destroyed on the same thread (strictly enforced on
     /// macOS), so the actual patch work (file IO, Cecil IL rewriting) runs
     /// on a background thread while this one pumps the splash's window
-    /// loop. Returns null on success (continue the normal launch flow), or
-    /// an exit code if patching failed and <see cref="LaunchVanillaFallback"/>
-    /// already ran.
+    /// loop. Returns null on success or a nonzero exit code after a failure.
     /// </summary>
     private static int? RunPatching(
-        string[] args, string gameDir, string donorDir, string cacheDir, CacheManager cache, Stopwatch sw)
+        string gameDir,
+        string donorDir,
+        string cacheDir,
+        CacheManager cache,
+        Stopwatch sw,
+        bool showSplash)
     {
         Logger.Log($"[Optimum] Optimum v{Version}");
         Logger.Log($"[Optimum] Applying optimizations...");
@@ -109,19 +170,22 @@ public static class Program
         cache.Invalidate();
 
         PatchSplashScreen? splash = null;
-        try
+        if (showSplash)
         {
-            splash = new PatchSplashScreen();
-        }
-        catch (Exception ex)
-        {
-            // Cosmetic only - a windowing/GL failure (headless host, no
-            // display, unsupported driver) must never block patching.
-            Logger.LogError($"[Optimum] Splash screen unavailable, continuing without it: {ex.Message}");
+            try
+            {
+                splash = new PatchSplashScreen();
+            }
+            catch (Exception ex)
+            {
+                // Cosmetic only - a windowing/GL failure (headless host, no
+                // display, unsupported driver) must never block patching.
+                Logger.LogError($"[Optimum] Splash screen unavailable, continuing without it: {ex.Message}");
+            }
         }
 
         var patchedTargets = new List<PatchedTarget>();
-        string? fallbackReason = null;
+        string? failureReason = null;
 
         void RunPatchLoop()
         {
@@ -137,7 +201,7 @@ public static class Program
                     if (!File.Exists(vanillaPath))
                     {
                         Logger.LogError($"[Optimum] Vanilla DLL not found: {vanillaPath}");
-                        fallbackReason = $"Missing: {target.AssemblyPath}";
+                        failureReason = $"Missing: {target.AssemblyPath}";
                         return;
                     }
 
@@ -145,7 +209,7 @@ public static class Program
                     {
                         Logger.LogError($"[Optimum] Donor DLL not found: {donorPath}");
                         Logger.LogError($"[Optimum] Expected at: {donorPath}");
-                        fallbackReason = $"Missing donor: {target.DonorDll}";
+                        failureReason = $"Missing donor: {target.DonorDll}";
                         return;
                     }
 
@@ -162,7 +226,7 @@ public static class Program
                     catch (PatchFailedException ex)
                     {
                         Logger.LogError($"[Optimum] ✗ Patch failed: {ex.Message}");
-                        fallbackReason = ex.Message;
+                        failureReason = ex.Message;
                         return;
                     }
                 }
@@ -171,15 +235,17 @@ public static class Program
             {
                 // Safety net: this runs on a background thread, so an
                 // exception here would otherwise take down the whole
-                // process via the default unhandled-exception handler
-                // instead of falling back to vanilla like every other
-                // failure path in this method does.
+                // process via the default unhandled-exception handler.
                 Logger.LogError($"[Optimum] Unexpected error while patching: {ex.Message}");
-                fallbackReason ??= ex.Message;
+                failureReason ??= ex.Message;
             }
         }
 
-        if (splash is null)
+        if (!showSplash)
+        {
+            RunPatchLoop();
+        }
+        else if (splash is null)
         {
             RunPatchLoop();
         }
@@ -206,9 +272,9 @@ public static class Program
             }
         }
 
-        if (fallbackReason is not null)
+        if (failureReason is not null)
         {
-            return LaunchVanillaFallback(args, fallbackReason);
+            return AbortLaunch(gameDir, cache, failureReason);
         }
 
         cache.CreateManifest(patchedTargets);
@@ -218,28 +284,34 @@ public static class Program
         return null;
     }
 
-    private static int LaunchGame(string[] args, string cacheDir, string gameDir)
+    private static int LaunchGame(string[] args, string cacheDir, string gameDir, CacheManager cache)
     {
         // --- Load patched assemblies and launch the game ---
         using var loader = new AssemblyLoader(cacheDir, gameDir);
         loader.Register();
 
-        // Load the primary game assembly from cache
-        var vintagestoryLib = loader.LoadEntryAssembly("VintagestoryLib.dll");
+        // Load every patched assembly before the game can resolve a vanilla
+        // copy from the normal probing paths.
+        var patchedAssemblies = LoadAllPatchedAssemblies(loader);
+        var vintagestoryLib = patchedAssemblies[0];
 
         // Find and invoke ClientProgram.Main
         var clientProgramType = vintagestoryLib.GetType("Vintagestory.Client.ClientProgram");
         if (clientProgramType is null)
         {
-            Logger.LogError("[Optimum] Could not find Vintagestory.Client.ClientProgram type.");
-            return LaunchVanillaFallback(args, "ClientProgram type not found in patched assembly");
+            return AbortLaunch(
+                gameDir,
+                cache,
+                "ClientProgram type not found in the patched assembly.");
         }
 
         var mainMethod = clientProgramType.GetMethod("Main", BindingFlags.Public | BindingFlags.Static);
         if (mainMethod is null)
         {
-            Logger.LogError("[Optimum] Could not find ClientProgram.Main method.");
-            return LaunchVanillaFallback(args, "ClientProgram.Main not found");
+            return AbortLaunch(
+                gameDir,
+                cache,
+                "ClientProgram.Main not found in the patched assembly.");
         }
 
         // Invoke the game - this blocks until the game exits
@@ -247,56 +319,132 @@ public static class Program
         return 0;
     }
 
-    /// <summary>
-    /// Graceful fallback: log the problem, launch vanilla Vintagestory.exe directly.
-    /// The user still gets to play - just without optimizations.
-    /// </summary>
-    private static int LaunchVanillaFallback(string[] args, string reason)
+    private static void ValidatePatchedRuntime(string cacheDir, string gameDir)
     {
-        Logger.LogError();
-        Logger.LogError($"[Optimum] ⚠ Falling back to vanilla launch.");
-        Logger.LogError($"[Optimum] Reason: {reason}");
-        Logger.LogError();
+        using var loader = new AssemblyLoader(cacheDir, gameDir);
+        loader.Register();
 
-        var gameDir = AppContext.BaseDirectory;
-        RestoreVanillaMods(gameDir);
-        var vanillaExe = Path.Combine(gameDir, "Vintagestory.exe");
-
-        if (!File.Exists(vanillaExe))
+        var patchedAssemblies = LoadAllPatchedAssemblies(loader);
+        for (int i = 0; i < PatchTargets.Length; i++)
         {
-            // Try platform-specific names
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-                vanillaExe = Path.Combine(gameDir, "Vintagestory");
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                vanillaExe = Path.Combine(gameDir, "Vintagestory");
-        }
-
-        if (File.Exists(vanillaExe))
-        {
-            var psi = new ProcessStartInfo
+            var target = PatchTargets[i];
+            var assembly = patchedAssemblies[i];
+            var expectedName = Path.GetFileNameWithoutExtension(target.AssemblyPath);
+            if (!string.Equals(assembly.GetName().Name, expectedName, StringComparison.OrdinalIgnoreCase))
             {
-                FileName = vanillaExe,
-                UseShellExecute = false,
-                WorkingDirectory = gameDir
-            };
-            foreach (var arg in args)
-                psi.ArgumentList.Add(arg);
+                throw new InvalidOperationException(
+                    $"Patched assembly identity mismatch for {target.AssemblyPath}: " +
+                    $"loaded {assembly.GetName().Name ?? "(unnamed)"}.");
+            }
 
+            Type[] types;
             try
             {
-                using var proc = Process.Start(psi);
-                proc?.WaitForExit();
-                return proc?.ExitCode ?? 1;
+                types = assembly.GetTypes();
             }
-            catch (Exception ex)
+            catch (ReflectionTypeLoadException ex)
             {
-                Logger.LogError($"[Optimum] Failed to launch vanilla: {ex.Message}");
-                return 1;
+                string details = string.Join(
+                    " | ",
+                    ex.LoaderExceptions
+                        .Where(error => error is not null)
+                        .Select(error => error!.Message));
+                throw new InvalidOperationException(
+                    $"Could not load all types from {target.AssemblyPath}: {details}", ex);
+            }
+
+            PreparePatchedMethods(target.AssemblyPath, types);
+
+        }
+
+        var clientProgramType = patchedAssemblies[0].GetType("Vintagestory.Client.ClientProgram")
+            ?? throw new InvalidOperationException(
+                "ClientProgram type not found in the patched VintagestoryLib.dll.");
+        _ = clientProgramType.GetMethod("Main", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new InvalidOperationException(
+                "ClientProgram.Main not found in the patched VintagestoryLib.dll.");
+
+        Logger.Log($"[Optimum] Loaded and reflected {patchedAssemblies.Length} patched assemblies.");
+    }
+
+    private static void PreparePatchedMethods(string assemblyPath, IReadOnlyCollection<Type> types)
+    {
+        int prepared = 0;
+        foreach (var type in types)
+        {
+            var methods = type.GetMethods(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
+                BindingFlags.Static | BindingFlags.DeclaredOnly);
+            foreach (var method in methods)
+            {
+                PrepareMethod(assemblyPath, method, ref prepared);
+            }
+
+            var constructors = type.GetConstructors(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
+                BindingFlags.Static);
+            foreach (var constructor in constructors)
+            {
+                PrepareMethod(assemblyPath, constructor, ref prepared);
             }
         }
 
-        Logger.LogError("[Optimum] Could not find Vintagestory.exe for fallback.");
+        Logger.Log($"[Optimum] JIT-validated {prepared} patched methods in {assemblyPath}.");
+    }
+
+    private static void PrepareMethod(string assemblyPath, MethodBase method, ref int prepared)
+    {
+        if (method.IsAbstract ||
+            (method.Attributes & MethodAttributes.PinvokeImpl) != 0 ||
+            (method.GetMethodImplementationFlags() & MethodImplAttributes.Runtime) != 0 ||
+            method.ContainsGenericParameters)
+            return;
+
+        try
+        {
+            RuntimeHelpers.PrepareMethod(method.MethodHandle);
+            prepared++;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"JIT validation failed for {assemblyPath}::{method.DeclaringType?.FullName}::{method.Name}: " +
+                $"{ex.GetType().Name}: {ex.Message}", ex);
+        }
+    }
+
+    private static Assembly[] LoadAllPatchedAssemblies(AssemblyLoader loader)
+    {
+        return PatchTargets
+            .Select(target => loader.LoadEntryAssembly(target.AssemblyPath))
+            .ToArray();
+    }
+
+    private static int AbortLaunch(string gameDir, CacheManager cache, string reason)
+    {
+        if (!cache.TryInvalidate(out var invalidationError))
+        {
+            Logger.LogError($"[Optimum] Could not invalidate the cache: {invalidationError}");
+        }
+        Logger.LogError();
+        Logger.LogError("[Optimum] Launch aborted. Optimum did not produce a complete patched runtime.");
+        Logger.LogError($"[Optimum] Reason: {reason}");
+        TryRestoreVanillaMods(gameDir);
+        Logger.LogError();
         return 1;
+    }
+
+    private static void TryRestoreVanillaMods(string gameDir)
+    {
+        try
+        {
+            RestoreVanillaMods(gameDir);
+            return;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Optimum] Could not restore vanilla built-in mods: {ex.Message}");
+        }
     }
 
     private static void DeployPatchedMods(string cacheDir, string gameDir)
@@ -318,25 +466,124 @@ public static class Program
 
     private static void RestoreVanillaMods(string gameDir)
     {
+        var plans = new List<RestorePlan>();
         foreach (var target in PatchTargets)
         {
             if (target.Mode != PatchMode.Mod || target.VanillaDll == target.AssemblyPath) continue;
 
             var backupDll = Path.Combine(gameDir, target.VanillaDll);
             var gameDll = Path.Combine(gameDir, target.AssemblyPath);
-            if (!File.Exists(backupDll)) continue;
+            if (!File.Exists(backupDll))
+            {
+                throw new FileNotFoundException(
+                    $"Vanilla backup is missing for {target.AssemblyPath}.", backupDll);
+            }
 
-            try
+            var backupPdb = Path.ChangeExtension(backupDll, ".pdb");
+            plans.Add(new RestorePlan(
+                backupDll,
+                gameDll,
+                File.Exists(backupPdb) ? backupPdb : null,
+                Path.ChangeExtension(gameDll, ".pdb")));
+        }
+
+        var committed = new List<RestorePlan>();
+        try
+        {
+            foreach (var plan in plans)
             {
-                File.Copy(backupDll, gameDll, true);
-                var backupPdb = Path.ChangeExtension(backupDll, ".pdb");
-                if (File.Exists(backupPdb))
-                    File.Copy(backupPdb, Path.ChangeExtension(gameDll, ".pdb"), true);
+                plan.TempDll = $"{plan.GameDll}.restore-{Guid.NewGuid():N}.tmp";
+                File.Copy(plan.BackupDll, plan.TempDll, false);
+                if (plan.BackupPdb is not null)
+                {
+                    plan.TempPdb = $"{plan.GamePdb}.restore-{Guid.NewGuid():N}.tmp";
+                    File.Copy(plan.BackupPdb, plan.TempPdb, false);
+                }
             }
-            catch (Exception ex)
+
+            foreach (var plan in plans)
             {
-                Logger.LogError($"[Optimum] Could not restore {target.AssemblyPath}: {ex.Message}");
+                File.Move(plan.TempDll!, plan.GameDll, true);
+                committed.Add(plan);
+                if (plan.TempPdb is not null)
+                    File.Move(plan.TempPdb, plan.GamePdb, true);
+                else if (File.Exists(plan.GamePdb))
+                    File.Delete(plan.GamePdb);
             }
+        }
+        catch (Exception ex)
+        {
+            foreach (var plan in committed)
+            {
+                try
+                {
+                    File.Copy(plan.BackupDll, plan.GameDll, true);
+                    if (plan.BackupPdb is not null)
+                        File.Copy(plan.BackupPdb, plan.GamePdb, true);
+                    else if (File.Exists(plan.GamePdb))
+                        File.Delete(plan.GamePdb);
+                }
+                catch (Exception rollbackError)
+                {
+                    throw new InvalidOperationException(
+                        $"Vanilla mod restoration failed and rollback failed for {plan.GameDll}: " +
+                        rollbackError.Message,
+                        ex);
+                }
+            }
+
+            throw new InvalidOperationException(
+                "Vanilla built-in mod restoration failed before all files were restored.", ex);
+        }
+        finally
+        {
+            foreach (var plan in plans)
+            {
+                if (plan.TempDll is not null && File.Exists(plan.TempDll))
+                    File.Delete(plan.TempDll);
+                if (plan.TempPdb is not null && File.Exists(plan.TempPdb))
+                    File.Delete(plan.TempPdb);
+            }
+        }
+    }
+
+    private static IDisposable AcquireLaunchLock(string dataPath, string gameDir)
+    {
+        string dataLockPath = Path.Combine(Path.GetFullPath(dataPath), CacheDirName, "launcher.lock");
+        string gameLockPath = Path.Combine(Path.GetFullPath(gameDir), CacheDirName, "game.lock");
+        var lockPaths = new[] { dataLockPath, gameLockPath }
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var locks = new List<FileStream>(lockPaths.Length);
+        try
+        {
+            foreach (var lockPath in lockPaths)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+                locks.Add(new FileStream(
+                    lockPath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.ReadWrite,
+                    FileShare.None));
+            }
+
+            return new LaunchLock(locks);
+        }
+        catch (IOException ex)
+        {
+            foreach (var handle in locks)
+                handle.Dispose();
+            throw new InvalidOperationException(
+                "Another Optimum launcher instance already owns the game or data path lock.", ex);
+        }
+    }
+
+    private sealed class LaunchLock(IReadOnlyList<FileStream> handles) : IDisposable
+    {
+        public void Dispose()
+        {
+            for (int i = handles.Count - 1; i >= 0; i--)
+                handles[i].Dispose();
         }
     }
 
@@ -360,6 +607,17 @@ public static class Program
         }
 
         return null;
+    }
+
+    private static bool HasArgument(string[] args, string expected)
+    {
+        foreach (var arg in args)
+        {
+            if (string.Equals(arg, expected, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>Progress reporter: forwards to Logger (console + log file) and the splash screen, if any.</summary>
@@ -389,4 +647,18 @@ internal record PatchTarget(
     string? VanillaAssemblyPath = null)
 {
     public string VanillaDll => VanillaAssemblyPath ?? AssemblyPath;
+}
+
+internal sealed class RestorePlan(
+    string backupDll,
+    string gameDll,
+    string? backupPdb,
+    string gamePdb)
+{
+    public string BackupDll { get; } = backupDll;
+    public string GameDll { get; } = gameDll;
+    public string? BackupPdb { get; } = backupPdb;
+    public string GamePdb { get; } = gamePdb;
+    public string? TempDll { get; set; }
+    public string? TempPdb { get; set; }
 }

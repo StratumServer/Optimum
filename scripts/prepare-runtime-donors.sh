@@ -21,6 +21,13 @@ runtime_root="$repo_root/.build/runtime-donors"
 contracts_dll="$repo_root/bin/$configuration/net10.0/Optimum.Api.Contracts.dll"
 game_content_dll="$repo_root/bin/$configuration/net10.0/Optimum.GameContent.dll"
 
+normalize_lf() {
+    find "$1" -type f -name '*.patch' -print0 |
+        while IFS= read -r -d '' file; do perl -0pi -e 's/\r\n/\n/g; s/\r/\n/g' "$file"; done
+}
+
+normalize_lf "$repo_root/patches/runtime"
+
 dotnet_tools_dir="${DOTNET_TOOLS_DIR:-$HOME/.dotnet/tools}"
 if [[ -x "$dotnet_tools_dir/ilspycmd" ]]; then
     export PATH="$dotnet_tools_dir:$PATH"

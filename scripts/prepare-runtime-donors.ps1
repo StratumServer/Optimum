@@ -18,6 +18,19 @@ $outputRoot = Join-Path $repoRoot "bin/$Configuration/net10.0"
 $contractsDll = Join-Path $outputRoot 'Optimum.Api.Contracts.dll'
 $gameContentDll = Join-Path $outputRoot 'Optimum.GameContent.dll'
 
+function Convert-ToLf([string]$Root) {
+    if (-not (Test-Path $Root)) { return }
+    Get-ChildItem -Path $Root -Recurse -File -Filter '*.patch' | ForEach-Object {
+        $bytes = [IO.File]::ReadAllBytes($_.FullName)
+        if ($bytes -contains 13) {
+            $text = [Text.Encoding]::UTF8.GetString($bytes) -creplace ([char]13 + [char]10), [char]10 -creplace [char]13, [char]10
+            [IO.File]::WriteAllBytes($_.FullName, [Text.Encoding]::UTF8.GetBytes($text))
+        }
+    }
+}
+
+Convert-ToLf (Join-Path $repoRoot 'patches/runtime')
+
 $ilspy = Get-Command ilspycmd -ErrorAction SilentlyContinue
 if (-not $ilspy) {
     $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }

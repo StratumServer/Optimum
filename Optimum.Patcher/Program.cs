@@ -121,6 +121,12 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "RegisterOptimumShaderProgram",
     },
+    ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
+    {
+        "optimumOitDisabled",
+        "optimumOitFailureLogged",
+        "DisableOptimumOit",
+    },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
     {
@@ -299,6 +305,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderCodePrefixes", 2),
     new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderProgramsPre", 0),
     new("Vintagestory.Client.NoObf.ShaderRegistry", "loadRegisteredShaderPrograms", 0),
+    // OIT: skip disposed shaders and restore render state after a failed OIT frame.
+    new("Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT", "OnRenderFrame", 2),
+    new("Vintagestory.Client.NoObf.SystemRenderOITLayers/AfterOIT", "OnRenderFrame", 2),
     // datapath.cfg support: entry shims (ClientLinux/ClientWindows/ClientMac) all
     // funnel into this Main, so the arg injection lives here (lambda-free)
     new("Vintagestory.Client.ClientProgram", "Main", 1),
@@ -317,9 +326,21 @@ int total = ILPatcher.PatchWithInjection(
     vanillaPath, compiledPath, outputPath,
     typesToInject, membersToInject, targets,
     // IL hooks: insert call AFTER EndIf in ComposerHeader to add the Extra tab button
-    new List<(string typeName, string methodName, int paramCount, string hookMethod, string targetCall)>
+    new List<HookTarget>
     {
-        ("Vintagestory.Client.NoObf.GuiCompositeSettings", "ComposerHeader", 2, "_AddOptimumTab", "EndIf"),
+        new(
+            "Vintagestory.Client.NoObf.GuiCompositeSettings",
+            "ComposerHeader",
+            2,
+            "_AddOptimumTab",
+            "EndIf",
+            TargetDeclaringType: "Vintagestory.API.Client.GuiComposer",
+            TargetParameterTypes: [],
+            TargetReturnType: "Vintagestory.API.Client.GuiComposer",
+            TargetHasThis: true,
+            TargetExplicitThis: false,
+            TargetCallingConvention: MethodCallingConvention.Default,
+            TargetGenericArity: 0),
     });
 
 Console.WriteLine($"\nDone.");

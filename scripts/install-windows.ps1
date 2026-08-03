@@ -387,6 +387,71 @@ function Find-ILSpyCmd {
     return $null
 }
 
+function Get-Pinned-ILSpyVersion {
+    $manifest = Join-Path $Root '.config\dotnet-tools.json'
+    if (-not (Test-Path $manifest)) {
+        throw "Pinned ilspycmd manifest not found: $manifest"
+    }
+
+    $json = Get-Content $manifest -Raw | ConvertFrom-Json
+    $version = [string]$json.tools.ilspycmd.version
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        throw "Pinned ilspycmd version is empty: $manifest"
+    }
+
+    return $version
+}
+
+function Get-Accepted-ILSpyVersionRange {
+    $manifest = Join-Path $Root '.config\ilspycmd-compat.json'
+    if (-not (Test-Path $manifest)) {
+        return [pscustomobject]@{
+            Minimum = [Version]'10.1.0.8386'
+            Maximum = [Version]'10.1.1.8388'
+        }
+    }
+
+    $json = Get-Content $manifest -Raw | ConvertFrom-Json
+    $minimum = [string]$json.minimumVersion
+    $maximum = [string]$json.maximumVersion
+    if ($minimum -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $maximum -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+        throw "ilspycmd version range is invalid: $manifest"
+    }
+
+    return [pscustomobject]@{
+        Minimum = [Version]$minimum
+        Maximum = [Version]$maximum
+    }
+}
+
+function Get-ILSpyVersion {
+    param([Parameter(Mandatory=$true)][string]$Command)
+
+    $line = Invoke-NativeStep { & $Command --version 2>$null | Select-Object -First 1 }
+    if ([string]$line -match '^\s*(?:ilspycmd:\s*)?(\d+\.\d+\.\d+\.\d+)\s*$') {
+        return $Matches[1]
+    }
+
+    return $null
+}
+
+function Assert-ILSpyVersion {
+    $command = Find-ILSpyCmd
+    if (-not $command) { throw "ilspycmd is not installed." }
+
+    $actual = Get-ILSpyVersion $command
+    $range = Get-Accepted-ILSpyVersionRange
+    $actualVersion = if ($actual) { [Version]$actual } else { $null }
+    if ($null -eq $actualVersion -or $actualVersion -lt $range.Minimum -or $actualVersion -gt $range.Maximum) {
+        $acceptedText = "$($range.Minimum) through $($range.Maximum)"
+        $preferred = Get-Pinned-ILSpyVersion
+        throw "ilspycmd version mismatch: found '$actual' at '$command'. Accepted range: $acceptedText. Preferred version: $preferred. Update the global tool and run the installer again."
+    }
+
+    Write-Log "Using ilspycmd $actual from $command"
+    return $command
+}
+
 function Install-ILSpyCmd {
     $manifest = Join-Path $Root '.config\dotnet-tools.json'
     if (Test-Path $manifest) {
@@ -411,6 +476,107 @@ function Write-Log($msg) {
 }
 
 function Write-Phase($text) { Write-Log "==PHASE== $text" }
+
+function Invoke-RuntimePreflight {
+    param(
+        [Parameter(Mandatory=$true)][string]$StageDir,
+        [Parameter(Mandatory=$true)][string]$LogRoot
+    )
+
+    $exe = Join-Path $StageDir 'Optimum.exe'
+    if (-not (Test-Path $exe)) {
+        throw "Runtime preflight executable not found: $exe"
+    }
+    $completionMarker = Join-Path $StageDir '.optimum/package-complete'
+    if (-not (Test-Path $completionMarker)) {
+        throw "Package completion marker not found: $completionMarker"
+    }
+
+    Write-Phase "Validating runtime patches..."
+    $stdoutPath = Join-Path $LogRoot 'optimum-preflight.stdout.log'
+    $stderrPath = Join-Path $LogRoot 'optimum-preflight.stderr.log'
+    Remove-Item -Force $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+
+    $process = Start-Process -FilePath $exe `
+        -ArgumentList @('--validate-only') `
+        -WorkingDirectory $StageDir `
+        -Wait `
+        -PassThru `
+        -NoNewWindow `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath
+
+    foreach ($path in @($stdoutPath, $stderrPath)) {
+        if (Test-Path $path) {
+            Get-Content $path | ForEach-Object { Write-Log ([string]$_) }
+        }
+    }
+
+    if ($process.ExitCode -ne 0) {
+        throw "Runtime patch validation failed with exit code $($process.ExitCode). The package was not installed."
+    }
+
+    Remove-Item -Recurse -Force (Join-Path $StageDir 'Logs') -ErrorAction SilentlyContinue
+    Write-Log "Runtime patch validation passed."
+}
+
+function Install-StagedPackage {
+    param(
+        [Parameter(Mandatory=$true)][string]$StageDir,
+        [Parameter(Mandatory=$true)][string]$InstallDir
+    )
+
+    $installPath = [System.IO.Path]::GetFullPath($InstallDir)
+    $parentDir = Split-Path -Parent $installPath
+    New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+
+    $token = [guid]::NewGuid().ToString('N')
+    $tempDir = Join-Path $parentDir ".optimum-stage-$token"
+    $backupDir = Join-Path $parentDir ".optimum-backup-$token"
+    $hadExisting = Test-Path $installPath
+    $oldMoved = $false
+    $newMoved = $false
+
+    try {
+        New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+        Get-ChildItem -Path $StageDir -Force | ForEach-Object {
+            Copy-Item -Recurse -Force -Path $_.FullName -Destination (Join-Path $tempDir $_.Name)
+        }
+
+        if ($hadExisting) {
+            Move-Item -LiteralPath $installPath -Destination $backupDir
+            $oldMoved = $true
+        }
+        Move-Item -LiteralPath $tempDir -Destination $installPath
+        $newMoved = $true
+        if ($oldMoved) {
+            Remove-Item -Recurse -Force -LiteralPath $backupDir
+            $oldMoved = $false
+        }
+        $tempDir = $null
+    } catch {
+        $message = $_.Exception.Message
+        try {
+            if ($newMoved -and (Test-Path $installPath)) {
+                Remove-Item -Recurse -Force -LiteralPath $installPath
+            }
+            if ($oldMoved -and (Test-Path $backupDir) -and -not (Test-Path $installPath)) {
+                Move-Item -LiteralPath $backupDir -Destination $installPath
+                $oldMoved = $false
+            }
+        } catch {
+            throw "Install failed and rollback failed: $message; rollback: $($_.Exception.Message)"
+        }
+        throw "Install failed: $message"
+    } finally {
+        if ($tempDir -and (Test-Path $tempDir)) {
+            Remove-Item -Recurse -Force -LiteralPath $tempDir -ErrorAction SilentlyContinue
+        }
+        if (-not $oldMoved -and (Test-Path $backupDir)) {
+            Remove-Item -Recurse -Force -LiteralPath $backupDir -ErrorAction SilentlyContinue
+        }
+    }
+}
 
 function Invoke-NativeDownload {
     param(
@@ -537,7 +703,7 @@ function Invoke-OptimumBuild {
         Write-Phase "Installing decompiler tool..."
         Install-ILSpyCmd
     }
-    if (-not (Find-ILSpyCmd)) { throw "ilspycmd install failed." }
+    [void](Assert-ILSpyVersion)
 
     $srcRoot   = $Root
     # Clean up previous build temps (enabled by default)
@@ -661,19 +827,22 @@ function Invoke-OptimumBuild {
             $ErrorActionPreference = 'Continue'
             try {
                 Write-Phase "Assembling the final package..."
-                & "$buildRoot/scripts/package.ps1" -OutputDir $stage -VanillaDir $VsPath *>&1 | ForEach-Object { Write-Log ([string]$_) }
+                $packageOutput = & "$buildRoot/scripts/package.ps1" -OutputDir $stage -VanillaDir $VsPath *>&1
+                $packageSucceeded = $?
+                $packageExitCode = $LASTEXITCODE
+                $packageOutput | ForEach-Object { Write-Log ([string]$_) }
+                if (-not $packageSucceeded -or ($packageExitCode -and $packageExitCode -ne 0)) {
+                    throw "Package step failed (exit code $packageExitCode)."
+                }
             } finally { $ErrorActionPreference = $prevEAP }
 
             $built = Get-ChildItem -Path $stage -Directory -Filter 'Optimum-v*-win-x64' | Select-Object -First 1
             if (-not $built) { throw "Packaged folder (Optimum-v*-win-x64) not found in $stage." }
 
+            Invoke-RuntimePreflight -StageDir $built.FullName -LogRoot $buildRoot
+
             Write-Phase "Copying files to $InstallDir..."
-            New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-            Get-ChildItem -Path $built.FullName -Force | ForEach-Object {
-                $dest = Join-Path $InstallDir $_.Name
-                if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-                Copy-Item -Recurse -Force -Path $_.FullName -Destination $dest
-            }
+            Install-StagedPackage -StageDir $built.FullName -InstallDir $InstallDir
         } finally { Pop-Location }
 
         $exe = Join-Path $InstallDir 'Optimum.exe'
@@ -729,16 +898,13 @@ function Invoke-OptimumBuild {
         Set-ItemProperty -Path $regKey -Name 'Publisher' -Value 'Zaldaryon'
         Set-ItemProperty -Path $regKey -Name 'InstallLocation' -Value "$InstallDir\"
         Set-ItemProperty -Path $regKey -Name 'DisplayIcon' -Value (Join-Path $InstallDir 'Optimum.exe')
-        $uninstallCmd = @"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "&{
-    Remove-Item -Recurse -Force '$InstallDir' -ErrorAction SilentlyContinue
-    Remove-Item -Force (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Optimum.lnk') -ErrorAction SilentlyContinue
-    `$sm = Join-Path ([Environment]::GetFolderPath('Programs')) 'Optimum'
-    if (Test-Path `$sm) { Remove-Item -Recurse -Force `$sm }
-    Remove-Item -Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Optimum_is1' -Recurse -ErrorAction SilentlyContinue
-}"
-"@
-        Set-ItemProperty -Path $regKey -Name 'UninstallString' -Value ($uninstallCmd -replace "`r?`n",' ')
+        $uninstaller = Join-Path $InstallDir 'uninstall.ps1'
+        if (-not (Test-Path $uninstaller)) {
+            throw "Packaged uninstaller not found: $uninstaller"
+        }
+        $uninstallCmd = 'powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' +
+            $uninstaller + '" -InstallDir "' + $InstallDir + '" -Force'
+        Set-ItemProperty -Path $regKey -Name 'UninstallString' -Value $uninstallCmd
         Set-ItemProperty -Path $regKey -Name 'NoModify' -Value 1 -Type DWord
         Set-ItemProperty -Path $regKey -Name 'NoRepair' -Value 1 -Type DWord
 
@@ -1702,7 +1868,6 @@ By checking the box below and proceeding, you acknowledge that you have read, un
                     "Optimum $existingSemver is installed. Remove it and upgrade to $($thisVer)?",
                     'Upgrade', 'YesNo', 'Question')
                 if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-                Remove-Item -Recurse -Force $dir -ErrorAction SilentlyContinue
             } else {
                 $r = [System.Windows.Forms.MessageBox]::Show(
                     "Optimum $existingSemver is already installed. Reinstall?",

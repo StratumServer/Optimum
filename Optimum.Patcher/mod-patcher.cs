@@ -28,9 +28,15 @@ public static class ModPatcher
             manifest.Members,
             manifest.Methods,
             interfacesToInject: manifest.Interfaces,
-            requireAllTargets: false);
+            requireAllTargets: true);
 
-        if (total <= 0)
+        if (total < 0)
+        {
+            throw new InvalidOperationException(
+                $"{modName} patch failed output validation. The patcher rejected the generated assembly.");
+        }
+
+        if (total == 0)
         {
             throw new InvalidOperationException($"{modName} patch produced no changes.");
         }
@@ -49,7 +55,6 @@ public static class ModPatcher
                 ["Vintagestory.GameContent.EntityBehaviorCollectEntities"] =
                 [
                     "OptimumCollectStrideInterval",
-                    "_optimumAccumulatedDelta",
                 ],
                 ["Vintagestory.Essentials.AStar"] =
                 [
@@ -134,7 +139,11 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityBehaviorCollectEntities", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),
                 new("Vintagestory.Essentials.AStar", "FindPathOrEscapePath", 9),
-                new("Vintagestory.Essentials.PathNode", "Equals", 1),
+                new(
+                    "Vintagestory.Essentials.PathNode",
+                    "Equals",
+                    1,
+                    ParameterTypes: ["Vintagestory.Essentials.PathNode"]),
                 new("Vintagestory.GameContent.EntityItemRenderer", "DoRender3DOpaque", 2),
                 new("Vintagestory.GameContent.EntityShapeRenderer", ".ctor", 2),
                 new("Vintagestory.GameContent.EntityShapeRenderer", "BeforeRender", 1),
@@ -163,6 +172,7 @@ public static class ModPatcher
             Types:
             [
                 "Vintagestory.GameContent.CrucibleInFirepitRenderer",
+                "Vintagestory.GameContent.GearRenderer",
                 "Vintagestory.GameContent.OptimumOutfitShapeCache",
                 "Vintagestory.GameContent.OptimumOutfitAnimatorCache",
                 "Vintagestory.GameContent.OptimumOutfitTexturePrewarmerModSystem",
@@ -220,7 +230,11 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockCookingContainer", "GetCookingStacks", 2),
                 new("Vintagestory.GameContent.Mechanics.MechanicalPowerMod", "OnServerGameTick", 1),
                 new("Vintagestory.GameContent.EntityDressedHumanoid", "OnTesselation", 2),
-                new("Vintagestory.GameContent.EntityDressedHumanoid", "OnTesselation", 3),
+                new("Vintagestory.GameContent.EntityDressedHumanoid", "OnTesselation", 3, Optional: true),
+                new("Vintagestory.GameContent.GearRenderer", "Init", 0),
+                new("Vintagestory.GameContent.GearRenderer", "LoadShader", 0),
+                new("Vintagestory.GameContent.GearRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.GearRenderer", "updateSuperMechState", 2),
             ]);
     }
 

@@ -32,6 +32,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
 # Pending Program.cs wiring (v0.2.12): field-type upgrades (object→Lock) and

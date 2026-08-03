@@ -1,0 +1,176 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
+index bba43f6..151f02b 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
+@@ -20,41 +20,89 @@ public class SystemRenderOITLayers : ClientSystem
+ 		public BeforeOIT(ICoreClientAPI capi)
+ 		{
+ 			this.capi = capi;
++			if (capi == null || capi.Render == null || capi.Render.FrameBuffers == null || capi.Render.FrameBuffers.Count <= 1)
++			{
++				SystemRenderOITLayers.DisableOptimumOit(capi, "transparent framebuffer is unavailable");
++				return;
++			}
+ 			transparentfb = capi.Render.FrameBuffers[1];
+ 		}
+ 
+ 		public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+ 		{
+-			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
+-			currentActiveShader?.Stop();
+-			IShaderProgram program = capi.Shader.GetProgram(9);
+-			program.Use();
+-			program.Uniform("OITreveal", 6);
+-			GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
+-			program.Stop();
+-			IShaderProgram programByName = capi.Shader.GetProgramByName("cloudvolumetric");
+-			programByName.Use();
+-			programByName.Uniform("liquidDepth", 4);
+-			programByName.Stop();
+-			currentActiveShader?.Use();
+-			if (revealTextureId == 0 || transparentfb.Disposed)
++			if (SystemRenderOITLayers.optimumOitDisabled) return;
++			IShaderProgram currentActiveShader = null;
++			try
++			{
++				if (capi == null || capi.Render == null || capi.Shader == null || capi.Render.FrameBuffers == null || capi.Render.FrameBuffers.Count <= 1)
++				{
++					SystemRenderOITLayers.DisableOptimumOit(capi, "render resources are unavailable");
++					return;
++				}
++				transparentfb = capi.Render.FrameBuffers[1];
++				if (transparentfb == null || transparentfb.Disposed)
++				{
++					SystemRenderOITLayers.DisableOptimumOit(capi, "transparent framebuffer is disposed");
++					return;
++				}
++				IShaderProgram program = capi.Shader.GetProgram(9);
++				IShaderProgram programByName = capi.Shader.GetProgramByName("cloudvolumetric");
++				if (program == null || program.Disposed || programByName == null || programByName.Disposed)
++				{
++					SystemRenderOITLayers.DisableOptimumOit(capi, "OIT shader is unavailable or disposed");
++					return;
++				}
++				currentActiveShader = capi.Render.CurrentActiveShader;
++				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Stop();
++				program.Use();
++				program.Uniform("OITreveal", 6);
++				GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
++				program.Stop();
++				programByName.Use();
++				programByName.Uniform("liquidDepth", 4);
++				programByName.Stop();
++				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
++				if (revealTextureId == 0 || transparentfb.Disposed)
++				{
++					rebuild();
++					if (revealTextureId == 0 || accumTextureId == 0)
++					{
++						SystemRenderOITLayers.DisableOptimumOit(capi, "OIT framebuffer rebuild produced no textures");
++						return;
++					}
++				}
++				DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
++				GL.DrawBuffers(array2.Length, array2);
++				GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0);
++				GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0);
++				GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++				GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++				GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++				float[] array3 = new float[4];
++				float[] array4 = new float[4] { 1f, 1f, 1f, 1f };
++				GL.ClearBuffer((ClearBuffer)6144, 0, array4);
++				GL.ClearBuffer((ClearBuffer)6144, 1, array4);
++				GL.ClearBuffer((ClearBuffer)6144, 3, array3);
++				GL.ClearBuffer((ClearBuffer)6144, 4, array3);
++				GL.ClearBuffer((ClearBuffer)6144, 5, array3);
++			}
++			catch (Exception e)
+ 			{
+-				rebuild();
++				SystemRenderOITLayers.DisableOptimumOit(capi, "OIT render callback failed", e);
++				try { freeResources(); } catch { }
++				try
++				{
++					IShaderProgram activeShader = capi?.Render?.CurrentActiveShader;
++					if (activeShader != null && activeShader != currentActiveShader && !activeShader.Disposed) activeShader.Stop();
++				}
++				catch { }
++				try
++				{
++					if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
++				}
++				catch { }
++				try { GL.ActiveTexture((TextureUnit)33984); } catch { }
+ 			}
+-			DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
+-			GL.DrawBuffers(array2.Length, array2);
+-			GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0);
+-			GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0);
+-			GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1);
+-			GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1);
+-			GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1);
+-			float[] array3 = new float[4];
+-			float[] array4 = new float[4] { 1f, 1f, 1f, 1f };
+-			GL.ClearBuffer((ClearBuffer)6144, 0, array4);
+-			GL.ClearBuffer((ClearBuffer)6144, 1, array4);
+-			GL.ClearBuffer((ClearBuffer)6144, 3, array3);
+-			GL.ClearBuffer((ClearBuffer)6144, 4, array3);
+-			GL.ClearBuffer((ClearBuffer)6144, 5, array3);
+ 		}
+ 
+ 		private void freeResources()
+@@ -67,7 +115,7 @@ public class SystemRenderOITLayers : ClientSystem
+ 
+ 		public void Dispose()
+ 		{
+-			freeResources();
++			try { freeResources(); } catch (Exception e) { SystemRenderOITLayers.DisableOptimumOit(capi, "OIT resource cleanup failed", e); }
+ 		}
+ 
+ 		private void rebuild()
+@@ -106,11 +154,20 @@ public class SystemRenderOITLayers : ClientSystem
+ 
+ 		public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+ 		{
+-			GL.ActiveTexture((TextureUnit)33990);
+-			GL.BindTexture((TextureTarget)3553, revealTextureId);
+-			GL.ActiveTexture((TextureUnit)33991);
+-			GL.BindTexture((TextureTarget)35866, accumTextureId);
+-			GL.ActiveTexture((TextureUnit)33984);
++			if (SystemRenderOITLayers.optimumOitDisabled || revealTextureId == 0 || accumTextureId == 0) return;
++			try
++			{
++				GL.ActiveTexture((TextureUnit)33990);
++				GL.BindTexture((TextureTarget)3553, revealTextureId);
++				GL.ActiveTexture((TextureUnit)33991);
++				GL.BindTexture((TextureTarget)35866, accumTextureId);
++				GL.ActiveTexture((TextureUnit)33984);
++			}
++			catch (Exception e)
++			{
++				SystemRenderOITLayers.DisableOptimumOit(null, "OIT texture binding failed", e);
++				try { GL.ActiveTexture((TextureUnit)33984); } catch { }
++			}
+ 		}
+ 
+ 		public void Dispose()
+@@ -124,6 +181,18 @@ public class SystemRenderOITLayers : ClientSystem
+ 
+ 	private static int revealTextureId;
+ 
++	private static bool optimumOitDisabled;
++
++	private static bool optimumOitFailureLogged;
++
++	private static void DisableOptimumOit(ICoreClientAPI capi, string reason, Exception error = null)
++	{
++		optimumOitDisabled = true;
++		if (optimumOitFailureLogged) return;
++		optimumOitFailureLogged = true;
++		capi?.Logger?.Warning("[Optimum] OIT renderer disabled: {0} {1}", reason, error);
++	}
++
+ 	public override string Name => "oitlayers";
+ 
+ 	public override EnumClientSystemType GetSystemType()
+

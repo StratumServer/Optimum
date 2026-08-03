@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -25,12 +26,12 @@ public static class ILHook
         var type = vanillaAsm.MainModule.GetType(typeName);
         if (type == null) { Console.Error.WriteLine($"  HOOK SKIP: type not found {typeName}"); return false; }
 
-        var method = type.Methods.FirstOrDefault(m => m.Name == methodName && m.Parameters.Count == paramCount);
+        var method = MethodSignature.FindUnique(type, methodName, paramCount);
         if (method == null) { Console.Error.WriteLine($"  HOOK SKIP: method not found {typeName}::{methodName}"); return false; }
         method.DebugInformation.SequencePoints.Clear();
         method.DebugInformation.Scope = null;
 
-        var hookMethod = type.Methods.FirstOrDefault(m => m.Name == hookMethodName);
+        var hookMethod = MethodSignature.FindUnique(type, hookMethodName);
         if (hookMethod == null) { Console.Error.WriteLine($"  HOOK SKIP: hook method not found {typeName}::{hookMethodName}"); return false; }
 
         var il = method.Body.GetILProcessor();
@@ -80,23 +81,40 @@ public static class ILHook
     public static bool InsertBeforeCall(
         AssemblyDefinition vanillaAsm,
         string typeName, string methodName, int paramCount,
-        string hookMethodName, string targetCallName)
+        string hookMethodName, string targetCallName,
+        string targetDeclaringType,
+        IReadOnlyList<string> targetParameterTypes,
+        string targetReturnType,
+        bool targetHasThis,
+        bool targetExplicitThis,
+        MethodCallingConvention targetCallingConvention,
+        int targetGenericArity)
     {
         var type = vanillaAsm.MainModule.GetType(typeName);
         if (type == null) { Console.Error.WriteLine($"  HOOK SKIP: type not found {typeName}"); return false; }
 
-        var method = type.Methods.FirstOrDefault(m => m.Name == methodName && m.Parameters.Count == paramCount);
+        var method = MethodSignature.FindUnique(type, methodName, paramCount);
         if (method == null) { Console.Error.WriteLine($"  HOOK SKIP: method not found {typeName}::{methodName}"); return false; }
         method.DebugInformation.SequencePoints.Clear();
         method.DebugInformation.Scope = null;
 
-        var hookMethod = type.Methods.FirstOrDefault(m => m.Name == hookMethodName);
+        var hookMethod = MethodSignature.FindUnique(type, hookMethodName);
         if (hookMethod == null) { Console.Error.WriteLine($"  HOOK SKIP: hook method not found {typeName}::{hookMethodName}"); return false; }
 
         var il = method.Body.GetILProcessor();
         var targetCalls = method.Body.Instructions
             .Where(i => (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
-                        i.Operand is MethodReference mr && mr.Name == targetCallName)
+                        i.Operand is MethodReference mr &&
+                        MethodSignature.Matches(
+                            mr,
+                            targetDeclaringType,
+                            targetCallName,
+                            targetParameterTypes,
+                            targetReturnType,
+                            targetHasThis,
+                            targetExplicitThis,
+                            targetCallingConvention,
+                            targetGenericArity))
             .ToList();
 
         if (targetCalls.Count == 0)
@@ -108,7 +126,7 @@ public static class ILHook
         int inserted = 0;
         foreach (var call in targetCalls)
         {
-            if (AlreadyCallsHook(call.Next, hookMethodName))
+            if (AlreadyCallsHook(call.Next, hookMethod))
             {
                 continue;
             }
@@ -131,17 +149,22 @@ public static class ILHook
 
         method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, method.Body.MaxStackSize + 2);
         Console.WriteLine($"  HOOKED: {typeName}::{methodName} after {targetCallName} → {hookMethodName} ({inserted} sites)");
+        if (inserted == 0)
+        {
+            Console.Error.WriteLine($"  HOOK SKIP: all {targetCalls.Count} call sites already contain {hookMethodName}");
+            return false;
+        }
         return true;
     }
 
-    private static bool AlreadyCallsHook(Instruction? start, string hookMethodName)
+    private static bool AlreadyCallsHook(Instruction? start, MethodDefinition hookMethod)
     {
         Instruction? cursor = start;
         for (int i = 0; i < 6 && cursor != null; i++, cursor = cursor.Next)
         {
             if ((cursor.OpCode == OpCodes.Call || cursor.OpCode == OpCodes.Callvirt) &&
                 cursor.Operand is MethodReference method &&
-                method.Name == hookMethodName)
+                MethodSignature.Matches(hookMethod, method))
             {
                 return true;
             }
@@ -161,10 +184,10 @@ public static class ILHook
         var type = vanillaAsm.MainModule.GetType(typeName);
         if (type == null) { Console.Error.WriteLine($"  HOOK SKIP: type not found {typeName}"); return false; }
 
-        var method = type.Methods.FirstOrDefault(m => m.Name == methodName && m.Parameters.Count == paramCount);
+        var method = MethodSignature.FindUnique(type, methodName, paramCount);
         if (method == null) { Console.Error.WriteLine($"  HOOK SKIP: method not found {typeName}::{methodName}"); return false; }
 
-        var hookMethod = type.Methods.FirstOrDefault(m => m.Name == hookMethodName);
+        var hookMethod = MethodSignature.FindUnique(type, hookMethodName);
         if (hookMethod == null) { Console.Error.WriteLine($"  HOOK SKIP: hook method not found {typeName}::{hookMethodName}"); return false; }
 
         var il = method.Body.GetILProcessor();

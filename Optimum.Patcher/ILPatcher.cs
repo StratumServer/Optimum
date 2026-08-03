@@ -64,9 +64,9 @@ public static class ILPatcher
         List<string> typesToInject,
         Dictionary<string, List<string>> membersToInject,
         List<MethodTarget> targets,
-        List<(string typeName, string methodName, int paramCount, string hookMethod, string targetCall)>? hooks = null,
+        List<HookTarget>? hooks = null,
         Dictionary<string, List<string>>? interfacesToInject = null,
-        bool requireAllTargets = false)
+        bool requireAllTargets = true)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
@@ -82,9 +82,8 @@ public static class ILPatcher
         // any of the directories above. That stays invisible until Cecil has to
         // resolve a type to write it out (MetadataBuilder.GetConstantType, for a
         // parameter default value on an injected member), at which point
-        // AssemblyDefinition.Write throws AssemblyResolutionException, the
-        // patcher process dies, and the launcher silently falls back to a
-        // vanilla (unpatched) launch. Walk up from both inputs to the first
+        // AssemblyDefinition.Write throws AssemblyResolutionException and the
+        // launcher aborts the launch. Walk up from both inputs to the first
         // ancestor that actually contains VintagestoryAPI.dll - the game root.
         AddGameRootSearchDirectories(resolver, vanillaPath);
         AddGameRootSearchDirectories(resolver, compiledPath);
@@ -123,27 +122,35 @@ public static class ILPatcher
 
         // Phase 1: Transplant method bodies
         int patched = 0;
+        int optionalSkipped = 0;
         foreach (var target in targets)
         {
-            var vanillaMethod = FindMethod(vanillaAsm, target);
             var compiledMethod = FindMethod(compiledAsm, target);
+            var vanillaMethod = compiledMethod is null
+                ? FindMethod(vanillaAsm, target)
+                : FindMatchingMethod(vanillaAsm, target, compiledMethod);
 
             if (vanillaMethod == null)
             {
-                if (requireAllTargets)
+                if (requireAllTargets && !target.Optional)
                     throw new InvalidOperationException($"Required vanilla method not found: {target}");
-                Console.Error.WriteLine($"  SKIP (not in vanilla): {target}");
+                if (target.Optional) optionalSkipped++;
+                Console.Error.WriteLine($"  OPTIONAL SKIP (not in vanilla): {target}");
                 continue;
             }
             if (compiledMethod == null)
             {
-                if (requireAllTargets)
+                if (requireAllTargets && !target.Optional)
                     throw new InvalidOperationException($"Required compiled method not found: {target}");
-                Console.Error.WriteLine($"  SKIP (not in compiled): {target}");
+                if (target.Optional) optionalSkipped++;
+                Console.Error.WriteLine($"  OPTIONAL SKIP (not in compiled): {target}");
                 continue;
             }
             if (!compiledMethod.HasBody)
             {
+                if (requireAllTargets && !target.Optional)
+                    throw new InvalidOperationException($"Required compiled method has no body: {target}");
+                if (target.Optional) optionalSkipped++;
                 Console.Error.WriteLine($"  SKIP (no body): {target}");
                 continue;
             }
@@ -168,14 +175,36 @@ public static class ILPatcher
         int hooked = 0;
         if (hooks != null)
         {
-            foreach (var (typeName, methodName, paramCount, hookMethod, targetCall) in hooks)
+            foreach (var hook in hooks)
             {
-                if (ILHook.InsertBeforeCall(vanillaAsm, typeName, methodName, paramCount, hookMethod, targetCall))
+                bool inserted = ILHook.InsertBeforeCall(
+                    vanillaAsm,
+                    hook.TypeFullName,
+                    hook.MethodName,
+                    hook.ParamCount,
+                    hook.HookMethod,
+                    hook.TargetCall,
+                    hook.TargetDeclaringType,
+                    hook.TargetParameterTypes,
+                    hook.TargetReturnType,
+                    hook.TargetHasThis,
+                    hook.TargetExplicitThis,
+                    hook.TargetCallingConvention,
+                    hook.TargetGenericArity);
+                if (!inserted && !hook.Optional)
+                {
+                    throw new InvalidOperationException($"Required IL hook was not applied: {hook}");
+                }
+                if (inserted)
                     hooked++;
             }
         }
 
-        Console.WriteLine($"\n  Summary: {injectedTypes} types, {injectedMembers} members, {injectedInterfaces} interfaces injected, {patched}/{targets.Count} methods patched, {hooked} hooks.");
+        int requiredTargetCount = targets.Count(target => !target.Optional);
+        Console.WriteLine(
+            $"\n  Summary: {injectedTypes} types, {injectedMembers} members, " +
+            $"{injectedInterfaces} interfaces injected, {patched}/{requiredTargetCount} required methods patched, " +
+            $"{optionalSkipped} optional methods skipped, {hooked} hooks.");
 
         var selfRefErrors = SelfConsistencyVerifier.VerifySelfReferences(vanillaAsm.MainModule);
         if (selfRefErrors.Count > 0)
@@ -191,6 +220,15 @@ public static class ILPatcher
         {
             Console.Error.WriteLine($"\n  {pinvokeErrors.Count} PInvoke integrity error(s), output not written:");
             foreach (var err in pinvokeErrors)
+                Console.Error.WriteLine($"    {err}");
+            return -1;
+        }
+
+        var ilErrors = IlStackVerifier.VerifyModule(vanillaAsm.MainModule);
+        if (ilErrors.Count > 0)
+        {
+            Console.Error.WriteLine($"\n  {ilErrors.Count} invalid IL error(s), output not written:");
+            foreach (var err in ilErrors)
                 Console.Error.WriteLine($"    {err}");
             return -1;
         }
@@ -285,8 +323,18 @@ public static class ILPatcher
             var vanillaType = vanillaAsm.MainModule.GetType(declaringType.FullName);
             if (vanillaType == null) continue;
 
-            // Check if field exists
-            if (vanillaType.Fields.Any(f => f.Name == fieldRef.Name)) continue;
+            // Check if field exists with the complete field signature.
+            var existingField = vanillaType.Fields.FirstOrDefault(f => f.Name == fieldRef.Name);
+            if (existingField is not null)
+            {
+                if (existingField.FieldType.FullName != fieldRef.FieldType.FullName)
+                {
+                    throw new InvalidOperationException(
+                        $"Field signature mismatch for {declaringType.FullName}::{fieldRef.Name}: " +
+                        $"reference uses {fieldRef.FieldType.FullName}, vanilla defines {existingField.FieldType.FullName}");
+                }
+                continue;
+            }
 
             // Also check properties (backing fields get injected with properties)
             if (fieldRef.Name.StartsWith("<") && fieldRef.Name.EndsWith(">k__BackingField"))
@@ -297,10 +345,21 @@ public static class ILPatcher
 
             // Inject the field from the compiled type
             var compiledType = compiledMethod.Module.GetType(declaringType.FullName);
-            if (compiledType == null) continue;
+            if (compiledType == null)
+            {
+                throw new InvalidOperationException(
+                    $"Required donor field type not found: {declaringType.FullName}");
+            }
 
-            var srcField = compiledType.Fields.FirstOrDefault(f => f.Name == fieldRef.Name);
-            if (srcField == null) continue;
+            var srcField = compiledType.Fields.FirstOrDefault(f =>
+                f.Name == fieldRef.Name &&
+                f.FieldType.FullName == fieldRef.FieldType.FullName);
+            if (srcField == null)
+            {
+                throw new InvalidOperationException(
+                    $"Required donor field not found: {declaringType.FullName}::{fieldRef.Name} " +
+                    $"({fieldRef.FieldType.FullName})");
+            }
 
             var newField = new FieldDefinition(
                 srcField.Name,
@@ -319,7 +378,7 @@ public static class ILPatcher
     {
         if (!compiledMethod.HasBody) return;
 
-        var missingNames = new HashSet<string>();
+        var missingNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var instruction in compiledMethod.Body.Instructions)
         {
             if (instruction.Operand is not MethodReference methodRef) continue;
@@ -328,8 +387,7 @@ public static class ILPatcher
             var targetType = vanillaAsm.MainModule.GetType(methodRef.DeclaringType.FullName);
             if (targetType == null) continue;
             bool exists = targetType.Methods.Any(method =>
-                method.Name == methodRef.Name &&
-                method.Parameters.Count == methodRef.Parameters.Count);
+                MethodSignature.Matches(method, methodRef));
             if (!exists)
             {
                 missingNames.Add(methodRef.Name);
@@ -456,9 +514,41 @@ public static class ILPatcher
         var type = asm.MainModule.GetType(target.TypeFullName);
         if (type == null) return null;
 
-        return type.Methods.FirstOrDefault(m =>
-            m.Name == target.MethodName &&
-            m.Parameters.Count == target.ParamCount);
+        var candidates = type.Methods
+            .Where(method => method.Name == target.MethodName &&
+                method.Parameters.Count == target.ParamCount)
+            .Where(target.Matches)
+            .ToArray();
+        if (candidates.Length > 1)
+        {
+            throw new InvalidOperationException(
+                $"Ambiguous method target {target}: " +
+                string.Join(", ", candidates.Select(MethodSignature.GetKey)));
+        }
+        return candidates.SingleOrDefault();
+    }
+
+    private static MethodDefinition? FindMatchingMethod(
+        AssemblyDefinition asm,
+        MethodTarget target,
+        MethodDefinition compiledMethod)
+    {
+        var type = asm.MainModule.GetType(target.TypeFullName);
+        if (type == null) return null;
+
+        var candidates = type.Methods
+            .Where(method => method.Name == target.MethodName &&
+                method.Parameters.Count == target.ParamCount &&
+                target.Matches(method) &&
+                MethodSignature.Matches(method, compiledMethod))
+            .ToArray();
+        if (candidates.Length > 1)
+        {
+            throw new InvalidOperationException(
+                $"Ambiguous vanilla signature for {target}: " +
+                string.Join(", ", candidates.Select(MethodSignature.GetKey)));
+        }
+        return candidates.SingleOrDefault();
     }
 
     private static void TransplantBody(
@@ -591,7 +681,39 @@ public static class ILPatcher
 /// <summary>
 /// Identifies a method to transplant.
 /// </summary>
-public record MethodTarget(string TypeFullName, string MethodName, int ParamCount)
+public record MethodTarget(
+    string TypeFullName,
+    string MethodName,
+    int ParamCount,
+    IReadOnlyList<string>? ParameterTypes = null,
+    bool Optional = false)
 {
-    public override string ToString() => $"{TypeFullName}::{MethodName}({ParamCount} params)";
+    public bool Matches(MethodDefinition method)
+    {
+        if (ParameterTypes is null) return true;
+        return method.Parameters.Select(parameter => parameter.ParameterType.FullName)
+            .SequenceEqual(ParameterTypes, StringComparer.Ordinal);
+    }
+
+    public override string ToString() =>
+        $"{TypeFullName}::{MethodName}({ParamCount} params){(Optional ? " [optional]" : "")}";
+}
+
+public record HookTarget(
+    string TypeFullName,
+    string MethodName,
+    int ParamCount,
+    string HookMethod,
+    string TargetCall,
+    string TargetDeclaringType,
+    IReadOnlyList<string> TargetParameterTypes,
+    string TargetReturnType,
+    bool TargetHasThis,
+    bool TargetExplicitThis,
+    MethodCallingConvention TargetCallingConvention,
+    int TargetGenericArity,
+    bool Optional = false)
+{
+    public override string ToString() =>
+        $"{TypeFullName}::{MethodName} -> {HookMethod} before {TargetCall}";
 }

@@ -33,6 +33,46 @@ public sealed class CacheManagerTests : IDisposable
         Assert.Null(cache.ValidateCache());
     }
 
+    [Fact]
+    public void ModifiedCachedAssemblyInvalidatesTheManifest()
+    {
+        var gameDir = Path.Combine(_root, "game");
+        var donorDir = Path.Combine(_root, "data", ".optimum", "donors");
+        var cacheDir = Path.Combine(_root, "data", ".optimum", "cache");
+        Directory.CreateDirectory(gameDir);
+        Directory.CreateDirectory(donorDir);
+
+        File.WriteAllText(Path.Combine(gameDir, "VintagestoryLib.dll"), "vanilla");
+        File.WriteAllText(Path.Combine(donorDir, "VintagestoryLib.Donor.dll"), "donor");
+
+        var cache = new CacheManager(gameDir, cacheDir, donorDir, "test");
+        cache.SavePatchedAssembly("VintagestoryLib.dll", [1, 2, 3], null);
+        cache.CreateManifest([new PatchedTarget("VintagestoryLib.dll", "VintagestoryLib.Donor.dll", 1)]);
+
+        File.WriteAllBytes(Path.Combine(cacheDir, "VintagestoryLib.dll"), [9, 9, 9]);
+
+        Assert.Null(cache.ValidateCache());
+    }
+
+    [Fact]
+    public void CacheWritesLeaveNoTemporaryFiles()
+    {
+        var gameDir = Path.Combine(_root, "game");
+        var donorDir = Path.Combine(_root, "data", ".optimum", "donors");
+        var cacheDir = Path.Combine(_root, "data", ".optimum", "cache");
+        Directory.CreateDirectory(gameDir);
+        Directory.CreateDirectory(donorDir);
+
+        File.WriteAllText(Path.Combine(gameDir, "VintagestoryLib.dll"), "vanilla");
+        File.WriteAllText(Path.Combine(donorDir, "VintagestoryLib.Donor.dll"), "donor");
+
+        var cache = new CacheManager(gameDir, cacheDir, donorDir, "test");
+        cache.SavePatchedAssembly("VintagestoryLib.dll", [1, 2, 3], null);
+        cache.CreateManifest([new PatchedTarget("VintagestoryLib.dll", "VintagestoryLib.Donor.dll", 1)]);
+
+        Assert.Empty(Directory.EnumerateFiles(cacheDir, "*.tmp-*", SearchOption.AllDirectories));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

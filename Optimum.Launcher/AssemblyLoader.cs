@@ -14,6 +14,14 @@ namespace Optimum.Launcher;
 /// </summary>
 public sealed class AssemblyLoader : IDisposable
 {
+    private static readonly HashSet<string> RequiredPatchedAssemblies = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "VintagestoryLib",
+        "VintagestoryAPI",
+        "VSEssentials",
+        "VSSurvivalMod",
+    };
+
     private readonly string _cacheDir;
     private readonly string _gameDir;
     private readonly string _launcherDir;
@@ -43,19 +51,36 @@ public sealed class AssemblyLoader : IDisposable
     /// </summary>
     public Assembly LoadEntryAssembly(string assemblyFileName)
     {
+        var expectedName = Path.GetFileNameWithoutExtension(assemblyFileName);
+        if (_loaded.TryGetValue(expectedName, out var loaded))
+            return loaded;
+
         var cachedPath = Path.Combine(_cacheDir, assemblyFileName);
         if (File.Exists(cachedPath))
         {
             var asm = Assembly.LoadFrom(cachedPath);
             var name = asm.GetName().Name;
-            if (name is not null)
-                _loaded[name] = asm;
+            if (!string.Equals(name, expectedName, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Patched assembly identity mismatch: {assemblyFileName} contains {name ?? "(unnamed)"}.");
+            }
+            if (!string.Equals(
+                    Path.GetFullPath(asm.Location),
+                    Path.GetFullPath(cachedPath),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException(
+                    $"Patched assembly was resolved from an unexpected path: {assemblyFileName} " +
+                    $"loaded from {asm.Location}, expected {cachedPath}.");
+            }
+            _loaded[expectedName] = asm;
             return asm;
         }
 
-        // Fallback to vanilla
-        var vanillaPath = Path.Combine(_gameDir, assemblyFileName);
-        return Assembly.LoadFrom(vanillaPath);
+        throw new FileNotFoundException(
+            $"Required patched entry assembly is missing from the cache: {assemblyFileName}",
+            cachedPath);
     }
 
     private Assembly? OnAssemblyResolve(object? sender, ResolveEventArgs args)
@@ -83,6 +108,13 @@ public sealed class AssemblyLoader : IDisposable
             var asm = Assembly.LoadFrom(cachedModPath);
             _loaded[asmName] = asm;
             return asm;
+        }
+
+        if (RequiredPatchedAssemblies.Contains(asmName))
+        {
+            throw new FileNotFoundException(
+                $"Required patched assembly is missing from the cache: {asmName}.dll",
+                cachedPath);
         }
 
         // Try game dir (vanilla / unpatched assemblies)

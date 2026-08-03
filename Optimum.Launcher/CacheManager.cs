@@ -39,26 +39,46 @@ public sealed class CacheManager
 
     /// <summary>
     /// Validates the cache. Returns the manifest if valid, null if a re-patch is needed.
-    /// Uses mtime+size fast-path: only computes SHA256 when mtime/size differ from recorded.
+    /// Checks the manifest inputs and the cached assembly hash before launch.
     /// </summary>
-    public CacheManifest? ValidateCache()
+    public CacheManifest? ValidateCache(IReadOnlyCollection<string>? requiredAssemblies = null)
+    {
+        return ValidateCacheCore(requiredAssemblies);
+    }
+
+    private CacheManifest? ValidateCacheCore(IReadOnlyCollection<string>? requiredAssemblies)
     {
         if (!File.Exists(ManifestPath))
             return null;
 
+        string json = File.ReadAllText(ManifestPath);
         CacheManifest? manifest;
         try
         {
-            var json = File.ReadAllText(ManifestPath);
             manifest = JsonSerializer.Deserialize<CacheManifest>(json, JsonOpts);
         }
-        catch
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
         {
             return null;
         }
 
         if (manifest is null)
             return null;
+
+        if (requiredAssemblies is not null)
+        {
+            foreach (string requiredAssembly in requiredAssemblies)
+            {
+                bool listed = manifest.Targets.Exists(target =>
+                    string.Equals(target.Assembly, requiredAssembly, StringComparison.OrdinalIgnoreCase));
+                if (!listed || !File.Exists(Path.Combine(_cacheDir, requiredAssembly)))
+                    return null;
+            }
+        }
 
         // Version check
         if (manifest.OptimumVersion != _optimumVersion)
@@ -72,7 +92,7 @@ public sealed class CacheManager
                 return null;
 
             var cachedPath = Path.Combine(_cacheDir, target.Assembly);
-            if (!File.Exists(cachedPath))
+            if (!File.Exists(cachedPath) || string.IsNullOrEmpty(target.CachedHash) || ComputeFileHash(cachedPath) != target.CachedHash)
                 return null;
 
             var donorPath = Path.Combine(_donorDir, target.Donor);
@@ -117,6 +137,9 @@ public sealed class CacheManager
             var vanillaPath = Path.Combine(_gameDir, t.VanillaAssemblyName ?? t.AssemblyName);
             var vanillaInfo = new FileInfo(vanillaPath);
             var donorPath = Path.Combine(_donorDir, t.DonorName);
+            var cachedPath = Path.Combine(_cacheDir, t.AssemblyName);
+            if (!File.Exists(cachedPath) || new FileInfo(cachedPath).Length == 0)
+                throw new FileNotFoundException("Patched assembly is missing from the cache.", cachedPath);
 
             manifest.Targets.Add(new CacheTarget
             {
@@ -127,6 +150,7 @@ public sealed class CacheManager
                 VanillaHash = ComputeFileHash(vanillaPath),
                 VanillaSize = vanillaInfo.Length,
                 VanillaMtimeTicks = vanillaInfo.LastWriteTimeUtc.Ticks,
+                CachedHash = ComputeFileHash(cachedPath),
                 PatchCount = t.PatchCount
             });
         }
@@ -140,8 +164,26 @@ public sealed class CacheManager
     /// </summary>
     public void Invalidate()
     {
+        if (Directory.Exists(ManifestPath))
+            throw new IOException($"Cache manifest path is a directory: {ManifestPath}");
+
         if (File.Exists(ManifestPath))
             File.Delete(ManifestPath);
+    }
+
+    public bool TryInvalidate(out string? failureReason)
+    {
+        try
+        {
+            Invalidate();
+            failureReason = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            failureReason = ex.Message;
+            return false;
+        }
     }
 
     /// <summary>
@@ -149,13 +191,21 @@ public sealed class CacheManager
     /// </summary>
     public void SavePatchedAssembly(string assemblyName, byte[] dllBytes, byte[]? pdbBytes)
     {
+        if (dllBytes is null || dllBytes.Length == 0)
+            throw new ArgumentException("The patched assembly cannot be empty.", nameof(dllBytes));
+
         var outputPath = Path.Combine(_cacheDir, assemblyName);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        File.WriteAllBytes(outputPath, dllBytes);
-        if (pdbBytes is not null)
+        WriteBytesAtomically(outputPath, dllBytes);
+
+        var pdbPath = Path.ChangeExtension(outputPath, ".pdb");
+        if (pdbBytes is not null && pdbBytes.Length > 0)
         {
-            var pdbName = Path.ChangeExtension(assemblyName, ".pdb");
-            File.WriteAllBytes(Path.Combine(_cacheDir, pdbName), pdbBytes);
+            WriteBytesAtomically(pdbPath, pdbBytes);
+        }
+        else if (File.Exists(pdbPath))
+        {
+            File.Delete(pdbPath);
         }
     }
 
@@ -165,7 +215,37 @@ public sealed class CacheManager
     private void SaveManifest(CacheManifest manifest)
     {
         var json = JsonSerializer.Serialize(manifest, JsonOpts);
-        File.WriteAllText(ManifestPath, json);
+        WriteTextAtomically(ManifestPath, json);
+    }
+
+    private static void WriteBytesAtomically(string path, byte[] bytes)
+    {
+        var temporaryPath = $"{path}.tmp-{Guid.NewGuid():N}";
+        try
+        {
+            File.WriteAllBytes(temporaryPath, bytes);
+            File.Move(temporaryPath, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    private static void WriteTextAtomically(string path, string contents)
+    {
+        var temporaryPath = $"{path}.tmp-{Guid.NewGuid():N}";
+        try
+        {
+            File.WriteAllText(temporaryPath, contents);
+            File.Move(temporaryPath, path, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
     }
 
     private string? DetectGameVersion()
@@ -203,6 +283,7 @@ public sealed class CacheTarget
     public string VanillaHash { get; set; } = "";
     public long VanillaSize { get; set; }
     public long VanillaMtimeTicks { get; set; }
+    public string CachedHash { get; set; } = "";
     public int PatchCount { get; set; }
 }
 

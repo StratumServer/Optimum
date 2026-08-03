@@ -131,22 +131,67 @@ pinned_ilspycmd_version() {
     printf '%s\n' "${parsed:-$fallback}"
 }
 
-ilspycmd_accepted_prefixes() {
+ilspycmd_version_bounds() {
     local manifest="$REPO_ROOT/.config/ilspycmd-compat.json"
     if [[ -f "$manifest" ]]; then
-        grep -oE '"[0-9]+(\.[0-9]+)+\."' "$manifest" | tr -d '"'
+        grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' "$manifest" | tr -d '"'
         return
     fi
-    printf '%s\n' '10.0.' '10.1.'
+    printf '%s\n' '10.1.0.8386' '10.1.1.8388'
+}
+
+ilspycmd_version_at_least() {
+    local current="$1" bound="$2"
+    local current_major current_minor current_patch current_build
+    local bound_major bound_minor bound_patch bound_build
+    IFS=. read -r current_major current_minor current_patch current_build <<< "$current"
+    IFS=. read -r bound_major bound_minor bound_patch bound_build <<< "$bound"
+    if (( 10#$current_major != 10#$bound_major )); then
+        (( 10#$current_major > 10#$bound_major ))
+        return
+    fi
+    if (( 10#$current_minor != 10#$bound_minor )); then
+        (( 10#$current_minor > 10#$bound_minor ))
+        return
+    fi
+    if (( 10#$current_patch != 10#$bound_patch )); then
+        (( 10#$current_patch > 10#$bound_patch ))
+        return
+    fi
+    (( 10#$current_build >= 10#$bound_build ))
+}
+
+ilspycmd_version_at_most() {
+    local current="$1" bound="$2"
+    local current_major current_minor current_patch current_build
+    local bound_major bound_minor bound_patch bound_build
+    IFS=. read -r current_major current_minor current_patch current_build <<< "$current"
+    IFS=. read -r bound_major bound_minor bound_patch bound_build <<< "$bound"
+    if (( 10#$current_major != 10#$bound_major )); then
+        (( 10#$current_major < 10#$bound_major ))
+        return
+    fi
+    if (( 10#$current_minor != 10#$bound_minor )); then
+        (( 10#$current_minor < 10#$bound_minor ))
+        return
+    fi
+    if (( 10#$current_patch != 10#$bound_patch )); then
+        (( 10#$current_patch < 10#$bound_patch ))
+        return
+    fi
+    (( 10#$current_build <= 10#$bound_build ))
 }
 
 ilspycmd_version_supported() {
-    local current="$1" prefix
+    local current="$1" bounds minimum maximum
     [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-    while IFS= read -r prefix; do
-        [[ -n "$prefix" && "$current" == "$prefix"* ]] && return 0
-    done < <(ilspycmd_accepted_prefixes)
-    return 1
+    bounds="$(ilspycmd_version_bounds)" || return 1
+    minimum="$(printf '%s\n' "$bounds" | sed -n '1p')"
+    maximum="$(printf '%s\n' "$bounds" | sed -n '2p')"
+    [[ "$minimum" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    [[ "$maximum" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+    ilspycmd_version_at_least "$current" "$minimum" &&
+        ilspycmd_version_at_most "$current" "$maximum"
 }
 
 find_ilspycmd() {
@@ -159,21 +204,10 @@ find_ilspycmd() {
     [[ -n "$ILSPY_BIN" ]]
 }
 
-# Reads ilspycmd's full --version output before parsing it, and bounds the
-# call with a timeout. Piping the tool's live stdout straight into `head -n1`
-# can hang: `head` exits after one line and closes its end of the pipe, and
-# a .NET global tool writing further output into a closed pipe can block
-# instead of erroring out (SIGPIPE is ignored by the runtime by default).
-ilspycmd_version() {
-    local raw
-    raw=$(timeout 5 "$ILSPY_BIN" --version 2>/dev/null || true)
-    printf '%s\n' "$raw" | head -n 1 | awk '{print $2}'
-}
-
 check_ilspycmd() {
     find_ilspycmd || return 1
     local version
-    version=$(ilspycmd_version)
+    version=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
     ilspycmd_version_supported "$version"
 }
 
@@ -214,16 +248,7 @@ install_ilspycmd() {
     check_dotnet10 || die "ilspycmd requires the .NET 10 SDK."
     local pinned
     pinned=$(pinned_ilspycmd_version)
-    # --allow-downgrade: `tool update --version` refuses to move to an older
-    # or NuGet-considered-newer version otherwise ("This cannot be used to
-    # downgrade versions, you must uninstall newer versions first" -
-    # https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-update).
-    # If update still fails, uninstall before falling back to a fresh
-    # install: `tool install` always refuses when the tool ID already
-    # exists, so retrying it without removing the old one first can never
-    # succeed.
     if ! "$DOTNET_BIN" tool update -g ilspycmd --version "$pinned" --allow-downgrade; then
-        "$DOTNET_BIN" tool uninstall -g ilspycmd || true
         "$DOTNET_BIN" tool install -g ilspycmd --version "$pinned"
     fi
     export PATH="$HOME/.dotnet/tools:$PATH"
@@ -321,19 +346,19 @@ detect_prereqs() {
     local current
     if check_ilspycmd; then
         PREREQ_STATUS[ilspycmd]="ok"
-        current=$(ilspycmd_version)
+        current=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
         PREREQ_LABEL[ilspycmd]="ilspycmd ($current)"
     else
         PREREQ_STATUS[ilspycmd]="missing"
         local ilspy_ver
         ilspy_ver=$(pinned_ilspycmd_version)
         if find_ilspycmd; then
-            current=$(ilspycmd_version)
+            current=$("$ILSPY_BIN" --version 2>/dev/null | head -n 1 | awk '{print $2}')
             PREREQ_LABEL[ilspycmd]="ilspycmd $current (unsupported, needs $ilspy_ver)"
         else
             PREREQ_LABEL[ilspycmd]="ilspycmd $ilspy_ver (decompiler)"
         fi
-        PREREQ_INSTALL_CMD[ilspycmd]="${DOTNET_BIN:-$HOME/.dotnet/dotnet} tool update -g ilspycmd --version $ilspy_ver"
+        PREREQ_INSTALL_CMD[ilspycmd]="${DOTNET_BIN:-$HOME/.dotnet/dotnet} tool update -g ilspycmd --version $ilspy_ver --allow-downgrade"
     fi
 }
 

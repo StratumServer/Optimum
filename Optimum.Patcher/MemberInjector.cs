@@ -26,8 +26,7 @@ public static class MemberInjector
             var sourceType = compiled.MainModule.GetType(typeName);
             if (sourceType is null)
             {
-                Console.WriteLine($"  INTERFACE SKIPPED (type not in donor): {typeName}");
-                continue;
+                throw new InvalidOperationException($"Required donor interface type not found: {typeName}");
             }
 
             foreach (var interfaceName in interfaceNames)
@@ -36,8 +35,8 @@ public static class MemberInjector
                     item.InterfaceType.FullName == interfaceName);
                 if (sourceInterface is null)
                 {
-                    Console.WriteLine($"  INTERFACE SKIPPED (not in donor): {typeName} -> {interfaceName}");
-                    continue;
+                    throw new InvalidOperationException(
+                        $"Required donor interface not found: {typeName} -> {interfaceName}");
                 }
                 if (targetType.Interfaces.Any(item => item.InterfaceType.FullName == interfaceName))
                 {
@@ -142,8 +141,7 @@ public static class MemberInjector
                 foreach (var sourceMethod in sourceMethods)
                 {
                     if (vanillaType.Methods.Any(method =>
-                        method.Name == name &&
-                        method.Parameters.Count == sourceMethod.Parameters.Count))
+                        MethodSignature.Matches(method, sourceMethod)))
                     {
                         continue;
                     }
@@ -153,6 +151,7 @@ public static class MemberInjector
                     methodCount++;
                     Console.WriteLine(
                         $"  INJECTED METHOD: {typeName}::{name}({sourceMethod.Parameters.Count} params)");
+                    injected += InjectMethodDependencies(vanilla, compiled, sourceMethod);
                 }
                 if (methodCount == 0)
                 {
@@ -161,9 +160,113 @@ public static class MemberInjector
                 continue;
             }
 
-            Console.WriteLine($"  MEMBER SKIPPED (not in donor): {typeName}::{name}");
-            continue;
+            throw new InvalidOperationException($"Required donor member not found: {typeName}::{name}");
         }
+        return injected;
+    }
+
+    /// <summary>
+    /// Injects same-assembly fields and helper methods referenced by an injected
+    /// method. Cecil copies the body of a helper after the main transplant pass,
+    /// so a one-level scan leaves fields used only by that helper unresolved.
+    /// Walk the dependency closure before the output reaches the verifier.
+    /// </summary>
+    private static int InjectMethodDependencies(
+        AssemblyDefinition vanilla,
+        AssemblyDefinition compiled,
+        MethodDefinition rootMethod)
+    {
+        if (!rootMethod.HasBody) return 0;
+
+        int injected = 0;
+        var pending = new Queue<MethodDefinition>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        pending.Enqueue(rootMethod);
+
+        while (pending.Count > 0)
+        {
+            var method = pending.Dequeue();
+            string methodKey = MethodSignature.GetKey(method);
+            if (!visited.Add(methodKey) || !method.HasBody) continue;
+
+            var vanillaType = vanilla.MainModule.GetType(method.DeclaringType.FullName);
+            var compiledType = compiled.MainModule.GetType(method.DeclaringType.FullName);
+            if (vanillaType is null || compiledType is null) continue;
+
+            foreach (var instruction in method.Body.Instructions)
+            {
+                if (instruction.Operand is FieldReference fieldReference)
+                {
+                    var fieldType = vanilla.MainModule.GetType(fieldReference.DeclaringType.FullName);
+                    var sourceType = compiled.MainModule.GetType(fieldReference.DeclaringType.FullName);
+                    if (fieldType is null || sourceType is null)
+                    {
+                        continue;
+                    }
+
+                    var existingField = fieldType.Fields.FirstOrDefault(field =>
+                        field.Name == fieldReference.Name);
+                    if (existingField is not null)
+                    {
+                        if (existingField.FieldType.FullName != fieldReference.FieldType.FullName)
+                        {
+                            throw new InvalidOperationException(
+                                $"Field signature mismatch for {fieldReference.DeclaringType.FullName}::" +
+                                $"{fieldReference.Name}: reference uses {fieldReference.FieldType.FullName}, " +
+                                $"vanilla defines {existingField.FieldType.FullName}");
+                        }
+                        continue;
+                    }
+
+                    var sourceField = sourceType.Fields.FirstOrDefault(field =>
+                        field.Name == fieldReference.Name &&
+                        field.FieldType.FullName == fieldReference.FieldType.FullName);
+                    if (sourceField is null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Required donor field not found: {fieldReference.DeclaringType.FullName}::" +
+                            $"{fieldReference.Name} ({fieldReference.FieldType.FullName})");
+                    }
+
+                    var newField = new FieldDefinition(
+                        sourceField.Name,
+                        sourceField.Attributes,
+                        vanilla.MainModule.ImportReference(sourceField.FieldType));
+                    if (sourceField.HasConstant) newField.Constant = sourceField.Constant;
+                    fieldType.Fields.Add(newField);
+                    injected++;
+                    Console.WriteLine(
+                        $"    INJECTED DEPENDENCY FIELD: {fieldReference.DeclaringType.FullName}::{sourceField.Name}");
+                    continue;
+                }
+
+                if (instruction.Operand is not MethodReference methodReference ||
+                    methodReference.DeclaringType.FullName != method.DeclaringType.FullName)
+                {
+                    continue;
+                }
+
+                bool exists = vanillaType.Methods.Any(candidate =>
+                    MethodSignature.Matches(candidate, methodReference));
+                if (exists) continue;
+
+                var sourceMethod = compiledType.Methods.FirstOrDefault(candidate =>
+                    MethodSignature.Matches(candidate, methodReference));
+                if (sourceMethod is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Required donor helper method not found: {method.DeclaringType.FullName}::" +
+                        $"{methodReference.Name}");
+                }
+
+                InjectMethod(vanillaType, sourceMethod, vanilla.MainModule);
+                injected++;
+                Console.WriteLine(
+                    $"    INJECTED DEPENDENCY METHOD: {method.DeclaringType.FullName}::{sourceMethod.Name}({sourceMethod.Parameters.Count} params)");
+                pending.Enqueue(sourceMethod);
+            }
+        }
+
         return injected;
     }
 
@@ -325,13 +428,13 @@ public static class MemberInjector
         }
 
         // Getter
-        if (src.GetMethod != null && !target.Methods.Any(m => m.Name == src.GetMethod.Name))
+        if (src.GetMethod != null && !target.Methods.Any(m => MethodSignature.Matches(m, src.GetMethod)))
         {
             InjectMethod(target, src.GetMethod, targetModule);
         }
 
         // Setter
-        if (src.SetMethod != null && !target.Methods.Any(m => m.Name == src.SetMethod.Name))
+        if (src.SetMethod != null && !target.Methods.Any(m => MethodSignature.Matches(m, src.SetMethod)))
         {
             InjectMethod(target, src.SetMethod, targetModule);
         }
@@ -339,8 +442,12 @@ public static class MemberInjector
         // Property definition
         var newProp = new PropertyDefinition(src.Name, src.Attributes, propType)
         {
-            GetMethod = target.Methods.FirstOrDefault(m => m.Name == src.GetMethod?.Name),
-            SetMethod = target.Methods.FirstOrDefault(m => m.Name == src.SetMethod?.Name),
+            GetMethod = src.GetMethod == null
+                ? null
+                : target.Methods.FirstOrDefault(m => MethodSignature.Matches(m, src.GetMethod)),
+            SetMethod = src.SetMethod == null
+                ? null
+                : target.Methods.FirstOrDefault(m => MethodSignature.Matches(m, src.SetMethod)),
         };
         target.Properties.Add(newProp);
     }

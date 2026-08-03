@@ -21,6 +21,21 @@ The release pipeline has four shipping paths:
 
 Any patch outside those selections remains a source-only donor. The following table records the resulting status.
 
+## 0.3.3 fixes for 0.3.2 reports
+
+The 2026-08-01 reports added four shipping paths:
+
+| Reported defect | Status | Shipping owner |
+|---|---:|---|
+| `EntityHeadController.GetPose` null animator | ✅ | `ApiPatcher.PatchHeadControllerPoseFallback` replaces the vanilla method body. |
+| `EntityPlayer.OnTesselation` head-controller construction | ✅ | The API source patch guards both client head-controller constructors. |
+| Shared `AnimatorBase` ABI failure during server spawn | ✅ | `ApiPatcher` no longer ships the shared comparer rewrite. The source donor and IL test remain outside the runtime path. |
+| `GearRenderer` missing renderer | ✅ | Source and runtime donor patches guard initialization and both render methods. `SurvivalManifest` selects the three methods. |
+| CRLF patch application | ✅ | Both bootstraps normalize generated trees, patch inputs, and source overlays. `.gitattributes` records LF for tracked text. |
+| Windows standalone removal | ✅ | The package ships `uninstall.ps1`, registers its file path, and writes a standalone marker for delayed cleanup. |
+
+The `GearRenderer.SkipAnimLod` row below remains ❌ because this work selects the recovery methods and does not ship the separate animation LOD optimization.
+
 ## Complete status inventory
 
 Legend: ✅ ships in the final package, ⚠️ ships in part or only through a replacement path, ❌ does not ship, ◻️ source cleanup without behavior change.
@@ -40,16 +55,16 @@ Legend: ✅ ships in the final package, ⚠️ ships in part or only through a r
 | Chisel LOD | ✅ | `ApiPatcher.PatchChiselLodHook` redirects the vanilla frustum call to the Optimum bridge. |
 | Inventory dirty hooks | ✅ | `ApiPatcher` injects two hooks into the vanilla API. |
 | Logger initializer | ✅ | `ApiPatcher` rewrites the vanilla static initializer. |
-| `+ Optimum v0.3.0` version label | ✅ | `ApiPatcher` rewrites `GameVersion.LongGameVersion`. |
+| `+ Optimum v0.3.3` version label | ✅ | `ApiPatcher` rewrites `GameVersion.LongGameVersion`. |
 | `EntityPos` and `ColorUtil` nonalloc helpers | ⚠️ | The API source patch does not enter the vanilla API DLL. Selected client callers use Optimum bridge methods. |
 | `DefaultShaderUniforms` view-vector allocation | ⚠️ | The bridge serves selected callers, but the vanilla API type still allocates. |
 | Animated block LOD in `AnimationUtil` | ❌ | The source patch compiles into a donor, but no API runtime rule injects it into the vanilla API. |
-| `GearRenderer.SkipAnimLod` | ❌ | The runtime manifest does not target `GearRenderer`, and the field depends on the missing animation LOD path. |
+| `GearRenderer.SkipAnimLod` | ❌ | The runtime manifest targets the recovery methods, but it does not target the separate animation LOD field or method. |
 | `Mat4f` aggressive inlining | ✅ | `ApiPatcher.PatchMat4fInlining` ships this. |
 | `SortableQueue` reusable sort buffer and `ItemAt` | ❌ | The vanilla API DLL remains the shipped implementation. |
 | `UniqueQueue` linked-list removal | ❌ | The vanilla API DLL remains the shipped implementation. |
 | `AnimationManager` LINQ allocation removal | ◻️ | N/A: verified 2026-07-27 that `.Any()` calls were already removed upstream in 1.22.5. No patch needed. |
-| `AnimatorBase` case-insensitive comparison optimization | ✅ | `ApiPatcher.PatchAnimatorAnimCodeComparer` ships this (fixed 2026-07-31). |
+| `AnimatorBase` case-insensitive comparison optimization | ⚠️ | The source donor and Cecil unit test retain the experiment. The runtime API patcher leaves the shared API unchanged after the server ABI failure. |
 | `GuiDialog` composer and prospecting mouse fixes | ❌ | The engine patch has no corresponding Cecil target. |
 | `GuiElementStatbar` decimal maximum and tooltip fix | ❌ | The engine patch has no corresponding Cecil target. |
 | `SlideshowGridRecipeTextComponent` scissor cache | ❌ | The engine patch has no corresponding Cecil target. |
@@ -71,18 +86,21 @@ Legend: ✅ ships in the final package, ⚠️ ships in part or only through a r
 
 ### 2. The API patcher has a narrow whitelist
 
-[`Optimum.Patcher/api-patcher.cs`](../Optimum.Patcher/api-patcher.cs) currently applies four groups:
+[`Optimum.Patcher/api-patcher.cs`](../Optimum.Patcher/api-patcher.cs) applies seven groups:
 
 1. two inventory dirty hooks;
 2. one chisel LOD hook;
-3. one logger initializer rewrite;
-4. one game-version label rewrite.
+3. two chisel LOD shadow-pass hooks;
+4. one logger initializer rewrite;
+5. one game-version label rewrite;
+6. the Mat4f inlining rewrite;
+7. the EntityHeadController pose fallback.
 
 The patcher does not transplant arbitrary API types, change method metadata, or replace full API method bodies. That design drops `AnimationUtil`, `Mat4f`, `SortableQueue`, `UniqueQueue`, and the perception-effect changes.
 
 ### 3. The engine patcher also has a target whitelist
 
-`Optimum.Patcher/Program.cs` lists the engine types and members that Cecil can transplant. Patches for `AnimationManager`, `GuiDialog`, `GuiElementStatbar`, and the recipe component do not appear in that target list. The bootstrap can still report those source patches as applied because it builds the donor tree. (`AnimatorBase`'s comparer fix now ships separately via `ApiPatcher.PatchAnimatorAnimCodeComparer` since it's an API-side IL patch, not an engine Cecil transplant.)
+`Optimum.Patcher/Program.cs` lists the engine types and members that Cecil can transplant. Patches for `AnimationManager`, `GuiDialog`, `GuiElementStatbar`, and the recipe component do not appear in that target list. The bootstrap can still report those source patches as applied because it builds the donor tree. The `AnimatorBase` source experiment also stays outside the runtime patch because the shared API serves the integrated server.
 
 ### 4. Runtime mod manifests select individual members
 
