@@ -1,0 +1,243 @@
+diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
+--- a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
++++ b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
+@@ -36,6 +36,17 @@
+ 
+         EntityBehaviorTemporalStabilityAffected bh;
+ 
++        bool optimumGearRendererDisabled;
++        bool optimumGearRendererFailureLogged;
++
++        void DisableOptimumGearRenderer(Exception error)
++        {
++            optimumGearRendererDisabled = true;
++            if (optimumGearRendererFailureLogged) return;
++            optimumGearRendererFailureLogged = true;
++            capi?.Logger?.Warning("[Optimum] GearRenderer disabled: {0}", error);
++        }
++
+         public GearRenderer(ICoreClientAPI capi)
+         {
+             this.capi = capi;
+@@ -56,34 +67,47 @@
+ 
+         public void Init()
+         {
+-            var shape = Shape.TryGet(capi, "shapes/block/machine/machinegear2.json");
+-            var block = capi.World.GetBlock(new AssetLocation("platepile"));
+-            if (block == null || shape == null) return;
+-
+-            capi.Tesselator.TesselateShape(block, shape, out var mesh);
+-            gearMeshref = capi.Render.UploadMesh(mesh);
+-            genGears();
+-
+-
+-            rustTexture = new LoadedTexture(capi);
+-            var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
+-            capi.Render.GetOrLoadTexture(loc, ref rustTexture);
+-
+-            shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
+-
+-            tripodAnim = new AnimationUtil(capi, tripodPos);
+-            tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
+-            tripodAnim.StartAnimation(new AnimationMetaData() { Animation = "walk", Code = "walk", BlendMode = EnumAnimationBlendMode.Average, AnimationSpeed = 0.1f });
+-            tripodAnim.renderer.ScaleX = 30;
+-            tripodAnim.renderer.ScaleY = 30;
+-            tripodAnim.renderer.ScaleZ = 30;
+-            tripodAnim.renderer.FogAffectedness = 0.15f;
+-            tripodAnim.renderer.LightAffected = false;
+-            tripodAnim.renderer.StabilityAffected = false;
+-            tripodAnim.renderer.ShouldRender = true;
++            try
++            {
++                var shape = Shape.TryGet(capi, "shapes/block/machine/machinegear2.json");
++                var block = capi.World.GetBlock(new AssetLocation("platepile"));
++                if (block == null || shape == null) return;
+ 
++                capi.Tesselator.TesselateShape(block, shape, out var mesh);
++                gearMeshref = capi.Render.UploadMesh(mesh);
++                genGears();
+ 
+-            bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
++
++                rustTexture = new LoadedTexture(capi);
++                var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
++                capi.Render.GetOrLoadTexture(loc, ref rustTexture);
++
++                shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
++
++                if (shape == null) return;
++                tripodAnim = new AnimationUtil(capi, tripodPos);
++                tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
++                if (tripodAnim.renderer == null)
++                {
++                    tripodAnim = null;
++                    return;
++                }
++                tripodAnim.StartAnimation(new AnimationMetaData() { Animation = "walk", Code = "walk", BlendMode = EnumAnimationBlendMode.Average, AnimationSpeed = 0.1f });
++                tripodAnim.renderer.ScaleX = 30;
++                tripodAnim.renderer.ScaleY = 30;
++                tripodAnim.renderer.ScaleZ = 30;
++                tripodAnim.renderer.FogAffectedness = 0.15f;
++                tripodAnim.renderer.LightAffected = false;
++                tripodAnim.renderer.StabilityAffected = false;
++                tripodAnim.renderer.ShouldRender = true;
++
++
++                bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
++            }
++            catch (Exception e)
++            {
++                DisableOptimumGearRenderer(e);
++            }
+         }
+ 
+         void genGears()
+@@ -122,13 +146,23 @@
+ 
+         public bool LoadShader()
+         {
+-            prog = capi.Shader.NewShaderProgram();
+-            prog.VertexShader = capi.Shader.NewShader(EnumShaderType.VertexShader);
+-            prog.FragmentShader = capi.Shader.NewShader(EnumShaderType.FragmentShader);
++            if (optimumGearRendererDisabled) return false;
++            try
++            {
++                prog = capi.Shader.NewShaderProgram();
++                prog.VertexShader = capi.Shader.NewShader(EnumShaderType.VertexShader);
++                prog.FragmentShader = capi.Shader.NewShader(EnumShaderType.FragmentShader);
+ 
+-            capi.Shader.RegisterFileShaderProgram("machinegear", prog);
++                capi.Shader.RegisterFileShaderProgram("machinegear", prog);
+ 
+-            return prog.Compile();
++                return prog.Compile();
++            }
++            catch (Exception e)
++            {
++                prog = null;
++                DisableOptimumGearRenderer(e);
++                return false;
++            }
+         }
+ 
+ 
+@@ -137,50 +171,85 @@
+ 
+         public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+         {
+-            if (tripodAnim == null) return;
+-            if (capi.IsGamePaused) deltaTime = 0;
++            if (optimumGearRendererDisabled || tripodAnim?.renderer == null || gearMeshref == null || gearMeshref.Disposed || prog == null || prog.Disposed) return;
++            IShaderProgram previousShader = capi?.Render?.CurrentActiveShader;
++            bool blendEnabled = false;
++            try
++            {
++                if (previousShader != null && !previousShader.Disposed) previousShader.Stop();
++                if (capi.IsGamePaused) deltaTime = 0;
+ 
+-            float targetRaiseyRel = 0;
+-            if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 3f, 0, 1);
+-            raiseyRelGears += (targetRaiseyRel - raiseyRelGears) * deltaTime;
++                float targetRaiseyRel = 0;
++                if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 3f, 0, 1);
++                raiseyRelGears += (targetRaiseyRel - raiseyRelGears) * deltaTime;
+ 
+-            capi.Render.GlToggleBlend(true);
++                capi.Render.GlToggleBlend(true);
++                blendEnabled = true;
+ 
+-            if (raiseyRelGears >= 0.01f)
++                if (raiseyRelGears >= 0.01f)
++                {
++                    renderGears(deltaTime);
++                }
++
++                if (!capi.IsGamePaused)
++                {
++                    tripodAnim.renderer.ShouldRender = raiseyRelTripod > 0.01f;
++                    updateSuperMechState(deltaTime, stage);
++                }
++            }
++            catch (Exception e)
+             {
+-                renderGears(deltaTime);
++                DisableOptimumGearRenderer(e);
+             }
+-
+-            if (!capi.IsGamePaused)
++            finally
+             {
+-                tripodAnim.renderer.ShouldRender = raiseyRelTripod > 0.01f;
+-                updateSuperMechState(deltaTime, stage);
++                if (blendEnabled)
++                {
++                    try { capi.Render.GlToggleBlend(false); } catch (Exception e) { DisableOptimumGearRenderer(e); }
++                }
++                try
++                {
++                    IShaderProgram activeShader = capi?.Render?.CurrentActiveShader;
++                    if (activeShader != null && activeShader != previousShader && !activeShader.Disposed) activeShader.Stop();
++                }
++                catch { }
++                try
++                {
++                    if (previousShader != null && !previousShader.Disposed) previousShader.Use();
++                }
++                catch { }
+             }
+-
+-            capi.Render.GlToggleBlend(false);
+         }
+ 
+         private void updateSuperMechState(float deltaTime, EnumRenderStage stage)
+         {
+-            float targetRaiseyRel = 0;
+-            if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 1.75f, 0, 1);
+-            raiseyRelTripod += (targetRaiseyRel - raiseyRelTripod) * deltaTime/3f;
++            if (optimumGearRendererDisabled || tripodAnim?.renderer == null) return;
++            try
++            {
++                float targetRaiseyRel = 0;
++                if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 1.75f, 0, 1);
++                raiseyRelTripod += (targetRaiseyRel - raiseyRelTripod) * deltaTime/3f;
+ 
+-            var plrPos = capi.World.Player.Entity.Pos;
++                var plrPos = capi.World.Player.Entity.Pos;
+ 
+-            tripodAccum += deltaTime / 50.0 * (0.33f + raiseyRelTripod) * 1.2f;
+-            tripodAccum = tripodAccum % 500000d;
++                tripodAccum += deltaTime / 50.0 * (0.33f + raiseyRelTripod) * 1.2f;
++                tripodAccum = tripodAccum % 500000d;
+ 
+-            float d = (1 - raiseyRelTripod) * 900;
++                float d = (1 - raiseyRelTripod) * 900;
+ 
+-            tripodPos.X = plrPos.X + Math.Sin(tripodAccum) * (300d + d);
+-            tripodPos.Y = capi.World.SeaLevel;
+-            tripodPos.Z = plrPos.Z + Math.Cos(tripodAccum) * (300d + d);
+-            tripodAnim.renderer.rotationDeg.Y = (float)((tripodAccum % GameMath.TWOPI) + GameMath.PI) * GameMath.RAD2DEG;
+-            tripodAnim.renderer.renderColor.Set(0.5f, 0.5f, 0.5f, Math.Min(1, raiseyRelTripod*2));
+-            tripodAnim.renderer.FogAffectedness = 1f - GameMath.Clamp(raiseyRelGears * 2.2f - 0.5f, 0, 0.9f);
++                tripodPos.X = plrPos.X + Math.Sin(tripodAccum) * (300d + d);
++                tripodPos.Y = capi.World.SeaLevel;
++                tripodPos.Z = plrPos.Z + Math.Cos(tripodAccum) * (300d + d);
++                tripodAnim.renderer.rotationDeg.Y = (float)((tripodAccum % GameMath.TWOPI) + GameMath.PI) * GameMath.RAD2DEG;
++                tripodAnim.renderer.renderColor.Set(0.5f, 0.5f, 0.5f, Math.Min(1, raiseyRelTripod*2));
++                tripodAnim.renderer.FogAffectedness = 1f - GameMath.Clamp(raiseyRelGears * 2.2f - 0.5f, 0, 0.9f);
+ 
+-            tripodAnim.OnRenderFrame(deltaTime, stage);
++                tripodAnim.OnRenderFrame(deltaTime, stage);
++            }
++            catch (Exception e)
++            {
++                DisableOptimumGearRenderer(e);
++            }
+         }
+ 
+         private void renderGears(float deltaTime)
+@@ -245,4 +314,3 @@
+ 
+     }
+ }
+-

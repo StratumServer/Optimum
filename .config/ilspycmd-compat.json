@@ -1,6 +1,4 @@
 {
-  "acceptedPrefixes": [
-    "10.0.",
-    "10.1."
-  ]
+  "minimumVersion": "10.1.0.8386",
+  "maximumVersion": "10.1.1.8388"
 }

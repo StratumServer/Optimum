@@ -136,11 +136,9 @@ public static class SelfConsistencyVerifier
         var type = allTypes.FirstOrDefault(t => t.FullName == declTypeName);
         if (type == null) return false;
 
-        // The CLR resolves a method MemberRef by name plus full signature,
-        // return type included, so the check must too.
-        return type.Methods.Any(m =>
-            m.Name == mr.Name &&
-            m.Parameters.Count == mr.Parameters.Count);
+        // The CLR resolves a method MemberRef by its complete signature, so
+        // the check must reject same-arity overloads with different types.
+        return type.Methods.Any(m => MethodSignature.Matches(m, mr));
     }
 
     /// <summary>

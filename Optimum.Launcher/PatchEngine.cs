@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -18,6 +20,8 @@ public record PatchProgress(int Current, int Total, string Description);
 /// </summary>
 public static class PatchEngine
 {
+    private static readonly TimeSpan ProcessTimeout = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// Patches a vanilla assembly using the Optimum.Patcher executable.
     /// Returns the patched bytes (DLL + PDB) or throws on failure.
@@ -42,6 +46,14 @@ public static class PatchEngine
         var outputDirectory = Path.GetDirectoryName(outputDllPath);
         if (!string.IsNullOrEmpty(outputDirectory))
             Directory.CreateDirectory(outputDirectory);
+
+        // Do not let a previous partial run satisfy the output check after a
+        // new patcher process exits without writing a fresh assembly.
+        if (File.Exists(outputDllPath))
+            File.Delete(outputDllPath);
+        var outputPdbPath = Path.ChangeExtension(outputDllPath, ".pdb");
+        if (File.Exists(outputPdbPath))
+            File.Delete(outputPdbPath);
 
         progress?.Report(new PatchProgress(0, 1, $"Patching {Path.GetFileName(vanillaDllPath)}..."));
 
@@ -74,12 +86,46 @@ public static class PatchEngine
         psi.ArgumentList.Add(donorDllPath);
         psi.ArgumentList.Add(outputDllPath);
 
-        using var proc = System.Diagnostics.Process.Start(psi)
+        using var proc = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start Optimum.Patcher process");
 
-        var stdout = proc.StandardOutput.ReadToEnd();
-        var stderr = proc.StandardError.ReadToEnd();
+        // Start both readers before waiting. Reading one redirected stream to
+        // completion before the other can deadlock when the second pipe fills.
+        Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+        Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+        if (!proc.WaitForExit((int)ProcessTimeout.TotalMilliseconds))
+        {
+            try
+            {
+                proc.Kill(entireProcessTree: true);
+            }
+            catch (InvalidOperationException)
+            {
+                // The process exited between the timeout and Kill call.
+            }
+            catch (Exception ex)
+            {
+                throw new PatchFailedException(
+                    $"Optimum.Patcher timed out after {ProcessTimeout} and could not stop: {ex.Message}");
+            }
+            bool stopped = proc.WaitForExit(10_000);
+            bool outputDrained = Task.WaitAll([stdoutTask, stderrTask], 10_000);
+            string timedOutStdout = outputDrained ? stdoutTask.GetAwaiter().GetResult() : "(unavailable)";
+            string timedOutStderr = outputDrained ? stderrTask.GetAwaiter().GetResult() : "(unavailable)";
+            if (!stopped)
+            {
+                throw new PatchFailedException(
+                    $"Optimum.Patcher timed out after {ProcessTimeout} and did not stop.\n" +
+                    $"stdout: {timedOutStdout}\nstderr: {timedOutStderr}");
+            }
+            throw new PatchFailedException(
+                $"Optimum.Patcher timed out after {ProcessTimeout}.\n" +
+                $"stdout: {timedOutStdout}\nstderr: {timedOutStderr}");
+        }
+
         proc.WaitForExit();
+        string stdout = stdoutTask.GetAwaiter().GetResult();
+        string stderr = stderrTask.GetAwaiter().GetResult();
 
         if (proc.ExitCode != 0)
         {
@@ -93,7 +139,7 @@ public static class PatchEngine
             throw new PatchFailedException($"Patcher did not produce output: {outputDllPath}");
 
         var dllBytes = File.ReadAllBytes(outputDllPath);
-        var pdbPath = Path.ChangeExtension(outputDllPath, ".pdb");
+        var pdbPath = outputPdbPath;
         var pdbBytes = File.Exists(pdbPath) ? File.ReadAllBytes(pdbPath) : null;
 
         // Parse stdout for patch count

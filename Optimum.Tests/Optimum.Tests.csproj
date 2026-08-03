@@ -10,6 +10,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Optimum.Patcher\Optimum.Patcher.csproj" />
+    <ProjectReference Include="..\Optimum.Launcher\Optimum.Launcher.csproj" />
     <ProjectReference Include="..\VintagestoryApi\VintagestoryAPI.csproj" />
     <ProjectReference Include="..\VSEssentials\VSEssentialsMod.csproj" />
     <!-- VintagestoryLib (the decompiled donor) only compiles after a full bootstrap with

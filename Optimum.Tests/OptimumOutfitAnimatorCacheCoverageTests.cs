@@ -29,7 +29,7 @@ public class OptimumOutfitAnimatorCacheCoverageTests
         string patcher = Read("Optimum.Patcher/mod-patcher.cs");
 
         Assert.Contains(
-            "new(\"Vintagestory.GameContent.EntityDressedHumanoid\", \"OnTesselation\", 3),",
+            "new(\"Vintagestory.GameContent.EntityDressedHumanoid\", \"OnTesselation\", 3, Optional: true),",
             patcher);
     }
 

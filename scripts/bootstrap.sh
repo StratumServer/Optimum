@@ -53,22 +53,67 @@ pinned_ilspycmd_version() {
   python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['tools']['ilspycmd']['version'])" "$manifest"
 }
 
-ilspycmd_accepted_prefixes() {
+ilspycmd_version_bounds() {
   local manifest="$repo_root/.config/ilspycmd-compat.json"
   if [[ -f "$manifest" ]]; then
-    grep -oE '"[0-9]+(\.[0-9]+)+\."' "$manifest" | tr -d '"'
+    grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' "$manifest" | tr -d '"'
     return
   fi
-  printf '%s\n' '10.0.' '10.1.'
+  printf '%s\n' '10.1.0.8386' '10.1.1.8388'
+}
+
+ilspycmd_version_at_least() {
+  local current="$1" bound="$2"
+  local current_major current_minor current_patch current_build
+  local bound_major bound_minor bound_patch bound_build
+  IFS=. read -r current_major current_minor current_patch current_build <<< "$current"
+  IFS=. read -r bound_major bound_minor bound_patch bound_build <<< "$bound"
+  if (( 10#$current_major != 10#$bound_major )); then
+    (( 10#$current_major > 10#$bound_major ))
+    return
+  fi
+  if (( 10#$current_minor != 10#$bound_minor )); then
+    (( 10#$current_minor > 10#$bound_minor ))
+    return
+  fi
+  if (( 10#$current_patch != 10#$bound_patch )); then
+    (( 10#$current_patch > 10#$bound_patch ))
+    return
+  fi
+  (( 10#$current_build >= 10#$bound_build ))
+}
+
+ilspycmd_version_at_most() {
+  local current="$1" bound="$2"
+  local current_major current_minor current_patch current_build
+  local bound_major bound_minor bound_patch bound_build
+  IFS=. read -r current_major current_minor current_patch current_build <<< "$current"
+  IFS=. read -r bound_major bound_minor bound_patch bound_build <<< "$bound"
+  if (( 10#$current_major != 10#$bound_major )); then
+    (( 10#$current_major < 10#$bound_major ))
+    return
+  fi
+  if (( 10#$current_minor != 10#$bound_minor )); then
+    (( 10#$current_minor < 10#$bound_minor ))
+    return
+  fi
+  if (( 10#$current_patch != 10#$bound_patch )); then
+    (( 10#$current_patch < 10#$bound_patch ))
+    return
+  fi
+  (( 10#$current_build <= 10#$bound_build ))
 }
 
 ilspycmd_version_supported() {
-  local current="$1" prefix
+  local current="$1" bounds minimum maximum
   [[ "$current" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-  while IFS= read -r prefix; do
-    [[ -n "$prefix" && "$current" == "$prefix"* ]] && return 0
-  done < <(ilspycmd_accepted_prefixes)
-  return 1
+  bounds="$(ilspycmd_version_bounds)" || return 1
+  minimum="$(printf '%s\n' "$bounds" | sed -n '1p')"
+  maximum="$(printf '%s\n' "$bounds" | sed -n '2p')"
+  [[ "$minimum" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  [[ "$maximum" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  ilspycmd_version_at_least "$current" "$minimum" &&
+    ilspycmd_version_at_most "$current" "$maximum"
 }
 
 install_ilspycmd_if_missing() {
@@ -116,8 +161,10 @@ extract_archive() {
 }
 
 normalize_lf() {
-  find "$1" -type f \( -name '*.cs' -o -name '*.csproj' -o -name '*.json' -o -name '*.xml' -o -name '*.props' -o -name '*.targets' \) -print0 |
-    while IFS= read -r -d '' file; do perl -0pi -e 's/\r\n/\n/g' "$file"; done
+  local root="$1"
+  [[ -d "$root" ]] || return 0
+  find "$root" -type f \( -name '*.cs' -o -name '*.csproj' -o -name '*.json' -o -name '*.xml' -o -name '*.props' -o -name '*.targets' -o -name '*.patch' -o -name '*.ps1' -o -name '*.sh' -o -name '*.cmd' -o -name '*.slnx' \) -print0 |
+    while IFS= read -r -d '' file; do perl -0pi -e 's/\r\n/\n/g; s/\r/\n/g' "$file"; done
 }
 
 git_apply_optimum_patch() {
@@ -263,7 +310,9 @@ for entry in "${decompile_targets[@]}"; do
     find "$out" -maxdepth 1 -name '*.csproj' -exec perl -0pi -e 's#<LangVersion>15\.0</LangVersion>#<LangVersion>latest</LangVersion>#g' {} \;
   fi
 
+  normalize_lf "$out"
   copy_tree_fresh "$out" "$repo_root/$work_dir"
+  normalize_lf "$repo_root/$work_dir"
 done
 
 # 3. Clone compile-target forks (VintagestoryApi, Cairo).
@@ -275,13 +324,16 @@ if [[ -f "$forks_file" ]]; then
     if [[ ! -d "$base" || "$refresh" == "1" ]]; then
       rm -rf "$base"
       echo "Cloning $name at $ref"
-      git clone --quiet "$url" "$base"
+      git -c core.autocrlf=false -c core.eol=lf clone --quiet "$url" "$base"
+      git -C "$base" config core.autocrlf false
+      git -C "$base" config core.eol lf
       git -C "$base" checkout --quiet "$ref"
       rm -rf "$base/.git"
       normalize_lf "$base"
     fi
 
     copy_tree_fresh "$base" "$repo_root/$name"
+    normalize_lf "$repo_root/$name"
   done < <(
     python3 - "$forks_file" <<'PY'
 import json, sys
@@ -301,7 +353,7 @@ if [[ -f "$forks_file" ]]; then
     dest="$ref_dir/$name"
     if [[ ! -d "$dest" ]]; then
       echo "Cloning reference: $name"
-      git clone --quiet --depth=1 "$url" "$dest" 2>/dev/null
+      git -c core.autocrlf=false -c core.eol=lf clone --quiet --depth=1 "$url" "$dest" 2>/dev/null
       git -C "$dest" checkout --quiet "$ref" 2>/dev/null
     fi
   done < <(
@@ -324,7 +376,7 @@ echo "Applying post-decompile fixups..."
 # Anchored fixup patterns fail on lines that end with \r, so this must run before any fixup.
 # perl -pi instead of sed -i: macOS BSD sed reads GNU-style -i arguments as the backup
 # suffix and then parses the target path as its script, which aborts the bootstrap.
-find "$repo_root/build" -name '*.cs' -print0 | xargs -0 perl -pi -e 's/\r$//'
+normalize_lf "$repo_root/build"
 
 vanilla_lib="$repo_root/.vanilla/win-x64/vintagestory/Lib"
 
@@ -1160,6 +1212,8 @@ echo "Baseline snapshot saved to .baseline/."
 #                   Example: PATCH_FILTER="AnimationUtil,SystemRender" skips those patches
 
 patches_dir="$repo_root/patches"
+normalize_lf "$patches_dir"
+normalize_lf "$sources_dir"
 patch_filter="${PATCH_FILTER:-all}"
 vanilla_patch_projects="VintagestoryLib Vintagestory"
 

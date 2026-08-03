@@ -8,12 +8,12 @@ using Xunit;
 namespace Optimum.Tests;
 
 /// <summary>
-/// AnimatorBase.animsByCode ships as a plain-ordinal dictionary in the vanilla assembly, so
+/// AnimatorBase.animsByCode uses a plain-ordinal dictionary in the vanilla assembly, so
 /// GetAnimationState/OnFrame both allocate a lowercased string on every lookup. The source
 /// patch (patches/VintagestoryApi/Common/Model/Animation/AnimatorBase.cs.patch) fixes this in
-/// the decompiled tree, but that tree only feeds tests/donor builds - it never reached the
-/// player's actual game assembly because ApiPatcher had no Cecil target for it. These tests
-/// exercise the Cecil-level fix against a synthetic module shaped like the real vanilla type.
+/// the decompiled tree, but the runtime API patcher leaves the shared API unchanged for server
+/// use. These tests exercise the Cecil-level fix against a synthetic module shaped like the real
+/// vanilla type.
 /// </summary>
 public sealed class AnimatorAnimCodeComparerTests
 {

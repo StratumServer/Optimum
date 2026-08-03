@@ -35,17 +35,29 @@ public class InstallerReleaseCoverageTests
     public void InstallerAndBootstrapsShareIlspycmdCompatibilityFile()
     {
         using JsonDocument document = JsonDocument.Parse(Read(".config/ilspycmd-compat.json"));
-        JsonElement prefixes = document.RootElement.GetProperty("acceptedPrefixes");
+        JsonElement minimum = document.RootElement.GetProperty("minimumVersion");
+        JsonElement maximum = document.RootElement.GetProperty("maximumVersion");
 
-        Assert.Equal(2, prefixes.GetArrayLength());
-        Assert.Equal("10.0.", prefixes[0].GetString());
-        Assert.Equal("10.1.", prefixes[1].GetString());
+        Assert.Equal("10.1.0.8386", minimum.GetString());
+        Assert.Equal("10.1.1.8388", maximum.GetString());
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/install-linux.sh"));
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/bootstrap.sh"));
         Assert.Contains(".config/ilspycmd-compat.json", Read("scripts/bootstrap.ps1"));
+        Assert.Contains(".config\\ilspycmd-compat.json", Read("scripts/install-windows.ps1"));
+        Assert.Contains("Get-Accepted-ILSpyVersionRange", Read("scripts/install-windows.ps1"));
+        Assert.Contains("Get-IlspycmdVersionRange", Read("scripts/bootstrap.ps1"));
+        Assert.Contains("minimumVersion", Read("scripts/install-windows.ps1"));
+        Assert.Contains("maximumVersion", Read("scripts/install-windows.ps1"));
+        Assert.Contains("Accepted range:", Read("scripts/install-windows.ps1"));
+        Assert.DoesNotContain("$actual -ne $required", Read("scripts/install-windows.ps1"));
         Assert.Contains("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", Read("scripts/install-linux.sh"));
         Assert.Contains("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$", Read("scripts/bootstrap.sh"));
         Assert.Contains("^\\d+\\.\\d+\\.\\d+\\.\\d+$", Read("scripts/bootstrap.ps1"));
+        Assert.Contains("ilspycmd_version_at_least", Read("scripts/install-linux.sh"));
+        Assert.Contains("ilspycmd_version_at_most", Read("scripts/install-linux.sh"));
+        Assert.DoesNotContain("acceptedVersions", Read("scripts/install-linux.sh"));
+        Assert.DoesNotContain("acceptedPrefixes", Read("scripts/install-linux.sh"));
+        Assert.DoesNotContain("Get-AcceptedIlspycmdPrefixes", Read("scripts/bootstrap.ps1"));
     }
 
     [Fact]
@@ -144,6 +156,29 @@ public class InstallerReleaseCoverageTests
     }
 
     [Fact]
+    public void WindowsInstallerCapturesPackageSuccessBeforeReadingExitCode()
+    {
+        string installer = Read("scripts/install-windows.ps1");
+        int successIndex = installer.IndexOf("$packageSucceeded = $?", StringComparison.Ordinal);
+        int exitCodeIndex = installer.IndexOf("$packageExitCode = $LASTEXITCODE", StringComparison.Ordinal);
+
+        Assert.True(successIndex >= 0);
+        Assert.True(exitCodeIndex > successIndex);
+    }
+
+    [Fact]
+    public void CacheValidationRequiresEveryPatchedAssembly()
+    {
+        string cacheManager = Read("Optimum.Launcher/CacheManager.cs");
+        string program = Read("Optimum.Launcher/Program.cs");
+
+        Assert.Contains("IReadOnlyCollection<string>? requiredAssemblies", cacheManager);
+        Assert.Contains("requiredAssembly", cacheManager);
+        Assert.Contains("ValidateCache(requiredAssemblies)", program);
+        Assert.Contains("ValidatePatchedRuntime", program);
+    }
+
+    [Fact]
     public void WindowsPackageShipsTheRuntimeLauncherAndDonors()
     {
         string package = Read("scripts/package.ps1");
@@ -154,6 +189,7 @@ public class InstallerReleaseCoverageTests
         Assert.Contains("VSEssentials.Donor.dll", package);
         Assert.Contains("VSSurvivalMod.Donor.dll", package);
         Assert.Contains("Vintagestory.exe", package);
+        Assert.Contains("package-complete", package);
     }
 
     [Fact]

@@ -40,6 +40,9 @@ Some optimizations in this repository do not yet reach the shipped game. See
 [`docs/patch-shipping-audit-0.3.0.md`](docs/patch-shipping-audit-0.3.0.md) for the
 per-patch shipping status.
 
+See [`docs/releases/optimum-0.3.3.md`](docs/releases/optimum-0.3.3.md) for the
+release fixes and validation record.
+
 ## Getting Started
 
 Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
@@ -62,8 +65,8 @@ The installer shows a ✓/✗ checklist of required tools, offers to install any
 git clone https://github.com/Zaldaryon/Optimum.git
 cd Optimum
 make package-appimage
-chmod +x Optimum-v0.3.2-linux-x64.AppImage
-./Optimum-v0.3.2-linux-x64.AppImage
+chmod +x Optimum-v0.3.3-linux-x64.AppImage
+./Optimum-v0.3.3-linux-x64.AppImage
 ```
 
 If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/`.
@@ -97,7 +100,7 @@ The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story inst
 ```powershell
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.3.2-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.3.3-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
@@ -125,7 +128,7 @@ Optimum launcher, Cecil patcher, runtime donors and optimized shaders. The
 launcher patches selected assembly copies at startup. A patch reaches players
 only when a Cecil target, an API rule or a runtime donor manifest owns it.
 
-The complete 0.3.0 shipping inventory appears in
+The complete shipping inventory appears in
 [`docs/patch-shipping-audit-0.3.0.md`](docs/patch-shipping-audit-0.3.0.md).
 
 ```bash
@@ -139,9 +142,9 @@ make package-win          # Windows zip (native Windows or WSL; cache works else
 Or call the scripts directly:
 
 ```bash
-./scripts/package-linux.sh                     # Optimum-v0.3.2-linux-x64.tar.gz
+./scripts/package-linux.sh                     # Optimum-v0.3.3-linux-x64.tar.gz
 ./scripts/package-linux.sh --format zip
-./scripts/package-linux.sh --format appimage   # Optimum-v0.3.2-linux-x64.AppImage
+./scripts/package-linux.sh --format appimage   # Optimum-v0.3.3-linux-x64.AppImage
 ./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
 ./scripts/package-macos.sh --arch x64          # Intel .dmg
 ./scripts/package-all.sh                       # all capable targets at once

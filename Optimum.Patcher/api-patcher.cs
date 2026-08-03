@@ -72,7 +72,7 @@ public static class ApiPatcher
         int loggerInitializers = PatchLoggerInitializer(vanilla.MainModule);
         int gameVersionLabels = PatchGameVersionLabel(vanilla.MainModule, optimumVersion);
         int mat4fInlined = PatchMat4fInlining(vanilla.MainModule);
-        int animatorComparerSites = PatchAnimatorAnimCodeComparer(vanilla.MainModule);
+        int headControllerFallback = PatchHeadControllerPoseFallback(vanilla.MainModule);
 
         if (inventoryHooks != 2)
         {
@@ -104,10 +104,10 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected at least 7 Mat4f inlined methods, applied {mat4fInlined}.");
         }
-        if (animatorComparerSites != 3)
+        if (headControllerFallback != 1)
         {
             throw new InvalidOperationException(
-                $"Expected 3 AnimatorBase animsByCode comparer sites, applied {animatorComparerSites}.");
+                $"Expected 1 EntityHeadController pose fallback, applied {headControllerFallback}.");
         }
 
         var selfReferenceErrors = SelfConsistencyVerifier.VerifySelfReferences(vanilla.MainModule);
@@ -116,6 +116,14 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 "Patched API contains invalid self references:\n" +
                 string.Join("\n", selfReferenceErrors));
+        }
+
+        var ilErrors = IlStackVerifier.VerifyModule(vanilla.MainModule);
+        if (ilErrors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Patched API contains invalid IL:\n" +
+                string.Join("\n", ilErrors));
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
@@ -129,7 +137,7 @@ public static class ApiPatcher
             $"{chiselShadowHooks} chisel LOD shadow hooks, " +
             $"{loggerInitializers} symbol-independent logger initializer, " +
             $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined, " +
-            $"{animatorComparerSites} AnimatorBase comparer sites.");
+            $"{headControllerFallback} head controller pose fallback.");
         return true;
     }
 
@@ -380,14 +388,14 @@ public static class ApiPatcher
     }
 
     /// <summary>
-    /// AnimatorBase.animsByCode was built with the default ordinal comparer, so
+    /// AnimatorBase.animsByCode uses the default ordinal comparer, so
     /// GetAnimationState and OnFrame both call code.ToLowerInvariant() on every lookup - an
     /// allocation per active animation, per frame. Rebuilding the dictionary with
     /// StringComparer.OrdinalIgnoreCase makes the lowercasing unnecessary; this patch does
     /// both: the constructor picks up the comparer, and the two lookup sites drop the now
     /// redundant ToLowerInvariant() call. This mirrors patches/VintagestoryApi/Common/Model/
-    /// Animation/AnimatorBase.cs.patch, which was compiling into the runtime-donor tree but
-    /// had no Cecil target, so it never reached the player's actual game assembly.
+    /// Animation/AnimatorBase.cs.patch. The source donor keeps this experiment for comparison.
+    /// The runtime API patcher leaves the shared API assembly unchanged for server use.
     /// </summary>
     internal static int PatchAnimatorAnimCodeComparer(ModuleDefinition module)
     {
@@ -439,6 +447,76 @@ public static class ApiPatcher
             $"  API PATCHED: {animatorBase.FullName} animsByCode OrdinalIgnoreCase comparer " +
             $"(ctor + {sites} lookup sites)");
         return 1 + sites;
+    }
+
+    /// <summary>
+    /// Keeps head controllers inert when a shape failed to create an animator or
+    /// lacks a named pose. Entity tessellation can recover from that state and
+    /// the render loop can continue without changing valid animation data.
+    /// </summary>
+    internal static int PatchHeadControllerPoseFallback(ModuleDefinition module)
+    {
+        var controller = module.GetType("Vintagestory.API.Common.EntityHeadController")
+            ?? throw new InvalidOperationException("EntityHeadController is missing from the vanilla API.");
+        var getPose = controller.Methods.Single(method =>
+            method.Name == "GetPose" && method.Parameters.Count == 1);
+        var animationManagerField = controller.Fields.Single(field => field.Name == "animationManager");
+
+        var animationManager = module.GetType("Vintagestory.API.Common.IAnimationManager")
+            ?? throw new InvalidOperationException("IAnimationManager is missing from the vanilla API.");
+        var animatorGetter = animationManager.Properties.Single(property => property.Name == "Animator").GetMethod
+            ?? throw new InvalidOperationException("IAnimationManager.Animator getter is missing from the vanilla API.");
+
+        var animator = module.GetType("Vintagestory.API.Common.IAnimator")
+            ?? throw new InvalidOperationException("IAnimator is missing from the vanilla API.");
+        var getPoseByName = animator.Methods.Single(method =>
+            method.Name == "GetPosebyName" && method.Parameters.Count == 2);
+
+        var elementPose = module.GetType("Vintagestory.API.Common.ElementPose")
+            ?? throw new InvalidOperationException("ElementPose is missing from the vanilla API.");
+        var elementPoseCtor = elementPose.Methods.Single(method =>
+            method.IsConstructor && !method.IsStatic && method.Parameters.Count == 0);
+
+        ClearDebugInformation(getPose);
+
+        var body = new MethodBody(getPose)
+        {
+            InitLocals = true,
+        };
+        var animationManagerLocal = new VariableDefinition(module.ImportReference(animationManager));
+        var animatorLocal = new VariableDefinition(module.ImportReference(animator));
+        body.Variables.Add(animationManagerLocal);
+        body.Variables.Add(animatorLocal);
+        var processor = body.GetILProcessor();
+        var fallback = Instruction.Create(OpCodes.Newobj, module.ImportReference(elementPoseCtor));
+        var returnExistingPose = Instruction.Create(OpCodes.Ret);
+
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(animationManagerField)));
+        processor.Append(Instruction.Create(OpCodes.Stloc, animationManagerLocal));
+        processor.Append(Instruction.Create(OpCodes.Ldloc, animationManagerLocal));
+        processor.Append(Instruction.Create(OpCodes.Brfalse, fallback));
+        processor.Append(Instruction.Create(OpCodes.Ldloc, animationManagerLocal));
+        processor.Append(Instruction.Create(OpCodes.Callvirt, module.ImportReference(animatorGetter)));
+        processor.Append(Instruction.Create(OpCodes.Stloc, animatorLocal));
+        processor.Append(Instruction.Create(OpCodes.Ldloc, animatorLocal));
+        processor.Append(Instruction.Create(OpCodes.Brfalse, fallback));
+        processor.Append(Instruction.Create(OpCodes.Ldloc, animatorLocal));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldc_I4, (int)StringComparison.InvariantCultureIgnoreCase));
+        processor.Append(Instruction.Create(OpCodes.Callvirt, module.ImportReference(getPoseByName)));
+        processor.Append(Instruction.Create(OpCodes.Dup));
+        processor.Append(Instruction.Create(OpCodes.Brtrue, returnExistingPose));
+        processor.Append(Instruction.Create(OpCodes.Pop));
+        processor.Append(Instruction.Create(OpCodes.Br, fallback));
+        processor.Append(returnExistingPose);
+        processor.Append(fallback);
+        processor.Append(Instruction.Create(OpCodes.Ret));
+
+        getPose.Body = body;
+        Console.WriteLine(
+            $"  API PATCHED: {controller.FullName}.GetPose null-safe fallback");
+        return 1;
     }
 
     private static int RemoveToLowerInvariantBeforeTryGetValue(MethodDefinition method)

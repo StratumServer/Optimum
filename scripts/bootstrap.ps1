@@ -99,12 +99,12 @@ function Copy-TreeFresh([string]$Src, [string]$Dst) {
 
 function Convert-ToLf([string]$Root) {
     if (-not (Test-Path $Root)) { return }
-    Get-ChildItem -Path $Root -Recurse -File -Include '*.cs','*.csproj','*.json','*.xml','*.props','*.targets' | ForEach-Object {
+    Get-ChildItem -Path $Root -Recurse -File -Include '*.cs','*.csproj','*.json','*.xml','*.props','*.targets','*.patch','*.ps1','*.sh','*.cmd','*.slnx' | ForEach-Object {
         $bytes = [IO.File]::ReadAllBytes($_.FullName)
         $hasCR = $false
         foreach ($b in $bytes) { if ($b -eq 13) { $hasCR = $true; break } }
         if ($hasCR) {
-            $t = [Text.Encoding]::UTF8.GetString($bytes) -creplace "`r`n", "`n"
+            $t = [Text.Encoding]::UTF8.GetString($bytes) -creplace ([char]13 + [char]10), [char]10 -creplace [char]13, [char]10
             [IO.File]::WriteAllBytes($_.FullName, [Text.Encoding]::UTF8.GetBytes($t))
         }
     }
@@ -117,11 +117,26 @@ function Get-PinnedIlspycmdVersion {
     return $json.tools.ilspycmd.version
 }
 
-function Get-AcceptedIlspycmdPrefixes {
+function Get-IlspycmdVersionRange {
     $manifest = Join-Path $repoRoot '.config/ilspycmd-compat.json'
-    if (-not (Test-Path $manifest)) { return @('10.0.', '10.1.') }
+    if (-not (Test-Path $manifest)) {
+        return [pscustomobject]@{
+            Minimum = [Version]'10.1.0.8386'
+            Maximum = [Version]'10.1.1.8388'
+        }
+    }
+
     $json = Get-Content $manifest -Raw | ConvertFrom-Json
-    return @($json.acceptedPrefixes)
+    $minimum = [string]$json.minimumVersion
+    $maximum = [string]$json.maximumVersion
+    if ($minimum -notmatch '^\d+\.\d+\.\d+\.\d+$' -or $maximum -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+        throw "ilspycmd version range is invalid: $manifest"
+    }
+
+    return [pscustomobject]@{
+        Minimum = [Version]$minimum
+        Maximum = [Version]$maximum
+    }
 }
 
 function Install-IlspycmdIfMissing {
@@ -137,9 +152,11 @@ function Install-IlspycmdIfMissing {
         if (-not $pinned) { return }
         $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
         $current = if ($verLine) { ($verLine -split '\s+')[1] } else { '' }
-        $acceptablePrefix = Get-AcceptedIlspycmdPrefixes
+        $range = Get-IlspycmdVersionRange
         $isStableVersion = $current -match '^\d+\.\d+\.\d+\.\d+$'
-        $currentOk = $isStableVersion -and [bool]($acceptablePrefix | Where-Object { $current.StartsWith($_) })
+        $currentVersion = if ($isStableVersion) { [Version]$current } else { $null }
+        $currentOk = $null -ne $currentVersion -and
+            $currentVersion -ge $range.Minimum -and $currentVersion -le $range.Maximum
         if ($currentOk) { return }
         Write-Host "ilspycmd $current is unsupported by this patch set, installing $pinned"
         Invoke-NativeStep { dotnet tool uninstall -g ilspycmd 2>&1 | Out-Null }
@@ -572,7 +589,9 @@ try {
             }
         }
 
+        Convert-ToLf $out
         Copy-TreeFresh $out (Join-Path $repoRoot $workDir)
+        Convert-ToLf (Join-Path $repoRoot $workDir)
     }
 
     # --- 3. Clone compile-target forks (VintagestoryApi, Cairo, ...) ---
@@ -588,8 +607,10 @@ try {
             if (-not (Test-Path $base) -or $Refresh) {
                 if (Test-Path $base) { Remove-Item -Recurse -Force $base }
                 Write-Host "Cloning $name at $($fork.ref)"
-                Invoke-NativeStep { git clone --quiet $fork.url $base 2>$null }
+                Invoke-NativeStep { git -c core.autocrlf=false -c core.eol=lf clone --quiet $fork.url $base 2>$null }
                 if ($LASTEXITCODE -ne 0) { throw "git clone failed for $name ($($fork.url))." }
+                Invoke-NativeStep { git -C $base config core.autocrlf false }
+                Invoke-NativeStep { git -C $base config core.eol lf }
                 Invoke-NativeStep { git -C $base checkout --quiet $fork.ref }
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $($fork.ref) failed for $name." }
                 Remove-Item -Recurse -Force (Join-Path $base '.git')
@@ -609,7 +630,7 @@ try {
                 $dest = Join-Path $refDir $r.name
                 if (-not (Test-Path $dest)) {
                     Write-Host "Cloning reference: $($r.name)"
-                    Invoke-NativeStep { git clone --quiet --depth=1 $r.url $dest 2>$null }
+                    Invoke-NativeStep { git -c core.autocrlf=false -c core.eol=lf clone --quiet --depth=1 $r.url $dest 2>$null }
                     Invoke-NativeStep { git -C $dest checkout --quiet $r.ref 2>$null }
                 }
             }
@@ -618,6 +639,7 @@ try {
 
     # --- 6. Post-decompile fixups (csproj rewrites, ambiguity resolution). ---
     Write-Host "Applying post-decompile fixups..."
+    Convert-ToLf (Join-Path $repoRoot 'build')
 
     # Normalize CRLF across all decompiled .cs files FIRST (ilspycmd on Windows
     # emits CRLF, and several fixups below anchor on `^`/`\n` which assumes LF).
@@ -1394,6 +1416,8 @@ try {
     $patchesDir = Join-Path $repoRoot 'patches'
     $patchFilter = if ($env:PATCH_FILTER) { $env:PATCH_FILTER } else { 'all' }
     $vanillaPatchProjects = @('VintagestoryLib', 'Vintagestory')
+    Convert-ToLf $patchesDir
+    Convert-ToLf $sourcesDir
 
     # The decompiled API assembly owns these types in aggregate source files.
     # Reject split source overlays and remove copies left by older workspaces.

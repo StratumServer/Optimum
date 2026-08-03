@@ -186,8 +186,8 @@ public class AllocationLookupBatchCoverageTests
     [Fact]
     public void AnimatorBaseAlreadyUsesOrdinalIgnoreCaseComparer()
     {
-        // Batch 6.1's AnimatorBase item was already shipped before this
-        // task; assert it stays that way rather than silently regressing.
+        // The source donor keeps this experiment outside the runtime API path.
+        // Assert the donor shape so the source-only comparison does not regress.
         string source = File.ReadAllText(FindRepositoryFile("VintagestoryApi/Common/Model/Animation/AnimatorBase.cs"));
         Assert.Contains("StringComparer.OrdinalIgnoreCase", source);
     }

@@ -17,6 +17,8 @@ internal static class Logger
     private static readonly object Sync = new();
     private static string? _logPath;
 
+    public static bool IsInitialized => _logPath is not null;
+
     /// <summary>
     /// Starts a fresh log file at {dataPath}/Logs/optimum-launcher.log for this
     /// run. Safe to call with an unwritable dataPath: logging degrades to

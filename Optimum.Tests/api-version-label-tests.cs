@@ -39,14 +39,14 @@ public sealed class ApiVersionLabelTests
         processor.Append(Instruction.Create(OpCodes.Stsfld, longGameVersion));
         processor.Append(Instruction.Create(OpCodes.Ret));
 
-        int patched = ApiPatcher.PatchGameVersionLabel(module, "0.3.0");
+        int patched = ApiPatcher.PatchGameVersionLabel(module, "0.3.3");
 
         Assert.Equal(1, patched);
         Instruction[] instructions = initializer.Body.Instructions.ToArray();
         Assert.Equal(OpCodes.Ldsfld, instructions[^5].OpCode);
         Assert.Same(longGameVersion, instructions[^5].Operand);
         Assert.Equal(OpCodes.Ldstr, instructions[^4].OpCode);
-        Assert.Equal(" + Optimum v0.3.0", instructions[^4].Operand);
+        Assert.Equal(" + Optimum v0.3.3", instructions[^4].Operand);
         Assert.Equal(OpCodes.Call, instructions[^3].OpCode);
         Assert.Equal("System.String System.String::Concat(System.String,System.String)", instructions[^3].Operand.ToString());
         Assert.Equal(OpCodes.Stsfld, instructions[^2].OpCode);

@@ -1,0 +1,19 @@
+diff --git a/VintagestoryApi/Common/Entity/EntityPlayer.cs b/VintagestoryApi/Common/Entity/EntityPlayer.cs
+--- a/VintagestoryApi/Common/Entity/EntityPlayer.cs
++++ b/VintagestoryApi/Common/Entity/EntityPlayer.cs
+@@ -423,6 +423,6 @@ namespace Vintagestory.API.Common
+             base.OnTesselation(ref entityShape, shapePathForLogging);
+ 
+-            if (Api?.Side == EnumAppSide.Client)
++            if (Api?.Side == EnumAppSide.Client && AnimManager?.Animator != null)
+             {
+                 AnimManager.HeadController = new PlayerHeadController(AnimManager, this, entityShape);
+             }
+@@ -431,6 +431,6 @@ namespace Vintagestory.API.Common
+                 OtherAnimManager.LoadAnimator(World.Api, this, entityShape, OtherAnimManager.Animator?.Animations, true, null, "head");
+ 
+-                if (Api?.Side == EnumAppSide.Client)
++                if (Api?.Side == EnumAppSide.Client && OtherAnimManager?.Animator != null)
+                 {
+                     OtherAnimManager.HeadController = new PlayerHeadController(OtherAnimManager, this, entityShape);
+                 }

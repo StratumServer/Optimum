@@ -114,6 +114,7 @@ try {
     Write-Host "Copying vanilla install to $stageDir..."
     if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
     Copy-Item -Recurse -Force $vanillaDir $stageDir
+    Copy-Item -Force (Join-Path $repoRoot 'scripts/uninstall.ps1') (Join-Path $stageDir 'uninstall.ps1')
 
     # Keep the engine and built-in mods vanilla. The launcher patches copies at startup.
     Write-Host 'Installing launcher, patcher, and runtime donors...'
@@ -142,6 +143,10 @@ try {
     $donorDir = Join-Path $optimumDir 'donors'
     $vanillaModDir = Join-Path $optimumDir 'vanilla/Mods'
     New-Item -ItemType Directory -Force -Path $donorDir, $vanillaModDir | Out-Null
+    [IO.File]::WriteAllText(
+        (Join-Path $optimumDir 'standalone-install'),
+        'Optimum standalone package',
+        (New-Object System.Text.UTF8Encoding($false)))
 
     $donorFiles = @(
         @($compiledLib, 'VintagestoryLib.Donor.dll'),
@@ -227,18 +232,26 @@ try {
         'Optimum.exe',
         'Optimum.dll',
         'Optimum.Patcher.dll',
+        'uninstall.ps1',
         'Vintagestory.exe',
         '.optimum/donors/VintagestoryLib.Donor.dll',
         '.optimum/donors/VintagestoryAPI.Contracts.dll',
         '.optimum/donors/VSEssentials.Donor.dll',
         '.optimum/donors/VSSurvivalMod.Donor.dll',
         '.optimum/vanilla/Mods/VSEssentials.dll',
-        '.optimum/vanilla/Mods/VSSurvivalMod.dll'
+        '.optimum/vanilla/Mods/VSSurvivalMod.dll',
+        '.optimum/standalone-install'
     )) {
         if (-not (Test-Path (Join-Path $stageDir $requiredStageFile))) {
             throw "Required package file not found: $requiredStageFile"
         }
     }
+
+    $completionMarker = Join-Path $stageDir '.optimum/package-complete'
+    [IO.File]::WriteAllText(
+        $completionMarker,
+        "Package validation completed for Optimum $optVer",
+        (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Host "Folder ready: $stageDir" -ForegroundColor Green
 
