@@ -1,5 +1,6 @@
 {
   "_comment": "Build sources and reference repos for Optimum. 'compile' entries are built from source. 'reference' entries are cloned for code reading/mapping but NOT compiled - the vanilla DLLs are used instead.",
+  "_1.22.6_check": "Checked 2026-07-31 via 'git ls-remote https://github.com/anegostudios/<repo>.git HEAD' - vsapi/vsessentialsmod/vssurvivalmod/vscreativemod/Cairo all still HEAD at the exact refs pinned below for 1.22.5. The compiled 1.22.6 client is already out (decompiled locally at ../ref/vintagestory/1.22.6/), but the matching source hasn't been pushed yet. Re-check before bumping vintageStoryVersion. See docs/todo.md.",
   "vintageStoryVersion": "1.22.5",
   "compile": [
     {

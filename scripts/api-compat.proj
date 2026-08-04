@@ -1,0 +1,19 @@
+<Project DefaultTargets="ValidateApi">
+  <PropertyGroup>
+    <DotNetApiCompatTaskAssembly>$(MSBuildSDKsPath)/Microsoft.NET.Sdk/tools/net10.0/Microsoft.DotNet.ApiCompat.Task.dll</DotNetApiCompatTaskAssembly>
+    <RoslynAssembliesPath>$(MSBuildSDKsPath)/../Roslyn/bincore</RoslynAssembliesPath>
+  </PropertyGroup>
+
+  <UsingTask
+    TaskName="Microsoft.DotNet.ApiCompat.Task.ValidateAssembliesTask"
+    AssemblyFile="$(DotNetApiCompatTaskAssembly)" />
+
+  <Target Name="ValidateApi">
+    <Error Condition="!Exists('$(LeftAssembly)')" Text="Reference API assembly not found: $(LeftAssembly)" />
+    <Error Condition="!Exists('$(RightAssembly)')" Text="Rebuilt API assembly not found: $(RightAssembly)" />
+    <ValidateAssembliesTask
+      LeftAssemblies="$(LeftAssembly)"
+      RightAssemblies="$(RightAssembly)"
+      RoslynAssembliesPath="$(RoslynAssembliesPath)" />
+  </Target>
+</Project>

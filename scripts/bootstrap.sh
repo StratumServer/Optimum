@@ -1268,6 +1268,13 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
     _optimum_tmp_git=true
   fi
 
+  if ! bash "$script_dir/validate-patch-syntax.sh" "$patches_dir"; then
+    if [[ "$_optimum_tmp_git" == true ]]; then
+      rm -rf "$repo_root/.git"
+    fi
+    exit 1
+  fi
+
   # Stage into git index for cleaner apply diagnostics. Staging failures are
   # not fatal: git apply reports per-patch failures below on its own.
   git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>/dev/null || true

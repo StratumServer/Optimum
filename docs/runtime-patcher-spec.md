@@ -83,7 +83,7 @@ shortcut/launcher) invokes `Optimum.exe` instead.
 
 ```json
 {
-  "optimumVersion": "0.3.3",
+  "optimumVersion": "0.3.4",
   "patcherHash": "sha256:abc123...",
   "targets": [
     {

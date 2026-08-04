@@ -252,3 +252,4 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/GearRenderer.cs b/VSSurvival
  	}
  
  	private void renderGears(float deltaTime)
+

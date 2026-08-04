@@ -1,6 +1,7 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 index bba43f6..151f02b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 @@ -20,41 +20,89 @@ public class SystemRenderOITLayers : ClientSystem
  		public BeforeOIT(ICoreClientAPI capi)
  		{
