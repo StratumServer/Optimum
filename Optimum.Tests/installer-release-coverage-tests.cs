@@ -209,8 +209,66 @@ public class InstallerReleaseCoverageTests
         string checker = Read("scripts/check-patches.sh");
 
         Assert.Contains("-not -path '*/runtime/*'", bootstrap);
+        Assert.Contains("validate-patch-syntax.sh", bootstrap);
         Assert.Contains("cp -a \"$patches_dir/runtime/.\"", extractor);
+        Assert.Contains("validate-patch-syntax.sh", extractor);
         Assert.Contains("prepare-runtime-donors.sh", checker);
+        Assert.Contains("Test-PatchSyntax", Read("scripts/bootstrap.ps1"));
+    }
+
+    [Fact]
+    public void PatchSyntaxValidatorRejectsMissingFileHeaders()
+    {
+        string validator = PatchReader.FindRepositoryFile("scripts/validate-patch-syntax.sh");
+        DirectoryInfo tempDirectory = Directory.CreateTempSubdirectory("optimum-patch-syntax-");
+
+        try
+        {
+            string patch = Path.Combine(tempDirectory.FullName, "malformed.patch");
+            File.WriteAllText(patch, """
+                diff --git a/VintagestoryLib/SystemRenderOITLayers.cs b/VintagestoryLib/SystemRenderOITLayers.cs
+                index bba43f6..151f02b 100644
+                @@ -1 +1 @@
+                -old
+                +new
+                """);
+
+            ProcessStartInfo startInfo = new("bash")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(validator)!
+            };
+            startInfo.ArgumentList.Add(validator);
+            startInfo.ArgumentList.Add(tempDirectory.FullName);
+            using Process process = Process.Start(startInfo)!;
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.NotEqual(0, process.ExitCode);
+            Assert.Contains("missing unified-diff file header", output + error);
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CommandHandbookReferencesHaveAnImplementedPageType()
+    {
+        string commandHandbook = PatchReader.FindRepositoryFile(
+            "VSSurvivalMod/Systems/Handbook/CommandHandbook.cs");
+        string pageType = Path.Combine(
+            Path.GetDirectoryName(commandHandbook)!,
+            "Gui",
+            "GuiHandbookCommandPage.cs");
+
+        Assert.Contains("GuiHandbookCommandPage", File.ReadAllText(commandHandbook));
+        Assert.True(File.Exists(pageType), $"Missing handbook page type: {pageType}");
+        Assert.Contains("class GuiHandbookCommandPage", File.ReadAllText(pageType));
     }
 
     [Theory]

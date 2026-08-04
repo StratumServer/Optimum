@@ -430,6 +430,22 @@ function Invoke-GitApplyOptimumPatch {
     return @{ Success = $false; Output = $firstOutput }
 }
 
+function Test-PatchSyntax([string]$PatchPath) {
+    $lines = Get-Content -LiteralPath $PatchPath
+    $hasOldHeader = [bool]($lines | Where-Object { $_.StartsWith('--- ') } | Select-Object -First 1)
+    $hasNewHeader = [bool]($lines | Where-Object { $_.StartsWith('+++ ') } | Select-Object -First 1)
+    if (-not $hasOldHeader -or -not $hasNewHeader) {
+        return @{ Success = $false; Output = 'missing unified-diff file header (expected --- and +++)' }
+    }
+
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $output = & git apply --stat $PatchPath 2>&1 | Out-String
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    return @{ Success = ($code -eq 0); Output = $output.Trim() }
+}
+
 # ===========================================================================
 # Main
 # ===========================================================================
@@ -1470,6 +1486,25 @@ try {
         $patches = Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File |
             Where-Object { $_.FullName -notmatch '[/\\]runtime[/\\]' } |
             Sort-Object FullName
+
+        $syntaxFailures = @()
+        foreach ($patch in $patches) {
+            $syntax = Test-PatchSyntax $patch.FullName
+            if (-not $syntax.Success) {
+                $syntaxFailures += $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
+                Write-Host "  FAILED: $($syntaxFailures[-1])"
+                if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
+            }
+        }
+        if ($syntaxFailures.Count -gt 0) {
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>$null | Out-Null
+            $ErrorActionPreference = $prevEAP
+            Write-Error "Patch syntax validation failed for $($syntaxFailures.Count) file(s)."
+            exit 1
+        }
+
         foreach ($patch in $patches) {
             $rel = $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
 
