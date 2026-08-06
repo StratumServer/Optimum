@@ -22,7 +22,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.3.4";
+    public const string Version = "0.3.5";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -44,14 +44,14 @@ public static class OptimumConfig
 
     /// <summary>
     /// Playtested and measured in a running client (2026-07-09 and
-    /// 2026-07-10 sessions, docs/benchmarking.md): the fragment-shader
+    /// 2026-07-10 sessions): the fragment-shader
     /// wrap (bug B3) works, OFF compiles bit-identical vanilla shaders,
     /// and ON at 8x8 trades ~3% mean FPS for a large stutter reduction
     /// (+84% 1% low FPS, p99 44->30 ms), ~10pp less CPU and ~30 MB less
     /// VRAM on a fragment-bound scene. Still default false: that is one
     /// trial per config on one route/GPU, and the 1%-low direction
     /// inverted between the two days' scenes, so the flip to true waits
-    /// for a repeat run confirming the pattern (V2.2 in docs/todo.md).
+    /// for a repeat run confirming the pattern.
     /// </summary>
     public static bool GreedyMeshEnabled = false;
 
@@ -62,7 +62,7 @@ public static class OptimumConfig
     /// "merge" would replace one vanilla quad with an identical one -
     /// all cost, no benefit), so 1 = merging off. Default 8 since the
     /// 2026-07-10 re-benchmark: 8x8 matched 4x4 on mean FPS and beat it
-    /// on 1% lows (docs/benchmarking.md), and a default of 1 made
+    /// on 1% lows, and a default of 1 made
     /// enabling GreedyMeshEnabled silently do nothing. Inert while the
     /// master switch is false.
     /// </summary>
@@ -103,7 +103,7 @@ public static class OptimumConfig
     /// explicit-gradient sampler cost (reduced-rate on some GPUs) goes
     /// away. Exists to isolate where the measured ON cost comes from
     /// (2026-07-10: ON at 8x8 costs ~3% mean FPS on a fragment-bound
-    /// scene, docs/benchmarking.md) - flip to false, re-run the same
+    /// scene) - flip to false, re-run the same
     /// route, and compare. Only affects shading when GreedyMeshEnabled
     /// is true and merges happen; requires a restart like the rest.
     /// </summary>
@@ -233,8 +233,7 @@ public static class OptimumConfig
     /// thread when it detects a scheduler fault. Default ON: the statistical
     /// parity gate showed the divergence from serial generation matches what
     /// vanilla's own multithreaded worldgen (MaxWorldgenThreads > 1) produces,
-    /// and vanilla worldgen is not run-to-run deterministic to begin with (see
-    /// docs/superpowers/specs/2026-07-16-per-pass-mutual-exclusion.md).
+    /// and vanilla worldgen is not run-to-run deterministic to begin with.
     /// </summary>
     public static bool WorldgenWorkStealingEnabled = true;
 

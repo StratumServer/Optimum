@@ -3,7 +3,7 @@
     <!-- Compiles for two reasons: a ProjectReference of build/Vintagestory/Vintagestory.csproj
          and of Optimum.Tests.csproj. Its own recompiled DLL never ships; the release
          patches the vanilla VintagestoryLib.dll via Mono.Cecil instead (Optimum.Patcher,
-         `make patch-il`). See docs/il-patcher-plan.md. -->
+         `make patch-il`). -->
     <Project Path="build/VintagestoryLib/VintagestoryLib.csproj" />
   </Folder>
   <Folder Name="/Build/">

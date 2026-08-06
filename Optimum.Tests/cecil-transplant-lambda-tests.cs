@@ -21,10 +21,10 @@ namespace Optimum.Tests;
 /// WeatherSimulationSound::updateSounds hit this from
 /// `rainSoundsLeafless.All(s => s.IsReady)` / `rainSoundsLeafy.All(...)`,
 /// added when the volume-deadzone patch first got a patches/runtime
-/// counterpart. Fixed by replacing both with explicit loops (docs/il-patcher-plan.md
-/// documents this exact constraint: "methods [containing lambdas] cannot be
-/// transplanted" - this was a known rule, just not checked before adding this
-/// particular method to the Methods list).
+/// counterpart. Fixed by replacing both with explicit loops ("methods
+/// [containing lambdas] cannot be transplanted" is a known Cecil-transplant
+/// constraint, just not checked before adding this particular method to
+/// the Methods list).
 ///
 /// Instance-capturing lambdas (e.g. the TyronThreadPool.QueueTask(() => ...)
 /// a few lines below in the same method) are not necessarily unsafe - that

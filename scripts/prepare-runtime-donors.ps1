@@ -75,6 +75,11 @@ function Invoke-Checked {
     }
 }
 
+function ConvertTo-XmlText {
+    param([string]$Value)
+    return $Value -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;'
+}
+
 function Decompile-Mod {
     param([string]$Project, [string]$Assembly)
     $output = Join-Path $runtimeRoot $Project
@@ -109,7 +114,7 @@ function Decompile-Mod {
     $hintRoot = $VanillaDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
     $text = $text.Replace(
         '<HintPath>.vanilla/win-x64/vintagestory/',
-        "<HintPath>$hintRoot")
+        "<HintPath>$(ConvertTo-XmlText $hintRoot)")
     $text = [regex]::Replace($text,
         '<LangVersion>\d+\.\d+</LangVersion>',
         '<LangVersion>preview</LangVersion>')
@@ -125,10 +130,11 @@ function Decompile-Mod {
 function Add-Reference {
     param([string]$ProjectFile, [string]$Include, [string]$HintPath)
     $text = [IO.File]::ReadAllText($ProjectFile)
+    $escapedHintPath = ConvertTo-XmlText $HintPath
     $reference = @"
 <ItemGroup>
     <Reference Include="$Include">
-      <HintPath>$HintPath</HintPath>
+      <HintPath>$escapedHintPath</HintPath>
       <Private>false</Private>
     </Reference>
 "@
@@ -139,9 +145,10 @@ function Add-Reference {
 function Set-ReferenceHintPath {
     param([string]$ProjectFile, [string]$Include, [string]$HintPath)
     $text = [IO.File]::ReadAllText($ProjectFile)
+    $escapedHintPath = ConvertTo-XmlText $HintPath
     $reference = @"
 <Reference Include="$Include">
-      <HintPath>$HintPath</HintPath>
+      <HintPath>$escapedHintPath</HintPath>
       <Private>false</Private>
     </Reference>
 "@
@@ -178,7 +185,7 @@ function Resolve-ProjectReferences {
         foreach ($dir in $searchPaths) {
             $probe = Join-Path $dir "$assemblyName.dll"
             if (Test-Path $probe) {
-                return ('<Reference Include="{0}"><HintPath>{1}</HintPath><Private>false</Private></Reference>' -f $assemblyName, $probe)
+                return ('<Reference Include="{0}"><HintPath>{1}</HintPath><Private>false</Private></Reference>' -f $assemblyName, (ConvertTo-XmlText $probe))
             }
         }
         return $m.Value
@@ -194,7 +201,7 @@ function Resolve-ProjectReferences {
         foreach ($dir in $searchPaths) {
             $probe = Join-Path $dir "$assemblyName.dll"
             if (Test-Path $probe) {
-                return ('<Reference Include="{0}"><HintPath>{1}</HintPath><Private>false</Private></Reference>' -f $assemblyName, $probe)
+                return ('<Reference Include="{0}"><HintPath>{1}</HintPath><Private>false</Private></Reference>' -f $assemblyName, (ConvertTo-XmlText $probe))
             }
         }
         return $m.Value

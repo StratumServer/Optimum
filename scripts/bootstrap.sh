@@ -274,7 +274,26 @@ fi
 # vanilla.
 vanilla_lib_pristine="$vanilla_dir/vintagestory/VintagestoryLib.vanilla.dll"
 
+# The extracted client always drops an empty assets/version-X.Y.Z.txt marker.
+# Re-extract when the on-disk version doesn't match the requested one, so
+# switching --version doesn't silently keep building against a stale vanilla
+# client from a previous run (existence alone isn't a strong enough check -
+# a prior 1.22.5 extraction and a requested 1.22.6 build both have
+# .vanilla/win-x64/vintagestory/, just with different DLLs inside).
+extracted_version=""
+if [[ -d "$vanilla_dir/vintagestory/assets" ]]; then
+  extracted_version="$(find "$vanilla_dir/vintagestory/assets" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+    | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+fi
+
 if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
+  echo "Extracting $client_archive"
+  extract_archive "$client_archive" "$vanilla_dir"
+  cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
+  echo "Extracted client is $extracted_version, requested $version - re-extracting"
+  rm -rf "$vanilla_dir" "$snapshot_dir"
+  rm -f "$repo_root/.bootstrap-complete"
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
@@ -1266,6 +1285,56 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
     git init -q "$repo_root"
     touch "$repo_root/.git/optimum-bootstrap-tmp"
     _optimum_tmp_git=true
+  fi
+
+  # 6a. Apply <version>-bridge patches when targeting a version other than
+  # the refs pinned in forks.json. Anego may not have published source
+  # matching that version yet for the forked repos; these patches
+  # reconstruct the confirmed behavior differences on top of the pinned
+  # checkout instead. See patches-<version>-bridge/README.md. Applied before
+  # Optimum's own patches/ loop below, so those land on top of the bridged
+  # source - matching how they'd apply against real source once Anego
+  # publishes it.
+  pinned_version="$(python3 -c "import json;print(json.load(open('$forks_file'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
+  bridge_dir="$repo_root/patches-${version}-bridge"
+  if [[ "$version" != "$pinned_version" ]]; then
+    if [[ ! -d "$bridge_dir" ]]; then
+      echo "WARNING: no upstream bridge patches for version $version (expected $bridge_dir). Forks will build against $pinned_version source unmodified; the result will not match a real $version install." >&2
+    else
+      echo "Applying $version upstream bridge patches (source reconstruction, not Optimum features - see patches-${version}-bridge/README.md)"
+      normalize_lf "$bridge_dir"
+      if ! bash "$script_dir/validate-patch-syntax.sh" "$bridge_dir"; then
+        if [[ "$_optimum_tmp_git" == true ]]; then rm -rf "$repo_root/.git"; fi
+        exit 1
+      fi
+      git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>/dev/null || true
+      bridge_failed=()
+      bridge_applied=0
+      while IFS= read -r -d '' patch; do
+        rel="${patch#$repo_root/}"
+        echo "Applying $rel"
+        bridge_top_proj="$(echo "$rel" | cut -d/ -f2)"
+        bridge_dir_arg=""
+        if echo "$vanilla_patch_projects" | grep -qw "$bridge_top_proj"; then
+          bridge_dir_arg="--directory=build"
+        fi
+        if ! output="$(git_apply_optimum_patch "$patch" "$bridge_dir_arg" 2>&1)"; then
+          bridge_failed+=("$rel")
+          echo "  FAILED: $output" | head -3
+        else
+          [[ -n "$output" ]] && echo "  $output"
+          ((bridge_applied++)) || true
+        fi
+      done < <(find "$bridge_dir" -type f -name '*.patch' -print0 | sort -z)
+      git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true
+      echo "Bridge patches: $bridge_applied applied, ${#bridge_failed[@]} failed"
+      if [[ "${#bridge_failed[@]}" -gt 0 ]]; then
+        printf '  %s\n' "${bridge_failed[@]}" >&2
+        echo "ERROR: $version bridge patches failed to apply. The pinned $pinned_version fork source may have drifted, or ilspycmd/decompile output changed. See patches-${version}-bridge/README.md." >&2
+        if [[ "$_optimum_tmp_git" == true ]]; then rm -rf "$repo_root/.git"; fi
+        exit 1
+      fi
+    fi
   fi
 
   if ! bash "$script_dir/validate-patch-syntax.sh" "$patches_dir"; then
