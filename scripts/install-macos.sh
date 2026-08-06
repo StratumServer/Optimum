@@ -168,6 +168,36 @@ install_optimum() {
     [[ -f "$patched_lib" ]] || die "Patched VintagestoryLib not found. Run 'make build' and the Patcher."
     [[ -f "$patched_api" ]] || die "Patched VintagestoryAPI not found. Run the Patcher."
 
+    # This script overlays Optimum's own compiled engine DLLs on top of
+    # $vs_dir's assets - it does not download or choose a Vintage Story
+    # version itself (unlike install-linux.sh). If $vs_dir is one version and
+    # the DLLs below were compiled (via `make bootstrap VERSION=...`) for a
+    # different one, the result mixes assets and engine from two versions,
+    # which crashed with a shader KeyNotFoundException during 1.22.6
+    # verification when this happened by accident on Linux. Warn instead of
+    # installing a silently-mismatched build.
+    local vs_dir_version="" built_version=""
+    if [[ -d "$vs_dir/assets" ]]; then
+        vs_dir_version="$(find "$vs_dir/assets" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+            | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+    fi
+    local vanilla_marker_dir="$REPO_ROOT/.vanilla/win-x64/vintagestory/assets"
+    if [[ -d "$vanilla_marker_dir" ]]; then
+        built_version="$(find "$vanilla_marker_dir" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+            | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+    fi
+    if [[ -n "$vs_dir_version" && -n "$built_version" && "$vs_dir_version" != "$built_version" ]]; then
+        warn "Version mismatch: $vs_dir is Vintage Story $vs_dir_version, but Optimum's compiled DLLs were built for $built_version (make bootstrap VERSION=$built_version). Installing will overlay $built_version engine DLLs onto $vs_dir_version assets."
+        if [[ "$INTERACTIVE" -eq 1 ]]; then
+            printf "  Continue anyway? [y/N]: "
+            local reply
+            read -r reply
+            [[ "$reply" =~ ^[Yy] ]] || die "Cancelled. Re-run 'make bootstrap VERSION=$vs_dir_version && make build' to match $vs_dir, or point --vs-dir at a $built_version install."
+        else
+            die "Refusing to install a mismatched build non-interactively. Re-run 'make bootstrap VERSION=$vs_dir_version && make build' to match $vs_dir, or point --vs-dir at a $built_version install."
+        fi
+    fi
+
     log "Installing Optimum v$OPTIMUM_VERSION to $install_dir"
 
     # Step 1: Copy the entire vanilla game to the install directory.

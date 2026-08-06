@@ -23,7 +23,7 @@ Optimum 0.3.3 targets Vintage Story 1.22.5 and carries the crash recovery work f
 
 ## Reports reviewed
 
-The review covered the Vigilance and ImpureSoul3 render stacks, the ChestyLaRue Windows checkout report, the KandelKitty uninstall report, `server-main.log`, `server-main (1).log`, and `message.txt`. The server logs also contain third-party Harmony and JSON patch failures. Those stacks name other mods and receive no Optimum code change in this release.
+The review covered several player-reported render stacks, a Windows checkout report, an uninstall report, `server-main.log`, `server-main (1).log`, and `message.txt`. The server logs also contain third-party Harmony and JSON patch failures. Those stacks name other mods and receive no Optimum code change in this release.
 
 ## Validation
 

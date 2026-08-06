@@ -175,9 +175,26 @@ BASE_ROOT="$REPO_ROOT/.vanilla/linux-x64"
 VANILLA_DIR="$BASE_ROOT/vintagestory"
 EXTRACTED_FRESH=0
 
+# Re-extract when the cached client's own version marker doesn't match what
+# we're packaging - a directory left over from packaging a different VERSION
+# looks present but ships the wrong VintagestoryLib.vanilla.dll underneath
+# every Cecil patch (same class of bug fixed in bootstrap.sh's .vanilla/win-x64
+# handling; this is package-linux.sh's own separate cache, not shared with it).
+EXTRACTED_VERSION=""
+if [[ -d "$VANILLA_DIR/assets" ]]; then
+    EXTRACTED_VERSION="$(find "$VANILLA_DIR/assets" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+        | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+fi
+
 if [[ ! -d "$VANILLA_DIR" ]]; then
     mkdir -p "$BASE_ROOT"
     echo "Extracting to $BASE_ROOT"
+    tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
+    EXTRACTED_FRESH=1
+elif [[ -n "$EXTRACTED_VERSION" && "$EXTRACTED_VERSION" != "$VERSION" ]]; then
+    echo "Cached linux-x64 client is $EXTRACTED_VERSION, requested $VERSION - re-extracting"
+    rm -rf "$BASE_ROOT"
+    mkdir -p "$BASE_ROOT"
     tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
     EXTRACTED_FRESH=1
 fi

@@ -23,6 +23,14 @@ Internal log-tail file for the wizard.
 
 .PARAMETER VsPath
 Path to an existing Vintage Story install (skips auto-detection).
+
+.PARAMETER Version
+Vintage Story version to build against (default: forks.json's
+vintageStoryVersion). Pass a version with a patches-<version>-bridge/
+directory (e.g. 1.22.6) to force building against that instead - see
+docs/vintage-story-version-updates.md. Without this, auto-detection (and
+the GUI) already picks whichever supported version - pinned or
+bridge-patched - the locally installed Vintage Story actually is.
 #>
 
 [CmdletBinding()]
@@ -33,7 +41,8 @@ param(
     [switch]$Shortcut,
     [switch]$StartMenu,
     [string]$LogFile,
-    [string]$VsPath
+    [string]$VsPath,
+    [string]$Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -129,8 +138,12 @@ function Find-AllVintageStory {
 
 function Find-VintageStory {
     # Returns the best single candidate: prefers the install whose version
-    # matches forks.json (requiredVer). Falls back to the first found install
-    # when none matches (preserves old behavior for single-install users).
+    # matches forks.json (requiredVer). If none matches but the user has a
+    # bridge-supported alternate version installed instead (e.g. 1.22.6 via
+    # patches-1.22.6-bridge/), prefers that over an unsupported version so
+    # the installer auto-targets whatever the user actually has - see
+    # docs/vintage-story-version-updates.md. Only applies when -Version
+    # wasn't explicitly passed; an explicit override is never second-guessed.
     $requiredVer = Get-RequiredVsVersion
     $all = @(Find-AllVintageStory)
     if ($all.Count -eq 0) { return $null }
@@ -140,13 +153,47 @@ function Find-VintageStory {
         if ($c.Version -eq $requiredVer) { return $c }
     }
 
+    if (-not $script:Version) {
+        $supported = @(Get-SupportedVsVersions)
+        foreach ($c in $all) {
+            if ($c.Version -in $supported) { return $c }
+        }
+    }
+
     # No match: return the first candidate (caller handles mismatch error).
     return $all[0]
 }
 
 function Get-RequiredVsVersion {
+    # -Version overrides the pinned default (e.g. -Version 1.22.6 to build
+    # against a patches-1.22.6-bridge/ target). See docs/vintage-story-version-updates.md.
+    if ($script:Version) { return $script:Version }
     $json = Get-Content (Join-Path $Root 'forks.json') -Raw | ConvertFrom-Json
     return $json.vintageStoryVersion
+}
+
+function Get-SupportedVsVersions {
+    # The pinned version from forks.json plus every version that has its own
+    # patches-<version>-bridge/ directory (e.g. 1.22.6) - see
+    # docs/vintage-story-version-updates.md.
+    $versions = [ordered]@{}
+    $versions[(Get-RequiredVsVersion)] = $true
+    Get-ChildItem -Path $Root -Directory -Filter 'patches-*-bridge' -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            if ($_.Name -match '^patches-(.+)-bridge$') { $versions[$Matches[1]] = $true }
+        }
+    return @($versions.Keys)
+}
+
+function Resolve-EffectiveVersion {
+    # Picks the version to build against: an explicit -Version override
+    # always wins; otherwise, if the actually-installed VS is a
+    # bridge-supported alternate, build against that (auto-targets what the
+    # user has); otherwise falls back to the pinned default.
+    param([string]$ActualVersion)
+    if ($script:Version) { return $script:Version }
+    if ($ActualVersion -and ($ActualVersion -in @(Get-SupportedVsVersions))) { return $ActualVersion }
+    return Get-RequiredVsVersion
 }
 
 function Find-OptimumInstall {
@@ -528,7 +575,17 @@ function Install-StagedPackage {
 
     $installPath = [System.IO.Path]::GetFullPath($InstallDir)
     $parentDir = Split-Path -Parent $installPath
-    New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    # PS 5.1 bug: Split-Path -Parent strips the trailing backslash from drive
+    # roots, returning "D:" instead of "D:\". "D:" is a relative path (current
+    # directory on drive D) and breaks Join-Path, New-Item, and Move-Item.
+    # Fix: re-append the backslash when the result is a bare drive letter.
+    if ($parentDir -match '^[A-Za-z]:$') {
+        $parentDir = "$parentDir\"
+    }
+    # Drive roots already exist; New-Item rejects them on PS 5.1.
+    if ($parentDir -ne [System.IO.Path]::GetPathRoot($installPath)) {
+        New-Item -ItemType Directory -Force -Path $parentDir | Out-Null
+    }
 
     $token = [guid]::NewGuid().ToString('N')
     $tempDir = Join-Path $parentDir ".optimum-stage-$token"
@@ -666,23 +723,22 @@ function Invoke-OptimumBuild {
     Write-Phase "Verifying tools..."
     Assert-RequiredTools
 
-    # Resolve VS path from an existing local installation.
-    $requiredVer = Get-RequiredVsVersion
+    # Resolve VS path from an existing local installation. Without an
+    # explicit -Version, the version to build against is picked from
+    # whichever supported install (pinned or bridge) is actually found -
+    # see Resolve-EffectiveVersion.
     if (-not $VsPath) {
         $vsInfo = Find-VintageStory
-        if ($vsInfo) {
-            $VsPath = $vsInfo.Path
-            if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                throw "Vintage Story version mismatch: found $($vsInfo.Version) at $($vsInfo.Path), Optimum $optimumBuildVer requires $requiredVer. Update or reinstall VS $requiredVer, or pass -VsPath <folder> to point at a $requiredVer install."
-            }
-        }
+        if ($vsInfo) { $VsPath = $vsInfo.Path }
     }
+    $requiredVer = Get-RequiredVsVersion
     if (-not $VsPath -or -not (Test-Path (Join-Path $VsPath 'Vintagestory.exe'))) {
         throw "Install Vintage Story $requiredVer before Optimum or pass -VsPath with the folder that contains Vintagestory.exe."
     }
     $actualVsVersion = Get-VsExeVersion -Dir $VsPath
+    $requiredVer = Resolve-EffectiveVersion -ActualVersion $actualVsVersion
     if ($actualVsVersion -ne $requiredVer) {
-        throw "Vintage Story version mismatch: found $actualVsVersion at $VsPath, Optimum $optimumBuildVer requires $requiredVer. Update or reinstall Vintage Story before installing Optimum."
+        throw "Vintage Story version mismatch: found $actualVsVersion at $VsPath, Optimum $optimumBuildVer requires $requiredVer. Update or reinstall Vintage Story before installing Optimum, or pass -Version $actualVsVersion if a patches-$actualVsVersion-bridge/ set exists for it."
     }
     Write-Log "Using Vintage Story from: $VsPath"
 
@@ -795,7 +851,7 @@ function Invoke-OptimumBuild {
                 }
                 Pop-Location
                 $global:LASTEXITCODE = 0
-                & "$buildRoot/scripts/bootstrap.ps1" -ClientArchive '__skip__' *>&1 | ForEach-Object { Write-Log ([string]$_) }
+                & "$buildRoot/scripts/bootstrap.ps1" -ClientArchive '__skip__' -Version $requiredVer *>&1 | ForEach-Object { Write-Log ([string]$_) }
                 # A failed patch makes bootstrap exit 1 before it syncs the
                 # sources/ overlay; building anyway then fails hundreds of
                 # lines later with misleading CS0103 errors about Optimum
@@ -827,11 +883,10 @@ function Invoke-OptimumBuild {
             $ErrorActionPreference = 'Continue'
             try {
                 Write-Phase "Assembling the final package..."
-                $packageOutput = & "$buildRoot/scripts/package.ps1" -OutputDir $stage -VanillaDir $VsPath *>&1
-                $packageSucceeded = $?
+                & "$buildRoot/scripts/package.ps1" -OutputDir $stage -VanillaDir $VsPath *>&1 |
+                    ForEach-Object { Write-Log ([string]$_) }
                 $packageExitCode = $LASTEXITCODE
-                $packageOutput | ForEach-Object { Write-Log ([string]$_) }
-                if (-not $packageSucceeded -or ($packageExitCode -and $packageExitCode -ne 0)) {
+                if ($packageExitCode -and $packageExitCode -ne 0) {
                     throw "Package step failed (exit code $packageExitCode)."
                 }
             } finally { $ErrorActionPreference = $prevEAP }
@@ -1067,22 +1122,26 @@ function Set-MissingActionCheckBox {
 function Update-PrereqStatus {
     # VS install
     $requiredVer = Get-RequiredVsVersion
+    $supportedVers = @(Get-SupportedVsVersions)
+    $script:effectiveVersion = $requiredVer
 
     # Respect a path the user already browsed to: if txtVsPath holds a valid
-    # exe and its version matches, skip auto-detection entirely.
+    # exe and its version is supported (pinned or bridge), skip auto-detection.
     $userBrowsed = $script:txtVsPath.Text.Trim()
     if ($userBrowsed -and (Test-Path (Join-Path $userBrowsed 'Vintagestory.exe'))) {
         $browseVer = Get-VsExeVersion -Dir $userBrowsed
-        if ($browseVer -eq $requiredVer) {
+        if ($browseVer -in $supportedVers) {
             $script:detectedVsPath = $userBrowsed
             $script:detectedVsVer = $browseVer
-            $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $userBrowsed"
+            $script:effectiveVersion = $browseVer
+            $bridgeNote = if ($browseVer -ne $requiredVer) { ' (bridge)' } else { '' }
+            $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story $browseVer$bridgeNote    $userBrowsed"
             $script:lblVsStatus.ForeColor = $colGreen
             $script:btnVsBrowse.Visible = $false
         } else {
             $script:detectedVsPath = $userBrowsed
             $script:detectedVsVer = $browseVer
-            $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $browseVer (need $requiredVer) - browse"
+            $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $browseVer (need $($supportedVers -join ' or ')) - browse"
             $script:lblVsStatus.ForeColor = $colOrange
             $script:btnVsBrowse.Visible = $true
         }
@@ -1091,16 +1150,18 @@ function Update-PrereqStatus {
         if ($vsInfo) {
             $script:detectedVsPath = $vsInfo.Path
             $script:detectedVsVer = $vsInfo.Version
-            if ($vsInfo.Version -and $vsInfo.Version -ne $requiredVer) {
-                $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $requiredVer) - browse"
-                $script:lblVsStatus.ForeColor = $colOrange
-                $script:btnVsBrowse.Visible = $true
-                $script:txtVsPath.Text = ''
-            } else {
-                $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story    $($vsInfo.Path)"
+            if ($vsInfo.Version -and ($vsInfo.Version -in $supportedVers)) {
+                $script:effectiveVersion = $vsInfo.Version
+                $bridgeNote = if ($vsInfo.Version -ne $requiredVer) { ' (bridge)' } else { '' }
+                $script:lblVsStatus.Text = [char]0x2713 + "  Vintage Story $($vsInfo.Version)$bridgeNote    $($vsInfo.Path)"
                 $script:lblVsStatus.ForeColor = $colGreen
                 $script:txtVsPath.Text = $vsInfo.Path
                 $script:btnVsBrowse.Visible = $false
+            } else {
+                $script:lblVsStatus.Text = [char]0x2717 + "  Vintage Story $($vsInfo.Version) (need $($supportedVers -join ' or ')) - browse"
+                $script:lblVsStatus.ForeColor = $colOrange
+                $script:btnVsBrowse.Visible = $true
+                $script:txtVsPath.Text = ''
             }
         } else {
             $script:detectedVsPath = $null
@@ -1183,16 +1244,17 @@ function Update-PrereqStatus {
         $script:btnIlspyBrowse.Visible = $true
     }
 
-    # Enable Install when the selected local Vintage Story version matches.
+    # Enable Install when the selected local Vintage Story version is supported.
     $selectedVsPath = $script:txtVsPath.Text.Trim()
     $vsOk = $selectedVsPath -and
         (Test-Path (Join-Path $selectedVsPath 'Vintagestory.exe')) -and
-        ((Get-VsExeVersion -Dir $selectedVsPath) -eq $requiredVer)
+        ((Get-VsExeVersion -Dir $selectedVsPath) -in $supportedVers)
     $dotnetOk = (Test-DotNet10) -or ($script:chkDotnetDl.Visible -and $script:chkDotnetDl.Checked)
     $gitOk = (Test-Git) -or ($script:chkGitDl.Visible -and $script:chkGitDl.Checked)
     $powerShellOk = (Test-WindowsPowerShell51) -or ($script:chkPowerShellDl.Visible -and $script:chkPowerShellDl.Checked)
     $ilspyOk = (Find-ILSpyCmd) -or ($script:chkIlspyDl.Visible -and $script:chkIlspyDl.Checked)
     $script:btnInstall.Enabled = ($vsOk -and $dotnetOk -and $gitOk -and $powerShellOk -and $ilspyOk)
+    if ($script:lblVersion) { $script:lblVersion.Text = "vs$($script:effectiveVersion)+v$optimumBuildVer" }
 }
 
 # === Form ===
@@ -1613,13 +1675,13 @@ $form.Controls.Add($script:txtLog)
 # === Bottom buttons ===
 # === Footer version ===
 $btnY = $form.ClientSize.Height - 44
-$lblVersion = New-Object System.Windows.Forms.Label
-$lblVersion.Text = "vs1.22.5+v$optimumBuildVer"
-$lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
-$lblVersion.ForeColor = $colTextDim
-$lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
-$lblVersion.AutoSize = $true
-$form.Controls.Add($lblVersion)
+$script:lblVersion = New-Object System.Windows.Forms.Label
+$script:lblVersion.Text = "vs$(Get-RequiredVsVersion)+v$optimumBuildVer"
+$script:lblVersion.Font = New-Object System.Drawing.Font('Segoe UI', 8)
+$script:lblVersion.ForeColor = $colTextDim
+$script:lblVersion.Location = New-Object System.Drawing.Point(20, ($btnY + 10))
+$script:lblVersion.AutoSize = $true
+$form.Controls.Add($script:lblVersion)
 
 # === Bottom buttons ===
 $script:btnCancel = New-FlatButton -Text 'Cancel' -W 100 -H 34
@@ -1843,10 +1905,10 @@ By checking the box below and proceeding, you acknowledge that you have read, un
         [System.Windows.Forms.MessageBox]::Show('Install Vintage Story before Optimum or select the folder that contains Vintagestory.exe.', 'Optimum', 'OK', 'Warning') | Out-Null
         return
     }
-    $requiredVer = Get-RequiredVsVersion
-    $selectedVsVersion = Get-VsExeVersion -Dir $vsP
-    if ($selectedVsVersion -ne $requiredVer) {
-        [System.Windows.Forms.MessageBox]::Show("Vintage Story $requiredVer is required. Found $selectedVsVersion at $vsP. Update or reinstall Vintage Story before installing Optimum.", 'Optimum', 'OK', 'Warning') | Out-Null
+    $supportedVers = @(Get-SupportedVsVersions)
+    $buildVersion = Get-VsExeVersion -Dir $vsP
+    if ($buildVersion -notin $supportedVers) {
+        [System.Windows.Forms.MessageBox]::Show("Vintage Story $($supportedVers -join ' or ') is required. Found $buildVersion at $vsP. Update or reinstall Vintage Story before installing Optimum.", 'Optimum', 'OK', 'Warning') | Out-Null
         return
     }
 
@@ -1883,6 +1945,7 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $q = [char]34
     $argLine = "-NoProfile -ExecutionPolicy Bypass -File $q$Self$q -Silent -InstallDir $q$dir$q"
     $argLine += " -VsPath $q$vsP$q"
+    $argLine += " -Version $q$buildVersion$q"
     if ($script:chkSep.Checked) {
         $data = $script:txtData.Text.Trim().TrimEnd('\')
         if (-not $data) {

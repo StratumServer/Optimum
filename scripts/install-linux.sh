@@ -53,7 +53,10 @@ Options:
   --data-path DIR         Separate data folder (--dataPath at launch)
   --package-dir DIR       Install from an existing packaged folder (skip build)
   --skip-build            Package existing build outputs without bootstrap/build
-  --version VERSION       Vintage Story version (default: from forks.json)
+  --version VERSION       Vintage Story version (default: from forks.json).
+                          Interactive mode also prompts for this when a
+                          patches-<version>-bridge/ directory offers an
+                          alternate - see docs/vintage-story-version-updates.md
   --no-menu-entry         Do not create the application menu entry
   --desktop-shortcut      Create a Desktop shortcut
   --non-interactive       Skip prompts, use defaults for all choices
@@ -459,6 +462,44 @@ offer_install_missing() {
 # Install directory selection
 # ============================================================================
 
+prompt_version() {
+    if [[ -n "$VERSION" ]]; then return; fi
+
+    local pinned
+    pinned="$(get_required_vs_version)"
+    VERSION="$pinned"
+
+    if [[ "$INTERACTIVE" -eq 0 ]]; then return; fi
+
+    # Only offer alternate versions that actually have a bridge patch set
+    # (patches-<version>-bridge/) or that ARE the pinned version - otherwise
+    # the build would silently target unpatched, possibly-incompatible
+    # source. See docs/vintage-story-version-updates.md.
+    local alternates=()
+    local bridge_dir
+    for bridge_dir in "$REPO_ROOT"/patches-*-bridge; do
+        [[ -d "$bridge_dir" ]] || continue
+        local v
+        v="$(basename "$bridge_dir")"
+        v="${v#patches-}"
+        v="${v%-bridge}"
+        [[ "$v" == "$pinned" ]] && continue
+        alternates+=("$v")
+    done
+
+    if [[ "${#alternates[@]}" -eq 0 ]]; then return; fi
+
+    printf "  ${BOLD}VINTAGE STORY VERSION${RESET}\n\n"
+    printf "    ${DIM}%s is built from Anego's official source throughout.${RESET}\n" "$pinned"
+    for v in "${alternates[@]}"; do
+        printf "    ${DIM}%s uses bridge-reconstructed source for some files - see patches-%s-bridge/README.md.${RESET}\n" "$v" "$v"
+    done
+    printf "    Version [${DIM}%s${RESET}]: " "$pinned"
+    local reply
+    read -r reply
+    VERSION="${reply:-$pinned}"
+}
+
 prompt_install_dir() {
     local default="$XDG_DATA_HOME/optimum"
 
@@ -710,6 +751,9 @@ confirm_install() {
     if [[ "$INTERACTIVE" -eq 0 ]]; then return; fi
 
     printf "\n  ${BOLD}SUMMARY${RESET}\n\n"
+    if [[ -n "$VERSION" ]]; then
+        printf "    VS version:    %s\n" "$VERSION"
+    fi
     printf "    Install to:    %s\n" "$INSTALL_DIR"
     if [[ -n "$DATA_PATH" ]]; then
         printf "    Data folder:   %s\n" "$DATA_PATH"
@@ -739,6 +783,7 @@ main() {
     fi
 
     # Step 2: Choose install directory and options
+    prompt_version
     prompt_install_dir
     prompt_data_path
     prompt_shortcuts

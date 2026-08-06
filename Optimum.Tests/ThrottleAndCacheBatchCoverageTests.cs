@@ -69,7 +69,7 @@ public class ThrottleAndCacheBatchCoverageTests
     [Fact]
     public void RainHeightmapSkipAlreadyShipped()
     {
-        // docs/todo.md's "guard the 256-lookup rebuild on player move" item was
+        // The "guard the 256-lookup rebuild on player move" optimization was
         // already shipped before Batch 6.2 started; assert it stays that way.
         string source = File.ReadAllText(FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs.patch"));
         Assert.Contains("optimumLastHeightmapCenterX", source);

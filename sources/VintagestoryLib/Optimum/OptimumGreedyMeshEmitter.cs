@@ -16,12 +16,10 @@ namespace Vintagestory.Client.NoObf;
 /// point: ChunkTesselator.BuildBlockPolygons calls EmitGreedyQuads at
 /// the top, after the edge model data setup but before the Y loop.
 ///
-/// This is the second implementation (plus a B6 upgrade). The first (see
-/// git history around commit 2945257) crashed and produced invisible
-/// chunks; a full read of the vanilla emit path found 12 distinct bugs,
-/// documented in docs/implementation-plans/greedy-mesh-phase2-fix-plan-
-/// 2026-07-09.md. This rewrite is correct-by-construction against that
-/// inventory:
+/// This is the second implementation (plus a B6 upgrade). The first
+/// crashed and produced invisible chunks; a full read of the vanilla
+/// emit path found 12 distinct bugs. This rewrite is correct-by-construction
+/// against that inventory:
 ///
 ///  B1  never reads currentModeldataByRenderPassByLodLevel; the caller
 ///      passes the center pool array directly.
@@ -94,9 +92,8 @@ public static class OptimumGreedyMeshEmitter
     // Built with explicit index assignments, not a collection-initializer
     // literal: array-literal initializers compile to a FieldRVA-backed
     // <PrivateImplementationDetails> blob, which is lost across this
-    // project's decompile -> recompile -> Cecil-transplant pipeline (see
-    // docs/il-patcher-plan.md) and makes the patcher reject the whole file
-    // as a self-reference error.
+    // project's decompile -> recompile -> Cecil-transplant pipeline and
+    // makes the patcher reject the whole file as a self-reference error.
     private static readonly (int colBit, int rowBit)[][] FaceVertexBits = BuildFaceVertexBits();
     private static readonly bool[] ColAnchorIsX2 = BuildColAnchorIsX2();
     private static readonly bool[] RowAnchorIsY2 = BuildRowAnchorIsY2();

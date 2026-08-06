@@ -26,6 +26,13 @@ normalize_lf() {
         while IFS= read -r -d '' file; do perl -0pi -e 's/\r\n/\n/g; s/\r/\n/g' "$file"; done
 }
 
+# Escapes a filesystem path for safe use as XML element text (e.g. inside
+# <HintPath>). Install paths are user-controlled and may contain characters
+# like '&' that are otherwise invalid XML and break MSBuild parsing.
+xml_escape() {
+    printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
 normalize_lf "$repo_root/patches/runtime"
 
 dotnet_tools_dir="${DOTNET_TOOLS_DIR:-$HOME/.dotnet/tools}"
@@ -98,7 +105,7 @@ decompile_mod() {
     # the next language-version number. Runtime donors are ignored build
     # artifacts, so resolve references to the selected owned client and use
     # the compiler's supported preview mode.
-    VANILLA_HINT_ROOT="$vanilla_dir/" perl -0pi -e '
+    VANILLA_HINT_ROOT="$(xml_escape "$vanilla_dir/")" perl -0pi -e '
         s#<HintPath>\.vanilla/win-x64/vintagestory/#<HintPath>$ENV{VANILLA_HINT_ROOT}#g;
         s#<LangVersion>\d+\.\d+</LangVersion>#<LangVersion>preview</LangVersion>#g;
         s#</PropertyGroup>#  <Nullable>disable</Nullable>\n    <NoWarn>\$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>\n  </PropertyGroup>#;
@@ -116,7 +123,7 @@ add_reference() {
     local project_file="$1"
     local include="$2"
     local hint_path="$3"
-    PROJECT_INCLUDE="$include" PROJECT_HINT_PATH="$hint_path" perl -0pi -e '
+    PROJECT_INCLUDE="$include" PROJECT_HINT_PATH="$(xml_escape "$hint_path")" perl -0pi -e '
         s#<ItemGroup>#<ItemGroup>\n    <Reference Include="$ENV{PROJECT_INCLUDE}">\n      <HintPath>$ENV{PROJECT_HINT_PATH}</HintPath>\n      <Private>false</Private>\n    </Reference>#;
     ' "$project_file"
 }
@@ -125,7 +132,7 @@ set_reference_hint_path() {
     local project_file="$1"
     local include="$2"
     local hint_path="$3"
-    PROJECT_INCLUDE="$include" PROJECT_HINT_PATH="$hint_path" perl -0pi -e '
+    PROJECT_INCLUDE="$include" PROJECT_HINT_PATH="$(xml_escape "$hint_path")" perl -0pi -e '
         s#<Reference Include="$ENV{PROJECT_INCLUDE}"\s*/>#<Reference Include="$ENV{PROJECT_INCLUDE}">\n      <HintPath>$ENV{PROJECT_HINT_PATH}</HintPath>\n      <Private>false</Private>\n    </Reference>#;
     ' "$project_file"
 }
@@ -162,6 +169,13 @@ resolve_references() {
     local project_file="$1"
     VANILLA_DIR="$vanilla_dir" perl -0pi -e '
         my @dirs = ("$ENV{VANILLA_DIR}/Lib", $ENV{VANILLA_DIR}, "$ENV{VANILLA_DIR}/Mods");
+        sub xml_escape {
+            my $s = shift;
+            $s =~ s/&/&amp;/g;
+            $s =~ s/</&lt;/g;
+            $s =~ s/>/&gt;/g;
+            return $s;
+        }
         # Pass 1: Self-closing references without HintPath
         s{<Reference Include="([^"]+)"\s*/>}{
             my $name = $1;
@@ -174,7 +188,7 @@ resolve_references() {
                 }
             }
             if ($found) {
-                qq{<Reference Include="$name">\n      <HintPath>$found</HintPath>\n      <Private>false</Private>\n    </Reference>};
+                qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($found) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
             } else {
                 qq{<Reference Include="$name" />};
             }
@@ -195,7 +209,7 @@ resolve_references() {
                     }
                 }
                 if ($found) {
-                    qq{<Reference Include="$name">\n      <HintPath>$found</HintPath>\n      <Private>false</Private>\n    </Reference>};
+                    qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($found) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
                 } else {
                     qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
                 }
