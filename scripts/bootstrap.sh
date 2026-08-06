@@ -158,6 +158,24 @@ extract_archive() {
       ;;
     *) echo "Unsupported archive: $archive" >&2; exit 1 ;;
   esac
+
+  # Normalise the archive's own root to "vintagestory".
+  #
+  # Every caller below reads $dest/vintagestory, and only the Windows zip roots
+  # there: the macOS tarball roots at "Vintage Story.app" and the Linux tarball
+  # at "vintagestory" already. Without this, a macOS bootstrap downloads the
+  # right client, extracts it, and then fails on the very next line with
+  #   cp: .vanilla/win-x64/vintagestory/VintagestoryLib.dll: No such file
+  # having done the 607MB download first.
+  #
+  # Renaming rather than teaching each reader about layouts keeps the canonical
+  # path the one thing every script and every HintPath already agrees on.
+  if [[ ! -d "$dest/vintagestory" ]]; then
+    local roots=("$dest"/*/)
+    if [[ ${#roots[@]} -eq 1 && -d "${roots[0]}" ]]; then
+      mv "${roots[0]%/}" "$dest/vintagestory"
+    fi
+  fi
 }
 
 normalize_lf() {
