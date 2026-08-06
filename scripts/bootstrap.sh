@@ -158,6 +158,49 @@ extract_archive() {
       ;;
     *) echo "Unsupported archive: $archive" >&2; exit 1 ;;
   esac
+
+  # Normalise the archive's own root to "vintagestory".
+  #
+  # Every caller below reads $dest/vintagestory, and only the Windows zip roots
+  # there: the macOS tarball roots at "Vintage Story.app" and the Linux tarball
+  # at "vintagestory" already. Without this, a macOS bootstrap downloads the
+  # right client, extracts it, and then fails on the very next line with
+  #   cp: .vanilla/win-x64/vintagestory/VintagestoryLib.dll: No such file
+  # having done the 607MB download first.
+  #
+  # Renaming rather than teaching each reader about layouts keeps the canonical
+  # path the one thing every script and every HintPath already agrees on.
+  if [[ ! -d "$dest/vintagestory" ]]; then
+    local roots=("$dest"/*/)
+    if [[ ${#roots[@]} -eq 1 && -d "${roots[0]}" ]]; then
+      mv "${roots[0]%/}" "$dest/vintagestory"
+    fi
+  fi
+}
+
+# Whether an archive can be read from end to end.
+#
+# The download below is atomic, so nothing this script writes can be short. A cache
+# created before that was true — or left by a kill -9, a full disk, or a machine losing
+# power — is short rather than absent, and the reuse check above only asks whether the
+# file exists. Reading it once costs seconds against a bootstrap measured in tens of
+# minutes, and turns "tar: unexpected end of file" into a second download.
+archive_is_complete() {
+  local archive="$1"
+  [[ -s "$archive" ]] || return 1
+
+  case "$archive" in
+    *.tar.gz|*.tgz) tar -tzf "$archive" >/dev/null 2>&1 ;;
+    *.zip)
+      if command -v unzip >/dev/null 2>&1; then
+        unzip -qt "$archive" >/dev/null 2>&1
+      else
+        python3 -c "import zipfile,sys; sys.exit(0 if zipfile.is_zipfile(sys.argv[1]) else 1)" \
+          "$archive" >/dev/null 2>&1
+      fi
+      ;;
+    *) return 0 ;;
+  esac
 }
 
 normalize_lf() {
@@ -221,14 +264,33 @@ download_client_archive() {
   local archive_path="$cache_dir/$archive_name"
 
   if [[ -f "$archive_path" ]]; then
-    echo "Using cached $archive_path" >&2
-    printf '%s\n' "$archive_path"
-    return
+    if archive_is_complete "$archive_path"; then
+      echo "Using cached $archive_path" >&2
+      printf '%s\n' "$archive_path"
+      return
+    fi
+
+    echo "Cached $archive_path is incomplete; downloading it again." >&2
+    rm -f "$archive_path"
   fi
 
   local url="https://cdn.vintagestory.at/gamefiles/stable/$archive_name"
   echo "Downloading $url" >&2
-  curl -L --fail --output "$archive_path" "$url"
+
+  # Written under a temporary name and moved into place only once curl has succeeded, so
+  # an interrupted download leaves nothing rather than a short file at the cache path.
+  # Without this, stopping the bootstrap during the ~500 MB download poisons the cache:
+  # the next run finds the file, reports "Using cached", and fails in tar instead.
+  local partial="$archive_path.partial"
+  rm -f "$partial"
+
+  if ! curl -L --fail --output "$partial" "$url"; then
+    rm -f "$partial"
+    echo "Download failed: $url" >&2
+    return 1
+  fi
+
+  mv -f "$partial" "$archive_path"
   printf '%s\n' "$archive_path"
 }
 
@@ -274,7 +336,26 @@ fi
 # vanilla.
 vanilla_lib_pristine="$vanilla_dir/vintagestory/VintagestoryLib.vanilla.dll"
 
+# The extracted client always drops an empty assets/version-X.Y.Z.txt marker.
+# Re-extract when the on-disk version doesn't match the requested one, so
+# switching --version doesn't silently keep building against a stale vanilla
+# client from a previous run (existence alone isn't a strong enough check -
+# a prior 1.22.5 extraction and a requested 1.22.6 build both have
+# .vanilla/win-x64/vintagestory/, just with different DLLs inside).
+extracted_version=""
+if [[ -d "$vanilla_dir/vintagestory/assets" ]]; then
+  extracted_version="$(find "$vanilla_dir/vintagestory/assets" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+    | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+fi
+
 if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
+  echo "Extracting $client_archive"
+  extract_archive "$client_archive" "$vanilla_dir"
+  cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
+  echo "Extracted client is $extracted_version, requested $version - re-extracting"
+  rm -rf "$vanilla_dir" "$snapshot_dir"
+  rm -f "$repo_root/.bootstrap-complete"
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
@@ -1266,6 +1347,56 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
     git init -q "$repo_root"
     touch "$repo_root/.git/optimum-bootstrap-tmp"
     _optimum_tmp_git=true
+  fi
+
+  # 6a. Apply <version>-bridge patches when targeting a version other than
+  # the refs pinned in forks.json. Anego may not have published source
+  # matching that version yet for the forked repos; these patches
+  # reconstruct the confirmed behavior differences on top of the pinned
+  # checkout instead. See patches-<version>-bridge/README.md. Applied before
+  # Optimum's own patches/ loop below, so those land on top of the bridged
+  # source - matching how they'd apply against real source once Anego
+  # publishes it.
+  pinned_version="$(python3 -c "import json;print(json.load(open('$forks_file'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
+  bridge_dir="$repo_root/patches-${version}-bridge"
+  if [[ "$version" != "$pinned_version" ]]; then
+    if [[ ! -d "$bridge_dir" ]]; then
+      echo "WARNING: no upstream bridge patches for version $version (expected $bridge_dir). Forks will build against $pinned_version source unmodified; the result will not match a real $version install." >&2
+    else
+      echo "Applying $version upstream bridge patches (source reconstruction, not Optimum features - see patches-${version}-bridge/README.md)"
+      normalize_lf "$bridge_dir"
+      if ! bash "$script_dir/validate-patch-syntax.sh" "$bridge_dir"; then
+        if [[ "$_optimum_tmp_git" == true ]]; then rm -rf "$repo_root/.git"; fi
+        exit 1
+      fi
+      git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>/dev/null || true
+      bridge_failed=()
+      bridge_applied=0
+      while IFS= read -r -d '' patch; do
+        rel="${patch#$repo_root/}"
+        echo "Applying $rel"
+        bridge_top_proj="$(echo "$rel" | cut -d/ -f2)"
+        bridge_dir_arg=""
+        if echo "$vanilla_patch_projects" | grep -qw "$bridge_top_proj"; then
+          bridge_dir_arg="--directory=build"
+        fi
+        if ! output="$(git_apply_optimum_patch "$patch" "$bridge_dir_arg" 2>&1)"; then
+          bridge_failed+=("$rel")
+          echo "  FAILED: $output" | head -3
+        else
+          [[ -n "$output" ]] && echo "  $output"
+          ((bridge_applied++)) || true
+        fi
+      done < <(find "$bridge_dir" -type f -name '*.patch' -print0 | sort -z)
+      git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true
+      echo "Bridge patches: $bridge_applied applied, ${#bridge_failed[@]} failed"
+      if [[ "${#bridge_failed[@]}" -gt 0 ]]; then
+        printf '  %s\n' "${bridge_failed[@]}" >&2
+        echo "ERROR: $version bridge patches failed to apply. The pinned $pinned_version fork source may have drifted, or ilspycmd/decompile output changed. See patches-${version}-bridge/README.md." >&2
+        if [[ "$_optimum_tmp_git" == true ]]; then rm -rf "$repo_root/.git"; fi
+        exit 1
+      fi
+    fi
   fi
 
   if ! bash "$script_dir/validate-patch-syntax.sh" "$patches_dir"; then

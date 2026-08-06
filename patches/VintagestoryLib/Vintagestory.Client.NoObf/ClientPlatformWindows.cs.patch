@@ -43,7 +43,7 @@ index fbc7255..f508de0 100644
 +		// hidden static delegate-cache class (<>O) to avoid reallocating the delegate on repeated
 +		// calls; the Cecil patcher's self-reference check can't resolve that compiler-generated
 +		// type against the vanilla target and rejects the transplant (same "lambda-freedom"
-+		// constraint docs/todo.md documents for Packet_Server). Building the delegate through
++		// constraint documented for Packet_Server). Building the delegate through
 +		// reflection instead avoids the method-group conversion entirely, so no cache class is
 +		// generated, and we get the documented timeBeginPeriod/timeEndPeriod pairing for free.
 +		System.Reflection.MethodInfo exitHandlerMethod = typeof(ClientPlatformWindows).GetMethod(

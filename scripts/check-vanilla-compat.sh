@@ -6,6 +6,19 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 patches_dir="$repo_root/patches"
 compat_allowlist="$script_dir/vanilla-compat-allowlist.txt"
 
+# Ground truth for which vanilla client this build actually targets: the
+# extracted client always drops an empty assets/version-X.Y.Z.txt marker
+# (see .vanilla/win-x64/vintagestory/assets/). Falls back to forks.json's
+# pinned version if .vanilla/ hasn't been populated yet (e.g. this script
+# run before bootstrap). Do not hardcode a version number below this line -
+# use $game_version so the checks work for 1.22.5 and 1.22.6 builds alike.
+game_version="$(find "$repo_root/.vanilla/win-x64/vintagestory/assets" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+  | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+if [[ -z "$game_version" ]]; then
+  game_version="$(python3 -c "import json;print(json.load(open('$repo_root/forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
+fi
+game_version_re="${game_version//./\\.}"
+
 is_allowlisted() {
   local rel="$1"
   [[ -f "$compat_allowlist" ]] || return 1
@@ -123,6 +136,9 @@ check_patch_targets
 check_patch_content
 check_cast_divergences
 
+# NetworkVersion is the wire-protocol version, distinct from the game
+# version, and confirmed unchanged between 1.22.5 and 1.22.6. Left as a
+# literal "1.22.6" intentionally - do not swap in $game_version here.
 check_contains \
   "$repo_root/build/VintagestoryLib/Vintagestory.Client/ClientPackets.cs" \
   'NetworkVersion = "1\.22\.6"' \
@@ -130,8 +146,8 @@ check_contains \
 
 check_contains \
   "$repo_root/build/VintagestoryLib/Vintagestory.Client/ClientPackets.cs" \
-  'ShortGameVersion = "1\.22\.5"' \
-  "client sends vanilla short game version"
+  "ShortGameVersion = \"$game_version_re\"" \
+  "client sends vanilla short game version ($game_version)"
 
 check_contains \
   "$repo_root/build/VintagestoryLib/Vintagestory.Server/ServerMain.cs" \

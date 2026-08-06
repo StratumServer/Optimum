@@ -246,8 +246,8 @@ echo "  Overlaid: VintagestoryAPI.dll (ABI-preserving Cecil patch)"
 echo "  Overlaid: Optimum.Api.Contracts.dll"
 echo "  Overlaid: exact Cecil-patched official mod assemblies"
 
-# VintagestoryLib ships Cecil-patched, never recompiled (see Current Status
-# in docs/todo.md) - overlay the patcher's output, not a source build.
+# VintagestoryLib ships Cecil-patched, never recompiled - overlay the
+# patcher's output, not a source build.
 if [ -f "$PATCHED_LIB_DLL" ]; then
     cp --remove-destination "$PATCHED_LIB_DLL" "$PATCHED_SERVER/VintagestoryLib.dll"
     echo "  Overlaid: VintagestoryLib.dll (Cecil-patched)"

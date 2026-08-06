@@ -1,0 +1,22 @@
+diff --git a/VSSurvivalMod/BlockEntity/BESpawner.cs b/VSSurvivalMod/BlockEntity/BESpawner.cs
+index d71df03..ba01433 100644
+--- a/VSSurvivalMod/BlockEntity/BESpawner.cs
++++ b/VSSurvivalMod/BlockEntity/BESpawner.cs
+@@ -554,8 +554,15 @@ namespace Vintagestory.GameContent
+         {
+             if (packetid == 1001)
+             {
+-                Data = SerializerUtil.Deserialize<BESpawnerData>(bytes);
+-                MarkDirty();
++                if (fromPlayer.WorldData.CurrentGameMode != EnumGameMode.Creative)
++                {
++                    Api.Logger.Audit($"{fromPlayer.PlayerName} not in creative mode tried to set spawner data at {Pos}");
++                }
++                else
++                {
++                    Data = SerializerUtil.Deserialize<BESpawnerData>(bytes);
++                    MarkDirty();
++                }
+             }
+         }
+ 

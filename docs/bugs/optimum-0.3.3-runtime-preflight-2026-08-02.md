@@ -10,7 +10,7 @@ The first launcher run records successful VintagestoryLib, VintagestoryAPI, and 
 
 `GearRenderer::DisableOptimumGearRenderer references missing field optimumGearRendererFailureLogged`
 
-The launcher then reports `vssurvivalmod patch produced no changes` and starts the vanilla fallback. The game log from the same installation shows vanilla built-in mods after that restoration. A separate current game log belongs to `C:\Games\Vulkanizer\Vintagestory.exe`, so it does not validate the failed Optimum run.
+The launcher then reports `vssurvivalmod patch produced no changes` and starts the vanilla fallback. The game log from the same installation shows vanilla built-in mods after that restoration. A separate current game log belongs to a different, unrelated Vintage Story install, so it does not validate the failed Optimum run.
 
 A second review found an independent API risk after the Survival fix. The first `GetPose` fallback consumed `animationManager` and `Animator` with `brfalse`, then called the next member without an instance on the evaluation stack. ILSpy reported stack underflow in the generated method even though reflection loaded the assembly.
 

@@ -476,6 +476,23 @@ try {
     #   c) Normal: download the installer and extract with innounp
     $skipDownload = ($ClientArchive -eq '__skip__')
     $freshExtract = $false
+
+    # Re-extract when the cached client's own version marker doesn't match
+    # what we're building - a directory left over from bootstrapping a
+    # different -Version looks present but silently keeps building against
+    # the wrong VintagestoryLib.exe/dll underneath (same class of bug fixed
+    # in bootstrap.sh's .vanilla/win-x64 handling).
+    $extractedVersion = $null
+    $vanillaAssetsCheck = Join-Path $winVanillaDir 'assets'
+    if (Test-Path $vanillaAssetsCheck) {
+        $marker = Get-ChildItem -Path $vanillaAssetsCheck -Filter 'version-*.txt' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($marker -and $marker.BaseName -match '^version-(.+)$') { $extractedVersion = $Matches[1] }
+    }
+    if ($extractedVersion -and $extractedVersion -ne $Version -and -not $skipDownload) {
+        Write-Host "Cached win-x64 client is $extractedVersion, requested $Version - re-extracting"
+        Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+    }
+
     if (Test-Path (Join-Path $winVanillaDir 'Vintagestory.exe')) {
         Write-Host "Using existing $winVanillaDir"
     } elseif ($skipDownload) {
@@ -491,8 +508,22 @@ try {
         if (-not (Test-Path $ClientArchive)) {
             $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
             Write-Host "Downloading $url (~570MB)"
-            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $ClientArchive $url }
-            if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
+
+            # Written under a temporary name and moved into place only once curl has
+            # succeeded, so an interrupted download leaves nothing rather than a short file
+            # at the cache path. Without this, stopping the bootstrap during the ~570 MB
+            # download poisons the cache: the next run finds the file, reports "Using
+            # cached", and fails in innounp instead.
+            $partial = "$ClientArchive.partial"
+            Remove-Item -Force -ErrorAction SilentlyContinue $partial
+
+            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $partial $url }
+            if ($LASTEXITCODE -ne 0) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $partial
+                throw "Download failed: $url"
+            }
+
+            Move-Item -Force $partial $ClientArchive
         } else {
             Write-Host "Using cached $ClientArchive"
         }
@@ -504,8 +535,19 @@ try {
             New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
             $innounpZip = Join-Path $toolsDir 'innounp-2.zip'
             Write-Host "Downloading innounp"
-            Invoke-NativeStep { curl.exe -L --fail --silent -o $innounpZip "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip" }
-            if ($LASTEXITCODE -ne 0) { throw "Download failed: innounp-2.zip" }
+
+            # Same reasoning as the client archive above: small enough that the window is
+            # narrow, and a short zip here fails in Expand-Archive on every later run.
+            $innounpPartial = "$innounpZip.partial"
+            Remove-Item -Force -ErrorAction SilentlyContinue $innounpPartial
+
+            Invoke-NativeStep { curl.exe -L --fail --silent -o $innounpPartial "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip" }
+            if ($LASTEXITCODE -ne 0) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $innounpPartial
+                throw "Download failed: innounp-2.zip"
+            }
+
+            Move-Item -Force $innounpPartial $innounpZip
             Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
             $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
             if ($found -and $found.FullName -ne $innounp) {
@@ -1470,6 +1512,72 @@ try {
     if ($ownershipConflicts.Count -gt 0) {
         Write-Error "Source and patch ownership conflict:`n  $($ownershipConflicts -join "`n  ")"
         exit 1
+    }
+
+    # Apply <version>-bridge patches when targeting a version other than the
+    # one pinned in forks.json. Anego may not have published source matching
+    # that version yet for the GitHub-cloned repos (VintagestoryApi, Cairo,
+    # VSEssentials, VSSurvivalMod, VSCreativeMod); these patches reconstruct
+    # the confirmed behavior differences on top of the pinned checkout. See
+    # patches-<version>-bridge/README.md. Mirrors scripts/bootstrap.sh's
+    # equivalent step; VintagestoryLib/Vintagestory never need this (they're
+    # decompiled fresh from whichever client -Version downloads).
+    $pinnedVersion = $Version
+    $bridgeForksFile = Join-Path $repoRoot 'forks.json'
+    if (Test-Path $bridgeForksFile) {
+        $pinnedVersion = (Get-Content $bridgeForksFile -Raw | ConvertFrom-Json).vintageStoryVersion
+    }
+    $bridgeDir = Join-Path $repoRoot "patches-$Version-bridge"
+    if ($Version -ne $pinnedVersion) {
+        if (-not (Test-Path $bridgeDir)) {
+            Write-Warning "No upstream bridge patches for version $Version (expected $bridgeDir). Forks will build against $pinnedVersion source unmodified; the result will not match a real $Version install."
+        } else {
+            Write-Host "Applying $Version upstream bridge patches (source reconstruction, not Optimum features - see $bridgeDir/README.md)"
+            Convert-ToLf $bridgeDir
+
+            $bridgeSyntaxFailures = @()
+            $bridgePatches = Get-ChildItem -Path $bridgeDir -Recurse -Filter '*.patch' -File | Sort-Object FullName
+            foreach ($patch in $bridgePatches) {
+                $syntax = Test-PatchSyntax $patch.FullName
+                if (-not $syntax.Success) {
+                    $bridgeSyntaxFailures += $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
+                    Write-Host "  FAILED: $($bridgeSyntaxFailures[-1])"
+                    if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
+                }
+            }
+            if ($bridgeSyntaxFailures.Count -gt 0) {
+                Write-Error "Bridge patch syntax validation failed for $($bridgeSyntaxFailures.Count) file(s)."
+                exit 1
+            }
+
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>$null | Out-Null
+            $ErrorActionPreference = $prevEAP
+
+            $bridgeFailed = @()
+            $bridgeApplied = 0
+            foreach ($patch in $bridgePatches) {
+                $rel = $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
+                Write-Host "Applying $rel"
+                $topProj = ($rel -split '/')[1]
+                $dirArg = if ($vanillaPatchProjects -contains $topProj) { '--directory=build' } else { '' }
+                $result = Invoke-GitApplyOptimumPatch -PatchPath $patch.FullName -DirArg $dirArg
+                if (-not $result.Success) {
+                    $bridgeFailed += $rel
+                    $firstLines = ($result.Output -split "`n") | Select-Object -First 3
+                    Write-Host "  FAILED: $($firstLines -join "`n")"
+                } else {
+                    if ($result.Output) { Write-Host "  $($result.Output)" }
+                    $bridgeApplied++
+                }
+            }
+            Write-Host "Bridge patches: $bridgeApplied applied, $($bridgeFailed.Count) failed"
+            if ($bridgeFailed.Count -gt 0) {
+                Write-Error "$Version bridge patches failed to apply: $($bridgeFailed -join ', '). See $bridgeDir/README.md."
+                exit 1
+            }
+        }
     }
 
     if ((Test-Path $patchesDir) -and (Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File -ErrorAction SilentlyContinue | Select-Object -First 1)) {

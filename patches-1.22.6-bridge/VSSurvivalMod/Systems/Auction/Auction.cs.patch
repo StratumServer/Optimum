@@ -1,0 +1,30 @@
+diff --git a/VSSurvivalMod/Systems/Auction/Auction.cs b/VSSurvivalMod/Systems/Auction/Auction.cs
+index 44837f2..800d36f 100644
+--- a/VSSurvivalMod/Systems/Auction/Auction.cs
++++ b/VSSurvivalMod/Systems/Auction/Auction.cs
+@@ -76,6 +76,8 @@ namespace Vintagestory.GameContent
+         /// </summary>
+         public float SalesCutRate = 0.1f;
+ 
++        public int MaxAuctionsPerPlayer = 100;
++
+ 
+ 
+         public int DeliveryCostsByDistance(Vec3d src, Vec3d dst)
+@@ -118,6 +120,7 @@ namespace Vintagestory.GameContent
+             DeliveryPriceMul = api.World.Config.GetFloat("auctionHouseDeliveryPriceMul", 1);
+             DurationWeeksMul = api.World.Config.GetInt("auctionHouseDurationWeeksMul", 5);
+             SalesCutRate = api.World.Config.GetFloat("auctionHouseSalesCutRate", 0.1f);
++            MaxAuctionsPerPlayer = api.World.Config.GetInt("maxAuctionsPerPlayer", 100);
+         }
+ 
+         #region Client
+@@ -558,7 +561,7 @@ namespace Vintagestory.GameContent
+                 return;
+             }
+ 
+-            if (GetAuctionsFrom((sellerEntity as EntityPlayer).Player).Count > 30)
++            if (GetAuctionsFrom((sellerEntity as EntityPlayer).Player).Count > MaxAuctionsPerPlayer)
+             {
+                 failureCode = "toomanyauctions";
+                 return;

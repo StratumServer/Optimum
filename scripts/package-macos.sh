@@ -80,9 +80,27 @@ BASE_ROOT="$REPO_ROOT/.vanilla/osx-${ARCH}"
 BASE_APP="$BASE_ROOT/Vintage Story.app"
 EXTRACTED_FRESH=0
 
+# Re-extract when the cached bundle's own version marker doesn't match what
+# we're packaging - a directory left over from packaging a different VERSION
+# looks present but ships the wrong VintagestoryLib.vanilla.dll underneath
+# every Cecil patch (same class of bug fixed in bootstrap.sh's .vanilla/win-x64
+# handling and package-linux.sh's .vanilla/linux-x64; this is package-macos.sh's
+# own separate cache, not shared with either).
+EXTRACTED_VERSION=""
+if [[ -d "$BASE_APP/assets" ]]; then
+    EXTRACTED_VERSION="$(find "$BASE_APP/assets" -maxdepth 1 -name 'version-*.txt' 2>/dev/null \
+        | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
+fi
+
 if [[ ! -d "$BASE_APP" ]]; then
     mkdir -p "$BASE_ROOT"
     echo "Extracting to $BASE_ROOT"
+    tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
+    EXTRACTED_FRESH=1
+elif [[ -n "$EXTRACTED_VERSION" && "$EXTRACTED_VERSION" != "$VERSION" ]]; then
+    echo "Cached macOS bundle is $EXTRACTED_VERSION, requested $VERSION - re-extracting"
+    rm -rf "$BASE_ROOT"
+    mkdir -p "$BASE_ROOT"
     tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
     EXTRACTED_FRESH=1
 fi

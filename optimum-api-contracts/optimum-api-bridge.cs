@@ -142,8 +142,7 @@ public static class OptimumApiBridge
         }
 
         // Timed from here down: TryGetValue plus the reflection-based playerPos read in
-        // ChiselDistanceSqTo are the actual per-call cost of this hook (see
-        // docs/benchmarking.md / ChiselLodShadowBenchmark for the isolated measurement).
+        // ChiselDistanceSqTo are the actual per-call cost of this hook.
         long start = Stopwatch.GetTimestamp();
         try
         {

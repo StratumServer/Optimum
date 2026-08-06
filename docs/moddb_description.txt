@@ -150,11 +150,12 @@
 <p>&nbsp;</p>
 <h2>Compatibility</h2>
 <p>Use the Optimum release that matches your Vintage Story version. Players do not need to install anything on the server. Most client mods work, but Optimum changes deeper client internals than a regular mod. If a mod hooks into rendering or entity update loops, test it before trusting it on a long session.</p>
+<p>Vintage Story 1.22.5 is the default target and the fully verified path. Vintage Story 1.22.6 is supported experimentally: install Vintage Story 1.22.6 first, then point the Optimum installer at it (<code>install-linux.sh --version 1.22.6</code>, <code>install-windows.cmd</code> auto-detects it, <code>install-macos.sh</code> asks to confirm the version). Optimum does not update your Vintage Story install for you. The 1.22.6 patches are reconstructed from the compiled client rather than from Anego's published source, so treat it as a stopgap until upstream source catches up.</p>
 <p>&nbsp;</p>
 <h2>Install</h2>
 <p>Optimum ships as source. You build it once against your installed copy of Vintage Story, and the installer produces a self-contained Optimum folder with a launcher that patches copies of the engine assemblies the first time you run it, then caches the result for instant launches after that. Your original Vintage Story install is never touched.</p>
 <h3>Windows (GUI Installer)</h3>
-<p>Download the <code>Source code (zip)</code> from the <a href="https://github.com/Zaldaryon/Optimum/releases/tag/v0.3.4">v0.3.4 release page</a>, extract it, and double-click <code>install-windows.cmd</code>. The installer handles prerequisite checks, decompile, patch, build, package, and registry install with a single click.</p>
+<p>Download the <code>Source code (zip)</code> from the <a href="https://github.com/Zaldaryon/Optimum/releases/tag/v0.3.5">v0.3.5 release page</a>, extract it, and double-click <code>install-windows.cmd</code>. The installer handles prerequisite checks, decompile, patch, build, package, and registry install with a single click, and builds against whichever Vintage Story version (1.22.5 or 1.22.6) it finds installed.</p>
 <h3>Manual Build</h3>
 <ol>
 <li>Download the source for the release that matches your Vintage Story version (the source zip or tar.gz on the release page).</li>

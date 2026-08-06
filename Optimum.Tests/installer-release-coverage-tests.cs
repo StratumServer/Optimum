@@ -156,14 +156,41 @@ public class InstallerReleaseCoverageTests
     }
 
     [Fact]
-    public void WindowsInstallerCapturesPackageSuccessBeforeReadingExitCode()
+    public void WindowsInstallerStreamsPackageOutputInsteadOfBufferingIt()
     {
+        // Regression guard: install-windows.ps1 used to assign
+        // `$packageOutput = & package.ps1 ... *>&1` and only write it to the
+        // log after the call returned. When package.ps1 (via
+        // prepare-runtime-donors.ps1) throws mid-build, PowerShell never
+        // populates that variable, silently dropping every line - including
+        // the real dotnet build compiler errors - and leaving only the
+        // generic wrapper error message. Piping straight into Write-Log
+        // keeps output visible even when the call throws partway through.
         string installer = Read("scripts/install-windows.ps1");
-        int successIndex = installer.IndexOf("$packageSucceeded = $?", StringComparison.Ordinal);
-        int exitCodeIndex = installer.IndexOf("$packageExitCode = $LASTEXITCODE", StringComparison.Ordinal);
 
-        Assert.True(successIndex >= 0);
-        Assert.True(exitCodeIndex > successIndex);
+        Assert.DoesNotContain("$packageOutput = &", installer);
+        Assert.Contains("*>&1 |", installer);
+        Assert.Contains("ForEach-Object { Write-Log ([string]$_) }", installer);
+        Assert.Contains("$packageExitCode = $LASTEXITCODE", installer);
+    }
+
+    [Fact]
+    public void WindowsInstallerNormalizesDriveRootParentPath()
+    {
+        // Regression guard: PowerShell 5.1's Split-Path -Parent strips the
+        // trailing backslash from drive roots (issue #6034), turning
+        // "C:\Optimum" into a parent of "C:" instead of "C:\". "C:" is a
+        // relative path (current directory on drive C) and Join-Path/
+        // New-Item/Move-Item downstream in Install-StagedPackage fail with
+        // "The path is not of a legal form" for anyone installing straight
+        // to a drive root (e.g. C:\Optimum, D:\Optimum). This fix landed
+        // once in 83dfa9b and was silently reverted by a later commit that
+        // rewrote this function without it; this test pins it in place.
+        string installer = Read("scripts/install-windows.ps1");
+
+        Assert.Contains("$parentDir -match '^[A-Za-z]:$'", installer);
+        Assert.Contains("$parentDir = \"$parentDir\\\"", installer);
+        Assert.Contains("$parentDir -ne [System.IO.Path]::GetPathRoot($installPath)", installer);
     }
 
     [Fact]
