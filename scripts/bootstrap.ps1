@@ -508,8 +508,22 @@ try {
         if (-not (Test-Path $ClientArchive)) {
             $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
             Write-Host "Downloading $url (~570MB)"
-            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $ClientArchive $url }
-            if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
+
+            # Written under a temporary name and moved into place only once curl has
+            # succeeded, so an interrupted download leaves nothing rather than a short file
+            # at the cache path. Without this, stopping the bootstrap during the ~570 MB
+            # download poisons the cache: the next run finds the file, reports "Using
+            # cached", and fails in innounp instead.
+            $partial = "$ClientArchive.partial"
+            Remove-Item -Force -ErrorAction SilentlyContinue $partial
+
+            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $partial $url }
+            if ($LASTEXITCODE -ne 0) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $partial
+                throw "Download failed: $url"
+            }
+
+            Move-Item -Force $partial $ClientArchive
         } else {
             Write-Host "Using cached $ClientArchive"
         }
@@ -521,8 +535,19 @@ try {
             New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
             $innounpZip = Join-Path $toolsDir 'innounp-2.zip'
             Write-Host "Downloading innounp"
-            Invoke-NativeStep { curl.exe -L --fail --silent -o $innounpZip "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip" }
-            if ($LASTEXITCODE -ne 0) { throw "Download failed: innounp-2.zip" }
+
+            # Same reasoning as the client archive above: small enough that the window is
+            # narrow, and a short zip here fails in Expand-Archive on every later run.
+            $innounpPartial = "$innounpZip.partial"
+            Remove-Item -Force -ErrorAction SilentlyContinue $innounpPartial
+
+            Invoke-NativeStep { curl.exe -L --fail --silent -o $innounpPartial "https://github.com/jrathlev/InnoUnpacker-Windows-GUI/releases/download/ui_2_2_9/innounp-2.zip" }
+            if ($LASTEXITCODE -ne 0) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $innounpPartial
+                throw "Download failed: innounp-2.zip"
+            }
+
+            Move-Item -Force $innounpPartial $innounpZip
             Expand-Archive -Path $innounpZip -DestinationPath $toolsDir -Force
             $found = Get-ChildItem -Path $toolsDir -Recurse -Filter 'innounp.exe' | Select-Object -First 1
             if ($found -and $found.FullName -ne $innounp) {

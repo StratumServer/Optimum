@@ -160,6 +160,31 @@ extract_archive() {
   esac
 }
 
+# Whether an archive can be read from end to end.
+#
+# The download below is atomic, so nothing this script writes can be short. A cache
+# created before that was true — or left by a kill -9, a full disk, or a machine losing
+# power — is short rather than absent, and the reuse check above only asks whether the
+# file exists. Reading it once costs seconds against a bootstrap measured in tens of
+# minutes, and turns "tar: unexpected end of file" into a second download.
+archive_is_complete() {
+  local archive="$1"
+  [[ -s "$archive" ]] || return 1
+
+  case "$archive" in
+    *.tar.gz|*.tgz) tar -tzf "$archive" >/dev/null 2>&1 ;;
+    *.zip)
+      if command -v unzip >/dev/null 2>&1; then
+        unzip -qt "$archive" >/dev/null 2>&1
+      else
+        python3 -c "import zipfile,sys; sys.exit(0 if zipfile.is_zipfile(sys.argv[1]) else 1)" \
+          "$archive" >/dev/null 2>&1
+      fi
+      ;;
+    *) return 0 ;;
+  esac
+}
+
 normalize_lf() {
   local root="$1"
   [[ -d "$root" ]] || return 0
@@ -221,14 +246,33 @@ download_client_archive() {
   local archive_path="$cache_dir/$archive_name"
 
   if [[ -f "$archive_path" ]]; then
-    echo "Using cached $archive_path" >&2
-    printf '%s\n' "$archive_path"
-    return
+    if archive_is_complete "$archive_path"; then
+      echo "Using cached $archive_path" >&2
+      printf '%s\n' "$archive_path"
+      return
+    fi
+
+    echo "Cached $archive_path is incomplete; downloading it again." >&2
+    rm -f "$archive_path"
   fi
 
   local url="https://cdn.vintagestory.at/gamefiles/stable/$archive_name"
   echo "Downloading $url" >&2
-  curl -L --fail --output "$archive_path" "$url"
+
+  # Written under a temporary name and moved into place only once curl has succeeded, so
+  # an interrupted download leaves nothing rather than a short file at the cache path.
+  # Without this, stopping the bootstrap during the ~500 MB download poisons the cache:
+  # the next run finds the file, reports "Using cached", and fails in tar instead.
+  local partial="$archive_path.partial"
+  rm -f "$partial"
+
+  if ! curl -L --fail --output "$partial" "$url"; then
+    rm -f "$partial"
+    echo "Download failed: $url" >&2
+    return 1
+  fi
+
+  mv -f "$partial" "$archive_path"
   printf '%s\n' "$archive_path"
 }
 
