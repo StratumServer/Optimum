@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$VanillaDir,
+    [string]$RuntimeDonorDir,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release'
 )
@@ -13,10 +14,19 @@ if (-not $VanillaDir) {
     $VanillaDir = Join-Path $repoRoot '.vanilla/win-x64/vintagestory'
 }
 $VanillaDir = [IO.Path]::GetFullPath($VanillaDir)
+$runtimeDonorParent = Split-Path -Parent $VanillaDir
+$runtimeDonorDir = if ($RuntimeDonorDir) {
+    [IO.Path]::GetFullPath($RuntimeDonorDir)
+} elseif ($env:RUNTIME_DONOR_DIR) {
+    [IO.Path]::GetFullPath($env:RUNTIME_DONOR_DIR)
+} else {
+    Join-Path $runtimeDonorParent 'runtime-donors'
+}
 $runtimeRoot = Join-Path $repoRoot '.build/runtime-donors'
 $outputRoot = Join-Path $repoRoot "bin/$Configuration/net10.0"
 $contractsDll = Join-Path $outputRoot 'Optimum.Api.Contracts.dll'
 $gameContentDll = Join-Path $outputRoot 'Optimum.GameContent.dll'
+$apiDll = Join-Path $outputRoot 'VintagestoryAPI.dll'
 
 function Convert-ToLf([string]$Root) {
     if (-not (Test-Path $Root)) { return }
@@ -47,12 +57,15 @@ if (-not $ilspy) {
 }
 
 $required = @(
-    (Join-Path $VanillaDir 'VintagestoryAPI.dll'),
-    (Join-Path $VanillaDir 'Mods/VSEssentials.dll'),
-    (Join-Path $VanillaDir 'Mods/VSEssentials.pdb'),
-    (Join-Path $VanillaDir 'Mods/VSCreativeMod.dll'),
-    (Join-Path $VanillaDir 'Mods/VSSurvivalMod.dll'),
-    (Join-Path $VanillaDir 'Mods/VSSurvivalMod.pdb'),
+    (Join-Path $runtimeDonorDir 'VintagestoryAPI.dll'),
+    (Join-Path $runtimeDonorDir 'Mods/VSEssentials.dll'),
+    (Join-Path $runtimeDonorDir 'Mods/VSEssentials.pdb'),
+    (Join-Path $runtimeDonorDir 'Mods/VSCreativeMod.dll'),
+    (Join-Path $runtimeDonorDir 'Mods/VSSurvivalMod.dll'),
+    (Join-Path $runtimeDonorDir 'Mods/VSSurvivalMod.pdb'),
+    (Join-Path $runtimeDonorDir 'runtime-donor-version.txt'),
+    (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256'),
+    $apiDll,
     $contractsDll,
     $gameContentDll
 )
@@ -60,6 +73,44 @@ foreach ($path in $required) {
     if (-not (Test-Path $path)) {
         throw "Required runtime-donor input not found: $path"
     }
+}
+
+$manifestEntries = Get-Content -LiteralPath (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256')
+$manifestPaths = @()
+foreach ($entry in $manifestEntries) {
+    if ($entry -notmatch '^([0-9a-fA-F]{64})\s{2}(.+)$') {
+        throw "Runtime donor manifest has an invalid entry: $entry"
+    }
+    $expectedHash = $Matches[1].ToLowerInvariant()
+    $relativePath = $Matches[2].Replace('/', [IO.Path]::DirectorySeparatorChar)
+    $relativePath = $relativePath.TrimStart('.', '\', '/')
+    $manifestPaths += $relativePath
+    $inputPath = Join-Path $runtimeDonorDir $relativePath
+    if (-not (Test-Path $inputPath -PathType Leaf)) {
+        throw "Runtime donor manifest references a missing file: $relativePath"
+    }
+    $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $inputPath).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw "Runtime donor snapshot failed integrity validation: $runtimeDonorDir"
+    }
+}
+$actualPaths = @(Get-ChildItem -Path $runtimeDonorDir -Recurse -File |
+    Where-Object { $_.Name -ne 'runtime-donor-manifest.sha256' } |
+    ForEach-Object { $_.FullName.Substring($runtimeDonorDir.Length + 1) } |
+    Sort-Object)
+$sortedManifestPaths = @($manifestPaths | Sort-Object)
+if (($actualPaths -join "`n") -ne ($sortedManifestPaths -join "`n")) {
+    throw "Runtime donor snapshot contains an unexpected file set: $runtimeDonorDir"
+}
+$liveVersionMarker = Get-ChildItem -Path (Join-Path $VanillaDir 'assets') -Filter 'version-*.txt' -File |
+    Select-Object -First 1
+$snapshotVersion = (Get-Content -LiteralPath (Join-Path $runtimeDonorDir 'runtime-donor-version.txt') -Raw).Trim()
+if (-not $liveVersionMarker -or $liveVersionMarker.Name -ne $snapshotVersion) {
+    throw "Runtime donor snapshot version does not match the selected vanilla client."
+}
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $apiDll).Hash -eq
+    (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $runtimeDonorDir 'VintagestoryAPI.dll')).Hash) {
+    throw 'Compiled VintagestoryAPI.dll matches the vanilla snapshot. Rebuild the patched API before donor validation.'
 }
 
 if (Test-Path $runtimeRoot) {
@@ -86,9 +137,10 @@ function Decompile-Mod {
     Write-Host "Decompiling exact $Project runtime donor..."
     $referenceArgs = @()
     foreach ($referenceDir in @(
-            $VanillaDir,
-            (Join-Path $VanillaDir 'Lib'),
-            (Join-Path $VanillaDir 'Mods'))) {
+            $outputRoot,
+            $runtimeDonorDir,
+            (Join-Path $runtimeDonorDir 'Lib'),
+            (Join-Path $runtimeDonorDir 'Mods'))) {
         if (Test-Path $referenceDir -PathType Container) {
             $referenceArgs += @('--referencepath', $referenceDir)
         } else {
@@ -111,17 +163,32 @@ function Decompile-Mod {
     }
 
     $text = [IO.File]::ReadAllText($projectFile)
-    $hintRoot = $VanillaDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    $text = $text.Replace(
-        '<HintPath>.vanilla/win-x64/vintagestory/',
-        "<HintPath>$(ConvertTo-XmlText $hintRoot)")
+    $hintRoot = $runtimeDonorDir.TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    $escapedHintRoot = ConvertTo-XmlText $hintRoot
+    $vanillaRoot = $VanillaDir.TrimEnd('\', '/')
+    $hintPrefixes = @(
+        '.vanilla/win-x64/vintagestory/',
+        '.vanilla\win-x64\vintagestory\',
+        "$vanillaRoot/",
+        "$vanillaRoot\",
+        ($vanillaRoot.Replace('\', '/') + '/')
+    ) | Select-Object -Unique
+    foreach ($prefix in $hintPrefixes) {
+        $pattern = '<HintPath>' + [regex]::Escape($prefix)
+        $replacement = ('<HintPath>' + $escapedHintRoot).Replace('$', '$$')
+        $text = [regex]::Replace(
+            $text,
+            $pattern,
+            $replacement,
+            [Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    }
     $text = [regex]::Replace($text,
         '<LangVersion>\d+\.\d+</LangVersion>',
         '<LangVersion>preview</LangVersion>')
     $text = [regex]::Replace(
         $text,
         '</PropertyGroup>',
-        "  <Nullable>disable</Nullable>`r`n    <NoWarn>`$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>`r`n  </PropertyGroup>",
+        "  <Nullable>disable</Nullable>`r`n    <NoWarn>`$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>`r`n  </PropertyGroup>`r`n  <ItemGroup>`r`n    <FrameworkReference Include=`"Microsoft.NETCore.App`" />`r`n  </ItemGroup>",
         1)
     [IO.File]::WriteAllText($projectFile, $text)
     return $projectFile
@@ -152,7 +219,7 @@ function Set-ReferenceHintPath {
       <Private>false</Private>
     </Reference>
 "@
-    $pattern = '<Reference Include="' + [regex]::Escape($Include) + '"\s*/>'
+    $pattern = '<Reference Include="' + [regex]::Escape($Include) + '">[\s\S]*?</Reference>|<Reference Include="' + [regex]::Escape($Include) + '"\s*/>'
     $text = [regex]::Replace($text, $pattern, $reference, 1)
     [IO.File]::WriteAllText($ProjectFile, $text)
 }
@@ -174,9 +241,9 @@ function Resolve-ProjectReferences {
     param([string]$ProjectFile)
     $text = [IO.File]::ReadAllText($ProjectFile)
     $searchPaths = @(
-        (Join-Path $VanillaDir 'Lib'),
-        $VanillaDir,
-        (Join-Path $VanillaDir 'Mods')
+        (Join-Path $runtimeDonorDir 'Lib'),
+        $runtimeDonorDir,
+        (Join-Path $runtimeDonorDir 'Mods')
     )
     # Pass 1: Self-closing references without HintPath
     $text = [regex]::Replace($text, '<Reference Include="([^"]+)"\s*/>', {
@@ -211,18 +278,20 @@ function Resolve-ProjectReferences {
 
 $essentialsProject = Decompile-Mod `
     'VSEssentials' `
-    (Join-Path $VanillaDir 'Mods/VSEssentials.dll')
+    (Join-Path $runtimeDonorDir 'Mods/VSEssentials.dll')
 $survivalProject = Decompile-Mod `
     'VSSurvivalMod' `
-    (Join-Path $VanillaDir 'Mods/VSSurvivalMod.dll')
+    (Join-Path $runtimeDonorDir 'Mods/VSSurvivalMod.dll')
 
 Add-Reference $essentialsProject 'Optimum.Api.Contracts' $contractsDll
 Add-Reference $essentialsProject 'Optimum.GameContent' $gameContentDll
 Add-Reference $survivalProject 'Optimum.Api.Contracts' $contractsDll
+Set-ReferenceHintPath $essentialsProject 'VintagestoryAPI' $apiDll
+Set-ReferenceHintPath $survivalProject 'VintagestoryAPI' $apiDll
 Set-ReferenceHintPath `
     $survivalProject `
     'VSCreativeMod' `
-    (Join-Path $VanillaDir 'Mods/VSCreativeMod.dll')
+    (Join-Path $runtimeDonorDir 'Mods/VSCreativeMod.dll')
 Exclude-CompileItems $survivalProject @(
     'Vintagestory/GameContent/ModSystemVillagerDebug.cs',
     'Vintagestory/ServerMods/ChiselBlockBulkSetMaterial.cs',
@@ -233,6 +302,17 @@ Resolve-ProjectReferences $survivalProject
 
 foreach ($project in @('VSEssentials', 'VSSurvivalMod')) {
     $patchRoot = Join-Path $repoRoot "patches/runtime/$project"
+    Get-ChildItem -Path $patchRoot -Filter '*.patch' -Recurse -File |
+        Sort-Object FullName |
+        ForEach-Object {
+            $patchPath = $_.FullName
+            Invoke-NativeStep {
+                & git -C $repoRoot apply --check --directory='.build/runtime-donors' --whitespace=nowarn $patchPath *> $null
+            }
+            if ($LASTEXITCODE -ne 0) {
+                throw "Runtime donor unavailable: $project requires a patch refresh for $($_.Name)."
+            }
+        }
     Get-ChildItem -Path $patchRoot -Filter '*.patch' -Recurse -File |
         Sort-Object FullName |
         ForEach-Object {
