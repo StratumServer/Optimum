@@ -127,17 +127,11 @@ with `VERSION`:
 
 ```bash
 make bootstrap VERSION=1.22.7     # official source throughout (default)
-make bootstrap VERSION=1.22.6     # decompiles 1.22.6 engine, forks from 1.22.7 source (compatible)
-make bootstrap VERSION=1.22.5     # decompiles 1.22.5 engine, forks from 1.22.7 source (compatible)
 dotnet build VintageStory.slnx -c Release
 ```
 
-When Anego ships a new client version, see
-[`docs/vintage-story-version-updates.md`](docs/vintage-story-version-updates.md)
-for the two ways to target it - bumping `forks.json` to real upstream source
-(preferred, always try this first) versus a temporary bridge-patch
-reconstruction from the compiled client (stopgap, only when upstream source
-isn't public yet).
+Optimum targets Vintage Story 1.22.7. When Anego ships a new client version,
+bump `forks.json` to the new upstream source and rebuild.
 
 ### Packaging for distribution
 
