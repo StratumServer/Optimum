@@ -1,14 +1,15 @@
 {
   "_comment": "Build sources and reference repos for Optimum. 'compile' entries are built from source. 'reference' entries are cloned for code reading/mapping but NOT compiled - the vanilla DLLs are used instead.",
-  "_1.22.6_check": "Checked 2026-07-31 via 'git ls-remote https://github.com/anegostudios/<repo>.git HEAD' - vsapi/vsessentialsmod/vssurvivalmod/vscreativemod/Cairo all still HEAD at the exact refs pinned below for 1.22.5. The compiled 1.22.6 client is already out, but the matching source hasn't been pushed yet. Re-check before bumping vintageStoryVersion.",
-  "_1.22.6_bridge": "VERIFIED 2026-08-05: 'bash scripts/bootstrap.sh --version 1.22.6' (or 'make bootstrap VERSION=1.22.6') followed by 'dotnet build VintageStory.slnx -c Release' succeeds end-to-end against the real 1.22.6 client (95/95 patches applied, 0 build errors). patches-1.22.6-bridge/ reconstructs the confirmed 1.22.6 source-level changes for vsapi/vsessentialsmod/vssurvivalmod only (the three of five compile-from-source repos with real changes) on top of the refs pinned below. VintagestoryLib/Vintagestory need NO bridge - bootstrap.sh decompiles them fresh from whichever --version's client archive it downloads, so they're already 1.22.6-shaped once decompiled; vscreativemod and Cairo need no bridge either (confirmed identical to 1.22.6 by full decompiled sweep). One real Optimum patch (patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch) collided with 1.22.6's own restoreLogsFolder feature and was fixed at the source (reduced context) during verification. See patches-1.22.6-bridge/README.md for the full story, including two bootstrap.sh bugs found and fixed along the way.",
-  "vintageStoryVersion": "1.22.5",
+  "_1.22.6_check": "Checked 2026-07-31: vsapi/vsessentialsmod/vssurvivalmod/vscreativemod/Cairo all still at 1.22.5 refs. 1.22.6 compiled client was out but source not pushed yet.",
+  "_1.22.6_bridge": "VERIFIED 2026-08-05: bootstrap.sh --version 1.22.6 + build succeed. patches-1.22.6-bridge/ reconstructs source-level changes for vsapi/vsessentialsmod/vssurvivalmod. See patches-1.22.6-bridge/README.md.",
+  "_1.22.7_upgrade": "2026-08-18: Pinned directly to 1.22.7 source refs from ../ref/vintagestory/1.22.7/source/. vsapi, vsessentialsmod, vssurvivalmod advanced; Cairo and vscreativemod unchanged.",
+  "vintageStoryVersion": "1.22.7",
   "compile": [
     {
       "name": "VintagestoryApi",
       "source": "clone",
       "url": "https://github.com/anegostudios/vsapi.git",
-      "ref": "324ccf9e852ffbe3764e3271508f28081123d111"
+      "ref": "63d33f70018c606fb0f70ead900fe90625fbd7b2"
     },
     {
       "name": "Cairo",
@@ -20,13 +21,13 @@
       "name": "VSEssentials",
       "source": "clone",
       "url": "https://github.com/anegostudios/vsessentialsmod.git",
-      "ref": "0cd7da3e4f6e7faba7bcd7f56be4a9a144a1c088"
+      "ref": "06673b67318e002332b6aa8b3d0308f11d2aba99"
     },
     {
       "name": "VSSurvivalMod",
       "source": "clone",
       "url": "https://github.com/anegostudios/vssurvivalmod.git",
-      "ref": "dfaeb44db824a7f37d5b7bf82ba0657633aa0f43"
+      "ref": "849fa8cad9e392368566efc7474e73db6404a145"
     },
     {
       "name": "VSCreativeMod",
