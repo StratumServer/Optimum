@@ -719,6 +719,8 @@ function Invoke-OptimumBuild {
     param([string]$InstallDir, [string]$DataPath, [bool]$Shortcut, [bool]$StartMenu, [string]$VsPath)
 
     if (-not $InstallDir) { throw "InstallDir is required." }
+    # Normalize bare drive letter so GetFullPath does not resolve to CWD.
+    if ($InstallDir -match '^[A-Za-z]:$') { $InstallDir = "$InstallDir\" }
 
     Write-Phase "Verifying tools..."
     Assert-RequiredTools
@@ -813,6 +815,14 @@ function Invoke-OptimumBuild {
             (Join-Path $srcRoot 'VSEssentials'),
             (Join-Path $srcRoot 'VSSurvivalMod'),
             (Join-Path $srcRoot 'bin'),
+            (Join-Path $srcRoot 'dist'),
+            (Join-Path $srcRoot 'build'),
+            (Join-Path $srcRoot 'ref'),
+            (Join-Path $srcRoot 'public'),
+            (Join-Path $srcRoot 'mods'),
+            (Join-Path $srcRoot '.deep-memory'),
+            (Join-Path $srcRoot '.opencode'),
+            (Join-Path $srcRoot 'Optimum.Benchmarks'),
             (Join-Path $srcRoot '.tools'),
             (Join-Path $srcRoot '.vs'),
             (Join-Path $srcRoot '.idea'),
@@ -1837,6 +1847,12 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     if (-not $dir) {
         [System.Windows.Forms.MessageBox]::Show('Choose the install folder.', 'Optimum', 'OK', 'Warning') | Out-Null
         return
+    }
+    # Bare drive letter (e.g. "D:") after TrimEnd is not a rooted path on PS 5.1.
+    # GetFullPath("D:") returns the CWD on that drive, not "D:\".
+    # Normalize to "D:\" so downstream path operations behave correctly.
+    if ($dir -match '^[A-Za-z]:$') {
+        $dir = "$dir\"
     }
 
     # Block installing into the Vintage Story directory (would overwrite vanilla files).

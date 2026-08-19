@@ -13,7 +13,7 @@
 
 # --- Configuration (override via env or make VAR=value) ---
 CONFIGURATION ?= Release
-VERSION ?= $(shell python3 -c "import json;print(json.load(open('forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)
+VERSION ?= $(shell python3 -c "import json;print(json.load(open('forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.7)
 CLIENT_ARCHIVE ?=
 
 # Paths (all overridable)
@@ -40,7 +40,8 @@ endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
 .PHONY: help check check-patches check-compat check-shaders bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-linux package-appimage package-macos package-win
+        package package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
+        coverage mutate-launcher server-smoke
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -80,6 +81,11 @@ patch-il: build ## Run Cecil patcher: vanilla DLL + compiled donor → patched o
 		$(VANILLA_DIR)/VintagestoryLib.vanilla.dll \
 		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib.dll \
 		build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll
+	@echo "Running API patcher..."
+	@dotnet run --project Optimum.Patcher -c $(CONFIGURATION) -- --api \
+		.vanilla/win-x64/runtime-donors/VintagestoryAPI.dll \
+		$(MOD_OUT)/Optimum.Api.Contracts.dll \
+		$(MOD_OUT)/VintagestoryAPI-patched.dll
 	@echo ""
 
 deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client dir and install dir
@@ -87,7 +93,8 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(VANILLA_DIR)/VintagestoryLib.dll
 	@cp $(BUILD_OUT)/Vintagestory.dll $(VANILLA_DIR)/
 	@cp $(BUILD_OUT)/Vintagestory.runtimeconfig.json $(VANILLA_DIR)/
-	@cp $(MOD_OUT)/VintagestoryAPI.dll $(VANILLA_DIR)/
+	@cp $(MOD_OUT)/VintagestoryAPI-patched.dll $(VANILLA_DIR)/VintagestoryAPI.dll
+	@cp $(MOD_OUT)/Optimum.Api.Contracts.dll $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/VSEssentials.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSSurvivalMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
@@ -99,7 +106,8 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp build/VintagestoryLib/bin/$(CONFIGURATION)/net10.0/VintagestoryLib-patched.dll $(INSTALL_DIR)/VintagestoryLib.dll; \
 		cp $(BUILD_OUT)/Vintagestory.dll $(INSTALL_DIR)/; \
 		cp $(BUILD_OUT)/Vintagestory.runtimeconfig.json $(INSTALL_DIR)/; \
-		cp $(MOD_OUT)/VintagestoryAPI.dll $(INSTALL_DIR)/; \
+		cp $(MOD_OUT)/VintagestoryAPI-patched.dll $(INSTALL_DIR)/VintagestoryAPI.dll; \
+		cp $(MOD_OUT)/Optimum.Api.Contracts.dll $(INSTALL_DIR)/; \
 		cp $(MOD_OUT)/VSEssentials.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/VSSurvivalMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
@@ -143,6 +151,39 @@ settings: ## Open client settings in editor
 
 test: build ## Run unit tests (separate from release build)
 	dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-restore --verbosity quiet
+
+coverage: build ## Run tests with coverage, report per-assembly (see which % is Optimum's own code vs the vanilla donor)
+	rm -rf .build/coverage
+	dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --collect:"XPlat Code Coverage" --results-directory .build/coverage || echo "(test failures above do not block the coverage report)"
+	dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --collect:"XPlat Code Coverage" --results-directory .build/coverage || echo "(test failures above do not block the coverage report)"
+	reportgenerator -reports:".build/coverage/**/coverage.cobertura.xml" \
+		-targetdir:.build/coverage/report -reporttypes:"Html;MarkdownSummary"
+	@echo ""
+	@echo "Per-assembly breakdown (donor assemblies like VintagestoryLib/VSSurvivalMod are"
+	@echo "mostly vanilla; Optimum.Launcher/Optimum.Patcher/Optimum.Api.Contracts are ours):"
+	@sed -n '/^# Coverage/,$$p' .build/coverage/report/Summary.md | grep -E '^\| \*\*'
+	@echo ""
+	@echo "Full report: .build/coverage/report/index.html"
+
+mutate-launcher: ## Mutation-test Optimum.Launcher (dotnet-stryker; needs `dotnet tool install -g dotnet-stryker`)
+	cd Optimum.Launcher && dotnet stryker
+
+server-smoke: build ## Isolated dedicated-server smoke test (see docs/automated-testing.md)
+	bash scripts/tests/run-server-smoke.sh --duration 20
+
+bench-scaling: build ## Run the four scaling benchmarks as a regression guard
+	dotnet run --project Optimum.Benchmarks -c Release -- \
+		-f '*AnimBlockLOD*' '*DynamicLightCache*' '*EntityRenderDistCull*' '*ChiselLodRouting*' \
+		-e json
+
+worldgen-benchmark-test: ## Validate precise worldgen benchmark fixtures and statistics
+	bash scripts/tests/worldgen-benchmark-integrity-test.sh
+
+worldgen-benchmark-smoke: build ## Run one short precise worldgen trial per treatment
+	bash scripts/worldgen-benchmark-suite.sh --smoke
+
+worldgen-benchmark: build ## Run the 12-trial precise worldgen release suite
+	bash scripts/worldgen-benchmark-suite.sh
 
 package: build ## Build every package this host can produce (Linux/macOS/Windows)
 	bash scripts/package-all.sh --version $(VERSION)

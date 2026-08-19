@@ -18,7 +18,7 @@ namespace Vintagestory.API.Config;
 ///   The controller never changes Config.MaxChunkRadius itself. Callers
 ///   read EffectiveRadius and clamp their per-client radius against it.
 /// </summary>
-internal sealed class OptimumAdaptiveRadiusController
+public sealed class OptimumAdaptiveRadiusController
 {
     private const double EwmaAlpha = 0.15;
 

@@ -112,6 +112,7 @@ public static class MemberInjector
                     vanilla.MainModule.ImportReference(srcField.FieldType));
                 if (srcField.HasConstant) newField.Constant = srcField.Constant;
                 if (srcField.HasDefault) newField.Constant = srcField.Constant;
+                CopyCustomAttributes(srcField.CustomAttributes, newField.CustomAttributes, vanilla.MainModule);
                 vanillaType.Fields.Add(newField);
                 injected++;
                 Console.WriteLine($"  INJECTED FIELD: {typeName}::{name}");
@@ -163,6 +164,50 @@ public static class MemberInjector
             throw new InvalidOperationException($"Required donor member not found: {typeName}::{name}");
         }
         return injected;
+    }
+
+    /// <summary>
+    /// Changes an existing vanilla field's declared type in place to match the
+    /// donor's declared type for the same field. Unlike <see cref="InjectStaticMembers"/>
+    /// (which only injects fields vanilla lacks and never compares types for
+    /// fields it already has), this requires the field to exist on *both* sides
+    /// and mutates the vanilla <see cref="FieldDefinition"/> instance in place -
+    /// never removes and re-adds it. Cecil hands existing vanilla method bodies
+    /// the FieldDefinition object itself as their instruction operand; replacing
+    /// the definition would orphan those operands and write a FieldDef token for
+    /// a field no longer in the type's field list.
+    /// </summary>
+    public static IReadOnlyList<FieldDefinition> RetypeFields(
+        AssemblyDefinition vanilla, AssemblyDefinition compiled, string typeName, List<string> fieldNames)
+    {
+        var vanillaType = vanilla.MainModule.GetType(typeName)
+            ?? throw new InvalidOperationException($"Required retype type not found in vanilla: {typeName}");
+        var compiledType = compiled.MainModule.GetType(typeName)
+            ?? throw new InvalidOperationException($"Required retype type not found in donor: {typeName}");
+
+        var retyped = new List<FieldDefinition>();
+        foreach (var name in fieldNames)
+        {
+            var vanillaField = vanillaType.Fields.FirstOrDefault(f => f.Name == name)
+                ?? throw new InvalidOperationException($"Required field to retype not found in vanilla: {typeName}::{name}");
+            var srcField = compiledType.Fields.FirstOrDefault(f => f.Name == name)
+                ?? throw new InvalidOperationException($"Required field to retype not found in donor: {typeName}::{name}");
+
+            var newType = vanilla.MainModule.ImportReference(srcField.FieldType);
+            if (vanillaField.FieldType.FullName == newType.FullName)
+            {
+                Console.WriteLine($"  FIELD TYPE ALREADY MATCHES: {typeName}::{name}");
+                retyped.Add(vanillaField);
+                continue;
+            }
+
+            string oldTypeName = vanillaField.FieldType.FullName;
+            vanillaField.FieldType = newType;
+            vanillaField.Attributes = srcField.Attributes;
+            retyped.Add(vanillaField);
+            Console.WriteLine($"  RETYPED FIELD: {typeName}::{name} ({oldTypeName} -> {newType.FullName})");
+        }
+        return retyped;
     }
 
     /// <summary>
@@ -268,6 +313,44 @@ public static class MemberInjector
         }
 
         return injected;
+    }
+
+    /// <summary>
+    /// Copies custom attributes (e.g. [ThreadStatic]) onto a newly injected field.
+    /// Field injection previously carried over only FieldAttributes (visibility/
+    /// static/initonly flags) and silently dropped every real .NET attribute -
+    /// for a plain data field this is harmless, but for something like
+    /// [ThreadStatic] it changes the field's actual runtime semantics from a
+    /// per-thread slot to one shared static, with no error or exception to
+    /// signal it either at patch time or at runtime.
+    /// </summary>
+    private static void CopyCustomAttributes(
+        Mono.Collections.Generic.Collection<CustomAttribute> source,
+        Mono.Collections.Generic.Collection<CustomAttribute> target,
+        ModuleDefinition targetModule)
+    {
+        foreach (var srcAttr in source)
+        {
+            var newAttr = new CustomAttribute(targetModule.ImportReference(srcAttr.Constructor));
+            foreach (var arg in srcAttr.ConstructorArguments)
+            {
+                newAttr.ConstructorArguments.Add(new CustomAttributeArgument(
+                    targetModule.ImportReference(arg.Type), arg.Value));
+            }
+            foreach (var namedArg in srcAttr.Fields)
+            {
+                newAttr.Fields.Add(new CustomAttributeNamedArgument(
+                    namedArg.Name,
+                    new CustomAttributeArgument(targetModule.ImportReference(namedArg.Argument.Type), namedArg.Argument.Value)));
+            }
+            foreach (var namedArg in srcAttr.Properties)
+            {
+                newAttr.Properties.Add(new CustomAttributeNamedArgument(
+                    namedArg.Name,
+                    new CustomAttributeArgument(targetModule.ImportReference(namedArg.Argument.Type), namedArg.Argument.Value)));
+            }
+            target.Add(newAttr);
+        }
     }
 
     private static TypeDefinition CloneType(TypeDefinition src, ModuleDefinition targetModule)

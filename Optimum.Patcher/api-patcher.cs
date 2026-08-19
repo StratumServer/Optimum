@@ -10,7 +10,7 @@ namespace Optimum.Patcher;
 
 /// <summary>
 /// Applies Optimum changes that must live inside the game API while preserving
-/// the owned 1.22.5 assembly as the binary-compatible base.
+/// the owned assembly as the binary-compatible base.
 /// </summary>
 public static class ApiPatcher
 {
@@ -110,6 +110,8 @@ public static class ApiPatcher
                 $"Expected 1 EntityHeadController pose fallback, applied {headControllerFallback}.");
         }
 
+        int typeForwards = InjectTypeForwards(vanilla, contracts);
+
         var selfReferenceErrors = SelfConsistencyVerifier.VerifySelfReferences(vanilla.MainModule);
         if (selfReferenceErrors.Count > 0)
         {
@@ -137,7 +139,8 @@ public static class ApiPatcher
             $"{chiselShadowHooks} chisel LOD shadow hooks, " +
             $"{loggerInitializers} symbol-independent logger initializer, " +
             $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined, " +
-            $"{headControllerFallback} head controller pose fallback.");
+            $"{headControllerFallback} head controller pose fallback, " +
+            $"{typeForwards} type forwards.");
         return true;
     }
 
@@ -542,5 +545,62 @@ public static class ApiPatcher
     {
         method.DebugInformation.SequencePoints.Clear();
         method.DebugInformation.Scope = null;
+    }
+
+    /// <summary>
+    /// Injects type-forwarding entries (ExportedType rows) into the vanilla API assembly
+    /// for every public/internal type defined in the contracts assembly whose namespace
+    /// matches one that VintagestoryLib references as [VintagestoryAPI]. This allows the
+    /// CLR to resolve TypeRefs scoped to VintagestoryAPI that point at Optimum-original
+    /// types living in Optimum.Api.Contracts.dll.
+    /// </summary>
+    private static int InjectTypeForwards(AssemblyDefinition vanilla, AssemblyDefinition contracts)
+    {
+        var contractsName = contracts.Name;
+        var existingRef = vanilla.MainModule.AssemblyReferences
+            .FirstOrDefault(r => r.Name == contractsName.Name);
+        if (existingRef == null)
+        {
+            existingRef = new AssemblyNameReference(contractsName.Name, contractsName.Version)
+            {
+                PublicKeyToken = contractsName.PublicKeyToken,
+                Culture = contractsName.Culture,
+            };
+            vanilla.MainModule.AssemblyReferences.Add(existingRef);
+        }
+
+        var existingForwards = new HashSet<string>(
+            vanilla.MainModule.ExportedTypes.Select(e => e.FullName));
+
+        int count = 0;
+        foreach (var type in contracts.MainModule.Types)
+        {
+            if (type.Name == "<Module>") continue;
+            if (existingForwards.Contains(type.FullName)) continue;
+            // Skip types already defined in the vanilla assembly (e.g. if they
+            // were injected by a prior phase or exist in the original vanilla).
+            if (vanilla.MainModule.GetType(type.FullName) != null) continue;
+
+            vanilla.MainModule.ExportedTypes.Add(
+                new ExportedType(type.Namespace, type.Name, vanilla.MainModule, existingRef));
+            count++;
+
+            // Forward nested types as well.
+            foreach (var nested in type.NestedTypes)
+            {
+                string nestedFullName = $"{type.FullName}/{nested.Name}";
+                if (existingForwards.Contains(nestedFullName)) continue;
+                if (vanilla.MainModule.GetType(nestedFullName) != null) continue;
+
+                var nestedExport = new ExportedType(type.Namespace, nested.Name, vanilla.MainModule, existingRef);
+                nestedExport.Attributes = TypeAttributes.NestedPublic;
+                vanilla.MainModule.ExportedTypes.Add(nestedExport);
+                count++;
+            }
+        }
+
+        if (count > 0)
+            Console.WriteLine($"  API PATCHED: {count} type forward(s) to {contractsName.Name}");
+        return count;
     }
 }

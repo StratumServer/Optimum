@@ -23,7 +23,7 @@ This only reconstructs the dev tree. To build redistributable packages, run
 scripts/package-all.ps1 (or `make package`) after `dotnet build`.
 
 .PARAMETER Version
-Vintage Story version. Default: 1.22.5.
+Vintage Story version. Default: 1.22.7.
 
 .PARAMETER ClientArchive
 Path to an existing Windows installer (.exe). If omitted, downloads from cdn.vintagestory.at.
@@ -35,7 +35,7 @@ Force re-extract, re-decompile, re-clone.
 .EXAMPLE
 .\scripts\bootstrap.ps1
 .\scripts\bootstrap.ps1 -Refresh
-.\scripts\bootstrap.ps1 -ClientArchive C:\Downloads\vs_install_win-x64_1.22.5.exe
+.\scripts\bootstrap.ps1 -ClientArchive C:\Downloads\vs_install_win-x64_1.22.7.exe
 #>
 
 [CmdletBinding()]
@@ -53,7 +53,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Version) {
     $forksFile = Join-Path $repoRoot 'forks.json'
     if (Test-Path $forksFile) { $Version = (Get-Content $forksFile -Raw | ConvertFrom-Json).vintageStoryVersion }
-    else { $Version = '1.22.5' }
+    else { $Version = '1.22.7' }
 }
 $gitInstallUrl = 'https://git-scm.com/download/win'
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -68,6 +68,47 @@ function Read-TextFile([string]$Path) {
 
 function Write-TextFile([string]$Path, [string]$Text) {
     [System.IO.File]::WriteAllText($Path, $Text, $Utf8NoBom)
+}
+
+function New-RuntimeDonorSnapshot([string]$SourceRoot, [string]$TargetRoot) {
+    if (Test-Path $TargetRoot) { Remove-Item -Recurse -Force $TargetRoot }
+    New-Item -ItemType Directory -Force -Path (Join-Path $TargetRoot 'Mods') | Out-Null
+    Copy-Item -Force (Join-Path $SourceRoot 'VintagestoryAPI.dll') $TargetRoot
+    Copy-Item -Recurse -Force (Join-Path $SourceRoot 'Lib') $TargetRoot
+    foreach ($file in @(
+            'Mods/VSEssentials.dll',
+            'Mods/VSEssentials.pdb',
+            'Mods/VSCreativeMod.dll',
+            'Mods/VSSurvivalMod.dll',
+            'Mods/VSSurvivalMod.pdb')) {
+        Copy-Item -Force (Join-Path $SourceRoot $file) (Join-Path $TargetRoot $file)
+    }
+    foreach ($configuration in @('Debug', 'Release')) {
+        foreach ($name in @('VSEssentials', 'VSSurvivalMod', 'VSCreativeMod')) {
+            $compiled = Join-Path $repoRoot "bin/$configuration/net10.0/$name.dll"
+            $vanilla = Join-Path $SourceRoot "Mods/$name.dll"
+            if ((Test-Path $compiled) -and ((Get-FileHash -Algorithm SHA256 -LiteralPath $compiled).Hash -eq (Get-FileHash -Algorithm SHA256 -LiteralPath $vanilla).Hash)) {
+                throw "Cannot snapshot $($name): the selected client already contains the matching Optimum build output."
+            }
+        }
+    }
+    $versionMarker = Get-ChildItem -Path (Join-Path $SourceRoot 'assets') -Filter 'version-*.txt' -File |
+        Select-Object -First 1
+    if (-not $versionMarker) { throw 'Vanilla runtime donor snapshot has no version marker.' }
+    [IO.File]::WriteAllText(
+        (Join-Path $TargetRoot 'runtime-donor-version.txt'),
+        $versionMarker.Name,
+        $Utf8NoBom)
+    $manifest = Get-ChildItem -Path $TargetRoot -Recurse -File |
+        Sort-Object FullName |
+        ForEach-Object {
+            $relative = './' + $_.FullName.Substring($TargetRoot.Length + 1).Replace('\', '/')
+            "$((Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash.ToLowerInvariant())  $relative"
+        }
+    $manifestText = ($manifest -join "`n") + "`n"
+    [IO.File]::WriteAllBytes(
+        (Join-Path $TargetRoot 'runtime-donor-manifest.sha256'),
+        [Text.Encoding]::UTF8.GetBytes($manifestText))
 }
 
 function Update-FileInPlace {
@@ -464,6 +505,7 @@ try {
     $snapshotDir = Join-Path $repoRoot 'build/snapshot'
     $zipCacheDir = Join-Path $vanillaDir '../archives'
     $sourcesDir = Join-Path $repoRoot 'sources'
+    $runtimeDonorDir = Join-Path $vanillaDir 'runtime-donors'
 
     if ($Refresh -and (Test-Path $vanillaDir)) { Remove-Item -Recurse -Force $vanillaDir }
     if ($Refresh -and (Test-Path $snapshotDir)) { Remove-Item -Recurse -Force $snapshotDir }
@@ -611,6 +653,12 @@ try {
             throw "innounp produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run to retry.`n  $names"
         }
         throw "Vanilla client files are corrupt ($($corrupt.Count) empty/truncated file(s)):`n  $names`nIf $winVanillaDir is Optimum's own cache, delete it and retry; if it points at your Vintage Story install, repair or reinstall Vintage Story $Version first."
+    }
+
+    if ($freshExtract -or ($skipDownload -and -not (Test-Path (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256')))) {
+        New-RuntimeDonorSnapshot $winVanillaDir $runtimeDonorDir
+    } elseif (-not (Test-Path (Join-Path $runtimeDonorDir 'runtime-donor-manifest.sha256'))) {
+        Write-Warning 'Protected runtime-donor snapshot is missing. Run bootstrap.ps1 -Refresh before check-patches.ps1.'
     }
 
     # --- 2. Decompile closed-source DLLs ---

@@ -98,12 +98,20 @@ check_dotnet10() {
     if command -v dotnet &>/dev/null; then
         candidates+=("$(command -v dotnet)")
     fi
-    candidates+=(
-        "$HOME/.dotnet/dotnet"
-        "/usr/share/dotnet/dotnet"
-        "/usr/lib/dotnet/dotnet"
-        "/snap/dotnet-sdk/current/dotnet"
-    )
+    if [[ -n "${OPTIMUM_DOTNET_CANDIDATES:-}" ]]; then
+        local candidate_path
+        IFS=: read -ra candidate_paths <<< "$OPTIMUM_DOTNET_CANDIDATES"
+        for candidate_path in "${candidate_paths[@]}"; do
+            candidates+=("$candidate_path")
+        done
+    else
+        candidates+=(
+            "$HOME/.dotnet/dotnet"
+            "/usr/share/dotnet/dotnet"
+            "/usr/lib/dotnet/dotnet"
+            "/snap/dotnet-sdk/current/dotnet"
+        )
+    fi
     local candidate
     for candidate in "${candidates[@]}"; do
         [[ -x "$candidate" ]] || continue
@@ -262,9 +270,9 @@ install_ilspycmd() {
 get_required_vs_version() {
     local forks="$REPO_ROOT/forks.json"
     if [[ -f "$forks" ]]; then
-        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.5"
+        perl -ne 'if (/"vintageStoryVersion"\s*:\s*"([^"]+)"/) { print $1; exit }' "$forks" || echo "1.22.7"
     else
-        echo "1.22.5"
+        echo "1.22.7"
     fi
 }
 

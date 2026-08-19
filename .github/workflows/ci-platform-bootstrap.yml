@@ -1,0 +1,464 @@
+name: Platform bootstrap
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to bootstrap'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - windows
+          - macos-intel
+          - macos-arm
+          - linux
+          - linux-arm
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.platform }}
+  cancel-in-progress: true
+
+jobs:
+  bootstrap-windows:
+    name: Bootstrap windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    if: inputs.platform == 'all' || inputs.platform == 'windows'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_install_win-x64_${version}.exe"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache client archive
+        uses: actions/cache@v4
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-windows-${{ steps.vs_version.outputs.version }}
+
+      - name: Download client archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-windows-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: |
+            nuget-windows-
+
+      - name: Bootstrap
+        timeout-minutes: 20
+        shell: pwsh
+        run: scripts/bootstrap.ps1 -ClientArchive "${{ steps.client.outputs.path }}"
+
+      - name: Build
+        shell: bash
+        run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Check patches
+        shell: bash
+        run: bash scripts/check-patches.sh --strict-unavailable
+
+      - name: Run tests
+        shell: bash
+        run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-logs-windows
+          path: |
+            .vanilla/*/vintagestory/Logs/
+            *.log
+          retention-days: 7
+
+  bootstrap-macos-intel:
+    name: Bootstrap macos-intel
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    if: inputs.platform == 'all' || inputs.platform == 'macos-intel'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bash 4+
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_osx-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache client archive
+        uses: actions/cache@v4
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-macos-intel-${{ steps.vs_version.outputs.version }}
+
+      - name: Download client archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-macos-intel-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: |
+            nuget-macos-intel-
+
+      - name: Bootstrap
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          "$(brew --prefix)/bin/bash" scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+
+      - name: Build
+        shell: bash
+        run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Check patches
+        shell: bash
+        run: |
+          "$(brew --prefix)/bin/bash" scripts/check-patches.sh --strict-unavailable
+
+      - name: Run tests
+        shell: bash
+        run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-logs-macos-intel
+          path: |
+            .vanilla/*/vintagestory/Logs/
+            *.log
+          retention-days: 7
+
+  bootstrap-macos-arm:
+    name: Bootstrap macos-arm
+    runs-on: macos-14
+    timeout-minutes: 45
+    if: inputs.platform == 'all' || inputs.platform == 'macos-arm'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bash 4+
+        run: |
+          brew install bash
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_osx-arm64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache client archive
+        uses: actions/cache@v4
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-macos-arm-${{ steps.vs_version.outputs.version }}
+
+      - name: Download client archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-macos-arm-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: |
+            nuget-macos-arm-
+
+      - name: Bootstrap
+        timeout-minutes: 20
+        shell: bash
+        run: bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+
+      - name: Build
+        shell: bash
+        run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Check patches
+        shell: bash
+        run: bash scripts/check-patches.sh --strict-unavailable
+
+      - name: Run tests
+        shell: bash
+        run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-logs-macos-arm
+          path: |
+            .vanilla/*/vintagestory/Logs/
+            *.log
+          retention-days: 7
+
+  bootstrap-linux:
+    name: Bootstrap linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    if: inputs.platform == 'all' || inputs.platform == 'linux'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache client archive
+        uses: actions/cache@v4
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-${{ steps.vs_version.outputs.version }}
+
+      - name: Download client archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-linux-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: |
+            nuget-linux-
+
+      - name: Bootstrap
+        timeout-minutes: 20
+        shell: bash
+        run: bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+
+      - name: Build
+        shell: bash
+        run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Check patches
+        shell: bash
+        run: bash scripts/check-patches.sh --strict-unavailable
+
+      - name: Run tests
+        shell: bash
+        run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-logs-linux
+          path: |
+            .vanilla/*/vintagestory/Logs/
+            *.log
+          retention-days: 7
+
+  bootstrap-linux-arm:
+    name: Bootstrap linux-arm
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    if: inputs.platform == 'all' || inputs.platform == 'linux-arm'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-arm64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache client archive
+        uses: actions/cache@v4
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-arm-${{ steps.vs_version.outputs.version }}
+
+      - name: Download client archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-linux-arm-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
+          restore-keys: |
+            nuget-linux-arm-
+
+      - name: Bootstrap
+        timeout-minutes: 20
+        shell: bash
+        run: bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+
+      - name: Build
+        shell: bash
+        run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Check patches
+        shell: bash
+        run: bash scripts/check-patches.sh --strict-unavailable
+
+      - name: Run tests
+        shell: bash
+        run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-logs-linux-arm
+          path: |
+            .vanilla/*/vintagestory/Logs/
+            *.log
+          retention-days: 7

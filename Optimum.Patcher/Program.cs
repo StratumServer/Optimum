@@ -54,6 +54,10 @@ var typesToInject = new List<string>
     "Optimum.EntityLightBatchBuffer",
     "Optimum.OptimumOptiTimeGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
+    // Server-side worldgen scheduler + chunk read pool (see
+    // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
+    // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
+    "Vintagestory.Server.OptimumChunkReadPool",
 };
 
 // --- Phase 2b: Members to inject into existing types ---
@@ -111,6 +115,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "EnsureOptimumTimerResolution",
         "OptimumOnProcessExit",
         "_optimumFocusLostStopwatch",
+        "optimumFsrDisabled",
+        "DisableOptimumFsr",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -151,6 +157,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumEntityLightBatchChanged",
         "onOptimumEntityShaderCacheChanged",
         "onOptimumRenderScaleChanged",
+        "onOptimumGodRaysCapChanged",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",
@@ -198,10 +205,17 @@ var membersToInject = new Dictionary<string, List<string>>
         "ApplyOptimumTextureLodBias",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
+    // (_lastSortPlayerPos/_lastSortYaw), plus the multi-tesselator worker pool and
+    // upload-handoff backpressure fields the wiring plan ships alongside them.
     ["Vintagestory.Client.NoObf.ChunkTesselatorManager"] = new()
     {
         "_lastSortPlayerPos",
         "_lastSortYaw",
+        "tesselators",
+        "uploadHandoff",
+        "PrimaryTesselator",
+        "_optimumRecalcPriority",
+        "OptimumRecalcPriority",
     },
     // ChunkTesselator: chisel LOD pool routing helpers and fields
     ["Vintagestory.Client.NoObf.ChunkTesselator"] = new()
@@ -216,6 +230,170 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()
     {
         "optimumUseChiselLodDistance",
+    },
+    // ICoreClientAPI.IsTesselationThread implementations (patches/VintagestoryApi/Client/API/
+    // ICoreClientAPI.cs.patch adds the interface member; every implementer needs a body or the
+    // type fails to load at runtime - this is what crashed the server at GameReady, T-TypeLoad
+    // on ClientCoreAPI, caught by scripts/tests/run-server-smoke.sh). ClientCoreAPI forwards to
+    // ClientMain, which needs the field its body reads. Now that ClientMain::Start (below) is
+    // transplanted and registers the tesselation worker thread, this returns true on that
+    // thread instead of always false - flips VSSurvivalMod/Systems/Cooking/MealMeshCache.cs's
+    // guard from "build the meal mesh inline" to "defer to the main thread", the intended fix.
+    ["Vintagestory.Client.NoObf.ClientCoreAPI"] = new()
+    {
+        "IsTesselationThread",
+    },
+    ["Vintagestory.Client.Gui.MainMenuAPI"] = new()
+    {
+        "IsTesselationThread",
+    },
+    ["Vintagestory.Client.NoObf.ClientMain"] = new()
+    {
+        "tesselationWorkers",
+        "IsTesselationThread",
+        "RegisterTesselationThread",
+        "GetTesselationWorkerSlot",
+        "ChunkTesselatorManager",
+    },
+
+    // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
+    // field initializer only runs once .ctor is a transplant target (see targets below).
+    ["Vintagestory.Server.ChunkColumnLoadRequest"] = new()
+    {
+        "dispatchClaim",
+        "TryClaimDispatch",
+        "ReleaseDispatch",
+    },
+    // Load-bearing dependency, wire before ServerSystemSupplyChunks/ServerSystemLoadAndSaveGame:
+    // both reference chunkthread.optimumReadPool.
+    ["Vintagestory.Server.ChunkServerThread"] = new()
+    {
+        "optimumReadPool",
+    },
+    ["Vintagestory.Server.ServerSystemSupplyChunks"] = new()
+    {
+        "optimumWorldgenPassCaps",
+        "optimumWorldgenPassInFlight",
+        "optimumGeneratorTypeLocks",
+        "optimumGeneratorMethodLocks",
+        "optimumGeneratorLockRegistry",
+        "optimumNextStage",
+        "optimumWorldgenFaulted",
+        "optimumWorldgenAuditReady",
+        "optimumWorldgenWorkersStarted",
+        "optimumWorldgenDispatchesInFlight",
+        "optimumLightConflictLock",
+        "optimumAdaptiveController",
+        "optimumAdaptiveRadiusController",
+        "optimumPostSpawnRaised",
+        "optimumSafetyChecked",
+        "optimumWorkerIndex",
+        "CheckWorldgenConcurrencySafety",
+        "OptimumInitializeWorldgenWorkers",
+        "IsWorldgenHandlerAllowedForParallelPass",
+        "IsWorldgenHandlerDirectlySafe",
+        "GetWorldgenGeneratorLock",
+        "RunWorldgenGenerator",
+        "RunWorldgenGeneratorsUnlocked",
+        "TryClaimWorldgenPass",
+        "ReleaseWorldgenPass",
+        "OptimumWorldgenWorkersActive",
+        "OptimumWorldgenWorkersDrained",
+    },
+    ["Vintagestory.Server.ServerSystemLoadAndSaveGame"] = new()
+    {
+        "optimumSaveBatch",
+        "TryStartOptimumChunkReadPool",
+    },
+    ["Vintagestory.Server.ServerSystemBlockSimulation"] = new()
+    {
+        "optimumPosPool",
+        "optimumPosPoolIndex",
+        "optimumFluidPosPool",
+        "optimumFluidPosPoolIndex",
+        "optimumTickSliceIndex",
+        "OptimumGetPooledPos",
+        "OptimumGetPooledFluidPos",
+    },
+    ["Vintagestory.Server.ServerSystemUnloadChunks"] = new()
+    {
+        "optimumUnloadCandidateSet",
+        "optimumOutOfRangeList",
+        "optimumInRangeSet",
+        "optimumUnloadGenRequests",
+        "optimumUnloadGenChunks",
+        "optimumUnloadGenMapChunks",
+    },
+    ["Vintagestory.Server.ServerSystemCompressChunks"] = new()
+    {
+        "optimumPlayerChunkPositions",
+    },
+    ["Vintagestory.Server.ServerSystemNotifyPing"] = new()
+    {
+        "optimumPingTimeouts",
+    },
+    ["Vintagestory.Server.ServerSystemRelight"] = new()
+    {
+        "optimumLightingDirtyChunks",
+    },
+    ["Vintagestory.Common.GameDatabase"] = new()
+    {
+        "GetChunk",
+    },
+    ["Vintagestory.Common.EventManager"] = new()
+    {
+        "singleDelayedCallbackBlockKeys",
+        "optimumCachedClimateDelegate",
+        "optimumCachedClimateInvocations",
+        "optimumCachedWindDelegate",
+        "optimumCachedWindInvocations",
+    },
+    // ServerPackets.cs.patch: 14th file of cecil-owned.list's server section,
+    // discovered during the wiring plan's triage but not audited there. Verified
+    // separately: zero <>c references in either target method (the class-level
+    // <>c is from an unrelated, untouched method), so no Gap A/B risk. Both new
+    // fields are [ThreadStatic] - exercises the Gap A fix (CustomAttributes
+    // copy) from the same pass.
+    ["Vintagestory.Server.ServerPackets"] = new()
+    {
+        "t_bulkEntityAttributes",
+        "t_bulkEntityAttributesWrapper",
+        "t_bulkEntityDebugAttributes",
+        "t_bulkEntityDebugAttributesWrapper",
+    },
+    // HandlePlayerIdentification/CreatePacketIdentification (a version-string bump
+    // each) and Launch() (needs PlayerAntiAbuseMonitor, itself gated on ServerConfig's
+    // still-unshipped .ctor, see the wiring plan doc) are deliberately not wired.
+    ["Vintagestory.Server.ServerMain"] = new()
+    {
+        "optimumCachedOnlinePlayers",
+        "optimumCachedOnlinePlayersTick",
+        "optimumCachedAllPlayers",
+        "optimumCachedAllPlayersTick",
+        "OptimumShouldSkipClient",
+    },
+};
+
+// --- Phase 2c: existing vanilla fields to retype in place (object -> Lock) ---
+// Worker-pool wiring plan Step 8: the object-to-Lock retype capability
+// (MemberInjector.RetypeFields/ILPatcher.RetargetFieldInitializers/
+// RetypedFieldReaderVerifier) unlocks the 3 dirtyChunks*Lock fields and the
+// MainThreadTasksLock field. Retyping them requires transplanting every reader
+// whose donor body emits Lock.EnterScope() instead of Monitor.Enter/Exit.
+// ChunkTesselatorManager::OnSeperateThreadGameTick is already a worker-pool
+// target and needs no extra listing.
+var fieldsToRetype = new Dictionary<string, List<string>>
+{
+    ["Vintagestory.Client.NoObf.TextureAtlasManager"] = new()
+    {
+        "atlasCreationQueued",
+    },
+    ["Vintagestory.Client.NoObf.ClientMain"] = new()
+    {
+        "dirtyChunksLock",
+        "dirtyChunksPriorityLock",
+        "dirtyChunksLastLock",
+        "MainThreadTasksLock",
     },
 };
 
@@ -240,13 +418,46 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "UpdateFreeMouse", 0),
+    // ClientSystemStartup: atlas pipeline per-stage timing instrumentation.
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "FinaliseTextureAtlas", 3),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "FinaliseTextureAtlas_StageB", 2),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "FinaliseTextureAtlas_StageC", 3),
+    // ClientMain: measure the existing one-launch-task-per-frame policy before
+    // any pacing change. The donor keeps the vanilla queue order and fallback.
+    new("Vintagestory.Client.NoObf.ClientMain", "ExecuteMainThreadTasks", 1),
+    new("Vintagestory.Client.NoObf.ClientMain", "requeueTasks", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "EnqueueMainThreadTask", 2),
+    // ClientMain::Start: transplanted together with the rest of the tesselation
+    // worker pool below - constructs ChunkTesselatorManager, assigns
+    // TerrainChunkTesselator from it (Option B, a real field again), and registers
+    // the tesselation worker thread. See
+    // docs/implementation-plans/chunk-tesselator-worker-pool-wiring-plan-2026-08-10.md.
+    new("Vintagestory.Client.NoObf.ClientMain", "Start", 0),
     // SystemRenderPlayerEffects: dynamic light radius (lambda-free rewrite)
     new("Vintagestory.Client.NoObf.SystemRenderPlayerEffects", "onBeforeRender", 1),
+    // ClientPlatformWindows: persistent mapped VBO and index uploads. ParameterTypes
+    // disambiguates the five updateVAO overloads so the bulk-copy bodies reach the
+    // shipped vanilla DLL instead of remaining only in the donor assembly.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "updateVAO", 6,
+        new[] { "System.Single[]", "System.Int32", "System.Int32", "System.Int32", "System.IntPtr", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "updateVAO", 6,
+        new[] { "System.Int32[]", "System.Int32", "System.Int32", "System.Int32", "System.IntPtr", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "updateVAO", 6,
+        new[] { "System.Int16[]", "System.Int32", "System.Int32", "System.Int32", "System.IntPtr", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "updateVAO", 6,
+        new[] { "System.UInt16[]", "System.Int32", "System.Int32", "System.Int32", "System.IntPtr", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "updateVAO", 6,
+        new[] { "System.Byte[]", "System.Int32", "System.Int32", "System.Int32", "System.IntPtr", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "updateIndices", 5,
+        new[] { "System.Int32[]", "System.Int32", "System.Int32", "Vintagestory.Client.NoObf.VAO", "System.Boolean" }),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
     // FSR: allocate the native intermediate and replace the final bilinear blit.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BlitPrimaryToDefault", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
+    // R4: pass the configured god-rays sample limit to the post-process shader.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderPostprocessingEffects", 1),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop
@@ -280,8 +491,30 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),
     // RenderAPIBase: skip disposed meshrefs instead of rendering freed GL handles (#8881/#8950/#8982-class crash)
     new("Vintagestory.Client.RenderAPIBase", "RenderMultiTextureMesh", 3),
-    // C1: skip RecalcPriority+Sort when the player hasn't moved (lambda-free rewrite)
+    // Chunk tesselator worker pool: .ctor constructs the tesselators/uploadHandoff
+    // worker-pool state (Option B - TerrainChunkTesselator stays a real field, assigned
+    // from ClientMain::Start above), OnBlockTexturesLoaded/OnSeperateThreadGameTick/
+    // TesselateChunk are the pool's three other vanilla-reader sites, and OnBeforeFrame
+    // (C1: skip RecalcPriority+Sort when the player hasn't moved) reads uploadHandoff.Reserved,
+    // now safe because the constructor that assigns it is transplanted here too.
+    new("Vintagestory.Client.NoObf.ChunkTesselatorManager", ".ctor", 1),
+    new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnBlockTexturesLoaded", 0),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnBeforeFrame", 1),
+    new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnSeperateThreadGameTick", 1),
+    new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "TesselateChunk", 6),
+    // Texture atlas overflow recovery and decode worker scaling.
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "RuntimeCreateNewAtlas", 1),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "PopulateTextureAtlassesFromTextures", 0),
+    // Step 8's collateral: the complete non-ctor, non-ChunkTesselatorManager reader
+    // set of the 3 dirtyChunks*Lock fields retyped above (fieldsToRetype) - verified
+    // by an IL scan of the real vanilla module (no other reader exists). Left
+    // untransplanted, these would keep using Monitor.Enter/Exit on a field that
+    // OnSeperateThreadGameTick now locks with Lock.EnterScope() - two locking
+    // primitives on the same field object provide no mutual exclusion against
+    // each other, silently (see RetypedFieldReaderVerifier's doc comment).
+    new("Vintagestory.Client.NoObf.ClientWorldMap", "SetChunkDirty", 4),
+    new("Vintagestory.Client.NoObf.ClientWorldMap", "MarkChunkDirty", 8),
+    new("Vintagestory.Client.NoObf.SystemRenderTerrain", "OnPlayerLeaveChunk", 2),
     // C3+C5: reused chunk-origin vector and pool-location lists per chunk upload
     new("Vintagestory.Client.NoObf.ChunkRenderer", "AddTesselatedChunk", 2),
     new("Vintagestory.Client.NoObf.TesselatedChunk", "AddCenterToPools", 5),
@@ -316,10 +549,72 @@ var targets = new List<MethodTarget>
     // background search-cache build otherwise kills the client (SmithingPlus
     // shutdown race, unhandled on the TyronThreadPool thread).
     new("Vintagestory.Common.CreativeTab", "CreateSearchCache", 1),
+    new("Vintagestory.Common.EventManager", "TriggerOnGetClimate", 4),
+    new("Vintagestory.Common.EventManager", "TriggerOnGetWindSpeed", 2),
+    new("Vintagestory.Common.EventManager", "TriggerGameTick", 2),
+    new("Vintagestory.Common.EventManager", "TriggerGameTickDebug", 2),
+    new("Vintagestory.Common.Compression", "CompressAndCombine", 3),
+    new("Vintagestory.Common.Compression", "DecompressCombined", 4),
+    new("Vintagestory.Common.LoadBalancer", "CreateDedicatedWorkerThread", 3),
     // SvgLoader: reload SVG asset data when a mod holds a stale IAsset ref
     // after the textures category is unloaded (waypoint icon packs, etc.).
     // Vanilla throws; this reloads from Origin, keeping icons drawing.
     new("Vintagestory.Client.NoObf.SvgLoader", "rasterizeSvg", 6),
+
+    // --- Server-side worldgen scheduler + chunk read pool ---
+    // See docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md
+    // for the full IL-level audit behind every target below (nested-type-set
+    // diffs, exact param counts, why the skipped methods are skipped).
+    new("Vintagestory.Server.ChunkColumnLoadRequest", ".ctor", 6),
+    new("Vintagestory.Server.ChunkServerThread", ".ctor", 3),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "OnBeginGameReady", 1),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "OnSeparateThreadTick", 0),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "tryLoadOrGenerateChunkColumnsInQueue", 0),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "loadChunkAreaBlocking", 6),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "GenerateChunkColumns_OnSeparateThread", 2),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "runGenerators", 2),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "GetOrCreateMapChunk", 2),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "TryLoadChunkColumn", 1),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "InitWorldgenAndSpawnChunks", 0),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "CreateAdditionalWorldGenThread", 3),
+    new("Vintagestory.Server.ServerSystemSupplyChunks", "GeneratorThreadLoop", 2),
+    // OptimumGeneratorThreadEntry is dead code (CreateAdditionalWorldGenThread
+    // uses its own inline lambda instead) - deliberately not a target.
+    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "OnBeginConfiguration", 0),
+    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyMapRegions", 1),
+    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyMapChunks", 1),
+    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyLoadedChunks", 2),
+    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyGeneratingChunks", 1),
+    // OnSeperateThreadShutDown is deliberately not a target: its only change is
+    // disposing optimumReadPool, but the pre-existing body also references the
+    // class's shared <>c (SaveGameWorld's cached delegate) - see "Gap B" above.
+    new("Vintagestory.Server.ServerSystemSendChunks", "sendAndEnqueueChunks", 1),
+    new("Vintagestory.Server.ServerSystemBlockSimulation", "GetUpdateInterval", 0),
+    new("Vintagestory.Server.ServerSystemBlockSimulation", "OnSeparateThreadTick", 0),
+    new("Vintagestory.Server.ServerSystemBlockSimulation", "tryTickBlock", 2),
+    new("Vintagestory.Server.ServerSystemUnloadChunks", "UnloadGeneratingChunkColumns", 1),
+    new("Vintagestory.Server.ServerSystemUnloadChunks", "FindUnloadableChunkColumnCandidates", 0),
+    new("Vintagestory.Server.ServerSystemUnloadChunks", "SendOutOfRangeChunkUnloads", 1),
+    new("Vintagestory.Server.PhysicsManager", "ServerTick", 1),
+    new("Vintagestory.Server.PhysicsManager", "BuildClientList", 1),
+    new("Vintagestory.Server.PhysicsManager", "BuildPositionPacket", 4),
+    new("Vintagestory.Server.PhysicsManager", "SendPositionsAndAnimations", 4),
+    new("Vintagestory.Server.BlockAccessorWorldGen", "AddEntity", 1),
+    new("Vintagestory.Server.ServerSystemCompressChunks", "FindFreeableMemory", 0),
+    new("Vintagestory.Server.ServerSystemNotifyPing", "PingTimerTick", 0),
+    new("Vintagestory.Server.ServerSystemInventory", "SendDirtySlots", 1),
+    new("Vintagestory.Server.ServerSystemRelight", "ProcessLightingTask", 2),
+    new("Vintagestory.Server.ServerMain", "get_AllOnlinePlayers", 0),
+    new("Vintagestory.Server.ServerMain", "get_AllPlayers", 0),
+    // Two BroadcastArbitraryPacket overloads share a name and param count -
+    // ParameterTypes disambiguates which one each target binds to.
+    new("Vintagestory.Server.ServerMain", "BroadcastArbitraryPacket", 2,
+        new[] { "System.Byte[]", "Vintagestory.API.Server.IServerPlayer[]" }),
+    new("Vintagestory.Server.ServerMain", "BroadcastArbitraryPacket", 2,
+        new[] { "Packet_Server", "Vintagestory.API.Server.IServerPlayer[]" }),
+    new("Vintagestory.Server.ServerMain", "BroadcastArbitraryUdpPacket", 2),
+    new("Vintagestory.Server.ServerPackets", "GetBulkEntityAttributesPacket", 2),
+    new("Vintagestory.Server.ServerPackets", "GetBulkEntityDebugAttributesPacket", 1),
 };
 
 int total = ILPatcher.PatchWithInjection(
@@ -341,7 +636,8 @@ int total = ILPatcher.PatchWithInjection(
             TargetExplicitThis: false,
             TargetCallingConvention: MethodCallingConvention.Default,
             TargetGenericArity: 0),
-    });
+    },
+    fieldsToRetype: fieldsToRetype);
 
 Console.WriteLine($"\nDone.");
 return total > 0 ? 0 : 1;

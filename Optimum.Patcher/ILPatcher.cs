@@ -66,7 +66,8 @@ public static class ILPatcher
         List<MethodTarget> targets,
         List<HookTarget>? hooks = null,
         Dictionary<string, List<string>>? interfacesToInject = null,
-        bool requireAllTargets = true)
+        bool requireAllTargets = true,
+        Dictionary<string, List<string>>? fieldsToRetype = null)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
@@ -120,9 +121,29 @@ public static class ILPatcher
             injectedMembers += MemberInjector.InjectStaticMembers(vanillaAsm, compiledAsm, typeName, members);
         }
 
+        // Phase 2c: Retype existing vanilla fields in place to match the donor's
+        // declared type (e.g. object -> System.Threading.Lock), preserving the
+        // FieldDefinition's metadata token so pre-existing vanilla method bodies
+        // that already reference it keep resolving. Must run after Phase 2a/2b
+        // (so the type/members it retypes already exist) and before Phase 1 (so
+        // InjectMissingFieldsForMethod's type-mismatch check sees the corrected
+        // type as agreement, not a mismatch, for every transplanted reader).
+        var retypedFields = new List<FieldDefinition>();
+        if (fieldsToRetype != null)
+        {
+            foreach (var (typeName, fieldNames) in fieldsToRetype)
+            {
+                retypedFields.AddRange(MemberInjector.RetypeFields(vanillaAsm, compiledAsm, typeName, fieldNames));
+            }
+        }
+        var retargetedInitializerKeys = retypedFields.Count > 0
+            ? RetargetFieldInitializers(vanillaAsm, retypedFields)
+            : new HashSet<string>();
+
         // Phase 1: Transplant method bodies
         int patched = 0;
         int optionalSkipped = 0;
+        var transplantedMethodKeys = new HashSet<string>();
         foreach (var target in targets)
         {
             var compiledMethod = FindMethod(compiledAsm, target);
@@ -168,6 +189,7 @@ public static class ILPatcher
 
             TransplantBody(vanillaMethod, compiledMethod, vanillaAsm, compiledAsm);
             patched++;
+            transplantedMethodKeys.Add(MethodSignature.GetKey(vanillaMethod));
             Console.WriteLine($"  PATCHED: {target}");
         }
 
@@ -224,6 +246,20 @@ public static class ILPatcher
             return -1;
         }
 
+        if (retypedFields.Count > 0)
+        {
+            var acceptedReaderKeys = new HashSet<string>(transplantedMethodKeys);
+            acceptedReaderKeys.UnionWith(retargetedInitializerKeys);
+            var retypeErrors = RetypedFieldReaderVerifier.Verify(vanillaAsm.MainModule, retypedFields, acceptedReaderKeys);
+            if (retypeErrors.Count > 0)
+            {
+                Console.Error.WriteLine($"\n  {retypeErrors.Count} retyped-field reader error(s), output not written:");
+                foreach (var err in retypeErrors)
+                    Console.Error.WriteLine($"    {err}");
+                return -1;
+            }
+        }
+
         var ilErrors = IlStackVerifier.VerifyModule(vanillaAsm.MainModule);
         if (ilErrors.Count > 0)
         {
@@ -241,6 +277,82 @@ public static class ILPatcher
         return injectedTypes + injectedMembers + injectedInterfaces + patched;
     }
 
+    /// <summary>
+    /// Fixes up pre-existing vanilla field-initializer sites for fields
+    /// <see cref="MemberInjector.RetypeFields"/> just retyped in place. A C#
+    /// field initializer like <c>object gate = new object();</c> compiles to
+    /// <c>ldarg.0; newobj System.Object::.ctor(); stfld object T::gate</c> in
+    /// every constructor of the declaring type - after the field is retyped to
+    /// e.g. System.Threading.Lock, that newobj still constructs a bare object,
+    /// so the CLR would store an object where a Lock is declared. Full trust
+    /// does not verify stfld operand types at load time, so this is silent
+    /// undefined behaviour, not a load error, the first time a transplanted
+    /// reader calls Lock-specific IL (Lock.EnterScope()) on it. The retyped
+    /// field is never itself transplanted - the declaring type's constructor
+    /// carries the `&lt;&gt;c`-cached-lambda blocker like every other ClientMain
+    /// method - so this rewrites the pre-existing vanilla IL directly rather
+    /// than replacing the whole method body.
+    /// Returns the <see cref="MethodSignature.GetKey"/> of every method whose
+    /// initializer was retargeted, so <see cref="RetypedFieldReaderVerifier"/>
+    /// can accept those sites even though they were never Cecil-transplanted.
+    /// </summary>
+    internal static HashSet<string> RetargetFieldInitializers(
+        AssemblyDefinition vanillaAsm, IReadOnlyList<FieldDefinition> retypedFields)
+    {
+        var retargetedMethodKeys = new HashSet<string>();
+        if (retypedFields.Count == 0) return retargetedMethodKeys;
+
+        foreach (var declaringType in retypedFields.Select(f => f.DeclaringType).Distinct())
+        {
+            var fieldsOnThisType = retypedFields.Where(f => f.DeclaringType == declaringType).ToList();
+            foreach (var method in declaringType.Methods)
+            {
+                if (!method.HasBody) continue;
+                if (!method.IsConstructor) continue;
+                var instructions = method.Body.Instructions;
+                for (int i = 1; i < instructions.Count; i++)
+                {
+                    if (instructions[i].OpCode != OpCodes.Stfld) continue;
+                    if (instructions[i].Operand is not FieldReference fieldRef) continue;
+                    var retypedField = fieldsOnThisType.FirstOrDefault(f => f.Name == fieldRef.Name);
+                    if (retypedField == null) continue;
+
+                    var predecessor = instructions[i - 1];
+                    bool isPlainObjectCtorCall =
+                        predecessor.OpCode == OpCodes.Newobj &&
+                        predecessor.Operand is MethodReference ctorRef &&
+                        ctorRef.DeclaringType.FullName == "System.Object" &&
+                        ctorRef.Name == ".ctor";
+                    if (!isPlainObjectCtorCall)
+                    {
+                        throw new InvalidOperationException(
+                            $"{declaringType.FullName}::{method.Name} initializes retyped field " +
+                            $"{fieldRef.DeclaringType.FullName}::{fieldRef.Name} with an unexpected " +
+                            $"predecessor instruction ({predecessor.OpCode}) at IL_{predecessor.Offset:X4}; " +
+                            "expected 'newobj System.Object::.ctor()'.");
+                    }
+
+                    predecessor.Operand = ResolveParameterlessConstructor(retypedField.FieldType, vanillaAsm.MainModule);
+                    retargetedMethodKeys.Add(MethodSignature.GetKey(method));
+                    Console.WriteLine(
+                        $"    RETARGETED INITIALIZER: {declaringType.FullName}::{method.Name} field {fieldRef.Name} " +
+                        $"newobj -> {retypedField.FieldType.FullName}::.ctor()");
+                }
+            }
+        }
+        return retargetedMethodKeys;
+    }
+
+    private static MethodReference ResolveParameterlessConstructor(TypeReference fieldType, ModuleDefinition module)
+    {
+        TypeDefinition resolved = fieldType.Resolve()
+            ?? throw new InvalidOperationException(
+                $"Cannot resolve retyped field type to find its parameterless constructor: {fieldType.FullName}");
+        MethodDefinition ctor = resolved.Methods.FirstOrDefault(m => m.IsConstructor && !m.IsStatic && m.Parameters.Count == 0)
+            ?? throw new InvalidOperationException(
+                $"Retyped field type has no accessible parameterless constructor: {fieldType.FullName}");
+        return module.ImportReference(ctor);
+    }
 
     /// <summary>
     /// Scans a method body for references to compiler-generated nested types
@@ -289,19 +401,26 @@ public static class ILPatcher
         // Inject missing nested types
         foreach (var nestedName in referencedTypes)
         {
-            if (vanillaParent.NestedTypes.Any(t => t.Name == nestedName))
-                continue;
-
             var srcNested = parentType.NestedTypes.FirstOrDefault(t => t.Name == nestedName);
             if (srcNested == null) continue;
 
-            var cloned = MemberInjector.InjectTypes(vanillaAsm, compiledAsm,
-                new List<string>()); // handled below directly
-
-            // Clone the nested type into vanilla
-            var newNested = CloneNestedType(srcNested, vanillaParent, vanillaAsm.MainModule);
-            vanillaParent.NestedTypes.Add(newNested);
-            Console.WriteLine($"    INJECTED NESTED: {parentType.FullName}/{nestedName}");
+            var existingNested = vanillaParent.NestedTypes.FirstOrDefault(t => t.Name == nestedName);
+            if (existingNested == null)
+            {
+                // Clone the nested type into vanilla.
+                var newNested = CloneNestedType(srcNested, vanillaParent, vanillaAsm.MainModule);
+                vanillaParent.NestedTypes.Add(newNested);
+                Console.WriteLine($"    INJECTED NESTED: {parentType.FullName}/{nestedName}");
+            }
+            else
+            {
+                // Compiler-generated ordinals can collide when the donor gains
+                // methods or closures. Keep vanilla's existing nested type and
+                // merge the donor members that the transplanted body references.
+                // Replacing the type would invalidate vanilla methods that still
+                // reference its original fields or lambda helpers.
+                MergeNestedTypeMembers(srcNested, existingNested, vanillaAsm.MainModule);
+            }
         }
     }
 
@@ -432,60 +551,115 @@ public static class ILPatcher
         // Clone methods (with bodies)
         foreach (var method in src.Methods)
         {
-            var newMethod = new MethodDefinition(
-                method.Name,
-                method.Attributes,
-                targetModule.ImportReference(method.ReturnType));
-
-            foreach (var param in method.Parameters)
-            {
-                newMethod.Parameters.Add(new ParameterDefinition(
-                    param.Name, param.Attributes,
-                    targetModule.ImportReference(param.ParameterType)));
-            }
-
-            if (method.HasBody)
-            {
-                newMethod.Body.InitLocals = method.Body.InitLocals;
-                newMethod.Body.MaxStackSize = method.Body.MaxStackSize;
-
-                foreach (var v in method.Body.Variables)
-                    newMethod.Body.Variables.Add(new VariableDefinition(targetModule.ImportReference(v.VariableType)));
-
-                var instrMap = new Dictionary<Instruction, Instruction>();
-                var il = newMethod.Body.GetILProcessor();
-                foreach (var instr in method.Body.Instructions)
-                {
-                    var newInstr = CloneInstructionSimple(instr, targetModule);
-                    instrMap[instr] = newInstr;
-                    il.Append(newInstr);
-                }
-
-                foreach (var instr in newMethod.Body.Instructions)
-                {
-                    if (instr.Operand is Instruction t && instrMap.TryGetValue(t, out var m))
-                        instr.Operand = m;
-                    else if (instr.Operand is Instruction[] ts)
-                        instr.Operand = ts.Select(x => instrMap.TryGetValue(x, out var mx) ? mx : x).ToArray();
-                }
-
-                foreach (var h in method.Body.ExceptionHandlers)
-                {
-                    newMethod.Body.ExceptionHandlers.Add(new ExceptionHandler(h.HandlerType)
-                    {
-                        TryStart = h.TryStart != null ? instrMap.GetValueOrDefault(h.TryStart) : null,
-                        TryEnd = h.TryEnd != null ? instrMap.GetValueOrDefault(h.TryEnd) : null,
-                        HandlerStart = h.HandlerStart != null ? instrMap.GetValueOrDefault(h.HandlerStart) : null,
-                        HandlerEnd = h.HandlerEnd != null ? instrMap.GetValueOrDefault(h.HandlerEnd) : null,
-                        CatchType = h.CatchType != null ? targetModule.ImportReference(h.CatchType) : null,
-                    });
-                }
-            }
-
-            newType.Methods.Add(newMethod);
+            newType.Methods.Add(CloneNestedMethod(method, targetModule));
         }
 
         return newType;
+    }
+
+    private static void MergeNestedTypeMembers(
+        TypeDefinition source,
+        TypeDefinition target,
+        ModuleDefinition targetModule)
+    {
+        foreach (var sourceField in source.Fields)
+        {
+            var targetField = target.Fields.FirstOrDefault(field => field.Name == sourceField.Name);
+            if (targetField != null)
+            {
+                if (targetField.FieldType.FullName != sourceField.FieldType.FullName)
+                {
+                    throw new InvalidOperationException(
+                        $"Compiler-generated nested field collision for {target.FullName}::{sourceField.Name}: " +
+                        $"vanilla uses {targetField.FieldType.FullName}, donor uses {sourceField.FieldType.FullName}");
+                }
+                continue;
+            }
+
+            var newField = new FieldDefinition(
+                sourceField.Name,
+                sourceField.Attributes,
+                targetModule.ImportReference(sourceField.FieldType));
+            if (sourceField.HasConstant) newField.Constant = sourceField.Constant;
+            target.Fields.Add(newField);
+            Console.WriteLine($"    INJECTED NESTED FIELD: {target.FullName}::{sourceField.Name}");
+        }
+
+        foreach (var sourceMethod in source.Methods)
+        {
+            if (target.Methods.Any(method => MethodSignature.Matches(method, sourceMethod)))
+            {
+                continue;
+            }
+
+            target.Methods.Add(CloneNestedMethod(sourceMethod, targetModule));
+            Console.WriteLine($"    INJECTED NESTED METHOD: {target.FullName}::{sourceMethod.Name}");
+        }
+    }
+
+    private static MethodDefinition CloneNestedMethod(MethodDefinition source, ModuleDefinition targetModule)
+    {
+        var target = new MethodDefinition(
+            source.Name,
+            source.Attributes,
+            targetModule.ImportReference(source.ReturnType));
+
+        foreach (var parameter in source.Parameters)
+        {
+            target.Parameters.Add(new ParameterDefinition(
+                parameter.Name,
+                parameter.Attributes,
+                targetModule.ImportReference(parameter.ParameterType)));
+        }
+
+        if (!source.HasBody)
+        {
+            return target;
+        }
+
+        target.Body.InitLocals = source.Body.InitLocals;
+        target.Body.MaxStackSize = source.Body.MaxStackSize;
+
+        foreach (var variable in source.Body.Variables)
+        {
+            target.Body.Variables.Add(new VariableDefinition(targetModule.ImportReference(variable.VariableType)));
+        }
+
+        var instructionMap = new Dictionary<Instruction, Instruction>();
+        var il = target.Body.GetILProcessor();
+        foreach (var instruction in source.Body.Instructions)
+        {
+            var cloned = CloneInstructionSimple(instruction, targetModule);
+            instructionMap[instruction] = cloned;
+            il.Append(cloned);
+        }
+
+        foreach (var instruction in target.Body.Instructions)
+        {
+            if (instruction.Operand is Instruction branch && instructionMap.TryGetValue(branch, out var mapped))
+            {
+                instruction.Operand = mapped;
+            }
+            else if (instruction.Operand is Instruction[] branches)
+            {
+                instruction.Operand = branches.Select(branch =>
+                    instructionMap.TryGetValue(branch, out var mappedBranch) ? mappedBranch : branch).ToArray();
+            }
+        }
+
+        foreach (var handler in source.Body.ExceptionHandlers)
+        {
+            target.Body.ExceptionHandlers.Add(new ExceptionHandler(handler.HandlerType)
+            {
+                TryStart = handler.TryStart != null ? instructionMap.GetValueOrDefault(handler.TryStart) : null,
+                TryEnd = handler.TryEnd != null ? instructionMap.GetValueOrDefault(handler.TryEnd) : null,
+                HandlerStart = handler.HandlerStart != null ? instructionMap.GetValueOrDefault(handler.HandlerStart) : null,
+                HandlerEnd = handler.HandlerEnd != null ? instructionMap.GetValueOrDefault(handler.HandlerEnd) : null,
+                CatchType = handler.CatchType != null ? targetModule.ImportReference(handler.CatchType) : null,
+            });
+        }
+
+        return target;
     }
 
     private static Instruction CloneInstructionSimple(Instruction src, ModuleDefinition targetModule)

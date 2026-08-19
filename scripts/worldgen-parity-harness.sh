@@ -41,10 +41,24 @@ WORLD_NAME="parity-test"
 GENERATE_SECONDS="${GENERATE_SECONDS:-180}"
 SHUTDOWN_GRACE_SECONDS="${SHUTDOWN_GRACE_SECONDS:-15}"
 RUN_AFTER_READY_SECONDS="${RUN_AFTER_READY_SECONDS:-0}"
-# Work-stealing defaults ON in OptimumConfig, so the default gate exercises the
-# multithreaded reference. Set OPTIMUM_WORLDGEN_MT=0 to gate the serial path;
-# the value is forwarded to the patched server, which honors 0 as a force-off.
-MT_MODE="${OPTIMUM_WORLDGEN_MT:-1}"
+# Optimum ships serial worldgen by default. Worker mode needs an explicit
+# worker count so each run records the scheduler configuration it exercises.
+MT_MODE="${OPTIMUM_WORLDGEN_MT:-0}"
+WORKER_COUNT="${OPTIMUM_WORLDGEN_WORKERS:-}"
+
+case "$MT_MODE" in
+    0) ;;
+    1)
+        if [[ ! "$WORKER_COUNT" =~ ^[1-3]$ ]]; then
+            echo "ERROR: worker mode requires OPTIMUM_WORLDGEN_WORKERS=1, 2, or 3" >&2
+            exit 64
+        fi
+        ;;
+    *)
+        echo "ERROR: OPTIMUM_WORLDGEN_MT must be 0 or 1" >&2
+        exit 64
+        ;;
+esac
 
 REFRESH_BASELINE=false
 for arg in "$@"; do
@@ -82,7 +96,12 @@ run_server() {
     echo "[$label] Booting server with seed $SEED (${GENERATE_SECONDS}s timeout)..."
     cd "$server_dir"
 
-    dotnet VintagestoryServer.dll \
+    local -a optimum_env=("OPTIMUM_WORLDGEN_MT=$MT_MODE")
+    if [ "$MT_MODE" = "1" ]; then
+        optimum_env+=("OPTIMUM_WORLDGEN_WORKERS=$WORKER_COUNT")
+    fi
+
+    env "${optimum_env[@]}" dotnet VintagestoryServer.dll \
         --dataPath "$datapath" \
         --withconfig="{ WorldConfig: { Seed: '$SEED', WorldName: '$WORLD_NAME' } }" \
         > "$log_path" 2>&1 &
@@ -120,22 +139,40 @@ find_database() {
     find "$datapath/Saves" -type f -name "*.vcdbs" -print -quit 2>/dev/null
 }
 
-# Count rows of one table that differ (or exist on only one side) between two
-# databases. Prints the count of run-A rows without an identical run-B row.
+sqlite_query() {
+    local database="$1"
+    local query="$2"
+    if command -v sqlite3 > /dev/null 2>&1; then
+        sqlite3 "$database" "$query"
+        return
+    fi
+    python3 - "$database" "$query" <<'PY'
+import sqlite3
+import sys
+
+database, query = sys.argv[1:]
+with sqlite3.connect(database) as connection:
+    for row in connection.execute(query):
+        print("|".join("" if value is None else str(value) for value in row))
+PY
+}
+
+# Count rows of one table that differ between two databases. Prints the count
+# of run-A rows without an identical run-B row.
 count_diff() {
     local table="$1"
     local db_a="$2"
     local db_b="$3"
     comm -23 \
-        <(sqlite3 "$db_a" "SELECT position, hex(data) FROM $table ORDER BY position;" | sort) \
-        <(sqlite3 "$db_b" "SELECT position, hex(data) FROM $table ORDER BY position;" | sort) \
+        <(sqlite_query "$db_a" "SELECT position, hex(data) FROM $table ORDER BY position;" | sort) \
+        <(sqlite_query "$db_b" "SELECT position, hex(data) FROM $table ORDER BY position;" | sort) \
         | wc -l
 }
 
 row_count() {
     local table="$1"
     local db="$2"
-    sqlite3 "$db" "SELECT count(*) FROM $table;"
+    sqlite_query "$db" "SELECT count(*) FROM $table;"
 }
 
 # Gate threshold: reference + max(5, 3*sqrt(reference)), rounded up.
@@ -237,17 +274,17 @@ while IFS= read -r -d '' directory; do
 done < <(find "$VANILLA_SERVER" -mindepth 1 -maxdepth 1 -type d -print0)
 find "$VANILLA_SERVER" -mindepth 1 -maxdepth 1 -type l -exec cp -a --target-directory="$PATCHED_SERVER" {} +
 
-cp --remove-destination "$PATCHED_DLLS/VintagestoryAPI-patched.dll" "$PATCHED_SERVER/VintagestoryAPI.dll"
+cp --remove-destination "$PATCHED_DLLS/VintagestoryAPI.dll" "$PATCHED_SERVER/VintagestoryAPI.dll"
 cp --remove-destination "$PATCHED_DLLS/Optimum.Api.Contracts.dll" "$PATCHED_SERVER/Optimum.Api.Contracts.dll"
 cp --remove-destination "$PATCHED_DLLS/Optimum.GameContent.dll" "$PATCHED_SERVER/Optimum.GameContent.dll"
-cp --remove-destination "$PATCHED_DLLS/VSEssentials-patched.dll" "$PATCHED_SERVER/Mods/VSEssentials.dll"
-cp --remove-destination "$PATCHED_DLLS/VSSurvivalMod-patched.dll" "$PATCHED_SERVER/Mods/VSSurvivalMod.dll"
+cp --remove-destination "$PATCHED_DLLS/VSEssentials.dll" "$PATCHED_SERVER/Mods/VSEssentials.dll"
+cp --remove-destination "$PATCHED_DLLS/VSSurvivalMod.dll" "$PATCHED_SERVER/Mods/VSSurvivalMod.dll"
 echo "  Overlaid: VintagestoryAPI.dll (ABI-preserving Cecil patch)"
 echo "  Overlaid: Optimum.Api.Contracts.dll"
 echo "  Overlaid: exact Cecil-patched official mod assemblies"
 
-# VintagestoryLib ships Cecil-patched, never recompiled - overlay the
-# patcher's output, not a source build.
+# VintagestoryLib ships Cecil-patched, never recompiled (see Current Status
+# in docs/todo.md) - overlay the patcher's output, not a source build.
 if [ -f "$PATCHED_LIB_DLL" ]; then
     cp --remove-destination "$PATCHED_LIB_DLL" "$PATCHED_SERVER/VintagestoryLib.dll"
     echo "  Overlaid: VintagestoryLib.dll (Cecil-patched)"
@@ -258,11 +295,6 @@ fi
 
 PATCHED_DATA="$HARNESS_DIR/patched-data"
 setup_data_dir "$PATCHED_DATA" "$PATCHED_SERVER"
-# Only forward an explicit override; the default run exercises the shipped
-# config default (work-stealing on) rather than an env-forced mode.
-if [ -n "${OPTIMUM_WORLDGEN_MT:-}" ]; then
-    export OPTIMUM_WORLDGEN_MT
-fi
 run_server "PATCHED" "$PATCHED_SERVER" "$PATCHED_DATA" "$HARNESS_DIR/patched-log.txt"
 PATCHED_DB=$(find_database "$PATCHED_DATA")
 if [ -z "$PATCHED_DB" ]; then

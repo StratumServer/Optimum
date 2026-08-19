@@ -13,8 +13,9 @@ namespace Vintagestory.API.Config;
 /// directly. Non-eligible blocks stay untouched for the per-block path.
 ///
 /// Merging is keyed by the caller-supplied "blocks" value (typically the
-/// BlockId) so faces of different materials never combine into one quad.
-/// Eligibility (drawtype, opacity, colormap, texture-bleed,
+/// BlockId) so faces of different materials never combine into one quad
+/// (see docs/implementation-plans/greedy-mesh-phase2-fix-plan-2026-07-09.md,
+/// bug B4). Eligibility (drawtype, opacity, colormap, texture-bleed,
 /// per-position texture variants, AO applicability) must be resolved by
 /// the caller before this runs; this class only knows about the merge key
 /// and the visible-face bitmask, not block semantics.

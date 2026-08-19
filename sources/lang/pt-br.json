@@ -43,5 +43,7 @@
 	"optimum-cmd-description": "Status e diagnósticos do Optimum",
 	"optimum-cmd-status": "Lista cada opção do Optimum e seu valor atual, mais diagnósticos",
 	"optimum-cmd-reset": "Zera todos os contadores de diagnóstico do Optimum",
-	"optimum-cmd-reset-done": "Contadores de diagnóstico do Optimum zerados."
+	"optimum-cmd-reset-done": "Contadores de diagnóstico do Optimum zerados.",
+	"optimum-godrayscap": "Limitar amostras de god-rays",
+	"optimum-godrayscap-tooltip": "Limita o pós-processamento de god-rays a 100 amostras de textura. Desligado mantém o caminho vanilla de 180 amostras."
 }

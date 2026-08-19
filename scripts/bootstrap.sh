@@ -19,14 +19,14 @@ usage() {
 Usage: scripts/bootstrap.sh [--version VERSION] [--client-archive PATH] [--refresh]
 
 Options:
-  --version VERSION        Vintage Story version. Default: 1.22.5
+  --version VERSION        Vintage Story version. Default: 1.22.7
   --client-archive PATH    Existing client archive (tar.gz or zip).
   --refresh                Force re-extract, re-decompile, re-clone.
   -h, --help               Show this help.
 EOF
 }
 
-version="$(python3 -c "import json;print(json.load(open('$repo_root/forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
+version="$(python3 -c "import json;print(json.load(open('$repo_root/forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.7)"
 client_archive=""
 refresh=0
 
@@ -313,6 +313,19 @@ vanilla_dir="$repo_root/.vanilla/win-x64"
 snapshot_dir="$repo_root/build/snapshot"
 zip_cache_dir="$repo_root/.vanilla/archives"
 sources_dir="$repo_root/sources"
+runtime_donor_dir="$vanilla_dir/runtime-donors"
+fresh_extract=0
+
+hash_files() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$@"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$@"
+  else
+    echo "sha256sum or shasum is required for runtime donor snapshots." >&2
+    exit 1
+  fi
+}
 
 if [[ "$refresh" == "1" ]]; then
   rm -rf "$vanilla_dir" "$snapshot_dir"
@@ -336,11 +349,38 @@ fi
 # vanilla.
 vanilla_lib_pristine="$vanilla_dir/vintagestory/VintagestoryLib.vanilla.dll"
 
+snapshot_runtime_donors() {
+  local source="$vanilla_dir/vintagestory"
+  rm -rf -- "$runtime_donor_dir"
+  mkdir -p -- "$runtime_donor_dir/Mods"
+  cp "$source/VintagestoryAPI.dll" "$runtime_donor_dir/"
+  cp -a "$source/Lib" "$runtime_donor_dir/"
+  cp "$source/Mods/VSEssentials.dll" "$runtime_donor_dir/Mods/"
+  cp "$source/Mods/VSEssentials.pdb" "$runtime_donor_dir/Mods/"
+  cp "$source/Mods/VSCreativeMod.dll" "$runtime_donor_dir/Mods/"
+  cp "$source/Mods/VSSurvivalMod.dll" "$runtime_donor_dir/Mods/"
+  cp "$source/Mods/VSSurvivalMod.pdb" "$runtime_donor_dir/Mods/"
+  local version_marker
+  version_marker="$(find "$source/assets" -maxdepth 1 -name 'version-*.txt' -print -quit)"
+  if [[ -z "$version_marker" ]]; then
+    echo "Vanilla runtime donor snapshot has no version marker." >&2
+    exit 1
+  fi
+  basename "$version_marker" > "$runtime_donor_dir/runtime-donor-version.txt"
+  (
+    cd "$runtime_donor_dir"
+    find . -type f -not -name 'runtime-donor-manifest.sha256' -print0 |
+      while IFS= read -r -d '' file; do
+        hash_files "$file"
+      done
+  ) > "$runtime_donor_dir/runtime-donor-manifest.sha256"
+}
+
 # The extracted client always drops an empty assets/version-X.Y.Z.txt marker.
 # Re-extract when the on-disk version doesn't match the requested one, so
 # switching --version doesn't silently keep building against a stale vanilla
 # client from a previous run (existence alone isn't a strong enough check -
-# a prior 1.22.5 extraction and a requested 1.22.6 build both have
+# a prior extraction and a requested different-version build both have
 # .vanilla/win-x64/vintagestory/, just with different DLLs inside).
 extracted_version=""
 if [[ -d "$vanilla_dir/vintagestory/assets" ]]; then
@@ -352,6 +392,7 @@ if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+  fresh_extract=1
 elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
   echo "Extracted client is $extracted_version, requested $version - re-extracting"
   rm -rf "$vanilla_dir" "$snapshot_dir"
@@ -359,12 +400,20 @@ elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+  fresh_extract=1
 elif [[ ! -f "$vanilla_lib_pristine" ]]; then
   echo "WARNING: $vanilla_lib_pristine is missing." >&2
   echo "  If \$vanilla_dir/vintagestory/VintagestoryLib.dll has ever been" >&2
   echo "  overwritten by 'make deploy', it may no longer be pristine vanilla." >&2
   echo "  Re-run with --refresh, or restore VintagestoryLib.vanilla.dll from" >&2
   echo "  \$zip_cache_dir manually before running 'make patch-il'." >&2
+fi
+
+if [[ "$fresh_extract" == "1" ]]; then
+  snapshot_runtime_donors
+elif [[ ! -f "$runtime_donor_dir/runtime-donor-manifest.sha256" ]]; then
+  echo "WARNING: protected runtime-donor snapshot is missing." >&2
+  echo "  Run scripts/bootstrap.sh --refresh before check-patches.sh." >&2
 fi
 
 # 2. Decompile closed-source DLLs.
@@ -1357,7 +1406,7 @@ if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit |
   # Optimum's own patches/ loop below, so those land on top of the bridged
   # source - matching how they'd apply against real source once Anego
   # publishes it.
-  pinned_version="$(python3 -c "import json;print(json.load(open('$forks_file'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
+  pinned_version="$(python3 -c "import json;print(json.load(open('$forks_file'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.7)"
   bridge_dir="$repo_root/patches-${version}-bridge"
   if [[ "$version" != "$pinned_version" ]]; then
     if [[ ! -d "$bridge_dir" ]]; then

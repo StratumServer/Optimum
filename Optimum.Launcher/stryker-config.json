@@ -1,0 +1,11 @@
+{
+  "stryker-config": {
+    "project": "Optimum.Launcher.csproj",
+    "test-projects": [
+      "../Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj"
+    ],
+    "reporters": ["html", "progress", "cleartext"],
+    "thresholds": { "high": 80, "low": 60, "break": 0 },
+    "concurrency": 4
+  }
+}

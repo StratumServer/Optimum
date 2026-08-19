@@ -8,7 +8,7 @@
     Runs per mode. Default 3.
 
 .PARAMETER MaxWorkers
-    Highest worker count to test. Default: ProcessorCount - 1 (capped at 6).
+    Highest exact worker count to test. Accepts 1 through 3. Default 3.
 
 .PARAMETER SpawnChunksWidth
     Override for spawn chunk columns. Default 15 (matches the bash benchmark).
@@ -16,15 +16,21 @@
 .PARAMETER TimeoutSeconds
     Max wait per run before declaring failure. Default 420.
 
+.PARAMETER OutputCsv
+    Absolute or project-relative CSV path for every accepted run. Defaults to
+    .worldgen-benchmark-win/results.csv.
+
 .EXAMPLE
     .\scripts\worldgen-benchmark.ps1
-    .\scripts\worldgen-benchmark.ps1 -Runs 5 -MaxWorkers 4
+    .\scripts\worldgen-benchmark.ps1 -Runs 5 -MaxWorkers 3
 #>
 param(
     [int]$Runs = 3,
-    [int]$MaxWorkers = [Math]::Min(6, [Environment]::ProcessorCount - 1),
+    [ValidateRange(1, 3)]
+    [int]$MaxWorkers = 3,
     [int]$SpawnChunksWidth = 15,
-    [int]$TimeoutSeconds = 420
+    [int]$TimeoutSeconds = 420,
+    [string]$OutputCsv = ''
 )
 
 Set-StrictMode -Version Latest
@@ -34,9 +40,17 @@ $ProjectRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $VanillaServer = Join-Path $ProjectRoot '.vanilla\win-x64\vintagestory'
 $PatchedDlls = Join-Path $ProjectRoot 'bin\Release\net10.0'
 $PatchedLibDll = Join-Path $ProjectRoot 'build\VintagestoryLib\bin\Release\net10.0\VintagestoryLib-patched.dll'
+$RunValidator = Join-Path $ProjectRoot 'scripts\validate-worldgen-run.ps1'
 $BenchDir = Join-Path $ProjectRoot '.worldgen-benchmark-win'
 $MagicNumbersTemplate = Join-Path $ProjectRoot '.worldgen-parity-baseline\servermagicnumbers.json'
 $Seed = '42424242'
+
+if ([string]::IsNullOrWhiteSpace($OutputCsv)) {
+    $OutputCsv = Join-Path $BenchDir 'results.csv'
+} elseif (-not [IO.Path]::IsPathRooted($OutputCsv)) {
+    $OutputCsv = Join-Path $ProjectRoot $OutputCsv
+}
+$OutputCsv = [IO.Path]::GetFullPath($OutputCsv)
 
 # Validate prerequisites
 if (-not (Test-Path $VanillaServer)) {
@@ -49,9 +63,18 @@ if (-not (Test-Path $MagicNumbersTemplate)) {
     Write-Error "servermagicnumbers.json baseline not found; run the parity harness once"
 }
 
+$orphan = Get-CimInstance Win32_Process -Filter "Name = 'dotnet.exe'" | Where-Object {
+    $_.CommandLine -like '*VintagestoryServer.dll*' -and $_.CommandLine -like "*$BenchDir*"
+} | Select-Object -First 1
+if ($orphan) {
+    Write-Error "A VintagestoryServer process uses $BenchDir. Stop process $($orphan.ProcessId) before starting this benchmark."
+}
+
 # Clean slate
 if (Test-Path $BenchDir) { Remove-Item -Recurse -Force $BenchDir }
 New-Item -ItemType Directory -Path $BenchDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Split-Path -Parent $OutputCsv) -Force | Out-Null
+Set-Content -LiteralPath $OutputCsv -Value 'mode,run,workers,seconds'
 
 # Build patched server overlay
 $PatchedServer = Join-Path $BenchDir 'patched-server'
@@ -59,12 +82,25 @@ Write-Host "Building patched server overlay..."
 Copy-Item -Recurse -Path $VanillaServer -Destination $PatchedServer
 
 # Overlay exact Cecil-patched official assemblies and Optimum-owned contracts.
-Copy-Item -Force (Join-Path $PatchedDlls 'VintagestoryAPI-patched.dll') (Join-Path $PatchedServer 'VintagestoryAPI.dll')
+Copy-Item -Force (Join-Path $PatchedDlls 'VintagestoryAPI.dll') (Join-Path $PatchedServer 'VintagestoryAPI.dll')
 Copy-Item -Force (Join-Path $PatchedDlls 'Optimum.Api.Contracts.dll') $PatchedServer
 Copy-Item -Force (Join-Path $PatchedDlls 'Optimum.GameContent.dll') $PatchedServer
-Copy-Item -Force (Join-Path $PatchedDlls 'VSEssentials-patched.dll') (Join-Path $PatchedServer 'Mods/VSEssentials.dll')
-Copy-Item -Force (Join-Path $PatchedDlls 'VSSurvivalMod-patched.dll') (Join-Path $PatchedServer 'Mods/VSSurvivalMod.dll')
+Copy-Item -Force (Join-Path $PatchedDlls 'VSEssentials.dll') (Join-Path $PatchedServer 'Mods/VSEssentials.dll')
+Copy-Item -Force (Join-Path $PatchedDlls 'VSSurvivalMod.dll') (Join-Path $PatchedServer 'Mods/VSSurvivalMod.dll')
 Copy-Item -Force $PatchedLibDll (Join-Path $PatchedServer 'VintagestoryLib.dll')
+
+$script:ActiveBenchmarkProcess = $null
+function Stop-ActiveBenchmarkProcess {
+    if ($null -ne $script:ActiveBenchmarkProcess -and -not $script:ActiveBenchmarkProcess.HasExited) {
+        try { $script:ActiveBenchmarkProcess.Kill($true) } catch {}
+        try { $script:ActiveBenchmarkProcess.WaitForExit(10000) } catch {}
+    }
+    $script:ActiveBenchmarkProcess = $null
+}
+trap {
+    Stop-ActiveBenchmarkProcess
+    break
+}
 
 function Get-SpawnTime {
     param([string]$LogPath)
@@ -129,44 +165,48 @@ function Invoke-BenchRun {
     $psi.EnvironmentVariables['OPTIMUM_WORLDGEN_MT'] = $MtValue
     $psi.EnvironmentVariables['OPTIMUM_WORLDGEN_WORKERS'] = $WorkersValue
 
-    $proc = [System.Diagnostics.Process]::Start($psi)
-
-    # Wait for RunGame marker or timeout
-    $deadline = [DateTime]::Now.AddSeconds($TimeoutSeconds)
+    $proc = $null
     $output = [System.Text.StringBuilder]::new()
-    $reader = $proc.StandardOutput
     $found = $false
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $script:ActiveBenchmarkProcess = $proc
 
-    while (-not $proc.HasExited -and [DateTime]::Now -lt $deadline) {
-        if (-not $reader.EndOfStream) {
-            $line = $reader.ReadLine()
-            [void]$output.AppendLine($line)
-            if ($line -match 'Entering runphase RunGame') {
-                $found = $true
-                break
+        # Wait for the RunGame marker or timeout.
+        $deadline = [DateTime]::Now.AddSeconds($TimeoutSeconds)
+        $reader = $proc.StandardOutput
+
+        while (-not $proc.HasExited -and [DateTime]::Now -lt $deadline) {
+            if (-not $reader.EndOfStream) {
+                $line = $reader.ReadLine()
+                [void]$output.AppendLine($line)
+                if ($line -match 'Entering runphase RunGame') {
+                    $found = $true
+                    break
+                }
+            } else {
+                Start-Sleep -Milliseconds 200
             }
-        } else {
-            Start-Sleep -Milliseconds 200
         }
-    }
 
-    # Drain remaining output briefly
-    Start-Sleep -Milliseconds 500
-
-    # Kill the server
-    if (-not $proc.HasExited) {
-        try { $proc.Kill($true) } catch {}
+        Start-Sleep -Milliseconds 500
+    } finally {
+        Stop-ActiveBenchmarkProcess
+        Remove-Item Env:\OPTIMUM_WORLDGEN_MT -ErrorAction SilentlyContinue
+        Remove-Item Env:\OPTIMUM_WORLDGEN_WORKERS -ErrorAction SilentlyContinue
     }
-    try { $proc.WaitForExit(10000) } catch {}
 
     # Write log
+    try {
+        $stderr = $proc.StandardError.ReadToEnd()
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+            [void]$output.AppendLine($stderr)
+        }
+    } catch {}
     Set-Content -Path $logPath -Value $output.ToString()
 
-    # Clean env
-    Remove-Item Env:\OPTIMUM_WORLDGEN_MT -ErrorAction SilentlyContinue
-    Remove-Item Env:\OPTIMUM_WORLDGEN_WORKERS -ErrorAction SilentlyContinue
-
     if (-not $found) { return -1 }
+    & $RunValidator -LogPath $logPath -ExpectedWorkers ([int]$WorkersValue)
     return Get-SpawnTime $logPath
 }
 
@@ -197,6 +237,7 @@ for ($r = 1; $r -le $Runs; $r++) {
     }
     Write-Host "${t}s"
     $serialTimes += $t
+    Add-Content -LiteralPath $OutputCsv -Value ("serial,{0},0,{1}" -f $r, $t)
     Remove-Item -Recurse -Force (Join-Path $BenchDir "data-serial-run$r") -ErrorAction SilentlyContinue
 }
 $results['serial'] = @{ Times = $serialTimes; Median = (Get-Median $serialTimes) }
@@ -214,6 +255,7 @@ for ($w = 1; $w -le $MaxWorkers; $w++) {
         }
         Write-Host "${t}s"
         $times += $t
+        Add-Content -LiteralPath $OutputCsv -Value ("{0},{1},{2},{3}" -f $label, $r, $w, $t)
         Remove-Item -Recurse -Force (Join-Path $BenchDir "data-$label-run$r") -ErrorAction SilentlyContinue
     }
     $results[$label] = @{ Times = $times; Median = (Get-Median $times) }
@@ -238,3 +280,4 @@ for ($w = 1; $w -le $MaxWorkers; $w++) {
 
 Write-Host ""
 Write-Host "ProcessorCount: $([Environment]::ProcessorCount), MaxWorkers tested: $MaxWorkers"
+Write-Host "CSV: $OutputCsv"

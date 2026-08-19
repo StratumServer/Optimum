@@ -19,7 +19,7 @@ Where to write the output. Default: repo root.
 macOS architecture: arm64 (Apple Silicon, default) or x64 (Intel).
 
 .PARAMETER Version
-Vintage Story version. Default: 1.22.5.
+Vintage Story version. Default: 1.22.7.
 
 .PARAMETER ClientArchive
 Path to an existing macOS client tar.gz. If omitted, downloads from the CDN.
@@ -45,7 +45,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Version) {
     $forksFile = Join-Path $repoRoot 'forks.json'
     if (Test-Path $forksFile) { $Version = (Get-Content $forksFile -Raw | ConvertFrom-Json).vintageStoryVersion }
-    else { $Version = '1.22.5' }
+    else { $Version = '1.22.7' }
 }
 . "$PSScriptRoot/_hostcaps.ps1"
 . "$PSScriptRoot/_exec.ps1"

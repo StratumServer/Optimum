@@ -74,6 +74,15 @@ patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
 
+# The dispatch claim lives on the in-memory load request. It prevents two
+# workers from mutating one column at once and changes no packet or chunk
+# serialization shape.
+patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
+
+# AdaptiveRadiusEffective only lowers the server's requested send radius. It
+# keeps the vanilla packet type and payload unchanged and remains config-gated.
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
+
 # Worldgen passes can create entities concurrently. Interlocked.Increment
 # preserves unique server entity IDs without changing their representation,
 # serialization, packet layout, or recipient selection.
