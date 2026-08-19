@@ -35,10 +35,19 @@
     <Compile Remove="Common\Effect\AmbientModifier.cs" />
     <Compile Remove="Client\optimum-entity-render-batch.cs" />
     <Compile Remove="Config\AdaptiveWorkerController.cs" />
+    <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Remove="Config\OptimumAnimLod.cs" />
     <Compile Remove="Config\OptimumConfig.cs" />
     <Compile Remove="Config\OptimumGreedyMesher.cs" />
+    <Compile Remove="Config\OptimumThreadGuard.cs" />
+    <Compile Remove="Config\OptimumWorkerInstances.cs" />
+    <Compile Remove="Config\OptimumBoundedHandoff.cs" />
+    <Compile Remove="Config\OptimumDispatchClaim.cs" />
+    <Compile Remove="Config\OptimumTesselationWorkerRegistry.cs" />
+    <Compile Remove="Config\OptimumTesselationSafetyGate.cs" />
+    <Compile Remove="Config\OptimumWorldgenSafetyGate.cs" />
+    <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Remove="Config\optimum-api-bridge.cs" />
   </ItemGroup>
 
