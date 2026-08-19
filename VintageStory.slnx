@@ -18,10 +18,7 @@
     <Project Path="VSSurvivalMod/VSSurvivalMod.csproj" />
     <Project Path="VSCreativeMod/VSCreativeMod.csproj" />
   </Folder>
-  <Folder Name="/Tests/">
-    <Project Path="Optimum.Tests/Optimum.Tests.csproj" />
-    <Project Path="Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj" />
-  </Folder>
+  
   <Folder Name="/Launcher/">
     <!-- Runtime patcher: applies Cecil patches at launch, caches result.
          No VS assembly references at compile time — loads everything via reflection. -->
