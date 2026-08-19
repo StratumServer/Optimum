@@ -1,8 +1,20 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/AnimationManager.cs b/VintagestoryApi/Common/Model/Animation/AnimationManager.cs
-index 573ec12..4b3dbae 100644
+index 573ec12..584fe7e 100644
 --- a/VintagestoryApi/Common/Model/Animation/AnimationManager.cs
 +++ b/VintagestoryApi/Common/Model/Animation/AnimationManager.cs
-@@ -450,11 +450,16 @@ namespace Vintagestory.API.Common
+@@ -2,10 +2,11 @@ using System;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+ #nullable disable
+@@ -450,11 +451,16 @@ namespace Vintagestory.API.Common
          {
              if (Animator != null)
              {
@@ -20,11 +32,30 @@ index 573ec12..4b3dbae 100644
              runTriggers();
          }
  
-@@ -474,11 +479,16 @@ namespace Vintagestory.API.Common
+@@ -464,26 +470,44 @@ namespace Vintagestory.API.Common
+         /// The event fired each time the client ticks.
+         /// </summary>
+         /// <param name="dt"></param>
+         public virtual void OnClientFrame(float dt)
+         {
+-            if ((!RunWhilePaused && capi.IsGamePaused) || Animator == null) return;
++            bool measureAnimation = OptimumDiagnostics.StutterWatchEnabled;
++            if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationManagerCall();
++            if ((!RunWhilePaused && capi.IsGamePaused) || Animator == null)
++            {
++                if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationManagerSkip();
++                return;
++            }
+ 
+             if (HeadController != null)
+             {
++                if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationHeadUpdate();
+                 HeadController.OnFrame(dt);
              }
  
              if (entity.IsRendered || entity.IsShadowRendered || !entity.Alive)
              {
++                if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationPoseUpdate();
                  Animator.OnFrame(ActiveAnimationsByAnimCode, dt);
 -                AdjustCollisionBoxToAnimation = ActiveAnimationsByAnimCode.Any(anim => anim.Value.AdjustCollisionBox);
 +                // Optimum: foreach replaces LINQ enumerator allocation (runs every frame)
@@ -35,6 +66,16 @@ index 573ec12..4b3dbae 100644
 +                }
                  runTriggers();
              }
++            else if (measureAnimation)
++            {
++                OptimumDiagnostics.RecordEntityAnimationPoseSkip();
++            }
  
              if (loopingSounds != null)
              {
++                if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationLoopingSoundPass();
+                 foreach (var val in loopingSounds)
+                 {
+                     if (!ActiveAnimationsByAnimCode.ContainsKey(val.Key))
+                     {
+                         val.Value.Stop();

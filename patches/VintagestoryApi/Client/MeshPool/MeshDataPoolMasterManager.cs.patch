@@ -1,0 +1,16 @@
+diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs b/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs
+index 436213b..3e8d15b 100644
+--- a/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs
++++ b/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs
+@@ -63,10 +63,11 @@ namespace Vintagestory.API.Client
+         public void OnFrame(float dt, float[] modelviewMatrix, float[] shadowMVPMatrix)
+         {
+             this.currentDt = dt;
+             this.currentModelViewMatrix = modelviewMatrix;
+             this.shadowMVPMatrix = shadowMVPMatrix;
++            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkRenderFrame();
+             while (removalQueue[3].Count > 0)
+             {
+                 RemoveLocationsNow(removalQueue[3].Dequeue());
+             }
+ 

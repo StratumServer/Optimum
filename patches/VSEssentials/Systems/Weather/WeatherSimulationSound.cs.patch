@@ -2,7 +2,9 @@ diff --git a/VSEssentials/Systems/Weather/WeatherSimulationSound.cs b/VSEssentia
 index 2fa68b1..5455828 100644
 --- a/VSEssentials/Systems/Weather/WeatherSimulationSound.cs
 +++ b/VSEssentials/Systems/Weather/WeatherSimulationSound.cs
-@@ -34,6 +34,13 @@ namespace Vintagestory.GameContent
+@@ -32,10 +32,17 @@ namespace Vintagestory.GameContent
+         float curWindVolumeLeafy = 0f;
+         float curWindVolumeLeafless = 0f;
          float curRainVolumeLeafy = 0f;
          float curRainVolumeLeafless = 0f;
  
@@ -16,7 +18,11 @@ index 2fa68b1..5455828 100644
          float curRainPitch = 1f;
          float curHailVolume = 0f;
          float curHailPitch = 1f;
-@@ -280,14 +287,18 @@ namespace Vintagestory.GameContent
+         float curTrembleVolume = 0f;
+         float curTremblePitch = 0f;
+@@ -278,18 +285,22 @@ namespace Vintagestory.GameContent
+             curRainPitch += (targetRainPitch - curRainPitch) * dt;
+             curTremblePitch += (targetTremblePitch - curTremblePitch) * dt;
  
              if (rainSoundsOn)
              {
@@ -37,7 +43,11 @@ index 2fa68b1..5455828 100644
                      rainSoundsLeafy[i]?.SetPitch(curRainPitch);
                  }
              }
-@@ -335,8 +346,18 @@ namespace Vintagestory.GameContent
+ 
+             lowTrembleSound?.SetVolume(curTrembleVolume);
+@@ -333,12 +344,22 @@ namespace Vintagestory.GameContent
+                 float targetVolumeLeafless = (1 - nearbyLeaviness) * 1.2f * wstr;
+ 
                  curWindVolumeLeafy += (targetVolumeLeafy - curWindVolumeLeafy) * dt;
                  curWindVolumeLeafless += (targetVolumeLeafless - curWindVolumeLeafless) * dt;
  
@@ -58,3 +68,5 @@ index 2fa68b1..5455828 100644
  
              }
              else
+             {
+                 if (windSoundsOn)

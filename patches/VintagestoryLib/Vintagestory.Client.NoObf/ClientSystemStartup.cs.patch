@@ -1,0 +1,43 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
+index f437458..cb5daad 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
+@@ -738,11 +738,14 @@ public class ClientSystemStartup : ClientSystem
+ 	}
+ 
+ 	internal void FinaliseTextureAtlas(TextureAtlasManager manager, string type, Action onCompleted)
+ 	{
+ 		logger.VerboseDebug("Server assets - composing " + type + " texture atlas on main thread");
++		long stageAStart = Stopwatch.GetTimestamp();
+ 		manager.ComposeTextureAtlasses_StageA();
++		long stageAElapsed = Stopwatch.GetTimestamp() - stageAStart;
++		logger.Notification("[Optimum] Atlas {0} StageA (upload): {1:F1} ms", type, stageAElapsed * 1000.0 / Stopwatch.Frequency);
+ 		logger.VerboseDebug("Server assets - done " + type + " textures composition");
+ 		if (ClientSettings.OffThreadMipMapCreation)
+ 		{
+ 			TyronThreadPool.QueueTask(delegate
+ 			{
+@@ -762,17 +765,23 @@ public class ClientSystemStartup : ClientSystem
+ 		}, "FinaliseTextureAtlas_StageC_" + type);
+ 	}
+ 
+ 	private void FinaliseTextureAtlas_StageB(TextureAtlasManager manager, string type)
+ 	{
++		long start = Stopwatch.GetTimestamp();
+ 		manager.ComposeTextureAtlasses_StageB();
++		long elapsed = Stopwatch.GetTimestamp() - start;
++		logger.Notification("[Optimum] Atlas {0} StageB (mipmaps): {1:F1} ms", type, elapsed * 1000.0 / Stopwatch.Frequency);
+ 		logger.VerboseDebug("Server assets - done " + type + " textures mipmap creation");
+ 	}
+ 
+ 	private void FinaliseTextureAtlas_StageC(TextureAtlasManager manager, string type, Action onCompleted)
+ 	{
++		long start = Stopwatch.GetTimestamp();
+ 		manager.ComposeTextureAtlasses_StageC();
++		long elapsed = Stopwatch.GetTimestamp() - start;
++		logger.Notification("[Optimum] Atlas {0} StageC (color sampling): {1:F1} ms", type, elapsed * 1000.0 / Stopwatch.Frequency);
+ 		logger.VerboseDebug("Server assets - done " + type + " textures random and average color collection");
+ 		onCompleted?.Invoke();
+ 	}
+ 
+ 	internal void BeginItemTesselation()

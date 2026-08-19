@@ -1,8 +1,12 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
-index 455b85f..c82c8cf 100644
+index 43dace8..0c2708a 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
-@@ -30,2 +30,9 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -28,10 +28,17 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 
+ 	private BlockAccessorWorldGenUpdateHeightmap blockAccessorWGUpdateHeightMap;
+ 
+ 	private Dictionary<long, ServerChunk> chunksCopy = new Dictionary<long, ServerChunk>();
  
 +	// Optimum: single reusable batch list shared across all four SaveAllDirty* methods.
 +	// These run sequentially under savingLock, so one field suffices. No field
@@ -12,47 +16,103 @@ index 455b85f..c82c8cf 100644
 +	private List<DbChunk> optimumSaveBatch;
 +
  	private bool ignoreSave;
-@@ -155,2 +162,6 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 
+ 	internal static PlayerSpawnPos SetDefaultSpawnOnce;
+ 
+ 	private FastMemoryStream reusableStream => reusableMemoryStream ?? (reusableMemoryStream = new FastMemoryStream());
+@@ -153,10 +160,14 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 				ServerMain.Logger.Event("Failed upgrading old savegame, giving up, sorry.");
+ 				throw new InvalidDataException("Failed upgrading savegame {0}", innerException);
+ 			}
+ 		}
  		chunkthread.gameDatabase.UpgradeToWriteAccess();
 +
 +		// Optimum: start parallel chunk read pool
 +		TryStartOptimumChunkReadPool();
 +
  		server.ModEventManager.OnWorldgenStartup += OnWorldgenStartup;
-@@ -205,2 +216,4 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		if (!string.IsNullOrWhiteSpace(server.progArgs.RestoreLogsFolder))
+ 		{
+ 			server.ModEventManager.RegisterOnServerRunPhase(EnumServerRunPhase.RunGame, OnRestoreFromBuildLog);
+ 		}
+@@ -207,10 +218,12 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		}
+ 	}
+ 
+ 	public override void OnSeperateThreadShutDown()
  	{
 +		try { chunkthread.optimumReadPool?.Dispose(); } catch { }
 +		chunkthread.optimumReadPool = null;
  		chunkthread.gameDatabase.Dispose();
-@@ -396,3 +409,5 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
+ 	public void OnWorldBeingSaved()
+ 	{
+@@ -398,11 +411,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
+ 	private int SaveAllDirtyMapRegions(FastMemoryStream ms)
+ 	{
  		int num = 0;
 -		List<DbChunk> list = new List<DbChunk>();
 +		optimumSaveBatch ??= new List<DbChunk>();
 +		optimumSaveBatch.Clear();
 +		List<DbChunk> list = optimumSaveBatch;
  		foreach (KeyValuePair<long, ServerMapRegion> loadedMapRegion in server.loadedMapRegions)
-@@ -417,3 +432,5 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		{
+ 			if (loadedMapRegion.Value.DirtyForSaving)
+ 			{
+ 				loadedMapRegion.Value.DirtyForSaving = false;
+@@ -419,11 +434,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
+ 	private int SaveAllDirtyMapChunks(FastMemoryStream ms)
+ 	{
  		int num = 0;
 -		List<DbChunk> list = new List<DbChunk>();
 +		optimumSaveBatch ??= new List<DbChunk>();
 +		optimumSaveBatch.Clear();
 +		List<DbChunk> list = optimumSaveBatch;
  		foreach (KeyValuePair<long, ServerMapChunk> loadedMapChunk in server.loadedMapChunks)
-@@ -444,3 +461,5 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		{
+ 			if (loadedMapChunk.Value.DirtyForSaving)
+ 			{
+ 				loadedMapChunk.Value.DirtyForSaving = false;
+@@ -446,11 +463,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
+ 	internal int SaveAllDirtyLoadedChunks(bool isSaveLater, FastMemoryStream ms)
+ 	{
  		int num = 0;
 -		List<DbChunk> list = new List<DbChunk>();
 +		optimumSaveBatch ??= new List<DbChunk>();
 +		optimumSaveBatch.Clear();
 +		List<DbChunk> list = optimumSaveBatch;
  		if (!isSaveLater)
-@@ -500,3 +519,5 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		{
+ 			PopulateChunksCopy();
+ 		}
+ 		foreach (KeyValuePair<long, ServerChunk> item in chunksCopy)
+@@ -504,11 +523,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	internal int SaveAllDirtyGeneratingChunks(FastMemoryStream ms)
+ 	{
  		int num = 0;
--		List<DbChunk> list = new List<DbChunk>();
-+		optimumSaveBatch ??= new List<DbChunk>();
-+		optimumSaveBatch.Clear();
-+		List<DbChunk> list = optimumSaveBatch;
  		if (chunkthread.requestedChunkColumns.Count > 0)
-@@ -566,2 +587,26 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		{
+-			List<DbChunk> list = new List<DbChunk>();
++			optimumSaveBatch ??= new List<DbChunk>();
++			optimumSaveBatch.Clear();
++			List<DbChunk> list = optimumSaveBatch;
+ 			List<DbChunk> list2 = new List<DbChunk>();
+ 			foreach (ChunkColumnLoadRequest item in chunkthread.requestedChunkColumns.Snapshot())
+ 			{
+ 				if (item.Chunks == null || item.Disposed || item.CurrentIncompletePass <= EnumWorldGenPass.Terrain)
+ 				{
+@@ -721,6 +742,31 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 			list.Clear();
+ 		}
+ 		ServerMain.Logger.Notification($"Block restore: Total of {dictionary.Count} chunks and {num} block have been restored from the build log. {num2} Blocks already had a new Block at their position.");
+ 		server.exitState.Mode = EnumExitMode.SoftExit;
  	}
 +
 +	private void TryStartOptimumChunkReadPool()
@@ -78,4 +138,5 @@ index 455b85f..c82c8cf 100644
 +			chunkthread.optimumReadPool = null;
 +		}
 +	}
++
  }

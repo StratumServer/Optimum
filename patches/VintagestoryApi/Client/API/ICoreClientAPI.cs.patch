@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/API/ICoreClientAPI.cs b/VintagestoryApi/Client/API/ICoreClientAPI.cs
+index 92ed256..aeee1f2 100644
+--- a/VintagestoryApi/Client/API/ICoreClientAPI.cs
++++ b/VintagestoryApi/Client/API/ICoreClientAPI.cs
+@@ -264,7 +264,12 @@ namespace Vintagestory.API.Client
+ 
+         /// <summary>
+         /// The threadId of the ChunkTesselator thread client-side
+         /// </summary>
+         int TesselationThreadId { get; }
++
++        /// <summary>
++        /// Returns true when the supplied managed thread id belongs to a client tessellation worker.
++        /// </summary>
++        bool IsTesselationThread(int threadId);
+     }
+ }

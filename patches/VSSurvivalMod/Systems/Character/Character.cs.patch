@@ -1,0 +1,23 @@
+diff --git a/VSSurvivalMod/Systems/Character/Character.cs b/VSSurvivalMod/Systems/Character/Character.cs
+index 0b59246..d5a00e0 100644
+--- a/VSSurvivalMod/Systems/Character/Character.cs
++++ b/VSSurvivalMod/Systems/Character/Character.cs
+@@ -593,11 +593,17 @@ namespace Vintagestory.GameContent
+ 
+         private void Event_PlayerJoinServer(IServerPlayer byPlayer)
+         {
+             didSelect = SerializerUtil.Deserialize(byPlayer.GetModdata("createCharacter"), false);
+ 
+-            if (!didSelect)
++            if (!didSelect && Environment.GetEnvironmentVariable("OPTIMUM_SKIP_CHAR_SELECT") == "1")
++            {
++                setCharacterClass(byPlayer.Entity, characterClasses[0].Code, true);
++                didSelect = true;
++                byPlayer.SetModData("createCharacter", SerializerUtil.Serialize(true));
++            }
++            else if (!didSelect)
+             {
+                 setCharacterClass(byPlayer.Entity, characterClasses[0].Code, false);
+             }
+ 
+             var classChangeMonths = sapi.World.Config.GetDecimal("allowClassChangeAfterMonths", -1);

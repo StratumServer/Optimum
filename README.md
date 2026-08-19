@@ -65,8 +65,8 @@ The installer shows a ✓/✗ checklist of required tools, offers to install any
 git clone https://github.com/Zaldaryon/Optimum.git
 cd Optimum
 make package-appimage
-chmod +x Optimum-v0.3.7-linux-x64.AppImage
-./Optimum-v0.3.7-linux-x64.AppImage
+chmod +x Optimum-v0.3.8-linux-x64.AppImage
+./Optimum-v0.3.8-linux-x64.AppImage
 ```
 
 If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/`.
@@ -100,7 +100,7 @@ The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story inst
 ```powershell
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.3.7-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.3.8-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
@@ -127,11 +127,17 @@ with `VERSION`:
 
 ```bash
 make bootstrap VERSION=1.22.7     # official source throughout (default)
+make bootstrap VERSION=1.22.6     # decompiles 1.22.6 engine, forks from 1.22.7 source (compatible)
+make bootstrap VERSION=1.22.5     # decompiles 1.22.5 engine, forks from 1.22.7 source (compatible)
 dotnet build VintageStory.slnx -c Release
 ```
 
-Optimum targets Vintage Story 1.22.7. When Anego ships a new client version,
-bump `forks.json` to the new upstream source and rebuild.
+When Anego ships a new client version, see
+[`docs/vintage-story-version-updates.md`](docs/vintage-story-version-updates.md)
+for the two ways to target it - bumping `forks.json` to real upstream source
+(preferred, always try this first) versus a temporary bridge-patch
+reconstruction from the compiled client (stopgap, only when upstream source
+isn't public yet).
 
 ### Packaging for distribution
 
@@ -155,9 +161,9 @@ make package-win          # Windows zip (native Windows or WSL; cache works else
 Or call the scripts directly:
 
 ```bash
-./scripts/package-linux.sh                     # Optimum-v0.3.7-linux-x64.tar.gz
+./scripts/package-linux.sh                     # Optimum-v0.3.8-linux-x64.tar.gz
 ./scripts/package-linux.sh --format zip
-./scripts/package-linux.sh --format appimage   # Optimum-v0.3.7-linux-x64.AppImage
+./scripts/package-linux.sh --format appimage   # Optimum-v0.3.8-linux-x64.AppImage
 ./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
 ./scripts/package-macos.sh --arch x64          # Intel .dmg
 ./scripts/package-all.sh                       # all capable targets at once

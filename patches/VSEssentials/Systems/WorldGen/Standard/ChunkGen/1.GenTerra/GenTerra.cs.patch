@@ -1,0 +1,174 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
+index 5f759f1..629fd1b 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
+@@ -36,12 +36,10 @@ namespace Vintagestory.ServerMods
+ 
+         NewNormalizedSimplexFractalNoise terrainNoise;
+         SimplexNoise distort2dx;
+         SimplexNoise distort2dz;
+         NormalizedSimplexNoise geoUpheavalNoise;
+-        WeightedTaper[] taperMap;
+-
+         struct ThreadLocalTempData
+         {
+             public double[] LerpedAmplitudes;
+             public double[] LerpedThresholds;
+             public float[] landformWeights;
+@@ -57,14 +55,40 @@ namespace Vintagestory.ServerMods
+         struct ColumnResult
+         {
+             public BitArray ColumnBlockSolidities;
+             public int WaterBlockID;
+         }
+-        ColumnResult[] columnResults;
+-        bool[] layerFullySolid;     // We can't use BitArrays for these because code which writes to them is heavily multi-threaded; but anyhow they are only mapSizeY x 4 bytes
+-        bool[] layerFullyEmpty;
+-        int[] borderIndicesByCardinal;
++
++        sealed class GenerationWorkspace
++        {
++            public readonly WeightedTaper[] TaperMap;
++            public readonly ColumnResult[] ColumnResults;
++            public readonly bool[] LayerFullySolid;
++            public readonly bool[] LayerFullyEmpty;
++            public readonly int[] BorderIndicesByCardinal;
++
++            public GenerationWorkspace(int mapHeight)
++            {
++                TaperMap = new WeightedTaper[chunksize * chunksize];
++                ColumnResults = new ColumnResult[chunksize * chunksize];
++                LayerFullySolid = new bool[mapHeight];
++                LayerFullyEmpty = new bool[mapHeight];
++                BorderIndicesByCardinal = new int[8];
++                for (int i = 0; i < ColumnResults.Length; i++)
++                {
++                    ColumnResults[i].ColumnBlockSolidities = new BitArray(mapHeight);
++                }
++                BorderIndicesByCardinal[Cardinal.NorthEast] = (chunksize - 1) * chunksize;
++                BorderIndicesByCardinal[Cardinal.SouthEast] = 0;
++                BorderIndicesByCardinal[Cardinal.SouthWest] = chunksize - 1;
++                BorderIndicesByCardinal[Cardinal.NorthWest] = (chunksize - 1) * chunksize + chunksize - 1;
++            }
++        }
++
++        ThreadLocal<GenerationWorkspace> workspaces;
++        readonly object landformLock = new object();
++        readonly object landformMapLock = new object();
+ 
+         public override bool ShouldLoad(EnumAppSide side)
+         {
+             return side == EnumAppSide.Server;
+         }
+@@ -138,21 +162,11 @@ namespace Vintagestory.ServerMods
+             {
+                 LerpedAmplitudes = new double[terrainGenOctaves],
+                 LerpedThresholds = new double[terrainGenOctaves],
+                 landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length]
+             });
+-            columnResults = new ColumnResult[chunksize * chunksize];
+-            layerFullyEmpty = new bool[api.WorldManager.MapSizeY];
+-            layerFullySolid = new bool[api.WorldManager.MapSizeY];
+-            taperMap = new WeightedTaper[chunksize * chunksize];
+-            for (int i = 0; i < chunksize * chunksize; i++) columnResults[i].ColumnBlockSolidities = new BitArray(api.WorldManager.MapSizeY);
+-
+-            borderIndicesByCardinal = new int[8];
+-            borderIndicesByCardinal[Cardinal.NorthEast] = (chunksize - 1) * chunksize + 0;
+-            borderIndicesByCardinal[Cardinal.SouthEast] = 0 + 0;
+-            borderIndicesByCardinal[Cardinal.SouthWest] = 0 + chunksize - 1;
+-            borderIndicesByCardinal[Cardinal.NorthWest] = (chunksize - 1) * chunksize + chunksize - 1;
++            workspaces = new ThreadLocal<GenerationWorkspace>(() => new GenerationWorkspace(api.WorldManager.MapSizeY));
+ 
+             landforms = null;  // Reset this, useful when /wgen regen command reloads all the generators because landforms gets reloaded from file there
+         }
+ 
+         private double[] scaleAdjustedFreqs(double[] vs, float horizontalScale)
+@@ -168,10 +182,13 @@ namespace Vintagestory.ServerMods
+ 
+ 
+ 
+         private void OnChunkColumnGen(IChunkColumnGenerateRequest request)
+         {
++            GenerationWorkspace workspace = workspaces.Value;
++            WeightedTaper[] taperMap = workspace.TaperMap;
++            int[] borderIndicesByCardinal = workspace.BorderIndicesByCardinal;
+             if (request.RequiresChunkBorderSmoothing && !PreventSmoothing(request.ChunkX, request.ChunkZ))
+             {
+                 var neibHeightMaps = request.NeighbourTerrainHeight;
+ 
+                 // Ignore diagonals if direct adjacent faces are available, otherwise the corners get weighted too strongly
+@@ -259,27 +276,37 @@ namespace Vintagestory.ServerMods
+                 }
+             }
+ 
+             if (landforms == null)    // This only needs to be done once, but cannot be done during initWorldGen() because NoiseLandforms.landforms is sometimes not yet setup at that point (depends on random order of ModSystems registering to events)
+             {
+-                landforms = NoiseLandforms.landforms;
+-                terrainYThresholds = new float[landforms.LandFormsByIndex.Length][];
+-                for (int i = 0; i < landforms.LandFormsByIndex.Length; i++) terrainYThresholds[i] = landforms.LandFormsByIndex[i].TerrainYThresholds;
++                lock (landformLock)
++                {
++                    if (landforms == null)
++                    {
++                        landforms = NoiseLandforms.landforms;
++                        terrainYThresholds = new float[landforms.LandFormsByIndex.Length][];
++                        for (int i = 0; i < landforms.LandFormsByIndex.Length; i++) terrainYThresholds[i] = landforms.LandFormsByIndex[i].TerrainYThresholds;
++                    }
++                }
+             }
+ 
+-            generate(request.Chunks, request.ChunkX, request.ChunkZ, request.RequiresChunkBorderSmoothing);
++            generate(request.Chunks, request.ChunkX, request.ChunkZ, request.RequiresChunkBorderSmoothing, workspace);
+         }
+ 
+         private bool PreventSmoothing(int chunkX, int chunkZ)
+         {
+             BoolRef result = new BoolRef();
+             api.Event.IsTerrainHeightSmoothingPrevented(chunkX, chunkZ, result);
+             return result.GetValue();
+         }
+ 
+-        private void generate(IServerChunk[] chunks, int chunkX, int chunkZ, bool requiresChunkBorderSmoothing)
++        private void generate(IServerChunk[] chunks, int chunkX, int chunkZ, bool requiresChunkBorderSmoothing, GenerationWorkspace workspace)
+         {
++            ColumnResult[] columnResults = workspace.ColumnResults;
++            bool[] layerFullySolid = workspace.LayerFullySolid;
++            bool[] layerFullyEmpty = workspace.LayerFullyEmpty;
++            WeightedTaper[] taperMap = workspace.TaperMap;
+             IMapChunk mapchunk = chunks[0].MapChunk;
+             const int chunksize = GlobalConstants.ChunkSize;
+ 
+             int upheavalMapUpLeft = 0;
+             int upheavalMapUpRight = 0;
+@@ -566,20 +593,23 @@ namespace Vintagestory.ServerMods
+         }
+ 
+ 
+         LerpedWeightedIndex2DMap GetOrLoadLerpedLandformMap(IMapChunk mapchunk, int regionX, int regionZ)
+         {
+-            // 1. Load?
+-            LandformMapByRegion.TryGetValue(regionZ * regionMapSize + regionX, out LerpedWeightedIndex2DMap map);
+-            if (map != null) return map;
++            lock (landformMapLock)
++            {
++                // 1. Load?
++                LandformMapByRegion.TryGetValue(regionZ * regionMapSize + regionX, out LerpedWeightedIndex2DMap map);
++                if (map != null) return map;
+ 
+-            IntDataMap2D lmap = mapchunk.MapRegion.LandformMap;
+-            // 2. Create
+-            map = LandformMapByRegion[regionZ * regionMapSize + regionX]
+-                = new LerpedWeightedIndex2DMap(lmap.Data, lmap.Size, TerraGenConfig.landFormSmoothingRadius, lmap.TopLeftPadding, lmap.BottomRightPadding);
++                IntDataMap2D lmap = mapchunk.MapRegion.LandformMap;
++                // 2. Create
++                map = LandformMapByRegion[regionZ * regionMapSize + regionX]
++                    = new LerpedWeightedIndex2DMap(lmap.Data, lmap.Size, TerraGenConfig.landFormSmoothingRadius, lmap.TopLeftPadding, lmap.BottomRightPadding);
+ 
+-            return map;
++                return map;
++            }
+         }
+ 
+ 
+         private void GetInterpolatedOctaves(float[] indices, out double[] amps, out double[] thresholds)
+         {

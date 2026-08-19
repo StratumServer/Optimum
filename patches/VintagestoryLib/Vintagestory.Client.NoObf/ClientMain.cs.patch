@@ -1,8 +1,58 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..02d6402 100644
+index 67feafa..9edd21d 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-@@ -314,11 +314,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	public ClientCoreAPI api;
+ 
+ 	public ChunkTesselator TerrainChunkTesselator;
+ 
++	public ChunkTesselatorManager ChunkTesselatorManager;
++
+ 	public bool ShouldTesselateTerrain = true;
+ 
+ 	public TerrainIlluminator terrainIlluminator;
+ 
+ 	public ClientWorldMap WorldMap;
+@@ -240,10 +242,36 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	public IColorPresets ColorPreset;
+ 
+ 	public int TesselationThreadId;
+ 
++	// Optimum: deliberately NOT readonly and NOT field-initialized. Cecil member
++	// injection (Optimum.Patcher/MemberInjector.InjectStaticMembers) adds this
++	// field to the already-compiled vanilla ClientMain without re-running its
++	// constructor, so a C# field initializer here never executes and the field
++	// is null at runtime - see Optimum.Tests/cecil-injected-field-initializer-tests.cs.
++	// Created lazily by RegisterTesselationThread (main thread, from Start) and
++	// read null-safely everywhere else, so worker threads never race on creation.
++	private OptimumTesselationWorkerRegistry tesselationWorkers;
++
++	public bool IsTesselationThread(int threadId)
++	{
++		OptimumTesselationWorkerRegistry workers = tesselationWorkers;
++		return workers != null && workers.Contains(threadId);
++	}
++
++	internal void RegisterTesselationThread(int threadId)
++	{
++		(tesselationWorkers ??= new OptimumTesselationWorkerRegistry()).Register(threadId);
++	}
++
++	internal int GetTesselationWorkerSlot(int threadId)
++	{
++		OptimumTesselationWorkerRegistry workers = tesselationWorkers;
++		return workers != null ? workers.GetSlot(threadId) : 0;
++	}
++
+ 	public DefaultShaderUniforms shUniforms = new DefaultShaderUniforms();
+ 
+ 	private ClientSystemStartup csStartup;
+ 
+ 	private bool ungrabbedFromDefocus;
+@@ -314,11 +342,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	private int lastWidth;
  
@@ -15,7 +65,7 @@ index 67feafa..02d6402 100644
  
  	public Queue<ClientTask> MainThreadTasks;
  
-@@ -340,15 +340,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -340,15 +368,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal bool ignoreServerCalendarUpdates;
  
@@ -33,7 +83,7 @@ index 67feafa..02d6402 100644
  
  	public object EntityLoadQueueLock = new object();
  
-@@ -378,11 +378,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -378,11 +406,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal PickingRayUtil pickingRayUtil = new PickingRayUtil();
  
@@ -46,7 +96,7 @@ index 67feafa..02d6402 100644
  
  	internal List<IPointLight> pointlights = new List<IPointLight>();
  
-@@ -402,27 +402,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -402,27 +430,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal int frameSeed;
  
@@ -79,7 +129,88 @@ index 67feafa..02d6402 100644
  
  	internal ServerInformation ServerInfo;
  
-@@ -2124,12 +2124,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -874,14 +902,19 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		disconnectMissingMods = null;
+ 		quadModel = Platform.UploadMesh(QuadMeshUtilExt.GetQuadModelData());
+ 		FrustumCulling frustumCulling = new FrustumCulling();
+ 		frustumCuller = frustumCulling;
+ 		frustumCuller.UpdateViewDistance(ClientSettings.ViewDistance);
+-		ChunkTesselator terrainChunkTesselator = new ChunkTesselator(this);
+-		TerrainChunkTesselator = terrainChunkTesselator;
+ 		Platform.AddOnCrash(OnCrashHandlerLeave.Create(this));
+-		rand = new ThreadLocal<Random>(() => new Random(Environment.TickCount));
++		// Optimum: method group, not a lambda literal. A lambda that captures
++		// nothing compiles to a cached static delegate on ClientMain/<>c
++		// (<>9__<memberOrdinal>_0), and that ordinal is a per-type member index
++		// that differs between the vanilla assembly and this decompiled-and-
++		// rebuilt donor, so a transplanted body binds to a vanilla slot holding
++		// an unrelated delegate type. See docs/il-patcher-plan.md and
++		// Optimum.Tests/cecil-transplant-lambda-tests.cs.
++		rand = new ThreadLocal<Random>(CreateRandom);
+ 		macroManager = new MacroManager(this);
+ 		Platform.ShaderUniforms = shUniforms;
+ 		_clientThreadsCts = new CancellationTokenSource();
+ 		ClientSystem clientSystem = new SystemCompressChunks(this);
+ 		Thread thread = new Thread(new ClientThread(this, "compresschunks", new ClientSystem[1] { clientSystem }, _clientThreadsCts.Token).Process);
+@@ -899,17 +932,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		Thread thread3 = new Thread(new ClientThread(this, "relight", new ClientSystem[1] { clientSystem3 }, _clientThreadsCts.Token).Process);
+ 		thread3.IsBackground = true;
+ 		thread3.Start();
+ 		thread3.Name = "relight";
+ 		clientThreads.Add(thread3);
+-		ClientSystem clientSystem4 = new ChunkTesselatorManager(this);
++		ChunkTesselatorManager terrainChunkTesselatorManager = new ChunkTesselatorManager(this);
++		ChunkTesselatorManager = terrainChunkTesselatorManager;
++		TerrainChunkTesselator = terrainChunkTesselatorManager.PrimaryTesselator;
++		ClientSystem clientSystem4 = terrainChunkTesselatorManager;
+ 		Thread thread4 = new Thread(new ClientThread(this, "tesselateterrain", new ClientSystem[1] { clientSystem4 }, _clientThreadsCts.Token).Process);
++		TesselationThreadId = thread4.ManagedThreadId;
++		RegisterTesselationThread(TesselationThreadId);
+ 		thread4.IsBackground = true;
+ 		thread4.Start();
+ 		thread4.Name = "tesselateterrain";
+ 		clientThreads.Add(thread4);
+-		TesselationThreadId = thread4.ManagedThreadId;
+ 		ClientSystem clientSystem5 = new SystemChunkVisibilityCalc(this);
+ 		Thread thread5 = new Thread(new ClientThread(this, "chunkvis", new ClientSystem[1] { clientSystem5 }, _clientThreadsCts.Token).Process);
+ 		thread5.IsBackground = true;
+ 		thread5.Start();
+ 		thread5.Name = "chunkvis";
+@@ -1032,11 +1069,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 	public void ExecuteMainThreadTasks(float deltaTime)
+ 	{
+ 		ScreenManager.FrameProfiler.Mark("beginMTT");
+ 		if (GameLaunchTasks.Count > 0)
+ 		{
+-			GameLaunchTasks.Dequeue().Action();
++			OptimumDiagnostics.RecordGameLaunchTaskFrame();
++			long budgetTicks = OptimumConfig.LaunchTaskBudgetEnabled && OptimumConfig.LaunchTaskBudgetMs > 0
++				? (long)OptimumConfig.LaunchTaskBudgetMs * Stopwatch.Frequency / 1000
++				: 0;
++			long frameStartTicks = Stopwatch.GetTimestamp();
++			do
++			{
++				int launchTaskQueueDepth = GameLaunchTasks.Count;
++				ClientTask launchTask = GameLaunchTasks.Dequeue();
++				long launchTaskStartTicks = Stopwatch.GetTimestamp();
++				try
++				{
++					launchTask.Action();
++				}
++				finally
++				{
++					OptimumDiagnostics.RecordGameLaunchTask(Stopwatch.GetTimestamp() - launchTaskStartTicks, launchTaskQueueDepth);
++				}
++			}
++			while (GameLaunchTasks.Count > 0
++				&& budgetTicks > 0
++				&& Stopwatch.GetTimestamp() - frameStartTicks < budgetTicks);
+ 		}
+ 		else
+ 		{
+ 			if (SuspendMainThreadTasks)
+ 			{
+@@ -2124,12 +2182,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -104,3 +235,21 @@ index 67feafa..02d6402 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
+@@ -3531,6 +3599,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
+ 		value?.Dispose();
+ 		EntityRenderers.Remove(forEntity.EntityId);
+ 		forEntity.Properties.Client.Renderer = null;
+ 	}
++
++	// Optimum: factory for `rand` in Start(). An *instance* method on purpose:
++	// a static method group would make Roslyn emit a cached-delegate holder type
++	// (ClientMain/<>O), one more compiler-generated nested type the transplant
++	// would have to clone. Declared last in the class on purpose too - Roslyn
++	// numbers closure names by declaring-member ordinal, so inserting a member
++	// earlier renumbers every <>c__DisplayClassNNN_* after it.
++	private Random CreateRandom()
++	{
++		return new Random(Environment.TickCount);
++	}
+ }

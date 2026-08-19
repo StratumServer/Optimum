@@ -1,0 +1,226 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerraPostProcess.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerraPostProcess.cs
+index 79c481d..a3baa0f 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerraPostProcess.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerraPostProcess.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+@@ -12,13 +13,22 @@ namespace Vintagestory.ServerMods
+ {
+     public class GenTerraPostProcess : ModStdWorldGen
+     {
+         ICoreServerAPI api;
+         IWorldGenBlockAccessor blockAccessor;
++        ThreadLocal<IWorldGenBlockAccessor> blockAccessors;
+ 
+-        HashSet<int> chunkVisitedNodes = new HashSet<int>();
+-        List<int> solidNodes = new List<int>(40);
++        sealed class TerraPostProcessWorkspace
++        {
++            public readonly HashSet<int> ChunkVisitedNodes = new HashSet<int>();
++            public readonly List<int> SolidNodes = new List<int>(40);
++            public readonly QueueOfInt BfsQueue = new QueueOfInt();
++            public readonly int[] CurrentVisited = new int[41 * 41 * 41];
++            public int Iteration;
++        }
++
++        ThreadLocal<TerraPostProcessWorkspace> workspaces;
+ 
+         public override bool ShouldLoad(EnumAppSide side)
+         {
+             return side == EnumAppSide.Server;
+         }
+@@ -41,26 +51,32 @@ namespace Vintagestory.ServerMods
+         }
+ 
+         private void OnWorldGenBlockAccessor(IChunkProviderThread chunkProvider)
+         {
+             blockAccessor = chunkProvider.GetBlockAccessor(true);
++            blockAccessors ??= new ThreadLocal<IWorldGenBlockAccessor>();
++            blockAccessors.Value = blockAccessor;
++            workspaces = new ThreadLocal<TerraPostProcessWorkspace>(() => new TerraPostProcessWorkspace());
+         }
+ 
++        private IWorldGenBlockAccessor CurrentBlockAccessor => blockAccessors?.Value ?? blockAccessor;
++
+         private void OnChunkColumnGen(IChunkColumnGenerateRequest request)
+         {
+             var chunks = request.Chunks;
+             int chunkX = request.ChunkX;
+             int chunkZ = request.ChunkZ;
+ 
+-            blockAccessor.BeginColumn();
++            CurrentBlockAccessor.BeginColumn();
+             int seaLevel = TerraGenConfig.seaLevel - 1;
+             const int chunksize = GlobalConstants.ChunkSize;
+             const int chunksizeSquared = chunksize * chunksize;
+             int chunkY = seaLevel / chunksize;
+             int yMax = chunks[0].MapChunk.YMax;
+             int cyMax = Math.Min(yMax / chunksize + 1, api.World.BlockAccessor.MapSizeY / chunksize);
+-            chunkVisitedNodes.Clear();
++            TerraPostProcessWorkspace workspace = workspaces.Value;
++            workspace.ChunkVisitedNodes.Clear();
+ 
+             for (int cy = chunkY; cy < cyMax; cy++)
+             {
+                 IChunkBlocks chunkdata = chunks[cy].Data;
+ 
+@@ -96,52 +112,49 @@ namespace Vintagestory.ServerMods
+                         int blockId = chunkdata.GetBlockIdUnsafe(index3d);
+                         if (blockId != 0 && blockIdBelow == 0)
+                         {
+                             int x = baseindex3d % chunksize;
+                             int z = baseindex3d / chunksize;
+-                            if (!chunkVisitedNodes.Contains(index3d)) deletePotentialFloatingBlocks(chunkX * chunksize + x, baseY + y, chunkZ * chunksize + z);
++                            if (!workspace.ChunkVisitedNodes.Contains(index3d)) deletePotentialFloatingBlocks(chunkX * chunksize + x, baseY + y, chunkZ * chunksize + z, workspace);
+                         }
+                         blockIdBelow = blockId;  // ready for the next iteration in the loop
+                     }
+                 }
+             }
+         }
+ 
+ 
+ 
+-        QueueOfInt bfsQueue = new QueueOfInt();
+         const int ARRAYSIZE = 41;  // Note if this constant is increased beyond 64, the bitshifts for compressedPos in the bfsQueue.Enqueue() and .Dequeue() calls may need updating
+-        readonly int[] currentVisited = new int[ARRAYSIZE * ARRAYSIZE * ARRAYSIZE];
+-        int iteration = 0;
+ 
+         /// <summary>
+         /// Very similar to RoomRegistry room search code: we will search for contiguous islands of blocks, surrounded by air on all sides
+         /// </summary>
+-        private void deletePotentialFloatingBlocks(int X, int Y, int Z)
++        private void deletePotentialFloatingBlocks(int X, int Y, int Z, TerraPostProcessWorkspace workspace)
+         {
+             int halfSize = (ARRAYSIZE - 1) / 2;
+-            solidNodes.Clear();
+-            bfsQueue.Clear();
++            workspace.SolidNodes.Clear();
++            workspace.BfsQueue.Clear();
+             int compressedPos = halfSize << 12 | halfSize << 6 | halfSize;
+-            bfsQueue.Enqueue(compressedPos);
+-            solidNodes.Add(compressedPos);
++            workspace.BfsQueue.Enqueue(compressedPos);
++            workspace.SolidNodes.Add(compressedPos);
+ 
+-            int iteration = ++this.iteration;
++            int iteration = ++workspace.Iteration;
+             int visitedIndex = (halfSize * ARRAYSIZE + halfSize) * ARRAYSIZE + halfSize; // Center node
+-            currentVisited[visitedIndex] = iteration;
++            workspace.CurrentVisited[visitedIndex] = iteration;
+ 
+             int baseX = X - halfSize;
+             int baseY = Y - halfSize;
+             int baseZ = Z - halfSize;
+             BlockPos npos = new BlockPos(Dimensions.NormalWorld);
+             int dx, dy, dz;
+ 
+             int worldHeight = api.World.BlockAccessor.MapSizeY;
+             int curVisitedNodes = 1;
+-            while (bfsQueue.Count > 0)
++            while (workspace.BfsQueue.Count > 0)
+             {
+-                compressedPos = bfsQueue.Dequeue();
++                compressedPos = workspace.BfsQueue.Dequeue();
+                 dx = compressedPos >> 12;
+                 dy = (compressedPos >> 6) & 0x3f;
+                 dz = compressedPos & 0x3f;
+                 npos.Set(baseX + dx, baseY + dy, baseZ + dz);
+ 
+@@ -154,14 +167,14 @@ namespace Vintagestory.ServerMods
+                     dx = npos.X - baseX;
+                     dy = npos.Y - baseY;
+                     dz = npos.Z - baseZ;
+ 
+                     visitedIndex = (dx * ARRAYSIZE + dy) * ARRAYSIZE + dz;
+-                    if (currentVisited[visitedIndex] == iteration) continue;   // continue if block position was already visited
+-                    currentVisited[visitedIndex] = iteration;  // mark this as visited so we don't check it more than once
++                    if (workspace.CurrentVisited[visitedIndex] == iteration) continue;   // continue if block position was already visited
++                    workspace.CurrentVisited[visitedIndex] = iteration;  // mark this as visited so we don't check it more than once
+ 
+-                    int nBlock = blockAccessor.GetBlockId(npos);
++                    int nBlock = CurrentBlockAccessor.GetBlockId(npos);
+                     if (nBlock == 0)
+                     {
+                         continue;   // continue if air, we are looking for solid blocks only  (NOTE: accessing outside generating chunks will also look like air here)
+                     }
+ 
+@@ -169,48 +182,48 @@ namespace Vintagestory.ServerMods
+ 
+                     // If more than 40 solid blocks together, either it is connected to base terrain or it's a large floating island which is OK
+                     if (++curVisitedNodes > 40)
+                     {
+                         // Cheap test on block below - no point in adding to chunkVisitedNodes if solid block below, as chunkVisitedNodes will be tested only when there is air below
+-                        if (!solidNodes.Contains(newCompressedPos - 64))
++                        if (!workspace.SolidNodes.Contains(newCompressedPos - 64))
+                         {
+-                            AddToChunkVisitedNodesIfSameChunk(npos.X, npos.Y, npos.Z, X, Y, Z);
++                            AddToChunkVisitedNodesIfSameChunk(npos.X, npos.Y, npos.Z, X, Y, Z, workspace);
+                         }
+-                        foreach (int compPos in solidNodes)
++                        foreach (int compPos in workspace.SolidNodes)
+                         {
+                             // Again, no point in adding to chunkVisitedNodes if solid block below
+-                            if (!solidNodes.Contains(compPos - 64))
++                            if (!workspace.SolidNodes.Contains(compPos - 64))
+                             {
+                                 dx = compPos >> 12;
+                                 dy = (compPos >> 6) & 0x3f;
+                                 dz = compPos & 0x3f;
+-                                AddToChunkVisitedNodesIfSameChunk(baseX + dx, baseY + dy, baseZ + dz, X, Y, Z);
++                                AddToChunkVisitedNodesIfSameChunk(baseX + dx, baseY + dy, baseZ + dz, X, Y, Z, workspace);
+                             }
+                         }
+                         return;
+                     }
+ 
+                     // Solid block: continue iterating, and add this block for further action
+-                    solidNodes.Add(newCompressedPos);
+-                    bfsQueue.Enqueue(newCompressedPos);
++                    workspace.SolidNodes.Add(newCompressedPos);
++                    workspace.BfsQueue.Enqueue(newCompressedPos);
+                 }
+             }
+ 
+ 
+             // We found a free floating section of blocks that's less that 20 blocks
+-            foreach (int compPos in solidNodes)
++            foreach (int compPos in workspace.SolidNodes)
+             {
+                 dx = compPos >> 12;
+                 dy = (compPos >> 6) & 0x3f;
+                 dz = compPos & 0x3f;
+ 
+                 npos.Set(baseX + dx, baseY + dy, baseZ + dz);
+-                blockAccessor.SetBlock(0, npos);
++                CurrentBlockAccessor.SetBlock(0, npos);
+             }
+         }
+ 
+-        private void AddToChunkVisitedNodesIfSameChunk(int nposX, int nposY, int nposZ, int origX, int origY, int origZ)
++        private void AddToChunkVisitedNodesIfSameChunk(int nposX, int nposY, int nposZ, int origX, int origY, int origZ, TerraPostProcessWorkspace workspace)
+         {
+             // Only if this solid block is above x,y,z position, or on same level and north or east, add to chunkVisitedNodes to be filtered out of future testing
+             if (nposY < origY) return;
+             if (nposY == origY)
+             {
+@@ -225,11 +238,11 @@ namespace Vintagestory.ServerMods
+             if (((nposZ ^ origZ) & chunkMask) != 0) return;
+             if (((nposY ^ origY) & chunkMask) != 0) return;
+ 
+             const int inChunkMask = chunksize - 1;
+             int index3d = ((nposY & inChunkMask) * chunksize + (nposZ & inChunkMask)) * chunksize + (nposX & inChunkMask);
+-            chunkVisitedNodes.Add(index3d);
++            workspace.ChunkVisitedNodes.Add(index3d);
+         }
+ 
+         //struct VisitNode : IEquatable<VisitNode>
+         //{
+         //    public int X, Y, Z;

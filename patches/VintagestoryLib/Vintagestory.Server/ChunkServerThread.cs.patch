@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs b/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs
-index ee7d12d..2db0a7c 100644
+index ee7d12d..063d931 100644
 --- a/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs
 @@ -1,10 +1,11 @@
@@ -14,13 +14,15 @@ index ee7d12d..2db0a7c 100644
  using Vintagestory.API.Server;
  using Vintagestory.Common;
  
-@@ -32,26 +33,36 @@ public class ChunkServerThread : ServerThread, IChunkProvider
+@@ -32,26 +33,37 @@ public class ChunkServerThread : ServerThread, IChunkProvider
  
  	public bool peekMode;
  
  	public int additionalWorldGenThreadsCount;
  
 +	internal OptimumChunkReadPool optimumReadPool;
++
++	internal bool optimumExactWorldgenWorkerMode;
 +
  	private bool additionalThreadsPaused;
  
@@ -33,25 +35,24 @@ index ee7d12d..2db0a7c 100644
 -		additionalWorldGenThreadsCount = Math.Min(val, MagicNum.MaxWorldgenThreads - 1);
 -		if (server.ReducedServerThreads)
 +		string worldgenMtOverride = Environment.GetEnvironmentVariable("OPTIMUM_WORLDGEN_MT");
-+		if (worldgenMtOverride == "1")
-+		{
-+			OptimumConfig.WorldgenWorkStealingEnabled = true;
-+		}
-+		else if (worldgenMtOverride == "0")
++		string workerCountOverride = Environment.GetEnvironmentVariable("OPTIMUM_WORLDGEN_WORKERS");
++		additionalWorldGenThreadsCount = OptimumConfig.ResolveWorldgenWorkerCount(
++			Environment.ProcessorCount,
++			server.ReducedServerThreads,
++			worldgenMtOverride,
++			workerCountOverride);
++		optimumExactWorldgenWorkerMode = additionalWorldGenThreadsCount > 0;
++		bool requestedParallelWorldgen = worldgenMtOverride == "1" && workerCountOverride != null;
++		if (requestedParallelWorldgen && !optimumExactWorldgenWorkerMode)
  		{
 -			additionalWorldGenThreadsCount = 0;
-+			OptimumConfig.WorldgenWorkStealingEnabled = false;
++			ServerMain.Logger.Warning("Optimum worldgen worker override rejected value {0}; expected an integer from 1 through 3 with reduced server threads disabled. Using serial generation.", workerCountOverride ?? "<missing>");
  		}
 -		if (additionalWorldGenThreadsCount < 0)
-+		additionalWorldGenThreadsCount = OptimumConfig.GetWorldgenWorkerCount(Environment.ProcessorCount, server.ReducedServerThreads);
-+		string workerCountOverride = Environment.GetEnvironmentVariable("OPTIMUM_WORLDGEN_WORKERS");
-+		if (additionalWorldGenThreadsCount > 0 && workerCountOverride != null && int.TryParse(workerCountOverride, out int forcedWorkers))
++		if (additionalWorldGenThreadsCount > 0)
  		{
 -			additionalWorldGenThreadsCount = 0;
-+			int safeCeiling = OptimumConfig.GetWorldgenWorkerCeiling(
-+				Environment.ProcessorCount,
-+				server.ReducedServerThreads);
-+			additionalWorldGenThreadsCount = Math.Clamp(forcedWorkers, 1, safeCeiling);
++			ServerMain.Logger.Notification("Optimum worldgen: {0} additional worker(s) (policy={1}, cores={2})", additionalWorldGenThreadsCount, OptimumConfig.WorldgenWorkerPolicy, Environment.ProcessorCount);
  		}
  	}
  

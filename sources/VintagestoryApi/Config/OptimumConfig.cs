@@ -22,7 +22,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.3.5";
+    public const string Version = "0.3.8";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -44,14 +44,14 @@ public static class OptimumConfig
 
     /// <summary>
     /// Playtested and measured in a running client (2026-07-09 and
-    /// 2026-07-10 sessions): the fragment-shader
+    /// 2026-07-10 sessions, docs/benchmarking.md): the fragment-shader
     /// wrap (bug B3) works, OFF compiles bit-identical vanilla shaders,
     /// and ON at 8x8 trades ~3% mean FPS for a large stutter reduction
     /// (+84% 1% low FPS, p99 44->30 ms), ~10pp less CPU and ~30 MB less
     /// VRAM on a fragment-bound scene. Still default false: that is one
     /// trial per config on one route/GPU, and the 1%-low direction
     /// inverted between the two days' scenes, so the flip to true waits
-    /// for a repeat run confirming the pattern.
+    /// for a repeat run confirming the pattern (V2.2 in docs/todo.md).
     /// </summary>
     public static bool GreedyMeshEnabled = false;
 
@@ -62,7 +62,7 @@ public static class OptimumConfig
     /// "merge" would replace one vanilla quad with an identical one -
     /// all cost, no benefit), so 1 = merging off. Default 8 since the
     /// 2026-07-10 re-benchmark: 8x8 matched 4x4 on mean FPS and beat it
-    /// on 1% lows, and a default of 1 made
+    /// on 1% lows (docs/benchmarking.md), and a default of 1 made
     /// enabling GreedyMeshEnabled silently do nothing. Inert while the
     /// master switch is false.
     /// </summary>
@@ -103,7 +103,7 @@ public static class OptimumConfig
     /// explicit-gradient sampler cost (reduced-rate on some GPUs) goes
     /// away. Exists to isolate where the measured ON cost comes from
     /// (2026-07-10: ON at 8x8 costs ~3% mean FPS on a fragment-bound
-    /// scene) - flip to false, re-run the same
+    /// scene, docs/benchmarking.md) - flip to false, re-run the same
     /// route, and compare. Only affects shading when GreedyMeshEnabled
     /// is true and merges happen; requires a restart like the rest.
     /// </summary>
@@ -121,6 +121,13 @@ public static class OptimumConfig
 
     public static int ChiselLodDistance = 48;
     public static double ChiselLodDistanceSq = 48.0 * 48.0;
+
+    /// <summary>
+    /// Hysteresis factor for entity/chisel render distance. Entities that were
+    /// visible last frame stay visible until they exceed innerRadius * 1.1.
+    /// (1.1)^2 = 1.21, precomputed to avoid sqrt in the render loop.
+    /// </summary>
+    public static double HysteresisFactorSq = 1.21;
 
     /// <summary>
     /// R3: scale ChunkCuller's occlusion-culling engagement threshold by view
@@ -228,14 +235,39 @@ public static class OptimumConfig
     public static bool RandomTickSliceEnabled = true;
 
     /// <summary>
-    /// Lets singleplayer world generation share passes across worker threads.
-    /// The scheduler owns one pass per worker and returns to the vanilla chunk
-    /// thread when it detects a scheduler fault. Default ON: the statistical
-    /// parity gate showed the divergence from serial generation matches what
-    /// vanilla's own multithreaded worldgen (MaxWorldgenThreads > 1) produces,
-    /// and vanilla worldgen is not run-to-run deterministic to begin with.
+    /// Lets diagnostic runs share worldgen passes across worker threads.
+    /// Optimum suspends automatic worker scheduling until worldgen R1 isolates
+    /// mutable generator state. The environment override controls experiments.
     /// </summary>
-    public static bool WorldgenWorkStealingEnabled = true;
+    public static bool WorldgenWorkStealingEnabled = false;
+
+    /// <summary>
+    /// Runtime cap for client tessellation workers. The startup scan lowers it
+    /// to one when a foreign texture source can race on singleton state.
+    /// </summary>
+    public static volatile int TesselationWorkerCap = int.MaxValue;
+
+    /// <summary>
+    /// Maximum number of completed meshes waiting for render-thread upload.
+    /// </summary>
+    public static int TesselationUploadQueueCapacity = 128;
+
+    /// <summary>
+    /// Allows parallel worldgen with assemblies outside the audited set.
+    /// This override can produce unsafe worldgen state and stays off by default.
+    /// </summary>
+    public static volatile bool WorldgenConcurrencyForce;
+
+    /// <summary>
+    /// Worldgen worker policy. Controls how many additional worldgen threads
+    /// run alongside the main chunk thread.
+    /// Values: "auto" (detect hardware), "serial" (0 workers), "1", "2", "3".
+    /// Default "auto": serial on systems with 8 or fewer logical processors,
+    /// 1 worker on systems with more than 8.
+    /// Environment variables OPTIMUM_WORLDGEN_MT and OPTIMUM_WORLDGEN_WORKERS
+    /// override this setting for benchmark automation.
+    /// </summary>
+    public static string WorldgenWorkerPolicy = "auto";
 
     /// <summary>
     /// Replace the vanilla ChunkMapLayer upload pipeline with a page-cached
@@ -329,10 +361,56 @@ public static class OptimumConfig
     public static volatile int AdaptiveRadiusEffective = int.MaxValue;
 
     /// <summary>
+    /// When true, ExecuteMainThreadTasks drains multiple launch tasks per frame
+    /// within LaunchTaskBudgetMs. When false, vanilla one-per-frame behavior.
+    /// Default false (opt-in experiment).
+    /// </summary>
+    public static volatile bool LaunchTaskBudgetEnabled;
+
+    /// <summary>
+    /// Per-frame time budget in milliseconds for draining launch tasks.
+    /// Clamped [1, 500]. Only effective when LaunchTaskBudgetEnabled is true.
+    /// </summary>
+    public static volatile int LaunchTaskBudgetMs = 100;
+
+    /// <summary>
+    /// Parallelize ServerChunk.FromBytes deserialization after the read pool
+    /// fetches raw bytes. Safe because each FromBytes call creates a new
+    /// ServerChunk instance with no shared mutable state.
+    /// </summary>
+    public static volatile bool ChunkDeserializeParallel = true;
+
+    /// <summary>
+    /// Minimum chunkMapSizeY required before parallel deserialization kicks in.
+    /// Below this threshold the overhead of Parallel.For exceeds serial.
+    /// Clamped [2, 64].
+    /// </summary>
+    public static volatile int ChunkDeserializeParallelMinY = 4;
+
+    /// <summary>
+    /// Move shader asset I/O, ToText decode, and LoadShaderProgram to a
+    /// background thread during loadRegisteredShaderPrograms. GL calls
+    /// (Compile, SetCustomSampler) stay on the GL thread.
+    /// </summary>
+    public static volatile bool ShaderPreprocessParallel = true;
+
+    /// <summary>
     /// FSR render scale: 1.0 = native (off), 0.85 = quality, 0.77 = balanced, 0.67 = performance.
     /// Multiplies ssaaLevel in SetupDefaultFrameBuffers. Disables FXAA when < 1.0.
     /// </summary>
     public static float RenderScale = 1.0f;
+
+    /// <summary>
+    /// R4: cap the god-rays post-process at 100 texture samples when enabled.
+    /// The disabled path sends the vanilla 180-sample limit. This option can
+    /// change the post-process image, so it stays off by default.
+    /// </summary>
+    public const int VanillaGodRaysSampleLimit = 180;
+    public const int OptimumGodRaysSampleLimit = 100;
+    public static bool GodRaysSampleCapEnabled = false;
+    public static int GodRaysSampleLimit => GodRaysSampleCapEnabled
+        ? OptimumGodRaysSampleLimit
+        : VanillaGodRaysSampleLimit;
 
     private static string? _configPath;
 
@@ -349,54 +427,74 @@ public static class OptimumConfig
     }
 
     /// <summary>
-    /// Worker count policy derived from benchmark data (6-core WSL2, 2026-07-16):
-    ///   serial=30s, 1w=23s(1.30x), 2w=17s(1.76x), 3w=15s(2.00x), 4w=17s(regress), 5w=16s.
-    /// Three workers saturate the E.2 illuminator lock; adding more just piles up
-    /// contention without reducing generation time. The chunk thread itself needs
-    /// one core, so the policy keeps workers at floor(cores/2) capped at 3.
-    ///
-    /// During spawn-chunk generation (before RunGame), returns the conservative
-    /// count (2 for 5-6 cores) to avoid starving the client renderer on the same
-    /// CPU. After RunGame, the adaptive controller raises to the ceiling.
+    /// Resolves the worker count from the persisted policy ("auto", "serial", "1"-"3").
+    /// Serial on systems with 8 or fewer logical processors (APU/iGPU saturation).
+    /// 1 worker on 8+ core systems with headroom for parallel terrain generation.
     /// </summary>
     public static int GetWorldgenWorkerCount(int logicalProcessors, bool reducedServerThreads)
     {
-        if (!WorldgenWorkStealingEnabled || reducedServerThreads)
-        {
-            return 0;
-        }
+        if (reducedServerThreads) return 0;
 
-        // 4 cores or fewer: overhead exceeds gains (1-worker barely breaks even on 6c)
-        if (logicalProcessors <= 4)
+        string policy = WorldgenWorkerPolicy ?? "auto";
+        return policy switch
         {
-            return 0;
-        }
-
-        // 5-6 cores: start with 2 during spawn (client is loading, GPU busy).
-        // Post-spawn, the adaptive controller raises to GetWorldgenWorkerCeiling().
-        if (logicalProcessors <= 6)
-        {
-            return 2;
-        }
-
-        // 7-8 cores: start with 2, ceiling at 3
-        return 2;
+            "serial" or "0" => 0,
+            "1" => 1,
+            "2" => Math.Min(2, Math.Max(0, logicalProcessors / 4 - 1)),
+            "3" => Math.Min(3, Math.Max(0, logicalProcessors / 4 - 1)),
+            _ => logicalProcessors > 8 ? 1 : 0, // "auto"
+        };
     }
 
     /// <summary>
-    /// Maximum worker count the adaptive controller may raise to after spawn
-    /// chunks finish. The benchmark-proven ceiling for the hardware.
+    /// Worker ceiling for adaptive scaling. Returns 0 when serial, otherwise
+    /// the configured or auto-detected ceiling.
     /// </summary>
     public static int GetWorldgenWorkerCeiling(int logicalProcessors, bool reducedServerThreads)
     {
-        if (!WorldgenWorkStealingEnabled || reducedServerThreads)
+        if (reducedServerThreads) return 0;
+
+        string policy = WorldgenWorkerPolicy ?? "auto";
+        return policy switch
         {
-            return 0;
+            "serial" or "0" => 0,
+            "1" => 1,
+            "2" => 2,
+            "3" => 3,
+            _ => logicalProcessors > 8 ? 2 : 0, // "auto" ceiling
+        };
+    }
+
+    /// <summary>
+    /// Resolves the exact worker count for a diagnostic environment override.
+    /// Priority: env var > config policy > auto default.
+    /// Reduced-thread mode forces serial regardless.
+    /// </summary>
+    public static int ResolveWorldgenWorkerCount(
+        int logicalProcessors,
+        bool reducedServerThreads,
+        string? mtOverride,
+        string? workerCountOverride)
+    {
+        if (reducedServerThreads) return 0;
+
+        // Env var explicit override (highest priority, for benchmarks)
+        if (mtOverride == "1" && workerCountOverride != null)
+        {
+            return workerCountOverride switch
+            {
+                "1" => 1,
+                "2" => 2,
+                "3" => 3,
+                _ => 0,
+            };
         }
 
-        if (logicalProcessors <= 4) return 0;
-        if (logicalProcessors <= 6) return 3;  // 2.00x measured on 6c
-        return 3;  // E.2 lock caps useful parallelism at 3 regardless of core count
+        // Env var explicitly disables
+        if (mtOverride == "0") return 0;
+
+        // Fall through to config-based policy
+        return GetWorldgenWorkerCount(logicalProcessors, reducedServerThreads);
     }
 
     /// <summary>
@@ -437,6 +535,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshFarDistance), GreedyMeshFarDistance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
+        (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -448,6 +547,12 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.AdaptiveRadiusFloor), AdaptiveRadiusFloor.ToString()),
         (nameof(OptimumConfigData.AdaptiveRadiusHighThreshold), AdaptiveRadiusHighThreshold.ToString()),
         (nameof(OptimumConfigData.AdaptiveRadiusLowThreshold), AdaptiveRadiusLowThreshold.ToString()),
+        (nameof(OptimumConfigData.LaunchTaskBudgetEnabled), LaunchTaskBudgetEnabled.ToString()),
+        (nameof(OptimumConfigData.LaunchTaskBudgetMs), LaunchTaskBudgetMs.ToString()),
+        (nameof(OptimumConfigData.WorldgenWorkerPolicy), WorldgenWorkerPolicy),
+        (nameof(OptimumConfigData.ChunkDeserializeParallel), ChunkDeserializeParallel.ToString()),
+        (nameof(OptimumConfigData.ChunkDeserializeParallelMinY), ChunkDeserializeParallelMinY.ToString()),
+        (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
     };
 
     /// <summary>
@@ -519,6 +624,7 @@ public static class OptimumConfig
             GreedyMeshFarDistanceSq = (double)GreedyMeshFarDistance * GreedyMeshFarDistance;
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
+            GodRaysSampleCapEnabled = data.GodRaysSampleCap;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -526,10 +632,16 @@ public static class OptimumConfig
             WorldgenWorkStealingEnabled = data.WorldgenWorkStealing;
             ChunkReadPoolEnabled = data.ChunkReadPoolEnabled;
             ChunkReadPoolWorkers = Math.Clamp(data.ChunkReadPoolWorkers, 1, 8);
+            ChunkDeserializeParallel = data.ChunkDeserializeParallel;
+            ChunkDeserializeParallelMinY = Math.Clamp(data.ChunkDeserializeParallelMinY, 2, 64);
+            ShaderPreprocessParallel = data.ShaderPreprocessParallel;
             AdaptiveRadiusEnabled = data.AdaptiveRadius;
             AdaptiveRadiusFloor = Math.Clamp(data.AdaptiveRadiusFloor, 1, 12);
             AdaptiveRadiusHighThreshold = Math.Max(1, data.AdaptiveRadiusHighThreshold);
             AdaptiveRadiusLowThreshold = Math.Max(1, data.AdaptiveRadiusLowThreshold);
+            LaunchTaskBudgetEnabled = data.LaunchTaskBudgetEnabled;
+            LaunchTaskBudgetMs = Math.Clamp(data.LaunchTaskBudgetMs, 1, 500);
+            WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
         }
         catch (Exception)
         {
@@ -580,6 +692,7 @@ public static class OptimumConfig
             GreedyMeshFarDistance = GreedyMeshFarDistance,
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
+            GodRaysSampleCap = GodRaysSampleCapEnabled,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -587,10 +700,16 @@ public static class OptimumConfig
             WorldgenWorkStealing = WorldgenWorkStealingEnabled,
             ChunkReadPoolEnabled = ChunkReadPoolEnabled,
             ChunkReadPoolWorkers = ChunkReadPoolWorkers,
+            ChunkDeserializeParallel = ChunkDeserializeParallel,
+            ChunkDeserializeParallelMinY = ChunkDeserializeParallelMinY,
+            ShaderPreprocessParallel = ShaderPreprocessParallel,
             AdaptiveRadius = AdaptiveRadiusEnabled,
             AdaptiveRadiusFloor = AdaptiveRadiusFloor,
             AdaptiveRadiusHighThreshold = AdaptiveRadiusHighThreshold,
             AdaptiveRadiusLowThreshold = AdaptiveRadiusLowThreshold,
+            LaunchTaskBudgetEnabled = LaunchTaskBudgetEnabled,
+            LaunchTaskBudgetMs = LaunchTaskBudgetMs,
+            WorldgenWorkerPolicy = WorldgenWorkerPolicy,
         };
 
         try
@@ -642,17 +761,24 @@ internal sealed class OptimumConfigData
     public int GreedyMeshFarDistance { get; set; } = 0;
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
+    public bool GodRaysSampleCap { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;
     public bool RandomTickSlice { get; set; } = true;
-    public bool WorldgenWorkStealing { get; set; } = true;
+    public bool WorldgenWorkStealing { get; set; } = false;
     public bool ChunkReadPoolEnabled { get; set; } = true;
     public int ChunkReadPoolWorkers { get; set; } = 4;
+    public bool ChunkDeserializeParallel { get; set; } = true;
+    public int ChunkDeserializeParallelMinY { get; set; } = 4;
+    public bool ShaderPreprocessParallel { get; set; } = true;
     public bool AdaptiveRadius { get; set; } = true;
     public int AdaptiveRadiusFloor { get; set; } = 4;
     public int AdaptiveRadiusHighThreshold { get; set; } = 60;
     public int AdaptiveRadiusLowThreshold { get; set; } = 20;
+    public bool LaunchTaskBudgetEnabled { get; set; } = false;
+    public int LaunchTaskBudgetMs { get; set; } = 100;
+    public string WorldgenWorkerPolicy { get; set; } = "auto";
 }
 
 public static class OptimumDiagnostics
@@ -935,6 +1061,7 @@ public static class OptimumDiagnostics
         sb.Append("\n  ").Append(GetGreedyMeshSummary());
         sb.Append("\n  ").Append(GetChunkRenderSummary());
         sb.Append("\n  ").Append(GetChunkUploadSummary());
+        sb.Append("\n  ").Append(GetEntityAnimationSummary());
         {
             var (hits, skips) = EntityTesselationBudget.Snapshot();
             sb.Append($"\n  Optimum entity tesselation budget: tesselated={hits}, deferred={skips}");
@@ -953,9 +1080,120 @@ public static class OptimumDiagnostics
         ResetChiselLod();
         ResetAnimBlock();
         ResetGreedyMesh();
-        ResetChunkRender();
+        ResetChunkRenderFrame();
         ResetChunkUpload();
+        ResetEntityAnimation();
         EntityTesselationBudget.Reset();
+    }
+
+    private const int EntityAnimationBandCount = 5;
+    private const int EntityAnimationUnknownBand = 4;
+    private static readonly string[] EntityAnimationBandNames = { "player", "near", "mid", "far", "unknown" };
+    private static readonly long[] _entityAnimationManagerCalls = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationManagerSkips = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationHeadUpdates = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationPoseUpdates = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationPoseSkips = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationMatrixBuilds = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationMatrixSkips = new long[EntityAnimationBandCount];
+    private static readonly long[] _entityAnimationLoopingSoundPasses = new long[EntityAnimationBandCount];
+    private static long _entityAnimationMatrixTicks;
+
+    [ThreadStatic]
+    private static bool _entityAnimationContextActive;
+
+    [ThreadStatic]
+    private static int _entityAnimationBand;
+
+    /// <summary>
+    /// Sets the distance band for the entity whose animation manager runs next.
+    /// Stutter-watch owns this context, so normal frames perform no distance work.
+    /// </summary>
+    public static void BeginEntityAnimationContext(bool isPlayer, double distanceSq)
+    {
+        if (!StutterWatchEnabled) return;
+
+        _entityAnimationBand = isPlayer ? 0 : distanceSq <= 24.0 * 24.0 ? 1 : distanceSq <= 48.0 * 48.0 ? 2 : 3;
+        _entityAnimationContextActive = true;
+    }
+
+    public static void EndEntityAnimationContext()
+    {
+        _entityAnimationContextActive = false;
+    }
+
+    public static void RecordEntityAnimationManagerCall() => AddEntityAnimationCount(_entityAnimationManagerCalls);
+    public static void RecordEntityAnimationManagerSkip() => AddEntityAnimationCount(_entityAnimationManagerSkips);
+    public static void RecordEntityAnimationHeadUpdate() => AddEntityAnimationCount(_entityAnimationHeadUpdates);
+    public static void RecordEntityAnimationPoseUpdate() => AddEntityAnimationCount(_entityAnimationPoseUpdates);
+    public static void RecordEntityAnimationPoseSkip() => AddEntityAnimationCount(_entityAnimationPoseSkips);
+    public static void RecordEntityAnimationMatrixBuild() => AddEntityAnimationCount(_entityAnimationMatrixBuilds);
+
+    public static void RecordEntityAnimationMatrixTicks(long elapsedTicks)
+    {
+        Interlocked.Add(ref _entityAnimationMatrixTicks, elapsedTicks);
+    }
+
+    public static void RecordEntityAnimationMatrixSkip() => AddEntityAnimationCount(_entityAnimationMatrixSkips);
+    public static void RecordEntityAnimationLoopingSoundPass() => AddEntityAnimationCount(_entityAnimationLoopingSoundPasses);
+
+    private static void AddEntityAnimationCount(long[] counts)
+    {
+        if (!StutterWatchEnabled) return;
+        int band = _entityAnimationContextActive ? _entityAnimationBand : EntityAnimationUnknownBand;
+        Interlocked.Increment(ref counts[band]);
+    }
+
+    public static void ResetEntityAnimation()
+    {
+        Array.Clear(_entityAnimationManagerCalls);
+        Array.Clear(_entityAnimationManagerSkips);
+        Array.Clear(_entityAnimationHeadUpdates);
+        Array.Clear(_entityAnimationPoseUpdates);
+        Array.Clear(_entityAnimationPoseSkips);
+        Array.Clear(_entityAnimationMatrixBuilds);
+        Array.Clear(_entityAnimationMatrixSkips);
+        Array.Clear(_entityAnimationLoopingSoundPasses);
+        Interlocked.Exchange(ref _entityAnimationMatrixTicks, 0);
+    }
+
+    public static string GetEntityAnimationSummary()
+    {
+        long managerCalls = SumEntityAnimationCounts(_entityAnimationManagerCalls);
+        long managerSkips = SumEntityAnimationCounts(_entityAnimationManagerSkips);
+        long headUpdates = SumEntityAnimationCounts(_entityAnimationHeadUpdates);
+        long poseUpdates = SumEntityAnimationCounts(_entityAnimationPoseUpdates);
+        long poseSkips = SumEntityAnimationCounts(_entityAnimationPoseSkips);
+        long matrixBuilds = SumEntityAnimationCounts(_entityAnimationMatrixBuilds);
+        long matrixSkips = SumEntityAnimationCounts(_entityAnimationMatrixSkips);
+        long loopingSoundPasses = SumEntityAnimationCounts(_entityAnimationLoopingSoundPasses);
+        double matrixMs = Interlocked.Read(ref _entityAnimationMatrixTicks) * 1000.0 / Stopwatch.Frequency;
+
+        var sb = new StringBuilder();
+        sb.Append($"Optimum entity animation: managerCalls={managerCalls}, managerSkips={managerSkips}, headUpdates={headUpdates}, poseUpdates={poseUpdates}, poseSkips={poseSkips}, matrixBuilds={matrixBuilds}, matrixSkips={matrixSkips}, loopingSoundPasses={loopingSoundPasses}, matrixMs={matrixMs:0.###}, bands=");
+        for (int i = 0; i < EntityAnimationBandCount; i++)
+        {
+            if (i > 0) sb.Append(';');
+            sb.Append(EntityAnimationBandNames[i]).Append(':')
+                .Append(Interlocked.Read(ref _entityAnimationManagerCalls[i])).Append('/')
+                .Append(Interlocked.Read(ref _entityAnimationPoseUpdates[i])).Append('/')
+                .Append(Interlocked.Read(ref _entityAnimationPoseSkips[i])).Append('/')
+                .Append(Interlocked.Read(ref _entityAnimationMatrixBuilds[i])).Append('/')
+                .Append(Interlocked.Read(ref _entityAnimationMatrixSkips[i]));
+        }
+
+        return sb.ToString();
+    }
+
+    private static long SumEntityAnimationCounts(long[] counts)
+    {
+        long total = 0;
+        for (int i = 0; i < counts.Length; i++)
+        {
+            total += Interlocked.Read(ref counts[i]);
+        }
+
+        return total;
     }
 
     // Entity re-tesselation frame budget (EntityTesselationFrameBudget). Reset once per frame
@@ -1103,14 +1341,102 @@ public static class OptimumDiagnostics
         ResetAnimBlock();
         ResetGreedyMesh();
         ResetEntityRenderP0();
+        ResetTessellation();
+        ResetEntityAnimation();
+        ResetGameLaunchTasks();
+        ResetWorldgenPassTiming();
+    }
+
+    // Game launch task diagnostics. The client intentionally runs at most one
+    // launch task per frame. These counters measure the current policy before
+    // any pacing change considers queue depth or task duration.
+    private static long _gameLaunchTaskFrames;
+    private static long _gameLaunchTaskCount;
+    private static long _gameLaunchTaskTicks;
+    private static long _gameLaunchTaskMaxTicks;
+    private static long _gameLaunchTaskPeakDepth;
+
+    public static void RecordGameLaunchTask(long elapsedTicks, int queueDepth)
+    {
+        Interlocked.Increment(ref _gameLaunchTaskCount);
+        Interlocked.Add(ref _gameLaunchTaskTicks, elapsedTicks);
+        UpdatePeak(ref _gameLaunchTaskMaxTicks, elapsedTicks);
+        UpdatePeak(ref _gameLaunchTaskPeakDepth, queueDepth);
+    }
+
+    /// <summary>
+    /// Called once per frame that processes at least one launch task.
+    /// Separated from RecordGameLaunchTask so multi-task frames count
+    /// as one frame but multiple tasks.
+    /// </summary>
+    public static void RecordGameLaunchTaskFrame()
+    {
+        Interlocked.Increment(ref _gameLaunchTaskFrames);
+    }
+
+    public static void ResetGameLaunchTasks()
+    {
+        Interlocked.Exchange(ref _gameLaunchTaskFrames, 0);
+        Interlocked.Exchange(ref _gameLaunchTaskCount, 0);
+        Interlocked.Exchange(ref _gameLaunchTaskTicks, 0);
+        Interlocked.Exchange(ref _gameLaunchTaskMaxTicks, 0);
+        Interlocked.Exchange(ref _gameLaunchTaskPeakDepth, 0);
+    }
+
+    public static string GetGameLaunchTaskSummary()
+    {
+        long frames = Interlocked.Read(ref _gameLaunchTaskFrames);
+        long count = Interlocked.Read(ref _gameLaunchTaskCount);
+        long totalTicks = Interlocked.Read(ref _gameLaunchTaskTicks);
+        long maxTicks = Interlocked.Read(ref _gameLaunchTaskMaxTicks);
+        double totalMs = totalTicks * 1000.0 / Stopwatch.Frequency;
+        double averageMs = count == 0 ? 0 : totalMs / count;
+        double maxMs = maxTicks * 1000.0 / Stopwatch.Frequency;
+        double tasksPerFrame = frames == 0 ? 0 : (double)count / frames;
+
+        return $"Optimum game launch tasks: frames={frames}, tasks={count}, tasks/frame={tasksPerFrame:0.00}, averageMs={averageMs:0.###}, maxMs={maxMs:0.###}, totalMs={totalMs:0.###}, peakQueueDepth={Interlocked.Read(ref _gameLaunchTaskPeakDepth)}";
+    }
+
+    private static void UpdatePeak(ref long target, long value)
+    {
+        long current = Interlocked.Read(ref target);
+        while (value > current)
+        {
+            long previous = Interlocked.CompareExchange(ref target, value, current);
+            if (previous == current)
+            {
+                return;
+            }
+            current = previous;
+        }
     }
 
     // Chunk render diagnostics (Phase 1 for rank 2 command batching evaluation)
     private static long _chunkRenderFrames;
     private static long _chunkDrawCalls;
     private static long _chunkPoolsRendered;
+    private static long _chunkPoolsCulled;
     private static long _chunkVisibleGroups;
     private static long _chunkFrustumCullTicks;
+    private const int ChunkRenderWindowSize = 120;
+    private static readonly long[] _chunkWindowDrawCalls = new long[ChunkRenderWindowSize];
+    private static readonly long[] _chunkWindowPoolsRendered = new long[ChunkRenderWindowSize];
+    private static readonly long[] _chunkWindowPoolsCulled = new long[ChunkRenderWindowSize];
+    private static readonly long[] _chunkWindowVisibleGroups = new long[ChunkRenderWindowSize];
+    private static readonly long[] _chunkWindowFrustumCullTicks = new long[ChunkRenderWindowSize];
+    private static long _chunkWindowSampleCount;
+    private static long _chunkWindowDrawCallsTotal;
+    private static long _chunkWindowPoolsRenderedTotal;
+    private static long _chunkWindowPoolsCulledTotal;
+    private static long _chunkWindowVisibleGroupsTotal;
+    private static long _chunkWindowFrustumCullTicksTotal;
+    private static long _chunkWindowLastDrawCalls;
+    private static long _chunkWindowLastPoolsRendered;
+    private static long _chunkWindowLastPoolsCulled;
+    private static long _chunkWindowLastVisibleGroups;
+    private static long _chunkWindowLastFrustumCullTicks;
+    private static long _chunkWindowNextSample;
+    private static int _chunkWindowBaselineReady;
 
     /// <summary>
     /// Called once per MeshDataPool.RenderMesh invocation (one MultiDrawElements call).
@@ -1122,13 +1448,71 @@ public static class OptimumDiagnostics
     }
 
     /// <summary>
-    /// Called once per MeshDataPoolManager.Render (one per pass+atlas combination).
-    /// poolsRendered = pools with groupCount > 0.
+    /// Called once per MeshDataPoolManager.Render.
+    /// poolsRendered counts pools with visible groups in this render pass.
+    /// poolsCulled counts normal-dimension pools with no visible groups after frustum culling.
     /// </summary>
     public static void RecordChunkRenderPass(int poolsRendered)
     {
-        Interlocked.Increment(ref _chunkRenderFrames);
+        RecordChunkRenderPass(poolsRendered, 0);
+    }
+
+    public static void RecordChunkRenderPass(int poolsRendered, int poolsCulled)
+    {
         Interlocked.Add(ref _chunkPoolsRendered, poolsRendered);
+        Interlocked.Add(ref _chunkPoolsCulled, poolsCulled);
+    }
+
+    /// <summary>
+    /// Called once per client frame from MeshDataPoolMasterManager.OnFrame.
+    /// </summary>
+    public static void RecordChunkRenderFrame()
+    {
+        Interlocked.Increment(ref _chunkRenderFrames);
+        if (Interlocked.Exchange(ref _chunkWindowBaselineReady, 1) == 0)
+        {
+            SetChunkWindowBaseline();
+            return;
+        }
+
+        RecordChunkWindowSample();
+    }
+
+    private static void SetChunkWindowBaseline()
+    {
+        Interlocked.Exchange(ref _chunkWindowLastDrawCalls, Interlocked.Read(ref _chunkDrawCalls));
+        Interlocked.Exchange(ref _chunkWindowLastPoolsRendered, Interlocked.Read(ref _chunkPoolsRendered));
+        Interlocked.Exchange(ref _chunkWindowLastPoolsCulled, Interlocked.Read(ref _chunkPoolsCulled));
+        Interlocked.Exchange(ref _chunkWindowLastVisibleGroups, Interlocked.Read(ref _chunkVisibleGroups));
+        Interlocked.Exchange(ref _chunkWindowLastFrustumCullTicks, Interlocked.Read(ref _chunkFrustumCullTicks));
+    }
+
+    private static void RecordChunkWindowSample()
+    {
+        long draws = Interlocked.Read(ref _chunkDrawCalls);
+        long pools = Interlocked.Read(ref _chunkPoolsRendered);
+        long culled = Interlocked.Read(ref _chunkPoolsCulled);
+        long groups = Interlocked.Read(ref _chunkVisibleGroups);
+        long cullTicks = Interlocked.Read(ref _chunkFrustumCullTicks);
+        long sampleNumber = Interlocked.Increment(ref _chunkWindowNextSample);
+        long drawDelta = draws - Interlocked.Exchange(ref _chunkWindowLastDrawCalls, draws);
+        long poolDelta = pools - Interlocked.Exchange(ref _chunkWindowLastPoolsRendered, pools);
+        long culledDelta = culled - Interlocked.Exchange(ref _chunkWindowLastPoolsCulled, culled);
+        long groupDelta = groups - Interlocked.Exchange(ref _chunkWindowLastVisibleGroups, groups);
+        long cullTickDelta = cullTicks - Interlocked.Exchange(ref _chunkWindowLastFrustumCullTicks, cullTicks);
+        int slot = (int)((sampleNumber - 1) % ChunkRenderWindowSize);
+
+        Interlocked.Add(ref _chunkWindowDrawCallsTotal, drawDelta - _chunkWindowDrawCalls[slot]);
+        Interlocked.Add(ref _chunkWindowPoolsRenderedTotal, poolDelta - _chunkWindowPoolsRendered[slot]);
+        Interlocked.Add(ref _chunkWindowPoolsCulledTotal, culledDelta - _chunkWindowPoolsCulled[slot]);
+        Interlocked.Add(ref _chunkWindowVisibleGroupsTotal, groupDelta - _chunkWindowVisibleGroups[slot]);
+        Interlocked.Add(ref _chunkWindowFrustumCullTicksTotal, cullTickDelta - _chunkWindowFrustumCullTicks[slot]);
+        _chunkWindowDrawCalls[slot] = drawDelta;
+        _chunkWindowPoolsRendered[slot] = poolDelta;
+        _chunkWindowPoolsCulled[slot] = culledDelta;
+        _chunkWindowVisibleGroups[slot] = groupDelta;
+        _chunkWindowFrustumCullTicks[slot] = cullTickDelta;
+        Interlocked.Exchange(ref _chunkWindowSampleCount, Math.Min(sampleNumber, ChunkRenderWindowSize));
     }
 
     /// <summary>
@@ -1144,8 +1528,48 @@ public static class OptimumDiagnostics
         Interlocked.Exchange(ref _chunkRenderFrames, 0);
         Interlocked.Exchange(ref _chunkDrawCalls, 0);
         Interlocked.Exchange(ref _chunkPoolsRendered, 0);
+        Interlocked.Exchange(ref _chunkPoolsCulled, 0);
         Interlocked.Exchange(ref _chunkVisibleGroups, 0);
         Interlocked.Exchange(ref _chunkFrustumCullTicks, 0);
+        Interlocked.Exchange(ref _chunkWindowSampleCount, 0);
+        Interlocked.Exchange(ref _chunkWindowDrawCallsTotal, 0);
+        Interlocked.Exchange(ref _chunkWindowPoolsRenderedTotal, 0);
+        Interlocked.Exchange(ref _chunkWindowPoolsCulledTotal, 0);
+        Interlocked.Exchange(ref _chunkWindowVisibleGroupsTotal, 0);
+        Interlocked.Exchange(ref _chunkWindowFrustumCullTicksTotal, 0);
+        Interlocked.Exchange(ref _chunkWindowLastDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkWindowLastPoolsRendered, 0);
+        Interlocked.Exchange(ref _chunkWindowLastPoolsCulled, 0);
+        Interlocked.Exchange(ref _chunkWindowLastVisibleGroups, 0);
+        Interlocked.Exchange(ref _chunkWindowLastFrustumCullTicks, 0);
+        Interlocked.Exchange(ref _chunkWindowNextSample, 0);
+        Interlocked.Exchange(ref _chunkWindowBaselineReady, 0);
+        Array.Clear(_chunkWindowDrawCalls);
+        Array.Clear(_chunkWindowPoolsRendered);
+        Array.Clear(_chunkWindowPoolsCulled);
+        Array.Clear(_chunkWindowVisibleGroups);
+        Array.Clear(_chunkWindowFrustumCullTicks);
+    }
+
+    public static void ResetChunkRenderFrame()
+    {
+        if (Volatile.Read(ref _chunkWindowBaselineReady) != 0)
+        {
+            RecordChunkWindowSample();
+        }
+
+        Interlocked.Exchange(ref _chunkRenderFrames, 0);
+        Interlocked.Exchange(ref _chunkDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkPoolsRendered, 0);
+        Interlocked.Exchange(ref _chunkPoolsCulled, 0);
+        Interlocked.Exchange(ref _chunkVisibleGroups, 0);
+        Interlocked.Exchange(ref _chunkFrustumCullTicks, 0);
+        Interlocked.Exchange(ref _chunkWindowLastDrawCalls, 0);
+        Interlocked.Exchange(ref _chunkWindowLastPoolsRendered, 0);
+        Interlocked.Exchange(ref _chunkWindowLastPoolsCulled, 0);
+        Interlocked.Exchange(ref _chunkWindowLastVisibleGroups, 0);
+        Interlocked.Exchange(ref _chunkWindowLastFrustumCullTicks, 0);
+        Interlocked.Exchange(ref _chunkWindowBaselineReady, 0);
     }
 
     // Chunk upload diagnostics (Phase 1 for rank 3 persistent mapped upload)
@@ -1201,16 +1625,30 @@ public static class OptimumDiagnostics
         long frames = Interlocked.Read(ref _chunkRenderFrames);
         long draws = Interlocked.Read(ref _chunkDrawCalls);
         long pools = Interlocked.Read(ref _chunkPoolsRendered);
+        long culled = Interlocked.Read(ref _chunkPoolsCulled);
         long groups = Interlocked.Read(ref _chunkVisibleGroups);
         long cullTicks = Interlocked.Read(ref _chunkFrustumCullTicks);
+        long windowFrames = Interlocked.Read(ref _chunkWindowSampleCount);
+        long windowDraws = Interlocked.Read(ref _chunkWindowDrawCallsTotal);
+        long windowPools = Interlocked.Read(ref _chunkWindowPoolsRenderedTotal);
+        long windowCulled = Interlocked.Read(ref _chunkWindowPoolsCulledTotal);
+        long windowGroups = Interlocked.Read(ref _chunkWindowVisibleGroupsTotal);
+        long windowCullTicks = Interlocked.Read(ref _chunkWindowFrustumCullTicksTotal);
         double cullMs = cullTicks * 1000.0 / Stopwatch.Frequency;
+        double windowCullMs = windowCullTicks * 1000.0 / Stopwatch.Frequency;
 
         double drawsPerFrame = frames == 0 ? 0 : (double)draws / frames;
         double poolsPerFrame = frames == 0 ? 0 : (double)pools / frames;
+        double culledPerFrame = frames == 0 ? 0 : (double)culled / frames;
         double groupsPerFrame = frames == 0 ? 0 : (double)groups / frames;
         double cullMsPerFrame = frames == 0 ? 0 : cullMs / frames;
+        double windowDrawsPerFrame = windowFrames == 0 ? 0 : (double)windowDraws / windowFrames;
+        double windowPoolsPerFrame = windowFrames == 0 ? 0 : (double)windowPools / windowFrames;
+        double windowCulledPerFrame = windowFrames == 0 ? 0 : (double)windowCulled / windowFrames;
+        double windowGroupsPerFrame = windowFrames == 0 ? 0 : (double)windowGroups / windowFrames;
+        double windowCullMsPerFrame = windowFrames == 0 ? 0 : windowCullMs / windowFrames;
 
-        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}";
+        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
     }
 
     public static string GetCountersSummary()
@@ -1226,6 +1664,209 @@ public static class OptimumDiagnostics
         double entityLightBatchMs = Interlocked.Read(ref _entityLightBatchTicks) * 1000.0 / Stopwatch.Frequency;
         sb.Append($"\n  EntityLightBatchTotals: frames={Interlocked.Read(ref _entityLightBatchFrames)}, samples={Interlocked.Read(ref _entityLightSamples)}, prepared={Interlocked.Read(ref _entityLightPreparedSamples)}, chunkGroups={Interlocked.Read(ref _entityLightChunkGroups)}, failedChunkGroups={Interlocked.Read(ref _entityLightFailedChunkGroups)}, coordinateMismatches={Interlocked.Read(ref _entityLightCoordinateMismatches)}, chunkInvalidations={Interlocked.Read(ref _entityLightChunkInvalidations)}, lockBatches={Interlocked.Read(ref _entityLightLockBatches)}, maxBatchSize={Interlocked.Read(ref _entityLightMaxBatchSize)}, timedFrames={Interlocked.Read(ref _entityLightTimedFrames)}, sampledBatchMs={entityLightBatchMs:0.###}");
         sb.Append($"\n  EntityShaderStateCacheTotals: segments={Interlocked.Read(ref _entityShaderSegments)}, uses={Interlocked.Read(ref _entityShaderUses)}, uniformUploadsAvoided={Interlocked.Read(ref _entityShaderUniformUploadsAvoided)}, uboLookupsAvoided={Interlocked.Read(ref _entityShaderUboLookupsAvoided)}");
+        sb.Append($"\n  {GetGameLaunchTaskSummary()}");
         return sb.ToString();
+    }
+
+    // Tessellation pipeline instrumentation (Phase 2, Steps 9-10)
+    private static long _tessChunksProcessed;
+    private static long _tessTotalTicks;
+    private static long _tessPeakQueueDepth;
+    private static long _tessCurrentQueueDepth;
+    private static long _tessReadyToUploadTicks; // wall-clock from "chunk data ready" to "mesh uploaded"
+    private static long _tessReadyToUploadCount;
+    private static long _tessRetryRequeueTotal;
+    private static long _tessRetryRequeueWorst; // worst per-chunk requeue count
+    private static long _tessBackpressureCount;
+    private static long _tessHandoffCapacity;
+    private static long _tessHandoffPeak;
+    private static readonly object _tessWorkerGate = new();
+    private static readonly List<int> _tessWorkerIds = new();
+
+    /// <summary>Called after each chunk tessellation completes (success or retry).</summary>
+    public static void RecordTessellation(long elapsedTicks, int queueDepth)
+    {
+        Interlocked.Increment(ref _tessChunksProcessed);
+        Interlocked.Add(ref _tessTotalTicks, elapsedTicks);
+
+        // Update peak (lock-free CAS loop)
+        long current = Interlocked.Read(ref _tessPeakQueueDepth);
+        while (queueDepth > current)
+        {
+            long prev = Interlocked.CompareExchange(ref _tessPeakQueueDepth, queueDepth, current);
+            if (prev == current) break;
+            current = prev;
+        }
+        Volatile.Write(ref _tessCurrentQueueDepth, queueDepth);
+    }
+
+    /// <summary>Called when a tessellated chunk is uploaded to the render thread.</summary>
+    public static void RecordTessUpload(long readyToUploadTicks)
+    {
+        Interlocked.Increment(ref _tessReadyToUploadCount);
+        Interlocked.Add(ref _tessReadyToUploadTicks, readyToUploadTicks);
+    }
+
+    /// <summary>Called on each RetryTesselationException requeue.</summary>
+    public static void RecordTessRetry(int perChunkRetryCount)
+    {
+        Interlocked.Increment(ref _tessRetryRequeueTotal);
+
+        // Update worst per-chunk (lock-free CAS loop)
+        long current = Interlocked.Read(ref _tessRetryRequeueWorst);
+        while (perChunkRetryCount > current)
+        {
+            long prev = Interlocked.CompareExchange(ref _tessRetryRequeueWorst, perChunkRetryCount, current);
+            if (prev == current) break;
+            current = prev;
+        }
+    }
+
+    /// <summary>Called when a completed mesh returns to the dirty queue because the handoff is full.</summary>
+    public static void RecordTessBackpressure()
+    {
+        Interlocked.Increment(ref _tessBackpressureCount);
+    }
+
+    /// <summary>Called once from OptimumBoundedHandoff's constructor with its actual capacity.</summary>
+    public static void RecordTessHandoffCapacity(int capacity)
+    {
+        Interlocked.Exchange(ref _tessHandoffCapacity, capacity);
+    }
+
+    /// <summary>Called on each successful OptimumBoundedHandoff.TryReserve with the new reserved count.</summary>
+    public static void RecordTessHandoffReserved(int reserved)
+    {
+        long current = Interlocked.Read(ref _tessHandoffPeak);
+        while (reserved > current)
+        {
+            long prev = Interlocked.CompareExchange(ref _tessHandoffPeak, reserved, current);
+            if (prev == current) break;
+            current = prev;
+        }
+    }
+
+    /// <summary>Called from OptimumTesselationWorkerRegistry.Register on first registration of a thread id.</summary>
+    public static void RecordTessWorkerRegistered(int threadId)
+    {
+        lock (_tessWorkerGate)
+        {
+            if (!_tessWorkerIds.Contains(threadId))
+            {
+                _tessWorkerIds.Add(threadId);
+            }
+        }
+    }
+
+    /// <summary>Check if a chunk has exceeded the retry threshold (50) and should log a warning.</summary>
+    public static bool ShouldWarnTessRetry(int perChunkRetryCount) => perChunkRetryCount == 50;
+
+    public static void ResetTessellation()
+    {
+        Interlocked.Exchange(ref _tessChunksProcessed, 0);
+        Interlocked.Exchange(ref _tessTotalTicks, 0);
+        Interlocked.Exchange(ref _tessPeakQueueDepth, 0);
+        Interlocked.Exchange(ref _tessCurrentQueueDepth, 0);
+        Interlocked.Exchange(ref _tessReadyToUploadTicks, 0);
+        Interlocked.Exchange(ref _tessReadyToUploadCount, 0);
+        Interlocked.Exchange(ref _tessRetryRequeueTotal, 0);
+        Interlocked.Exchange(ref _tessRetryRequeueWorst, 0);
+        Interlocked.Exchange(ref _tessBackpressureCount, 0);
+        Interlocked.Exchange(ref _tessHandoffPeak, 0);
+        lock (_tessWorkerGate)
+        {
+            _tessWorkerIds.Clear();
+        }
+    }
+
+    public static string GetTessellationSummary()
+    {
+        long chunks = Interlocked.Read(ref _tessChunksProcessed);
+        long ticks = Interlocked.Read(ref _tessTotalTicks);
+        long peak = Interlocked.Read(ref _tessPeakQueueDepth);
+        long currentQ = Volatile.Read(ref _tessCurrentQueueDepth);
+        long uploadCount = Interlocked.Read(ref _tessReadyToUploadCount);
+        long uploadTicks = Interlocked.Read(ref _tessReadyToUploadTicks);
+        long retries = Interlocked.Read(ref _tessRetryRequeueTotal);
+        long worstRetry = Interlocked.Read(ref _tessRetryRequeueWorst);
+        long backpressure = Interlocked.Read(ref _tessBackpressureCount);
+        long handoffCapacity = Interlocked.Read(ref _tessHandoffCapacity);
+        long handoffPeak = Interlocked.Read(ref _tessHandoffPeak);
+
+        double totalMs = ticks * 1000.0 / Stopwatch.Frequency;
+        double meanMs = chunks == 0 ? 0 : totalMs / chunks;
+        double uploadMs = uploadCount == 0 ? 0 : uploadTicks * 1000.0 / Stopwatch.Frequency / uploadCount;
+
+        string workerIds;
+        int workerCount;
+        lock (_tessWorkerGate)
+        {
+            workerCount = _tessWorkerIds.Count;
+            workerIds = string.Join(",", _tessWorkerIds);
+        }
+
+        return $"Optimum tessellation: chunks={chunks}, meanMs/chunk={meanMs:0.###}, queuePeak={peak}, queueNow={currentQ}, ready-to-upload meanMs={uploadMs:0.###}, retries={retries}, worstPerChunk={worstRetry}, backpressure={backpressure}, workers={workerCount} [ids={workerIds}], handoffPeak={handoffPeak}/{handoffCapacity}";
+    }
+
+    // Worldgen per-pass timing diagnostics (Step 33)
+    private const int WorldgenPassCount = 6; // None(0), Terrain(1), TerrainFeatures(2), Vegetation(3), NeighbourSunLightFlood(4), PreDone(5)
+    private static readonly long[] _worldgenPassTicks = new long[WorldgenPassCount];
+    private static readonly long[] _worldgenPassColumns = new long[WorldgenPassCount];
+    internal static long _worldgenTotalColumns;
+
+    public static void RecordWorldgenPassTiming(int pass, long elapsedTicks)
+    {
+        if ((uint)pass >= WorldgenPassCount) return;
+        Interlocked.Add(ref _worldgenPassTicks[pass], elapsedTicks);
+        Interlocked.Increment(ref _worldgenPassColumns[pass]);
+        Interlocked.Increment(ref _worldgenTotalColumns);
+    }
+
+    public static void ResetWorldgenPassTiming()
+    {
+        Array.Clear(_worldgenPassTicks);
+        Array.Clear(_worldgenPassColumns);
+        Interlocked.Exchange(ref _worldgenTotalColumns, 0);
+    }
+
+    private static readonly string[] WorldgenPassNames = { "None", "Terrain", "TerrainFeatures", "Vegetation", "SunLightFlood", "PreDone" };
+
+    public static string GetWorldgenPassTimingSummary()
+    {
+        long totalColumns = Interlocked.Read(ref _worldgenTotalColumns);
+        var sb = new StringBuilder();
+        sb.Append($"Optimum worldgen pass timing: totalColumns={totalColumns}");
+        for (int i = 1; i < WorldgenPassCount; i++)
+        {
+            long ticks = Interlocked.Read(ref _worldgenPassTicks[i]);
+            long cols = Interlocked.Read(ref _worldgenPassColumns[i]);
+            double totalMs = ticks * 1000.0 / Stopwatch.Frequency;
+            double meanMs = cols == 0 ? 0 : totalMs / cols;
+            sb.Append($", {WorldgenPassNames[i]}={meanMs:0.###}ms/col({cols}cols,{totalMs:0.#}ms)");
+        }
+        return sb.ToString();
+    }
+
+    // Chunk deserialization parallelism diagnostics
+    private static long _chunkDeserializeParallelColumns;
+    private static long _chunkDeserializeParallelChunks;
+
+    public static void RecordChunkDeserializeParallel(int chunksInColumn)
+    {
+        Interlocked.Increment(ref _chunkDeserializeParallelColumns);
+        Interlocked.Add(ref _chunkDeserializeParallelChunks, chunksInColumn);
+    }
+
+    public static void ResetChunkDeserializeParallel()
+    {
+        Interlocked.Exchange(ref _chunkDeserializeParallelColumns, 0);
+        Interlocked.Exchange(ref _chunkDeserializeParallelChunks, 0);
+    }
+
+    public static string GetChunkDeserializeParallelSummary()
+    {
+        long columns = Interlocked.Read(ref _chunkDeserializeParallelColumns);
+        long chunks = Interlocked.Read(ref _chunkDeserializeParallelChunks);
+        return $"Optimum chunk deserialize parallel: columns={columns}, chunks={chunks}";
     }
 }

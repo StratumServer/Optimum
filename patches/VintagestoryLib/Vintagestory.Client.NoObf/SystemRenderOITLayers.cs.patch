@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..151f02b 100644
+index bba43f6..c44848a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -20,41 +20,89 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -18,45 +18,93 @@ public class SystemRenderOITLayers : ClientSystem
+ 		public int RenderRange => 1;
+ 
  		public BeforeOIT(ICoreClientAPI capi)
  		{
  			this.capi = capi;
@@ -61,7 +63,7 @@ index bba43f6..151f02b 100644
 +				programByName.Uniform("liquidDepth", 4);
 +				programByName.Stop();
 +				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
-+				if (revealTextureId == 0 || transparentfb.Disposed)
++				if (revealTextureId == 0 || transparentfb.Disposed || transparentfb != capi.Render.FrameBuffers[1])
 +				{
 +					rebuild();
 +					if (revealTextureId == 0 || accumTextureId == 0)
@@ -120,7 +122,11 @@ index bba43f6..151f02b 100644
  		}
  
  		private void freeResources()
-@@ -67,7 +115,7 @@ public class SystemRenderOITLayers : ClientSystem
+ 		{
+ 			GL.DeleteTexture(accumTextureId);
+@@ -65,11 +113,11 @@ public class SystemRenderOITLayers : ClientSystem
+ 			revealTextureId = 0;
+ 		}
  
  		public void Dispose()
  		{
@@ -129,7 +135,11 @@ index bba43f6..151f02b 100644
  		}
  
  		private void rebuild()
-@@ -106,11 +154,20 @@ public class SystemRenderOITLayers : ClientSystem
+ 		{
+ 			freeResources();
+@@ -104,15 +152,24 @@ public class SystemRenderOITLayers : ClientSystem
+ 
+ 		public int RenderRange => 1;
  
  		public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
  		{
@@ -155,7 +165,11 @@ index bba43f6..151f02b 100644
  		}
  
  		public void Dispose()
-@@ -124,6 +181,18 @@ public class SystemRenderOITLayers : ClientSystem
+ 		{
+ 		}
+@@ -122,10 +179,22 @@ public class SystemRenderOITLayers : ClientSystem
+ 
+ 	private static int accumTextureId;
  
  	private static int revealTextureId;
  
@@ -174,4 +188,5 @@ index bba43f6..151f02b 100644
  	public override string Name => "oitlayers";
  
  	public override EnumClientSystemType GetSystemType()
-
+ 	{
+ 		return EnumClientSystemType.Render;

@@ -1,18 +1,19 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..baf5049 100644
+index 4a24e75..1e7a086 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-@@ -1,8 +1,9 @@
+@@ -1,8 +1,10 @@
  using System;
  using System.Collections.Generic;
  using System.Text.RegularExpressions;
++using System.Threading.Tasks;
 +using OpenTK.Graphics.OpenGL;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common;
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,10 +182,25 @@ public class ShaderRegistry
+@@ -181,36 +183,122 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -38,21 +39,91 @@ index 4a24e75..baf5049 100644
  	private static bool loadRegisteredShaderPrograms()
  	{
  		ScreenManager.Platform.Logger.Notification("Loading shaders...");
-@@ -200,17 +216,35 @@ public class ShaderRegistry
+ 		bool flag = true;
+-		_ = ScreenManager.Platform.AssetManager;
+-		List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
+-		many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
+-		foreach (IAsset item in many)
++
++		// Optimum: preprocess shader sources on a background thread (Step 35).
++		// Phase 1 (CPU-only): asset I/O, UTF-8 decode, #include resolution, #define prefixes.
++		// Phase 2 (GL thread): glCompileShader, glLinkProgram, sampler setup.
++		// When disabled, runs vanilla single-threaded path.
++		if (OptimumConfig.ShaderPreprocessParallel)
  		{
- 			ShaderProgram shaderProgram = shaderPrograms[i];
- 			if (shaderProgram != null)
- 			{
- 				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
--				flag = shaderProgram.Compile() && flag;
-+				bool compiled = shaderProgram.Compile();
-+				if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
+-			includes[item.Name] = item.ToText();
++			bool useSSBOs = ScreenManager.Platform.UseSSBOs;
++			int programCount = nextPassId;
++
++			// Phase 1: run on background thread
++			Task preprocessTask = Task.Run(() =>
++			{
++				List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
++				many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
++				foreach (IAsset item in many)
 +				{
-+					shaderProgram.LoadError |= !compiled;
++					includes[item.Name] = item.ToText();
 +				}
-+				else
++				for (int i = 0; i < programCount; i++)
 +				{
-+					flag = compiled && flag;
++					ShaderProgram shaderProgram = shaderPrograms[i];
++					if (shaderProgram != null)
++					{
++						LoadShaderProgram(shaderProgram, useSSBOs);
++					}
++				}
++			});
++
++			preprocessTask.Wait();
++
++			// Phase 2: GL thread only (compile + sampler setup)
++			for (int i = 0; i < programCount; i++)
++			{
++				ShaderProgram shaderProgram = shaderPrograms[i];
++				if (shaderProgram != null)
++				{
++					bool compiled = shaderProgram.Compile();
++					if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
++					{
++						shaderProgram.LoadError |= !compiled;
++					}
++					else
++					{
++						flag = compiled && flag;
++					}
++				}
++			}
+ 		}
+-		for (int i = 0; i < nextPassId; i++)
++		else
+ 		{
+-			ShaderProgram shaderProgram = shaderPrograms[i];
+-			if (shaderProgram != null)
++			// Vanilla path: single-threaded load + compile
++			_ = ScreenManager.Platform.AssetManager;
++			List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
++			many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
++			foreach (IAsset item in many)
+ 			{
+-				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
+-				flag = shaderProgram.Compile() && flag;
++				includes[item.Name] = item.ToText();
++			}
++			for (int i = 0; i < nextPassId; i++)
++			{
++				ShaderProgram shaderProgram = shaderPrograms[i];
++				if (shaderProgram != null)
++				{
++					LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
++					bool compiled = shaderProgram.Compile();
++					if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
++					{
++						shaderProgram.LoadError |= !compiled;
++					}
++					else
++					{
++						flag = compiled && flag;
++					}
 +				}
  			}
  		}
@@ -75,7 +146,7 @@ index 4a24e75..baf5049 100644
  
  	private static void LoadShaderProgram(ShaderProgram program, bool useSSBOs)
  	{
-@@ -296,11 +330,11 @@ public class ShaderRegistry
+@@ -296,11 +384,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -88,7 +159,7 @@ index 4a24e75..baf5049 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +367,28 @@ public class ShaderRegistry
+@@ -333,10 +421,28 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";

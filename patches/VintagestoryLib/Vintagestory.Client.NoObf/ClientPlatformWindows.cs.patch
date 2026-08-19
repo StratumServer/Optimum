@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index fbc7255..f508de0 100644
+index 6edf0c9..79c2642 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -47,6 +47,95 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -45,10 +45,99 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	private AssetManager assetManager;
  
  	private Stopwatch frameStopWatch;
  
@@ -43,7 +45,7 @@ index fbc7255..f508de0 100644
 +		// hidden static delegate-cache class (<>O) to avoid reallocating the delegate on repeated
 +		// calls; the Cecil patcher's self-reference check can't resolve that compiler-generated
 +		// type against the vanilla target and rejects the transplant (same "lambda-freedom"
-+		// constraint documented for Packet_Server). Building the delegate through
++		// constraint docs/todo.md documents for Packet_Server). Building the delegate through
 +		// reflection instead avoids the method-group conversion entirely, so no cache class is
 +		// generated, and we get the documented timeBeginPeriod/timeEndPeriod pairing for free.
 +		System.Reflection.MethodInfo exitHandlerMethod = typeof(ClientPlatformWindows).GetMethod(
@@ -98,16 +100,26 @@ index fbc7255..f508de0 100644
  	internal Stopwatch uptimeStopWatch = new Stopwatch();
  
  	private Logger logger;
-@@ -95,6 +184,8 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	private int doResize;
+@@ -93,10 +182,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	private List<string> drawCallStacks = new List<string>();
  
  	private List<FrameBufferRef> frameBuffers;
  
 +	private const int OptimumFsrFramebufferIndex = 18;
 +
++	private bool optimumFsrDisabled;
++
  	private MeshRef screenQuad;
  
  	private bool serverRunning;
-@@ -480,21 +571,102 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	private bool gamepause;
+@@ -478,25 +571,106 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		frameStopWatch.Start();
+ 	}
  
  	private void window_RenderFrame(FrameEventArgs e)
  	{
@@ -214,7 +226,11 @@ index fbc7255..f508de0 100644
  		ScreenManager.FrameProfiler.Mark("sleep");
  		UpdateMousePosition();
  		RenderBloom = ClientSettings.Bloom && base.DoPostProcessingEffects;
-@@ -1212,7 +1384,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		RenderGodRays = ClientSettings.GodRayQuality > 0 && base.DoPostProcessingEffects;
+ 		RenderFXAA = ClientSettings.FXAA && base.DoPostProcessingEffects;
+@@ -1210,11 +1384,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
  		GL.DepthFunc((DepthFunction)513);
@@ -227,7 +243,11 @@ index fbc7255..f508de0 100644
  		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
  		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
-@@ -1438,6 +1614,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
+ 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
+@@ -1436,10 +1614,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
  		GL.DrawBuffer((DrawBufferMode)36064);
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
@@ -257,14 +277,47 @@ index fbc7255..f508de0 100644
  		frameBufferRef = (list[5] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
-@@ -2032,6 +2231,36 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			Width = num / 4,
+ 			Height = num2 / 4
+@@ -1867,10 +2068,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		{
+ 			LoadFrameBuffer(EnumFrameBuffer.GodRays);
+ 			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
+ 			godrays.Use();
+ 			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
++			godrays.Uniform("maxGodRaySamples", OptimumConfig.GodRaysSampleLimit);
+ 			godrays.SunPosScreenIn = ShaderUniforms.SunPositionScreen;
+ 			godrays.SunPos3dIn = ShaderUniforms.LightPosition3D;
+ 			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
+ 			godrays.Dusk = ShaderUniforms.Dusk;
+ 			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
+@@ -2023,17 +2225,67 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 				throw new Exception(text);
+ 			}
+ 		}
+ 	}
+ 
++	private void DisableOptimumFsr(Exception error)
++	{
++		if (!optimumFsrDisabled)
++		{
++			logger.Error("Optimum FSR disabled after runtime failure: {0}", error);
++		}
++		optimumFsrDisabled = true;
++	}
++
+ 	public override void BlitPrimaryToDefault()
+ 	{
+ 		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
  		{
  			int scene2D = frameBuffers[0].ColorTextureIds[0];
 +			FrameBufferRef optimumFsrFramebuffer = frameBuffers[OptimumFsrFramebufferIndex];
 +			ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
 +			ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
-+			bool useFsr = ClientSettings.OptimumRenderScale < 1.0f
++			bool useFsr = !optimumFsrDisabled
++				&& ClientSettings.OptimumRenderScale < 1.0f
 +				&& optimumFsrFramebuffer != null
 +				&& fsrEasu != null
 +				&& fsrRcas != null
@@ -272,25 +325,163 @@ index fbc7255..f508de0 100644
 +				&& !fsrRcas.LoadError;
 +			if (useFsr)
 +			{
-+				GlToggleBlend(on: false);
-+				CurrentFrameBufferKeepVw = optimumFsrFramebuffer;
-+				GL.Viewport(0, 0, optimumFsrFramebuffer.Width, optimumFsrFramebuffer.Height);
-+				GL.DrawBuffer((DrawBufferMode)36064);
-+				fsrEasu.Use();
-+				fsrEasu.BindTexture2D("inputScene", scene2D, 0);
-+				fsrEasu.Uniform("inputTexelSize", 1f / (float)frameBuffers[0].Width, 1f / (float)frameBuffers[0].Height);
-+				RenderFullscreenTriangle(screenQuad);
-+				fsrEasu.Stop();
++				try
++				{
++					GlToggleBlend(on: false);
++					CurrentFrameBufferKeepVw = optimumFsrFramebuffer;
++					GL.Viewport(0, 0, optimumFsrFramebuffer.Width, optimumFsrFramebuffer.Height);
++					GL.DrawBuffer((DrawBufferMode)36064);
++					fsrEasu.Use();
++					fsrEasu.BindTexture2D("inputScene", scene2D, 0);
++					fsrEasu.Uniform("inputTexelSize", 1f / (float)frameBuffers[0].Width, 1f / (float)frameBuffers[0].Height);
++					RenderFullscreenTriangle(screenQuad);
++					fsrEasu.Stop();
 +
-+				LoadFrameBuffer(EnumFrameBuffer.Default);
-+				fsrRcas.Use();
-+				fsrRcas.BindTexture2D("inputScene", optimumFsrFramebuffer.ColorTextureIds[0], 0);
-+				fsrRcas.Uniform("inputTexelSize", 1f / (float)optimumFsrFramebuffer.Width, 1f / (float)optimumFsrFramebuffer.Height);
-+				RenderFullscreenTriangle(screenQuad);
-+				fsrRcas.Stop();
-+				GlToggleBlend(on: true);
-+				return;
++					LoadFrameBuffer(EnumFrameBuffer.Default);
++					fsrRcas.Use();
++					fsrRcas.BindTexture2D("inputScene", optimumFsrFramebuffer.ColorTextureIds[0], 0);
++					fsrRcas.Uniform("inputTexelSize", 1f / (float)optimumFsrFramebuffer.Width, 1f / (float)optimumFsrFramebuffer.Height);
++					RenderFullscreenTriangle(screenQuad);
++					fsrRcas.Stop();
++					GlToggleBlend(on: true);
++					return;
++				}
++				catch (Exception error)
++				{
++					DisableOptimumFsr(error);
++					LoadFrameBuffer(EnumFrameBuffer.Default);
++					GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
++					GlToggleBlend(on: true);
++				}
 +			}
  			LoadFrameBuffer(EnumFrameBuffer.Default);
  			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
+ 			blit.Use();
+ 			blit.Scene2D = scene2D;
+@@ -2665,15 +2917,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	private unsafe void updateVAO(float[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
+ 	{
+ 		GL.BindBuffer((BufferTarget)34962, vboId);
+ 		if (pers)
+ 		{
+-			float* ptr = (float*)vboPtr;
+-			ptr += offset / 4;
+-			for (int i = 0; i < count; i++)
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			byte* dest = (byte*)vboPtr + offset;
++			int byteCount = count * 4;
++			fixed (float* src = data)
+ 			{
+-				*(ptr++) = data[i];
++				System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(dest, (byte*)src, (uint)byteCount);
+ 			}
+ 		}
+ 		else
+ 		{
+ 			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
+@@ -2683,15 +2936,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
+ 	{
+ 		GL.BindBuffer((BufferTarget)34962, vboId);
+ 		if (pers)
+ 		{
+-			int* ptr = (int*)vboPtr;
+-			ptr += offset / 4;
+-			for (int i = 0; i < count; i++)
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			byte* dest = (byte*)vboPtr + offset;
++			int byteCount = count * 4;
++			fixed (int* src = data)
+ 			{
+-				*(ptr++) = data[i];
++				System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(dest, (byte*)src, (uint)byteCount);
+ 			}
+ 		}
+ 		else
+ 		{
+ 			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
+@@ -2701,15 +2955,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
+ 	{
+ 		GL.BindBuffer((BufferTarget)34962, vboId);
+ 		if (pers)
+ 		{
+-			short* ptr = (short*)vboPtr;
+-			ptr += offset / 2;
+-			for (int i = 0; i < count; i++)
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			byte* dest = (byte*)vboPtr + offset;
++			int byteCount = count * 2;
++			fixed (short* src = data)
+ 			{
+-				*(ptr++) = data[i];
++				System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(dest, (byte*)src, (uint)byteCount);
+ 			}
+ 		}
+ 		else
+ 		{
+ 			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
+@@ -2719,15 +2974,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
+ 	{
+ 		GL.BindBuffer((BufferTarget)34962, vboId);
+ 		if (pers)
+ 		{
+-			ushort* ptr = (ushort*)vboPtr;
+-			ptr += offset / 2;
+-			for (int i = 0; i < count; i++)
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			byte* dest = (byte*)vboPtr + offset;
++			int byteCount = count * 2;
++			fixed (ushort* src = data)
+ 			{
+-				*(ptr++) = data[i];
++				System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(dest, (byte*)src, (uint)byteCount);
+ 			}
+ 		}
+ 		else
+ 		{
+ 			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
+@@ -2737,15 +2993,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
+ 	{
+ 		GL.BindBuffer((BufferTarget)34962, vboId);
+ 		if (pers)
+ 		{
+-			byte* ptr = (byte*)vboPtr;
+-			ptr += offset / 1;
+-			for (int i = 0; i < count; i++)
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			byte* dest = (byte*)vboPtr + offset;
++			int byteCount = count;
++			fixed (byte* src = data)
+ 			{
+-				*(ptr++) = data[i];
++				System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(dest, src, (uint)byteCount);
+ 			}
+ 		}
+ 		else
+ 		{
+ 			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
+@@ -2759,15 +3016,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			return;
+ 		}
+ 		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
+ 		if (pers)
+ 		{
+-			int* indicesPtr = (int*)vao.indicesPtr;
+-			indicesPtr += IndicesOffset / 4;
+-			for (int i = 0; i < IndicesCount; i++)
++			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++			byte* dest = (byte*)vao.indicesPtr + IndicesOffset;
++			int byteCount = IndicesCount * 4;
++			fixed (int* src = Indices)
+ 			{
+-				*(indicesPtr++) = Indices[i];
++				System.Runtime.CompilerServices.Unsafe.CopyBlockUnaligned(dest, (byte*)src, (uint)byteCount);
+ 			}
+ 		}
+ 		else
+ 		{
+ 			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);

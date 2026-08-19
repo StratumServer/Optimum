@@ -1,0 +1,98 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/3.GenCaves/GenCaves.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/3.GenCaves/GenCaves.cs
+index 30f034d..e37604c 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/3.GenCaves/GenCaves.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/3.GenCaves/GenCaves.cs
+@@ -1,6 +1,7 @@
+ using System;
++using System.Threading;
+ using System.Collections.Generic;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ 
+@@ -13,10 +14,11 @@ namespace Vintagestory.ServerMods
+         protected override int chunkRange { get { return 5; } }
+ 
+         public override double ExecuteOrder() { return 0.3; }
+ 
+         internal LCGRandom caveRand;
++        ThreadLocal<LCGRandom> caveRandThreadLocal;
+         IWorldGenBlockAccessor worldgenBlockAccessor;
+ 
+         NormalizedSimplexNoise basaltNoise;
+         NormalizedSimplexNoise heightvarNoise;
+         int regionsize;
+@@ -47,10 +49,11 @@ namespace Vintagestory.ServerMods
+ 
+         public override void initWorldGen()
+         {
+             base.initWorldGen();
+             caveRand = new LCGRandom(api.WorldManager.Seed + 123128);
++            caveRandThreadLocal = new ThreadLocal<LCGRandom>(() => new LCGRandom(api.WorldManager.Seed + 123128));
+             basaltNoise = NormalizedSimplexNoise.FromDefaultOctaves(2, 1f / 3.5f, 0.9f, api.World.Seed + 12);
+             heightvarNoise = NormalizedSimplexNoise.FromDefaultOctaves(3, 1f / 20f, 0.9f, api.World.Seed + 12);
+ 
+             regionsize = api.World.BlockAccessor.RegionSize;
+         }
+@@ -120,11 +123,11 @@ namespace Vintagestory.ServerMods
+ 
+                     for (int gdx = -chunkRange; gdx <= chunkRange; gdx++)
+                     {
+                         for (int gdz = -chunkRange; gdz <= chunkRange; gdz++)
+                         {
+-                            chunkRand.InitPositionSeed(chunkX + gdx, chunkZ + gdz);
++                            (chunkRandThreadLocal?.Value ?? chunkRand).InitPositionSeed(chunkX + gdx, chunkZ + gdz);
+                             GeneratePartial(chunks, chunkX, chunkZ, gdx, gdz);
+                         }
+                     }
+ 
+                     MarkDirty(chunkX, chunkZ, chunks);
+@@ -182,11 +185,11 @@ namespace Vintagestory.ServerMods
+             {
+                 return;
+             }
+ 
+             worldgenBlockAccessor.BeginColumn();
+-            LCGRandom chunkRand = this.chunkRand;
++            LCGRandom chunkRand = chunkRandThreadLocal?.Value ?? this.chunkRand;
+             int quantityCaves = chunkRand.NextInt(100) < TerraGenConfig.CavesPerChunkColumn*100 ? 1 : 0;
+ 
+             int rndSize = chunksize * chunksize * (worldheight - 20);
+             while (quantityCaves-- > 0)
+             {
+@@ -225,19 +228,20 @@ namespace Vintagestory.ServerMods
+                 float curviness = rnd == 0 ? 0.035f : (rnd1000 < 30 ? 0.5f : 0.1f);    // 0.01 chance;  0.03 chance)
+ 
+                 int maxIterations = chunkRange * chunksize - chunksize / 2;
+                 maxIterations = maxIterations - chunkRand.NextInt(maxIterations / 4);
+ 
+-                caveRand.SetWorldSeed(chunkRand.NextInt(10000000));
+-                caveRand.InitPositionSeed(chunkX + cdx, chunkZ + cdz);
++                LCGRandom currentCaveRand = caveRandThreadLocal?.Value ?? this.caveRand;
++                currentCaveRand.SetWorldSeed(chunkRand.NextInt(10000000));
++                currentCaveRand.InitPositionSeed(chunkX + cdx, chunkZ + cdz);
+                 CarveTunnel(chunks, chunkX, chunkZ, posX, posY, posZ, horAngle, vertAngle, horizontalSize, verticalSize, 0, maxIterations, 0, extraBranchy, curviness, largeNearLavaLayer);
+             }
+         }
+ 
+         private void CarveTunnel(IServerChunk[] chunks, int chunkX, int chunkZ, double posX, double posY, double posZ, float horAngle, float vertAngle, float horizontalSize, float verticalSize, int currentIteration, int maxIterations, int branchLevel, bool extraBranchy = false, float curviness = 0.1f, bool largeNearLavaLayer = false)
+         {
+-            LCGRandom caveRand = this.caveRand;
++            LCGRandom caveRand = caveRandThreadLocal?.Value ?? this.caveRand;
+ 
+             ushort[] terrainheightmap = chunks[0].MapChunk.WorldGenTerrainHeightMap;
+             ushort[] rainheightmap = chunks[0].MapChunk.RainHeightMap;
+ 
+             float horAngleChange = 0;
+@@ -441,10 +445,11 @@ namespace Vintagestory.ServerMods
+ 
+ 
+ 
+         private void CarveShaft(IServerChunk[] chunks, int chunkX, int chunkZ, double posX, double posY, double posZ, float horAngle, float vertAngle, float horizontalSize, float verticalSize, int caveCurrentIteration, int maxIterations, int branchLevel)
+         {
++            LCGRandom caveRand = caveRandThreadLocal?.Value ?? this.caveRand;
+             float vertAngleChange = 0;
+ 
+             ushort[] terrainheightmap = chunks[0].MapChunk.WorldGenTerrainHeightMap;
+             ushort[] rainheightmap = chunks[0].MapChunk.RainHeightMap;
+ 

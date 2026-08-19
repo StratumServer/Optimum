@@ -1,0 +1,61 @@
+diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs b/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
+index c56f6af..131de3a 100644
+--- a/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
++++ b/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
+@@ -110,10 +110,12 @@ namespace Vintagestory.API.Client
+         /// <param name="originUniformName"></param>
+         /// <param name="frustumCullMode">The culling mode.  Default is CulHideDelay.</param>
+         public void Render(Vec3d playerpos, string originUniformName, EnumFrustumCullMode frustumCullMode = EnumFrustumCullMode.CullNormal)
+         {
+             int count = pools.Count;
++            int poolsRendered = 0;
++            int poolsCulled = 0;
+             for (int i = 0; i < count; i++)
+             {
+                 MeshDataPool pool = pools[i];
+                 if (pool.dimensionId == Dimensions.MiniDimensions)
+                 {
+@@ -155,10 +157,11 @@ namespace Vintagestory.API.Client
+                         (float)(pool.poolOrigin.Z + renderOffset.Z - playerpos.Z)
+                     ));
+ 
+                     try
+                     {
++                        poolsRendered++;
+                         pool.RenderMesh(capi.Render);
+                     }
+                     finally
+                     {
+                         if (revertModelviewMatrix)
+@@ -169,26 +172,31 @@ namespace Vintagestory.API.Client
+                             capi.Render.CurrentActiveShader.Uniform("forcedTransparency", 0f);
+                     }
+                 }
+                 else
+                 {
++                    long cullStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                     pool.FrustumCull(frustumCuller, frustumCullMode);
++                    Vintagestory.API.Config.OptimumDiagnostics.RecordChunkFrustumCullTicks(System.Diagnostics.Stopwatch.GetTimestamp() - cullStart);
+ 
+                     if (pool.indicesGroupsCount == 0)
+                     {
++                        poolsCulled++;
+                         continue;
+                     }
+ 
+                     capi.Render.CurrentActiveShader.Uniform(originUniformName, tmp.Set(
+                         (float)(pool.poolOrigin.X - playerpos.X),
+                         (float)(pool.poolOrigin.Y + pool.dimensionId * BlockPos.DimensionBoundary - playerpos.Y),
+                         (float)(pool.poolOrigin.Z - playerpos.Z)
+                     ));
+ 
++                    poolsRendered++;
+                     pool.RenderMesh(capi.Render);
+                 }
+             }
++            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkRenderPass(poolsRendered, poolsCulled);
+         }
+ 
+         /// <summary>
+         /// Gets the stats of the model.
+         /// </summary>

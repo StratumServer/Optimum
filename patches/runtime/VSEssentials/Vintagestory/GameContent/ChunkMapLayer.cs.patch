@@ -17,7 +17,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
 +
 +	private OptimumMapPagePriorityQueue loadQueue = new OptimumMapPagePriorityQueue();
 +
-+	private HashSet<long> coveredPages = new HashSet<long>();
++	private HashSet<long> renderedPages = new HashSet<long>();
 +
  	private bool colorAccurate;
  
@@ -201,7 +201,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  			}
  			foreach (MultiChunkMapComponent item in list)
  			{
-@@ -440,22 +528,84 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -440,22 +528,71 @@ public class ChunkMapLayer : RGBMapLayer
  			loadedMapData.TryRemove(item2, out var _);
  		}
  		mtThread1secAccum = 0f;
@@ -244,13 +244,13 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
 +		float pageScreenSize = OptimumMapPageCache.PageLen * 32 * mapElem.ZoomLevel;
 +		Vec2f viewPos = new Vec2f();
 +		Vec3d worldPos = new Vec3d();
-+		coveredPages.Clear();
++		renderedPages.Clear();
 +		foreach (FastVec2i chunkCoord in curVisibleChunks)
 +		{
 +			(int pageX, int pageZ) = OptimumMapPageCache.ChunkToPage(chunkCoord.X, chunkCoord.Y);
 +			long pageKey = OptimumMapPageCache.PackPageCoord(pageX, pageZ);
 +			int layer = pageTextureArray.GetLayer(pageKey);
-+			if (layer < 0 || !coveredPages.Add(pageKey))
++			if (layer < 0 || !renderedPages.Add(pageKey))
 +			{
 +				continue;
 +			}
@@ -261,24 +261,11 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
 +			float screenY = (float)mapElem.Bounds.renderY + viewPos.Y;
 +			pageRenderer.AddPage(screenX, screenY, pageScreenSize, pageScreenSize, layer);
 +		}
++		pageRenderer.EndFrame(capi.Render.FrameWidth, capi.Render.FrameHeight);
 +		foreach (KeyValuePair<FastVec2i, MultiChunkMapComponent> item in loadedMapData)
 +		{
-+			FastVec2i baseCoord = item.Value.chunkCoord;
-+			bool allCovered = true;
-+			for (int dx = 0; dx < 3 && allCovered; dx++)
-+			{
-+				for (int dz = 0; dz < 3 && allCovered; dz++)
-+				{
-+					(int pageX, int pageZ) = OptimumMapPageCache.ChunkToPage(baseCoord.X + dx, baseCoord.Y + dz);
-+					allCovered = coveredPages.Contains(OptimumMapPageCache.PackPageCoord(pageX, pageZ));
-+				}
-+			}
-+			if (!allCovered)
-+			{
-+				item.Value.Render(mapElem, dt);
-+			}
++			item.Value.Render(mapElem, dt);
 +		}
-+		pageRenderer.EndFrame(capi.Render.FrameWidth, capi.Render.FrameHeight);
 +	}
 +
  	public override void OnMouseMoveClient(MouseEvent args, GuiElementMap mapElem, StringBuilder hoverText)
@@ -286,7 +273,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  		if (!base.Active)
  		{
  			return;
-@@ -495,19 +645,56 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -495,19 +632,56 @@ public class ChunkMapLayer : RGBMapLayer
  		}
  		foreach (FastVec2i item2 in nowHidden)
  		{

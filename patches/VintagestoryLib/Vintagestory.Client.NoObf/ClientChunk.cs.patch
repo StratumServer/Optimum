@@ -1,8 +1,21 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
-index 7be6b24..4c02195 100644
+index 7be6b24..3916eb8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
-@@ -215,10 +215,40 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+@@ -39,10 +39,12 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+ 
+ 	internal int quantityOverloads;
+ 
+ 	internal bool enquedForRedraw;
+ 
++	internal int optimumTessRetryCount;
++
+ 	internal bool shouldSunRelight;
+ 
+ 	public ushort traversability;
+ 
+ 	public bool traversabilityFresh;
+@@ -215,10 +217,40 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
  			return base.blocksCompressed != null;
  		}
  		return true;

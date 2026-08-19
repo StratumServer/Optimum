@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-index c1e2c75..1e55a52 100644
+index bdaa84a..b82240e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-@@ -2192,6 +2192,23 @@ public class ClientSettings : SettingsBase
+@@ -2205,6 +2205,23 @@ public class ClientSettings : SettingsBase
  
  	public virtual bool DefaultSSBOsSetting()
  	{

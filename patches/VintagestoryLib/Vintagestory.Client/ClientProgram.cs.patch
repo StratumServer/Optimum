@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index d70969e..3ab1e84 100644
+index afa4d5f..240ab8f 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-@@ -48,8 +48,43 @@ public class ClientProgram
+@@ -46,10 +46,45 @@ public class ClientProgram
+ 
+ 	public static ScreenManager screenManager;
  
  	public static void Main(string[] rawArgs)
  	{

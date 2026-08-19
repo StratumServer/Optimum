@@ -1,0 +1,46 @@
+diff --git a/VintagestoryApi/Common/TyronThreadPool.cs b/VintagestoryApi/Common/TyronThreadPool.cs
+index eb70684..1235212 100644
+--- a/VintagestoryApi/Common/TyronThreadPool.cs
++++ b/VintagestoryApi/Common/TyronThreadPool.cs
+@@ -20,19 +20,38 @@ namespace Vintagestory.API.Common
+         public ConcurrentDictionary<int, string> RunningTasks = new ConcurrentDictionary<int, string>(Math.Min(8, Environment.ProcessorCount), 8);
+         public ConcurrentDictionary<int, Thread> DedicatedThreads = new ConcurrentDictionary<int, Thread>(Math.Min(8, Environment.ProcessorCount), 8);
+         int keyCounter = 0;
+         int dedicatedCounter = 0;
+ 
++        /// <summary>Captured at construction: ThreadPool.GetMaxThreads worker count before SetMaxThreads.</summary>
++        public static int SetMaxThreadsWorkerBefore { get; private set; }
++        /// <summary>Captured at construction: ThreadPool.GetMaxThreads worker count after SetMaxThreads.</summary>
++        public static int SetMaxThreadsWorkerAfter { get; private set; }
++        /// <summary>Captured at construction: ThreadPool.GetMaxThreads IO count before SetMaxThreads.</summary>
++        public static int SetMaxThreadsIoBefore { get; private set; }
++        /// <summary>Captured at construction: ThreadPool.GetMaxThreads IO count after SetMaxThreads.</summary>
++        public static int SetMaxThreadsIoAfter { get; private set; }
++        /// <summary>Captured at construction: return value of the processor-derived ThreadPool.SetMaxThreads call.</summary>
++        public static bool SetMaxThreadsResult { get; private set; }
++
+         public TyronThreadPool()
+         {
+-            // radfast note 13.3.25:  setting below the number of physical CPU cores has no effect, see https://learn.microsoft.com/en-us/dotnet/api/system.threading.threadpool.setmaxthreads?view=net-8.0
+-            ThreadPool.SetMaxThreads(10, 1);
++            // Keep a floor for small machines and scale the process-global caps with available CPUs.
++            ThreadPool.GetMaxThreads(out int workerBefore, out int ioBefore);
++            SetMaxThreadsWorkerBefore = workerBefore;
++            SetMaxThreadsIoBefore = ioBefore;
++            int workerMax = Math.Max(10, Environment.ProcessorCount * 2);
++            int ioMax = Math.Max(1, Environment.ProcessorCount);
++            SetMaxThreadsResult = ThreadPool.SetMaxThreads(workerMax, ioMax);
++            ThreadPool.GetMaxThreads(out int workerAfter, out int ioAfter);
++            SetMaxThreadsWorkerAfter = workerAfter;
++            SetMaxThreadsIoAfter = ioAfter;
+         }
+ 
+         private int MarkStarted(string caller)
+         {
+-            int key = keyCounter++;
++            int key = Interlocked.Increment(ref keyCounter) - 1;
+             RunningTasks[key] = caller;
+             return key;
+         }
+ 
+         private void MarkEnded(int key)

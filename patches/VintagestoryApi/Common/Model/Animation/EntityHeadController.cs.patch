@@ -1,7 +1,11 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/EntityHeadController.cs b/VintagestoryApi/Common/Model/Animation/EntityHeadController.cs
+index 562113d..392a02d 100644
 --- a/VintagestoryApi/Common/Model/Animation/EntityHeadController.cs
 +++ b/VintagestoryApi/Common/Model/Animation/EntityHeadController.cs
-@@ -250,4 +250,5 @@ namespace Vintagestory.API.Common
+@@ -247,9 +247,10 @@ namespace Vintagestory.API.Common
+             neckPose.degOffZ = zOffsetDeg * neckZOffsetFactor;
+         }
+ 
          protected virtual (float yOffsetDeg, float zOffsetDeg) GetOffsets(float dt) => ((entity.Pos.HeadYaw + YawOffset) * GameMath.RAD2DEG, (entity.Pos.HeadPitch + PitchOffset) * GameMath.RAD2DEG);
  
 -        protected ElementPose GetPose(string name) => animationManager.Animator.GetPosebyName(name) ?? throw new InvalidOperationException($"[Head Controller] Entity '{entity.Code}' shape does not have '{name}' element.");
@@ -9,3 +13,4 @@ diff --git a/VintagestoryApi/Common/Model/Animation/EntityHeadController.cs b/Vi
 +        protected ElementPose GetPose(string name) => animationManager?.Animator?.GetPosebyName(name) ?? new ElementPose();
      }
  }
+ 

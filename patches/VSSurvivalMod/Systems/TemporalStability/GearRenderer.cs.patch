@@ -1,7 +1,10 @@
 diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
+index d1f563b..b083a32 100644
 --- a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
 +++ b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
-@@ -36,6 +36,17 @@
+@@ -34,10 +34,21 @@ namespace Vintagestory.GameContent
+         double tripodAccum;
+         LoadedTexture rustTexture;
  
          EntityBehaviorTemporalStabilityAffected bh;
  
@@ -19,7 +22,11 @@ diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurviva
          public GearRenderer(ICoreClientAPI capi)
          {
              this.capi = capi;
-@@ -56,34 +67,47 @@
+ 
+             if (!capi.Assets.Exists("shapes/block/machine/machinegear2.json"))
+@@ -54,38 +65,51 @@ namespace Vintagestory.GameContent
+             LoadShader();
+         }
  
          public void Init()
          {
@@ -31,13 +38,21 @@ diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurviva
 -            gearMeshref = capi.Render.UploadMesh(mesh);
 -            genGears();
 -
--
++            try
++            {
++                var shape = Shape.TryGet(capi, "shapes/block/machine/machinegear2.json");
++                var block = capi.World.GetBlock(new AssetLocation("platepile"));
++                if (block == null || shape == null) return;
+ 
 -            rustTexture = new LoadedTexture(capi);
 -            var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
 -            capi.Render.GetOrLoadTexture(loc, ref rustTexture);
--
++                capi.Tesselator.TesselateShape(block, shape, out var mesh);
++                gearMeshref = capi.Render.UploadMesh(mesh);
++                genGears();
+ 
 -            shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
--
+ 
 -            tripodAnim = new AnimationUtil(capi, tripodPos);
 -            tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
 -            tripodAnim.StartAnimation(new AnimationMetaData() { Animation = "walk", Code = "walk", BlendMode = EnumAnimationBlendMode.Average, AnimationSpeed = 0.1f });
@@ -48,24 +63,13 @@ diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurviva
 -            tripodAnim.renderer.LightAffected = false;
 -            tripodAnim.renderer.StabilityAffected = false;
 -            tripodAnim.renderer.ShouldRender = true;
-+            try
-+            {
-+                var shape = Shape.TryGet(capi, "shapes/block/machine/machinegear2.json");
-+                var block = capi.World.GetBlock(new AssetLocation("platepile"));
-+                if (block == null || shape == null) return;
- 
-+                capi.Tesselator.TesselateShape(block, shape, out var mesh);
-+                gearMeshref = capi.Render.UploadMesh(mesh);
-+                genGears();
- 
--            bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
-+
 +                rustTexture = new LoadedTexture(capi);
 +                var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
 +                capi.Render.GetOrLoadTexture(loc, ref rustTexture);
-+
+ 
 +                shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
-+
+ 
+-            bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
 +                if (shape == null) return;
 +                tripodAnim = new AnimationUtil(capi, tripodPos);
 +                tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
@@ -93,7 +97,11 @@ diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurviva
          }
  
          void genGears()
-@@ -122,13 +146,23 @@
+         {
+             var rnd = capi.World.Rand;
+@@ -120,69 +144,114 @@ namespace Vintagestory.GameContent
+ 
+ 
  
          public bool LoadShader()
          {
@@ -122,7 +130,8 @@ diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurviva
          }
  
  
-@@ -137,50 +171,85 @@
+         float raiseyRelGears;
+         float raiseyRelTripod;
  
          public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
          {
@@ -236,9 +245,12 @@ diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurviva
          }
  
          private void renderGears(float deltaTime)
-@@ -245,4 +314,3 @@
+         {
+             prog.Use();
+@@ -243,6 +312,5 @@ namespace Vintagestory.GameContent
+             gearMeshref?.Dispose();
+         }
  
      }
  }
 -
-

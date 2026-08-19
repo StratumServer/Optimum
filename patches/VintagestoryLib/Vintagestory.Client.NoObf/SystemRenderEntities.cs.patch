@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..6c47d26 100644
+index 374f827..5fcc83c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -1,13 +1,34 @@
+@@ -1,15 +1,36 @@
  using System;
  using System.Collections.Generic;
 +using System.Diagnostics;
@@ -37,7 +37,11 @@ index 374f827..6c47d26 100644
  	public override string Name => "ree";
  
  	public SystemRenderEntities(ClientMain game)
-@@ -22,22 +43,209 @@ public class SystemRenderEntities : ClientSystem
+ 		: base(game)
+ 	{
+@@ -20,39 +41,239 @@ public class SystemRenderEntities : ClientSystem
+ 		game.eventManager.RegisterRenderer(OnRenderFrame2D, EnumRenderStage.Ortho, Name, 0.4);
+ 		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowFar, Name, 0.4);
  		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowNear, Name, 0.4);
  	}
  
@@ -213,6 +217,7 @@ index 374f827..6c47d26 100644
 +		int optimumLightSampleCount = 0;
  		int num = ClientSettings.ViewDistance * ClientSettings.ViewDistance;
 -		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
++		double numHysteresis = num * OptimumConfig.HysteresisFactorSq;
 +		// Optimum: .XYZ allocates a new Vec3d every call; the loop only
 +		// needs the player's X/Z to compute a squared distance, so read
 +		// those two doubles directly instead.
@@ -227,7 +232,7 @@ index 374f827..6c47d26 100644
 +			// and distance (2 muls + compare) reject before the frustum
 +			// test (6 plane dot-products per call). Distance stays behind
 +			// the || so it's still skipped for the player/AllowOutsideLoadedRange cases.
-+			if (entity.Pos.Dimension == dimension && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || (float)((plrX - entity.Pos.X) * (plrX - entity.Pos.X) + (plrZ - entity.Pos.Z) * (plrZ - entity.Pos.Z)) < (float)num) && game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || game.WorldMap.IsChunkRendered(entity.Pos)))
++			if (entity.Pos.Dimension == dimension && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || (float)((plrX - entity.Pos.X) * (plrX - entity.Pos.X) + (plrZ - entity.Pos.Z) * (plrZ - entity.Pos.Z)) < (float)(entity.IsRendered ? numHysteresis : num)) && game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || game.WorldMap.IsChunkRendered(entity.Pos)))
  			{
  				entity.IsRendered = true;
 +				OptimumDiagnostics.EntityRenderCull.Hit();
@@ -248,16 +253,37 @@ index 374f827..6c47d26 100644
 +				}
  			}
  			game.api.World.FrameProfiler.Mark("esr-beforeanim");
++			bool measureAnimation = OptimumDiagnostics.StutterWatchEnabled;
++			if (measureAnimation)
++			{
++				double dx = plrX - entity.Pos.X;
++				double dz = plrZ - entity.Pos.Z;
++				OptimumDiagnostics.BeginEntityAnimationContext(entity == game.EntityPlayer, dx * dx + dz * dz);
++			}
  			try
-@@ -51,6 +259,7 @@ public class SystemRenderEntities : ClientSystem
+ 			{
+ 				entity.AnimManager?.OnClientFrame(dt);
  			}
+ 			catch (Exception)
+ 			{
+ 				game.Logger.Error("Animations error for entity " + entity.Code.ToShortString() + " at " + entity.Pos.AsBlockPos);
+ 				throw;
+ 			}
++			finally
++			{
++				if (measureAnimation) OptimumDiagnostics.EndEntityAnimationContext();
++			}
  			game.api.World.FrameProfiler.Mark("esr-afteranim");
  		}
 +		optimumEntityLightPreviousSampleCount = optimumLightSampleCount;
  	}
  
  	public void OnRenderOpaque3D(float deltaTime)
-@@ -84,11 +293,40 @@ public class SystemRenderEntities : ClientSystem
+ 	{
+ 		RuntimeStats.renderedEntities = 0;
+@@ -82,15 +303,44 @@ public class SystemRenderEntities : ClientSystem
+ 		game.Platform.GlDisableCullFace();
+ 		game.GlMatrixModeModelView();
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
  		game.Platform.GlToggleBlend(on: true);
@@ -267,9 +293,11 @@ index 374f827..6c47d26 100644
 +		bool shaderSegmentActive = false;
 +		bool shaderSegmentUnavailable = false;
 +		try
-+		{
+ 		{
+-			if (entityRenderer2.Value.entity.IsRendered)
 +			foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
-+			{
+ 			{
+-				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
 +				if (entityRenderer2.Value.entity.IsRendered)
 +				{
 +					bool supportsShaderStateCache = shaderStateCacheEnabled && !shaderSegmentUnavailable && entityRenderer2.Value is IOptimumEntityShaderRenderer shaderRenderer && shaderRenderer.OptimumShaderStateCompatible;
@@ -288,11 +316,9 @@ index 374f827..6c47d26 100644
 +			}
 +		}
 +		finally
- 		{
--			if (entityRenderer2.Value.entity.IsRendered)
++		{
 +			if (shaderSegmentActive)
- 			{
--				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
++			{
 +				EndOptimumEntityShaderSegment();
 +			}
 +			else
@@ -301,7 +327,11 @@ index 374f827..6c47d26 100644
  			}
  		}
  		game.GlPopMatrix();
-@@ -129,6 +367,20 @@ public class SystemRenderEntities : ClientSystem
+ 		entityanimated.Stop();
+ 		ScreenManager.FrameProfiler.Mark("ree-op-b");
+@@ -127,10 +377,25 @@ public class SystemRenderEntities : ClientSystem
+ 			shaderProgramChunkshadowmap.Use();
+ 		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
  			Entity entity = entityRenderer.Value.entity;
@@ -309,9 +339,10 @@ index 374f827..6c47d26 100644
 +			bool shadowCullEnabled = ClientSettings.OptimumEntityShadowCull;
 +			if (shadowCullEnabled && entity != game.EntityPlayer)
 +			{
-+				double dx = entity.Pos.X - game.EntityPlayer.Pos.X;
-+				double dz = entity.Pos.Z - game.EntityPlayer.Pos.Z;
-+				if (dx * dx + dz * dz > ShadowCullDistanceSq)
++double dx = entity.Pos.X - game.EntityPlayer.Pos.X;
++			double dz = entity.Pos.Z - game.EntityPlayer.Pos.Z;
++			double shadowThreshold = entity.IsShadowRendered ? ShadowCullDistanceSq * OptimumConfig.HysteresisFactorSq : ShadowCullDistanceSq;
++			if (dx * dx + dz * dz > shadowThreshold)
 +				{
 +					entity.IsShadowRendered = false;
 +					OptimumDiagnostics.EntityShadowCull.Skip();
@@ -322,3 +353,5 @@ index 374f827..6c47d26 100644
  			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
  			{
  				entity.IsShadowRendered = true;
+ 				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
+ 			}

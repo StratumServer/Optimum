@@ -1,7 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
+index 277d286..c68549e 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-@@ -82,7 +82,7 @@
+@@ -80,11 +80,11 @@ internal class ServerSystemSendChunks : ServerSystem
+ 	}
+ 
  	private void sendAndEnqueueChunks(ConnectedClient client)
  	{
  		int val = (int)Math.Ceiling((float)client.WorldData.Viewdistance / (float)MagicNum.ServerChunkSize);
@@ -10,3 +13,5 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/Vin
  		if (client.CurrentChunkSentRadius > num && client.forceSendChunks.Count == 0 && client.forceSendMapChunks.Count == 0)
  		{
  			return;
+ 		}
+ 		chunksToSend.Clear();

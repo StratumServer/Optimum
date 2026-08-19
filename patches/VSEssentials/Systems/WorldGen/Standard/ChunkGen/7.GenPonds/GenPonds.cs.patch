@@ -1,0 +1,249 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/7.GenPonds/GenPonds.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/7.GenPonds/GenPonds.cs
+index acfac74..d8285d2 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/7.GenPonds/GenPonds.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/7.GenPonds/GenPonds.cs
+@@ -1,6 +1,7 @@
+ using System;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ 
+@@ -9,26 +10,34 @@ using Vintagestory.API.Server;
+ namespace Vintagestory.ServerMods
+ {
+     public class GenPonds : ModStdWorldGen
+     {
+         ICoreServerAPI api;
+-        LCGRandom rand;
+         int mapheight;
+         IWorldGenBlockAccessor blockAccessor;
+-        readonly QueueOfInt searchPositionsDeltas = new QueueOfInt();
+-        readonly QueueOfInt pondPositions = new QueueOfInt();
++        ThreadLocal<IWorldGenBlockAccessor> blockAccessors;
+         int searchSize;
+         int mapOffset;
+         int minBoundary;
+         int maxBoundary;
+ 
+-        int climateUpLeft;
+-        int climateUpRight;
+-        int climateBotLeft;
+-        int climateBotRight;
+-        int[] didCheckPosition;
+-        int iteration;
++        sealed class PondWorkspace
++        {
++            public LCGRandom Rand;
++            public readonly QueueOfInt SearchPositionsDeltas = new QueueOfInt();
++            public readonly QueueOfInt PondPositions = new QueueOfInt();
++            public int ClimateUpLeft;
++            public int ClimateUpRight;
++            public int ClimateBotLeft;
++            public int ClimateBotRight;
++            public int[] DidCheckPosition;
++            public int Iteration;
++            public readonly Vec2i Tmp = new Vec2i();
++            public readonly BlockPos TmpPos = new BlockPos(API.Config.Dimensions.NormalWorld);
++        }
++
++        ThreadLocal<PondWorkspace> workspaces;
+ 
+         LakeBedLayerProperties lakebedLayerConfig;
+ 
+ 
+         public override double ExecuteOrder()
+@@ -58,41 +67,49 @@ namespace Vintagestory.ServerMods
+         }
+ 
+         private void OnWorldGenBlockAccessor(IChunkProviderThread chunkProvider)
+         {
+             blockAccessor = chunkProvider.GetBlockAccessor(true);
++            blockAccessors ??= new ThreadLocal<IWorldGenBlockAccessor>();
++            blockAccessors.Value = blockAccessor;
+         }
+ 
++        private IWorldGenBlockAccessor CurrentBlockAccessor => blockAccessors?.Value ?? blockAccessor;
++
+ 
+         public void initWorldGen()
+         {
+             LoadGlobalConfig(api);
+ 
+-            rand = new LCGRandom(api.WorldManager.Seed - 12);
+             searchSize = 3 * chunksize;
+             mapOffset = chunksize;
+             minBoundary = -chunksize + 1;
+             maxBoundary = 2 * chunksize - 1;
+             mapheight = api.WorldManager.MapSizeY;
+-            didCheckPosition = new int[searchSize * searchSize];
++            workspaces = new ThreadLocal<PondWorkspace>(() => new PondWorkspace
++            {
++                Rand = new LCGRandom(api.WorldManager.Seed - 12),
++                DidCheckPosition = new int[searchSize * searchSize]
++            });
+ 
+             var blockLayerConfig = BlockLayerConfig.GetInstance(api);
+ 
+             lakebedLayerConfig = blockLayerConfig.LakeBedLayer;
+         }
+ 
+         private void OnChunkColumnGen(IChunkColumnGenerateRequest request)
+         {
++            PondWorkspace workspace = workspaces.Value;
+             var chunks = request.Chunks;
+             int chunkX = request.ChunkX;
+             int chunkZ = request.ChunkZ;
+             if (GetIntersectingStructure(chunkX * chunksize + chunksize / 2, chunkZ * chunksize + chunksize / 2, PondsHashCode) != null)
+             {
+                 return;
+             }
+-            blockAccessor.BeginColumn();
+-            LCGRandom rand = this.rand;
++            CurrentBlockAccessor.BeginColumn();
++            LCGRandom rand = workspace.Rand;
+             rand.InitPositionSeed(chunkX, chunkZ);
+             int maxHeight = mapheight - 1;
+             int pondYPos;
+ 
+             ushort[] heightmap = chunks[0].MapChunk.RainHeightMap;
+@@ -102,16 +119,16 @@ namespace Vintagestory.ServerMods
+             int regionChunkSize = api.WorldManager.RegionSize / chunksize;
+             float fac = (float)climateMap.InnerSize / regionChunkSize;
+             int rlX = chunkX % regionChunkSize;
+             int rlZ = chunkZ % regionChunkSize;
+ 
+-            climateUpLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac));
+-            climateUpRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac));
+-            climateBotLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac + fac));
+-            climateBotRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac + fac));
++            workspace.ClimateUpLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac));
++            workspace.ClimateUpRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac));
++            workspace.ClimateBotLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac + fac));
++            workspace.ClimateBotRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac + fac));
+ 
+-            int climateMid = GameMath.BiLerpRgbColor(0.5f, 0.5f, climateUpLeft, climateUpRight, climateBotLeft, climateBotRight);
++            int climateMid = GameMath.BiLerpRgbColor(0.5f, 0.5f, workspace.ClimateUpLeft, workspace.ClimateUpRight, workspace.ClimateBotLeft, workspace.ClimateBotRight);
+ 
+             // 16-23 bits = Red = temperature
+             // 8-15 bits = Green = rain
+             // 0-7 bits = Blue = humidity
+ 
+@@ -178,31 +195,36 @@ namespace Vintagestory.ServerMods
+         /// Spreads one water layer of a pond - all at the same y-height.  This starts from the bottom of the pond.  Blocks below must all be solid, or water.<br/>
+         /// It will not place any water if the pond would overflow - no solid base or larger than 3*chunksize
+         /// </summary>
+         public void TryPlacePondAt(int dx, int pondYPos, int dz, int chunkX, int chunkZ, int depth = 0)
+         {
++            PondWorkspace workspace = workspaces.Value;
+             int mapOffset = this.mapOffset;
+             int searchSize = this.searchSize;
+             int minBoundary = this.minBoundary;
+             int maxBoundary = this.maxBoundary;
+             int waterID = gcfg.waterBlockId;
+             int ndx, ndz;
++            QueueOfInt searchPositionsDeltas = workspace.SearchPositionsDeltas;
++            QueueOfInt pondPositions = workspace.PondPositions;
++            int[] didCheckPosition = workspace.DidCheckPosition;
++            LCGRandom rand = workspace.Rand;
+             searchPositionsDeltas.Clear();
+             pondPositions.Clear();
+ 
+             int basePosX = chunkX * chunksize;
+             int basePosZ = chunkZ * chunksize;
+-            Vec2i tmp = new Vec2i();
++            Vec2i tmp = workspace.Tmp;
+ 
+             // The starting block is an air block
+             int arrayIndex = (dz + mapOffset) * searchSize + dx + mapOffset;
+             searchPositionsDeltas.Enqueue(arrayIndex);
+             pondPositions.Enqueue(arrayIndex);
+-            int iteration = ++this.iteration;
++            int iteration = ++workspace.Iteration;
+             didCheckPosition[arrayIndex] = iteration;
+ 
+-            BlockPos tmpPos = new BlockPos(API.Config.Dimensions.NormalWorld);
++            BlockPos tmpPos = workspace.TmpPos;
+ 
+             while (searchPositionsDeltas.Count > 0)
+             {
+                 int p = searchPositionsDeltas.Dequeue();
+                 int px = p % searchSize - mapOffset;
+@@ -222,22 +244,22 @@ namespace Vintagestory.ServerMods
+                         didCheckPosition[arrayIndex] = iteration;
+ 
+                         tmp.Set(basePosX + ndx, basePosZ + ndz);
+ 
+                         tmpPos.Set(tmp.X, pondYPos - 1, tmp.Y);
+-                        Block belowBlock = blockAccessor.GetBlock(tmpPos);
++                        Block belowBlock = CurrentBlockAccessor.GetBlock(tmpPos);
+ 
+                         bool inBoundary = ndx > minBoundary && ndz > minBoundary && ndx < maxBoundary && ndz < maxBoundary;
+ 
+                         // Only continue when every position is within our 3x3 chunk search area and has a more or less solid block below (or water)
+                         // Note from radfast: this actually runs this check on the edges as well (i.e. it is unnecessarily checking the banks have a solid block below them!) - but changing this could slightly alter worldgen
+                         if (inBoundary && (belowBlock.GetLiquidBarrierHeightOnSide(BlockFacing.UP, tmpPos) >= 1.0 || belowBlock.BlockId == waterID))   // This test is OK even for waterID, as GetBlock will correctly return the liquid block if the solid blocks 'layer' is air
+                         {
+                             // If it's not a bank, spread water into it and queue for further checks from here
+                             //if (blockAccessor.GetBlock(tmp.X, pondYPos, tmp.Y).Replaceable >= 6000)
+                             tmpPos.Set(tmp.X, pondYPos, tmp.Y);
+-                            if (blockAccessor.GetBlock(tmpPos).GetLiquidBarrierHeightOnSide(facing.Opposite, tmpPos) < 0.9)
++                            if (CurrentBlockAccessor.GetBlock(tmpPos).GetLiquidBarrierHeightOnSide(facing.Opposite, tmpPos) < 0.9)
+                             {
+                                 searchPositionsDeltas.Enqueue(arrayIndex);
+                                 pondPositions.Enqueue(arrayIndex);
+                             }
+                         }
+@@ -279,17 +301,17 @@ namespace Vintagestory.ServerMods
+                 int lz = GameMath.Mod(pz, chunksize);
+ 
+                 // Get correct chunk and correct climate data if we don't have it already
+                 if (curChunkX != prevChunkX || curChunkZ != prevChunkZ)
+                 {
+-                    chunk = (IServerChunk)blockAccessor.GetChunk(curChunkX, pondYPos / chunksize, curChunkZ);
++                    chunk = (IServerChunk)CurrentBlockAccessor.GetChunk(curChunkX, pondYPos / chunksize, curChunkZ);
+                     if (chunk == null) chunk = api.WorldManager.GetChunk(curChunkX, pondYPos / chunksize, curChunkZ);
+                     chunk.Unpack();
+ 
+                     if (ly == 0)
+                     {
+-                        chunkOneBlockBelow = ((IServerChunk)blockAccessor.GetChunk(curChunkX, (pondYPos - 1) / chunksize, curChunkZ));
++                        chunkOneBlockBelow = ((IServerChunk)CurrentBlockAccessor.GetChunk(curChunkX, (pondYPos - 1) / chunksize, curChunkZ));
+                         if (chunkOneBlockBelow == null) return;
+                         chunkOneBlockBelow.Unpack();
+                     } else
+                     {
+                         chunkOneBlockBelow = chunk;
+@@ -300,14 +322,14 @@ namespace Vintagestory.ServerMods
+ 
+                     float fac = (float)climateMap.InnerSize / regionChunkSize;
+                     int rlX = curChunkX % regionChunkSize;
+                     int rlZ = curChunkZ % regionChunkSize;
+ 
+-                    climateUpLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac));
+-                    climateUpRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac));
+-                    climateBotLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac + fac));
+-                    climateBotRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac + fac));
++                    workspace.ClimateUpLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac));
++                    workspace.ClimateUpRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac));
++                    workspace.ClimateBotLeft = climateMap.GetUnpaddedInt((int)(rlX * fac), (int)(rlZ * fac + fac));
++                    workspace.ClimateBotRight = climateMap.GetUnpaddedInt((int)(rlX * fac + fac), (int)(rlZ * fac + fac));
+ 
+                     prevChunkX = curChunkX;
+                     prevChunkZ = curChunkZ;
+ 
+                     chunkOneBlockBelow.MarkModified();
+@@ -317,11 +339,11 @@ namespace Vintagestory.ServerMods
+ 
+                 // Raise heightmap by 1 (only relevant for above-ground ponds)
+                 if (mapchunk.RainHeightMap[lz * chunksize + lx] < pondYPos) mapchunk.RainHeightMap[lz * chunksize + lx] = (ushort)pondYPos;
+ 
+                 // Identify correct climate at this position - could be optimised if we place water into ponds in columns instead of layers
+-                int climate = GameMath.BiLerpRgbColor((float)lx / chunksize, (float)lz / chunksize, climateUpLeft, climateUpRight, climateBotLeft, climateBotRight);
++                int climate = GameMath.BiLerpRgbColor((float)lx / chunksize, (float)lz / chunksize, workspace.ClimateUpLeft, workspace.ClimateUpRight, workspace.ClimateBotLeft, workspace.ClimateBotRight);
+                 float temp = Climate.GetScaledAdjustedTemperatureFloat((climate >> 16) & 0xff, pondYPos - TerraGenConfig.seaLevel);
+ 
+ 
+                 // 1. Place water or ice block
+                 int index3d = (ly * chunksize + lz) * chunksize + lx;
