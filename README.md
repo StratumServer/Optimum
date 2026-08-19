@@ -4,7 +4,7 @@
 </div>
 
 [![License](https://img.shields.io/badge/license-GPL--3.0%20%2B%20Commons%20Clause-blue)](LICENSE)
-[![VS Version](https://img.shields.io/badge/Vintage%20Story-1.22.5-green)](https://www.vintagestory.at)
+[![VS Version](https://img.shields.io/badge/Vintage%20Story-1.22.7-green)](https://www.vintagestory.at)
 [![Stars](https://img.shields.io/github/stars/Zaldaryon/Optimum?logo=github&style=flat)](https://github.com/Zaldaryon/Optimum/stargazers)
 
 Optimum is a high-performance, client-side fork of [Vintage Story](https://www.vintagestory.at).
@@ -36,7 +36,7 @@ Optimum is a high-performance, client-side fork of [Vintage Story](https://www.v
 - Mouse wheel fix at low sensitivity (#9710)
 - Creative search cache crash containment (a mod exception no longer kills the client)
 
-See [`docs/releases/optimum-0.3.5.md`](docs/releases/optimum-0.3.5.md) for the
+See [`docs/releases/optimum-0.3.6.md`](docs/releases/optimum-0.3.6.md) for the
 release fixes and validation record.
 
 ## Getting Started
