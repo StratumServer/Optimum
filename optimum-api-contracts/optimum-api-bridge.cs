@@ -114,9 +114,12 @@ public static class OptimumApiBridge
 
             double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
             double chiselDistance = ChiselDistanceSqTo(culler, sphere);
+            // Hysteresis: entities that were visible stay visible until they cross the outer threshold.
+            double innerThreshold = chiselDistanceSq;
+            double outerThreshold = chiselDistanceSq * OptimumConfig.HysteresisFactorSq;
             return lodLevel == 2
-                ? chiselDistance <= chiselDistanceSq
-                : chiselDistance > chiselDistanceSq;
+                ? chiselDistance <= (nowVisible ? outerThreshold : innerThreshold)
+                : chiselDistance > (nowVisible ? innerThreshold : outerThreshold);
         }
 
         return culler.InFrustumAndRange(sphere, nowVisible, lodLevel);
@@ -142,7 +145,8 @@ public static class OptimumApiBridge
         }
 
         // Timed from here down: TryGetValue plus the reflection-based playerPos read in
-        // ChiselDistanceSqTo are the actual per-call cost of this hook.
+        // ChiselDistanceSqTo are the actual per-call cost of this hook (see
+        // docs/benchmarking.md / ChiselLodShadowBenchmark for the isolated measurement).
         long start = Stopwatch.GetTimestamp();
         try
         {
@@ -153,9 +157,12 @@ public static class OptimumApiBridge
 
             double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
             double chiselDistance = ChiselDistanceSqTo(culler, location.FrustumCullSphere);
+            // Hysteresis: entities that were visible stay visible until they cross the outer threshold.
+            double innerThreshold = chiselDistanceSq;
+            double outerThreshold = chiselDistanceSq * OptimumConfig.HysteresisFactorSq;
             return lodLevel == 2
-                ? chiselDistance <= chiselDistanceSq
-                : chiselDistance > chiselDistanceSq;
+                ? chiselDistance <= (baseResult ? outerThreshold : innerThreshold)
+                : chiselDistance > (baseResult ? innerThreshold : outerThreshold);
         }
         finally
         {

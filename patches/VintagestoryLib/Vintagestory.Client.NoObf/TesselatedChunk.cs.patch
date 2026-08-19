@@ -1,8 +1,33 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-index bdcda35..dbcee65 100644
+index bdcda35..d9a8eb1 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-@@ -56,11 +56,16 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+@@ -24,10 +24,12 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+ 
+ 	internal TesselatedChunkPart[] edgeParts;
+ 
+ 	internal int VerticesCount;
+ 
++	internal long readyToUploadTimestamp;
++
+ 	internal Sphere boundingSphere;
+ 
+ 	public int CompareTo(TesselatedChunk obj)
+ 	{
+ 		return priority - obj.priority;
+@@ -45,10 +47,11 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+ 			if (otc.edgeParts != null)
+ 			{
+ 				Dispose(edgeParts);
+ 				edgeParts = otc.edgeParts;
+ 			}
++			readyToUploadTimestamp = otc.readyToUploadTimestamp;
+ 			return true;
+ 		}
+ 		return false;
+ 	}
+ 
+@@ -56,11 +59,16 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  	{
  		if (centerParts != null)
  		{
@@ -20,7 +45,7 @@ index bdcda35..dbcee65 100644
  				centerParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
  			}
  			hostChunk.SetPoolLocations(ref hostChunk.centerModelPoolLocations, list.ToArray(), hiddenState);
-@@ -73,11 +78,14 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+@@ -73,11 +81,14 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  	{
  		if (edgeParts != null)
  		{

@@ -1,0 +1,212 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs
+index 55b134c..c2bc003 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ 
+@@ -12,19 +13,32 @@ namespace Vintagestory.ServerMods
+ 
+     public class GenBlockLayers : ModStdWorldGen
+     {
+         private ICoreServerAPI api;
+ 
+-        List<int> BlockLayersIds = new List<int>();
+-        LCGRandom rnd;
+         int mapheight;
+         ClampedSimplexNoise grassDensity;
+         ClampedSimplexNoise grassHeight;
+         int boilingWaterBlockId;
+ 
+-        public int[] layersUnderWaterTmp = new int[1];
+-        public int[] layersUnderWater = Array.Empty<int>();
++        sealed class BlockLayerWorkspace
++        {
++            public readonly List<int> BlockLayersIds = new List<int>();
++            public readonly LCGRandom Rnd;
++            public readonly int[] LayersUnderWaterTmp = new int[1];
++            public int[] LayersUnderWater = Array.Empty<int>();
++
++            public BlockLayerWorkspace(int seed)
++            {
++                Rnd = new LCGRandom(seed);
++            }
++        }
++
++        ThreadLocal<BlockLayerWorkspace> workspaces;
++
++        public int[] layersUnderWaterTmp => workspaces?.Value?.LayersUnderWaterTmp ?? Array.Empty<int>();
++        public int[] layersUnderWater => workspaces?.Value?.LayersUnderWater ?? Array.Empty<int>();
+         public BlockLayerConfig blockLayerConfig;
+         public SimplexNoise distort2dx;
+         public SimplexNoise distort2dz;
+ 
+         public override bool ShouldLoad(EnumAppSide side)
+@@ -81,13 +95,14 @@ namespace Vintagestory.ServerMods
+             LoadGlobalConfig(api);
+ 
+             api.ObjectCache.Remove(BlockLayerConfig.cacheKey);
+             blockLayerConfig = BlockLayerConfig.GetInstance(api);
+ 
+-            rnd = new LCGRandom(api.WorldManager.Seed);
+-            grassDensity = new ClampedSimplexNoise(new double[] { 4 }, new double[] { 0.5 }, rnd.NextInt());
+-            grassHeight = new ClampedSimplexNoise(new double[] { 1.5 }, new double[] { 0.5 }, rnd.NextInt());
++            LCGRandom initRandom = new LCGRandom(api.WorldManager.Seed);
++            grassDensity = new ClampedSimplexNoise(new double[] { 4 }, new double[] { 0.5 }, initRandom.NextInt());
++            grassHeight = new ClampedSimplexNoise(new double[] { 1.5 }, new double[] { 0.5 }, initRandom.NextInt());
++            workspaces = new ThreadLocal<BlockLayerWorkspace>(() => new BlockLayerWorkspace(api.WorldManager.Seed));
+ 
+             mapheight = api.WorldManager.MapSizeY;
+ 
+             boilingWaterBlockId = gcfg.boilingWaterBlockId;
+         }
+@@ -96,11 +111,12 @@ namespace Vintagestory.ServerMods
+         {
+             var chunks = request.Chunks;
+             int chunkX = request.ChunkX;
+             int chunkZ = request.ChunkZ;
+ 
+-            rnd.InitPositionSeed(chunkX, chunkZ);
++            BlockLayerWorkspace workspace = workspaces.Value;
++            workspace.Rnd.InitPositionSeed(chunkX, chunkZ);
+ 
+             IntDataMap2D forestMap = chunks[0].MapChunk.MapRegion.ForestMap;
+             IntDataMap2D climateMap = chunks[0].MapChunk.MapRegion.ClimateMap;
+             IntDataMap2D beachMap = chunks[0].MapChunk.MapRegion.BeachMap;
+             IntDataMap2D biomeMap = chunks[0].MapChunk.MapRegion.BiomeMap;
+@@ -257,10 +273,13 @@ namespace Vintagestory.ServerMods
+             return (int)(distx / 5);
+         }
+ 
+         private int PutLayers(double posRand, int lx, int lz, int posyoffs, BlockPos pos, IServerChunk[] chunks, float rainRel, float temp, int unscaledTemp, ushort[] heightMap, int biome)
+         {
++            BlockLayerWorkspace workspace = workspaces.Value;
++            List<int> blockLayersIds = workspace.BlockLayersIds;
++            int[] layersUnderWater = workspace.LayersUnderWater;
+             int i = 0;
+             int j = 0;
+             bool underWater = false;
+             bool isOcean = false;
+             bool underIce = false;
+@@ -303,23 +322,24 @@ namespace Vintagestory.ServerMods
+                     {
+                         chunks[0].MapChunk.TopRockIdMap[lz * chunksize + lx] = blockId;
+                         if (underIce) break;   // radfast 30.1.24: Note, under ice we do not set the sea/lake floor layers (gravel etc), for consistency with legacy worldgen prior to 1.19.4
+ 
+                         LoadBlockLayers(posRand, rainRel, temp, unscaledTemp, startPosY + posyoffs, pos, blockId, isOcean, biome);
++                        layersUnderWater = workspace.LayersUnderWater;
+                         first = false;
+ 
+                         if (!underWater) heightMap[lz * chunksize + lx] = (ushort)(pos.Y + 1);
+                     }
+ 
+-                    if (i >= BlockLayersIds.Count || (underWater && j >= layersUnderWater.Length))
++                    if (i >= blockLayersIds.Count || (underWater && j >= layersUnderWater.Length))
+                     {
+                         return pos.Y;
+                     }
+ 
+ 
+                     IChunkBlocks chunkdata = chunks[chunkY].Data;
+-                    chunkdata.SetBlockUnsafe(index3d, underWater ? layersUnderWater[j++] : BlockLayersIds[i++]);
++                    chunkdata.SetBlockUnsafe(index3d, underWater ? layersUnderWater[j++] : blockLayersIds[i++]);
+                     chunkdata.SetFluid(index3d, 0);
+                 }
+                 else
+                 {
+                     if ((i > 0 && temp > -18) || j > 0) return pos.Y;
+@@ -359,10 +379,12 @@ namespace Vintagestory.ServerMods
+             }
+         }
+ 
+         public void PlaceTallGrass(int x, int posY, int z, IServerChunk[] chunks, float rainRel, float tempRel, float temp, float forestRel, int biome)
+         {
++            BlockLayerWorkspace workspace = workspaces.Value;
++            LCGRandom rnd = workspace.Rnd;
+             double rndVal = blockLayerConfig.Tallgrass.RndWeight * rnd.NextDouble() + blockLayerConfig.Tallgrass.PerlinWeight * grassDensity.Noise(x, z, -0.5f);
+ 
+             double extraGrass = Math.Max(0, rainRel * tempRel - 0.25);
+ 
+             if (rndVal <= GameMath.Clamp(forestRel - extraGrass, 0.05, 0.99) || posY >= mapheight - 1 || posY < 1) return;
+@@ -406,21 +428,24 @@ namespace Vintagestory.ServerMods
+         }
+ 
+ 
+         private void LoadBlockLayers(double posRand, float rainRel, float temperature, int unscaledTemp, int posY, BlockPos pos, int firstBlockId, bool isOcean, int biome)
+         {
++            BlockLayerWorkspace workspace = workspaces.Value;
++            List<int> blockLayersIds = workspace.BlockLayersIds;
++            LCGRandom rnd = workspace.Rnd;
+             float heightRel = ((float)posY - TerraGenConfig.seaLevel) / ((float)mapheight - TerraGenConfig.seaLevel);
+             float fertilityRel = Climate.GetFertilityFromUnscaledTemp((int)(rainRel * 255), unscaledTemp, heightRel) / 255f;
+ 
+             float depthf = TerraGenConfig.SoilThickness(rainRel, temperature, posY - TerraGenConfig.seaLevel, 1f);
+             int depth = (int)depthf;
+             if (depthf - depth > rnd.NextFloat()) depth++;
+ 
+             // Hardcoding crime here. Please don't look. Makes deep layers of ice work
+             if (temperature < -16) depth += 10;
+ 
+-            BlockLayersIds.Clear();
++            blockLayersIds.Clear();
+             for (int j = 0; j < blockLayerConfig.Blocklayers.Length; j++)
+             {
+                 BlockLayer bl = blockLayerConfig.Blocklayers[j];
+                 float yDist = bl.CalcYDistance(posY, mapheight);
+                 float trfDist = bl.CalcTrfDistance(temperature, rainRel, fertilityRel);
+@@ -434,16 +459,16 @@ namespace Vintagestory.ServerMods
+                 if (trfDist + yDist <= posRand)
+                 {
+                     int blockId = bl.GetBlockId(posRand, temperature, rainRel, fertilityRel, firstBlockId, pos, mapheight, biome);
+                     if (blockId != 0)
+                     {
+-                        BlockLayersIds.Add(blockId);
++                        blockLayersIds.Add(blockId);
+                         if (bl.Thickness > 1)
+                         {
+                             for (int i = 1; i < bl.Thickness * (1 - trfDist * yDist); i++)
+                             {
+-                                BlockLayersIds.Add(blockId);
++                                blockLayersIds.Add(blockId);
+                                 yDist = Math.Abs((float)posY-- / mapheight - GameMath.Min((float)posY-- / mapheight, bl.MaxY));
+                             }
+                         }
+ 
+                         posY--;
+@@ -454,11 +479,11 @@ namespace Vintagestory.ServerMods
+                         heightRel = ((float)posY - TerraGenConfig.seaLevel) / ((float)api.WorldManager.MapSizeY - TerraGenConfig.seaLevel);
+                         fertilityRel = Climate.GetFertilityFromUnscaledTemp((int)(rainRel * 255), unscaledTemp, heightRel) / 255f;
+                     }
+                 }
+ 
+-                if (BlockLayersIds.Count >= depth) break;
++                if (blockLayersIds.Count >= depth) break;
+             }
+ 
+             int lakeBedId;
+             if (isOcean)
+             {
+@@ -466,14 +491,14 @@ namespace Vintagestory.ServerMods
+             }
+             else
+             {
+                 lakeBedId = blockLayerConfig.LakeBedLayer.GetSuitable(temperature, rainRel, (float)pos.Y / api.WorldManager.MapSizeY, rnd, firstBlockId);
+             }
+-            if (lakeBedId == 0) layersUnderWater = Array.Empty<int>();
++            if (lakeBedId == 0) workspace.LayersUnderWater = Array.Empty<int>();
+             else
+             {
+-                layersUnderWaterTmp[0] = lakeBedId;
+-                layersUnderWater = layersUnderWaterTmp;
++                workspace.LayersUnderWaterTmp[0] = lakeBedId;
++                workspace.LayersUnderWater = workspace.LayersUnderWaterTmp;
+             }
+         }
+     }
+ }

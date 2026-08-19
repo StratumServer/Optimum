@@ -1,0 +1,80 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
+index 8f36d60..bbed526 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
+@@ -26,11 +26,11 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 
+ 	public List<TextureAtlas> Atlasses = new List<TextureAtlas>();
+ 
+ 	public List<LoadedTexture> AtlasTextures;
+ 
+-	private bool atlasCreationQueued;
++	private int atlasCreationQueued;
+ 
+ 	public TextureAtlasPosition[] TextureAtlasPositionsByTextureSubId;
+ 
+ 	public TextureAtlasPosition UnknownTexturePos;
+ 
+@@ -146,27 +146,32 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 
+ 	public virtual TextureAtlas RuntimeCreateNewAtlas(string itemclass)
+ 	{
+ 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
+ 		{
+-			if (!atlasCreationQueued && Environment.CurrentManagedThreadId == game.TesselationThreadId)
++			if (game.IsTesselationThread(Environment.CurrentManagedThreadId) && Interlocked.CompareExchange(ref atlasCreationQueued, 1, 0) == 0)
+ 			{
+-				atlasCreationQueued = true;
+ 				game.EnqueueMainThreadTask(delegate
+ 				{
+ 					RuntimeCreateNewAtlas(itemclass);
+ 				}, "createnewatlas");
+ 				game.Logger.VerboseDebug("queuing new " + itemclass + " atlas creation");
+ 			}
+ 			throw new RetryTesselationException("Attempting to create an additional texture atlas outside of the main thread. This is not possible as we have only one OpenGL context!");
+ 		}
+ 		game.Logger.VerboseDebug("creating new " + itemclass + " atlas");
+-		TextureAtlas textureAtlas = CreateNewAtlas(itemclass);
+-		LoadedTexture item = textureAtlas.Upload(game);
+-		AtlasTextures.Add(item);
+-		atlasCreationQueued = false;
+-		return textureAtlas;
++		try
++		{
++			TextureAtlas textureAtlas = CreateNewAtlas(itemclass);
++			LoadedTexture item = textureAtlas.Upload(game);
++			AtlasTextures.Add(item);
++			return textureAtlas;
++		}
++		finally
++		{
++			Interlocked.Exchange(ref atlasCreationQueued, 0);
++		}
+ 	}
+ 
+ 	private void addCommonTextures()
+ 	{
+ 		foreach (KeyValuePair<AssetLocation, int> item in textureNamesDict)
+@@ -490,14 +495,19 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 	{
+ 		TextureAtlasPositionsByTextureSubId = new TextureAtlasPosition[textureNamesDict.Count];
+ 		BakedBitmap[] bitmaps = new BakedBitmap[textureNamesDict.Count];
+ 		if (itemclass != "entities")
+ 		{
+-			StartWorkerThread(delegate
++			// Optimum: scale decode workers to available cores (was fixed at 1 + caller).
++			int extraWorkers = Math.Max(1, Environment.ProcessorCount - 1);
++			for (int w = 0; w < extraWorkers; w++)
+ 			{
+-				LoadBitmaps(bitmaps);
+-			});
++				StartWorkerThread(delegate
++				{
++					LoadBitmaps(bitmaps);
++				});
++			}
+ 		}
+ 		LoadBitmaps(bitmaps);
+ 		while (WorkerThreadsInProgress() && !game.disposed)
+ 		{
+ 			Thread.Sleep(10);

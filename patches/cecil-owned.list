@@ -1,66 +1,70 @@
-# Source patches whose release effect ships via the Mono.Cecil transplant
-# (Optimum.Patcher/Program.cs), not via a recompiled VintagestoryLib.dll.
-# check-patches.sh checks these against build/ (the donor) same as any other
-# patch, reverse-apply proves the donor source carries the change, but reports
-# them under their own "cecil" counter instead of the ordinary applied/pending
-# split. A patch on this list that fails reverse-apply is still a conflict:
-# the list changes what a passing patch is called, not whether it passes.
 #
+# check-patches.sh checks these against build/ (the donor) same as any other
 # check-patches.sh cross-checks this list against Program.cs's own target,
-# member-injection, and IL-hook type lists and fails loud on drift in either
+# decompiled donor tree and remain pending because ClientWorldMap requires
 # direction, so keep the two in sync by hand when Program.cs changes.
-patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
+# fields.
+# improve lock contention and fix mod SVG icon loss. The patches ship in the
+# member-injection, and IL-hook type lists and fails loud on drift in either
+# (Optimum.Patcher/Program.cs), not via a recompiled VintagestoryLib.dll.
+patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch
-patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
-patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
-# Pending Program.cs wiring (v0.2.12): field-type upgrades (object→Lock) and
-# method body changes that improve lock contention and fix mod SVG icon loss.
-# The patches ship in the decompiled donor tree and are validated here, but
-# Cecil transplant entries in Program.cs are deferred because ClientWorldMap
-# and SystemClientTickingBlocks require ~25 method transplants each (every
-# method touching the renamed lock fields). ParticleManager is import-only.
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
-patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs.patch
-# Server-side worldgen scheduler and chunk read pool (Cecil-transplanted into
-# VintagestoryLib.dll at launcher startup, same as client patches above).
-patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
-patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/GameDatabase.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs.patch
-patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
-patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
-patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
+# patch, reverse-apply proves the donor source carries the change, but reports
+# Pending Program.cs wiring: field-type upgrades and method body changes that
+# Server-side worldgen scheduler and chunk read pool (Cecil-transplanted into
+# several method transplants for every method that touches its renamed lock
+# Source patches whose release effect ships via the Mono.Cecil transplant
+# split. A patch on this list that fails reverse-apply is still a conflict:
+# the list changes what a passing patch is called, not whether it passes.
+# them under their own "cecil" counter instead of the ordinary applied/pending
+# VintagestoryLib.dll at launcher startup, same as client patches above).
+# Wired 2026-08-11, see docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md.

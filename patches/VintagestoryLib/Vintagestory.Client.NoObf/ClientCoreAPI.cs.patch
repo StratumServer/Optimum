@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs
+index 406c7fb..f909265 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs
+@@ -102,10 +102,12 @@ public class ClientCoreAPI : APIBase, ICoreClientAPI, ICoreAPI, ICoreAPICommon
+ 
+ 	public ITesselatorAPI Tesselator => game.TesselatorManager.Tesselator;
+ 
+ 	public int TesselationThreadId => game.TesselationThreadId;
+ 
++	public bool IsTesselationThread(int threadId) => game.IsTesselationThread(threadId);
++
+ 	public IBlockTextureAtlasAPI BlockTextureAtlas => game.BlockAtlasManager;
+ 
+ 	public IItemTextureAtlasAPI ItemTextureAtlas => game.ItemAtlasManager;
+ 
+ 	public ITextureAtlasAPI EntityTextureAtlas => game.EntityAtlasManager;

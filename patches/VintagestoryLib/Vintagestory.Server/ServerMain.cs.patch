@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerMain.cs b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
-index 1103a72..6b2d635 100644
+index 6f69cd3..a61a869 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 @@ -413,16 +413,64 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
@@ -72,7 +72,7 @@ index 1103a72..6b2d635 100644
  
  	IClassRegistryAPI IWorldAccessor.ClassRegistry => api.ClassRegistry;
  
-@@ -4244,11 +4292,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -4245,11 +4293,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  
  	internal void BroadcastArbitraryPacket(byte[] data, params IServerPlayer[] skipPlayers)
  	{
@@ -85,7 +85,7 @@ index 1103a72..6b2d635 100644
  			}
  		}
  	}
-@@ -4258,11 +4306,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -4259,11 +4307,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  		Serialize_(packet);
  		byte[] array = null;
  		bool compressed = false;
@@ -98,7 +98,7 @@ index 1103a72..6b2d635 100644
  				{
  					array = client.Socket.PreparePacketForSending(reusableBuffer, Config.CompressPackets, out compressed);
  				}
-@@ -4277,17 +4325,30 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -4278,17 +4326,30 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  
  	internal void BroadcastArbitraryUdpPacket(Packet_UdpPacket data, params IServerPlayer[] skipPlayers)
  	{

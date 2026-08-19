@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs b/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs
+index 23d2f42..c06bb00 100644
+--- a/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs
++++ b/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs
+@@ -319,10 +319,12 @@ public class MainMenuAPI : ICoreClientAPI, ICoreAPI, ICoreAPICommon
+ 		{
+ 			throw new NotImplementedException();
+ 		}
+ 	}
+ 
++	public bool IsTesselationThread(int threadId) => false;
++
+ 	public MainMenuAPI(ScreenManager screenManager)
+ 	{
+ 		this.screenManager = screenManager;
+ 		inputapi = new MainMenuInputAPI(screenManager);
+ 		renderapi = new MainMenuRenderAPI(screenManager);

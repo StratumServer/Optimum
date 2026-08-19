@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..2ecb761 100644
+index 4d08f84..6e06f51 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..2ecb761 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,164 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,169 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -107,9 +107,9 @@ index 4d08f84..2ecb761 100644
  
 +	private void OnOptimumOptions(bool on)
 +	{
-+		// The feature-flag build uses 21 rows inside the fixed 740px dialog.
-+		// The 30px interval places the last row at 717px.
-+		double rowH = 30.0;
++		// The feature-flag build uses 23 rows inside the fixed 740px dialog.
++		// The 28px interval places the last row at 703px.
++		double rowH = 28.0;
 +		double y0 = 87.0;
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
@@ -163,19 +163,22 @@ index 4d08f84..2ecb761 100644
 +			.AddStaticText(Lang.Get("optimum-renderscale"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-renderscale-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
 +			.AddDropDown(new string[] { "1.0", "0.85", "0.77", "0.67" }, new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, 0, onOptimumRenderScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 17 + 2, 200, 25), "optRenderScale")
++			.AddStaticText(Lang.Get("optimum-godrayscap"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
++			.AddHoverText(Lang.Get("optimum-godrayscap-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
++			.AddSwitch(onOptimumGodRaysCapChanged, ElementBounds.Fixed(450, y0 + rowH * 18 - 3, 200, 20), "optGodRaysCap")
 +#if OPTIMUM_GREEDY_MESH
-+			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
-+			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 17 - 3, 200, 20), "optGreedyMesh")
-+			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
-+			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 18 + 2, 200, 20), "optGreedySpan")
-+			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
-+			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 19 + 2, 200, 20), "optGreedyLightTol")
-+			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
-+			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 20), "optGreedyFarDist")
++			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
++			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 19 - 3, 200, 20), "optGreedyMesh")
++			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
++			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 20), "optGreedySpan")
++			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 21, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 21, 400, 25))
++			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 21 + 2, 200, 20), "optGreedyLightTol")
++			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 22, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 22, 400, 25))
++			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 22 + 2, 200, 20), "optGreedyFarDist")
 +#endif
 +			.EndChildElements()
 +			.Compose();
@@ -200,6 +203,7 @@ index 4d08f84..2ecb761 100644
 +		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
 +		int renderScaleIdx = ClientSettings.OptimumRenderScale >= 1.0f ? 0 : ClientSettings.OptimumRenderScale >= 0.85f ? 1 : ClientSettings.OptimumRenderScale >= 0.77f ? 2 : 3;
 +		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
++		composer.GetSwitch("optGodRaysCap").SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
 +#if OPTIMUM_GREEDY_MESH
 +		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
 +		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
@@ -246,6 +250,7 @@ index 4d08f84..2ecb761 100644
 +		ScreenManager.Platform.RebuildFrameBuffers();
 +		handler.ReloadShaders();
 +	}
++	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityLightBatchChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
@@ -264,7 +269,7 @@ index 4d08f84..2ecb761 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1982,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1987,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

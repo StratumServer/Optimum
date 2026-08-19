@@ -1,0 +1,55 @@
+diff --git a/VSEssentials/Entities/EntityBlockFalling.cs b/VSEssentials/Entities/EntityBlockFalling.cs
+index 0615808..7f72be4 100644
+--- a/VSEssentials/Entities/EntityBlockFalling.cs
++++ b/VSEssentials/Entities/EntityBlockFalling.cs
+@@ -108,10 +108,12 @@ namespace Vintagestory.GameContent
+             prog.Stop();
+         }
+ 
+         private void genMesh(EntityBlockFalling entity)
+         {
++            mesh.Clear();
++
+             int posx = entity.blockEntityAttributes?.GetInt("posx", entity.initialPos.X) ?? entity.initialPos.X;
+             int posy = entity.blockEntityAttributes?.GetInt("posy", entity.initialPos.Y) ?? entity.initialPos.Y;
+             int posz = entity.blockEntityAttributes?.GetInt("posz", entity.initialPos.Z) ?? entity.initialPos.Z;
+             BlockEntity be = capi.World.BlockAccessor.GetBlockEntity(new BlockPos(posx, posy, posz));
+ 
+@@ -140,27 +142,35 @@ namespace Vintagestory.GameContent
+                 }
+ 
+                 entity.reusedMeshRef = true;
+                 if (!dict.TryGetValue(cacheKey, out entity.meshRef))
+                 {
++                    MeshData meshToUpload;
+                     if (ifbms != null)
+                     {
+                         ifbms.OnFallingBlockTesselation(entity, this, capi.Tesselator);
+                         if (mesh.VerticesCount > 0)
+                         {
+                             mesh.CustomBytes = null;
+                             mesh.CustomFloats = null;
+                             mesh.CustomInts = null;
+                             entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh);
+                         }
++
++                        meshToUpload = mesh;
+                     }
+                     else
+                     {
+-                        mesh = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
++                        meshToUpload = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
++                    }
++
++                    if (entity.meshRef == null)
++                    {
++                        entity.meshRef = capi.Render.UploadMultiTextureMesh(meshToUpload);
+                     }
+ 
+-                    dict[cacheKey] = entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh);
++                    dict[cacheKey] = entity.meshRef;
+                 }
+             }
+         }
+ 
+         private bool IsRendered(EntityBlockFalling entity)

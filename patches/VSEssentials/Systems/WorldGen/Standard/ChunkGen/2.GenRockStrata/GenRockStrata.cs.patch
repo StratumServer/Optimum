@@ -1,0 +1,138 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs
+index cb9eefa..feaa325 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ using Vintagestory.ServerMods.NoObf;
+@@ -104,10 +105,11 @@ namespace Vintagestory.ServerMods
+                 }
+ 
+                 strataNoises[i] = new MapLayerCustomPerlin(api.World.Seed + 23423 + i, ampls, freq, th);
+             }
+ 
++            workspaces = new ThreadLocal<RockWorkspace>(() => new RockWorkspace());
+             api.Logger.VerboseDebug("Initialised GenRockStrata");
+         }
+ 
+ 
+ 
+@@ -134,24 +136,28 @@ namespace Vintagestory.ServerMods
+         }
+ 
+ 
+         // Cheap ugly code for better performance :<
+         #region
+-        float[] rockGroupMaxThickness = new float[4];
+-        int[] rockGroupCurrentThickness = new int[4];
+-
+-        IMapChunk mapChunk;
+-        ushort[] heightMap;
+-        int rdx;
+-        int rdz;
++        sealed class RockWorkspace
++        {
++            public readonly float[] RockGroupMaxThickness = new float[4];
++            public readonly int[] RockGroupCurrentThickness = new int[4];
++            public IMapChunk MapChunk;
++            public ushort[] HeightMap;
++            public int Rdx;
++            public int Rdz;
++            public LerpedWeightedIndex2DMap Map;
++            public float LerpMapInv;
++            public float ChunkInRegionX;
++            public float ChunkInRegionZ;
++            public GeologicProvinces Provinces;
++        }
+ 
+-        LerpedWeightedIndex2DMap map;
+-        float lerpMapInv;
+-        float chunkInRegionX;
+-        float chunkInRegionZ;
++        ThreadLocal<RockWorkspace> workspaces;
++        readonly object provinceMapLock = new object();
+ 
+-        GeologicProvinces provinces = NoiseGeoProvince.provinces;
+         #endregion
+ 
+         internal void GenChunkColumn(IChunkColumnGenerateRequest request)
+         {
+             var chunks = request.Chunks;
+@@ -169,25 +175,38 @@ namespace Vintagestory.ServerMods
+             }
+         }
+ 
+         public void preLoad(IServerChunk[] chunks, int chunkX, int chunkZ)
+         {
+-            mapChunk = chunks[0].MapChunk;
+-            heightMap = mapChunk.WorldGenTerrainHeightMap;
+-            rdx = chunkX % regionChunkSize;
+-            rdz = chunkZ % regionChunkSize;
+-
+-            map = GetOrLoadLerpedProvinceMap(chunks[0].MapChunk, chunkX, chunkZ);
+-            lerpMapInv = 1f / TerraGenConfig.geoProvMapScale;
+-            chunkInRegionX = (chunkX % regionChunkSize) * lerpMapInv * chunksize;
+-            chunkInRegionZ = (chunkZ % regionChunkSize) * lerpMapInv * chunksize;
+-
+-            provinces = NoiseGeoProvince.provinces;
++            RockWorkspace workspace = workspaces.Value;
++            workspace.MapChunk = chunks[0].MapChunk;
++            workspace.HeightMap = workspace.MapChunk.WorldGenTerrainHeightMap;
++            workspace.Rdx = chunkX % regionChunkSize;
++            workspace.Rdz = chunkZ % regionChunkSize;
++
++            workspace.Map = GetOrLoadLerpedProvinceMap(chunks[0].MapChunk, chunkX, chunkZ);
++            workspace.LerpMapInv = 1f / TerraGenConfig.geoProvMapScale;
++            workspace.ChunkInRegionX = (chunkX % regionChunkSize) * workspace.LerpMapInv * chunksize;
++            workspace.ChunkInRegionZ = (chunkZ % regionChunkSize) * workspace.LerpMapInv * chunksize;
++
++            workspace.Provinces = NoiseGeoProvince.provinces;
+         }
+ 
+         public void genBlockColumn(IServerChunk[] chunks, int chunkX, int chunkZ, int lx, int lz)
+         {
++            RockWorkspace workspace = workspaces.Value;
++            IMapChunk mapChunk = workspace.MapChunk;
++            ushort[] heightMap = workspace.HeightMap;
++            int rdx = workspace.Rdx;
++            int rdz = workspace.Rdz;
++            LerpedWeightedIndex2DMap map = workspace.Map;
++            float lerpMapInv = workspace.LerpMapInv;
++            float chunkInRegionX = workspace.ChunkInRegionX;
++            float chunkInRegionZ = workspace.ChunkInRegionZ;
++            float[] rockGroupMaxThickness = workspace.RockGroupMaxThickness;
++            int[] rockGroupCurrentThickness = workspace.RockGroupCurrentThickness;
++            GeologicProvinces provinces = workspace.Provinces;
+             int surfaceY = heightMap[lz * chunksize + lx];
+             int ylower = 1;
+             int yupper = surfaceY;
+             int rockBlockId = this.rockBlockId;
+ 
+@@ -311,15 +330,17 @@ namespace Vintagestory.ServerMods
+         }
+ 
+         LerpedWeightedIndex2DMap GetOrLoadLerpedProvinceMap(IMapChunk mapchunk, int chunkX, int chunkZ)
+         {
+             int index2d = chunkZ / regionChunkSize * regionMapSize + chunkX / regionChunkSize;
++            lock (provinceMapLock)
++            {
++                ProvinceMapByRegion.TryGetValue(index2d, out LerpedWeightedIndex2DMap map);
++                if (map != null) return map;
+ 
+-            ProvinceMapByRegion.TryGetValue(index2d, out LerpedWeightedIndex2DMap map);
+-            if (map != null) return map;
+-
+-            return CreateLerpedProvinceMap(mapchunk.MapRegion.GeologicProvinceMap, chunkX / regionChunkSize, chunkZ / regionChunkSize);
++                return CreateLerpedProvinceMap(mapchunk.MapRegion.GeologicProvinceMap, chunkX / regionChunkSize, chunkZ / regionChunkSize);
++            }
+         }
+ 
+         LerpedWeightedIndex2DMap CreateLerpedProvinceMap(IntDataMap2D geoMap, int regionX, int regionZ)
+         {
+             int index2d = regionZ * regionMapSize + regionX;

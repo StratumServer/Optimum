@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs b/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
-index be5e47c..302dfba 100644
+index 3b3daf9..daee741 100644
 --- a/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
 +++ b/VintagestoryApi/Client/UI/Dialog/GuiDialog.cs
-@@ -571,10 +571,11 @@ namespace Vintagestory.API.Client
+@@ -573,10 +573,11 @@ namespace Vintagestory.API.Client
              }
  
              if (!IsOpened()) return;
@@ -14,7 +14,7 @@ index be5e47c..302dfba 100644
                      args.Handled = true;
                      return;
                  }
-@@ -596,10 +597,11 @@ namespace Vintagestory.API.Client
+@@ -598,10 +599,11 @@ namespace Vintagestory.API.Client
                  if (args.Handled) return;
              }
  
@@ -26,7 +26,7 @@ index be5e47c..302dfba 100644
                      args.Handled = true;
                      return;
                  }
-@@ -621,10 +623,11 @@ namespace Vintagestory.API.Client
+@@ -623,10 +625,11 @@ namespace Vintagestory.API.Client
                  if (args.Handled) return;
              }
  
@@ -38,7 +38,7 @@ index be5e47c..302dfba 100644
                      args.Handled = true;
                      break;
                  }
-@@ -646,10 +649,11 @@ namespace Vintagestory.API.Client
+@@ -648,10 +651,11 @@ namespace Vintagestory.API.Client
  
              if (focused)
              {

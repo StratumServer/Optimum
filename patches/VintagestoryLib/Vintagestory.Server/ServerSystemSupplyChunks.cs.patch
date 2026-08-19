@@ -1,30 +1,48 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
-index f644852..93a558d 100644
+index 159b06c..f797597 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
-@@ -1,9 +1,11 @@
+@@ -1,9 +1,13 @@
  using System;
  using System.Collections.Generic;
 +using System.Diagnostics;
  using System.Linq;
++using System.Reflection;
  using System.Threading;
 +using System.Threading.Tasks;
++using HarmonyLib;
  using Vintagestory.API.Common;
  using Vintagestory.API.Common.Entities;
  using Vintagestory.API.Config;
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
-@@ -26,10 +28,37 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -26,10 +30,62 @@ internal class ServerSystemSupplyChunks : ServerSystem
  
  	private bool requiresSetEmptyFlag;
  
  	private volatile int pauseAllWorldgenThreads;
  
-+	private int[] optimumStageClaims;
++	private int[] optimumWorldgenPassCaps;
++
++	private int[] optimumWorldgenPassInFlight;
++
++	private Dictionary<Type, Lock> optimumGeneratorTypeLocks;
++
++	private Dictionary<MethodInfo, Lock> optimumGeneratorMethodLocks;
++
++	private Lock optimumGeneratorLockRegistry;
 +
 +	private int optimumNextStage;
 +
 +	private int optimumWorldgenFaulted;
++
++	private int optimumWorldgenAuditReady;
++
++	private int optimumWorldgenWorkersStarted;
++
++	private int optimumWorldgenDispatchesInFlight;
++
++	private OptimumWorldgenFootprintRegistry optimumWorldgenFootprints;
 +
 +	/// <summary>
 +	/// Conflict lock for passes 3 (Vegetation) and 4 (NeighbourSunLightFlood).
@@ -45,24 +63,75 @@ index f644852..93a558d 100644
 +	/// </summary>
 +	internal AdaptiveWorkerController optimumAdaptiveController;
 +
++	/// <summary>
++	/// Adaptive radius controller: reduces effective chunk radius under queue
++	/// pressure so fewer columns enqueue at once during fast exploration.
++	/// </summary>
++	internal OptimumAdaptiveRadiusController optimumAdaptiveRadiusController;
++
 +	private int optimumPostSpawnRaised;
++
++	// Optimum: gates the one-time worldgen audit and worker startup.
++	private bool optimumSafetyChecked;
 +
  	[ThreadStatic]
  	private static FastMemoryStream saveChunksStream;
  
  	private List<long> entitiesToRemove = new List<long>();
  
-@@ -61,17 +90,29 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -54,36 +110,80 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 	{
+ 		if (chunkthread.requestedChunkColumns.Count == 0 || !is8Core)
+ 		{
+ 			return MagicNum.ChunkThreadTickTime;
+ 		}
++		// Optimum: this formula is vanilla's, but vanilla's own worker count is
++		// always 0 (additionalWorldGenThreadsCount - 1 == -1, i.e. "tick every
++		// iteration"), so it never actually shrinks the interval in vanilla. Once
++		// Optimum sets a positive worker count, the same formula inverts to give
++		// FEWER workers a FASTER poll (0ms at 1 worker) and only settles near
++		// ChunkThreadTickTime at 6+ workers - the opposite of what's useful, and a
++		// measured source of busy-spin overhead (see docs/todo.md, R2). Workers
++	// pull their own columns through pass caps and request claims; the chunk
++	// thread does not need to poll faster than normal to keep them fed.
++		if (chunkthread.additionalWorldGenThreadsCount > 0)
++		{
++			return MagicNum.ChunkThreadTickTime;
++		}
+ 		return chunkthread.additionalWorldGenThreadsCount - 1;
+ 	}
  
  	public override void OnBeginGameReady(SaveGame savegame)
  	{
  		requiresChunkBorderSmoothing = savegame.CreatedWorldGenVersion != 3;
  		requiresSetEmptyFlag = GameVersion.IsLowerVersionThan(server.SaveGameData.LastSavedGameVersion, "1.12-dev.1");
-+		optimumStageClaims = new int[(int)EnumWorldGenPass.Done];
+-		if (chunkthread.additionalWorldGenThreadsCount > 0)
+-		{
+-			int num = 1;
+-			for (int i = 0; i < chunkthread.additionalWorldGenThreadsCount; i++)
+-			{
+-				CreateAdditionalWorldGenThread(num, num + 1, i + 1);
+-				num++;
+-			}
+-		}
++		optimumWorldgenPassCaps = new int[(int)EnumWorldGenPass.Done];
++		optimumWorldgenPassInFlight = new int[(int)EnumWorldGenPass.Done];
++		for (int i = 0; i < optimumWorldgenPassCaps.Length; i++)
++		{
++			optimumWorldgenPassCaps[i] = 1;
++		}
++		optimumGeneratorTypeLocks = new Dictionary<Type, Lock>();
++		optimumGeneratorMethodLocks = new Dictionary<MethodInfo, Lock>();
++		optimumGeneratorLockRegistry = new Lock();
++		optimumWorldgenFootprints = new OptimumWorldgenFootprintRegistry();
 +		optimumLightConflictLock = new Lock();
 +		optimumAdaptiveController = new AdaptiveWorkerController(
++			chunkthread.optimumExactWorldgenWorkerMode ? chunkthread.additionalWorldGenThreadsCount :
 +			OptimumConfig.GetWorldgenWorkerCeiling(Environment.ProcessorCount, server.ReducedServerThreads));
-+		// Start at the conservative spawn-phase cap; post-spawn raise brings it to ceiling.
++		optimumAdaptiveRadiusController = new OptimumAdaptiveRadiusController(server.Config.MaxChunkRadius);
++		// The worldgen audit runs after TriggerInitWorldGen populates the handler and
++		// before InitWorldgenAndSpawnChunks queues any startup work.
++		// Exact mode holds the requested cap for the full run.
 +		OptimumApiBridge.ForceAdaptiveCap(optimumAdaptiveController, chunkthread.additionalWorldGenThreadsCount);
 +		optimumAdaptiveController.OnCapChanged = (oldCap, newCap, contention) =>
 +		{
@@ -71,25 +140,45 @@ index f644852..93a558d 100644
 +		};
 +		Interlocked.Exchange(ref optimumNextStage, -1);
 +		Interlocked.Exchange(ref optimumWorldgenFaulted, 0);
- 		if (chunkthread.additionalWorldGenThreadsCount > 0)
- 		{
--			int num = 1;
-+			ServerMain.Logger.Notification("Optimum worldgen scheduler started with {0} worker threads.", chunkthread.additionalWorldGenThreadsCount);
- 			for (int i = 0; i < chunkthread.additionalWorldGenThreadsCount; i++)
- 			{
--				CreateAdditionalWorldGenThread(num, num + 1, i + 1);
--				num++;
-+				CreateAdditionalWorldGenThread(0, 0, i + 1);
- 			}
- 		}
++		Interlocked.Exchange(ref optimumWorldgenAuditReady, 0);
++		Interlocked.Exchange(ref optimumWorldgenWorkersStarted, 0);
++		Interlocked.Exchange(ref optimumWorldgenDispatchesInFlight, 0);
++		Interlocked.Exchange(ref optimumPostSpawnRaised, 0);
++		optimumSafetyChecked = false;
  	}
  
  	public override void OnSeparateThreadTick()
-@@ -292,25 +333,25 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 	{
+ 		if (server.RunPhase != EnumServerRunPhase.RunGame)
+ 		{
+ 			return;
+ 		}
++		// The worldgen handler becomes available in InitWorldgenAndSpawnChunks.
++		// This branch remains as a recovery path for worlds that initialize it
++		// outside the normal startup sequence.
++		if (!optimumSafetyChecked && worldgenHandler != null)
++		{
++			OptimumInitializeWorldgenWorkers();
++		}
+ 		deleteChunkColumns();
+ 		moveRequestsToGeneratingQueue();
++		// Adaptive radius: sample queue depth each tick and adjust the effective radius.
++		optimumAdaptiveRadiusController?.Tick(chunkthread.requestedChunkColumns.Count, server.Config.MaxChunkRadius);
+ 		KeyValuePair<HorRectanglei, ChunkLoadOptions> result;
+ 		while (!server.fastChunkQueue.IsEmpty && server.fastChunkQueue.TryDequeue(out result))
+ 		{
+ 			loadChunkAreaBlocking(result.Key.X1, result.Key.Z1, result.Key.X2, result.Key.Z2, isStartupLoad: false, result.Value.ChunkGenParams);
+ 			if (result.Value.OnLoaded != null)
+@@ -291,29 +391,44 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 		}
  		if (pauseAllWorldgenThreads > 0)
  		{
  			return false;
  		}
++		if (Volatile.Read(ref optimumWorldgenFaulted) != 0 && !OptimumWorldgenWorkersDrained())
++		{
++			return false;
++		}
  		CleanupRequestsQueue();
 -		int additionalWorldGenThreadsCount = chunkthread.additionalWorldGenThreadsCount;
 +		bool flag = OptimumWorldgenWorkersActive();
@@ -108,13 +197,42 @@ index f644852..93a558d 100644
  					return false;
  				}
 -				if (loadOrGenerateChunkColumn_OnChunkThread(requestedChunkColumn, currentIncompletePass_AsInt) && chunkthread.additionalWorldGenThreadsCount == 0)
-+				if (loadOrGenerateChunkColumn_OnChunkThread(requestedChunkColumn, currentIncompletePass_AsInt) && !flag)
- 				{
- 					return true;
- 				}
+-				{
+-					return true;
+-				}
++					if (!requestedChunkColumn.TryClaimDispatch())
++					{
++						continue;
++					}
++					try
++					{
++						if (loadOrGenerateChunkColumn_OnChunkThread(requestedChunkColumn, currentIncompletePass_AsInt) && !flag)
++						{
++							return true;
++						}
++					}
++					finally
++					{
++						requestedChunkColumn.ReleaseDispatch();
++					}
  			}
  		}
-@@ -430,48 +471,85 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 		return false;
+ 	}
+ 
+@@ -419,57 +534,286 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 			return stage == 0;
+ 		}
+ 		bool num = CanGenerateChunkColumn(chunkRequest);
+ 		if (num)
+ 		{
+-			PopulateChunk(chunkRequest);
++			num = PopulateChunk(chunkRequest);
+ 		}
+ 		if (!num || chunkthread.additionalWorldGenThreadsCount == 0)
+ 		{
+ 			chunkRequest.FlagToRequeue();
+ 		}
  		return num;
  	}
  
@@ -123,14 +241,9 @@ index f644852..93a558d 100644
 -		ChunkColumnLoadRequest chunkColumnLoadRequest = null;
 -		long num = long.MinValue;
 -		foreach (ChunkColumnLoadRequest requestedChunkColumn in chunkthread.requestedChunkColumns)
-+		if (!OptimumWorldgenWorkersActive() || optimumStageClaims == null)
++		if (!OptimumWorldgenWorkersActive() || optimumWorldgenPassCaps == null)
  		{
 -			if (requestedChunkColumn == null || requestedChunkColumn.Disposed)
--			{
--				continue;
--			}
--			int currentIncompletePass_AsInt = requestedChunkColumn.CurrentIncompletePass_AsInt;
--			if (currentIncompletePass_AsInt < stageStart || currentIncompletePass_AsInt >= stageEnd)
 +			return 0;
 +		}
 +		int num = (int)EnumWorldGenPass.Done - 1;
@@ -138,93 +251,282 @@ index f644852..93a558d 100644
 +		for (int i = 0; i < num; i++)
 +		{
 +			int targetPass = (num2 - 1 + i) % num + 1;
-+			if (Interlocked.CompareExchange(ref optimumStageClaims[targetPass], 1, 0) != 0)
++			if (!TryClaimWorldgenPass(targetPass))
  			{
  				continue;
  			}
--			if (currentIncompletePass_AsInt >= requestedChunkColumn.untilPass)
--			{
--				requestedChunkColumn.FlagToRequeue();
--			}
--			else if (requestedChunkColumn.creationTime > num)
+-			int currentIncompletePass_AsInt = requestedChunkColumn.CurrentIncompletePass_AsInt;
+-			if (currentIncompletePass_AsInt < stageStart || currentIncompletePass_AsInt >= stageEnd)
 +			try
- 			{
--				if (ensurePrettyNeighbourhood(requestedChunkColumn))
-+				ChunkColumnLoadRequest chunkColumnLoadRequest = null;
-+				long num3 = long.MinValue;
++			{
 +				foreach (ChunkColumnLoadRequest requestedChunkColumn in chunkthread.requestedChunkColumns)
- 				{
--					num = requestedChunkColumn.creationTime;
--					chunkColumnLoadRequest = requestedChunkColumn;
++				{
 +					if (requestedChunkColumn == null || requestedChunkColumn.Disposed || requestedChunkColumn.CurrentIncompletePass_AsInt != targetPass)
 +					{
 +						continue;
 +					}
-+					if (targetPass >= requestedChunkColumn.untilPass)
++					if (!requestedChunkColumn.TryClaimDispatch())
 +					{
-+						requestedChunkColumn.FlagToRequeue();
++						continue;
 +					}
-+					else if (requestedChunkColumn.creationTime > num3)
++					try
 +					{
-+						if (ensurePrettyNeighbourhood(requestedChunkColumn))
-+						{
-+							num3 = requestedChunkColumn.creationTime;
-+							chunkColumnLoadRequest = requestedChunkColumn;
-+						}
-+						else
++						if (requestedChunkColumn.Disposed || requestedChunkColumn.CurrentIncompletePass_AsInt != targetPass || targetPass >= requestedChunkColumn.untilPass)
 +						{
 +							requestedChunkColumn.FlagToRequeue();
++							continue;
 +						}
-+					}
- 				}
--				else
-+				if (chunkColumnLoadRequest != null && !chunkColumnLoadRequest.Disposed && chunkColumnLoadRequest.CurrentIncompletePass_AsInt == targetPass)
- 				{
--					requestedChunkColumn.FlagToRequeue();
-+					long workStart = Stopwatch.GetTimestamp();
-+					long lockWait = 0;
-+					if (targetPass == 3 || targetPass == 4)
-+					{
-+						long lockStart = Stopwatch.GetTimestamp();
-+						lock (optimumLightConflictLock)
++						if (!ensurePrettyNeighbourhood(requestedChunkColumn))
 +						{
-+							lockWait = Stopwatch.GetTimestamp() - lockStart;
-+							PopulateChunk(chunkColumnLoadRequest);
++							requestedChunkColumn.FlagToRequeue();
++							continue;
 +						}
++						if (requestedChunkColumn.Disposed || requestedChunkColumn.CurrentIncompletePass_AsInt != targetPass || targetPass >= requestedChunkColumn.untilPass)
++						{
++							requestedChunkColumn.FlagToRequeue();
++							continue;
++						}
++						long workStart = Stopwatch.GetTimestamp();
++						if (!PopulateChunk(requestedChunkColumn))
++						{
++							requestedChunkColumn.FlagToRequeue();
++							continue;
++						}
++						long workTicks = Stopwatch.GetTimestamp() - workStart;
++						optimumAdaptiveController.RecordChunk(0, workTicks);
++						return 1;
 +					}
-+					else
++					finally
 +					{
-+						PopulateChunk(chunkColumnLoadRequest);
++						requestedChunkColumn.ReleaseDispatch();
 +					}
-+					long workTicks = Stopwatch.GetTimestamp() - workStart - lockWait;
-+					optimumAdaptiveController.RecordChunk(lockWait, workTicks);
-+					return 1;
- 				}
- 			}
--		}
--		if (chunkColumnLoadRequest != null)
--		{
--			PopulateChunk(chunkColumnLoadRequest);
--			return 1;
++				}
++			}
 +			finally
 +			{
-+				Volatile.Write(ref optimumStageClaims[targetPass], 0);
++				ReleaseWorldgenPass(targetPass);
 +			}
- 		}
- 		return 0;
- 	}
- 
-+	private bool OptimumWorldgenWorkersActive()
-+	{
-+		return chunkthread.additionalWorldGenThreadsCount > 0 && Volatile.Read(ref optimumWorldgenFaulted) == 0;
++		}
++		return 0;
 +	}
 +
++	private void OptimumInitializeWorldgenWorkers()
++	{
++		if (optimumSafetyChecked)
++		{
++			return;
++		}
++
++		optimumSafetyChecked = true;
++		bool eligible = CheckWorldgenConcurrencySafety();
++		if (!eligible && !OptimumConfig.WorldgenConcurrencyForce)
++		{
++			chunkthread.additionalWorldGenThreadsCount = 0;
++			ServerMain.Logger.Warning("Optimum worldgen parallelism disabled because a foreign or Harmony-patched handler is active.");
++		}
++		else if (OptimumConfig.WorldgenConcurrencyForce)
++		{
++			ServerMain.Logger.Warning("Optimum worldgen concurrency override is active. Generator state can race.");
++		}
++
++		Volatile.Write(ref optimumWorldgenAuditReady, 1);
++		if (chunkthread.additionalWorldGenThreadsCount > 0)
++		{
++			ServerMain.Logger.Notification("Optimum worldgen scheduler started with {0} worker threads.", chunkthread.additionalWorldGenThreadsCount);
++			for (int i = 0; i < chunkthread.additionalWorldGenThreadsCount; i++)
++			{
++				CreateAdditionalWorldGenThread(0, 0, i + 1);
++			}
++			Volatile.Write(ref optimumWorldgenWorkersStarted, 1);
++		}
++	}
++
++	private bool CheckWorldgenConcurrencySafety()
++	{
++		bool eligible = true;
++		bool terrainParallelSafe = true;
++		if (optimumGeneratorTypeLocks == null)
++		{
++			optimumGeneratorTypeLocks = new Dictionary<Type, Lock>();
++		}
++		if (optimumGeneratorMethodLocks == null)
++		{
++			optimumGeneratorMethodLocks = new Dictionary<MethodInfo, Lock>();
++		}
++		for (int pass = 0; pass < worldgenHandler.OnChunkColumnGen.Length; pass++)
++		{
++			List<ChunkColumnGenerationDelegate> handlers = worldgenHandler.OnChunkColumnGen[pass];
++			if (handlers == null)
+ 			{
+ 				continue;
+ 			}
+-			if (currentIncompletePass_AsInt >= requestedChunkColumn.untilPass)
++
++			foreach (ChunkColumnGenerationDelegate handler in handlers)
+ 			{
+-				requestedChunkColumn.FlagToRequeue();
++				string assemblyName = handler?.Method?.DeclaringType?.Assembly?.GetName().Name;
++				bool foreign = !OptimumWorldgenSafetyGate.IsKnownSafeAssembly(assemblyName);
++				bool harmonyPatched;
++				try
++				{
++					harmonyPatched = handler?.Method != null && Harmony.GetPatchInfo(handler.Method)?.Owners?.Count > 0;
++				}
++				catch
++				{
++					harmonyPatched = true;
++				}
++
++				if (pass == (int)EnumWorldGenPass.Terrain && !IsWorldgenHandlerAllowedForParallelPass(pass, handler))
++				{
++					terrainParallelSafe = false;
++					ServerMain.Logger.Notification("Optimum worldgen pass {0} keeps cap 1 for handler {1}.", pass, handler?.Method?.DeclaringType?.FullName ?? "<unknown>");
++				}
++
++				if (!foreign && !harmonyPatched)
++				{
++					continue;
++				}
++
++				eligible = false;
++				string reason = foreign ? "foreign assembly" : "Harmony patch";
++				ServerMain.Logger.Warning("Optimum worldgen pass {0} forced to serial mode by {1}: {2}", pass, reason, assemblyName ?? "<unknown>");
+ 			}
+-			else if (requestedChunkColumn.creationTime > num)
++		}
++
++		if (terrainParallelSafe && (eligible || OptimumConfig.WorldgenConcurrencyForce) && chunkthread.additionalWorldGenThreadsCount > 0)
++		{
++			optimumWorldgenPassCaps[(int)EnumWorldGenPass.Terrain] = Math.Min(3, chunkthread.additionalWorldGenThreadsCount);
++		}
++
++		return eligible;
++	}
++
++	private bool IsWorldgenHandlerAllowedForParallelPass(int pass, ChunkColumnGenerationDelegate handler)
++	{
++		if (pass != (int)EnumWorldGenPass.Terrain || handler == null)
++		{
++			return false;
++		}
++
++		string typeName = handler.Target?.GetType().FullName ?? handler.Method?.DeclaringType?.FullName;
++		return typeName == "Vintagestory.ServerMods.GenTerra" ||
++			typeName == "Vintagestory.ServerMods.GenRockStrataNew" ||
++			typeName == "Vintagestory.ServerMods.GenCaves" ||
++			typeName == "Vintagestory.ServerMods.GenDevastationLayer";
++	}
++
++	private bool IsWorldgenHandlerDirectlySafe(int pass, ChunkColumnGenerationDelegate handler)
++	{
++		if (!IsWorldgenHandlerAllowedForParallelPass(pass, handler))
++		{
++			return false;
++		}
++
++		string typeName = handler.Target?.GetType().FullName ?? handler.Method?.DeclaringType?.FullName;
++		return typeName != "Vintagestory.ServerMods.GenDevastationLayer";
++	}
++
++	private Lock GetWorldgenGeneratorLock(ChunkColumnGenerationDelegate handler)
++	{
++		Type targetType = handler?.Target?.GetType();
++		if (targetType != null)
++		{
++			lock (optimumGeneratorLockRegistry)
+ 			{
+-				if (ensurePrettyNeighbourhood(requestedChunkColumn))
++				if (!optimumGeneratorTypeLocks.TryGetValue(targetType, out Lock targetLock))
+ 				{
+-					num = requestedChunkColumn.creationTime;
+-					chunkColumnLoadRequest = requestedChunkColumn;
++					targetLock = new Lock();
++					optimumGeneratorTypeLocks[targetType] = targetLock;
+ 				}
+-				else
++				return targetLock;
++			}
++		}
++
++		MethodInfo method = handler?.Method;
++		if (method != null)
++		{
++			lock (optimumGeneratorLockRegistry)
++			{
++				if (!optimumGeneratorMethodLocks.TryGetValue(method, out Lock methodLock))
+ 				{
+-					requestedChunkColumn.FlagToRequeue();
++					methodLock = new Lock();
++					optimumGeneratorMethodLocks[method] = methodLock;
+ 				}
++				return methodLock;
+ 			}
+ 		}
+-		if (chunkColumnLoadRequest != null)
++
++		return optimumGeneratorLockRegistry;
++	}
++
++	private void RunWorldgenGenerator(ChunkColumnGenerationDelegate handler, ChunkColumnLoadRequest chunkRequest, int forPass)
++	{
++		if (handler == null)
++		{
++			return;
++		}
++		if (IsWorldgenHandlerDirectlySafe(forPass, handler))
+ 		{
+-			PopulateChunk(chunkColumnLoadRequest);
+-			return 1;
++			handler(chunkRequest);
++			return;
++		}
++		Lock generatorLock = GetWorldgenGeneratorLock(handler);
++		lock (generatorLock)
++		{
++			handler(chunkRequest);
+ 		}
+-		return 0;
++	}
++
++	private bool TryClaimWorldgenPass(int pass)
++	{
++		int cap = Volatile.Read(ref optimumWorldgenPassCaps[pass]);
++		while (true)
++		{
++			int inFlight = Volatile.Read(ref optimumWorldgenPassInFlight[pass]);
++			if (inFlight >= cap)
++			{
++				return false;
++			}
++			if (Interlocked.CompareExchange(ref optimumWorldgenPassInFlight[pass], inFlight + 1, inFlight) == inFlight)
++			{
++				return true;
++			}
++		}
++	}
++
++	private void ReleaseWorldgenPass(int pass)
++	{
++		Interlocked.Decrement(ref optimumWorldgenPassInFlight[pass]);
++	}
++
++	private bool OptimumWorldgenWorkersActive()
++	{
++		return chunkthread.additionalWorldGenThreadsCount > 0 &&
++			Volatile.Read(ref optimumWorldgenAuditReady) != 0 &&
++			Volatile.Read(ref optimumWorldgenWorkersStarted) != 0 &&
++			Volatile.Read(ref optimumWorldgenFaulted) == 0;
++	}
++
++	private bool OptimumWorldgenWorkersDrained()
++	{
++		return Volatile.Read(ref optimumWorldgenDispatchesInFlight) == 0;
+ 	}
+ 
  	public bool CanGenerateChunkColumn(ChunkColumnLoadRequest chunkRequest)
  	{
  		if (chunkRequest.CurrentIncompletePass_AsInt >= chunkRequest.untilPass || !ensurePrettyNeighbourhood(chunkRequest))
- 		{
- 			return false;
-@@ -931,32 +1009,71 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -931,32 +1275,112 @@ internal class ServerSystemSupplyChunks : ServerSystem
  	internal ServerChunk[] TryLoadChunkColumn(ChunkColumnLoadRequest chunkRequest)
  	{
  		int chunkMapSizeY = server.WorldMap.ChunkMapSizeY;
@@ -236,8 +538,6 @@ index f644852..93a558d 100644
 -			if (chunk == null)
 -			{
 -				continue;
--			}
--			try
 +		// Optimum: parallel chunk read via read pool (SQLite WAL allows concurrent readers)
 +		OptimumChunkReadPool pool = chunkthread.optimumReadPool;
 +		if (pool != null && pool.IsOpen && chunkMapSizeY >= 4)
@@ -254,27 +554,69 @@ index f644852..93a558d 100644
 +					rawChunks[i] = pool.GetChunkBytes(Vintagestory.Common.Database.ChunkPos.ToChunkIndex(cx, i, cz, dim));
 +				});
 +
-+			for (int i = 0; i < chunkMapSizeY; i++)
++			// Optimum: parallelize FromBytes deserialization (CPU-bound protobuf + decompression)
++			// Each ServerChunk.FromBytes is independent: uses its own MemoryStream, creates a new
++			// ServerChunk instance, and only reads shared state (datapool.OnlyAirBlocksData, ClassRegistry).
++			// The ChunkDataPool.datapool field assignment is a per-instance write (no contention).
++			if (OptimumConfig.ChunkDeserializeParallel && chunkMapSizeY >= OptimumConfig.ChunkDeserializeParallelMinY)
++			{
++				int deserializedCount = 0;
++				Exception firstException = null;
++				Parallel.For(0, chunkMapSizeY,
++					new ParallelOptions { MaxDegreeOfParallelism = maxDop },
++					i =>
++					{
++						byte[] chunk = rawChunks[i];
++						if (chunk == null) return;
++						try
++						{
++							array[i] = ServerChunk.FromBytes(chunk, server.serverChunkDataPool, server);
++							Interlocked.Increment(ref deserializedCount);
++						}
++						catch (Exception ex)
++						{
++							if (server.Config.RegenerateCorruptChunks || server.Config.RepairMode)
++							{
++								array[i] = ServerChunk.CreateNew(server.serverChunkDataPool);
++								ServerMain.Logger.Error("Failed deserializing chunk (parallel FromBytes), repair mode: {0}", ex);
++								return;
++							}
++							Interlocked.CompareExchange(ref firstException, ex, null);
++						}
++					});
++				if (firstException != null)
++				{
++					ServerMain.Logger.Error("Failed deserializing chunk (parallel FromBytes). Will exit.");
++					throw firstException;
++				}
++				num = deserializedCount;
++				OptimumDiagnostics.RecordChunkDeserializeParallel(chunkMapSizeY);
+ 			}
+-			try
++			else
  			{
 -				num++;
 -				array[i] = ServerChunk.FromBytes(chunk, server.serverChunkDataPool, server);
-+				byte[] chunk = rawChunks[i];
-+				if (chunk == null) continue;
-+				try
++				for (int i = 0; i < chunkMapSizeY; i++)
 +				{
-+					num++;
-+					array[i] = ServerChunk.FromBytes(chunk, server.serverChunkDataPool, server);
-+				}
-+				catch (Exception ex)
-+				{
-+					if (server.Config.RegenerateCorruptChunks || server.Config.RepairMode)
++					byte[] chunk = rawChunks[i];
++					if (chunk == null) continue;
++					try
 +					{
-+						array[i] = ServerChunk.CreateNew(server.serverChunkDataPool);
-+						ServerMain.Logger.Error("Failed deserializing chunk (parallel read pool), repair mode: {0}", ex);
-+						continue;
++						num++;
++						array[i] = ServerChunk.FromBytes(chunk, server.serverChunkDataPool, server);
 +					}
-+					ServerMain.Logger.Error("Failed deserializing chunk (parallel read pool). Will exit.");
-+					throw;
++					catch (Exception ex)
++					{
++						if (server.Config.RegenerateCorruptChunks || server.Config.RepairMode)
++						{
++							array[i] = ServerChunk.CreateNew(server.serverChunkDataPool);
++							ServerMain.Logger.Error("Failed deserializing chunk (parallel read pool), repair mode: {0}", ex);
++							continue;
++						}
++						ServerMain.Logger.Error("Failed deserializing chunk (parallel read pool). Will exit.");
++						throw;
++					}
 +				}
  			}
 -			catch (Exception ex)
@@ -313,7 +655,35 @@ index f644852..93a558d 100644
  		if (requiresSetEmptyFlag)
  		{
  			foreach (ServerChunk serverChunk in array)
-@@ -1299,18 +1416,19 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1038,10 +1462,11 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 	}
+ 
+ 	public void InitWorldgenAndSpawnChunks()
+ 	{
+ 		worldgenHandler = (WorldGenHandler)server.api.Event.TriggerInitWorldGen();
++		OptimumInitializeWorldgenWorkers();
+ 		ServerMain.Logger.Event("Loading {0}x{1}x{2} spawn chunks...", MagicNum.SpawnChunksWidth, MagicNum.SpawnChunksWidth, server.WorldMap.ChunkMapSizeY);
+ 		if (storyChunkSpawnEvents == null)
+ 		{
+ 			storyChunkSpawnEvents = new string[15]
+ 			{
+@@ -1278,10 +1703,15 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 		}
+ 		long num3 = Environment.TickCount + 12000;
+ 		ServerMain.Logger.VerboseDebug("Starting area loading/generation: columns " + blockingRequestsRemaining + ", total queue length " + chunkthread.requestedChunkColumns.Count);
+ 		while (!server.stopped && server.exitState.Mode == EnumExitMode.None)
+ 		{
++			if (Volatile.Read(ref optimumWorldgenFaulted) != 0 && !OptimumWorldgenWorkersDrained())
++			{
++				Thread.Sleep(1);
++				continue;
++			}
+ 			CleanupRequestsQueue();
+ 			if (blockingRequestsRemaining <= 0 || chunkthread.requestedChunkColumns.Count == 0)
+ 			{
+ 				break;
+ 			}
+@@ -1299,34 +1729,57 @@ internal class ServerSystemSupplyChunks : ServerSystem
  					ServerMain.Logger.StoryEvent("...");
  				}
  				storyEventPrints++;
@@ -334,13 +704,152 @@ index f644852..93a558d 100644
  					{
  						return;
  					}
-@@ -1394,10 +1512,14 @@ internal class ServerSystemSupplyChunks : ServerSystem
- 				list[i](chunkRequest);
+-					flag |= loadOrGenerateChunkColumn_OnChunkThread(requestedChunkColumn2, currentIncompletePass_AsInt);
++					if (!requestedChunkColumn2.TryClaimDispatch())
++					{
++						continue;
++					}
++					try
++					{
++						flag |= loadOrGenerateChunkColumn_OnChunkThread(requestedChunkColumn2, currentIncompletePass_AsInt);
++					}
++					finally
++					{
++						requestedChunkColumn2.ReleaseDispatch();
++					}
+ 				}
+ 			}
+ 			if (flag)
+ 			{
+ 				num3 = Environment.TickCount + 12000;
+ 			}
+ 			else
+ 			{
+ 				if (Environment.TickCount <= num3)
+ 				{
++					// Optimum: with workers active, most columns here are mid-pass
++					// and owned by a worker thread, so this chunk thread finds
++					// nothing to do on almost every iteration - a bare `continue`
++					// busy-spins CleanupRequestsQueue()'s Interlocked counters
++					// against the same cache lines the workers are reading (see
++					// docs/todo.md, R2). Sleep for the same case vanilla never
++					// triggers (flag2 is only true when Optimum's workers are on).
++					if (flag2)
++					{
++						Thread.Sleep(1);
++					}
+ 					continue;
+ 				}
+ 				ServerMain.Logger.Error("Attempting to force generate chunk columns from " + chunkX1 + "," + chunkZ1 + " to " + chunkX2 + "," + chunkZ2);
+ 				ServerMain.Logger.Error(chunkthread.additionalWorldGenThreadsCount + " additional worldgen threads active, number of 'undone' chunks is " + blockingRequestsRemaining);
+ 				foreach (ChunkColumnLoadRequest requestedChunkColumn3 in chunkthread.requestedChunkColumns)
+@@ -1340,12 +1793,16 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 				throw new Exception("Somehow worldgen has become stuck in an endless loop, please report this as a bug!  Additional data in the server-main log");
+ 			}
+ 		}
+ 	}
+ 
+-	private void PopulateChunk(ChunkColumnLoadRequest chunkRequest)
++	private bool PopulateChunk(ChunkColumnLoadRequest chunkRequest)
+ 	{
++		if (!TryAcquireWorldgenFootprint(chunkRequest, out OptimumWorldgenFootprintLease footprintLease))
++		{
++			return false;
++		}
+ 		chunkRequest.Unpack();
+ 		chunkRequest.generatingLock.AcquireWriteLock();
+ 		try
+ 		{
+ 			if (server.Config.SkipEveryChunkRow > 0 && chunkRequest.chunkX % (server.Config.SkipEveryChunkRow + server.Config.SkipEveryChunkRowWidth) < server.Config.SkipEveryChunkRowWidth)
+@@ -1375,29 +1832,94 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 			chunkRequest.MapChunk.DirtyForSaving = true;
+ 		}
+ 		finally
+ 		{
+ 			chunkRequest.generatingLock.ReleaseWriteLock();
++			footprintLease?.Dispose();
+ 		}
++		return true;
++	}
++
++	private bool TryAcquireWorldgenFootprint(ChunkColumnLoadRequest chunkRequest, out OptimumWorldgenFootprintLease footprintLease)
++	{
++		footprintLease = null;
++		if (chunkthread.additionalWorldGenThreadsCount <= 0 || optimumWorldgenFootprints == null)
++		{
++			return true;
++		}
++
++		int radius = 1;
++		int minX = Math.Max(0, chunkRequest.chunkX - radius);
++		int maxX = Math.Min(server.WorldMap.ChunkMapSizeX - 1, chunkRequest.chunkX + radius);
++		int minZ = Math.Max(0, chunkRequest.chunkZ - radius);
++		int maxZ = Math.Min(server.WorldMap.ChunkMapSizeZ - 1, chunkRequest.chunkZ + radius);
++		var keys = new List<OptimumWorldgenFootprintKey>((maxX - minX + 1) * (maxZ - minZ + 1));
++		for (int x = minX; x <= maxX; x++)
++		{
++			for (int z = minZ; z <= maxZ; z++)
++			{
++				keys.Add(new OptimumWorldgenFootprintKey(chunkRequest.dimension, x, z));
++			}
++		}
++
++		return optimumWorldgenFootprints.TryAcquire(keys, out footprintLease);
+ 	}
+ 
+ 	private void runGenerators(ChunkColumnLoadRequest chunkRequest, int forPass)
+ 	{
++		long startTicks = Stopwatch.GetTimestamp();
++		if ((forPass == (int)EnumWorldGenPass.Vegetation || forPass == (int)EnumWorldGenPass.NeighbourSunLightFlood) && optimumLightConflictLock != null)
++		{
++			using (optimumLightConflictLock.EnterScope())
++			{
++				RunWorldgenGeneratorsUnlocked(chunkRequest, forPass);
++			}
++			OptimumDiagnostics.RecordWorldgenPassTiming(forPass, Stopwatch.GetTimestamp() - startTicks);
++			LogWorldgenPassTimingPeriodic();
++			return;
++		}
++		RunWorldgenGeneratorsUnlocked(chunkRequest, forPass);
++		OptimumDiagnostics.RecordWorldgenPassTiming(forPass, Stopwatch.GetTimestamp() - startTicks);
++		LogWorldgenPassTimingPeriodic();
++	}
++
++	private void LogWorldgenPassTimingPeriodic()
++	{
++		long total = Interlocked.Read(ref OptimumDiagnostics._worldgenTotalColumns);
++		if (total > 0 && total % 100 == 0)
++		{
++			ServerMain.Logger.Notification(OptimumDiagnostics.GetWorldgenPassTimingSummary());
++		}
++	}
++
++	private void RunWorldgenGeneratorsUnlocked(ChunkColumnLoadRequest chunkRequest, int forPass)
++	{
++		if ((uint)forPass >= (uint)worldgenHandler.OnChunkColumnGen.Length)
++		{
++			throw new InvalidOperationException($"Optimum worldgen received pass {forPass} for column {chunkRequest.chunkX},{chunkRequest.chunkZ}; handler has {worldgenHandler.OnChunkColumnGen.Length} passes and request is at {chunkRequest.CurrentIncompletePass_AsInt}.");
++		}
+ 		List<ChunkColumnGenerationDelegate> list = worldgenHandler.OnChunkColumnGen[forPass];
+ 		if (list == null)
+ 		{
+ 			return;
+ 		}
+ 		for (int i = 0; i < list.Count; i++)
+ 		{
+ 			try
+ 			{
+-				list[i](chunkRequest);
++				RunWorldgenGenerator(list[i], chunkRequest, forPass);
  			}
  			catch (Exception ex)
  			{
- 				ServerMain.Logger.Worldgen("An error was thrown in pass {5} when generating chunk column X={0},Z={1} in world '{3}' with seed {4}\nException {2}\n\n", chunkRequest.chunkX, chunkRequest.chunkZ, ex, server.SaveGameData.WorldName, server.SaveGameData.Seed, chunkRequest.CurrentIncompletePass.ToString());
-+				if (OptimumWorldgenWorkersActive())
+-				ServerMain.Logger.Worldgen("An error was thrown in pass {5} when generating chunk column X={0},Z={1} in world '{3}' with seed {4}\nException {2}\n\n", chunkRequest.chunkX, chunkRequest.chunkZ, ex, server.SaveGameData.WorldName, server.SaveGameData.Seed, chunkRequest.CurrentIncompletePass.ToString());
++				string handlerName = list[i]?.Method == null
++					? "<unknown>"
++					: list[i].Method.DeclaringType?.FullName + "." + list[i].Method.Name;
++				ServerMain.Logger.Worldgen("An error was thrown in pass {5} by handler '{6}' when generating chunk column X={0},Z={1} in world '{3}' with seed {4}\nException {2}\n\n", chunkRequest.chunkX, chunkRequest.chunkZ, ex, server.SaveGameData.WorldName, server.SaveGameData.Seed, chunkRequest.CurrentIncompletePass.ToString(), handlerName);
++				if (optimumWorkerIndex > 0)
 +				{
 +					throw;
 +				}
@@ -349,7 +858,7 @@ index f644852..93a558d 100644
  					break;
  				}
  			}
-@@ -1507,41 +1629,92 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1507,43 +2029,95 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		ServerMain.Logger.VerboseDebug("Incomplete chunks stored and wiped.");
  	}
  
@@ -379,17 +888,14 @@ index f644852..93a558d 100644
  	{
  		Thread.Sleep(5);
 -		int num = Math.Min(3, MagicNum.ChunkColumnsToGeneratePerThreadTick / chunkthread.additionalWorldGenThreadsCount);
-+		int num = Math.Max(1, Math.Min(3, MagicNum.ChunkColumnsToGeneratePerThreadTick / chunkthread.additionalWorldGenThreadsCount));
++		int num = Math.Max(1, Math.Min(3, MagicNum.ChunkColumnsToGeneratePerThreadTick / Math.Max(1, chunkthread.additionalWorldGenThreadsCount)));
  		int num2 = 0;
 +		int evaluateGate = 0;
  		while (!server.stopped)
  		{
 -			if (chunkthread.requestedChunkColumns.Count > 0 && (!server.Suspended || server.RunPhase == EnumServerRunPhase.WorldReady))
-+			// After spawn chunks finish (RunGame), raise the cap from the
-+			// conservative spawn-phase value (2) to the full benchmark-proven
-+			// ceiling (3). The adaptive controller takes over from there.
-+			// CAS gate: only one worker thread performs the raise.
-+			if (Volatile.Read(ref optimumPostSpawnRaised) == 0 && server.RunPhase == EnumServerRunPhase.RunGame)
++			// Automatic mode may raise the cap after spawn. Exact mode skips this path.
++			if (!chunkthread.optimumExactWorldgenWorkerMode && Volatile.Read(ref optimumPostSpawnRaised) == 0 && server.RunPhase == EnumServerRunPhase.RunGame)
 +			{
 +				if (Interlocked.CompareExchange(ref optimumPostSpawnRaised, 1, 0) == 0)
 +				{
@@ -406,13 +912,14 @@ index f644852..93a558d 100644
 +			// Adaptive cap enforcement: if this worker's index exceeds the
 +			// current cap, yield until the controller raises it back.
 +			if (optimumWorkerIndex > optimumAdaptiveController.ActiveWorkerCap)
-+			{
+ 			{
 +				Thread.Sleep(10);
 +				continue;
 +			}
 +
 +			if (OptimumWorldgenWorkersActive() && chunkthread.requestedChunkColumns.Count > 0 && (!server.Suspended || server.RunPhase == EnumServerRunPhase.WorldReady))
- 			{
++			{
++				Interlocked.Increment(ref optimumWorldgenDispatchesInFlight);
  				try
  				{
  					for (int i = 0; i < num; i++)
@@ -426,9 +933,8 @@ index f644852..93a558d 100644
  						}
  					}
 +
-+					// Periodic evaluation: one worker triggers it per interval.
-+					// The CAS gate ensures exactly one evaluator per window.
-+					if (optimumAdaptiveController.ShouldEvaluate() &&
++					// Automatic mode lets one worker evaluate each interval.
++					if (!chunkthread.optimumExactWorldgenWorkerMode && optimumAdaptiveController.ShouldEvaluate() &&
 +					    Interlocked.CompareExchange(ref evaluateGate, 1, 0) == 0)
 +					{
 +						optimumAdaptiveController.Evaluate(chunkthread.requestedChunkColumns.Count);
@@ -443,6 +949,36 @@ index f644852..93a558d 100644
 +					}
  					ServerMain.Logger.Error(e);
  				}
++				finally
++				{
++					Interlocked.Decrement(ref optimumWorldgenDispatchesInFlight);
++				}
  			}
  			PauseWorldgenThreadIfRequired(onChunkthread: false);
  			Thread.Sleep(1);
+ 		}
+ 		BlockAccessorWorldGen.ThreadDispose();
+@@ -1554,13 +2128,23 @@ internal class ServerSystemSupplyChunks : ServerSystem
+ 		BlockAccessorWorldGen.ThreadDispose();
+ 	}
+ 
+ 	public override void Dispose()
+ 	{
++		LogWorldgenPassTimingSummary();
+ 		BlockAccessorWorldGen.ThreadDispose();
+ 	}
+ 
++	private void LogWorldgenPassTimingSummary()
++	{
++		long totalCols = Interlocked.Read(ref OptimumDiagnostics._worldgenTotalColumns);
++		if (totalCols > 0)
++		{
++			ServerMain.Logger.Notification(OptimumDiagnostics.GetWorldgenPassTimingSummary());
++		}
++	}
++
+ 	public bool PauseAllWorldgenThreads(int timeoutms)
+ 	{
+ 		if (Interlocked.CompareExchange(ref pauseAllWorldgenThreads, 1, 0) != 0)
+ 		{
+ 			return false;

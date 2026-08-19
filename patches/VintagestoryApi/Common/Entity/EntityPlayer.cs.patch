@@ -1,7 +1,11 @@
 diff --git a/VintagestoryApi/Common/Entity/EntityPlayer.cs b/VintagestoryApi/Common/Entity/EntityPlayer.cs
+index 7279e48..7551c9f 100644
 --- a/VintagestoryApi/Common/Entity/EntityPlayer.cs
 +++ b/VintagestoryApi/Common/Entity/EntityPlayer.cs
-@@ -423,6 +423,6 @@ namespace Vintagestory.API.Common
+@@ -419,20 +419,20 @@ namespace Vintagestory.API.Common
+         {
+             tesselating = true;
+ 
              base.OnTesselation(ref entityShape, shapePathForLogging);
  
 -            if (Api?.Side == EnumAppSide.Client)
@@ -9,7 +13,9 @@ diff --git a/VintagestoryApi/Common/Entity/EntityPlayer.cs b/VintagestoryApi/Com
              {
                  AnimManager.HeadController = new PlayerHeadController(AnimManager, this, entityShape);
              }
-@@ -431,6 +431,6 @@ namespace Vintagestory.API.Common
+ 
+             if (IsSelf)
+             {
                  OtherAnimManager.LoadAnimator(World.Api, this, entityShape, OtherAnimManager.Animator?.Animations, true, null, "head");
  
 -                if (Api?.Side == EnumAppSide.Client)
@@ -17,3 +23,5 @@ diff --git a/VintagestoryApi/Common/Entity/EntityPlayer.cs b/VintagestoryApi/Com
                  {
                      OtherAnimManager.HeadController = new PlayerHeadController(OtherAnimManager, this, entityShape);
                  }
+             }
+         }

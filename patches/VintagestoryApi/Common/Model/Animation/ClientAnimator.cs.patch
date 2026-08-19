@@ -1,0 +1,50 @@
+diff --git a/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs b/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
+index 9636237..6cda901 100644
+--- a/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
++++ b/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.Collections.Generic;
++using System.Diagnostics;
+ using System.Linq;
+ using System.Text;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.Config;
+@@ -321,11 +322,19 @@ namespace Vintagestory.API.Common
+             base.OnFrame(activeAnimationsByAnimCode, dt);
+         }
+ 
+         protected override void calculateMatrices(float dt)
+         {
+-            if (!CalculateMatrices) return;
++            bool measureAnimation = OptimumDiagnostics.StutterWatchEnabled;
++            if (!CalculateMatrices)
++            {
++                if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationMatrixSkip();
++                return;
++            }
++
++            if (measureAnimation) OptimumDiagnostics.RecordEntityAnimationMatrixBuild();
++            long startedAt = measureAnimation ? Stopwatch.GetTimestamp() : 0;
+ 
+             jointsDone.Clear();
+ 
+             int animVersion = 0;
+ 
+@@ -385,10 +394,15 @@ namespace Vintagestory.API.Common
+                 for (int i = 0; i < 16; i++)
+                 {
+                     animMatrix[i] = cachedMatrix[i];
+                 }
+             }
++
++            if (measureAnimation)
++            {
++                OptimumDiagnostics.RecordEntityAnimationMatrixTicks(Stopwatch.GetTimestamp() - startedAt);
++            }
+         }
+ 
+ 
+ 
+         // Careful when changing around stuff in here, this is a recursively called method

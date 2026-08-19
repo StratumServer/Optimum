@@ -1,0 +1,100 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/5.GenDeposits/GenDeposits.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/5.GenDeposits/GenDeposits.cs
+index b6ab588..8b1be56 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/5.GenDeposits/GenDeposits.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/5.GenDeposits/GenDeposits.cs
+@@ -1,7 +1,8 @@
+ using System.Collections.Generic;
+ using System.Linq;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ using Vintagestory.API.Util;
+@@ -23,10 +24,11 @@ namespace Vintagestory.ServerMods
+         int regionSize;
+ 
+         float chanceMultiplier;
+ 
+         IBlockAccessor blockAccessor;
++        ThreadLocal<IBlockAccessor> blockAccessors;
+ 
+         public LCGRandom depositRand;
+ 
+         BlockPos tmpPos = new BlockPos(API.Config.Dimensions.NormalWorld);
+ 
+@@ -65,12 +67,16 @@ namespace Vintagestory.ServerMods
+         }
+ 
+         private void OnWorldGenBlockAccessor(IChunkProviderThread chunkProvider)
+         {
+             blockAccessor = chunkProvider.GetBlockAccessor(true);
++            blockAccessors ??= new ThreadLocal<IBlockAccessor>();
++            blockAccessors.Value = blockAccessor;
+         }
+ 
++        private IBlockAccessor CurrentBlockAccessor => blockAccessors?.Value ?? blockAccessor;
++
+         public void reloadWorldGen()
+         {
+             initAssets(api, true);
+             initWorldGen();
+         }
+@@ -201,17 +207,17 @@ namespace Vintagestory.ServerMods
+         }
+ 
+ 
+         protected override void GenChunkColumn(IChunkColumnGenerateRequest request)
+         {
+-            if (blockAccessor is IWorldGenBlockAccessor wgba) wgba.BeginColumn();
++            if (CurrentBlockAccessor is IWorldGenBlockAccessor wgba) wgba.BeginColumn();
+             base.GenChunkColumn(request);
+         }
+ 
+         public override void GeneratePartial(IServerChunk[] chunks, int chunkX, int chunkZ, int chunkdX, int chunkdZ)
+         {
+-            LCGRandom chunkRand = this.chunkRand;
++            LCGRandom chunkRand = chunkRandThreadLocal?.Value ?? this.chunkRand;
+             int fromChunkx = chunkX + chunkdX;
+             int fromChunkz = chunkZ + chunkdZ;
+ 
+             int fromBaseX = fromChunkx * chunksize;
+             int fromBaseZ = fromChunkz * chunksize;
+@@ -244,11 +250,11 @@ namespace Vintagestory.ServerMods
+             foreach (var val in subDepositsToPlace)
+             {
+                 depositRand.SetWorldSeed(chunkRand.NextInt(10000000));
+                 depositRand.InitPositionSeed(fromChunkx, fromChunkz);
+ 
+-                val.Value.GeneratorInst.GenDeposit(blockAccessor, chunks, chunkX, chunkZ, val.Key, ref subDepositsToPlace);
++                val.Value.GeneratorInst.GenDeposit(CurrentBlockAccessor, chunks, chunkX, chunkZ, val.Key, ref subDepositsToPlace);
+             }
+         }
+ 
+ 
+ 
+@@ -264,11 +270,11 @@ namespace Vintagestory.ServerMods
+ 
+                 if (originMapchunk == null) return; // Definition: Climate dependent deposits are limited to size 32x32x32
+ 
+                 depoCenterPos.Y = originMapchunk.RainHeightMap[lz * chunksize + lx];
+ 
+-                IntDataMap2D climateMap = blockAccessor.GetMapRegion(depoCenterPos.X / regionSize, depoCenterPos.Z / regionSize)?.ClimateMap;
++                IntDataMap2D climateMap = CurrentBlockAccessor.GetMapRegion(depoCenterPos.X / regionSize, depoCenterPos.Z / regionSize)?.ClimateMap;
+                 if (climateMap == null) return;
+ 
+                 float normXInRegionClimate = (float)((double)depoCenterPos.X / regionSize % 1.0);
+                 float normZInRegionClimate = (float)((double)depoCenterPos.Z / regionSize % 1.0);
+ 
+@@ -291,10 +297,10 @@ namespace Vintagestory.ServerMods
+                 {
+                     return;
+                 }
+             }
+ 
+-            variant.GeneratorInst?.GenDeposit(blockAccessor, chunks, chunkX, chunkZ, depoCenterPos, ref subDepositsToPlace);
++            variant.GeneratorInst?.GenDeposit(CurrentBlockAccessor, chunks, chunkX, chunkZ, depoCenterPos, ref subDepositsToPlace);
+         }
+ 
+     }
+ }

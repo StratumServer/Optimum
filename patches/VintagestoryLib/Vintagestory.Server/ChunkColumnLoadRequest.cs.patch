@@ -1,0 +1,41 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs b/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs
+index 04b25be..06458ed 100644
+--- a/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs
++++ b/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs
+@@ -1,8 +1,9 @@
+ using System.Collections.Generic;
+ using System.Threading;
+ using Vintagestory.API.Datastructures;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Server;
+ using Vintagestory.Common;
+ 
+ namespace Vintagestory.Server;
+ 
+@@ -34,14 +35,26 @@ public class ChunkColumnLoadRequest : ILongIndex, IChunkColumnGenerateRequest
+ 
+ 	internal bool prettified;
+ 
+ 	internal bool blockingRequest;
+ 
++	private readonly OptimumDispatchClaim dispatchClaim = new OptimumDispatchClaim();
++
+ 	private static long counter;
+ 
+ 	internal bool Disposed => (disposeOrRequeueFlags & 1) == 1;
+ 
++	internal bool TryClaimDispatch()
++	{
++		return dispatchClaim.TryClaim();
++	}
++
++	internal void ReleaseDispatch()
++	{
++		dispatchClaim.Release();
++	}
++
+ 	public long Index => mapIndex2d;
+ 
+ 	public EnumWorldGenPass GenerateUntilPass => (EnumWorldGenPass)untilPass;
+ 
+ 	public EnumWorldGenPass CurrentIncompletePass
