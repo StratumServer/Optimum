@@ -59,3 +59,11 @@ research/benchmark-artifacts/
 .playwright-mcp/
 graphify-out/
 __pycache__/
+
+# Private development artifacts
+docs/
+Optimum.Tests/
+Optimum.Launcher.Tests/
+build-linux.sh
+build-macos.sh
+build-windows.ps1
