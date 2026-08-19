@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyTitle>Optimum</AssemblyTitle>
     <Description>Runtime patcher that applies Optimum optimizations on launch with caching.</Description>
-    <ApplicationIcon>..\docs\optimum.ico</ApplicationIcon>
+    <ApplicationIcon>optimum.ico</ApplicationIcon>
     <Version>$(OptimumVersion)</Version>
   </PropertyGroup>
   <ItemGroup>
