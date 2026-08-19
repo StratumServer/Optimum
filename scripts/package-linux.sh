@@ -8,7 +8,7 @@
 #   ./scripts/package-linux.sh
 #   ./scripts/package-linux.sh --format zip --output ~/releases
 #   ./scripts/package-linux.sh --format appimage
-#   ./scripts/package-linux.sh --client-archive /path/to/vs_client_linux-x64_1.22.5.tar.gz
+#   ./scripts/package-linux.sh --client-archive /path/to/vs_client_linux-x64_1.22.7.tar.gz
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ RESET='\033[0m'
 # Defaults
 FORMAT="targz"
 OUTPUT_DIR="$REPO_ROOT"
-VERSION="$(python3 -c "import json;print(json.load(open('$(dirname "$0")/../forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.5)"
+VERSION="$(python3 -c "import json;print(json.load(open('$(dirname "$0")/../forks.json'))['vintageStoryVersion'])" 2>/dev/null || echo 1.22.7)"
 CLIENT_ARCHIVE=""
 
 while [[ $# -gt 0 ]]; do

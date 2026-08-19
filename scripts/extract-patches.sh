@@ -32,7 +32,7 @@ if [[ -d "$patches_dir" ]]; then
     mkdir -p "$(dirname "$preserved_dir/patches/$rel")"
     cp -f "$f" "$preserved_dir/patches/$rel"
   done < <(find "$patches_dir" -type f -not -name '*.patch' -print0)
-  # Runtime patches are generated against exact user-owned 1.22.5 assemblies,
+  # Runtime patches are generated against exact user-owned assemblies,
   # whose decompiled trees live only under ignored .build/. They cannot be
   # regenerated from .baseline, so preserve them verbatim.
   if [[ -d "$patches_dir/runtime" ]]; then

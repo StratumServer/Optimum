@@ -44,7 +44,7 @@ public sealed class OptimumMapPageRenderer : IDisposable
     private int _locMapPages;
     private int _locZValue;
 
-    public bool Ready => _shader != null && _vaoId != 0 && _texArray.TextureId != 0;
+    public bool Ready => _shader != null && !_shader.Disposed && _vaoId != 0 && _texArray.TextureId != 0;
 
     public OptimumMapPageRenderer(ICoreClientAPI capi, OptimumMapTextureArray texArray)
     {
@@ -54,6 +54,7 @@ public sealed class OptimumMapPageRenderer : IDisposable
 
         CreateShader();
         CreateQuadVao();
+        _capi.Event.ReloadShader += OnReloadShader;
     }
 
     /// <summary>
@@ -176,6 +177,8 @@ public sealed class OptimumMapPageRenderer : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        _capi.Event.ReloadShader -= OnReloadShader;
+
         if (_vaoId != 0)
         {
             GL.DeleteVertexArray(_vaoId);
@@ -193,6 +196,14 @@ public sealed class OptimumMapPageRenderer : IDisposable
         }
         _shader?.Dispose();
         _shader = null;
+    }
+
+    private bool OnReloadShader()
+    {
+        if (_disposed) return true;
+        _shader?.Dispose();
+        CreateShader();
+        return true;
     }
 
     private void CreateShader()

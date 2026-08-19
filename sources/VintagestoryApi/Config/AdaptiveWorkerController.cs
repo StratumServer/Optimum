@@ -31,7 +31,7 @@ public sealed class AdaptiveWorkerController
     private const double EwmaAlpha = 0.3;
     private const int QueuePressureFloor = 10;
 
-    private readonly int _maxWorkers;
+    private int _maxWorkers;
     private readonly int _evalInterval;
 
     private int _activeWorkerCap;
@@ -75,9 +75,9 @@ public sealed class AdaptiveWorkerController
     /// </param>
     public AdaptiveWorkerController(int maxWorkers, int evalInterval = 50)
     {
-        _maxWorkers = Math.Max(1, maxWorkers);
+        _maxWorkers = Math.Max(0, maxWorkers);
         _evalInterval = Math.Max(10, evalInterval);
-        _activeWorkerCap = _maxWorkers; // Cold-start: use the static policy cap
+        _activeWorkerCap = _maxWorkers;
         _contentionEwma = 0.0;
         _warmedUp = false;
     }
@@ -171,7 +171,8 @@ public sealed class AdaptiveWorkerController
     /// </summary>
     internal void ForceCapForTesting(int cap)
     {
-        Volatile.Write(ref _activeWorkerCap, Math.Clamp(cap, 1, _maxWorkers));
+        int next = _maxWorkers == 0 ? 0 : Math.Clamp(cap, 1, _maxWorkers);
+        Volatile.Write(ref _activeWorkerCap, next);
     }
 
     /// <summary>
@@ -179,8 +180,12 @@ public sealed class AdaptiveWorkerController
     /// </summary>
     internal void Reset(int? newMax = null)
     {
-        int max = newMax ?? _maxWorkers;
-        Volatile.Write(ref _activeWorkerCap, max);
+        if (newMax.HasValue)
+        {
+            _maxWorkers = Math.Max(0, newMax.Value);
+        }
+
+        Volatile.Write(ref _activeWorkerCap, _maxWorkers);
         _contentionEwma = 0.0;
         _warmedUp = false;
         Interlocked.Exchange(ref _lockWaitTicks, 0);

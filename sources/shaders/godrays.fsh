@@ -2,6 +2,7 @@
 
 uniform sampler2D inputTexture;
 uniform sampler2D glowParts;
+uniform int maxGodRaySamples;
 
 
 in vec2 texCoord;
@@ -33,12 +34,8 @@ vec4 applyGodRays(in vec2 uv, in vec2 nSunPos) {
 	// Sample weight. Decays as we radiate outwards.
 	float weight = intensity / 23.0 / 1.5;
 	
-	// Optimum: cap max samples by quality level. GODRAYS=1 halves the work.
-#if GODRAYS == 1
-	int samples = int(90 * min(1, intensity * 1.2));
-#else
-	int samples = int(180 * min(1, intensity * 1.2));
-#endif
+	int vanillaSamples = int(180 * min(1, intensity * 1.2));
+	int samples = min(maxGodRaySamples, vanillaSamples);
 	
 	// Short deltas near the sun
 	vec2 sdTuv = clampDeltas((nSunPos - uv) * intensity / 200 * direction);

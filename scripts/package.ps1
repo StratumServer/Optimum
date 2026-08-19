@@ -33,7 +33,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Version) {
     $forksFile = Join-Path $repoRoot 'forks.json'
     if (Test-Path $forksFile) { $Version = (Get-Content $forksFile -Raw | ConvertFrom-Json).vintageStoryVersion }
-    else { $Version = '1.22.5' }
+    else { $Version = '1.22.7' }
 }
 . "$PSScriptRoot/_hostcaps.ps1"
 . "$PSScriptRoot/_exec.ps1"
@@ -92,7 +92,8 @@ try {
     }
 
     Write-Host 'Preparing runtime donors...'
-    & (Join-Path $PSScriptRoot 'prepare-runtime-donors.ps1') -VanillaDir $vanillaDir -Configuration Release
+    $runtimeDonorDir = Join-Path $repoRoot '.vanilla/win-x64/runtime-donors'
+    & (Join-Path $PSScriptRoot 'prepare-runtime-donors.ps1') -VanillaDir $vanillaDir -RuntimeDonorDir $runtimeDonorDir -Configuration Release
     if ($LASTEXITCODE -ne 0) { throw 'Runtime donor preparation failed.' }
     $runtimeDonorRoot = Join-Path $repoRoot '.build/runtime-donors'
     $essentialsDonor = Get-ChildItem -Path (Join-Path $runtimeDonorRoot 'VSEssentials') -Recurse -Filter 'VSEssentials.dll' -File |

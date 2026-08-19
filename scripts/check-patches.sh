@@ -159,7 +159,7 @@ check_cecil_cross_reference() {
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.(Client(\.NoObf)?|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
+  done < <(grep -oE '"Vintagestory\.(Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
   for rel in "${!cecil_owned[@]}"; do
     if [[ -z "${expected["$rel"]:-}" ]]; then
@@ -279,12 +279,20 @@ done < <(find "$patches_dir" -type f -name '*.patch' \
 echo "Patches: $applied applied, $cecil cecil, $pending pending, $unavailable unavailable, $conflict conflict, $total total"
 
 # Runtime patches intentionally target source decompiled locally from the
-# user's exact 1.22.5 mod assemblies, not the repository donor trees. Validate
+# user.s exact mod assemblies, not the repository donor trees. Validate
 # that the full exact-donor pipeline can apply and compile them.
 runtime_total="$(find "$patches_dir/runtime" -type f -name '*.patch' 2>/dev/null | wc -l)"
 if [[ "$runtime_total" -gt 0 ]]; then
   runtime_log="$(mktemp)"
+  # RUNTIME_DONOR_DIR is pinned to the repo's own protected snapshot rather
+  # than left to prepare-runtime-donors.sh's default (a "runtime-donors"
+  # sibling of VANILLA_DIR). A developer who exports VANILLA_DIR to point at
+  # an external/live Vintage Story install would otherwise silently validate
+  # against a nonexistent or unrelated directory instead of the protected
+  # snapshot - the same isolation bug fixed for the Windows packaging path
+  # in scripts/package.ps1 (see research/runtime-donor-mismatch-investigation-2026-08-14.md).
   if VANILLA_DIR="${VANILLA_DIR:-$repo_root/.vanilla/win-x64/vintagestory}" \
+      RUNTIME_DONOR_DIR="${RUNTIME_DONOR_DIR:-$repo_root/.vanilla/win-x64/runtime-donors}" \
       CONFIGURATION="${CONFIGURATION:-Release}" \
       bash "$repo_root/scripts/prepare-runtime-donors.sh" >"$runtime_log" 2>&1; then
     rm -f "$runtime_log"

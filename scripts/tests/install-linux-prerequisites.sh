@@ -9,6 +9,7 @@ trap 'rm -rf "$TEST_ROOT"' EXIT
 
 export HOME="$TEST_ROOT/home"
 export PATH="$TEST_ROOT/bin:/usr/bin:/bin"
+export OPTIMUM_DOTNET_CANDIDATES="$TEST_ROOT/bin/dotnet:$HOME/.dotnet/dotnet"
 mkdir -p "$HOME/.dotnet/tools" "$TEST_ROOT/bin"
 
 cat > "$TEST_ROOT/bin/dotnet" <<'EOF'

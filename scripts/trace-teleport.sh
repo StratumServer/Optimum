@@ -19,7 +19,7 @@
 #   use explicit --providers instead.
 #
 # Also run gcdump before and after one teleport per client for mesh-buffer churn
-# analysis. The script offers to take one after the capture.
+# analysis (feeds queue rank 11). The script offers to take one after the capture.
 #
 # Reading the output:
 #   Load the .speedscope.json at https://www.speedscope.app/.
@@ -29,11 +29,11 @@
 #     - TesselatedChunk upload path through ChunkRenderer
 #     - GL buffer uploads in ClientPlatformWindows
 #     - GC pause events
-#     - SystemRenderEntities.OnBeforeRender
-#     - GetEntitiesAround
+#     - SystemRenderEntities.OnBeforeRender (C1 gate)
+#     - GetEntitiesAround (B4 gate)
 #
 # Deliverable: docs/benchmarks/teleport-trace-<date>.md with a method/inclusive%
-# delta table and a scheduled/parked verdict for each candidate optimization.
+# delta table and one verdict per gated queue item: scheduled or parked.
 
 set -euo pipefail
 

@@ -17,6 +17,7 @@ public class OptimumStatusModSystem : ModSystem
     public override void StartClientSide(ICoreClientAPI api)
     {
         this.api = api;
+        api.Event.LevelFinalize += LogGameLaunchTaskSummary;
 
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
@@ -121,6 +122,27 @@ public class OptimumStatusModSystem : ModSystem
                     })
                 .EndSubCommand()
             .EndSubCommand()
+            .BeginSubCommand("worldgen")
+                .WithDescription("Worldgen per-pass timing diagnostics")
+                .BeginSubCommand("passstats")
+                    .WithDescription("Show per-pass worldgen timing")
+                    .HandleWith(_ =>
+                    {
+                        string summary = OptimumDiagnostics.GetWorldgenPassTimingSummary();
+                        api.Logger.Notification("[Optimum] worldgen passstats:\n" + summary);
+                        return TextCommandResult.Success(summary);
+                    })
+                .EndSubCommand()
+                .BeginSubCommand("passreset")
+                    .WithDescription("Reset per-pass worldgen timing counters")
+                    .HandleWith(_ =>
+                    {
+                        OptimumDiagnostics.ResetWorldgenPassTiming();
+                        api.Logger.Notification("[Optimum] worldgen pass diagnostics reset");
+                        return TextCommandResult.Success("Worldgen pass diagnostics reset.");
+                    })
+                .EndSubCommand()
+            .EndSubCommand()
             .BeginSubCommand("greedy")
                 .WithDescription("Greedy mesh diagnostics")
                 .BeginSubCommand("stats")
@@ -142,6 +164,11 @@ public class OptimumStatusModSystem : ModSystem
                     })
                 .EndSubCommand()
             .EndSubCommand();
+    }
+
+    private void LogGameLaunchTaskSummary()
+    {
+        api.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetGameLaunchTaskSummary());
     }
 
     private TextCommandResult DumpChunkBlocks()
@@ -300,7 +327,9 @@ public class OptimumStatusModSystem : ModSystem
         {
             sb.AppendLine($"  {name}: {value}");
         }
+        sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}->{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}->{TyronThreadPool.SetMaxThreadsIoAfter}");
         sb.AppendLine(OptimumDiagnostics.GetCountersSummary());
+        sb.AppendLine(OptimumDiagnostics.GetTessellationSummary());
         sb.AppendLine(OptimumDiagnostics.GetChiselLodSummary());
         sb.AppendLine(OptimumDiagnostics.GetAnimBlockSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
@@ -319,6 +348,12 @@ public class OptimumStatusModSystem : ModSystem
                 enabled++;
         }
         api.Logger.Notification("[Optimum] Features: {0}/{1} enabled", enabled, total);
+        api.Logger.Notification("[Optimum] threadpool: setMaxThreads={0} worker={1}->{2} io={3}->{4}",
+            TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant(),
+            TyronThreadPool.SetMaxThreadsWorkerBefore,
+            TyronThreadPool.SetMaxThreadsWorkerAfter,
+            TyronThreadPool.SetMaxThreadsIoBefore,
+            TyronThreadPool.SetMaxThreadsIoAfter);
 
         if (OptimumConfig.RepulsionGateEnabled)
             api.Logger.Debug("[Optimum] Repulsion gate: ON (distance={0})", OptimumConfig.RepulsionDistance);
@@ -340,6 +375,9 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Entity light batch: ON");
         if (OptimumConfig.EntityShaderStateCacheEnabled)
             api.Logger.Debug("[Optimum] Entity shader state cache: ON");
+        api.Logger.Debug("[Optimum] God-rays sample limit: {0} ({1})",
+            OptimumConfig.GodRaysSampleLimit,
+            OptimumConfig.GodRaysSampleCapEnabled ? "cap" : "vanilla");
         if (OptimumConfig.MapPageCacheEnabled)
             api.Logger.Debug("[Optimum] Map page cache (FastMap): ON (maxLayers={0}, bc7={1})",
                 OptimumConfig.MapPageCacheMaxLayers, OptimumConfig.MapPageCacheBc7);
@@ -348,7 +386,7 @@ public class OptimumStatusModSystem : ModSystem
         if (OptimumConfig.RandomTickSliceEnabled)
             api.Logger.Debug("[Optimum] Random tick slice: ON (server-side)");
         if (OptimumConfig.WorldgenWorkStealingEnabled)
-            api.Logger.Debug("[Optimum] Worldgen work stealing: ON (server-side)");
+            api.Logger.Debug("[Optimum] Worldgen work stealing: SUSPENDED (serial policy pending R1)");
         if (OptimumConfig.ChunkReadPoolEnabled)
             api.Logger.Debug("[Optimum] Chunk read pool: ON (server-side)");
     }

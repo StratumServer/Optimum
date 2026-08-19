@@ -11,6 +11,10 @@
          (CS8600-series), so it silences CS8632 without new noise. -->
     <Nullable>annotations</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- The .NET 10 restore graph shares project assets during parallel walks;
+         serial restore keeps fresh Linux, WSL, and Windows checkouts deterministic. -->
+    <RestoreDisableParallel>true</RestoreDisableParallel>
+    <BuildInParallel>false</BuildInParallel>
     <!-- Enable long path support on Windows. ILSpy's source generators emit
          filenames exceeding 260 chars (regex generated sources with hashes).
          Builds under deep %TEMP% paths (usernames with spaces) fail without this. -->
