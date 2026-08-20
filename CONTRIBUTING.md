@@ -49,7 +49,10 @@ To add a new optimization:
 
 ## Pull Request Process
 
-1. Fork the repo and create a branch from `main`.
+`dev` is the working branch. `main` is the release branch. Pull requests target
+`dev`; maintainers promote tested changes to `main` for releases.
+
+1. Fork the repo and create a branch from `dev`.
 2. Make your changes. Keep commits focused.
 3. Run `make test` and verify all tests pass.
 4. Run `make run` and verify the client launches without shader errors or crashes.
@@ -83,4 +86,4 @@ chore(patches): regenerate after baseline update
 
 ## License
 
-By submitting a PR, you agree that your contribution is licensed under the same terms as the project (GPL-3.0 + Commons Clause).
+By submitting a PR, you agree that your contribution uses the license that applies to the files you change. See `LICENSE-SCOPE.md` before adding code.

@@ -1,0 +1,20 @@
+# Optimum notices
+
+## Anego Studios
+
+Optimum builds against Vintage Story and uses source repositories published by
+Anego Studios as a patch and source baseline. The Anego-derived material is
+not covered by `LICENSE-MIT`. It remains subject to
+`LICENSE-OPTIMUM-LEGACY-GPL-COMMONS` and the applicable upstream license and
+notice files.
+
+The Anego source repositories used by `forks.json` include `vsapi`, `Cairo`,
+`vsessentialsmod`, `vssurvivalmod`, and `vscreativemod`. Their upstream license
+files identify the software as proprietary. This notice records provenance; it
+does not grant permission to redistribute Anego-owned material.
+
+## Third-party material
+
+Third-party files keep their own notices and license terms. In particular,
+`sources/shaders/cloudvolumetric.fsh` contains its own MIT notice for the
+Inigo Quilez material it uses.
