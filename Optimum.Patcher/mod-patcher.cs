@@ -115,7 +115,7 @@ public static class ModPatcher
                     "pageTextureArray",
                     "pageRenderer",
                     "loadQueue",
-                    "coveredPages",
+                    "renderedPages",
                     "UploadChunkToPageArray",
                     "RenderWithPageArray",
                 ],
