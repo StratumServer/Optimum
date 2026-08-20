@@ -18,7 +18,7 @@ make test    # verify all 178 tests pass
 make run     # launch and test in-game
 ```
 
-See the [Building from Source](https://github.com/Zaldaryon/Optimum/wiki/Building-from-Source) wiki page for prerequisites and details.
+See the [Building from Source](https://github.com/StratumServer/Optimum/wiki/Building-from-Source) wiki page for prerequisites and details.
 
 ## Architecture
 

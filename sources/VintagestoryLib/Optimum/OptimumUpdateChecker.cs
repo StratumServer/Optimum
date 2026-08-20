@@ -12,7 +12,7 @@ namespace Optimum;
 public static class OptimumUpdateChecker
 {
     private static readonly string ReleasesUrl =
-        "https://api.github.com/repos/Zaldaryon/Optimum/releases/latest";
+        "https://api.github.com/repos/StratumServer/Optimum/releases/latest";
 
     /// <summary>Null until the check completes. Empty string means up-to-date.</summary>
     public static string LatestVersion { get; private set; }

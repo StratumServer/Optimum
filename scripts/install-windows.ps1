@@ -1947,7 +1947,7 @@ Optimum is licensed under the GNU General Public License v3.0 with the Commons C
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
 
 5. SOURCE CODE TRANSPARENCY
-The complete source code, patches, and build scripts are publicly available for inspection at: https://github.com/Zaldaryon/Optimum
+The complete source code, patches, and build scripts are publicly available for inspection at: https://github.com/StratumServer/Optimum
 
 6. ACCEPTANCE
 By checking the box below and proceeding, you acknowledge that you have read, understood, and agree to the terms above.
