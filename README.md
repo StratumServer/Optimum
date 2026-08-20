@@ -3,7 +3,7 @@
   <h1>Optimum</h1>
 </div>
 
-[![License](https://img.shields.io/badge/license-GPL--3.0%20%2B%20Commons%20Clause-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-composite-blue)](LICENSE)
 [![VS Version](https://img.shields.io/badge/Vintage%20Story-1.22.7-green)](https://www.vintagestory.at)
 [![Stars](https://img.shields.io/github/stars/StratumServer/Optimum?logo=github&style=flat)](https://github.com/StratumServer/Optimum/stargazers)
 
@@ -213,8 +213,6 @@ Optimum drew on published techniques from these projects. No source code from an
 
 ## License
 
-GPL-3.0 with the Commons Clause. The source is open: read it, modify it, share it. Copyleft applies, so any work that includes Optimum source carries the same license. The Commons Clause adds one rule on top: you may not sell Optimum or a product whose value derives from it.
+Optimum is a composite work. Original Optimum tools and project files in [LICENSE-SCOPE.md](LICENSE-SCOPE.md) use the [MIT License](LICENSE-MIT). Patch files, source overlays, and other paths outside that scope retain the historical terms and applicable upstream notices.
 
-**Vendor Exception.** The Licensor grants [Anego Studios](https://anegostudios.com) a perpetual, irrevocable, royalty-free license to use, modify, and incorporate Optimum patches into their products. The Commons Clause restriction does not apply to Anego Studios. This exception follows the GPL-3.0 Section 7 additional permissions mechanism.
-
-See [LICENSE](LICENSE) for the full terms.
+Vintage Story and the Anego-derived material remain subject to their upstream terms. See [LICENSE](LICENSE), [NOTICE](NOTICE), and the preserved historical license in [LICENSE-OPTIMUM-LEGACY-GPL-COMMONS](LICENSE-OPTIMUM-LEGACY-GPL-COMMONS).
