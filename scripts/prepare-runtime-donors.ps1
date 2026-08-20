@@ -185,11 +185,16 @@ function Decompile-Mod {
     $text = [regex]::Replace($text,
         '<LangVersion>\d+\.\d+</LangVersion>',
         '<LangVersion>preview</LangVersion>')
-    $text = [regex]::Replace(
+    $text = ([regex]'</PropertyGroup>').Replace(
         $text,
-        '</PropertyGroup>',
-        "  <Nullable>disable</Nullable>`r`n    <NoWarn>`$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>`r`n  </PropertyGroup>`r`n  <ItemGroup>`r`n    <FrameworkReference Include=`"Microsoft.NETCore.App`" />`r`n  </ItemGroup>",
+        "  <Nullable>disable</Nullable>`r`n    <NoWarn>`$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>`r`n  </PropertyGroup>",
         1)
+    if ($text -notmatch '<FrameworkReference\s+Include="Microsoft\.NETCore\.App"\s*/>') {
+        $text = ([regex]'</PropertyGroup>').Replace(
+            $text,
+            "</PropertyGroup>`r`n  <ItemGroup>`r`n    <FrameworkReference Include=`"Microsoft.NETCore.App`" />`r`n  </ItemGroup>",
+            1)
+    }
     [IO.File]::WriteAllText($projectFile, $text)
     return $projectFile
 }
@@ -205,7 +210,7 @@ function Add-Reference {
       <Private>false</Private>
     </Reference>
 "@
-    $text = [regex]::Replace($text, '<ItemGroup>', $reference, 1)
+    $text = ([regex]'<ItemGroup>').Replace($text, $reference, 1)
     [IO.File]::WriteAllText($ProjectFile, $text)
 }
 
@@ -220,7 +225,7 @@ function Set-ReferenceHintPath {
     </Reference>
 "@
     $pattern = '<Reference Include="' + [regex]::Escape($Include) + '">[\s\S]*?</Reference>|<Reference Include="' + [regex]::Escape($Include) + '"\s*/>'
-    $text = [regex]::Replace($text, $pattern, $reference, 1)
+    $text = ([regex]$pattern).Replace($text, $reference, 1)
     [IO.File]::WriteAllText($ProjectFile, $text)
 }
 

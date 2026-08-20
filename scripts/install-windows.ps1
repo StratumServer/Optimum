@@ -817,6 +817,17 @@ function Invoke-OptimumBuild {
             (Join-Path $srcRoot 'bin'),
             (Join-Path $srcRoot 'dist'),
             (Join-Path $srcRoot 'build'),
+            # Generated/local-tooling caches, gitignored (or, for .codegraph,
+            # simply not source) and unused by the build - .build/ alone was
+            # measured at 585MB of stale runtime-donor build output, the single
+            # biggest contributor to this step silently copying ~800MB+ and
+            # looking hung with no progress output.
+            (Join-Path $srcRoot '.build'),
+            (Join-Path $srcRoot 'graphify-out'),
+            (Join-Path $srcRoot '.codegraph'),
+            (Join-Path $srcRoot '.worldgen-sweep'),
+            (Join-Path $srcRoot '.worldgen-sweep-separate'),
+            (Join-Path $srcRoot '.backup-optimum-changes'),
             (Join-Path $srcRoot 'ref'),
             (Join-Path $srcRoot 'public'),
             (Join-Path $srcRoot 'mods'),
@@ -826,14 +837,28 @@ function Invoke-OptimumBuild {
             (Join-Path $srcRoot '.tools'),
             (Join-Path $srcRoot '.vs'),
             (Join-Path $srcRoot '.idea'),
+            # Bare names (no path) match a directory with this name at ANY depth,
+            # not just $srcRoot's own top-level dirs. Every C# project folder
+            # (Optimum.Tests, Optimum.Launcher, Optimum.Launcher.Tests, ...) has
+            # its own nested bin/ - unlike obj/ (already excluded this way), bin/
+            # was only excluded at $srcRoot's root above, so hundreds of MB of
+            # NuGet-restored runtime assemblies (one folder per RID, satellite
+            # resource DLLs per locale - tens of thousands of small files) were
+            # getting silently robocopied on every install, making this step look
+            # hung for many minutes with the progress output suppressed below.
+            'bin',
             'obj'
         )
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            robocopy "$srcRoot" "$buildRoot" /E /NFL /NDL /NJH /NJS /NP /XD $excludeDirs /XF '*.zip' '*.tar.gz' '*.dmg' *>&1 | Out-Null
+            robocopy "$srcRoot" "$buildRoot" /E /NFL /NDL /NJH /NJS /NP /R:3 /W:2 /XD $excludeDirs /XF '*.zip' '*.tar.gz' '*.dmg' *>&1 | Out-Null
         } finally { $ErrorActionPreference = $prevEAP }
-        if ($LASTEXITCODE -ge 8) { throw "Failed to copy the source into the temp folder (robocopy $LASTEXITCODE)." }
+        # Without /R:/W:, robocopy's defaults are 1,000,000 retries at 30s apart per
+        # locked/inaccessible file - a single OneDrive placeholder or AV-locked file
+        # under $srcRoot makes this step hang for what looks like forever with no
+        # output (stdout/stderr are discarded above). /R:3 /W:2 fails fast instead.
+        if ($LASTEXITCODE -ge 8) { throw "Failed to copy the source into the temp folder (robocopy $LASTEXITCODE). If this repo lives under OneDrive/Dropbox or a cloud-synced folder, make sure it's fully downloaded locally (not 'Files On-Demand' placeholders) and not being scanned by antivirus, then retry." }
         $global:LASTEXITCODE = 0
 
         $vanillaLink = Join-Path $buildRoot '.vanilla\win-x64\vintagestory'
@@ -843,7 +868,9 @@ function Invoke-OptimumBuild {
             Write-Log "Junction failed, copying VS install..."
             Remove-Item -Recurse -Force (Split-Path $vanillaLink) -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Force -Path $vanillaLink | Out-Null
-            robocopy "$VsPath" "$vanillaLink" /E /NFL /NDL /NJH /NJS /NP *>&1 | Out-Null
+            $global:LASTEXITCODE = 0
+            robocopy "$VsPath" "$vanillaLink" /E /NFL /NDL /NJH /NJS /NP /R:3 /W:2 *>&1 | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "Failed to copy the Vintage Story install into the build workspace (robocopy $LASTEXITCODE)." }
         }
 
         Push-Location $buildRoot

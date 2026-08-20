@@ -189,7 +189,9 @@ decompile_mod() {
             s#<HintPath>\Q${win_bwd}\E[/\\]#<HintPath>${root}#gi;
         }
         s#<LangVersion>\d+\.\d+</LangVersion>#<LangVersion>preview</LangVersion>#g;
-        s#</PropertyGroup>#  <Nullable>disable</Nullable>\n    <NoWarn>\$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>\n  </PropertyGroup>\n  <ItemGroup>\n    <FrameworkReference Include="Microsoft.NETCore.App" />\n  </ItemGroup>#;
+        s#</PropertyGroup>#  <Nullable>disable</Nullable>\n    <NoWarn>\$(NoWarn);0618;8632;0420;0649;0169;9193;9113</NoWarn>\n  </PropertyGroup>#;
+        s#</PropertyGroup>#</PropertyGroup>\n  <ItemGroup>\n    <FrameworkReference Include="Microsoft.NETCore.App" />\n  </ItemGroup>#
+            unless /<FrameworkReference\s+Include="Microsoft\.NETCore\.App"/;
     ' "$project_file"
 }
 

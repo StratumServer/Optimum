@@ -93,6 +93,11 @@ jobs:
         shell: bash
         run: bash scripts/check-patches.sh --strict-unavailable
 
+      - name: "Package (exercises the Windows install path: package.ps1 -> prepare-runtime-donors.ps1)"
+        timeout-minutes: 15
+        shell: pwsh
+        run: scripts/package.ps1
+
       - name: Run tests
         shell: bash
         run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
@@ -104,6 +109,7 @@ jobs:
           name: bootstrap-logs-windows
           path: |
             .vanilla/*/vintagestory/Logs/
+            .build/runtime-donors/**/*.csproj
             *.log
           retention-days: 7
 

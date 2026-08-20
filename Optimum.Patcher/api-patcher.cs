@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
@@ -73,6 +74,7 @@ public static class ApiPatcher
         int gameVersionLabels = PatchGameVersionLabel(vanilla.MainModule, optimumVersion);
         int mat4fInlined = PatchMat4fInlining(vanilla.MainModule);
         int headControllerFallback = PatchHeadControllerPoseFallback(vanilla.MainModule);
+        int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
 
         if (inventoryHooks != 2)
         {
@@ -109,6 +111,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 1 EntityHeadController pose fallback, applied {headControllerFallback}.");
         }
+        if (threadPoolDiagnostics != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 TyronThreadPool diagnostics patch, applied {threadPoolDiagnostics}.");
+        }
 
         int typeForwards = InjectTypeForwards(vanilla, contracts);
 
@@ -140,6 +147,7 @@ public static class ApiPatcher
             $"{loggerInitializers} symbol-independent logger initializer, " +
             $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined, " +
             $"{headControllerFallback} head controller pose fallback, " +
+            $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
             $"{typeForwards} type forwards.");
         return true;
     }
@@ -519,6 +527,163 @@ public static class ApiPatcher
         getPose.Body = body;
         Console.WriteLine(
             $"  API PATCHED: {controller.FullName}.GetPose null-safe fallback");
+        return 1;
+    }
+
+    /// <summary>
+    /// Vanilla's TyronThreadPool constructor hardcodes ThreadPool.SetMaxThreads(10, 1),
+    /// which under-provisions the worker pool on modern many-core machines. This mirrors
+    /// patches/VintagestoryApi/Common/TyronThreadPool.cs.patch (used to compile the
+    /// donor VintagestoryAPI.dll and the optimized client): scale the caps with
+    /// Environment.ProcessorCount, and expose the before/after thread counts plus the
+    /// SetMaxThreads result as new static properties so OptimumStatusModSystem.BuildStatus
+    /// (sources/VSEssentials/Systems/OptimumStatus.cs) can report them - that type is
+    /// injected wholesale into VSEssentials.dll and calls these properties directly, so
+    /// without this patch the live-patched vanilla API throws
+    /// MissingMethodException: TyronThreadPool.get_SetMaxThreadsResult() the first time
+    /// the status command runs its JIT-validation pass.
+    /// </summary>
+    internal static int PatchTyronThreadPoolDiagnostics(ModuleDefinition module)
+    {
+        var threadPool = module.GetType("Vintagestory.API.Common.TyronThreadPool")
+            ?? throw new InvalidOperationException("TyronThreadPool is missing from the vanilla API.");
+
+        var intType = module.TypeSystem.Int32;
+        var boolType = module.TypeSystem.Boolean;
+
+        FieldDefinition AddStaticAutoProperty(string name, TypeReference type)
+        {
+            var field = new FieldDefinition(
+                $"<{name}>k__BackingField", FieldAttributes.Private | FieldAttributes.Static, type);
+            threadPool.Fields.Add(field);
+
+            var getter = new MethodDefinition(
+                $"get_{name}",
+                MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.SpecialName |
+                    MethodAttributes.HideBySig,
+                type);
+            var getterIl = getter.Body.GetILProcessor();
+            getterIl.Append(Instruction.Create(OpCodes.Ldsfld, field));
+            getterIl.Append(Instruction.Create(OpCodes.Ret));
+            threadPool.Methods.Add(getter);
+            threadPool.Properties.Add(
+                new PropertyDefinition(name, PropertyAttributes.None, type) { GetMethod = getter });
+            return field;
+        }
+
+        var workerBeforeField = AddStaticAutoProperty("SetMaxThreadsWorkerBefore", intType);
+        var workerAfterField = AddStaticAutoProperty("SetMaxThreadsWorkerAfter", intType);
+        var ioBeforeField = AddStaticAutoProperty("SetMaxThreadsIoBefore", intType);
+        var ioAfterField = AddStaticAutoProperty("SetMaxThreadsIoAfter", intType);
+        var resultField = AddStaticAutoProperty("SetMaxThreadsResult", boolType);
+
+        var ctor = threadPool.Methods.Single(method => method.IsConstructor && !method.IsStatic &&
+            method.Parameters.Count == 0);
+        ClearDebugInformation(ctor);
+
+        var body = ctor.Body;
+        var instructions = body.Instructions;
+        var setMaxThreadsCall = instructions.Single(instruction =>
+            instruction.OpCode == OpCodes.Call &&
+            instruction.Operand is MethodReference callee &&
+            callee.Name == "SetMaxThreads" &&
+            callee.DeclaringType.FullName == "System.Threading.ThreadPool" &&
+            callee.Parameters.Count == 2);
+        var setMaxThreadsRef = (MethodReference)setMaxThreadsCall.Operand;
+
+        int callIndex = instructions.IndexOf(setMaxThreadsCall);
+        if (callIndex < 2)
+        {
+            throw new InvalidOperationException(
+                $"{ctor.FullName}: expected at least two instructions before the SetMaxThreads call.");
+        }
+        var loadWorkerArg = instructions[callIndex - 2];
+        var loadIoArg = instructions[callIndex - 1];
+        var popInstruction = instructions[callIndex + 1];
+        if (popInstruction.OpCode != OpCodes.Pop)
+        {
+            throw new InvalidOperationException(
+                $"{ctor.FullName}: expected Pop right after ThreadPool.SetMaxThreads, found " +
+                $"{popInstruction.OpCode}. Vanilla shape changed - this patch needs updating.");
+        }
+
+        var getMaxThreads = module.ImportReference(
+            typeof(ThreadPool).GetMethod(
+                nameof(ThreadPool.GetMaxThreads),
+                new[] { typeof(int).MakeByRefType(), typeof(int).MakeByRefType() }));
+        var processorCountGetter = module.ImportReference(
+            typeof(Environment).GetProperty(nameof(Environment.ProcessorCount))!.GetGetMethod());
+        var mathMax = module.ImportReference(
+            typeof(Math).GetMethod(nameof(Math.Max), new[] { typeof(int), typeof(int) }));
+
+        var workerBeforeLocal = new VariableDefinition(intType);
+        var ioBeforeLocal = new VariableDefinition(intType);
+        var workerMaxLocal = new VariableDefinition(intType);
+        var ioMaxLocal = new VariableDefinition(intType);
+        var workerAfterLocal = new VariableDefinition(intType);
+        var ioAfterLocal = new VariableDefinition(intType);
+        body.Variables.Add(workerBeforeLocal);
+        body.Variables.Add(ioBeforeLocal);
+        body.Variables.Add(workerMaxLocal);
+        body.Variables.Add(ioMaxLocal);
+        body.Variables.Add(workerAfterLocal);
+        body.Variables.Add(ioAfterLocal);
+        body.InitLocals = true;
+
+        var replacement = new[]
+        {
+            // ThreadPool.GetMaxThreads(out workerBefore, out ioBefore);
+            Instruction.Create(OpCodes.Ldloca, workerBeforeLocal),
+            Instruction.Create(OpCodes.Ldloca, ioBeforeLocal),
+            Instruction.Create(OpCodes.Call, getMaxThreads),
+            Instruction.Create(OpCodes.Ldloc, workerBeforeLocal),
+            Instruction.Create(OpCodes.Stsfld, workerBeforeField),
+            Instruction.Create(OpCodes.Ldloc, ioBeforeLocal),
+            Instruction.Create(OpCodes.Stsfld, ioBeforeField),
+
+            // int workerMax = Math.Max(10, Environment.ProcessorCount * 2);
+            Instruction.Create(OpCodes.Ldc_I4, 10),
+            Instruction.Create(OpCodes.Call, processorCountGetter),
+            Instruction.Create(OpCodes.Ldc_I4_2),
+            Instruction.Create(OpCodes.Mul),
+            Instruction.Create(OpCodes.Call, mathMax),
+            Instruction.Create(OpCodes.Stloc, workerMaxLocal),
+
+            // int ioMax = Math.Max(1, Environment.ProcessorCount);
+            Instruction.Create(OpCodes.Ldc_I4_1),
+            Instruction.Create(OpCodes.Call, processorCountGetter),
+            Instruction.Create(OpCodes.Call, mathMax),
+            Instruction.Create(OpCodes.Stloc, ioMaxLocal),
+
+            // SetMaxThreadsResult = ThreadPool.SetMaxThreads(workerMax, ioMax);
+            Instruction.Create(OpCodes.Ldloc, workerMaxLocal),
+            Instruction.Create(OpCodes.Ldloc, ioMaxLocal),
+            Instruction.Create(OpCodes.Call, setMaxThreadsRef),
+            Instruction.Create(OpCodes.Stsfld, resultField),
+
+            // ThreadPool.GetMaxThreads(out workerAfter, out ioAfter);
+            Instruction.Create(OpCodes.Ldloca, workerAfterLocal),
+            Instruction.Create(OpCodes.Ldloca, ioAfterLocal),
+            Instruction.Create(OpCodes.Call, getMaxThreads),
+            Instruction.Create(OpCodes.Ldloc, workerAfterLocal),
+            Instruction.Create(OpCodes.Stsfld, workerAfterField),
+            Instruction.Create(OpCodes.Ldloc, ioAfterLocal),
+            Instruction.Create(OpCodes.Stsfld, ioAfterField),
+        };
+
+        var processor = body.GetILProcessor();
+        foreach (var instruction in replacement)
+        {
+            processor.InsertBefore(loadWorkerArg, instruction);
+        }
+        processor.Remove(loadWorkerArg);
+        processor.Remove(loadIoArg);
+        processor.Remove(setMaxThreadsCall);
+        processor.Remove(popInstruction);
+
+        Console.WriteLine(
+            $"  API PATCHED: {ctor.FullName} CPU-scaled thread pool sizing + diagnostics capture " +
+            "(SetMaxThreadsWorkerBefore/After, SetMaxThreadsIoBefore/After, SetMaxThreadsResult)");
         return 1;
     }
 
