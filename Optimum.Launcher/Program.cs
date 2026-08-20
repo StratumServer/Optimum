@@ -59,6 +59,30 @@ public static class Program
         // Use the game's own data path resolution if possible, otherwise local.
         var dataPath = ResolveDataPath(args) ?? gameDir;
         Logger.Init(dataPath);
+
+        ShaderCompatibilityReport shaderCompatibility;
+        try
+        {
+            shaderCompatibility = ShaderCompatibilityScanner.Scan(dataPath, gameDir, Version);
+            ShaderCompatibilityScanner.SaveReport(dataPath, shaderCompatibility);
+        }
+        catch (Exception ex)
+        {
+            shaderCompatibility = ShaderCompatibilityScanner.CreateConservativeReport(Version, ex.Message);
+            try { ShaderCompatibilityScanner.SaveReport(dataPath, shaderCompatibility); } catch { }
+        }
+        Logger.Log($"[Optimum] Shader compatibility scan: sources={shaderCompatibility.Sources.Count}, " +
+            $"shaders={shaderCompatibility.ShaderOwners.Count}, conflicts={shaderCompatibility.Conflicts.Count}, " +
+            $"failed={shaderCompatibility.ScanFailed}, fingerprint={shaderCompatibility.Fingerprint}");
+        foreach (var conflict in shaderCompatibility.Conflicts)
+            Logger.Log($"[Optimum] Shader owner: {conflict.Shader} <- {string.Join(", ", conflict.Owners)} ({conflict.Reason})");
+        foreach (var feature in shaderCompatibility.DisabledFeatures.Order(StringComparer.OrdinalIgnoreCase))
+        {
+            string reason = shaderCompatibility.FeatureReasons.TryGetValue(feature, out var reasons)
+                ? string.Join("; ", reasons)
+                : "compatibility report";
+            Logger.Log($"[Optimum] Shader feature disabled: {feature} ({reason})");
+        }
         using var launchLock = AcquireLaunchLock(dataPath, gameDir);
         var cacheDir = Path.Combine(dataPath, CacheDirName, CacheSubDir);
         var donorDir = Path.Combine(gameDir, CacheDirName, "donors");

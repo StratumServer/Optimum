@@ -131,6 +131,7 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "optimumOitDisabled",
         "optimumOitFailureLogged",
+        "RestoreVanillaTransparentState",
         "DisableOptimumOit",
     },
     // Settings tab: inject the field, callbacks, and hook helper

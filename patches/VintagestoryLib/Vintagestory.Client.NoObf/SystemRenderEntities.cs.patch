@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..5fcc83c 100644
+index 374f827..324fffa 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 @@ -1,15 +1,36 @@
@@ -213,7 +213,7 @@ index 374f827..5fcc83c 100644
  	private void OnBeforeRender(float dt)
  	{
 +		OptimumDiagnostics.ResetEntityTesselationBudget();
-+		int optimumLightBatchId = OptimumConfig.EntityLightBatchEnabled && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0;
++		int optimumLightBatchId = OptimumConfig.EffectiveEntityLightBatch && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0;
 +		int optimumLightSampleCount = 0;
  		int num = ClientSettings.ViewDistance * ClientSettings.ViewDistance;
 -		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
@@ -289,7 +289,7 @@ index 374f827..5fcc83c 100644
  		game.Platform.GlToggleBlend(on: true);
 -		foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
 +		OptimumEntityShaderState.End();
-+		bool shaderStateCacheEnabled = OptimumConfig.EntityShaderStateCacheEnabled && !optimumEntityShaderCacheDisabled;
++		bool shaderStateCacheEnabled = OptimumConfig.EffectiveEntityShaderStateCache && !optimumEntityShaderCacheDisabled;
 +		bool shaderSegmentActive = false;
 +		bool shaderSegmentUnavailable = false;
 +		try

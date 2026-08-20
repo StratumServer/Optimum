@@ -173,10 +173,8 @@ void main()
 	
 		// Water edge + shinyness shading effect, kinda nice
 		float ownDepth = linearDepth(gl_FragCoord.z);
-		// Optimum: 3x3 grid (range=1) instead of 5x5 (range=2).
-		// Saves 16 depth texture reads per water fragment (25→9). Foam edges stay sharp.
 		float diffTotal = 0;
-		int range = 1;
+		int range = 2;
 		for (int dx = -range; dx <= range; dx++) {
 			for (int dy = -range; dy <= range; dy++) {
 				float diff = ownDepth - linearDepth(texture(depthTex, vec2(x + dx/frameSize.x, y + dy/frameSize.y)).x);
@@ -186,7 +184,7 @@ void main()
 			}
 		}
 		
-		diffTotal /= 4;
+		diffTotal /= (4*range * range);
 		diffTotal = min(diffTotal, -vn/10 + 0.05);
 		
 		if (isLava) {

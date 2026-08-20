@@ -187,13 +187,13 @@ public static class OptimumGreedyMeshEmitter
         Block[] currentChunkBlocksExt,
         MeshData[][] centerPool)
     {
-        if (!OptimumConfig.GreedyMeshEnabled) return 0;
+        if (!OptimumConfig.EffectiveGreedyMesh) return 0;
 
         if (!_geometryVerified)
         {
             VerifyFaceGeometry(tct);
             _geometryVerified = true;
-            if (!OptimumConfig.GreedyMeshEnabled) return 0;
+            if (!OptimumConfig.EffectiveGreedyMesh) return 0;
         }
 
         // Clamp to [1, 8]: the tile-count encoding in EmitMergedQuad

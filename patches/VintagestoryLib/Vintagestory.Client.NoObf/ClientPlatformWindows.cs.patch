@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..79c2642 100644
+index 6edf0c9..308ebd4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,99 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -81,11 +81,11 @@ index 6edf0c9..79c2642 100644
 +		ClientSettings.OptimumChiselLod = Vintagestory.API.Config.OptimumConfig.ChiselLodEnabled;
 +		ClientSettings.OptimumChiselLodDistance = Vintagestory.API.Config.OptimumConfig.ChiselLodDistance;
 +		ClientSettings.OptimumDynamicLightCache = Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled;
-+		ClientSettings.OptimumRenderScale = Vintagestory.API.Config.OptimumConfig.RenderScale;
++		ClientSettings.OptimumRenderScale = Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale;
 +		// FSR: force SSAA to the render scale value so FBOs shrink on startup.
-+		if (Vintagestory.API.Config.OptimumConfig.RenderScale < 1.0f)
++		if (Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale < 1.0f)
 +		{
-+			ClientSettings.SSAA = Vintagestory.API.Config.OptimumConfig.RenderScale;
++			ClientSettings.SSAA = Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale;
 +		}
 +		Optimum.OptimumUpdateChecker.CheckAsync();
 +
