@@ -525,6 +525,7 @@ cat > "$repo_root/build/VintagestoryLib/VintagestoryLib.csproj" <<'CSPROJ'
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\VintagestoryApi\VintagestoryAPI.csproj" />
+    <ProjectReference Include="..\..\optimum-api-contracts\optimum-api-contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="cairo-sharp"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath></Reference>

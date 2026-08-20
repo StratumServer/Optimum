@@ -22,7 +22,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.3.11";
+    public const string Version = "0.3.13";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
@@ -408,9 +408,94 @@ public static class OptimumConfig
     public const int VanillaGodRaysSampleLimit = 180;
     public const int OptimumGodRaysSampleLimit = 100;
     public static bool GodRaysSampleCapEnabled = false;
-    public static int GodRaysSampleLimit => GodRaysSampleCapEnabled
+    public static int GodRaysSampleLimit => EffectiveGodRaysSampleCap
         ? OptimumGodRaysSampleLimit
         : VanillaGodRaysSampleLimit;
+
+    // Compatibility state comes from the launcher's metadata scan. It stays
+    // outside OptimumConfigData so a mod cannot make a runtime fallback
+    // persistent by changing its shader files.
+    private static readonly HashSet<string> _shaderCompatibilityDisabledFeatures = new(StringComparer.OrdinalIgnoreCase);
+    private static bool _shaderCompatibilityScanFailed;
+    private static bool _greedyMeshVertexShaderReady;
+    private static bool _greedyMeshFragmentShaderReady;
+    private static string? _shaderCompatibilityFingerprint;
+    private static string? _dataPath;
+
+    public static bool EffectiveGreedyMesh => GreedyMeshEnabled &&
+        !IsShaderFeatureDisabled("GreedyMesh") &&
+        _greedyMeshVertexShaderReady && _greedyMeshFragmentShaderReady;
+
+    public static float EffectiveRenderScale => IsShaderFeatureDisabled("RenderScale") ? 1.0f : RenderScale;
+
+    public static bool EffectiveGodRaysSampleCap => GodRaysSampleCapEnabled &&
+        !IsShaderFeatureDisabled("GodRaysSampleCap");
+
+    public static bool EffectiveEntityLightBatch => EntityLightBatchEnabled &&
+        !IsShaderFeatureDisabled("EntityLightBatch");
+
+    public static bool EffectiveEntityShaderStateCache => EntityShaderStateCacheEnabled &&
+        !IsShaderFeatureDisabled("EntityShaderStateCache");
+
+    public static bool EffectiveOit => !IsShaderFeatureDisabled("Oit");
+
+    public static bool EffectiveShaderPreprocessParallel => ShaderPreprocessParallel &&
+        !IsShaderFeatureDisabled("ShaderPreprocessParallel");
+
+    public static bool IsShaderFeatureDisabled(string feature) =>
+        _shaderCompatibilityScanFailed || _shaderCompatibilityDisabledFeatures.Contains(feature);
+
+    public static void SetGreedyMeshShaderAbi(bool vertexShaderReady, bool fragmentShaderReady)
+    {
+        _greedyMeshVertexShaderReady = vertexShaderReady;
+        _greedyMeshFragmentShaderReady = fragmentShaderReady;
+        GreedyMeshShadersCompiledOn = vertexShaderReady && fragmentShaderReady;
+    }
+
+    public static void ResetShaderCompatibilityAfterReload()
+    {
+        SetGreedyMeshShaderAbi(false, false);
+    }
+
+    private static void LoadShaderCompatibilityReport()
+    {
+        _shaderCompatibilityDisabledFeatures.Clear();
+        _shaderCompatibilityScanFailed = true;
+        _shaderCompatibilityFingerprint = null;
+        ResetShaderCompatibilityAfterReload();
+
+        if (_dataPath == null) return;
+
+        string reportPath = Path.Combine(_dataPath, ".optimum", "shader-compatibility.json");
+        try
+        {
+            if (!File.Exists(reportPath)) return;
+
+            string json = File.ReadAllText(reportPath);
+            var report = JsonSerializer.Deserialize<ShaderCompatibilityState>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            if (report == null) return;
+
+            if (report.DisabledFeatures != null)
+            {
+                foreach (string? feature in report.DisabledFeatures)
+                {
+                    if (!string.IsNullOrWhiteSpace(feature)) _shaderCompatibilityDisabledFeatures.Add(feature);
+                }
+            }
+
+            _shaderCompatibilityScanFailed = report.ScanFailed;
+            _shaderCompatibilityFingerprint = report.Fingerprint;
+        }
+        catch (Exception)
+        {
+            _shaderCompatibilityDisabledFeatures.Clear();
+            _shaderCompatibilityScanFailed = true;
+            _shaderCompatibilityFingerprint = null;
+        }
+    }
 
     private static string? _configPath;
 
@@ -563,6 +648,8 @@ public static class OptimumConfig
         string dir = Path.Combine(dataPath, "ModConfig");
         Directory.CreateDirectory(dir);
         _configPath = Path.Combine(dir, "optimum.json");
+        _dataPath = dataPath;
+        LoadShaderCompatibilityReport();
     }
 
     /// <summary>
@@ -728,6 +815,13 @@ public static class OptimumConfig
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
+
+    private sealed class ShaderCompatibilityState
+    {
+        public bool ScanFailed { get; set; }
+        public string? Fingerprint { get; set; }
+        public List<string>? DisabledFeatures { get; set; }
+    }
 }
 
 internal sealed class OptimumConfigData

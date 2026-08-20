@@ -95,6 +95,12 @@ public sealed class CacheManager
             if (!File.Exists(cachedPath) || string.IsNullOrEmpty(target.CachedHash) || ComputeFileHash(cachedPath) != target.CachedHash)
                 return null;
 
+            if (string.Equals(target.Assembly, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase) &&
+                !ApiContractValidator.HasTesselationThreadContract(cachedPath))
+            {
+                return null;
+            }
+
             var donorPath = Path.Combine(_donorDir, target.Donor);
             if (!File.Exists(donorPath) || ComputeFileHash(donorPath) != target.DonorHash)
                 return null;
@@ -140,6 +146,9 @@ public sealed class CacheManager
             var cachedPath = Path.Combine(_cacheDir, t.AssemblyName);
             if (!File.Exists(cachedPath) || new FileInfo(cachedPath).Length == 0)
                 throw new FileNotFoundException("Patched assembly is missing from the cache.", cachedPath);
+
+            if (string.Equals(t.AssemblyName, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase))
+                ApiContractValidator.EnsureTesselationThreadContract(cachedPath);
 
             manifest.Targets.Add(new CacheTarget
             {

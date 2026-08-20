@@ -104,8 +104,7 @@ vec4 traverse(vec3 o, vec3 d, float far, float T){
     float t = 0.0;
     vec4 k = vec4(0.0);
 
-    // Optimum: cap march steps at 100 (vanilla uses 200).
-    for(int i = 0; i < 100; i++){
+    for(int i = 0; i < 200; i++){
 
         vec4 map = texelFetch(cloudMap, p, 0);
 

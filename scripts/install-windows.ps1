@@ -56,6 +56,134 @@ $InstallUrls = @{
     PowerShell = 'https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-windows'
 }
 
+function Normalize-WindowsDirectoryPath {
+    param(
+        [AllowNull()][string]$Path,
+        [string]$Name = 'Path'
+    )
+
+    if ($null -eq $Path) { return $null }
+    $normalized = $Path.Trim()
+    if (-not $normalized) { return $null }
+    if ($normalized -match '^[A-Za-z]:$') { $normalized = "$normalized\" }
+
+    try {
+        return [System.IO.Path]::GetFullPath($normalized)
+    } catch {
+        throw "$Name is not a valid Windows directory path: $Path"
+    }
+}
+
+function Test-PathWithin {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$Parent
+    )
+
+    $pathKey = $Path.TrimEnd('\')
+    $parentKey = $Parent.TrimEnd('\')
+    return [System.StringComparer]::OrdinalIgnoreCase.Equals($pathKey, $parentKey) -or
+        $pathKey.StartsWith($parentKey + '\', [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-FileSystemRoot {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    return [System.StringComparer]::OrdinalIgnoreCase.Equals(
+        $Path,
+        [System.IO.Path]::GetPathRoot($Path))
+}
+
+function Assert-NoPathOverlap {
+    param(
+        [Parameter(Mandatory=$true)][string]$LeftPath,
+        [Parameter(Mandatory=$true)][string]$LeftName,
+        [Parameter(Mandatory=$true)][string]$RightPath,
+        [Parameter(Mandatory=$true)][string]$RightName
+    )
+
+    if ((Test-PathWithin -Path $LeftPath -Parent $RightPath) -or
+        (Test-PathWithin -Path $RightPath -Parent $LeftPath)) {
+        throw "$LeftName and $RightName cannot overlap. Choose separate directories."
+    }
+}
+
+function Get-ExistingDirectory {
+    param([Parameter(Mandatory=$true)][string]$Path)
+
+    $candidate = $Path
+    while ($candidate -and -not (Test-Path -LiteralPath $candidate -PathType Container)) {
+        $parent = Split-Path -Parent $candidate
+        if (-not $parent -or $parent -eq $candidate) { return $null }
+        $candidate = $parent
+    }
+    return $candidate
+}
+
+function Assert-DirectoryWritable {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$Name
+    )
+
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        throw "$Name points to a file, not a directory: $Path"
+    }
+
+    $probeRoot = if (Test-Path -LiteralPath $Path -PathType Container) {
+        $Path
+    } else {
+        Get-ExistingDirectory -Path $Path
+    }
+    if (-not $probeRoot) {
+        throw "$Name has no existing parent directory: $Path"
+    }
+
+    $probe = Join-Path $probeRoot ".optimum-write-test-$([guid]::NewGuid().ToString('N'))"
+    try {
+        [System.IO.File]::WriteAllText($probe, 'Optimum write probe')
+        Remove-Item -LiteralPath $probe -Force -ErrorAction Stop
+    } catch {
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+        throw "$Name is not writable: $Path. Choose a writable directory or run PowerShell with the required permissions."
+    }
+}
+
+function Assert-SafeInstallerPaths {
+    param(
+        [Parameter(Mandatory=$true)][string]$InstallDir,
+        [string]$DataPath,
+        [Parameter(Mandatory=$true)][string]$VintageStoryDir,
+        [Parameter(Mandatory=$true)][string]$WorkspaceRoot,
+        [string]$BuildRoot
+    )
+
+    if (Test-FileSystemRoot -Path $InstallDir) {
+        throw "InstallDir cannot be a drive root: $InstallDir. Choose a folder such as $InstallDir`Optimum."
+    }
+    Assert-NoPathOverlap -LeftPath $InstallDir -LeftName 'InstallDir' -RightPath $VintageStoryDir -RightName 'Vintage Story'
+    Assert-NoPathOverlap -LeftPath $InstallDir -LeftName 'InstallDir' -RightPath $WorkspaceRoot -RightName 'the Optimum workspace'
+
+    if ($DataPath) {
+        if (Test-PathWithin -Path $DataPath -Parent $InstallDir) {
+            throw "DataPath cannot be inside InstallDir. Choose a separate data directory."
+        }
+        if (Test-PathWithin -Path $DataPath -Parent $VintageStoryDir) {
+            throw "DataPath cannot be inside the Vintage Story directory. Choose a separate data directory."
+        }
+        if (Test-PathWithin -Path $DataPath -Parent $WorkspaceRoot) {
+            throw "DataPath cannot be inside the Optimum workspace. Choose a separate data directory."
+        }
+    }
+
+    if ($BuildRoot) {
+        Assert-NoPathOverlap -LeftPath $InstallDir -LeftName 'InstallDir' -RightPath $BuildRoot -RightName 'the temporary build directory'
+        if ($DataPath) {
+            Assert-NoPathOverlap -LeftPath $DataPath -LeftName 'DataPath' -RightPath $BuildRoot -RightName 'the temporary build directory'
+        }
+    }
+}
+
 # ===========================================================================
 # Detection helpers
 # ===========================================================================
@@ -573,7 +701,10 @@ function Install-StagedPackage {
         [Parameter(Mandatory=$true)][string]$InstallDir
     )
 
-    $installPath = [System.IO.Path]::GetFullPath($InstallDir)
+    $installPath = Normalize-WindowsDirectoryPath -Path $InstallDir -Name 'InstallDir'
+    if (Test-FileSystemRoot -Path $installPath) {
+        throw "InstallDir cannot be a drive root: $installPath"
+    }
     $parentDir = Split-Path -Parent $installPath
     # PS 5.1 bug: Split-Path -Parent strips the trailing backslash from drive
     # roots, returning "D:" instead of "D:\". "D:" is a relative path (current
@@ -719,8 +850,8 @@ function Invoke-OptimumBuild {
     param([string]$InstallDir, [string]$DataPath, [bool]$Shortcut, [bool]$StartMenu, [string]$VsPath)
 
     if (-not $InstallDir) { throw "InstallDir is required." }
-    # Normalize bare drive letter so GetFullPath does not resolve to CWD.
-    if ($InstallDir -match '^[A-Za-z]:$') { $InstallDir = "$InstallDir\" }
+    $InstallDir = Normalize-WindowsDirectoryPath -Path $InstallDir -Name 'InstallDir'
+    if ($DataPath) { $DataPath = Normalize-WindowsDirectoryPath -Path $DataPath -Name 'DataPath' }
 
     Write-Phase "Verifying tools..."
     Assert-RequiredTools
@@ -734,6 +865,7 @@ function Invoke-OptimumBuild {
         if ($vsInfo) { $VsPath = $vsInfo.Path }
     }
     $requiredVer = Get-RequiredVsVersion
+    if ($VsPath) { $VsPath = Normalize-WindowsDirectoryPath -Path $VsPath -Name 'VsPath' }
     if (-not $VsPath -or -not (Test-Path (Join-Path $VsPath 'Vintagestory.exe'))) {
         throw "Install Vintage Story $requiredVer before Optimum or pass -VsPath with the folder that contains Vintagestory.exe."
     }
@@ -743,6 +875,9 @@ function Invoke-OptimumBuild {
         throw "Vintage Story version mismatch: found $actualVsVersion at $VsPath, Optimum $optimumBuildVer requires $requiredVer. Update or reinstall Vintage Story before installing Optimum, or pass -Version $actualVsVersion if a patches-$actualVsVersion-bridge/ set exists for it."
     }
     Write-Log "Using Vintage Story from: $VsPath"
+    Assert-SafeInstallerPaths -InstallDir $InstallDir -DataPath $DataPath -VintageStoryDir $VsPath -WorkspaceRoot $Root
+    Assert-DirectoryWritable -Path $InstallDir -Name 'InstallDir'
+    if ($DataPath) { Assert-DirectoryWritable -Path $DataPath -Name 'DataPath' }
 
     # Validate shaders in the user's VS install. A previous partial extraction
     # or corrupted install surfaces later as "blur.vsh ... unexpected $end".
@@ -787,6 +922,7 @@ function Invoke-OptimumBuild {
     }
     $buildId = [guid]::NewGuid().ToString('N').Substring(0, 8)
     $buildRoot = Join-Path $shortRoot "Optimum-$optimumBuildVer-$buildId"
+    Assert-SafeInstallerPaths -InstallDir $InstallDir -DataPath $DataPath -VintageStoryDir $VsPath -WorkspaceRoot $Root -BuildRoot $buildRoot
     # Clean dirs from OTHER versions (stale caches with different decompiler output).
     Get-ChildItem $shortRoot -Directory -Filter 'Optimum-*' -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch "^Optimum-$([regex]::Escape($optimumBuildVer))" } |
@@ -1404,7 +1540,7 @@ $form.Controls.Add($script:btnVsBrowse)
 # Hidden field for the VS path
 $script:txtVsPath = New-Object System.Windows.Forms.TextBox
 $script:txtVsPath.Visible = $false
-if ($VsPath) { $script:txtVsPath.Text = $VsPath.TrimEnd('\') }
+if ($VsPath) { $script:txtVsPath.Text = $VsPath.Trim() }
 $form.Controls.Add($script:txtVsPath)
 $y += 26
 
@@ -1870,40 +2006,38 @@ By checking the box below and proceeding, you acknowledge that you have read, un
 
     if ($agreeForm.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
 
-    $dir = $script:txtDir.Text.Trim().TrimEnd('\')
+    try {
+        $dir = Normalize-WindowsDirectoryPath -Path $script:txtDir.Text -Name 'InstallDir'
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Optimum', 'OK', 'Warning') | Out-Null
+        return
+    }
     if (-not $dir) {
         [System.Windows.Forms.MessageBox]::Show('Choose the install folder.', 'Optimum', 'OK', 'Warning') | Out-Null
         return
     }
-    # Bare drive letter (e.g. "D:") after TrimEnd is not a rooted path on PS 5.1.
-    # GetFullPath("D:") returns the CWD on that drive, not "D:\".
-    # Normalize to "D:\" so downstream path operations behave correctly.
-    if ($dir -match '^[A-Za-z]:$') {
-        $dir = "$dir\"
+    if (Test-FileSystemRoot -Path $dir) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "The install folder cannot be a drive root ($dir). Choose a folder such as $dir`Optimum.",
+            'Optimum', 'OK', 'Warning') | Out-Null
+        return
     }
 
-    # Block installing into the Vintage Story directory (would overwrite vanilla files).
-    $vsP = $script:txtVsPath.Text.Trim().TrimEnd('\')
-    if ($vsP -and (Test-Path (Join-Path $vsP 'Vintagestory.exe'))) {
-        $dirNorm = [System.IO.Path]::GetFullPath($dir).TrimEnd('\')
-        $vsNorm = [System.IO.Path]::GetFullPath($vsP).TrimEnd('\')
-        if ($dirNorm -eq $vsNorm -or $dirNorm.StartsWith($vsNorm + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
-            [System.Windows.Forms.MessageBox]::Show(
-                "The install folder cannot be inside your Vintage Story directory ($vsP).`nOptimum must install to a separate location.",
-                'Optimum', 'OK', 'Warning') | Out-Null
-            return
-        }
+    try {
+        $vsP = Normalize-WindowsDirectoryPath -Path $script:txtVsPath.Text -Name 'VsPath'
+    } catch {
+        [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Optimum', 'OK', 'Warning') | Out-Null
+        return
     }
-    # Also check against the detected VS path (if user didn't browse).
-    if ($script:detectedVsPath) {
-        $dirNorm2 = [System.IO.Path]::GetFullPath($dir).TrimEnd('\')
-        $vsNorm2 = [System.IO.Path]::GetFullPath($script:detectedVsPath).TrimEnd('\')
-        if ($dirNorm2 -eq $vsNorm2 -or $dirNorm2.StartsWith($vsNorm2 + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
-            [System.Windows.Forms.MessageBox]::Show(
-                "The install folder cannot be inside your Vintage Story directory ($($script:detectedVsPath)).`nOptimum must install to a separate location.",
-                'Optimum', 'OK', 'Warning') | Out-Null
-            return
-        }
+    if (-not $vsP -or -not (Test-Path (Join-Path $vsP 'Vintagestory.exe'))) {
+        [System.Windows.Forms.MessageBox]::Show('Install Vintage Story before Optimum or select the folder that contains Vintagestory.exe.', 'Optimum', 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ((Test-PathWithin -Path $dir -Parent $vsP) -or (Test-PathWithin -Path $vsP -Parent $dir)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "The install folder cannot overlap the Vintage Story directory ($vsP).`nOptimum must install to a separate location.",
+            'Optimum', 'OK', 'Warning') | Out-Null
+        return
     }
 
     # .NET 10 SDK: if missing and user unchecked download, block
@@ -1943,7 +2077,6 @@ By checking the box below and proceeding, you acknowledge that you have read, un
         return
     }
 
-    $vsP = $script:txtVsPath.Text.Trim().TrimEnd('\')
     if (-not $vsP -or -not (Test-Path (Join-Path $vsP 'Vintagestory.exe'))) {
         [System.Windows.Forms.MessageBox]::Show('Install Vintage Story before Optimum or select the folder that contains Vintagestory.exe.', 'Optimum', 'OK', 'Warning') | Out-Null
         return
@@ -1990,9 +2123,18 @@ By checking the box below and proceeding, you acknowledge that you have read, un
     $argLine += " -VsPath $q$vsP$q"
     $argLine += " -Version $q$buildVersion$q"
     if ($script:chkSep.Checked) {
-        $data = $script:txtData.Text.Trim().TrimEnd('\')
+        try {
+            $data = Normalize-WindowsDirectoryPath -Path $script:txtData.Text -Name 'DataPath'
+        } catch {
+            [System.Windows.Forms.MessageBox]::Show($_.Exception.Message, 'Optimum', 'OK', 'Warning') | Out-Null
+            return
+        }
         if (-not $data) {
             [System.Windows.Forms.MessageBox]::Show('Enter the data folder or uncheck the option.', 'Optimum', 'OK', 'Warning') | Out-Null
+            return
+        }
+        if (Test-PathWithin -Path $data -Parent $dir) {
+            [System.Windows.Forms.MessageBox]::Show('The data folder cannot be inside the install folder. Choose a separate directory.', 'Optimum', 'OK', 'Warning') | Out-Null
             return
         }
         $argLine += " -DataPath $q$data$q"

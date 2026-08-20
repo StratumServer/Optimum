@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..6e06f51 100644
+index 4d08f84..f46ccc4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..6e06f51 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,169 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,170 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -199,13 +199,13 @@ index 4d08f84..6e06f51 100644
 +		composer.GetSlider("optChiselLodDist").SetValues(ClientSettings.OptimumChiselLodDistance, 32, 256, 16, " blocks");
 +		composer.GetSwitch("optOcclusionScale").SetValue(Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled);
 +		composer.GetSwitch("optDynLightCache").SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
-+		composer.GetSwitch("optEntityLightBatch").SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
-+		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
++		composer.GetSwitch("optEntityLightBatch").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveEntityLightBatch);
++		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveEntityShaderStateCache);
 +		int renderScaleIdx = ClientSettings.OptimumRenderScale >= 1.0f ? 0 : ClientSettings.OptimumRenderScale >= 0.85f ? 1 : ClientSettings.OptimumRenderScale >= 0.77f ? 2 : 3;
 +		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
 +		composer.GetSwitch("optGodRaysCap").SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
 +#if OPTIMUM_GREEDY_MESH
-+		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
++		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveGreedyMesh);
 +		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
 +		composer.GetSlider("optGreedyLightTol").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance, 0, 4, 1);
 +		composer.GetSlider("optGreedyFarDist").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance, 0, 256, 16, " blocks");
@@ -233,6 +233,7 @@ index 4d08f84..6e06f51 100644
 +
 +	private void onOptimumRenderScaleChanged(string code, bool selected)
 +	{
++		if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("RenderScale")) return;
 +		float scale = float.Parse(code, System.Globalization.CultureInfo.InvariantCulture);
 +		ClientSettings.OptimumRenderScale = scale;
 +		Vintagestory.API.Config.OptimumConfig.RenderScale = scale;
@@ -258,7 +259,7 @@ index 4d08f84..6e06f51 100644
 +	// mid-session toggle only takes full effect after a restart; until
 +	// then the GreedyMeshShadersCompiledOn guard keeps emitter and shader
 +	// consistent (worst case: no merging).
-+	private void onOptimumGreedyMeshChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private void onOptimumGreedyMeshChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("GreedyMesh")) return; Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private bool onOptimumGreedySpanChanged(int val) { Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth = val; Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeHeight = val; Vintagestory.API.Config.OptimumConfig.Save(); return true; }
 +	private bool onOptimumGreedyLightTolChanged(int val) { Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance = val; Vintagestory.API.Config.OptimumConfig.Save(); return true; }
 +	private bool onOptimumGreedyFarDistChanged(int val) { Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance = val; Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistanceSq = (double)val * val; Vintagestory.API.Config.OptimumConfig.Save(); return true; }
@@ -269,7 +270,7 @@ index 4d08f84..6e06f51 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1987,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +1988,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

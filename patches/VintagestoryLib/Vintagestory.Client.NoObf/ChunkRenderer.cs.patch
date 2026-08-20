@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..9d4a5e8 100644
+index 431e51a..ce28235 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -69,7 +69,7 @@ index 431e51a..9d4a5e8 100644
 +			}
 +			return;
 +		}
-+		float textureLodBias = MathF.Log2(ClientSettings.OptimumRenderScale);
++		float textureLodBias = MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f));
 +		if (Math.Abs(textureLodBias - optimumTextureLodBias) < 0.0001f)
 +		{
 +			return;

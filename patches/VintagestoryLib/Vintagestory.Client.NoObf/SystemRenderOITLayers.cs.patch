@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..c44848a 100644
+index bba43f6..8414cd7 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -18,45 +18,93 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -18,45 +18,94 @@ public class SystemRenderOITLayers : ClientSystem
  		public int RenderRange => 1;
  
  		public BeforeOIT(ICoreClientAPI capi)
@@ -103,6 +103,7 @@ index bba43f6..c44848a 100644
 +					if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
 +				}
 +				catch { }
++				try { SystemRenderOITLayers.RestoreVanillaTransparentState(); } catch { }
 +				try { GL.ActiveTexture((TextureUnit)33984); } catch { }
  			}
 -			DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
@@ -124,7 +125,7 @@ index bba43f6..c44848a 100644
  		private void freeResources()
  		{
  			GL.DeleteTexture(accumTextureId);
-@@ -65,11 +113,11 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -65,11 +114,11 @@ public class SystemRenderOITLayers : ClientSystem
  			revealTextureId = 0;
  		}
  
@@ -137,7 +138,7 @@ index bba43f6..c44848a 100644
  		private void rebuild()
  		{
  			freeResources();
-@@ -104,15 +152,24 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -104,15 +153,24 @@ public class SystemRenderOITLayers : ClientSystem
  
  		public int RenderRange => 1;
  
@@ -167,7 +168,7 @@ index bba43f6..c44848a 100644
  		public void Dispose()
  		{
  		}
-@@ -122,10 +179,22 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -122,19 +180,50 @@ public class SystemRenderOITLayers : ClientSystem
  
  	private static int accumTextureId;
  
@@ -176,6 +177,20 @@ index bba43f6..c44848a 100644
 +	private static bool optimumOitDisabled;
 +
 +	private static bool optimumOitFailureLogged;
++
++	private static void RestoreVanillaTransparentState()
++	{
++		DrawBuffersEnum[] vanillaBuffers = new DrawBuffersEnum[3]
++		{
++			DrawBuffersEnum.ColorAttachment0,
++			DrawBuffersEnum.ColorAttachment1,
++			DrawBuffersEnum.ColorAttachment2
++		};
++		GL.DrawBuffers(vanillaBuffers.Length, vanillaBuffers);
++		GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++		GL.BlendFunc(1, (BlendingFactorSrc)0, (BlendingFactorDest)769);
++		GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
++	}
 +
 +	private static void DisableOptimumOit(ICoreClientAPI capi, string reason, Exception error = null)
 +	{
@@ -190,3 +205,17 @@ index bba43f6..c44848a 100644
  	public override EnumClientSystemType GetSystemType()
  	{
  		return EnumClientSystemType.Render;
+ 	}
+ 
+ 	public SystemRenderOITLayers(ClientMain game)
+ 		: base(game)
+ 	{
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveOit)
++		{
++			optimumOitDisabled = true;
++			return;
++		}
+ 		game.api.Event.RegisterRenderer(new BeforeOIT(game.api), EnumRenderStage.OIT, "beforeoit");
+ 		game.api.Event.RegisterRenderer(new AfterOIT(), EnumRenderStage.OIT, "afteroit");
+ 	}
+ }

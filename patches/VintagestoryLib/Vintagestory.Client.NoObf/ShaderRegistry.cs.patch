@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..1e7a086 100644
+index 4a24e75..edaaa34 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..1e7a086 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,36 +183,122 @@ public class ShaderRegistry
+@@ -181,39 +183,149 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -39,6 +39,7 @@ index 4a24e75..1e7a086 100644
  	private static bool loadRegisteredShaderPrograms()
  	{
  		ScreenManager.Platform.Logger.Notification("Loading shaders...");
++		OptimumConfig.ResetShaderCompatibilityAfterReload();
  		bool flag = true;
 -		_ = ScreenManager.Platform.AssetManager;
 -		List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
@@ -49,7 +50,7 @@ index 4a24e75..1e7a086 100644
 +		// Phase 1 (CPU-only): asset I/O, UTF-8 decode, #include resolution, #define prefixes.
 +		// Phase 2 (GL thread): glCompileShader, glLinkProgram, sampler setup.
 +		// When disabled, runs vanilla single-threaded path.
-+		if (OptimumConfig.ShaderPreprocessParallel)
++		if (OptimumConfig.EffectiveShaderPreprocessParallel)
  		{
 -			includes[item.Name] = item.ToText();
 +			bool useSSBOs = ScreenManager.Platform.UseSSBOs;
@@ -83,6 +84,11 @@ index 4a24e75..1e7a086 100644
 +				if (shaderProgram != null)
 +				{
 +					bool compiled = shaderProgram.Compile();
++					if (shaderProgram == ShaderPrograms.Chunkopaque)
++					{
++						bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
++						OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
++					}
 +					if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
 +					{
 +						shaderProgram.LoadError |= !compiled;
@@ -104,18 +110,23 @@ index 4a24e75..1e7a086 100644
 +			List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
 +			many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
 +			foreach (IAsset item in many)
- 			{
--				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
--				flag = shaderProgram.Compile() && flag;
++			{
 +				includes[item.Name] = item.ToText();
 +			}
 +			for (int i = 0; i < nextPassId; i++)
-+			{
+ 			{
+-				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
+-				flag = shaderProgram.Compile() && flag;
 +				ShaderProgram shaderProgram = shaderPrograms[i];
 +				if (shaderProgram != null)
 +				{
 +					LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
 +					bool compiled = shaderProgram.Compile();
++					if (shaderProgram == ShaderPrograms.Chunkopaque)
++					{
++						bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
++						OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
++					}
 +					if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
 +					{
 +						shaderProgram.LoadError |= !compiled;
@@ -133,9 +144,9 @@ index 4a24e75..1e7a086 100644
  		ShaderPrograms.Chunktopsoil.SetCustomSampler("terrainTexLinear", isLinear: true);
 +		// Only apply LOD bias when FSR is active (RenderScale < 1.0).
 +		// At 1.0, skip SamplerParameter calls entirely to match vanilla behavior.
-+		if (ClientSettings.OptimumRenderScale < 1.0f)
++		if (OptimumConfig.EffectiveRenderScale < 1.0f)
 +		{
-+			float terrainLodBias = MathF.Log2(ClientSettings.OptimumRenderScale);
++			float terrainLodBias = MathF.Log2(OptimumConfig.EffectiveRenderScale);
 +			GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
 +			GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
 +			GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
@@ -144,9 +155,25 @@ index 4a24e75..1e7a086 100644
  		return flag;
  	}
  
++	private static bool HasOptimumGreedyMeshContract(ShaderProgram program)
++	{
++		return HasOptimumGreedyMeshContract(program.VertexShader) && HasOptimumGreedyMeshContract(program.FragmentShader);
++	}
++
++	private static bool HasOptimumGreedyMeshContract(Shader shader)
++	{
++		return shader != null && shader.Code != null &&
++			shader.Code.Contains("tileBoundsMin", StringComparison.Ordinal) &&
++			shader.Code.Contains("tileBoundsSize", StringComparison.Ordinal) &&
++			shader.Code.Contains("GREEDYMESH", StringComparison.Ordinal);
++	}
++
  	private static void LoadShaderProgram(ShaderProgram program, bool useSSBOs)
  	{
-@@ -296,11 +384,11 @@ public class ShaderRegistry
+ 		if (program.LoadFromFile)
+ 		{
+ 			LoadShader(program, EnumShaderType.VertexShader);
+@@ -296,11 +408,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -159,7 +186,7 @@ index 4a24e75..1e7a086 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +421,28 @@ public class ShaderRegistry
+@@ -333,10 +445,27 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -172,7 +199,7 @@ index 4a24e75..1e7a086 100644
 +		// The flag tells the emitter what the live shaders can decode, so
 +		// a config/shader mismatch degrades to no merging instead of
 +		// feeding sentinel bits to a shader that would misread them.
-+		bool greedy = OptimumConfig.GreedyMeshEnabled;
++		bool greedy = OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh");
 +		Shader optimumFrag = program.FragmentShader;
 +		optimumFrag.PrefixCode = optimumFrag.PrefixCode + "#define GREEDYMESH " + (greedy ? 1 : 0) + "\r\n";
 +		// GREEDYMESH_GRAD picks the merged-quad sampler: 1 = textureGrad
@@ -182,7 +209,6 @@ index 4a24e75..1e7a086 100644
 +		optimumFrag.PrefixCode = optimumFrag.PrefixCode + "#define GREEDYMESH_GRAD " + (OptimumConfig.GreedyMeshTextureGrad ? 1 : 0) + "\r\n";
 +		Shader optimumVert = program.VertexShader;
 +		optimumVert.PrefixCode = optimumVert.PrefixCode + "#define GREEDYMESH " + (greedy ? 1 : 0) + "\r\n";
-+		OptimumConfig.GreedyMeshShadersCompiledOn = greedy;
  	}
  
  	private static string HandleIncludes(ShaderProgram program, string shaderCode, HashSet<string> filenames = null)

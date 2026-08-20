@@ -75,6 +75,7 @@ public static class ApiPatcher
         int mat4fInlined = PatchMat4fInlining(vanilla.MainModule);
         int headControllerFallback = PatchHeadControllerPoseFallback(vanilla.MainModule);
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
+        int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
 
         if (inventoryHooks != 2)
         {
@@ -116,6 +117,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 1 TyronThreadPool diagnostics patch, applied {threadPoolDiagnostics}.");
         }
+        if (clientApiThreadContract != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 ICoreClientAPI.IsTesselationThread contract patch, applied {clientApiThreadContract}.");
+        }
 
         int typeForwards = InjectTypeForwards(vanilla, contracts);
 
@@ -145,11 +151,42 @@ public static class ApiPatcher
             $"API patch complete: {inventoryHooks} inventory hooks, {chiselHooks} chisel LOD hook, " +
             $"{chiselShadowHooks} chisel LOD shadow hooks, " +
             $"{loggerInitializers} symbol-independent logger initializer, " +
-            $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined, " +
-            $"{headControllerFallback} head controller pose fallback, " +
-            $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
-            $"{typeForwards} type forwards.");
+                $"{gameVersionLabels} game version label, {mat4fInlined} Mat4f inlined, " +
+                $"{headControllerFallback} head controller pose fallback, " +
+                $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
+                $"{clientApiThreadContract} client API thread contract, " +
+                $"{typeForwards} type forwards.");
         return true;
+    }
+
+    internal static int PatchClientApiThreadContract(ModuleDefinition module)
+    {
+        const string typeName = "Vintagestory.API.Client.ICoreClientAPI";
+        const string methodName = "IsTesselationThread";
+        var clientApi = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        if (clientApi.Methods.Any(method =>
+                method.Name == methodName &&
+                method.Parameters.Count == 1 &&
+                method.Parameters[0].ParameterType.MetadataType == MetadataType.Int32 &&
+                method.ReturnType.MetadataType == MetadataType.Boolean))
+        {
+            return 0;
+        }
+
+        var method = new MethodDefinition(
+            methodName,
+            MethodAttributes.Public |
+            MethodAttributes.Abstract |
+            MethodAttributes.Virtual |
+            MethodAttributes.HideBySig |
+            MethodAttributes.NewSlot,
+            module.TypeSystem.Boolean);
+        method.Parameters.Add(new ParameterDefinition("threadId", ParameterAttributes.None, module.TypeSystem.Int32));
+        clientApi.Methods.Add(method);
+        Console.WriteLine($"  API PATCHED: {typeName}.{methodName}(int)");
+        return 1;
     }
 
     internal static int PatchGameVersionLabel(ModuleDefinition module, string optimumVersion)
