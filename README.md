@@ -5,7 +5,7 @@
 
 [![License](https://img.shields.io/badge/license-GPL--3.0%20%2B%20Commons%20Clause-blue)](LICENSE)
 [![VS Version](https://img.shields.io/badge/Vintage%20Story-1.22.7-green)](https://www.vintagestory.at)
-[![Stars](https://img.shields.io/github/stars/Zaldaryon/Optimum?logo=github&style=flat)](https://github.com/Zaldaryon/Optimum/stargazers)
+[![Stars](https://img.shields.io/github/stars/StratumServer/Optimum?logo=github&style=flat)](https://github.com/StratumServer/Optimum/stargazers)
 
 Optimum is a high-performance, client-side fork of [Vintage Story](https://www.vintagestory.at).
 
@@ -52,7 +52,7 @@ Optimum compiles from source because Vintage Story is proprietary. The first bui
 **Interactive installer** (guided, checks and installs prerequisites):
 
 ```bash
-git clone https://github.com/Zaldaryon/Optimum.git
+git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 ./scripts/install-linux.sh
 ```
@@ -62,7 +62,7 @@ The installer shows a ✓/✗ checklist of required tools, offers to install any
 **AppImage** (single portable executable, no install):
 
 ```bash
-git clone https://github.com/Zaldaryon/Optimum.git
+git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 make package-appimage
 chmod +x Optimum-v0.3.13-linux-x64.AppImage
@@ -74,7 +74,7 @@ If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/
 **Manual build** (for development or full control):
 
 ```bash
-git clone https://github.com/Zaldaryon/Optimum.git
+git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 make check    # report which tools are installed (installs nothing)
 make build    # bootstrap + build
@@ -88,7 +88,7 @@ Requires .NET 10 SDK, bash, python3, git, curl, perl.
 **GUI installer** (checks prerequisites, offers downloads, choose install folder):
 
 ```powershell
-git clone https://github.com/Zaldaryon/Optimum.git
+git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 .\install-windows.cmd
 ```
@@ -109,7 +109,7 @@ Requires .NET 10 SDK, Git for Windows, and PowerShell 5.1+.
 ### macOS
 
 ```bash
-git clone https://github.com/Zaldaryon/Optimum.git
+git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 make build
 ./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg

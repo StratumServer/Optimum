@@ -10,6 +10,6 @@ public static class OptimumInfo
 {
     public const string Version = OptimumConfig.Version;
     public const string Name = "Optimum";
-    public const string Url = "https://github.com/Zaldaryon/Optimum";
+    public const string Url = "https://github.com/StratumServer/Optimum";
     public const string DisplayTag = Name + " v" + Version;
 }
