@@ -229,9 +229,12 @@ if [[ -n "$BAD_SHADERS" ]]; then
 fi
 
 # 6. Rebrand: rename launcher, swap icon, rewrite Info.plist.
+# Keep the vanilla-named binary too so managers that hardcode 'vintagestory'
+# still reach Optimum; CFBundleExecutable stays Optimum. Both copies load the
+# same patched Vintagestory.dll through the embedded entry name.
 if [[ -f "$APP_DIR/Vintagestory" ]]; then
-    mv "$APP_DIR/Vintagestory" "$APP_DIR/Optimum"
-    chmod +x "$APP_DIR/Optimum"
+    cp -f "$APP_DIR/Vintagestory" "$APP_DIR/Optimum"
+    chmod +x "$APP_DIR/Vintagestory" "$APP_DIR/Optimum"
 else
     echo "Warning: launcher 'Vintagestory' not found in bundle." >&2
 fi
