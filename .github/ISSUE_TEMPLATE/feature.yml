@@ -1,5 +1,6 @@
 name: Feature or optimization suggestion
 description: Suggest a performance optimization, compatibility improvement, or installer change.
+title: "[Feature] "
 labels: ["enhancement"]
 body:
   - type: markdown

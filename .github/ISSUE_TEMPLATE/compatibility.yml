@@ -1,5 +1,6 @@
 name: Mod or shader compatibility
 description: Optimum conflicts with another mod or shader package.
+title: "[Compatibility] "
 labels: ["bug", "compatibility"]
 body:
   - type: markdown
