@@ -333,9 +333,13 @@ fi
 # 6. Rebrand: rename launcher, repoint run.sh, swap icon, brand .desktop
 # ============================================================================
 
+# Keep the vanilla-named binary too: managers like StoryForge hardcode
+# 'vintagestory' when launching the game, and both names load the same
+# patched Vintagestory.dll through the embedded entry name, so either
+# entrypoint runs Optimum.
 if [[ -f "$STAGE_DIR/Vintagestory" ]]; then
-    mv "$STAGE_DIR/Vintagestory" "$STAGE_DIR/Optimum"
-    chmod +x "$STAGE_DIR/Optimum"
+    cp -f "$STAGE_DIR/Vintagestory" "$STAGE_DIR/Optimum"
+    chmod +x "$STAGE_DIR/Vintagestory" "$STAGE_DIR/Optimum"
 else
     echo "Warning: launcher 'Vintagestory' not found in archive." >&2
 fi
