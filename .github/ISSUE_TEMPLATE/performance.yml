@@ -1,5 +1,6 @@
 name: Performance regression
 description: FPS, frame time, or stutter got worse, especially compared to an earlier Optimum release.
+title: "[Performance] "
 labels: ["bug", "performance"]
 body:
   - type: input
