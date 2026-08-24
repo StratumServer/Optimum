@@ -1,5 +1,6 @@
 name: Crash report
 description: The client crashed, froze on load, or threw an unhandled exception.
+title: "[Crash] "
 labels: ["bug", "crash"]
 body:
   - type: input
