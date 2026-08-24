@@ -7,6 +7,8 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading;
 
+[assembly: InternalsVisibleTo("Optimum.Launcher.Tests")]
+
 namespace Optimum.Launcher;
 
 /// <summary>
@@ -612,14 +614,25 @@ public static class Program
     }
 
     /// <summary>
-    /// Extracts --dataPath from CLI args (same as VS does).
+    /// Extracts --dataPath from CLI args, matching the forms the game itself
+    /// accepts through CommandLineParser: "--dataPath VALUE" and
+    /// "--dataPath=VALUE", plus the "-d" convenience forms. Returns null when
+    /// absent so the caller falls back to datapath.cfg and then the install
+    /// directory.
     /// </summary>
-    private static string? ResolveDataPath(string[] args)
+    internal static string? ResolveDataPath(string[] args)
     {
-        for (int i = 0; i < args.Length - 1; i++)
+        for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] is "--dataPath" or "-d")
-                return args[i + 1];
+            string arg = args[i];
+            if (arg is "--dataPath" or "-d")
+            {
+                return i + 1 < args.Length ? args[i + 1] : null;
+            }
+            if (arg.StartsWith("--dataPath=", StringComparison.Ordinal))
+                return arg["--dataPath=".Length..];
+            if (arg.StartsWith("-d=", StringComparison.Ordinal))
+                return arg["-d=".Length..];
         }
 
         var configPath = Path.Combine(AppContext.BaseDirectory, "datapath.cfg");
