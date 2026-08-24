@@ -1,0 +1,14 @@
+name: Question or documentation issue
+description: Ask how something works, or report a wiki or README mismatch with the current source.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Open-ended questions and documentation mismatches go here. No fixed structure required, just say what you found or what you want to know. For a doc mismatch, name the wiki page and the current source it disagrees with if you know it.
+  - type: textarea
+    id: body
+    attributes:
+      label: Question or mismatch
+    validations:
+      required: true

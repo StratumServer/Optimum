@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Building from Source
+    url: https://github.com/StratumServer/Optimum/wiki/Building-from-Source
+    about: Prerequisites and platform-specific build steps. Check this before filing an install or build failure.
+  - name: Settings
+    url: https://github.com/StratumServer/Optimum/wiki/Settings
+    about: Config file locations and the world-generation workaround keys.
+  - name: Vanilla bug
+    url: https://github.com/anegostudios/VintageStory-Issues/issues
+    about: If the same problem happens on a stock vanilla client, report it upstream instead.

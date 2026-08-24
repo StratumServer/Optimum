@@ -1,0 +1,88 @@
+name: Crash report
+description: The client crashed, froze on load, or threw an unhandled exception.
+labels: ["bug", "crash"]
+body:
+  - type: input
+    id: optimum-version
+    attributes:
+      label: Optimum version
+      description: From the launcher log line "[Optimum] Optimum vX.Y.Z".
+      placeholder: "0.3.13"
+    validations:
+      required: true
+  - type: input
+    id: vs-version
+    attributes:
+      label: Vintage Story version
+      placeholder: "1.22.7"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: What was happening
+      description: What you were doing when it crashed. First frame of loading, world age, recent actions, graphics settings changed.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Leave blank if the crash is not reliably reproducible.
+  - type: textarea
+    id: trace
+    attributes:
+      label: Crash report or stack trace
+      description: Copy the text from the in-game Crash Reporter screen, or paste the exception from the log.
+      render: text
+      placeholder: |
+        System.InvalidOperationException: ...
+           at ...
+    validations:
+      required: true
+  - type: textarea
+    id: launcher-log
+    attributes:
+      label: Optimum launcher log
+      description: Attach or paste `Logs/optimum-launcher.log` from your data path. Full file, not a snippet.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: client-log
+    attributes:
+      label: Vintage Story client log
+      description: Attach `Logs/client-main.log` from your data path. Full file, not a snippet.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: shader-compat
+    attributes:
+      label: Shader compatibility report
+      description: If a shader or render-hook mod is installed, paste the contents of `.optimum/shader-compatibility.json` from your data path.
+      render: json
+  - type: textarea
+    id: mods
+    attributes:
+      label: Mods loaded
+      description: List any mods, including shader packages. Try to reproduce with only Optimum active if possible.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I confirmed this does not happen on a stock vanilla Vintage Story client.
+          required: true
+        - label: I am running the latest Optimum release.
+          required: true
