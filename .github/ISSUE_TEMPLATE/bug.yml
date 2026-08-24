@@ -1,0 +1,74 @@
+name: Bug report
+description: Something in the game behaves differently from vanilla, or differently from a previous Optimum release.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, confirm the bug reproduces with Optimum's patches and shaders active, not only in vanilla Vintage Story. If it also happens in vanilla, report it to [VintageStory-Issues](https://github.com/anegostudios/VintageStory-Issues/issues) instead. For a crash or unhandled exception, use the Crash report form. For a conflict with another mod or shader, use the Mod or shader compatibility form.
+  - type: input
+    id: optimum-version
+    attributes:
+      label: Optimum version
+      description: From the launcher log line "[Optimum] Optimum vX.Y.Z", or the splash screen.
+      placeholder: "0.3.13"
+    validations:
+      required: true
+  - type: input
+    id: vs-version
+    attributes:
+      label: Vintage Story version
+      placeholder: "1.22.7"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Load a world with ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Attach a screenshot or short video if it helps show the problem.
+  - type: textarea
+    id: mods
+    attributes:
+      label: Mods loaded
+      description: List any mods, including shader packages. Try to reproduce with only Optimum active if possible.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I confirmed this does not happen on a stock vanilla Vintage Story client.
+          required: true
+        - label: I am running the latest Optimum release.
+          required: true

@@ -1,0 +1,40 @@
+name: Performance regression
+description: FPS, frame time, or stutter got worse, especially compared to an earlier Optimum release.
+labels: ["bug", "performance"]
+body:
+  - type: input
+    id: optimum-version
+    attributes:
+      label: Optimum version
+      placeholder: "0.3.13"
+    validations:
+      required: true
+  - type: input
+    id: last-good-version
+    attributes:
+      label: Last version without the regression
+      description: Leave blank if you are not sure, or if this is your first Optimum version.
+      placeholder: "0.3.12"
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      placeholder: "RTX 3060, Ryzen 5 5600, 32 GB RAM"
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: What you observe
+      description: FPS numbers, frame time, or a stutter pattern. Before and after numbers if you have them.
+    validations:
+      required: true
+  - type: textarea
+    id: world
+    attributes:
+      label: World and settings
+      description: Render distance, graphics settings, FSR or render scale setting, world age, anything unusual built nearby.
+  - type: textarea
+    id: mods
+    attributes:
+      label: Mods loaded

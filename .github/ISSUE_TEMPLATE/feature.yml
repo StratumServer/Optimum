@@ -1,0 +1,32 @@
+name: Feature or optimization suggestion
+description: Suggest a performance optimization, compatibility improvement, or installer change.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Optimum accepts performance optimizations, compatibility improvements, and installer or build changes. It does not accept gameplay, balance, or content changes; those belong in a mod. See [CONTRIBUTING.md](https://github.com/StratumServer/Optimum/blob/main/CONTRIBUTING.md).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is the actual problem you are trying to solve. Not the solution yet.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This does not change gameplay, balance, or add content.
+          required: true
