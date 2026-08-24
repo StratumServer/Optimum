@@ -118,6 +118,30 @@ make build
 
 Open the .dmg and drag Optimum.app to Applications. Requires .NET 10 SDK, bash, python3, git, curl, perl.
 
+## Settings
+
+Optimum persists its runtime settings to `ModConfig/optimum.json` inside your
+Vintage Story data path. The file is created with defaults on first run.
+The `.optimum/` directory under the same data path holds launcher state
+(donor assemblies, the patched-assembly cache, and the shader compatibility
+report), not user settings.
+
+The data path depends on the platform:
+
+| Platform | Data path |
+|---|---|
+| Windows | `%APPDATA%\VintagestoryData` |
+| Linux | `~/.config/VintagestoryData` |
+| macOS | `~/Library/Application Support/VintagestoryData` |
+
+Older macOS installs may still have `~/.config/VintagestoryData`; the game
+moves that folder to the new location on first run.
+
+The client reads the file once at startup, so a full restart is required
+after editing it. When troubleshooting world-generation problems, the four
+relevant keys are `ChunkReadPoolEnabled`, `ChunkReadPoolWorkers`,
+`ChunkDeserializeParallel`, and `ChunkDeserializeParallelMinY`.
+
 ## Build
 
 ### Targeting a Vintage Story version

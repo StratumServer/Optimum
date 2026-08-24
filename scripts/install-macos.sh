@@ -226,9 +226,9 @@ install_optimum() {
     # Step 5: Remove vanilla launcher.
     rm -f "$install_dir/Vintagestory" 2>/dev/null
 
-    # Step 6: Create .optimum config dir.
+    # Step 6: Create the launcher state dir. Runtime settings live in
+    # ModConfig/optimum.json under the VS data path, not here.
     mkdir -p "$install_dir/.optimum"
-    [[ -f "$install_dir/.optimum/optimum.json" ]] || echo '{}' > "$install_dir/.optimum/optimum.json"
     echo "$OPTIMUM_VERSION" > "$install_dir/.optimum/version"
 
     cat > "$install_dir/run-optimum.sh" <<'LAUNCHER'
