@@ -14,6 +14,13 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 
+# A GIT_DIR inherited from the calling environment (some tools and shell rc
+# files export it) overrides repository discovery for every git call below:
+# the clone succeeds, then the very next `git -C <clone> config` dies with
+# "fatal: not in a git directory". Drop it, along with its siblings, so this
+# script only ever talks to repositories it names explicitly.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+
 usage() {
   cat <<'EOF'
 Usage: scripts/bootstrap.sh [--version VERSION] [--client-archive PATH] [--refresh]
@@ -455,6 +462,12 @@ if [[ -f "$forks_file" ]]; then
       rm -rf "$base"
       echo "Cloning $name at $ref"
       git -c core.autocrlf=false -c core.eol=lf clone --quiet "$url" "$base"
+      if [[ ! -d "$base/.git" ]]; then
+        echo "Cloning $name succeeded but left no repository at $base" >&2
+        echo "Check the URL in forks.json and your git environment (GIT_DIR," >&2
+        echo "GIT_WORK_TREE), then retry." >&2
+        exit 1
+      fi
       git -C "$base" config core.autocrlf false
       git -C "$base" config core.eol lf
       git -C "$base" checkout --quiet "$ref"
