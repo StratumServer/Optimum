@@ -1,0 +1,75 @@
+name: Install, update, or build failure
+description: The installer, updater, or a from-source build failed before the game launched.
+labels: ["bug", "installer"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most install failures are platform-specific. Check the [Building from Source](https://github.com/StratumServer/Optimum/wiki/Building-from-Source) wiki page for your platform before filing.
+  - type: dropdown
+    id: method
+    attributes:
+      label: Install method
+      options:
+        - Prebuilt installer or updater
+        - bootstrap.sh / build from source
+        - Package manager (AUR, Flatpak, etc.)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: input
+    id: from-version
+    attributes:
+      label: Updating from version
+      description: Leave blank on a fresh install.
+      placeholder: "0.3.12"
+  - type: input
+    id: to-version
+    attributes:
+      label: Installing or updating to version
+      placeholder: "0.3.13"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps taken
+      description: Exact commands run, or exact clicks in the installer UI.
+      placeholder: |
+        1. Downloaded the v0.3.13 release
+        2. Ran ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: where
+    attributes:
+      label: Where it stopped
+      description: The last visible step, phase, or progress message before it failed or hung.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Full error output or log
+      description: Paste the exact error text, or attach the log. Do not paraphrase the error.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I read the Building from Source wiki page for my platform.
+          required: true
