@@ -126,6 +126,12 @@ try {
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }
+    # Managers that launch the game executable by its vanilla name
+    # (StoryForge launches Vintagestory.exe directly) must get the Optimum
+    # launcher, not a vanilla start. The apphost embeds the managed entry
+    # name (Optimum.dll), so a byte copy still loads and runs the launcher;
+    # Optimum.runtimeconfig.json and Optimum.dll are already staged above.
+    Copy-Item -Force (Join-Path $launcherOut 'Optimum.exe') (Join-Path $stageDir 'Vintagestory.exe')
     # Native assets for the launcher's patch-progress splash screen (OpenTK's
     # GLFW, SkiaSharp's text renderer). .NET's default native resolver looks
     # for these under runtimes/<rid>/native/ relative to the app base
