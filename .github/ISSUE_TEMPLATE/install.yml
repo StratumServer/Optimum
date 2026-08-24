@@ -1,5 +1,6 @@
 name: Install, update, or build failure
 description: The installer, updater, or a from-source build failed before the game launched.
+title: "[Installer] "
 labels: ["bug", "installer"]
 body:
   - type: markdown
