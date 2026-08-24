@@ -1,0 +1,55 @@
+name: Mod or shader compatibility
+description: Optimum conflicts with another mod or shader package.
+labels: ["bug", "compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check `.optimum/shader-compatibility.json` in your data path first. If it already flags the mod as a conflict and disables a feature, say so below and describe what still goes wrong.
+  - type: input
+    id: conflicting-mod
+    attributes:
+      label: Conflicting mod or shader package
+      description: Name and version.
+      placeholder: "Ancestral Bliss Shaders 1.3.15"
+    validations:
+      required: true
+  - type: input
+    id: optimum-version
+    attributes:
+      label: Optimum version
+      placeholder: "0.3.13"
+    validations:
+      required: true
+  - type: input
+    id: vs-version
+    attributes:
+      label: Vintage Story version
+      placeholder: "1.22.7"
+    validations:
+      required: true
+  - type: textarea
+    id: symptom
+    attributes:
+      label: What happens
+      description: Crash, visual glitch, or disabled feature. Name the specific visual element if applicable (clouds, water, godrays, FSR).
+    validations:
+      required: true
+  - type: textarea
+    id: shader-compat
+    attributes:
+      label: Shader compatibility report
+      description: Paste the contents of `.optimum/shader-compatibility.json` from your data path.
+      render: json
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: client-log
+    attributes:
+      label: Vintage Story client log
+      description: Attach `Logs/client-main.log` from your data path.
+      render: text
