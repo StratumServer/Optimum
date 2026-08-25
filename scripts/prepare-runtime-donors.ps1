@@ -305,19 +305,34 @@ Exclude-CompileItems $survivalProject @(
 Resolve-ProjectReferences $essentialsProject
 Resolve-ProjectReferences $survivalProject
 
-foreach ($project in @('VSEssentials', 'VSSurvivalMod')) {
+$runtimeProjects = @('VSEssentials', 'VSSurvivalMod')
+$runtimePatchFailures = @()
+foreach ($project in $runtimeProjects) {
     $patchRoot = Join-Path $repoRoot "patches/runtime/$project"
     Get-ChildItem -Path $patchRoot -Filter '*.patch' -Recurse -File |
         Sort-Object FullName |
         ForEach-Object {
             $patchPath = $_.FullName
-            Invoke-NativeStep {
-                & git -C $repoRoot apply --check --directory='.build/runtime-donors' --whitespace=nowarn $patchPath *> $null
+            $patchOutput = Invoke-NativeStep {
+                & git -C $repoRoot apply --check --directory='.build/runtime-donors' --whitespace=nowarn $patchPath 2>&1 |
+                    Out-String
             }
-            if ($LASTEXITCODE -ne 0) {
-                throw "Runtime donor unavailable: $project requires a patch refresh for $($_.Name)."
+            $patchExitCode = $LASTEXITCODE
+            if ($patchExitCode -ne 0) {
+                $details = ([string]$patchOutput).Trim()
+                if (-not $details) {
+                    $details = 'git apply --check failed without diagnostic output.'
+                }
+                $runtimePatchFailures += "$project requires a patch refresh for $($_.Name): $details"
             }
         }
+}
+if ($runtimePatchFailures.Count -gt 0) {
+    throw "Runtime donor compatibility gate failed:`n  $($runtimePatchFailures -join "`n  ")"
+}
+
+foreach ($project in $runtimeProjects) {
+    $patchRoot = Join-Path $repoRoot "patches/runtime/$project"
     Get-ChildItem -Path $patchRoot -Filter '*.patch' -Recurse -File |
         Sort-Object FullName |
         ForEach-Object {
