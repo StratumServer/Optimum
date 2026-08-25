@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
-index 43dace8..0c2708a 100644
+index 43dace8..90acd17 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
 @@ -28,10 +28,17 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
@@ -35,20 +35,19 @@ index 43dace8..0c2708a 100644
  		{
  			server.ModEventManager.RegisterOnServerRunPhase(EnumServerRunPhase.RunGame, OnRestoreFromBuildLog);
  		}
-@@ -207,10 +218,12 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -207,10 +218,11 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  		}
  	}
  
  	public override void OnSeperateThreadShutDown()
  	{
-+		try { chunkthread.optimumReadPool?.Dispose(); } catch { }
-+		chunkthread.optimumReadPool = null;
++		DisposeOptimumChunkReadPool();
  		chunkthread.gameDatabase.Dispose();
  	}
  
  	public void OnWorldBeingSaved()
  	{
-@@ -398,11 +411,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -398,11 +410,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  	}
  
  	private int SaveAllDirtyMapRegions(FastMemoryStream ms)
@@ -63,7 +62,7 @@ index 43dace8..0c2708a 100644
  			if (loadedMapRegion.Value.DirtyForSaving)
  			{
  				loadedMapRegion.Value.DirtyForSaving = false;
-@@ -419,11 +434,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -419,11 +433,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  	}
  
  	private int SaveAllDirtyMapChunks(FastMemoryStream ms)
@@ -78,7 +77,7 @@ index 43dace8..0c2708a 100644
  			if (loadedMapChunk.Value.DirtyForSaving)
  			{
  				loadedMapChunk.Value.DirtyForSaving = false;
-@@ -446,11 +463,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -446,11 +462,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  	}
  
  	internal int SaveAllDirtyLoadedChunks(bool isSaveLater, FastMemoryStream ms)
@@ -93,7 +92,7 @@ index 43dace8..0c2708a 100644
  			PopulateChunksCopy();
  		}
  		foreach (KeyValuePair<long, ServerChunk> item in chunksCopy)
-@@ -504,11 +523,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -504,11 +522,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  	internal int SaveAllDirtyGeneratingChunks(FastMemoryStream ms)
  	{
  		int num = 0;
@@ -108,7 +107,7 @@ index 43dace8..0c2708a 100644
  			{
  				if (item.Chunks == null || item.Disposed || item.CurrentIncompletePass <= EnumWorldGenPass.Terrain)
  				{
-@@ -721,6 +742,31 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -721,6 +741,45 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  			list.Clear();
  		}
  		ServerMain.Logger.Notification($"Block restore: Total of {dictionary.Count} chunks and {num} block have been restored from the build log. {num2} Blocks already had a new Block at their position.");
@@ -136,6 +135,20 @@ index 43dace8..0c2708a 100644
 +		{
 +			ServerMain.Logger.Warning("[Optimum] Chunk read pool failed to start: {0}", ex.Message);
 +			chunkthread.optimumReadPool = null;
++		}
++	}
++
++	private void DisposeOptimumChunkReadPool()
++	{
++		OptimumChunkReadPool pool = chunkthread.optimumReadPool;
++		chunkthread.optimumReadPool = null;
++		try
++		{
++			pool?.Dispose();
++		}
++		catch (Exception ex)
++		{
++			ServerMain.Logger.Warning("[Optimum] Chunk read pool shutdown failed: {0}", ex.Message);
 +		}
 +	}
 +

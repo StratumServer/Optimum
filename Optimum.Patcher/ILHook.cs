@@ -157,10 +157,99 @@ public static class ILHook
         return true;
     }
 
+    /// <summary>
+    /// Inserts a parameterless instance void hook immediately before exactly one
+    /// matching call in the target method. Unlike <see cref="InsertBeforeCall"/>,
+    /// this preserves the target call's existing stack (the call is void and has
+    /// no return value to carry through).
+    /// </summary>
+    public static bool InsertInstanceVoidCallBefore(
+        AssemblyDefinition vanillaAsm,
+        string typeName, string methodName, int paramCount,
+        string hookMethodName, string targetCallName,
+        string targetDeclaringType,
+        IReadOnlyList<string> targetParameterTypes,
+        string targetReturnType,
+        bool targetHasThis,
+        bool targetExplicitThis,
+        MethodCallingConvention targetCallingConvention,
+        int targetGenericArity)
+    {
+        var type = vanillaAsm.MainModule.GetType(typeName);
+        if (type == null) { Console.Error.WriteLine($"  HOOK SKIP: type not found {typeName}"); return false; }
+
+        var method = MethodSignature.FindUnique(type, methodName, paramCount);
+        if (method == null) { Console.Error.WriteLine($"  HOOK SKIP: method not found {typeName}::{methodName}"); return false; }
+        method.DebugInformation.SequencePoints.Clear();
+        method.DebugInformation.Scope = null;
+
+        var hookMethod = MethodSignature.FindUnique(type, hookMethodName);
+        if (hookMethod == null) { Console.Error.WriteLine($"  HOOK SKIP: hook method not found {typeName}::{hookMethodName}"); return false; }
+        if (!hookMethod.HasThis || hookMethod.Parameters.Count != 0 || hookMethod.ReturnType.FullName != "System.Void")
+        {
+            Console.Error.WriteLine($"  HOOK SKIP: {typeName}::{hookMethodName} must be a parameterless instance void method");
+            return false;
+        }
+
+        var targetCalls = method.Body.Instructions
+            .Where(i => (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+                        i.Operand is MethodReference mr &&
+                        MethodSignature.Matches(
+                            mr,
+                            targetDeclaringType,
+                            targetCallName,
+                            targetParameterTypes,
+                            targetReturnType,
+                            targetHasThis,
+                            targetExplicitThis,
+                            targetCallingConvention,
+                            targetGenericArity))
+            .ToList();
+
+        if (targetCalls.Count != 1)
+        {
+            Console.Error.WriteLine(
+                $"  HOOK SKIP: expected exactly one call to {targetCallName} in " +
+                $"{typeName}::{methodName}, found {targetCalls.Count}");
+            return false;
+        }
+
+        var targetCall = targetCalls[0];
+        if (AlreadyCallsHookBefore(targetCall, hookMethod))
+        {
+            Console.WriteLine($"  HOOK EXISTS: {typeName}::{methodName} before {targetCallName} → {hookMethodName}");
+            return true;
+        }
+
+        var il = method.Body.GetILProcessor();
+        il.InsertBefore(targetCall, il.Create(OpCodes.Ldarg_0));
+        il.InsertBefore(targetCall, il.Create(OpCodes.Call, hookMethod));
+        method.Body.MaxStackSize = Math.Max(method.Body.MaxStackSize, method.Body.MaxStackSize + 1);
+
+        Console.WriteLine($"  HOOKED: {typeName}::{methodName} before {targetCallName} → {hookMethodName}");
+        return true;
+    }
+
     private static bool AlreadyCallsHook(Instruction? start, MethodDefinition hookMethod)
     {
         Instruction? cursor = start;
         for (int i = 0; i < 6 && cursor != null; i++, cursor = cursor.Next)
+        {
+            if ((cursor.OpCode == OpCodes.Call || cursor.OpCode == OpCodes.Callvirt) &&
+                cursor.Operand is MethodReference method &&
+                MethodSignature.Matches(hookMethod, method))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool AlreadyCallsHookBefore(Instruction target, MethodDefinition hookMethod)
+    {
+        Instruction? cursor = target.Previous;
+        for (int i = 0; i < 6 && cursor != null; i++, cursor = cursor.Previous)
         {
             if ((cursor.OpCode == OpCodes.Call || cursor.OpCode == OpCodes.Callvirt) &&
                 cursor.Operand is MethodReference method &&

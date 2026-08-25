@@ -305,6 +305,7 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "optimumSaveBatch",
         "TryStartOptimumChunkReadPool",
+        "DisposeOptimumChunkReadPool",
     },
     ["Vintagestory.Server.ServerSystemBlockSimulation"] = new()
     {
@@ -586,9 +587,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyMapChunks", 1),
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyLoadedChunks", 2),
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyGeneratingChunks", 1),
-    // OnSeperateThreadShutDown is deliberately not a target: its only change is
-    // disposing optimumReadPool, but the pre-existing body also references the
-    // class's shared <>c (SaveGameWorld's cached delegate) - see "Gap B" above.
+    // OnSeperateThreadShutDown is deliberately not a target: its pre-existing
+    // body references the class's shared <>c (SaveGameWorld's cached delegate).
+    // DisposeOptimumChunkReadPool is injected and called by an IL hook immediately
+    // before the vanilla GameDatabase.Dispose call instead.
     new("Vintagestory.Server.ServerSystemSendChunks", "sendAndEnqueueChunks", 1),
     new("Vintagestory.Server.ServerSystemBlockSimulation", "GetUpdateInterval", 0),
     new("Vintagestory.Server.ServerSystemBlockSimulation", "OnSeparateThreadTick", 0),
@@ -637,6 +639,23 @@ int total = ILPatcher.PatchWithInjection(
             TargetExplicitThis: false,
             TargetCallingConvention: MethodCallingConvention.Default,
             TargetGenericArity: 0),
+        // The shutdown method cannot be transplanted because its pre-existing
+        // body references the shared <>c nested type. Clear and dispose the
+        // read-only SQLite pool immediately before the vanilla database closes.
+        new(
+            "Vintagestory.Server.ServerSystemLoadAndSaveGame",
+            "OnSeperateThreadShutDown",
+            0,
+            "DisposeOptimumChunkReadPool",
+            "Dispose",
+            TargetDeclaringType: "Vintagestory.Common.GameDatabase",
+            TargetParameterTypes: [],
+            TargetReturnType: "System.Void",
+            TargetHasThis: true,
+            TargetExplicitThis: false,
+            TargetCallingConvention: MethodCallingConvention.Default,
+            TargetGenericArity: 0,
+            InsertBeforeTarget: true),
     },
     fieldsToRetype: fieldsToRetype);
 
