@@ -194,7 +194,7 @@ Or call the scripts directly:
 ./scripts/package-all.sh --targets linux-x64,osx-arm64
 ```
 
-The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer; pass `-ClientArchive` to use a specific installer.
+The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer; pass `-ClientArchive` to supply the installer when no matching cache exists.
 
 ### Host prerequisites for packaging
 
@@ -217,7 +217,7 @@ Linux and macOS packaging runs with bash. No PowerShell required for those targe
 |---|---|---|---|
 | **linux-x64** | ✅ tar.gz / AppImage | ✅ tar.gz | ✅ tar.gz |
 | **osx-x64 / osx-arm64** | ✅ unsigned .dmg | ✅ signed .dmg (hdiutil) | ⚠️ .tar.gz fallback |
-| **win-x64** | ✅ WSL, or prefilled official cache | ⚠️ prefilled official cache | ✅ native |
+| **win-x64** | ✅ pwsh + innoextract >= 1.11 | ✅ pwsh + innoextract >= 1.11 | ✅ native |
 
 The .dmg files built on Linux are unsigned. macOS Gatekeeper shows a warning on first open; users right-click > Open to accept. For a notarizable .dmg, build on macOS with an Apple Developer certificate.
 

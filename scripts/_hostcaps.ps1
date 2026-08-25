@@ -49,7 +49,10 @@ function Test-InnoextractMinimumVersion {
 
 function Test-CachedWindowsClient {
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    Test-Path (Join-Path $repoRoot '.vanilla/win-x64/vintagestory/Vintagestory.exe')
+    $clientDir = Join-Path $repoRoot '.vanilla/win-x64/vintagestory'
+    $marker = @(Get-ChildItem -Path (Join-Path $clientDir 'assets') -Filter 'version-*.txt' -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1)
+    (Test-Path (Join-Path $clientDir 'Vintagestory.exe')) -and $marker.Count -gt 0
 }
 
 # Returns an array of capability objects: Target, Quality (Full/Degraded/Blocked), Note.

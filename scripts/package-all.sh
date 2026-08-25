@@ -78,13 +78,30 @@ if [[ -n "$INNO_VERSION" && ( "$INNO_MAJOR" -gt 1 || ( "$INNO_MAJOR" -eq 1 && "$
     INNO_USABLE=1
 fi
 
-if [[ -f "$REPO_ROOT/.vanilla/win-x64/vintagestory/Vintagestory.exe" ]] && command -v dotnet &>/dev/null; then
+WIN_CACHE_DIR="$REPO_ROOT/.vanilla/win-x64/vintagestory"
+HAS_WIN_CACHE=0
+if [[ -f "$WIN_CACHE_DIR/Vintagestory.exe" ]]; then
+    for marker in "$WIN_CACHE_DIR"/assets/version-*.txt; do
+        if [[ -f "$marker" ]]; then
+            HAS_WIN_CACHE=1
+            break
+        fi
+    done
+fi
+
+if ! command -v pwsh &>/dev/null; then
+    map_set CAP_QUALITY win-x64 "Blocked"
+    map_set CAP_NOTE win-x64 "need pwsh + dotnet for off-platform Windows packaging"
+elif ! command -v dotnet &>/dev/null; then
+    map_set CAP_QUALITY win-x64 "Blocked"
+    map_set CAP_NOTE win-x64 "need dotnet to cross-build the win-x64 launcher"
+elif [[ "$HAS_WIN_CACHE" -eq 1 ]]; then
     map_set CAP_QUALITY win-x64 "Degraded"
     map_set CAP_NOTE win-x64 "cross-build Optimum.exe + cached Windows client"
-elif [[ "$INNO_USABLE" -eq 1 ]] && command -v dotnet &>/dev/null; then
+elif [[ "$INNO_USABLE" -eq 1 ]]; then
     map_set CAP_QUALITY win-x64 "Degraded"
     map_set CAP_NOTE win-x64 "cross-build Optimum.exe + innoextract $INNO_VERSION for the official Inno 6.4.3 installer"
-elif [[ -n "$INNO_VERSION" && "$INNO_MAJOR" -eq 1 && "$INNO_MINOR" -lt 11 ]]; then
+elif [[ -n "$INNO_VERSION" && ( "$INNO_MAJOR" -lt 1 || ( "$INNO_MAJOR" -eq 1 && "$INNO_MINOR" -lt 11 ) ) ]]; then
     map_set CAP_QUALITY win-x64 "Blocked"
     map_set CAP_NOTE win-x64 "innoextract $INNO_VERSION is too old; need innoextract >= 1.11"
 elif [[ -z "$INNO_VERSION" ]]; then
