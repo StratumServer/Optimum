@@ -156,6 +156,7 @@ public class InstallerReleaseCoverageTests
         Assert.DoesNotContain("cdn.vintagestory", installer);
         Assert.Contains("[string]$ClientArchive", package);
         Assert.Contains("innoextract >= 1.11", package);
+        Assert.Contains("A matching\npackage-client cache avoids the extractor", package);
         Assert.Contains("--info", package);
         Assert.Contains("--extract", package);
         Assert.Contains("vs_install_win-x64_", package);
@@ -170,6 +171,7 @@ public class InstallerReleaseCoverageTests
         Assert.Contains("ClientArchive", makefile);
         Assert.Contains("WIN_CACHE_DIR", packageAll);
         Assert.Contains("package-client", packageAll);
+        Assert.Contains("marker_version", packageAll);
         Assert.Contains("Vintagestory.exe", packageAll);
         Assert.Contains("innoextract >= 1.11", packageAll);
         Assert.Contains("command -v pwsh", packageAll);
