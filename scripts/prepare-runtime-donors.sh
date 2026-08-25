@@ -4,15 +4,6 @@ if (set -o pipefail 2>/dev/null); then
     set -o pipefail
 fi
 
-# sort -z is GNU coreutils; macOS sort lacks it. Fall back to plain sort
-# (patch filenames have no embedded newlines, so null-delimiting is
-# cosmetic and not required for correctness).
-if echo | sort -z 2>/dev/null; then
-    sort_z() { sort -z; }
-else
-    sort_z() { sort; }
-fi
-
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 vanilla_dir="${VANILLA_DIR:-$repo_root/.vanilla/win-x64/vintagestory}"
@@ -330,30 +321,8 @@ resolve_references() {
 resolve_references "$essentials_project"
 resolve_references "$survival_project"
 
-eligible_projects=()
-for project in VSEssentials VSSurvivalMod; do
-    project_ready=1
-    while IFS= read -r -d '' patch; do
-        if ! git -C "$repo_root" apply --check \
-            --directory=".build/runtime-donors" \
-            --whitespace=nowarn \
-            "$patch"; then
-            echo "Runtime donor unavailable: $project requires a patch refresh for $(basename "$patch")." >&2
-            project_ready=0
-            break
-        fi
-    done < <(find "$repo_root/patches/runtime/$project" -name '*.patch' -print0 | sort_z)
-
-    if [[ "$project_ready" == "1" ]]; then
-        while IFS= read -r -d '' patch; do
-            git -C "$repo_root" apply \
-                --directory=".build/runtime-donors" \
-                --whitespace=nowarn \
-                "$patch"
-        done < <(find "$repo_root/patches/runtime/$project" -name '*.patch' -print0 | sort_z)
-        eligible_projects+=("$project")
-    fi
-done
+"$repo_root/scripts/runtime-donor-patch-gate.sh" "$repo_root" ".build/runtime-donors"
+eligible_projects=(VSEssentials VSSurvivalMod)
 
 # Optimum-owned new types are source overlays, not decompiled game source.
 if [[ " ${eligible_projects[*]} " == *" VSEssentials "* ]]; then
