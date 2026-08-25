@@ -20,6 +20,33 @@ function Get-HostOS {
 
 function Test-Cmd { param([string]$Name) [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
 
+function Get-InnoextractVersion {
+    $command = Get-Command innoextract -ErrorAction SilentlyContinue
+    if (-not $command) { return $null }
+
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = @(& $command.Path --version 2>&1)
+        $exitCode = $LASTEXITCODE
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $previousEap
+    }
+    if ($exitCode -ne 0) { return $null }
+
+    $text = $output -join [Environment]::NewLine
+    if ($text -notmatch '(?im)^\s*innoextract\s+(\d+)\.(\d+)(?:\.(\d+))?') { return $null }
+    $patch = if ($Matches[3]) { [int]$Matches[3] } else { 0 }
+    return [Version]::new([int]$Matches[1], [int]$Matches[2], $patch)
+}
+
+function Test-InnoextractMinimumVersion {
+    $version = Get-InnoextractVersion
+    $version -and $version -ge [Version]'1.11'
+}
+
 function Test-CachedWindowsClient {
     $repoRoot = Split-Path -Parent $PSScriptRoot
     Test-Path (Join-Path $repoRoot '.vanilla/win-x64/vintagestory/Vintagestory.exe')
@@ -52,15 +79,18 @@ function Get-HostCaps {
     if ($os -eq 'Windows') {
         $caps += [pscustomobject]@{ Target='win-x64'; Quality='Full'; Note='native build + local vanilla client' }
     } else {
-        $hasExtract = (Test-Cmd innoextract)
+        $innoVersion = Get-InnoextractVersion
+        $hasExtract = $innoVersion -and $innoVersion -ge [Version]'1.11'
         $hasRid     = (Test-Cmd dotnet)   # cross-build the win-x64 apphost
         $hasCachedWinClient = Test-CachedWindowsClient
         if ($hasCachedWinClient -and $hasRid) {
             $caps += [pscustomobject]@{ Target='win-x64'; Quality='Degraded'; Note='cross-build Optimum.exe + cached Windows client' }
         } elseif ($hasExtract -and $hasRid) {
-            $caps += [pscustomobject]@{ Target='win-x64'; Quality='Degraded'; Note='cross-build Optimum.exe + innoextract vanilla installer' }
-        } elseif (-not $hasExtract) {
-            $caps += [pscustomobject]@{ Target='win-x64'; Quality='Blocked'; Note='need innoextract to unpack the Windows installer (vs_install_win-x64_*.exe)' }
+            $caps += [pscustomobject]@{ Target='win-x64'; Quality='Degraded'; Note="cross-build Optimum.exe + innoextract $innoVersion for the official Inno 6.4.3 installer" }
+        } elseif (-not $innoVersion) {
+            $caps += [pscustomobject]@{ Target='win-x64'; Quality='Blocked'; Note='need innoextract >= 1.11 to unpack the official Windows installer (vs_install_win-x64_*.exe)' }
+        } elseif ($innoVersion -lt [Version]'1.11') {
+            $caps += [pscustomobject]@{ Target='win-x64'; Quality='Blocked'; Note="innoextract $innoVersion is too old; need innoextract >= 1.11 for Inno Setup 6.4.3" }
         } else {
             $caps += [pscustomobject]@{ Target='win-x64'; Quality='Blocked'; Note='need dotnet to cross-build the win-x64 launcher' }
         }

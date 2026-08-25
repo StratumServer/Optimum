@@ -143,17 +143,27 @@ public class InstallerReleaseCoverageTests
     }
 
     [Fact]
-    public void WindowsInstallerRequiresAnExistingVintageStoryInstallation()
+    public void WindowsPackagingKeepsNativeInstallAndSupportsOffPlatformExtraction()
     {
         string installer = Read("scripts/install-windows.ps1");
         string package = Read("scripts/package.ps1");
+        string makefile = Read("Makefile");
+        string packageAll = Read("scripts/package-all.sh");
 
         Assert.Contains("Install Vintage Story $requiredVer before Optimum", installer);
         Assert.Contains("-VanillaDir $VsPath", installer);
         Assert.DoesNotContain("DownloadVs", installer);
         Assert.DoesNotContain("cdn.vintagestory", installer);
-        Assert.DoesNotContain("cdn.vintagestory", package);
-        Assert.DoesNotContain("innoextract", package);
+        Assert.Contains("[string]$ClientArchive", package);
+        Assert.Contains("innoextract >= 1.11", package);
+        Assert.Contains("--info", package);
+        Assert.Contains("--extract", package);
+        Assert.Contains("vs_install_win-x64_", package);
+        Assert.Contains("cdn.vintagestory", package);
+        Assert.Contains("innoextract >= 1.11", makefile);
+        Assert.Contains("ClientArchive", makefile);
+        Assert.Contains("vintagestory/Vintagestory.exe", packageAll);
+        Assert.Contains("innoextract >= 1.11", packageAll);
     }
 
     [Fact]
