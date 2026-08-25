@@ -2,7 +2,7 @@ diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs 
 index bba43f6..8414cd7 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -18,45 +18,94 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -18,45 +18,95 @@ public class SystemRenderOITLayers : ClientSystem
  		public int RenderRange => 1;
  
  		public BeforeOIT(ICoreClientAPI capi)
@@ -40,8 +40,8 @@ index bba43f6..8414cd7 100644
 +					SystemRenderOITLayers.DisableOptimumOit(capi, "render resources are unavailable");
 +					return;
 +				}
-+				transparentfb = capi.Render.FrameBuffers[1];
-+				if (transparentfb == null || transparentfb.Disposed)
++				FrameBufferRef currentTransparentfb = capi.Render.FrameBuffers[1];
++				if (currentTransparentfb == null || currentTransparentfb.Disposed)
 +				{
 +					SystemRenderOITLayers.DisableOptimumOit(capi, "transparent framebuffer is disposed");
 +					return;
@@ -63,8 +63,9 @@ index bba43f6..8414cd7 100644
 +				programByName.Uniform("liquidDepth", 4);
 +				programByName.Stop();
 +				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
-+				if (revealTextureId == 0 || transparentfb.Disposed || transparentfb != capi.Render.FrameBuffers[1])
++				if (revealTextureId == 0 || transparentfb == null || transparentfb.Disposed || transparentfb != currentTransparentfb)
 +				{
++					transparentfb = currentTransparentfb;
 +					rebuild();
 +					if (revealTextureId == 0 || accumTextureId == 0)
 +					{
