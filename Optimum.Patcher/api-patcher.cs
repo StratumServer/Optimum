@@ -43,7 +43,7 @@ public static class ApiPatcher
             ReadSymbols = false,
         };
 
-        using var vanilla = AssemblyDefinition.ReadAssembly(vanillaPath, vanillaReaderParameters);
+        using var vanilla = AssemblyReader.Read(vanillaPath, vanillaReaderParameters, out preserveSymbols);
         using var contracts = AssemblyDefinition.ReadAssembly(contractsPath, contractsReaderParameters);
 
         var bridge = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumApiBridge")

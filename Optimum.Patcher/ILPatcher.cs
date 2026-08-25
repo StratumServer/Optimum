@@ -104,7 +104,7 @@ public static class ILPatcher
             ReadSymbols = false
         };
 
-        using var vanillaAsm = AssemblyDefinition.ReadAssembly(vanillaPath, vanillaReaderParams);
+        using var vanillaAsm = AssemblyReader.Read(vanillaPath, vanillaReaderParams, out preserveSymbols);
         using var compiledAsm = AssemblyDefinition.ReadAssembly(compiledPath, compiledReaderParams);
 
         int injectedInterfaces = interfacesToInject == null
