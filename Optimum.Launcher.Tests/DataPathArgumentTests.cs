@@ -56,6 +56,41 @@ public sealed class DataPathArgumentTests
     }
 
     [Fact]
+    public void MissingConfiguredDataPathIsIgnored()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "optimum-data-path-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string configPath = Path.Combine(root, "datapath.cfg");
+        File.WriteAllText(configPath, Path.Combine(root, "missing"));
+        try
+        {
+            Assert.Null(Program.ResolveConfiguredDataPath(configPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExistingConfiguredDataPathIsAccepted()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "optimum-data-path-tests", Guid.NewGuid().ToString("N"));
+        string dataPath = Path.Combine(root, "data");
+        Directory.CreateDirectory(dataPath);
+        string configPath = Path.Combine(root, "datapath.cfg");
+        File.WriteAllText(configPath, $"  {dataPath}  ");
+        try
+        {
+            Assert.Equal(dataPath, Program.ResolveConfiguredDataPath(configPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void DefaultDataPathMatchesPackagedGamePath()
     {
         string gameDir = Path.Combine(Path.GetTempPath(), "optimum-data-path-tests", Guid.NewGuid().ToString("N"));

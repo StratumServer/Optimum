@@ -637,13 +637,20 @@ public static class Program
 
         var configPath = Path.Combine(AppContext.BaseDirectory, "datapath.cfg");
         if (File.Exists(configPath))
-        {
-            var configuredPath = File.ReadAllText(configPath).Trim();
-            if (configuredPath.Length > 0)
-                return configuredPath;
-        }
+            return ResolveConfiguredDataPath(configPath);
 
         return null;
+    }
+
+    internal static string? ResolveConfiguredDataPath(string configPath)
+    {
+        if (!File.Exists(configPath))
+            return null;
+
+        string configuredPath = File.ReadAllText(configPath).Trim();
+        return configuredPath.Length > 0 && Directory.Exists(configuredPath)
+            ? configuredPath
+            : null;
     }
 
     /// <summary>
