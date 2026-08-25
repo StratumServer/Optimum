@@ -179,7 +179,7 @@ make package              # all targets this host can produce
 make package-linux        # tar.gz
 make package-appimage     # single .AppImage executable
 make package-macos        # .dmg (ARCH=arm64 or x64)
-make package-win          # Windows zip (native Windows or WSL; cache works elsewhere)
+make package-win          # Windows zip (native Windows or off-platform with innoextract >= 1.11)
 ```
 
 Or call the scripts directly:
@@ -194,7 +194,7 @@ Or call the scripts directly:
 ./scripts/package-all.sh --targets linux-x64,osx-arm64
 ```
 
-The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg.
+The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer when no matching `.vanilla/win-x64/package-client` cache exists. A matching package cache is reused without the extractor, and a fresh extraction leaves the bootstrap/decompile cache at `.vanilla/win-x64/vintagestory` intact for `make run` and `make patch-il`. Pass `-ClientArchive` to supply the installer when no matching package cache exists.
 
 ### Host prerequisites for packaging
 
@@ -204,6 +204,7 @@ Beyond the build requirements (.NET 10 SDK, bash, git, curl, perl), packaging ne
 |---|---|---|
 | `appimagetool` | Builds .AppImage (downloaded to .tools/ on first use) | auto or `sudo apt install appimagetool` |
 | `pwsh` | Windows packaging off-platform (win-x64 target only) | [Install PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) |
+| `innoextract` >= 1.11 | Extracts the official Inno Setup 6.4.3 Windows client when no matching package cache exists | [Current releases](https://github.com/crazy-max/innoextract/releases) (distro 1.9 is too old) |
 | Windows interoperability (`wslpath` + Windows PowerShell) | Runs the official Inno 6.4.3 installer into a disposable directory when bootstrapping win-x64 from WSL | included with WSL |
 | `mkisofs` / `genisoimage` | Creates hybrid HFS image for .dmg on Linux | `sudo apt install cdrtools` or `genisoimage` |
 | `cmake` + `git` | Build libdmg-hfsplus (compiled once into .tools/) | `sudo apt install cmake git` |
@@ -216,7 +217,7 @@ Linux and macOS packaging runs with bash. No PowerShell required for those targe
 |---|---|---|---|
 | **linux-x64** | ✅ tar.gz / AppImage | ✅ tar.gz | ✅ tar.gz |
 | **osx-x64 / osx-arm64** | ✅ unsigned .dmg | ✅ signed .dmg (hdiutil) | ⚠️ .tar.gz fallback |
-| **win-x64** | ✅ WSL, or prefilled official cache | ⚠️ prefilled official cache | ✅ native |
+| **win-x64** | ✅ pwsh + innoextract >= 1.11, or package-client cache | ✅ pwsh + innoextract >= 1.11, or package-client cache | ✅ native |
 
 The .dmg files built on Linux are unsigned. macOS Gatekeeper shows a warning on first open; users right-click > Open to accept. For a notarizable .dmg, build on macOS with an Apple Developer certificate.
 

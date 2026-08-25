@@ -26,7 +26,7 @@ checks=(
   "make|0|package-macos.ps1 (.dmg on Linux via libdmg-hfsplus)|apt-get install make"
   "cmake|0|package-macos.ps1 (.dmg on Linux via libdmg-hfsplus)|apt-get install cmake"
   "mkisofs|0|package-macos.ps1 (.dmg on Linux; genisoimage also works)|apt-get install cdrtools  (or genisoimage)"
-  "innoextract|0|package.ps1 (Windows package on Linux/macOS hosts)|apt-get install innoextract"
+  "innoextract|0|package.ps1 (off-platform Windows package; requires >= 1.11)|use a current release from https://github.com/crazy-max/innoextract/releases (distro 1.9 is too old)"
 )
 
 printf '%s\n\n' "$(yellow 'Optimum prerequisite check (report only - nothing is installed)')"
@@ -36,6 +36,19 @@ printf '%-14s %-10s %s\n' "----" "------" "-------"
 for entry in "${checks[@]}"; do
   IFS='|' read -r name required used hint <<< "$entry"
   if command -v "$name" >/dev/null 2>&1; then
+    if [[ "$name" == "innoextract" ]]; then
+      inno_version="$(innoextract --version 2>/dev/null | sed -n 's/^innoextract \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' | head -n 1 || true)"
+      inno_major="${inno_version%%.*}"
+      inno_minor="${inno_version#*.}"
+      if [[ -z "$inno_version" || ! "$inno_major" =~ ^[0-9]+$ || ! "$inno_minor" =~ ^[0-9]+$ || "$inno_major" -lt 1 || ( "$inno_major" -eq 1 && "$inno_minor" -lt 11 ) ]]; then
+        printf '%-14s %s%-8s %s\n' "$name" "$(red OLD)" "" "$used"
+        printf '               %s %s\n' "$(red '→ unsupported for Inno Setup 6.4.3.')" "$hint"
+        missing_optional=$((missing_optional + 1))
+        continue
+      fi
+      printf '%-14s %s%-8s %s (v%s)\n' "$name" "$(green OK)" "" "$used" "$inno_version"
+      continue
+    fi
     printf '%-14s %s%-8s %s\n' "$name" "$(green OK)" "" "$used"
   else
     if [[ "$required" == "1" ]]; then
