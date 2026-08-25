@@ -269,7 +269,7 @@ public static class ILPatcher
             return -1;
         }
 
-        vanillaAsm.Write(outputPath, new WriterParameters { WriteSymbols = preserveSymbols });
+        AssemblyWriter.Write(vanillaAsm, outputPath, preserveSymbols);
         if (preserveSymbols)
         {
             Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");

@@ -142,7 +142,7 @@ public static class ApiPatcher
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
-        vanilla.Write(outputPath, new WriterParameters { WriteSymbols = preserveSymbols });
+        AssemblyWriter.Write(vanilla, outputPath, preserveSymbols);
         if (preserveSymbols)
         {
             Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");

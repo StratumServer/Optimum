@@ -117,6 +117,34 @@ public sealed class PdbSymbolFallbackTests
         }
     }
 
+    [Fact]
+    public void DiscardedSymbolsRemoveAStaleOutputSidecar()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"optimum-symbol-output-{Guid.NewGuid():N}");
+        string outputPath = Path.Combine(root, "output.dll");
+        string outputPdbPath = Path.ChangeExtension(outputPath, ".pdb");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            File.WriteAllText(outputPdbPath, "stale symbols");
+
+            using AssemblyDefinition assembly = AssemblyDefinition.CreateAssembly(
+                new AssemblyNameDefinition("Optimum.SymbolOutputFixture", new Version(1, 0, 0, 0)),
+                "Optimum.SymbolOutputFixture",
+                ModuleKind.Dll);
+
+            AssemblyWriter.Write(assembly, outputPath, writeSymbols: false);
+
+            Assert.True(File.Exists(outputPath));
+            Assert.False(File.Exists(outputPdbPath));
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
     private static void CopyOutputAssembly(string assemblyPath, string? pdbName)
     {
         string outputDirectory = Path.GetDirectoryName(typeof(PdbSymbolFallbackTests).Assembly.Location)!;
