@@ -22,7 +22,7 @@ public static class ShaderCompatibilityScanner
     private static readonly string[] ShaderFeatures =
     [
         "GreedyMesh", "RenderScale", "GodRaysSampleCap", "EntityLightBatch",
-        "EntityShaderStateCache", "Oit", "ShaderPreprocessParallel"
+        "EntityShaderStateCache", "Oit", "MapPageCache", "ShaderPreprocessParallel"
     ];
 
     private static readonly (string Token, string Name)[] IndicatorTokens =
@@ -297,7 +297,8 @@ public static class ShaderCompatibilityScanner
         AddFeatureDecision(report, "GodRaysSampleCap", HasExternalShader(report, "godrays.fsh"),
             "external godrays shader owns the sample-count contract");
         bool externalShaderHooks = report.Sources.Any(x => x.Indicators.Any(IsShaderHookIndicator));
-        AddFeatureDecision(report, "ShaderPreprocessParallel", report.Sources.Any(x => x.ShaderFiles.Count > 0) || externalShaderHooks,
+        bool externalShaderAssets = report.Sources.Any(x => x.ShaderFiles.Count > 0);
+        AddFeatureDecision(report, "ShaderPreprocessParallel", externalShaderAssets || externalShaderHooks,
             "external shader assets or shader hooks can depend on load order");
         AddFeatureDecision(report, "EntityLightBatch", externalShaderHooks,
             "external render hooks can observe entity-light update ordering");
@@ -305,6 +306,8 @@ public static class ShaderCompatibilityScanner
             "external render hooks can observe entity shader state");
         AddFeatureDecision(report, "Oit", externalShaderHooks || HasExternalShader(report, "cloudvolumetric.fsh"),
             "external render or cloud shader owns the OIT integration point");
+        AddFeatureDecision(report, "MapPageCache", externalShaderAssets || externalShaderHooks,
+            "external shader assets or shader hooks can dispose registered programs during reload");
 
         if (report.ScanFailed)
         {
@@ -371,8 +374,28 @@ public static class ShaderCompatibilityScanner
     {
         string normalized = path.Replace('\\', '/');
         int marker = normalized.IndexOf("assets/game/shaders/", StringComparison.OrdinalIgnoreCase);
-        if (marker < 0) return null;
-        string shader = normalized[marker..];
+        string shader;
+        if (marker >= 0)
+        {
+            shader = normalized[marker..];
+        }
+        else
+        {
+            marker = normalized.IndexOf("/shaders/", StringComparison.OrdinalIgnoreCase);
+            if (marker >= 0)
+            {
+                shader = normalized[(marker + 1)..];
+            }
+            else if (normalized.StartsWith("shaders/", StringComparison.OrdinalIgnoreCase))
+            {
+                shader = normalized;
+            }
+            else
+            {
+                return null;
+            }
+        }
+
         string extension = Path.GetExtension(shader);
         if (extension is not ".fsh" and not ".vsh" and not ".gsh") return null;
         return shader.ToLowerInvariant();

@@ -151,6 +151,7 @@ settings: ## Open client settings in editor
 
 test: build ## Run unit tests (separate from release build)
 	dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-restore --verbosity quiet
+	dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-restore --verbosity quiet
 
 coverage: build ## Run tests with coverage, report per-assembly (see which % is Optimum's own code vs the vanilla donor)
 	rm -rf .build/coverage
