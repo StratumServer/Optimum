@@ -36,6 +36,12 @@ public static class ShaderCompatibilityScanner
         ("enumrenderstage", "RenderHook")
     ];
 
+    private static readonly string[] OptimumBuiltInMods =
+    [
+        "VSEssentials.dll",
+        "VSSurvivalMod.dll"
+    ];
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -64,7 +70,7 @@ public static class ShaderCompatibilityScanner
                 {
                     try
                     {
-                        ScanSource(entry, dataPath, report);
+                        ScanSource(entry, dataPath, gameDir, report);
                     }
                     catch (Exception ex) when (IsRecoverable(ex))
                     {
@@ -126,9 +132,9 @@ public static class ShaderCompatibilityScanner
         return report;
     }
 
-    private static void ScanSource(string sourcePath, string dataPath, ShaderCompatibilityReport report)
+    private static void ScanSource(string sourcePath, string dataPath, string gameDir, ShaderCompatibilityReport report)
     {
-        if (IsOptimumSource(sourcePath)) return;
+        if (IsOptimumSource(sourcePath, gameDir)) return;
 
         var source = new ShaderModSource
         {
@@ -335,11 +341,30 @@ public static class ShaderCompatibilityScanner
         "assets/game/shaders/chunkopaque.vsh" or "assets/game/shaders/final.fsh" or
         "assets/game/shaders/godrays.fsh" or "assets/game/shaders/cloudvolumetric.fsh";
 
-    private static bool IsOptimumSource(string path)
+    private static bool IsOptimumSource(string path, string gameDir)
     {
         string name = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        return name.Equals("Optimum", StringComparison.OrdinalIgnoreCase) ||
-            name.StartsWith("Optimum-", StringComparison.OrdinalIgnoreCase);
+        if (name.Equals("Optimum", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("Optimum-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        try
+        {
+            string fullPath = Path.GetFullPath(path);
+            string builtInModsPath = Path.GetFullPath(Path.Combine(gameDir, "Mods"));
+            return OptimumBuiltInMods.Any(mod =>
+                string.Equals(fullPath, Path.Combine(builtInModsPath, mod), StringComparison.OrdinalIgnoreCase));
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
     }
 
     private static string? NormalizeShaderPath(string path)

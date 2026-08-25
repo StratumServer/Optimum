@@ -58,8 +58,9 @@ public static class Program
         var gameDir = AppContext.BaseDirectory;
 
         // Resolve cache directory: {dataPath}/.optimum/cache/
-        // Use the game's own data path resolution if possible, otherwise local.
-        var dataPath = ResolveDataPath(args) ?? gameDir;
+        // Mirror GamePaths.DataPath when no explicit path was supplied so the
+        // launcher report and the runtime configuration use the same root.
+        var dataPath = ResolveDataPath(args) ?? ResolveDefaultDataPath(gameDir);
         Logger.Init(dataPath);
 
         ShaderCompatibilityReport shaderCompatibility;
@@ -617,8 +618,7 @@ public static class Program
     /// Extracts --dataPath from CLI args, matching the forms the game itself
     /// accepts through CommandLineParser: "--dataPath VALUE" and
     /// "--dataPath=VALUE", plus the "-d" convenience forms. Returns null when
-    /// absent so the caller falls back to datapath.cfg and then the install
-    /// directory.
+    /// no explicit path or datapath.cfg entry exists.
     /// </summary>
     internal static string? ResolveDataPath(string[] args)
     {
@@ -637,13 +637,39 @@ public static class Program
 
         var configPath = Path.Combine(AppContext.BaseDirectory, "datapath.cfg");
         if (File.Exists(configPath))
-        {
-            var configuredPath = File.ReadAllText(configPath).Trim();
-            if (configuredPath.Length > 0)
-                return configuredPath;
-        }
+            return ResolveConfiguredDataPath(configPath);
 
         return null;
+    }
+
+    internal static string? ResolveConfiguredDataPath(string configPath)
+    {
+        if (!File.Exists(configPath))
+            return null;
+
+        string configuredPath = File.ReadAllText(configPath).Trim();
+        return configuredPath.Length > 0 && Directory.Exists(configuredPath)
+            ? configuredPath
+            : null;
+    }
+
+    /// <summary>
+    /// Mirrors the production and development branches of GamePaths.DataPath.
+    /// The launcher runs beside the game's assets in a packaged installation.
+    /// </summary>
+    internal static string ResolveDefaultDataPath(string gameDir)
+    {
+        // GamePaths uses AppDomain.CurrentDomain.BaseDirectory in the same
+        // no-assets development mode.
+        if (!Directory.Exists(Path.Combine(gameDir, "assets")))
+            return gameDir;
+
+        string applicationData = Environment.GetFolderPath(
+            Environment.SpecialFolder.ApplicationData,
+            Environment.SpecialFolderOption.DoNotVerify);
+        return string.IsNullOrEmpty(applicationData)
+            ? gameDir
+            : Path.Combine(applicationData, "VintagestoryData");
     }
 
     private static bool HasArgument(string[] args, string expected)
