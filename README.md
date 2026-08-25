@@ -179,7 +179,7 @@ make package              # all targets this host can produce
 make package-linux        # tar.gz
 make package-appimage     # single .AppImage executable
 make package-macos        # .dmg (ARCH=arm64 or x64)
-make package-win          # Windows zip (native Windows or WSL; cache works elsewhere)
+make package-win          # Windows zip (native Windows or off-platform with innoextract >= 1.11)
 ```
 
 Or call the scripts directly:
@@ -194,7 +194,7 @@ Or call the scripts directly:
 ./scripts/package-all.sh --targets linux-x64,osx-arm64
 ```
 
-The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg.
+The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer; pass `-ClientArchive` to use a specific installer.
 
 ### Host prerequisites for packaging
 
@@ -204,6 +204,7 @@ Beyond the build requirements (.NET 10 SDK, bash, git, curl, perl), packaging ne
 |---|---|---|
 | `appimagetool` | Builds .AppImage (downloaded to .tools/ on first use) | auto or `sudo apt install appimagetool` |
 | `pwsh` | Windows packaging off-platform (win-x64 target only) | [Install PowerShell](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell) |
+| `innoextract` >= 1.11 | Extracts the official Inno Setup 6.4.3 Windows client for off-platform packaging | [Current releases](https://github.com/crazy-max/innoextract/releases) (distro 1.9 is too old) |
 | Windows interoperability (`wslpath` + Windows PowerShell) | Runs the official Inno 6.4.3 installer into a disposable directory when bootstrapping win-x64 from WSL | included with WSL |
 | `mkisofs` / `genisoimage` | Creates hybrid HFS image for .dmg on Linux | `sudo apt install cdrtools` or `genisoimage` |
 | `cmake` + `git` | Build libdmg-hfsplus (compiled once into .tools/) | `sudo apt install cmake git` |

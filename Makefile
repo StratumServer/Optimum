@@ -2,7 +2,7 @@
 # Requires (dev):       .NET 10 SDK, bash, python3, git, curl, perl.
 # Requires (packaging): tar, curl. Optional per target:
 #                         macOS .dmg on Linux -> cmake + mkisofs/genisoimage
-#                         Windows package off-Windows -> pwsh + innoextract
+#                         Windows package off-Windows -> pwsh + innoextract >= 1.11
 # Run `make check` to see exactly what your host is missing.
 # Windows: use Git Bash, WSL, or adapt to PowerShell.
 #
@@ -197,5 +197,5 @@ package-appimage: build ## Package Linux x64 as AppImage (single executable)
 package-macos: build ## Package macOS (.dmg/.app); ARCH=arm64 or x64
 	bash scripts/package-macos.sh --arch $(or $(ARCH),arm64) --version $(VERSION)
 
-package-win: build ## Package Windows x64 (folder + zip); needs innoextract off-Windows
-	pwsh scripts/package.ps1 -Zip -Version $(VERSION)
+package-win: build ## Package Windows x64 (folder + zip); needs innoextract >= 1.11 off-Windows
+	pwsh scripts/package.ps1 -Zip -Version $(VERSION) $(if $(CLIENT_ARCHIVE),-ClientArchive "$(CLIENT_ARCHIVE)")

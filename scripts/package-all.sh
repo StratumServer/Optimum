@@ -64,16 +64,35 @@ for arch in x64 arm64; do
     fi
 done
 
-# Windows target
-if command -v innoextract &>/dev/null && command -v dotnet &>/dev/null; then
-    map_set CAP_QUALITY win-x64 "Degraded"
-    map_set CAP_NOTE win-x64 "cross-build Optimum.exe + innoextract vanilla installer"
-elif [[ -d "$REPO_ROOT/.vanilla/win-x64/vintagestory" ]] && command -v dotnet &>/dev/null; then
+# Windows target. The distro package on older systems is often innoextract 1.9,
+# which cannot parse the official Inno Setup 6.4.3 installer. Require the
+# supported release line before advertising an uncached off-platform package.
+INNO_VERSION=""
+if command -v innoextract &>/dev/null; then
+    INNO_VERSION="$(innoextract --version 2>/dev/null | sed -n 's/^innoextract \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' | head -n 1 || true)"
+fi
+INNO_MAJOR="${INNO_VERSION%%.*}"
+INNO_MINOR="${INNO_VERSION#*.}"
+INNO_USABLE=0
+if [[ -n "$INNO_VERSION" && ( "$INNO_MAJOR" -gt 1 || ( "$INNO_MAJOR" -eq 1 && "$INNO_MINOR" -ge 11 ) ) ]]; then
+    INNO_USABLE=1
+fi
+
+if [[ -f "$REPO_ROOT/.vanilla/win-x64/vintagestory/Vintagestory.exe" ]] && command -v dotnet &>/dev/null; then
     map_set CAP_QUALITY win-x64 "Degraded"
     map_set CAP_NOTE win-x64 "cross-build Optimum.exe + cached Windows client"
+elif [[ "$INNO_USABLE" -eq 1 ]] && command -v dotnet &>/dev/null; then
+    map_set CAP_QUALITY win-x64 "Degraded"
+    map_set CAP_NOTE win-x64 "cross-build Optimum.exe + innoextract $INNO_VERSION for the official Inno 6.4.3 installer"
+elif [[ -n "$INNO_VERSION" && "$INNO_MAJOR" -eq 1 && "$INNO_MINOR" -lt 11 ]]; then
+    map_set CAP_QUALITY win-x64 "Blocked"
+    map_set CAP_NOTE win-x64 "innoextract $INNO_VERSION is too old; need innoextract >= 1.11"
+elif [[ -z "$INNO_VERSION" ]]; then
+    map_set CAP_QUALITY win-x64 "Blocked"
+    map_set CAP_NOTE win-x64 "need innoextract >= 1.11 + dotnet for off-platform Windows packaging"
 else
     map_set CAP_QUALITY win-x64 "Blocked"
-    map_set CAP_NOTE win-x64 "need innoextract + dotnet for off-platform Windows packaging"
+    map_set CAP_NOTE win-x64 "need dotnet to cross-build the win-x64 launcher"
 fi
 
 # Print capability report
