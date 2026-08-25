@@ -78,21 +78,20 @@ if [[ -n "$INNO_VERSION" && ( "$INNO_MAJOR" -gt 1 || ( "$INNO_MAJOR" -eq 1 && "$
     INNO_USABLE=1
 fi
 
+WIN_CACHE_DIR="$REPO_ROOT/.vanilla/win-x64/package-client"
 HAS_WIN_CACHE=0
-WIN_CACHE_DIRS=(
-    "$REPO_ROOT/.vanilla/win-x64/vintagestory"
-    "$REPO_ROOT/.vanilla/win-x64/package-client"
-)
-for win_cache_dir in "${WIN_CACHE_DIRS[@]}"; do
-    if [[ -f "$win_cache_dir/Vintagestory.exe" ]]; then
-        for marker in "$win_cache_dir"/assets/version-*.txt; do
-            if [[ -f "$marker" ]]; then
+if [[ -f "$WIN_CACHE_DIR/Vintagestory.exe" ]]; then
+    for marker in "$WIN_CACHE_DIR"/assets/version-*.txt; do
+        if [[ -f "$marker" ]]; then
+            marker_version="${marker##*/version-}"
+            marker_version="${marker_version%.txt}"
+            if [[ "$marker_version" == "$VERSION" ]]; then
                 HAS_WIN_CACHE=1
-                break 2
+                break
             fi
-        done
-    fi
-done
+        fi
+    done
+fi
 
 if ! command -v pwsh &>/dev/null; then
     map_set CAP_QUALITY win-x64 "Blocked"

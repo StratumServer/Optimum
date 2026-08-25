@@ -11,16 +11,17 @@ Also compress the folder into Optimum-v<version>-win-x64.zip.
 
 .PARAMETER VanillaDir
 Path to an existing Vintage Story Windows installation. When omitted, the
-script uses .vanilla/win-x64/vintagestory when that cache matches the requested
-version. If off-platform extraction is needed, it uses the separate
+script uses the shared .vanilla/win-x64/vintagestory cache on Windows. On
+non-Windows hosts, automatic packaging uses the separate
 .vanilla/win-x64/package-client cache so the bootstrap/decompile cache remains
 available to make run and make patch-il.
 
 .PARAMETER ClientArchive
 Path to an official Vintage Story Windows installer. On non-Windows hosts,
 the default is .vanilla/archives/vs_install_win-x64_<version>.exe; a missing
-archive is downloaded and extracted with innoextract >= 1.11. Windows hosts
-continue to use a native installation or -VanillaDir.
+archive is downloaded and extracted with innoextract >= 1.11. A matching
+package-client cache avoids the extractor. Windows hosts continue to use a
+native installation or -VanillaDir.
 
 .EXAMPLE
 .\scripts\package.ps1 -VanillaDir C:\Games\VintageStory
@@ -74,25 +75,19 @@ function Resolve-WindowsVanilla {
     )
     $winRoot = Join-Path $RepoRoot '.vanilla/win-x64'
     $winDir = Join-Path $winRoot 'vintagestory'
-    $cachedVersion = Get-WindowsClientVersion -ClientDir $winDir
-    if ((Test-Path (Join-Path $winDir 'Vintagestory.exe')) -and $cachedVersion -eq $RequestedVersion) {
-        return $winDir
-    }
-
-    $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
     if (Test-WindowsHost) {
+        $cachedVersion = Get-WindowsClientVersion -ClientDir $winDir
+        if ((Test-Path (Join-Path $winDir 'Vintagestory.exe')) -and $cachedVersion -eq $RequestedVersion) {
+            return $winDir
+        }
+
+        $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
         if (Test-Path (Join-Path $legacyWin 'Vintagestory.exe')) { return $legacyWin }
         if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) {
             $reported = if ($cachedVersion) { $cachedVersion } else { 'unknown' }
             throw "Cached Windows client at $winDir is version $reported, requested $RequestedVersion. Pass -VanillaDir with the correct installation or refresh the cache."
         }
         throw 'Vintage Story installation not found. Pass -VanillaDir with the folder that contains Vintagestory.exe.'
-    }
-
-    $innoVersion = Get-InnoextractVersion
-    if (-not $innoVersion -or $innoVersion -lt [Version]'1.11') {
-        $detected = if ($innoVersion) { "detected $innoVersion" } else { 'not found' }
-        throw "Off-platform Windows packaging requires innoextract >= 1.11 ($detected). Install a current release from https://github.com/crazy-max/innoextract/releases."
     }
 
     # Never replace the shared bootstrap/decompile cache. It is also the donor
@@ -102,6 +97,12 @@ function Resolve-WindowsVanilla {
     $packageCachedVersion = Get-WindowsClientVersion -ClientDir $cacheDir
     if ((Test-Path (Join-Path $cacheDir 'Vintagestory.exe')) -and $packageCachedVersion -eq $RequestedVersion) {
         return $cacheDir
+    }
+
+    $innoVersion = Get-InnoextractVersion
+    if (-not $innoVersion -or $innoVersion -lt [Version]'1.11') {
+        $detected = if ($innoVersion) { "detected $innoVersion" } else { 'not found' }
+        throw "Off-platform Windows packaging requires innoextract >= 1.11 ($detected). Install a current release from https://github.com/crazy-max/innoextract/releases."
     }
 
     $cacheParent = Split-Path -Parent $cacheDir
