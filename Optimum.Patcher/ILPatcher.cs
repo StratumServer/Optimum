@@ -199,20 +199,35 @@ public static class ILPatcher
         {
             foreach (var hook in hooks)
             {
-                bool inserted = ILHook.InsertBeforeCall(
-                    vanillaAsm,
-                    hook.TypeFullName,
-                    hook.MethodName,
-                    hook.ParamCount,
-                    hook.HookMethod,
-                    hook.TargetCall,
-                    hook.TargetDeclaringType,
-                    hook.TargetParameterTypes,
-                    hook.TargetReturnType,
-                    hook.TargetHasThis,
-                    hook.TargetExplicitThis,
-                    hook.TargetCallingConvention,
-                    hook.TargetGenericArity);
+                bool inserted = hook.InsertBeforeTarget
+                    ? ILHook.InsertInstanceVoidCallBefore(
+                        vanillaAsm,
+                        hook.TypeFullName,
+                        hook.MethodName,
+                        hook.ParamCount,
+                        hook.HookMethod,
+                        hook.TargetCall,
+                        hook.TargetDeclaringType,
+                        hook.TargetParameterTypes,
+                        hook.TargetReturnType,
+                        hook.TargetHasThis,
+                        hook.TargetExplicitThis,
+                        hook.TargetCallingConvention,
+                        hook.TargetGenericArity)
+                    : ILHook.InsertBeforeCall(
+                        vanillaAsm,
+                        hook.TypeFullName,
+                        hook.MethodName,
+                        hook.ParamCount,
+                        hook.HookMethod,
+                        hook.TargetCall,
+                        hook.TargetDeclaringType,
+                        hook.TargetParameterTypes,
+                        hook.TargetReturnType,
+                        hook.TargetHasThis,
+                        hook.TargetExplicitThis,
+                        hook.TargetCallingConvention,
+                        hook.TargetGenericArity);
                 if (!inserted && !hook.Optional)
                 {
                     throw new InvalidOperationException($"Required IL hook was not applied: {hook}");
@@ -886,7 +901,8 @@ public record HookTarget(
     bool TargetExplicitThis,
     MethodCallingConvention TargetCallingConvention,
     int TargetGenericArity,
-    bool Optional = false)
+    bool Optional = false,
+    bool InsertBeforeTarget = false)
 {
     public override string ToString() =>
         $"{TypeFullName}::{MethodName} -> {HookMethod} before {TargetCall}";
