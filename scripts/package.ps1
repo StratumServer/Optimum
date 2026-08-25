@@ -10,12 +10,24 @@ Where to create the output folder (and zip). Default: repo root.
 Also compress the folder into Optimum-v<version>-win-x64.zip.
 
 .PARAMETER VanillaDir
-Path to an existing Vintage Story Windows installation.
+Path to an existing Vintage Story Windows installation. When omitted, the
+script uses the shared .vanilla/win-x64/vintagestory cache on Windows. On
+non-Windows hosts, automatic packaging uses the separate
+.vanilla/win-x64/package-client cache so the bootstrap/decompile cache remains
+available to make run and make patch-il.
+
+.PARAMETER ClientArchive
+Path to an official Vintage Story Windows installer. On non-Windows hosts,
+the default is .vanilla/archives/vs_install_win-x64_<version>.exe; a missing
+archive is downloaded and extracted with innoextract >= 1.11. A matching
+package-client cache avoids the extractor. Windows hosts continue to use a
+native installation or -VanillaDir.
 
 .EXAMPLE
 .\scripts\package.ps1 -VanillaDir C:\Games\VintageStory
 .\scripts\package.ps1 -VanillaDir C:\Games\VintageStory -Zip
 .\scripts\package.ps1 -VanillaDir C:\Games\VintageStory -OutputDir D:\releases -Zip
+pwsh ./scripts/package.ps1 -ClientArchive /tmp/vs_install_win-x64_1.22.7.exe -Zip
 #>
 
 [CmdletBinding()]
@@ -23,7 +35,8 @@ param(
     [string]$OutputDir,
     [switch]$Zip,
     [string]$Version,
-    [string]$VanillaDir
+    [string]$VanillaDir,
+    [string]$ClientArchive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,23 +51,154 @@ if (-not $Version) {
 . "$PSScriptRoot/_hostcaps.ps1"
 . "$PSScriptRoot/_exec.ps1"
 
-# Resolve a local Windows vanilla install. This script does not download
-# Vintage Story.
+function Test-WindowsHost {
+    ($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)
+}
+
+function Get-WindowsClientVersion {
+    param([string]$ClientDir)
+    $assetsDir = Join-Path $ClientDir 'assets'
+    $marker = Get-ChildItem -Path $assetsDir -Filter 'version-*.txt' -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($marker -and $marker.BaseName -match '^version-(.+)$') { return $Matches[1] }
+    return $null
+}
+
+# Resolve a local Windows vanilla install or populate the cross-platform cache
+# from the official installer. Native Windows keeps using the caller's local
+# installation; only non-Windows hosts need innoextract.
 function Resolve-WindowsVanilla {
-    param([string]$RepoRoot)
-    $winDir = Join-Path (Join-Path $RepoRoot '.vanilla/win-x64') 'vintagestory'
-    if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
+    param(
+        [string]$RepoRoot,
+        [string]$RequestedVersion,
+        [string]$InstallerPath
+    )
+    $winRoot = Join-Path $RepoRoot '.vanilla/win-x64'
+    $winDir = Join-Path $winRoot 'vintagestory'
+    if (Test-WindowsHost) {
+        $cachedVersion = Get-WindowsClientVersion -ClientDir $winDir
+        if ((Test-Path (Join-Path $winDir 'Vintagestory.exe')) -and $cachedVersion -eq $RequestedVersion) {
+            return $winDir
+        }
 
-    $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
-    if (($IsWindows -or ($env:OS -eq 'Windows_NT')) -and (Test-Path (Join-Path $legacyWin 'Vintagestory.exe'))) { return $legacyWin }
+        $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
+        if (Test-Path (Join-Path $legacyWin 'Vintagestory.exe')) { return $legacyWin }
+        if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) {
+            $reported = if ($cachedVersion) { $cachedVersion } else { 'unknown' }
+            throw "Cached Windows client at $winDir is version $reported, requested $RequestedVersion. Pass -VanillaDir with the correct installation or refresh the cache."
+        }
+        throw 'Vintage Story installation not found. Pass -VanillaDir with the folder that contains Vintagestory.exe.'
+    }
 
-    throw 'Vintage Story installation not found. Pass -VanillaDir with the folder that contains Vintagestory.exe.'
+    # Never replace the shared bootstrap/decompile cache. It is also the donor
+    # used by make run and make patch-il. An off-platform package gets its own
+    # extracted client cache instead.
+    $cacheDir = Join-Path $winRoot 'package-client'
+    $packageCachedVersion = Get-WindowsClientVersion -ClientDir $cacheDir
+    if ((Test-Path (Join-Path $cacheDir 'Vintagestory.exe')) -and $packageCachedVersion -eq $RequestedVersion) {
+        return $cacheDir
+    }
+
+    $innoVersion = Get-InnoextractVersion
+    if (-not $innoVersion -or $innoVersion -lt [Version]'1.11') {
+        $detected = if ($innoVersion) { "detected $innoVersion" } else { 'not found' }
+        throw "Off-platform Windows packaging requires innoextract >= 1.11 ($detected). Install a current release from https://github.com/crazy-max/innoextract/releases."
+    }
+
+    $cacheParent = Split-Path -Parent $cacheDir
+    $archiveCache = Join-Path $RepoRoot '.vanilla/archives'
+    New-Item -ItemType Directory -Force -Path $archiveCache | Out-Null
+    New-Item -ItemType Directory -Force -Path $cacheParent | Out-Null
+    if (-not $InstallerPath) {
+        $InstallerPath = Join-Path $archiveCache "vs_install_win-x64_$RequestedVersion.exe"
+    } else {
+        $InstallerPath = [IO.Path]::GetFullPath($InstallerPath)
+    }
+
+    if (-not (Test-Path $InstallerPath)) {
+        $url = "https://cdn.vintagestory.at/gamefiles/stable/vs_install_win-x64_$RequestedVersion.exe"
+        Write-Host "Downloading $url (~570MB)"
+        $partial = "$InstallerPath.$([Guid]::NewGuid().ToString('N')).partial"
+        Remove-Item -Force -ErrorAction SilentlyContinue $partial
+        Invoke-NativeStep { curl -L --fail --progress-bar -o $partial $url }
+        if ($LASTEXITCODE -ne 0) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $partial
+            throw "Download failed: $url"
+        }
+        if (-not (Test-Path $partial) -or (Get-Item $partial).Length -eq 0) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $partial
+            throw "Download produced an empty installer: $url"
+        }
+        Move-Item -Force $partial $InstallerPath
+    } else {
+        Write-Host "Using cached $InstallerPath"
+    }
+
+    $innoextract = (Get-Command innoextract -ErrorAction Stop).Path
+    $info = @(Invoke-NativeStep { & $innoextract --info $InstallerPath 2>&1 })
+    $infoExitCode = $LASTEXITCODE
+    if ($infoExitCode -ne 0 -or (($info -join "`n") -notmatch '(?i)setup data version')) {
+        throw "innoextract $innoVersion could not inspect the official installer '$InstallerPath'. The installer uses a newer or unsupported Inno Setup format."
+    }
+
+    # Keep staging beside the cache so promotion is a same-volume directory
+    # move instead of a potentially non-atomic cross-filesystem copy.
+    $extractRoot = Join-Path $cacheParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+    try {
+        Write-Host "Extracting with innoextract $innoVersion to the Windows client cache"
+        Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $InstallerPath }
+        if ($LASTEXITCODE -ne 0) {
+            throw "innoextract failed (exit $LASTEXITCODE) for $InstallerPath"
+        }
+
+        $sourceRoot = Join-Path $extractRoot 'app'
+        if (-not (Test-Path (Join-Path $sourceRoot 'Vintagestory.exe'))) {
+            $sourceRoot = $extractRoot
+        }
+        foreach ($required in @('Vintagestory.exe', 'VintagestoryLib.dll', 'assets/game/shaders')) {
+            if (-not (Test-Path (Join-Path $sourceRoot $required))) {
+                throw "innoextract completed but the Windows client is missing '$required'."
+            }
+        }
+        $extractedVersion = Get-WindowsClientVersion -ClientDir $sourceRoot
+        if ($extractedVersion -ne $RequestedVersion) {
+            $reported = if ($extractedVersion) { $extractedVersion } else { 'unknown' }
+            throw "Installer extracted Vintage Story $reported, requested $RequestedVersion."
+        }
+
+        $backupDir = Join-Path $cacheParent ".package-client-backup-$([Guid]::NewGuid().ToString('N'))"
+        $promoted = $false
+        try {
+            if (Test-Path $cacheDir) { Move-Item -Path $cacheDir -Destination $backupDir }
+            Move-Item -Path $sourceRoot -Destination $cacheDir
+            $promoted = $true
+        } catch {
+            if (-not (Test-Path $cacheDir) -and (Test-Path $backupDir)) {
+                Move-Item -Path $backupDir -Destination $cacheDir
+            }
+            throw
+        } finally {
+            if ($promoted -and (Test-Path $backupDir)) {
+                Remove-Item -Recurse -Force $backupDir -ErrorAction SilentlyContinue
+            }
+        }
+    } finally {
+        if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }
+    }
+
+    if (Test-Path (Join-Path $cacheDir 'Vintagestory.exe')) { return $cacheDir }
+    throw "Extraction completed without producing $cacheDir/Vintagestory.exe."
 }
 
 Push-Location $repoRoot
 try {
     Show-HostCaps -Only 'win-x64' | Out-Null
-    $vanillaDir = if ($VanillaDir) { [IO.Path]::GetFullPath($VanillaDir) } else { Resolve-WindowsVanilla -RepoRoot $repoRoot }
+    $vanillaDir = if ($VanillaDir) {
+        [IO.Path]::GetFullPath($VanillaDir)
+    } else {
+        Resolve-WindowsVanilla -RepoRoot $repoRoot -RequestedVersion $Version -InstallerPath $ClientArchive
+    }
     if (-not (Test-Path (Join-Path $vanillaDir 'Vintagestory.exe'))) {
         throw "Vanilla Windows install not found: $vanillaDir"
     }
@@ -211,8 +355,8 @@ try {
         }
     }
 
-    # Validate the staged assets before shipping them. A tolerated-partial
-    # innounp extraction or a poisoned .vanilla cache carries zero-byte or
+    # Validate the staged assets before shipping them. A partial innoextract
+    # extraction or a poisoned .vanilla cache carries zero-byte or
     # truncated files into the stage, and a truncated shader then kills the
     # game at startup with an opaque GL error (the 0.2.1 "blur.vsh ...
     # unexpected $end at <EOF>" reports). Fail the package with a clear
