@@ -104,7 +104,7 @@ public static class ILPatcher
             ReadSymbols = false
         };
 
-        using var vanillaAsm = AssemblyDefinition.ReadAssembly(vanillaPath, vanillaReaderParams);
+        using var vanillaAsm = AssemblyReader.Read(vanillaPath, vanillaReaderParams, out preserveSymbols);
         using var compiledAsm = AssemblyDefinition.ReadAssembly(compiledPath, compiledReaderParams);
 
         int injectedInterfaces = interfacesToInject == null
@@ -269,7 +269,7 @@ public static class ILPatcher
             return -1;
         }
 
-        vanillaAsm.Write(outputPath, new WriterParameters { WriteSymbols = preserveSymbols });
+        AssemblyWriter.Write(vanillaAsm, outputPath, preserveSymbols);
         if (preserveSymbols)
         {
             Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");
