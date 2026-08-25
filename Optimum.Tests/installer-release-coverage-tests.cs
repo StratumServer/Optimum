@@ -160,10 +160,16 @@ public class InstallerReleaseCoverageTests
         Assert.Contains("--extract", package);
         Assert.Contains("vs_install_win-x64_", package);
         Assert.Contains("cdn.vintagestory", package);
+        Assert.Contains("Get-WindowsClientVersion", package);
+        Assert.Contains("version-*.txt", package);
+        Assert.Contains("Installer extracted Vintage Story", package);
+        Assert.Contains(".innoextract-stage-", package);
         Assert.Contains("innoextract >= 1.11", makefile);
         Assert.Contains("ClientArchive", makefile);
-        Assert.Contains("vintagestory/Vintagestory.exe", packageAll);
+        Assert.Contains("WIN_CACHE_DIR", packageAll);
+        Assert.Contains("Vintagestory.exe", packageAll);
         Assert.Contains("innoextract >= 1.11", packageAll);
+        Assert.Contains("command -v pwsh", packageAll);
     }
 
     [Fact]

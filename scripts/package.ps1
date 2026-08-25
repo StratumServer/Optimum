@@ -52,6 +52,15 @@ function Test-WindowsHost {
     ($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)
 }
 
+function Get-WindowsClientVersion {
+    param([string]$ClientDir)
+    $assetsDir = Join-Path $ClientDir 'assets'
+    $marker = Get-ChildItem -Path $assetsDir -Filter 'version-*.txt' -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($marker -and $marker.BaseName -match '^version-(.+)$') { return $Matches[1] }
+    return $null
+}
+
 # Resolve a local Windows vanilla install or populate the cross-platform cache
 # from the official installer. Native Windows keeps using the caller's local
 # installation; only non-Windows hosts need innoextract.
@@ -62,12 +71,18 @@ function Resolve-WindowsVanilla {
         [string]$InstallerPath
     )
     $winDir = Join-Path (Join-Path $RepoRoot '.vanilla/win-x64') 'vintagestory'
-    if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
+    $cachedVersion = Get-WindowsClientVersion -ClientDir $winDir
+    if ((Test-Path (Join-Path $winDir 'Vintagestory.exe')) -and $cachedVersion -eq $RequestedVersion) {
+        return $winDir
+    }
 
     $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
-    if ((Test-WindowsHost) -and (Test-Path (Join-Path $legacyWin 'Vintagestory.exe'))) { return $legacyWin }
-
     if (Test-WindowsHost) {
+        if (Test-Path (Join-Path $legacyWin 'Vintagestory.exe')) { return $legacyWin }
+        if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) {
+            $reported = if ($cachedVersion) { $cachedVersion } else { 'unknown' }
+            throw "Cached Windows client at $winDir is version $reported, requested $RequestedVersion. Pass -VanillaDir with the correct installation or refresh the cache."
+        }
         throw 'Vintage Story installation not found. Pass -VanillaDir with the folder that contains Vintagestory.exe.'
     }
 
@@ -77,8 +92,10 @@ function Resolve-WindowsVanilla {
         throw "Off-platform Windows packaging requires innoextract >= 1.11 ($detected). Install a current release from https://github.com/crazy-max/innoextract/releases."
     }
 
+    $cacheParent = Split-Path -Parent $winDir
     $archiveCache = Join-Path $RepoRoot '.vanilla/archives'
     New-Item -ItemType Directory -Force -Path $archiveCache | Out-Null
+    New-Item -ItemType Directory -Force -Path $cacheParent | Out-Null
     if (-not $InstallerPath) {
         $InstallerPath = Join-Path $archiveCache "vs_install_win-x64_$RequestedVersion.exe"
     } else {
@@ -88,7 +105,7 @@ function Resolve-WindowsVanilla {
     if (-not (Test-Path $InstallerPath)) {
         $url = "https://cdn.vintagestory.at/gamefiles/stable/vs_install_win-x64_$RequestedVersion.exe"
         Write-Host "Downloading $url (~570MB)"
-        $partial = "$InstallerPath.partial"
+        $partial = "$InstallerPath.$([Guid]::NewGuid().ToString('N')).partial"
         Remove-Item -Force -ErrorAction SilentlyContinue $partial
         Invoke-NativeStep { curl -L --fail --progress-bar -o $partial $url }
         if ($LASTEXITCODE -ne 0) {
@@ -111,7 +128,9 @@ function Resolve-WindowsVanilla {
         throw "innoextract $innoVersion could not inspect the official installer '$InstallerPath'. The installer uses a newer or unsupported Inno Setup format."
     }
 
-    $extractRoot = Join-Path ([IO.Path]::GetTempPath()) "Optimum-win-extract-$([Guid]::NewGuid().ToString('N'))"
+    # Keep staging beside the cache so promotion is a same-volume directory
+    # move instead of a potentially non-atomic cross-filesystem copy.
+    $extractRoot = Join-Path $cacheParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
     try {
         Write-Host "Extracting with innoextract $innoVersion to the Windows client cache"
@@ -129,10 +148,28 @@ function Resolve-WindowsVanilla {
                 throw "innoextract completed but the Windows client is missing '$required'."
             }
         }
+        $extractedVersion = Get-WindowsClientVersion -ClientDir $sourceRoot
+        if ($extractedVersion -ne $RequestedVersion) {
+            $reported = if ($extractedVersion) { $extractedVersion } else { 'unknown' }
+            throw "Installer extracted Vintage Story $reported, requested $RequestedVersion."
+        }
 
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $winDir) | Out-Null
-        if (Test-Path $winDir) { Remove-Item -Recurse -Force $winDir }
-        Move-Item -Path $sourceRoot -Destination $winDir
+        $backupDir = Join-Path $cacheParent ".vintagestory-backup-$([Guid]::NewGuid().ToString('N'))"
+        $promoted = $false
+        try {
+            if (Test-Path $winDir) { Move-Item -Path $winDir -Destination $backupDir }
+            Move-Item -Path $sourceRoot -Destination $winDir
+            $promoted = $true
+        } catch {
+            if (-not (Test-Path $winDir) -and (Test-Path $backupDir)) {
+                Move-Item -Path $backupDir -Destination $winDir
+            }
+            throw
+        } finally {
+            if ($promoted -and (Test-Path $backupDir)) {
+                Remove-Item -Recurse -Force $backupDir -ErrorAction SilentlyContinue
+            }
+        }
     } finally {
         if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }
     }

@@ -40,7 +40,7 @@ for entry in "${checks[@]}"; do
       inno_version="$(innoextract --version 2>/dev/null | sed -n 's/^innoextract \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' | head -n 1 || true)"
       inno_major="${inno_version%%.*}"
       inno_minor="${inno_version#*.}"
-      if [[ -z "$inno_version" || ! "$inno_major" =~ ^[0-9]+$ || ! "$inno_minor" =~ ^[0-9]+$ || ( "$inno_major" -eq 1 && "$inno_minor" -lt 11 ) ]]; then
+      if [[ -z "$inno_version" || ! "$inno_major" =~ ^[0-9]+$ || ! "$inno_minor" =~ ^[0-9]+$ || "$inno_major" -lt 1 || ( "$inno_major" -eq 1 && "$inno_minor" -lt 11 ) ]]; then
         printf '%-14s %s%-8s %s\n' "$name" "$(red OLD)" "" "$used"
         printf '               %s %s\n' "$(red '→ unsupported for Inno Setup 6.4.3.')" "$hint"
         missing_optional=$((missing_optional + 1))
