@@ -49,9 +49,9 @@ To add a new optimization:
 
 ## Pull Request Process
 
-`main` is the current working and release branch. This is temporary: pull
-requests should target `main` for now instead of `dev`. `dev` still exists and
-will resume as the working branch when this notice is removed.
+`main` is the working and release branch. Pull requests target `main`. The
+`dev` branch this project used before is gone; it was deleted after being
+merged into `main`.
 
 1. Fork the repo and create a branch from `main`.
 2. Make your changes. Keep commits focused.
