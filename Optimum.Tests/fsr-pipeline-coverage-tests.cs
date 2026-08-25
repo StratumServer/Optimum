@@ -77,9 +77,9 @@ public class FsrPipelineCoverageTests
         // rendering matches vanilla exactly - vanilla never sets these
         // TexParameter/SamplerParameter calls at all.
         Assert.Contains("if (ClientSettings.OptimumRenderScale >= 1.0f)", chunkRenderer);
-        Assert.Contains("MathF.Log2(ClientSettings.OptimumRenderScale)", chunkRenderer);
+        Assert.Contains("MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f))", chunkRenderer);
         Assert.Contains("(TextureParameterName)34049, textureLodBias", chunkRenderer);
-        Assert.Contains("if (ClientSettings.OptimumRenderScale < 1.0f)", shaderRegistry);
+        Assert.Contains("if (OptimumConfig.EffectiveRenderScale < 1.0f)", shaderRegistry);
         Assert.Contains("(SamplerParameterName)34049, terrainLodBias", shaderRegistry);
         Assert.Contains("terrainTexLinear", shaderRegistry);
     }

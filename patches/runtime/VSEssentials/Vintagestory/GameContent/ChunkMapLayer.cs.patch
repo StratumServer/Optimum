@@ -30,7 +30,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  			{
  				throw new Exception($"Cannot open {mapDbFilePath}, possibly corrupted. Please fix manually or delete this file to continue playing");
  			}
-+			if (OptimumConfig.MapPageCacheEnabled)
++			if (OptimumConfig.EffectiveMapPageCache)
 +			{
 +				pageCache = new OptimumMapPageCache(capi, api.World.SavegameIdentifier);
 +				if (OptimumConfig.MapPageCachePregen)
@@ -65,7 +65,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  	public override void OnMapOpenedClient()
  	{
  		colorAccurate = api.World.Config.GetAsBool("colorAccurateWorldmap") || capi.World.Player.Privileges.IndexOf("colorAccurateWorldmap") != -1;
-+		if (OptimumConfig.MapPageCacheEnabled && pageTextureArray == null)
++		if (OptimumConfig.EffectiveMapPageCache && pageTextureArray == null)
 +		{
 +			pageTextureArray = new OptimumMapTextureArray(OptimumConfig.MapPageCacheMaxLayers);
 +			pageRenderer = new OptimumMapPageRenderer(capi, pageTextureArray);
@@ -294,7 +294,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
 +			centerChunkZ = (int)(sumZ / curVisibleChunks.Count);
 +		}
 +		(int centerPageX, int centerPageZ) = OptimumMapPageCache.ChunkToPage(centerChunkX, centerChunkZ);
-+		if (pageCache != null && OptimumConfig.MapPageCacheEnabled)
++		if (pageCache != null && OptimumConfig.EffectiveMapPageCache)
 +		{
 +			HashSet<long> queuedPages = new HashSet<long>();
 +			foreach (FastVec2i item in nowVisible)
