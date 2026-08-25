@@ -230,6 +230,106 @@ public class InstallerReleaseCoverageTests
     }
 
     [Fact]
+    public void RuntimeDonorPatchGatesValidateEveryMandatoryProjectBeforeApplying()
+    {
+        string bash = Read("scripts/runtime-donor-patch-gate.sh");
+        string bashPreparation = Read("scripts/prepare-runtime-donors.sh");
+        string powershell = Read("scripts/prepare-runtime-donors.ps1");
+
+        Assert.Contains("runtime-donor-patch-gate.sh", bashPreparation);
+        Assert.Contains("runtime_projects=(VSEssentials VSSurvivalMod)", bash);
+        Assert.Contains("runtime_patch_failures=()", bash);
+        Assert.Contains("Runtime donor compatibility gate failed:", bash);
+        Assert.Contains("exit 1", bash);
+        int bashFailureGate = bash.IndexOf("Runtime donor compatibility gate failed:", StringComparison.Ordinal);
+        int bashApply = bash.IndexOf(
+            "git -C \"$repo_root\" apply \\",
+            bashFailureGate,
+            StringComparison.Ordinal);
+        Assert.True(bashFailureGate >= 0, "Bash donor failure gate is missing");
+        Assert.True(bashApply > bashFailureGate, "Bash applies a patch before its compatibility gate");
+
+        Assert.Contains("$runtimeProjects = @('VSEssentials', 'VSSurvivalMod')", powershell);
+        Assert.Contains("$runtimePatchFailures = @()", powershell);
+        Assert.Contains("$patchExitCode = $LASTEXITCODE", powershell);
+        Assert.Contains("2>&1 |", powershell);
+        Assert.Contains("git apply --check failed without diagnostic output.", powershell);
+        Assert.Contains("Runtime donor compatibility gate failed:", powershell);
+        int powershellFailureGate = powershell.IndexOf("Runtime donor compatibility gate failed:", StringComparison.Ordinal);
+        int powershellApply = powershell.IndexOf(
+            "git -C $repoRoot apply",
+            powershellFailureGate,
+            StringComparison.Ordinal);
+        Assert.True(powershellFailureGate >= 0, "PowerShell donor failure gate is missing");
+        Assert.True(powershellApply > powershellFailureGate, "PowerShell applies a patch before its compatibility gate");
+    }
+
+    [Fact]
+    public void BashRuntimeDonorPatchGateRejectsPartialCompatibility()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        string gate = PatchReader.FindRepositoryFile("scripts/runtime-donor-patch-gate.sh");
+        DirectoryInfo tempDirectory = Directory.CreateTempSubdirectory("optimum-runtime-gate-");
+
+        try
+        {
+            string runtimeRoot = Path.Combine(tempDirectory.FullName, "runtime");
+            string patchesRoot = Path.Combine(tempDirectory.FullName, "patches", "runtime");
+            string goodTarget = Path.Combine(runtimeRoot, "VSEssentials", "Good.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(goodTarget)!);
+            Directory.CreateDirectory(Path.Combine(patchesRoot, "VSEssentials"));
+            Directory.CreateDirectory(Path.Combine(patchesRoot, "VSSurvivalMod"));
+            File.WriteAllText(goodTarget, "old\n");
+            File.WriteAllText(
+                Path.Combine(patchesRoot, "VSEssentials", "Good.cs.patch"),
+                """
+                diff --git a/VSEssentials/Good.cs b/VSEssentials/Good.cs
+                --- a/VSEssentials/Good.cs
+                +++ b/VSEssentials/Good.cs
+                @@ -1 +1 @@
+                -old
+                +new
+                """.Replace("                ", ""));
+            File.WriteAllText(
+                Path.Combine(patchesRoot, "VSSurvivalMod", "Missing.cs.patch"),
+                """
+                diff --git a/VSSurvivalMod/Missing.cs b/VSSurvivalMod/Missing.cs
+                --- a/VSSurvivalMod/Missing.cs
+                +++ b/VSSurvivalMod/Missing.cs
+                @@ -1 +1 @@
+                -missing
+                +new
+                """.Replace("                ", ""));
+
+            ProcessStartInfo startInfo = new("bash")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add(gate);
+            startInfo.ArgumentList.Add(tempDirectory.FullName);
+            startInfo.ArgumentList.Add("runtime");
+            using Process process = Process.Start(startInfo)!;
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.NotEqual(0, process.ExitCode);
+            Assert.Contains("Runtime donor compatibility gate failed", output + error);
+            Assert.Equal("old\n", File.ReadAllText(goodTarget));
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void RuntimePatchesHaveASeparateExactDonorPipeline()
     {
         string bootstrap = Read("scripts/bootstrap.sh");
