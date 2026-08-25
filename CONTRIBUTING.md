@@ -49,10 +49,11 @@ To add a new optimization:
 
 ## Pull Request Process
 
-`dev` is the working branch. `main` is the release branch. Pull requests target
-`dev`; maintainers promote tested changes to `main` for releases.
+`main` is the current working and release branch. This is temporary: pull
+requests should target `main` for now instead of `dev`. `dev` still exists and
+will resume as the working branch when this notice is removed.
 
-1. Fork the repo and create a branch from `dev`.
+1. Fork the repo and create a branch from `main`.
 2. Make your changes. Keep commits focused.
 3. Run `make test` and verify all tests pass.
 4. Run `make run` and verify the client launches without shader errors or crashes.
