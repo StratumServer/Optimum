@@ -48,10 +48,34 @@ public sealed class WorldgenR1WorkspacePatchContractTests
     {
         string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch");
 
-        Assert.Contains("OptimumWorldgenFootprintRegistry optimumWorldgenFootprints", source);
+        Assert.Contains("chunkthread.optimumWorldgenFootprints", source);
         Assert.Contains("TryAcquireWorldgenFootprint", source);
         Assert.Contains("out OptimumWorldgenFootprintLease footprintLease", source);
         Assert.Contains("footprintLease?.Dispose()", source);
         Assert.Contains("requestedChunkColumn.FlagToRequeue();", source);
+    }
+
+    [Fact]
+    public void UnloadReservesTheSameFootprintUntilPersistenceCompletes()
+    {
+        string unload = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch");
+        string thread = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch");
+        string patcher = System.IO.File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+
+        int acquire = unload.IndexOf("TryAcquireOptimumWorldgenFootprint", System.StringComparison.Ordinal);
+        int readLock = unload.IndexOf("item2.generatingLock.AcquireReadLock()", acquire, System.StringComparison.Ordinal);
+        int setChunks = unload.IndexOf("gameDatabase.SetChunks", readLock, System.StringComparison.Ordinal);
+        int setMapChunks = unload.IndexOf("gameDatabase.SetMapChunks", setChunks, System.StringComparison.Ordinal);
+        int dispose = unload.IndexOf("leases[i]?.Dispose()", setMapChunks, System.StringComparison.Ordinal);
+
+        Assert.True(acquire >= 0);
+        Assert.True(readLock > acquire);
+        Assert.True(setChunks > readLock);
+        Assert.True(setMapChunks > setChunks);
+        Assert.True(dispose > setMapChunks);
+        Assert.Contains("optimumWorldgenFootprints", thread);
+        Assert.Contains("TryAcquireOptimumWorldgenFootprint", thread);
+        Assert.Contains("\"TryAcquireOptimumWorldgenFootprint\"", patcher);
+        Assert.Contains("\"optimumUnloadGenLeases\"", patcher);
     }
 }
