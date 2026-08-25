@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs b/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs
-index ee7d12d..063d931 100644
+index ee7d12d..a347848 100644
 --- a/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs
 @@ -1,10 +1,11 @@
@@ -14,13 +14,15 @@ index ee7d12d..063d931 100644
  using Vintagestory.API.Server;
  using Vintagestory.Common;
  
-@@ -32,26 +33,37 @@ public class ChunkServerThread : ServerThread, IChunkProvider
+@@ -32,29 +33,68 @@ public class ChunkServerThread : ServerThread, IChunkProvider
  
  	public bool peekMode;
  
  	public int additionalWorldGenThreadsCount;
  
 +	internal OptimumChunkReadPool optimumReadPool;
++
++	internal OptimumWorldgenFootprintRegistry optimumWorldgenFootprints;
 +
 +	internal bool optimumExactWorldgenWorkerMode;
 +
@@ -56,5 +58,34 @@ index ee7d12d..063d931 100644
  		}
  	}
  
++	internal bool TryAcquireOptimumWorldgenFootprint(int dimension, int chunkX, int chunkZ, int chunkMapSizeX, int chunkMapSizeZ, out OptimumWorldgenFootprintLease footprintLease)
++	{
++		footprintLease = null;
++		OptimumWorldgenFootprintRegistry registry = optimumWorldgenFootprints;
++		if (additionalWorldGenThreadsCount <= 0 || registry == null)
++		{
++			return true;
++		}
++
++		const int radius = 1;
++		int minX = Math.Max(0, chunkX - radius);
++		int maxX = Math.Min(chunkMapSizeX - 1, chunkX + radius);
++		int minZ = Math.Max(0, chunkZ - radius);
++		int maxZ = Math.Min(chunkMapSizeZ - 1, chunkZ + radius);
++		var keys = new List<OptimumWorldgenFootprintKey>((maxX - minX + 1) * (maxZ - minZ + 1));
++		for (int x = minX; x <= maxX; x++)
++		{
++			for (int z = minZ; z <= maxZ; z++)
++			{
++				keys.Add(new OptimumWorldgenFootprintKey(dimension, x, z));
++			}
++		}
++
++		return registry.TryAcquire(keys, out footprintLease);
++	}
++
  	protected override void UpdatePausedStatus(bool newpause)
  	{
+ 		if (newpause != additionalThreadsPaused)
+ 		{
+ 			TogglePause(newpause);

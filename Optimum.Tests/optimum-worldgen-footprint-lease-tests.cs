@@ -64,4 +64,29 @@ public sealed class OptimumWorldgenFootprintLeaseTests
         lease!.Dispose();
         Assert.Null(blocked);
     }
+
+    [Fact]
+    public void UnloadCannotReserveAColumnInsideAWorkerFootprint()
+    {
+        var registry = new OptimumWorldgenFootprintRegistry();
+        var workerFootprint = new[]
+        {
+            new OptimumWorldgenFootprintKey(0, 10, 20),
+            new OptimumWorldgenFootprintKey(0, 11, 20),
+            new OptimumWorldgenFootprintKey(0, 10, 21),
+            new OptimumWorldgenFootprintKey(0, 11, 21),
+        };
+
+        Assert.True(registry.TryAcquire(workerFootprint, out OptimumWorldgenFootprintLease? workerLease));
+        Assert.False(registry.TryAcquire(
+            new[] { new OptimumWorldgenFootprintKey(0, 11, 20) },
+            out OptimumWorldgenFootprintLease? unloadLease));
+        Assert.Null(unloadLease);
+
+        workerLease!.Dispose();
+        Assert.True(registry.TryAcquire(
+            new[] { new OptimumWorldgenFootprintKey(0, 11, 20) },
+            out OptimumWorldgenFootprintLease? available));
+        available!.Dispose();
+    }
 }

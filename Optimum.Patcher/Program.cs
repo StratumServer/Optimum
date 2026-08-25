@@ -270,6 +270,8 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Server.ChunkServerThread"] = new()
     {
         "optimumReadPool",
+        "optimumWorldgenFootprints",
+        "TryAcquireOptimumWorldgenFootprint",
     },
     ["Vintagestory.Server.ServerSystemSupplyChunks"] = new()
     {
@@ -325,6 +327,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumUnloadGenRequests",
         "optimumUnloadGenChunks",
         "optimumUnloadGenMapChunks",
+        "optimumUnloadGenLeases",
     },
     ["Vintagestory.Server.ServerSystemCompressChunks"] = new()
     {
