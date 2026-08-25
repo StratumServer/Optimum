@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Xunit;
 
@@ -16,7 +17,27 @@ public class OitFramebufferRebuildCoverageTests
 
         // The rebuild condition must detect when the framebuffer instance changed
         // (after RebuildFrameBuffers replaces the list entry with a new object).
-        Assert.Contains("transparentfb != capi.Render.FrameBuffers[1]", source);
+        Assert.Contains("transparentfb != currentTransparentfb", source);
+    }
+
+    [Fact]
+    public void OitRebuildComparesPreviousFramebufferToCurrentBeforeReplacingIt()
+    {
+        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+
+        int currentFramebuffer = source.IndexOf(
+            "FrameBufferRef currentTransparentfb = capi.Render.FrameBuffers[1]",
+            StringComparison.Ordinal);
+        int identityCheck = source.IndexOf(
+            "transparentfb != currentTransparentfb",
+            StringComparison.Ordinal);
+        int methodEnd = source.IndexOf("private void freeResources", currentFramebuffer, StringComparison.Ordinal);
+
+        Assert.True(currentFramebuffer >= 0, "The current transparent framebuffer must be captured without replacing the previous reference.");
+        Assert.True(identityCheck > currentFramebuffer, "The OIT rebuild must compare the previous reference with the current framebuffer.");
+        Assert.True(methodEnd > currentFramebuffer, "The OIT render method must have a recognizable boundary.");
+        string renderMethod = source.Substring(currentFramebuffer, methodEnd - currentFramebuffer);
+        Assert.DoesNotContain("transparentfb = capi.Render.FrameBuffers[1]", renderMethod);
     }
 
     [Fact]
