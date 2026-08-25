@@ -43,7 +43,7 @@ public static class ApiPatcher
             ReadSymbols = false,
         };
 
-        using var vanilla = AssemblyDefinition.ReadAssembly(vanillaPath, vanillaReaderParameters);
+        using var vanilla = AssemblyReader.Read(vanillaPath, vanillaReaderParameters, out preserveSymbols);
         using var contracts = AssemblyDefinition.ReadAssembly(contractsPath, contractsReaderParameters);
 
         var bridge = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumApiBridge")
@@ -142,7 +142,7 @@ public static class ApiPatcher
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
-        vanilla.Write(outputPath, new WriterParameters { WriteSymbols = preserveSymbols });
+        AssemblyWriter.Write(vanilla, outputPath, preserveSymbols);
         if (preserveSymbols)
         {
             Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");
