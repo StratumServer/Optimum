@@ -1,8 +1,20 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs
-index 642722c..ddf48f6 100644
+index 642722c..c95c743 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs
-@@ -38,10 +38,21 @@ internal class ServerSystemUnloadChunks : ServerSystem
+@@ -1,10 +1,11 @@
+ using System;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
+ using System.Runtime;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ using Vintagestory.API.Util;
+ using Vintagestory.Common.Database;
+@@ -38,10 +39,21 @@ internal class ServerSystemUnloadChunks : ServerSystem
  
  	private float accum120s;
  
@@ -24,7 +36,7 @@ index 642722c..ddf48f6 100644
  	{
  		this.chunkthread = chunkthread;
  		server.api.ChatCommands.GetOrCreate("chunk").BeginSubCommand("unload").WithDescription("Toggle on / off whether the server(and thus in turn the client) should unload chunks")
-@@ -354,13 +365,21 @@ internal class ServerSystemUnloadChunks : ServerSystem
+@@ -354,14 +366,22 @@ internal class ServerSystemUnloadChunks : ServerSystem
  			chunk.Dispose();
  		}
  		return flag;
@@ -35,19 +47,21 @@ index 642722c..ddf48f6 100644
 +	private List<ChunkColumnLoadRequest> optimumUnloadGenRequests;
 +	private List<DbChunk> optimumUnloadGenChunks;
 +	private List<DbChunk> optimumUnloadGenMapChunks;
++	private List<OptimumWorldgenFootprintLease> optimumUnloadGenLeases;
 +
  	internal void UnloadGeneratingChunkColumns(long timeToLive)
  	{
 -		List<ChunkColumnLoadRequest> list = new List<ChunkColumnLoadRequest>();
+-		int num = 0;
 +		// Optimum: reuse lists instead of allocating per call.
 +		List<ChunkColumnLoadRequest> list = optimumUnloadGenRequests ??= new List<ChunkColumnLoadRequest>();
 +		list.Clear();
- 		int num = 0;
  		foreach (ChunkColumnLoadRequest item in chunkthread.requestedChunkColumns.Snapshot())
  		{
  			if (item.Chunks == null || item.Disposed)
  			{
-@@ -391,12 +410,15 @@ internal class ServerSystemUnloadChunks : ServerSystem
+ 				continue;
+@@ -391,85 +411,127 @@ internal class ServerSystemUnloadChunks : ServerSystem
  		}
  		if (list.Count == 0)
  		{
@@ -55,17 +69,133 @@ index 642722c..ddf48f6 100644
  		}
 -		List<DbChunk> list2 = new List<DbChunk>();
 -		List<DbChunk> list3 = new List<DbChunk>();
+-		using FastMemoryStream ms = new FastMemoryStream();
+-		foreach (ChunkColumnLoadRequest item2 in list)
 +		// Optimum: reuse DbChunk lists
 +		List<DbChunk> list2 = optimumUnloadGenChunks ??= new List<DbChunk>();
 +		list2.Clear();
 +		List<DbChunk> list3 = optimumUnloadGenMapChunks ??= new List<DbChunk>();
 +		list3.Clear();
- 		using FastMemoryStream ms = new FastMemoryStream();
- 		foreach (ChunkColumnLoadRequest item2 in list)
++		List<OptimumWorldgenFootprintLease> leases = optimumUnloadGenLeases ??= new List<OptimumWorldgenFootprintLease>();
++		leases.Clear();
++		try
  		{
- 			item2.generatingLock.AcquireReadLock();
- 			try
-@@ -449,27 +471,30 @@ internal class ServerSystemUnloadChunks : ServerSystem
+-			item2.generatingLock.AcquireReadLock();
+-			try
++			using FastMemoryStream ms = new FastMemoryStream();
++			foreach (ChunkColumnLoadRequest item2 in list)
+ 			{
+-				for (int j = 0; j < item2.Chunks.Length; j++)
++				OptimumWorldgenFootprintLease lease = null;
++				try
+ 				{
+-					if (item2.Chunks[j].DirtyForSaving)
++					if (!chunkthread.TryAcquireOptimumWorldgenFootprint(
++						item2.dimension,
++						item2.chunkX,
++						item2.chunkZ,
++						server.WorldMap.ChunkMapSizeX,
++						server.WorldMap.ChunkMapSizeZ,
++						out lease))
+ 					{
+-						item2.Chunks[j].DirtyForSaving = false;
+-						list2.Add(new DbChunk
+-						{
+-							Position = new ChunkPos(item2.chunkX, j, item2.chunkZ, 0),
+-							Data = item2.Chunks[j].ToBytes(ms)
+-						});
++						continue;
+ 					}
+-				}
+-				ServerMapChunk mapChunk = item2.MapChunk;
+-				if (mapChunk != null)
+-				{
+-					if (mapChunk.DirtyForSaving)
++
++					item2.generatingLock.AcquireReadLock();
++					try
+ 					{
+-						list3.Add(new DbChunk
++						for (int j = 0; j < item2.Chunks.Length; j++)
++						{
++							if (item2.Chunks[j].DirtyForSaving)
++							{
++								item2.Chunks[j].DirtyForSaving = false;
++								list2.Add(new DbChunk
++								{
++									Position = new ChunkPos(item2.chunkX, j, item2.chunkZ, 0),
++									Data = item2.Chunks[j].ToBytes(ms)
++								});
++							}
++						}
++						ServerMapChunk mapChunk = item2.MapChunk;
++						if (mapChunk != null)
+ 						{
+-							Position = new ChunkPos(item2.chunkX, 0, item2.chunkZ, 0),
+-							Data = mapChunk.ToBytes(ms)
+-						});
++							if (mapChunk.DirtyForSaving)
++							{
++								list3.Add(new DbChunk
++								{
++									Position = new ChunkPos(item2.chunkX, 0, item2.chunkZ, 0),
++									Data = mapChunk.ToBytes(ms)
++								});
++							}
++							mapChunk.DirtyForSaving = false;
++							server.loadedMapChunks.Remove(item2.mapIndex2d);
++						}
++					}
++					finally
++					{
++						item2.generatingLock.ReleaseReadLock();
++					}
++					if (!chunkthread.requestedChunkColumns.Remove(item2.mapIndex2d))
++					{
++						throw new Exception("Chunkrequest no longer in queue? Race condition?");
++					}
++					server.ChunkColumnRequested.Remove(item2.mapIndex2d);
++					if (lease != null)
++					{
++						leases.Add(lease);
++						lease = null;
+ 					}
+-					mapChunk.DirtyForSaving = false;
+-					server.loadedMapChunks.Remove(item2.mapIndex2d);
++				}
++				finally
++				{
++					lease?.Dispose();
+ 				}
+ 			}
+-			finally
++			if (list2.Count > 0)
+ 			{
+-				item2.generatingLock.ReleaseReadLock();
++				chunkthread.gameDatabase.SetChunks(list2);
+ 			}
+-			if (!chunkthread.requestedChunkColumns.Remove(item2.mapIndex2d))
++			if (list3.Count > 0)
+ 			{
+-				throw new Exception("Chunkrequest no longer in queue? Race condition?");
++				chunkthread.gameDatabase.SetMapChunks(list3);
+ 			}
+-			server.ChunkColumnRequested.Remove(item2.mapIndex2d);
+-			num++;
+-		}
+-		if (list2.Count > 0)
+-		{
+-			chunkthread.gameDatabase.SetChunks(list2);
+ 		}
+-		if (list3.Count > 0)
++		finally
+ 		{
+-			chunkthread.gameDatabase.SetMapChunks(list3);
++			for (int i = 0; i < leases.Count; i++)
++			{
++				leases[i]?.Dispose();
++			}
++			leases.Clear();
  		}
  	}
  
@@ -99,7 +229,7 @@ index 642722c..ddf48f6 100644
  			long key = server.WorldMap.MapChunkIndex2D(vec2i.X, vec2i.Y);
  			server.loadedMapChunks.TryGetValue(key, out value);
  			value?.MarkFresh();
-@@ -545,12 +570,15 @@ internal class ServerSystemUnloadChunks : ServerSystem
+@@ -545,12 +607,15 @@ internal class ServerSystemUnloadChunks : ServerSystem
  		}
  	}
  
