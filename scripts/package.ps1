@@ -11,8 +11,10 @@ Also compress the folder into Optimum-v<version>-win-x64.zip.
 
 .PARAMETER VanillaDir
 Path to an existing Vintage Story Windows installation. When omitted, the
-script uses .vanilla/win-x64/vintagestory or acquires the official client on
-non-Windows hosts.
+script uses .vanilla/win-x64/vintagestory when that cache matches the requested
+version. If off-platform extraction is needed, it uses the separate
+.vanilla/win-x64/package-client cache so the bootstrap/decompile cache remains
+available to make run and make patch-il.
 
 .PARAMETER ClientArchive
 Path to an official Vintage Story Windows installer. On non-Windows hosts,
@@ -70,7 +72,8 @@ function Resolve-WindowsVanilla {
         [string]$RequestedVersion,
         [string]$InstallerPath
     )
-    $winDir = Join-Path (Join-Path $RepoRoot '.vanilla/win-x64') 'vintagestory'
+    $winRoot = Join-Path $RepoRoot '.vanilla/win-x64'
+    $winDir = Join-Path $winRoot 'vintagestory'
     $cachedVersion = Get-WindowsClientVersion -ClientDir $winDir
     if ((Test-Path (Join-Path $winDir 'Vintagestory.exe')) -and $cachedVersion -eq $RequestedVersion) {
         return $winDir
@@ -92,7 +95,16 @@ function Resolve-WindowsVanilla {
         throw "Off-platform Windows packaging requires innoextract >= 1.11 ($detected). Install a current release from https://github.com/crazy-max/innoextract/releases."
     }
 
-    $cacheParent = Split-Path -Parent $winDir
+    # Never replace the shared bootstrap/decompile cache. It is also the donor
+    # used by make run and make patch-il. An off-platform package gets its own
+    # extracted client cache instead.
+    $cacheDir = Join-Path $winRoot 'package-client'
+    $packageCachedVersion = Get-WindowsClientVersion -ClientDir $cacheDir
+    if ((Test-Path (Join-Path $cacheDir 'Vintagestory.exe')) -and $packageCachedVersion -eq $RequestedVersion) {
+        return $cacheDir
+    }
+
+    $cacheParent = Split-Path -Parent $cacheDir
     $archiveCache = Join-Path $RepoRoot '.vanilla/archives'
     New-Item -ItemType Directory -Force -Path $archiveCache | Out-Null
     New-Item -ItemType Directory -Force -Path $cacheParent | Out-Null
@@ -154,15 +166,15 @@ function Resolve-WindowsVanilla {
             throw "Installer extracted Vintage Story $reported, requested $RequestedVersion."
         }
 
-        $backupDir = Join-Path $cacheParent ".vintagestory-backup-$([Guid]::NewGuid().ToString('N'))"
+        $backupDir = Join-Path $cacheParent ".package-client-backup-$([Guid]::NewGuid().ToString('N'))"
         $promoted = $false
         try {
-            if (Test-Path $winDir) { Move-Item -Path $winDir -Destination $backupDir }
-            Move-Item -Path $sourceRoot -Destination $winDir
+            if (Test-Path $cacheDir) { Move-Item -Path $cacheDir -Destination $backupDir }
+            Move-Item -Path $sourceRoot -Destination $cacheDir
             $promoted = $true
         } catch {
-            if (-not (Test-Path $winDir) -and (Test-Path $backupDir)) {
-                Move-Item -Path $backupDir -Destination $winDir
+            if (-not (Test-Path $cacheDir) -and (Test-Path $backupDir)) {
+                Move-Item -Path $backupDir -Destination $cacheDir
             }
             throw
         } finally {
@@ -174,8 +186,8 @@ function Resolve-WindowsVanilla {
         if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }
     }
 
-    if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) { return $winDir }
-    throw "Extraction completed without producing $winDir/Vintagestory.exe."
+    if (Test-Path (Join-Path $cacheDir 'Vintagestory.exe')) { return $cacheDir }
+    throw "Extraction completed without producing $cacheDir/Vintagestory.exe."
 }
 
 Push-Location $repoRoot

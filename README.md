@@ -194,7 +194,7 @@ Or call the scripts directly:
 ./scripts/package-all.sh --targets linux-x64,osx-arm64
 ```
 
-The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer; pass `-ClientArchive` to supply the installer when no matching cache exists.
+The Linux script renames the launcher to Optimum, repoints run.sh, swaps the window icon, and brands the .desktop entry. The macOS script assembles Optimum.app (renamed launcher, Icon.icns from the logo, rebranded Info.plist) and builds a drag-to-Applications .dmg. Off-Windows Windows packaging downloads the official `vs_install_win-x64_<version>.exe` into `.vanilla/archives/` and extracts it with `innoextract` 1.11 or newer. A matching `.vanilla/win-x64/vintagestory` cache is reused; otherwise extraction goes to `.vanilla/win-x64/package-client` so the bootstrap/decompile cache remains intact for `make run` and `make patch-il`. Pass `-ClientArchive` to supply the installer when no matching cache exists.
 
 ### Host prerequisites for packaging
 
