@@ -9,6 +9,8 @@
 
 Optimum is a high-performance, client-side fork of [Vintage Story](https://www.vintagestory.at).
 
+Read the [Optimum Privacy Policy](PRIVACY.md) for the information handled by the build scripts, installers, launcher, and patcher.
+
 ## Features
 
 - Background FPS limiter (30 FPS when alt-tabbed)
