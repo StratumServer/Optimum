@@ -92,6 +92,18 @@ check_cmd() { command -v "$1" &>/dev/null; }
 DOTNET_BIN=""  # set by check_dotnet10 on success
 ILSPY_BIN=""   # set by check_ilspycmd on success
 
+# NixOS (and other non-FHS systems) do not ship the glibc dynamic linker at
+# /lib64/ld-linux-x86-64.so.2, so the SDK that dotnet-install.sh downloads
+# cannot run there. Detect those systems so the installer routes the .NET 10
+# prerequisite through nixpkgs instead of downloading a broken SDK.
+detect_nixos() {
+    [[ -e /etc/NIXOS ]] || [[ -n "${NIX_STORE:-}" ]]
+}
+
+nixos_dotnet_install_cmd() {
+    printf '%s' 'nix profile install nixpkgs#dotnet-sdk_10'
+}
+
 check_dotnet10() {
     DOTNET_BIN=""
     local candidates=()
@@ -107,6 +119,7 @@ check_dotnet10() {
     else
         candidates+=(
             "$HOME/.dotnet/dotnet"
+            "$HOME/.nix-profile/bin/dotnet"
             "/usr/share/dotnet/dotnet"
             "/usr/lib/dotnet/dotnet"
             "/snap/dotnet-sdk/current/dotnet"
@@ -236,6 +249,9 @@ system_install_command() {
 }
 
 install_dotnet10() {
+    if detect_nixos; then
+        die "On NixOS the .NET 10 SDK must come from nixpkgs; the dot.net installer downloads a glibc build that cannot run there. Run: $(nixos_dotnet_install_cmd), then re-run this installer."
+    fi
     local installer
     installer=$(mktemp)
     if check_cmd curl; then
@@ -294,9 +310,15 @@ detect_prereqs() {
         fi
     else
         PREREQ_STATUS[dotnet]="missing"
-        PREREQ_LABEL[dotnet]=".NET 10 SDK"
-        PREREQ_INSTALL_CMD[dotnet]="curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir ~/.dotnet"
-        PREREQ_INSTALL_URL[dotnet]="https://dotnet.microsoft.com/download/dotnet/10.0"
+        if detect_nixos; then
+            PREREQ_LABEL[dotnet]=".NET 10 SDK (NixOS: install via nixpkgs)"
+            PREREQ_INSTALL_CMD[dotnet]="$(nixos_dotnet_install_cmd)"
+            PREREQ_INSTALL_URL[dotnet]="https://search.nixos.org/packages?query=dotnet-sdk_10"
+        else
+            PREREQ_LABEL[dotnet]=".NET 10 SDK"
+            PREREQ_INSTALL_CMD[dotnet]="curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir ~/.dotnet"
+            PREREQ_INSTALL_URL[dotnet]="https://dotnet.microsoft.com/download/dotnet/10.0"
+        fi
     fi
 
     # Git
