@@ -883,6 +883,9 @@ main() {
         printf "    ${BOLD}Desktop:${RESET} %s\n" "$desktop_dir/Optimum.desktop"
     fi
     printf "    ${BOLD}Run:${RESET}     %s/optimum-launch.sh\n" "$INSTALL_DIR"
+    if detect_nixos; then
+        warn "NixOS detected: the launcher and game are glibc binaries. Run them through a FHS environment such as steam-run (or appimage-run for the AppImage) with the .NET runtime and game native libraries exposed. See the NixOS section in README.md."
+    fi
     printf "\n"
 }
 
