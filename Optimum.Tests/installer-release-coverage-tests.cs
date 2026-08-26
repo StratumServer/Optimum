@@ -197,6 +197,148 @@ public class InstallerReleaseCoverageTests
     }
 
     [Fact]
+    public void WindowsInstallerPassesFinalDataPathToPreflightBeforeCopyingIt()
+    {
+        string installer = Read("scripts/install-windows.ps1");
+        int preflightFunction = installer.IndexOf(
+            "function Invoke-RuntimePreflight",
+            StringComparison.Ordinal);
+        int argumentQuoter = installer.IndexOf(
+            "function ConvertTo-WindowsProcessArgument",
+            StringComparison.Ordinal);
+        Assert.True(preflightFunction >= 0, "Runtime preflight function is missing");
+        Assert.True(argumentQuoter >= 0, "Windows process argument helper is missing");
+
+        int installFunction = installer.IndexOf(
+            "function Install-StagedPackage",
+            preflightFunction,
+            StringComparison.Ordinal);
+
+        Assert.True(installFunction > preflightFunction, "Runtime preflight function boundary is missing");
+        Assert.True(argumentQuoter < preflightFunction, "Process argument helper must be defined before preflight");
+        string argumentHelper = installer.Substring(argumentQuoter, preflightFunction - argumentQuoter);
+        Assert.Contains("$Value.IndexOf('\"') -ge 0", argumentHelper);
+        Assert.Contains("[regex]::Replace($Value, '(\\\\+)$', '$1$1')", argumentHelper);
+        Assert.Contains("return \"`\"$escapedValue`\"\"", argumentHelper);
+
+        string preflight = installer.Substring(preflightFunction, installFunction - preflightFunction);
+        int preflightCall = installer.IndexOf(
+            "Invoke-RuntimePreflight -StageDir $built.FullName -LogRoot $buildRoot -DataPath $DataPath",
+            installFunction,
+            StringComparison.Ordinal);
+        Assert.True(preflightCall > installFunction, "Build flow does not pass DataPath to runtime preflight");
+
+        int stagedInstall = installer.IndexOf(
+            "Install-StagedPackage -StageDir $built.FullName -InstallDir $InstallDir",
+            preflightCall,
+            StringComparison.Ordinal);
+        Assert.True(stagedInstall > preflightCall, "Staged package must be copied only after runtime preflight");
+
+        int dataPathConfig = installer.IndexOf(
+            "[System.IO.File]::WriteAllText",
+            stagedInstall,
+            StringComparison.Ordinal);
+        Assert.True(dataPathConfig > stagedInstall, "datapath.cfg must be written after the package copy");
+
+        Assert.Contains("[string]$DataPath", preflight);
+        Assert.Contains("$argumentList = @('--validate-only')", preflight);
+        Assert.Contains("$argumentList += @('--dataPath', (ConvertTo-WindowsProcessArgument -Value $DataPath))", preflight);
+        Assert.Contains("-ArgumentList $argumentList", preflight);
+    }
+
+    [Fact]
+    public void WindowsInstallerDataPathArgumentSurvivesWindowsPowerShellParsing()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string installer = Read("scripts/install-windows.ps1");
+        int helperStart = installer.IndexOf(
+            "function ConvertTo-WindowsProcessArgument",
+            StringComparison.Ordinal);
+        Assert.True(helperStart >= 0, "Windows process argument helper is missing");
+        if (helperStart < 0)
+        {
+            return;
+        }
+
+        int helperEnd = installer.IndexOf(
+            "function Invoke-RuntimePreflight",
+            helperStart,
+            StringComparison.Ordinal);
+        Assert.True(helperEnd > helperStart, "Windows process argument helper boundary is missing");
+
+        string helper = installer.Substring(helperStart, helperEnd - helperStart);
+        string harness = helper + "\n" + """
+            $ErrorActionPreference = 'Stop'
+            $probe = Join-Path $env:TEMP ('optimum-argv-probe-' + [guid]::NewGuid().ToString('N') + '.ps1')
+            $output = Join-Path $env:TEMP ('optimum-argv-output-' + [guid]::NewGuid().ToString('N') + '.txt')
+
+            try {
+                [System.IO.File]::WriteAllText($probe, '$args | ForEach-Object { [Console]::Out.WriteLine($_) }')
+                foreach ($dataPath in @($null, 'C:\Users\Jane Doe\Vintage Data', 'C:\Users\Jane Doe\Vintage Data\', 'D:\')) {
+                    $argumentList = @('-NoProfile', '-NonInteractive', '-File', (ConvertTo-WindowsProcessArgument -Value $probe), '--validate-only')
+                    $expected = @('--validate-only')
+                    if ($null -ne $dataPath) {
+                        $argumentList += @('--dataPath', (ConvertTo-WindowsProcessArgument -Value $dataPath))
+                        $expected += @('--dataPath', $dataPath)
+                    }
+
+                    Remove-Item -LiteralPath $output -Force -ErrorAction SilentlyContinue
+                    $process = Start-Process -FilePath 'powershell.exe' -ArgumentList $argumentList -Wait -PassThru -NoNewWindow -RedirectStandardOutput $output
+                    $actual = @(Get-Content -LiteralPath $output)
+                    if ($process.ExitCode -ne 0 -or $actual.Count -ne $expected.Count) {
+                        throw "Argument count/exit mismatch for '$dataPath': $($process.ExitCode) / $($actual -join '|')"
+                    }
+                    for ($i = 0; $i -lt $expected.Count; $i++) {
+                        if ($actual[$i] -cne $expected[$i]) {
+                            throw "Argument mismatch for '$dataPath': expected '$($expected[$i])', got '$($actual[$i])'"
+                        }
+                    }
+                }
+            } finally {
+                Remove-Item -LiteralPath $probe, $output -Force -ErrorAction SilentlyContinue
+            }
+
+            'Windows Start-Process argv harness passed'
+            """;
+
+        DirectoryInfo tempDirectory = Directory.CreateTempSubdirectory("optimum-windows-argv-");
+        string harnessPath = Path.Combine(tempDirectory.FullName, "harness.ps1");
+        File.WriteAllText(harnessPath, harness);
+
+        try
+        {
+            ProcessStartInfo startInfo = new("powershell.exe")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-NonInteractive");
+            startInfo.ArgumentList.Add("-ExecutionPolicy");
+            startInfo.ArgumentList.Add("Bypass");
+            startInfo.ArgumentList.Add("-File");
+            startInfo.ArgumentList.Add(harnessPath);
+
+            using Process process = Process.Start(startInfo)!;
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.True(process.ExitCode == 0, output + Environment.NewLine + error);
+            Assert.Contains("Windows Start-Process argv harness passed", output);
+        }
+        finally
+        {
+            tempDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void WindowsInstallerNormalizesDriveRootParentPath()
     {
         // Regression guard: PowerShell 5.1's Split-Path -Parent strips the
