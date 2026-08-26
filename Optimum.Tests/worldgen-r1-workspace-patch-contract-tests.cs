@@ -78,4 +78,19 @@ public sealed class WorldgenR1WorkspacePatchContractTests
         Assert.Contains("\"TryAcquireOptimumWorldgenFootprint\"", patcher);
         Assert.Contains("\"optimumUnloadGenLeases\"", patcher);
     }
+
+    [Fact]
+    public void SafetyGateDetectsPatchesOnMethodsTheHandlerCallsNotJustTheHandler()
+    {
+        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch");
+
+        // A mod can patch a method the registered handler calls (GenTerra.generate)
+        // or a compiler-generated closure the handler invokes (GenTerra.<>c__DisplayClass34_0)
+        // without patching the handler method itself. The safety gate must scan the
+        // declaring type and its nested types, not just Harmony.GetPatchInfo(handler.Method).
+        Assert.Contains("IsWorldgenHandlerHarmonyPatched", source);
+        Assert.Contains("handlerMethod.DeclaringType", source);
+        Assert.Contains("declaringType.GetMethods", source);
+        Assert.Contains("declaringType.GetNestedTypes", source);
+    }
 }
