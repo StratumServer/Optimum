@@ -278,6 +278,9 @@ public static class OptimumConfig
     /// </summary>
     public static bool MapPageCacheEnabled = true;
 
+    public static bool EffectiveMapPageCache => MapPageCacheEnabled &&
+        !IsShaderFeatureDisabled("MapPageCache");
+
     /// <summary>
     /// Number of layers in the GL_TEXTURE_2D_ARRAY used for map page
     /// rendering. Each layer holds one 256x256 page. 128 covers most

@@ -153,7 +153,7 @@ public sealed class OptimumMapPageCache : IDisposable
     /// </summary>
     public void WriteChunk(int chunkX, int chunkZ, int[] chunkPixels)
     {
-        if (!OptimumConfig.MapPageCacheEnabled || _disposed) return;
+        if (!OptimumConfig.EffectiveMapPageCache || _disposed) return;
         if (chunkPixels == null || chunkPixels.Length != GlobalConstants.ChunkSize * GlobalConstants.ChunkSize) return;
 
         var (pageX, pageZ) = ChunkToPage(chunkX, chunkZ);
@@ -202,7 +202,7 @@ public sealed class OptimumMapPageCache : IDisposable
     /// </summary>
     public bool TryReadPage(int pageX, int pageZ)
     {
-        if (!OptimumConfig.MapPageCacheEnabled || _disposed) return false;
+        if (!OptimumConfig.EffectiveMapPageCache || _disposed) return false;
 
         string path = GetPagePath(pageX, pageZ);
         if (!File.Exists(path)) return false;

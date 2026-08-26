@@ -154,8 +154,8 @@ public class EntityRenderP0Tests
         string renderer = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs.patch");
         string patcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
 
-        Assert.Contains("OptimumConfig.EntityLightBatchEnabled && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0", system);
-        Assert.Contains("OptimumConfig.EntityShaderStateCacheEnabled", system);
+        Assert.Contains("OptimumConfig.EffectiveEntityLightBatch && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0", system);
+        Assert.Contains("OptimumConfig.EffectiveEntityShaderStateCache", system);
         Assert.Contains("!optimumEntityShaderCacheDisabled", system);
         Assert.Contains("OptimumEntityLightBatchSize = 256", system);
         Assert.Contains("OptimumEntityLightMinimumSamples = 4", system);

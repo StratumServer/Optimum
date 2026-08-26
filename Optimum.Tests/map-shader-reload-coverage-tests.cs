@@ -55,6 +55,19 @@ public sealed class MapShaderReloadCoverageTests
     }
 
     [Fact]
+    public void ExternalShaderCompatibilityDisablesThePageCacheFallback()
+    {
+        string config = Read("sources/VintagestoryApi/Config/OptimumConfig.cs");
+        string pageCache = Read("sources/VSEssentials/Systems/WorldMap/ChunkLayer/OptimumMapPageCache.cs");
+        string patch = PatchReader.ReadPatch(
+            "patches/runtime/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs.patch");
+
+        Assert.Contains("EffectiveMapPageCache", config);
+        Assert.Contains("!OptimumConfig.EffectiveMapPageCache", pageCache);
+        Assert.Contains("OptimumConfig.EffectiveMapPageCache", patch);
+    }
+
+    [Fact]
     public void ChunkMapLayerRendersAllComponentsAfterInstancedPass()
     {
         string patch = PatchReader.ReadPatch(
