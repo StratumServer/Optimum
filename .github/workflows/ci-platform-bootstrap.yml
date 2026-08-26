@@ -102,6 +102,10 @@ jobs:
         shell: bash
         run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
 
+      - name: Run launcher tests
+        shell: bash
+        run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -196,6 +200,10 @@ jobs:
         shell: bash
         run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
 
+      - name: Run launcher tests
+        shell: bash
+        run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -287,6 +295,10 @@ jobs:
         shell: bash
         run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
 
+      - name: Run launcher tests
+        shell: bash
+        run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -373,6 +385,10 @@ jobs:
         shell: bash
         run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
 
+      - name: Run launcher tests
+        shell: bash
+        run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -458,6 +474,10 @@ jobs:
       - name: Run tests
         shell: bash
         run: dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build --nologo
+
+      - name: Run launcher tests
+        shell: bash
+        run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
 
       - name: Upload logs on failure
         if: failure()

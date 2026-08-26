@@ -72,7 +72,28 @@ public static class Program
         catch (Exception ex)
         {
             shaderCompatibility = ShaderCompatibilityScanner.CreateConservativeReport(Version, ex.Message);
-            try { ShaderCompatibilityScanner.SaveReport(dataPath, shaderCompatibility); } catch { }
+            try
+            {
+                ShaderCompatibilityScanner.SaveReport(dataPath, shaderCompatibility);
+            }
+            catch (Exception saveException)
+            {
+                string reportPath = Path.Combine(dataPath, CacheDirName, ShaderCompatibilityScanner.ReportFileName);
+                try
+                {
+                    if (File.Exists(reportPath)) File.Delete(reportPath);
+                }
+                catch (Exception cleanupException)
+                {
+                    throw new IOException(
+                        "Could not save the conservative shader compatibility report or remove the previous report.",
+                        new AggregateException(ex, saveException, cleanupException));
+                }
+
+                Logger.LogError(
+                    $"[Optimum] Could not save the conservative shader compatibility report; " +
+                    $"removed any previous report to keep shader features disabled: {saveException.Message}");
+            }
         }
         Logger.Log($"[Optimum] Shader compatibility scan: sources={shaderCompatibility.Sources.Count}, " +
             $"shaders={shaderCompatibility.ShaderOwners.Count}, conflicts={shaderCompatibility.Conflicts.Count}, " +

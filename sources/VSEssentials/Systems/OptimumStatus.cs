@@ -378,7 +378,7 @@ public class OptimumStatusModSystem : ModSystem
         api.Logger.Debug("[Optimum] God-rays sample limit: {0} ({1})",
             OptimumConfig.GodRaysSampleLimit,
             OptimumConfig.GodRaysSampleCapEnabled ? "cap" : "vanilla");
-        if (OptimumConfig.MapPageCacheEnabled)
+        if (OptimumConfig.EffectiveMapPageCache)
             api.Logger.Debug("[Optimum] Map page cache (FastMap): ON (maxLayers={0}, bc7={1})",
                 OptimumConfig.MapPageCacheMaxLayers, OptimumConfig.MapPageCacheBc7);
         if (OptimumConfig.AdaptiveRadiusEnabled)

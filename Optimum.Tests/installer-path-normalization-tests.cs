@@ -17,14 +17,14 @@ public class InstallerPathNormalizationTests
     {
         string script = Read("scripts/install-windows.ps1");
 
-        // The GUI click handler must detect a bare drive letter after TrimEnd
-        // and append a backslash BEFORE any GetFullPath call.
-        Assert.Contains("if ($dir -match '^[A-Za-z]:$')", script);
-        Assert.Contains("$dir = \"$dir\\\"", script);
+        // The shared normalizer must detect a bare drive letter and append a
+        // backslash before any GetFullPath call.
+        Assert.Contains("function Normalize-WindowsDirectoryPath", script);
+        Assert.Contains("if ($normalized -match '^[A-Za-z]:$')", script);
+        Assert.Contains("[System.IO.Path]::GetFullPath($normalized)", script);
 
-        // The normalization must appear BEFORE the VS-overlap GetFullPath check.
-        int normPos = script.IndexOf("if ($dir -match '^[A-Za-z]:$')");
-        int getFullPathPos = script.IndexOf("[System.IO.Path]::GetFullPath($dir)");
+        int normPos = script.IndexOf("if ($normalized -match '^[A-Za-z]:$')");
+        int getFullPathPos = script.IndexOf("[System.IO.Path]::GetFullPath($normalized)");
         Assert.True(normPos < getFullPathPos,
             "Drive letter normalization must precede the first GetFullPath($dir) call");
     }
@@ -34,8 +34,9 @@ public class InstallerPathNormalizationTests
     {
         string script = Read("scripts/install-windows.ps1");
 
-        // Invoke-OptimumBuild must also normalize bare drive letters from CLI args.
-        Assert.Contains("if ($InstallDir -match '^[A-Za-z]:$')", script);
+        // Invoke-OptimumBuild must normalize bare drive letters from CLI args
+        // through the shared helper.
+        Assert.Contains("$InstallDir = Normalize-WindowsDirectoryPath -Path $InstallDir -Name 'InstallDir'", script);
     }
 
     [Fact]
@@ -54,23 +55,30 @@ public class InstallerPathNormalizationTests
     {
         string script = Read("scripts/install-windows.ps1");
 
-        // Expected order in btnInstall click handler (search from the agree form):
-        // 1. Trim + TrimEnd
-        // 2. Empty check
-        // 3. Bare drive letter normalization
-        // 4. GetFullPath for VS overlap check
+        // The shared helper owns trim, drive-root normalization, and GetFullPath.
+        int helperPos = script.IndexOf("function Normalize-WindowsDirectoryPath");
+        int trimPos = script.IndexOf("$normalized = $Path.Trim()", helperPos);
+        int driveNorm = script.IndexOf("if ($normalized -match '^[A-Za-z]:$')", helperPos);
+        int fullPath = script.IndexOf("[System.IO.Path]::GetFullPath($normalized)", helperPos);
+
+        Assert.True(helperPos >= 0, "Path normalizer missing");
+        Assert.True(trimPos > helperPos, "Trim step missing in path normalizer");
+        Assert.True(driveNorm > trimPos, "Drive normalization must follow trim");
+        Assert.True(fullPath > driveNorm, "GetFullPath must follow drive normalization");
+
+        // The GUI click handler normalizes before its empty/root validation.
         int agreeForm = script.IndexOf("if ($agreeForm.ShowDialog()");
         Assert.True(agreeForm > 0, "Agree form dialog missing");
 
-        int trimPos = script.IndexOf("$dir = $script:txtDir.Text.Trim().TrimEnd", agreeForm);
-        int emptyCheck = script.IndexOf("if (-not $dir)", trimPos);
-        int driveNorm = script.IndexOf("if ($dir -match '^[A-Za-z]:$')", trimPos);
-        int fullPath = script.IndexOf("[System.IO.Path]::GetFullPath($dir)", trimPos);
+        int guiNormalizePos = script.IndexOf(
+            "$dir = Normalize-WindowsDirectoryPath -Path $script:txtDir.Text -Name 'InstallDir'",
+            agreeForm);
+        int emptyCheck = script.IndexOf("if (-not $dir)", guiNormalizePos);
+        int rootCheck = script.IndexOf("if (Test-FileSystemRoot -Path $dir)", guiNormalizePos);
 
-        Assert.True(trimPos > agreeForm, "Trim step missing after agree form");
-        Assert.True(emptyCheck > trimPos, "Empty check must follow trim");
-        Assert.True(driveNorm > emptyCheck, "Drive normalization must follow empty check");
-        Assert.True(fullPath > driveNorm, "GetFullPath must follow drive normalization");
+        Assert.True(guiNormalizePos > agreeForm, "Path normalization missing after agree form");
+        Assert.True(emptyCheck > guiNormalizePos, "Empty check must follow normalization");
+        Assert.True(rootCheck > emptyCheck, "Root validation must follow the empty check");
     }
 
     private static string Read(string relativePath)
