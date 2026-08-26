@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
-index 159b06c..22b6600 100644
+index 159b06c..5e50b61 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
 @@ -1,9 +1,13 @@
@@ -218,7 +218,7 @@ index 159b06c..22b6600 100644
  		return false;
  	}
  
-@@ -419,57 +532,286 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -419,57 +532,328 @@ internal class ServerSystemSupplyChunks : ServerSystem
  			return stage == 0;
  		}
  		bool num = CanGenerateChunkColumn(chunkRequest);
@@ -365,15 +365,7 @@ index 159b06c..22b6600 100644
 -				requestedChunkColumn.FlagToRequeue();
 +				string assemblyName = handler?.Method?.DeclaringType?.Assembly?.GetName().Name;
 +				bool foreign = !OptimumWorldgenSafetyGate.IsKnownSafeAssembly(assemblyName);
-+				bool harmonyPatched;
-+				try
-+				{
-+					harmonyPatched = handler?.Method != null && Harmony.GetPatchInfo(handler.Method)?.Owners?.Count > 0;
-+				}
-+				catch
-+				{
-+					harmonyPatched = true;
-+				}
++				bool harmonyPatched = IsWorldgenHandlerHarmonyPatched(handler);
 +
 +				if (pass == (int)EnumWorldGenPass.Terrain && !IsWorldgenHandlerAllowedForParallelPass(pass, handler))
 +				{
@@ -399,6 +391,65 @@ index 159b06c..22b6600 100644
 +		}
 +
 +		return eligible;
++	}
++
++	private bool IsWorldgenHandlerHarmonyPatched(ChunkColumnGenerationDelegate handler)
++	{
++		MethodInfo handlerMethod = handler?.Method;
++		if (handlerMethod == null)
++		{
++			return false;
++		}
++		try
++		{
++			// A mod can patch a method the registered handler calls (for example
++			// GenTerra.generate) or a compiler-generated closure the handler invokes
++			// (for example GenTerra.<>c__DisplayClass34_0) instead of the handler
++			// method itself. Checking only the handler method leaves those patches
++			// invisible, so the pass cap stays raised while the patched body is not
++			// safe to run concurrently. Scan the declaring type and its nested types
++			// to catch both shapes.
++			if (Harmony.GetPatchInfo(handlerMethod)?.Owners?.Count > 0)
+ 			{
+-				if (ensurePrettyNeighbourhood(requestedChunkColumn))
++				return true;
++			}
++			Type declaringType = handlerMethod.DeclaringType;
++			if (declaringType == null)
++			{
++				return false;
++			}
++			foreach (MethodInfo method in declaringType.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
++			{
++				if (Harmony.GetPatchInfo(method)?.Owners?.Count > 0)
+ 				{
+-					num = requestedChunkColumn.creationTime;
+-					chunkColumnLoadRequest = requestedChunkColumn;
++					return true;
+ 				}
+-				else
++			}
++			foreach (Type nested in declaringType.GetNestedTypes(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
++			{
++				foreach (MethodInfo method in nested.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
+ 				{
+-					requestedChunkColumn.FlagToRequeue();
++					if (Harmony.GetPatchInfo(method)?.Owners?.Count > 0)
++					{
++						return true;
++					}
+ 				}
+ 			}
+ 		}
+-		if (chunkColumnLoadRequest != null)
++		catch
+ 		{
+-			PopulateChunk(chunkColumnLoadRequest);
+-			return 1;
++			return true;
+ 		}
+-		return 0;
++		return false;
 +	}
 +
 +	private bool IsWorldgenHandlerAllowedForParallelPass(int pass, ChunkColumnGenerationDelegate handler)
@@ -432,16 +483,12 @@ index 159b06c..22b6600 100644
 +		if (targetType != null)
 +		{
 +			lock (optimumGeneratorLockRegistry)
- 			{
--				if (ensurePrettyNeighbourhood(requestedChunkColumn))
++			{
 +				if (!optimumGeneratorTypeLocks.TryGetValue(targetType, out Lock targetLock))
- 				{
--					num = requestedChunkColumn.creationTime;
--					chunkColumnLoadRequest = requestedChunkColumn;
++				{
 +					targetLock = new Lock();
 +					optimumGeneratorTypeLocks[targetType] = targetLock;
- 				}
--				else
++				}
 +				return targetLock;
 +			}
 +		}
@@ -452,15 +499,13 @@ index 159b06c..22b6600 100644
 +			lock (optimumGeneratorLockRegistry)
 +			{
 +				if (!optimumGeneratorMethodLocks.TryGetValue(method, out Lock methodLock))
- 				{
--					requestedChunkColumn.FlagToRequeue();
++				{
 +					methodLock = new Lock();
 +					optimumGeneratorMethodLocks[method] = methodLock;
- 				}
++				}
 +				return methodLock;
- 			}
- 		}
--		if (chunkColumnLoadRequest != null)
++			}
++		}
 +
 +		return optimumGeneratorLockRegistry;
 +	}
@@ -472,13 +517,10 @@ index 159b06c..22b6600 100644
 +			return;
 +		}
 +		if (IsWorldgenHandlerDirectlySafe(forPass, handler))
- 		{
--			PopulateChunk(chunkColumnLoadRequest);
--			return 1;
++		{
 +			handler(chunkRequest);
 +			return;
- 		}
--		return 0;
++		}
 +		Lock generatorLock = GetWorldgenGeneratorLock(handler);
 +		lock (generatorLock)
 +		{
@@ -524,7 +566,7 @@ index 159b06c..22b6600 100644
  	public bool CanGenerateChunkColumn(ChunkColumnLoadRequest chunkRequest)
  	{
  		if (chunkRequest.CurrentIncompletePass_AsInt >= chunkRequest.untilPass || !ensurePrettyNeighbourhood(chunkRequest))
-@@ -931,32 +1273,112 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -931,32 +1315,112 @@ internal class ServerSystemSupplyChunks : ServerSystem
  	internal ServerChunk[] TryLoadChunkColumn(ChunkColumnLoadRequest chunkRequest)
  	{
  		int chunkMapSizeY = server.WorldMap.ChunkMapSizeY;
@@ -653,7 +695,7 @@ index 159b06c..22b6600 100644
  		if (requiresSetEmptyFlag)
  		{
  			foreach (ServerChunk serverChunk in array)
-@@ -1038,10 +1460,11 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1038,10 +1502,11 @@ internal class ServerSystemSupplyChunks : ServerSystem
  	}
  
  	public void InitWorldgenAndSpawnChunks()
@@ -665,7 +707,7 @@ index 159b06c..22b6600 100644
  		{
  			storyChunkSpawnEvents = new string[15]
  			{
-@@ -1278,10 +1701,15 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1278,10 +1743,15 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		}
  		long num3 = Environment.TickCount + 12000;
  		ServerMain.Logger.VerboseDebug("Starting area loading/generation: columns " + blockingRequestsRemaining + ", total queue length " + chunkthread.requestedChunkColumns.Count);
@@ -681,7 +723,7 @@ index 159b06c..22b6600 100644
  			{
  				break;
  			}
-@@ -1299,34 +1727,57 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1299,34 +1769,57 @@ internal class ServerSystemSupplyChunks : ServerSystem
  					ServerMain.Logger.StoryEvent("...");
  				}
  				storyEventPrints++;
@@ -741,7 +783,7 @@ index 159b06c..22b6600 100644
  				ServerMain.Logger.Error("Attempting to force generate chunk columns from " + chunkX1 + "," + chunkZ1 + " to " + chunkX2 + "," + chunkZ2);
  				ServerMain.Logger.Error(chunkthread.additionalWorldGenThreadsCount + " additional worldgen threads active, number of 'undone' chunks is " + blockingRequestsRemaining);
  				foreach (ChunkColumnLoadRequest requestedChunkColumn3 in chunkthread.requestedChunkColumns)
-@@ -1340,12 +1791,16 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1340,12 +1833,16 @@ internal class ServerSystemSupplyChunks : ServerSystem
  				throw new Exception("Somehow worldgen has become stuck in an endless loop, please report this as a bug!  Additional data in the server-main log");
  			}
  		}
@@ -759,7 +801,7 @@ index 159b06c..22b6600 100644
  		try
  		{
  			if (server.Config.SkipEveryChunkRow > 0 && chunkRequest.chunkX % (server.Config.SkipEveryChunkRow + server.Config.SkipEveryChunkRowWidth) < server.Config.SkipEveryChunkRowWidth)
-@@ -1375,29 +1830,80 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1375,29 +1872,80 @@ internal class ServerSystemSupplyChunks : ServerSystem
  			chunkRequest.MapChunk.DirtyForSaving = true;
  		}
  		finally
@@ -842,7 +884,7 @@ index 159b06c..22b6600 100644
  					break;
  				}
  			}
-@@ -1507,43 +2013,95 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1507,43 +2055,95 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		ServerMain.Logger.VerboseDebug("Incomplete chunks stored and wiped.");
  	}
  
@@ -880,7 +922,7 @@ index 159b06c..22b6600 100644
 -			if (chunkthread.requestedChunkColumns.Count > 0 && (!server.Suspended || server.RunPhase == EnumServerRunPhase.WorldReady))
 +			// Automatic mode may raise the cap after spawn. Exact mode skips this path.
 +			if (!chunkthread.optimumExactWorldgenWorkerMode && Volatile.Read(ref optimumPostSpawnRaised) == 0 && server.RunPhase == EnumServerRunPhase.RunGame)
- 			{
++			{
 +				if (Interlocked.CompareExchange(ref optimumPostSpawnRaised, 1, 0) == 0)
 +				{
 +					int maxCeiling = OptimumConfig.GetWorldgenWorkerCeiling(Environment.ProcessorCount, server.ReducedServerThreads);
@@ -902,7 +944,7 @@ index 159b06c..22b6600 100644
 +			}
 +
 +			if (OptimumWorldgenWorkersActive() && chunkthread.requestedChunkColumns.Count > 0 && (!server.Suspended || server.RunPhase == EnumServerRunPhase.WorldReady))
-+			{
+ 			{
 +				Interlocked.Increment(ref optimumWorldgenDispatchesInFlight);
  				try
  				{
@@ -942,7 +984,7 @@ index 159b06c..22b6600 100644
  			Thread.Sleep(1);
  		}
  		BlockAccessorWorldGen.ThreadDispose();
-@@ -1554,13 +2112,23 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1554,13 +2154,23 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		BlockAccessorWorldGen.ThreadDispose();
  	}
  
