@@ -29,32 +29,58 @@ export OPTIMUM_DOTNET_CANDIDATES="$TEST_ROOT/absent/dotnet"
 
 source "$REPO_ROOT/scripts/install-linux.sh"
 
-# Without any Nix signal the host is not treated as NixOS.
+# --- Interpreter check ---
+# On the default glibc host a downloaded SDK would run.
+unset OPTIMUM_GLIBC_INTERPRETER
+if ! downloaded_dotnet_runnable; then
+    echo "downloaded_dotnet_runnable returned false on the default glibc host" >&2
+    exit 1
+fi
+
+# Simulate a non-FHS host: override the interpreter to a missing path.
+export OPTIMUM_GLIBC_INTERPRETER="$TEST_ROOT/missing-ld-linux"
+[[ "$(glibc_interpreter_path)" == "$TEST_ROOT/missing-ld-linux" ]]
+if downloaded_dotnet_runnable; then
+    echo "downloaded_dotnet_runnable returned true with a missing interpreter" >&2
+    exit 1
+fi
+
+# --- NixOS detection ---
 unset NIX_STORE
 if detect_nixos; then
     echo "detect_nixos returned true without NIX_STORE or /etc/NIXOS" >&2
     exit 1
 fi
-
-# With NIX_STORE set the installer treats the host as NixOS.
 export NIX_STORE="$TEST_ROOT/nix/store"
-if ! detect_nixos; then
-    echo "detect_nixos returned false with NIX_STORE set" >&2
-    exit 1
-fi
+detect_nixos || { echo "detect_nixos returned false with NIX_STORE set" >&2; exit 1; }
 
 [[ "$(nixos_dotnet_install_cmd)" == *"nixpkgs"* ]]
 [[ "$(nixos_dotnet_install_cmd)" == *"dotnet-sdk_10"* ]]
 
+# --- NixOS prerequisite routing ---
 detect_prereqs
 [[ "${PREREQ_STATUS[dotnet]}" == "missing" ]]
 [[ "${PREREQ_LABEL[dotnet]}" == *"nixpkgs"* ]]
 [[ "${PREREQ_INSTALL_CMD[dotnet]}" == "nix profile install nixpkgs#dotnet-sdk_10" ]]
 
-# install_dotnet10 must refuse to run the glibc dotnet-install.sh on NixOS.
+# install_dotnet10 must refuse the glibc installer on NixOS.
 if ( install_dotnet10 ) 2>/dev/null; then
     echo "install_dotnet10 succeeded on NixOS; expected it to refuse" >&2
     exit 1
 fi
 
-echo "Linux NixOS prerequisite tests passed."
+# --- non-NixOS, non-FHS routing ---
+unset NIX_STORE
+detect_prereqs
+[[ "${PREREQ_STATUS[dotnet]}" == "missing" ]]
+[[ "${PREREQ_LABEL[dotnet]}" == *"non-FHS"* ]]
+[[ -z "${PREREQ_INSTALL_CMD[dotnet]}" ]]
+
+# install_dotnet10 must refuse the glibc installer when the interpreter is
+# missing even outside NixOS.
+if ( install_dotnet10 ) 2>/dev/null; then
+    echo "install_dotnet10 succeeded without a glibc interpreter; expected it to refuse" >&2
+    exit 1
+fi
+
+echo "Linux NixOS and non-FHS prerequisite tests passed."

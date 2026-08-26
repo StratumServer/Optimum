@@ -92,10 +92,30 @@ check_cmd() { command -v "$1" &>/dev/null; }
 DOTNET_BIN=""  # set by check_dotnet10 on success
 ILSPY_BIN=""   # set by check_ilspycmd on success
 
-# NixOS (and other non-FHS systems) do not ship the glibc dynamic linker at
-# /lib64/ld-linux-x86-64.so.2, so the SDK that dotnet-install.sh downloads
-# cannot run there. Detect those systems so the installer routes the .NET 10
-# prerequisite through nixpkgs instead of downloading a broken SDK.
+# dotnet-install.sh downloads a glibc SDK whose binaries hardcode the system
+# dynamic linker. NixOS and other non-FHS systems keep that linker in the Nix
+# store, so the downloaded SDK cannot run unless the linker is exposed at the
+# standard path (for example through nix-ld on NixOS). Check the interpreter
+# for the current architecture rather than guessing from the distribution.
+glibc_interpreter_path() {
+    if [[ -n "${OPTIMUM_GLIBC_INTERPRETER:-}" ]]; then
+        printf '%s' "$OPTIMUM_GLIBC_INTERPRETER"
+        return
+    fi
+    case "$(uname -m)" in
+        x86_64|amd64) printf '%s' '/lib64/ld-linux-x86-64.so.2' ;;
+        aarch64|arm64) printf '%s' '/lib/ld-linux-aarch64.so.1' ;;
+        *) printf '%s' '' ;;
+    esac
+}
+
+downloaded_dotnet_runnable() {
+    local interp
+    interp="$(glibc_interpreter_path)"
+    [[ -z "$interp" ]] && return 0
+    [[ -e "$interp" ]]
+}
+
 detect_nixos() {
     [[ -e /etc/NIXOS ]] || [[ -n "${NIX_STORE:-}" ]]
 }
@@ -249,8 +269,11 @@ system_install_command() {
 }
 
 install_dotnet10() {
-    if detect_nixos; then
-        die "On NixOS the .NET 10 SDK must come from nixpkgs; the dot.net installer downloads a glibc build that cannot run there. Run: $(nixos_dotnet_install_cmd), then re-run this installer."
+    if ! downloaded_dotnet_runnable; then
+        if detect_nixos; then
+            die "The dot.net installer downloads a glibc SDK that cannot run here (missing $(glibc_interpreter_path)). On NixOS install it from nixpkgs instead: $(nixos_dotnet_install_cmd), then re-run this installer."
+        fi
+        die "The dot.net installer downloads a glibc SDK that cannot run here (missing $(glibc_interpreter_path)). Install the .NET 10 SDK through your distribution and re-run this installer."
     fi
     local installer
     installer=$(mktemp)
@@ -314,6 +337,10 @@ detect_prereqs() {
             PREREQ_LABEL[dotnet]=".NET 10 SDK (NixOS: install via nixpkgs)"
             PREREQ_INSTALL_CMD[dotnet]="$(nixos_dotnet_install_cmd)"
             PREREQ_INSTALL_URL[dotnet]="https://search.nixos.org/packages?query=dotnet-sdk_10"
+        elif ! downloaded_dotnet_runnable; then
+            PREREQ_LABEL[dotnet]=".NET 10 SDK (non-FHS system: install via your distribution)"
+            PREREQ_INSTALL_CMD[dotnet]=""
+            PREREQ_INSTALL_URL[dotnet]="https://learn.microsoft.com/dotnet/core/install/linux"
         else
             PREREQ_LABEL[dotnet]=".NET 10 SDK"
             PREREQ_INSTALL_CMD[dotnet]="curl -sSL https://dot.net/v1/dotnet-install.sh | bash -s -- --channel 10.0 --install-dir ~/.dotnet"
