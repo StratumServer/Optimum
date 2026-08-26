@@ -83,6 +83,36 @@ make run      # build, deploy, and launch client
 
 Requires .NET 10 SDK, bash, python3, git, curl, perl.
 
+**NixOS** (non-FHS distribution):
+
+The interactive installer detects NixOS and routes the .NET 10 SDK prerequisite
+through nixpkgs, since the SDK from dot.net is a glibc build that cannot run
+there:
+
+```sh
+nix profile install nixpkgs#dotnet-sdk_10
+```
+
+The packaged launcher and game are glibc binaries as well, so run the AppImage
+through `appimage-run` with the runtime dependencies exposed. In the NixOS
+configuration:
+
+```nix
+programs.appimage.enable = true;
+programs.appimage.binfmt = true;
+programs.appimage.package = pkgs.appimage-run.override {
+  extraPkgs = pkgs: [
+    pkgs.dotnet-runtime
+    pkgs.openal
+    pkgs.gtk3
+  ];
+};
+```
+
+Then run the `.AppImage` normally. `dotnet-runtime` exposes the .NET runtime
+for the launcher, and `openal` and `gtk3` cover the game's audio and UI native
+libraries. Add or remove entries if your build needs a different native set.
+
 ### Windows
 
 **GUI installer** (checks prerequisites, offers downloads, choose install folder):
