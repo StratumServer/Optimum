@@ -46,6 +46,23 @@ public sealed class WorldgenModShapedFixtureTests
         Assert.False(OptimumWorldgenSafetyGate.IsKnownSafeAssembly(assemblyName));
     }
 
+    [Fact]
+    public async Task StaticScratchFieldsRaceAcrossColumnsLikeTerraPretyCoastmap()
+    {
+        // TerraPrety's transpiler injects initCoastmapForChunk into GenTerra.generate,
+        // which writes static CoastMap.coastMap* fields read later by getSalinityFor.
+        // A static-scratch generator reproduces that shape: parallel columns corrupt
+        // the scratch and diverge from the serial hash.
+        int[] columns = CreateColumns(24);
+        var serial = new StaticScratchGenerator(42424242);
+        int serialHash = Hash(serial.GenerateSerial(columns));
+
+        var parallel = new StaticScratchGenerator(42424242);
+        int parallelHash = Hash(await parallel.GenerateParallel(columns, 3));
+
+        Assert.NotEqual(serialHash, parallelHash);
+    }
+
     private static int[] CreateColumns(int count)
     {
         var columns = new int[count];
@@ -155,6 +172,61 @@ public sealed class WorldgenModShapedFixtureTests
             workspace.ColumnResults[0] = Mix(seed, column);
             workspace.LandformCache[column] = workspace.ColumnResults[0];
             return workspace.LandformCache[column];
+        }
+    }
+
+    private sealed class StaticScratchGenerator
+    {
+        private static int sCoastUpLeft;
+        private static int sCoastUpRight;
+        private static int sCoastBotLeft;
+        private static int sCoastBotRight;
+
+        private readonly int seed;
+
+        public StaticScratchGenerator(int seed)
+        {
+            this.seed = seed;
+        }
+
+        public int[] GenerateSerial(IReadOnlyList<int> columns)
+        {
+            var results = new int[columns.Count];
+            for (int i = 0; i < columns.Count; i++) results[i] = Generate(columns[i], null);
+            return results;
+        }
+
+        public async Task<int[]> GenerateParallel(IReadOnlyList<int> columns, int workerCount)
+        {
+            var results = new int[columns.Count];
+            for (int start = 0; start < columns.Count; start += workerCount)
+            {
+                int count = Math.Min(workerCount, columns.Count - start);
+                using var barrier = new Barrier(count);
+                var tasks = new Task[count];
+                for (int offset = 0; offset < count; offset++)
+                {
+                    int index = start + offset;
+                    tasks[offset] = Task.Run(() => results[index] = Generate(columns[index], barrier));
+                }
+                await Task.WhenAll(tasks);
+            }
+            return results;
+        }
+
+        private int Generate(int column, Barrier? barrier)
+        {
+            // Phase 1: write static scratch (like initCoastmapForChunk).
+            sCoastUpLeft = Mix(seed, column);
+            sCoastUpRight = Mix(seed, column + 1);
+            sCoastBotLeft = Mix(seed, column + 2);
+            sCoastBotRight = Mix(seed, column + 3);
+
+            // Force interleaving so another column overwrites the scratch before read-back.
+            barrier?.SignalAndWait();
+
+            // Phase 2: read static scratch back (like getSalinityFor).
+            return sCoastUpLeft ^ sCoastUpRight ^ sCoastBotLeft ^ sCoastBotRight;
         }
     }
 
