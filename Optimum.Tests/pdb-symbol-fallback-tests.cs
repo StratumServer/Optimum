@@ -88,7 +88,7 @@ public sealed class PdbSymbolFallbackTests
     }
 
     [Fact]
-    public void CorruptSymbolsStillFailTheRead()
+    public void CorruptSymbolsAreIgnoredAndAssemblyStillLoads()
     {
         string root = Path.Combine(Path.GetTempPath(), $"optimum-symbol-corrupt-{Guid.NewGuid():N}");
         string assemblyPath = Path.Combine(root, "assembly.dll");
@@ -100,16 +100,42 @@ public sealed class PdbSymbolFallbackTests
             File.WriteAllText(Path.ChangeExtension(assemblyPath, ".pdb"), "not a portable PDB");
 
             var parameters = new ReaderParameters { ReadSymbols = true };
-            Exception? error = Record.Exception(() =>
-            {
-                using AssemblyDefinition assembly = AssemblyReader.Read(
-                    assemblyPath,
-                    parameters,
-                    out _);
-            });
+            using AssemblyDefinition assembly = AssemblyReader.Read(
+                assemblyPath,
+                parameters,
+                out bool symbolsLoaded);
 
-            Assert.NotNull(error);
-            Assert.True(parameters.ReadSymbols);
+            Assert.False(symbolsLoaded);
+            Assert.False(parameters.ReadSymbols);
+            Assert.Equal("Optimum.Api.Contracts", assembly.Name.Name);
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void TruncatedSymbolsAreIgnoredAndAssemblyStillLoads()
+    {
+        string root = Path.Combine(Path.GetTempPath(), $"optimum-symbol-truncated-{Guid.NewGuid():N}");
+        string assemblyPath = Path.Combine(root, "assembly.dll");
+
+        try
+        {
+            Directory.CreateDirectory(root);
+            CopyOutputAssembly(assemblyPath, pdbName: null);
+            File.WriteAllBytes(Path.ChangeExtension(assemblyPath, ".pdb"), Array.Empty<byte>());
+
+            var parameters = new ReaderParameters { ReadSymbols = true };
+            using AssemblyDefinition assembly = AssemblyReader.Read(
+                assemblyPath,
+                parameters,
+                out bool symbolsLoaded);
+
+            Assert.False(symbolsLoaded);
+            Assert.False(parameters.ReadSymbols);
+            Assert.Equal("Optimum.Api.Contracts", assembly.Name.Name);
         }
         finally
         {
