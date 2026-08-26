@@ -652,10 +652,25 @@ function Write-Log($msg) {
 
 function Write-Phase($text) { Write-Log "==PHASE== $text" }
 
+function ConvertTo-WindowsProcessArgument {
+    param([Parameter(Mandatory=$true)][string]$Value)
+
+    if ($Value.IndexOf('"') -ge 0) {
+        throw 'Windows paths cannot contain a double quote.'
+    }
+
+    # Windows command-line parsing consumes a backslash immediately before a
+    # closing quote. Double trailing backslashes so a drive root such as D:\
+    # remains D:\ after Start-Process joins ArgumentList into one command line.
+    $escapedValue = [regex]::Replace($Value, '(\\+)$', '$1$1')
+    return "`"$escapedValue`""
+}
+
 function Invoke-RuntimePreflight {
     param(
         [Parameter(Mandatory=$true)][string]$StageDir,
-        [Parameter(Mandatory=$true)][string]$LogRoot
+        [Parameter(Mandatory=$true)][string]$LogRoot,
+        [string]$DataPath
     )
 
     $exe = Join-Path $StageDir 'Optimum.exe'
@@ -672,8 +687,13 @@ function Invoke-RuntimePreflight {
     $stderrPath = Join-Path $LogRoot 'optimum-preflight.stderr.log'
     Remove-Item -Force $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
 
+    $argumentList = @('--validate-only')
+    if ($DataPath) {
+        $argumentList += @('--dataPath', (ConvertTo-WindowsProcessArgument -Value $DataPath))
+    }
+
     $process = Start-Process -FilePath $exe `
-        -ArgumentList @('--validate-only') `
+        -ArgumentList $argumentList `
         -WorkingDirectory $StageDir `
         -Wait `
         -PassThru `
@@ -1067,7 +1087,7 @@ function Invoke-OptimumBuild {
             $built = Get-ChildItem -Path $stage -Directory -Filter 'Optimum-v*-win-x64' | Select-Object -First 1
             if (-not $built) { throw "Packaged folder (Optimum-v*-win-x64) not found in $stage." }
 
-            Invoke-RuntimePreflight -StageDir $built.FullName -LogRoot $buildRoot
+            Invoke-RuntimePreflight -StageDir $built.FullName -LogRoot $buildRoot -DataPath $DataPath
 
             Write-Phase "Copying files to $InstallDir..."
             Install-StagedPackage -StageDir $built.FullName -InstallDir $InstallDir
