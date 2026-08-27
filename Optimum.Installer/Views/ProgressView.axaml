@@ -1,0 +1,38 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             x:Class="Optimum.Installer.Views.ProgressView"
+             x:DataType="vm:ProgressViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Top" Spacing="6">
+      <TextBlock Text="{Binding PhaseLabel}" FontWeight="SemiBold" FontSize="15" />
+      <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" />
+      <Grid ColumnDefinitions="*,Auto">
+        <TextBlock Grid.Column="0" Text="{Binding StatusDetail}" Opacity="0.7" FontSize="12"
+                   TextTrimming="CharacterEllipsis" />
+        <TextBlock Grid.Column="1" Opacity="0.7" FontSize="12">
+          <Run Text="{Binding Elapsed}" />
+          <Run Text="  " />
+          <Run Text="{Binding EstimatedRemaining}" />
+        </TextBlock>
+      </Grid>
+    </StackPanel>
+
+    <Button DockPanel.Dock="Bottom" Content="Cancel" HorizontalAlignment="Right"
+            Margin="0,12,0,0"
+            IsEnabled="{Binding !CancelRequested}"
+            Command="{Binding CancelCommand}" />
+
+    <Border BorderBrush="#40808080" BorderThickness="1" CornerRadius="4" Margin="0,12">
+      <ScrollViewer>
+        <ItemsControl ItemsSource="{Binding Log}" Margin="8">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:LogLine">
+              <TextBlock Text="{Binding Text}" FontFamily="monospace" FontSize="12" TextWrapping="Wrap" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
+    </Border>
+  </DockPanel>
+</UserControl>

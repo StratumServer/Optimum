@@ -14,7 +14,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Optimum.Cli\Optimum.Cli.csproj" />
     <ProjectReference Include="..\Optimum.Bootstrap.Core\Optimum.Bootstrap.Core.csproj" />
-    <!-- FakeSystemProbe is shared test support. -->
-    <ProjectReference Include="..\Optimum.Bootstrap.Core.Tests\Optimum.Bootstrap.Core.Tests.csproj" />
+    <ProjectReference Include="..\Optimum.Bootstrap.Core.TestSupport\Optimum.Bootstrap.Core.TestSupport.csproj" />
   </ItemGroup>
 </Project>

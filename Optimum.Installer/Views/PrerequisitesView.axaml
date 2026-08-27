@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             x:Class="Optimum.Installer.Views.PrerequisitesView"
+             x:DataType="vm:PrerequisitesViewModel">
+  <DockPanel>
+    <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Margin="0,0,0,12" />
+
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+      <Button Content="Re-scan" Command="{Binding RescanCommand}" />
+      <Button Content="Continue" Classes="accent"
+              IsEnabled="{Binding CanContinue}"
+              Command="{Binding ContinueCommand}" />
+    </StackPanel>
+
+    <ScrollViewer>
+      <ItemsControl ItemsSource="{Binding Rows}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:PrerequisiteRowViewModel">
+            <Grid ColumnDefinitions="90,*,Auto" Margin="0,4">
+              <TextBlock Grid.Column="0" Text="{Binding Status}" FontFamily="monospace" />
+              <StackPanel Grid.Column="1">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Detail}" Opacity="0.7" FontSize="12" />
+              </StackPanel>
+              <Button Grid.Column="2" Content="{Binding ActionLabel}"
+                      IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                      ToolTip.Tip="{Binding ActionDetail}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

@@ -1,0 +1,26 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             x:Class="Optimum.Installer.Views.EulaView"
+             x:DataType="vm:EulaViewModel">
+  <DockPanel>
+    <TextBlock DockPanel.Dock="Top" Text="Before you continue"
+               FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
+
+    <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,10,0,0">
+      <CheckBox Content="I have read and accept this notice"
+                IsChecked="{Binding Accepted}"
+                x:Name="AcceptBox" />
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+        <Button Content="Decline" Command="{Binding DeclineCommand}" />
+        <Button Content="Accept and continue" Classes="accent"
+                IsEnabled="{Binding CanAccept}"
+                Command="{Binding AcceptCommand}" />
+      </StackPanel>
+    </StackPanel>
+
+    <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged">
+      <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
+    </ScrollViewer>
+  </DockPanel>
+</UserControl>

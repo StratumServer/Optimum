@@ -24,4 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Optimum.Bootstrap.Core\Optimum.Bootstrap.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Optimum.Installer.Tests" />
+  </ItemGroup>
 </Project>

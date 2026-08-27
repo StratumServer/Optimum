@@ -275,17 +275,8 @@ public static class CliRunner
         return result;
     }
 
-    internal static string? ResolveRepoRoot(ISystemProbe probe, string? explicitRoot)
-    {
-        string start = explicitRoot is not null ? Path.GetFullPath(explicitRoot) : Directory.GetCurrentDirectory();
-        for (string? dir = start; dir is not null; dir = Path.GetDirectoryName(dir))
-        {
-            if (probe.FileExists(Path.Combine(dir, "forks.json"))
-                && probe.FileExists(Path.Combine(dir, "scripts", "bootstrap.sh")))
-                return dir;
-        }
-        return null;
-    }
+    internal static string? ResolveRepoRoot(ISystemProbe probe, string? explicitRoot) =>
+        RepoRoot.Discover(probe, explicitRoot);
 
     private static int Unknown(string verb, TextWriter stderr)
     {

@@ -1,0 +1,42 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             x:Class="Optimum.Installer.Views.OptionsView"
+             x:DataType="vm:OptionsViewModel">
+  <DockPanel>
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
+      <Button Content="Back" Command="{Binding BackCommand}" />
+      <Button Content="Continue" Classes="accent"
+              IsEnabled="{Binding CanContinue}"
+              Command="{Binding ContinueCommand}" />
+    </StackPanel>
+
+    <StackPanel Spacing="14">
+      <StackPanel Spacing="4">
+        <TextBlock Text="Install directory" FontWeight="SemiBold" />
+        <TextBox Text="{Binding InstallDirectory}" />
+      </StackPanel>
+
+      <CheckBox Content="Use a separate data folder"
+                IsChecked="{Binding UseSeparateDataFolder}" />
+      <StackPanel Spacing="4" IsVisible="{Binding UseSeparateDataFolder}">
+        <TextBox Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder" />
+        <TextBlock Text="{Binding DataPathHint}" Opacity="0.7" FontSize="12"
+                   IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+      </StackPanel>
+
+      <StackPanel Spacing="4" IsVisible="{Binding ShowVersionChoice}">
+        <TextBlock Text="Vintage Story version" FontWeight="SemiBold" />
+        <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}" />
+      </StackPanel>
+
+      <CheckBox Content="Add an application menu entry" IsChecked="{Binding CreateMenuEntry}" />
+      <CheckBox Content="Create a desktop shortcut" IsChecked="{Binding CreateDesktopShortcut}" />
+
+      <TextBlock Text="{Binding ValidationError}" Foreground="#d13438"
+                 TextWrapping="Wrap"
+                 IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </StackPanel>
+  </DockPanel>
+</UserControl>
