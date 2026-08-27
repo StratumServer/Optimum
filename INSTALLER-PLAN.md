@@ -187,9 +187,15 @@ against a build that takes twenty minutes and allocates gigabytes.
 - The staged-package transactional installer, ported from `Install-StagedPackage`
   and made to work on all three operating systems.
 - Path guards that consolidate `guard_install_dir`
-  (`scripts/install-linux.sh:661`), `Assert-SafeInstallerPaths`
-  (`scripts/install-windows.ps1:152`), and a symlink-component walk equivalent to
-  RiftLauncher's `assertNoSymlinkComponents`.
+  (`scripts/install-linux.sh:661`) and `Assert-SafeInstallerPaths`
+  (`scripts/install-windows.ps1:152`). The guard rejects a symlinked install or
+  data directory (the transactional install would otherwise operate on the link's
+  target), but not a symlinked parent: an install directory legitimately sits
+  under a symlinked home or a mounted second drive. RiftLauncher's full
+  `assertNoSymlinkComponents` walk stays available in `SymlinkComponentCheck` for
+  a path that is expected to stay within a trusted base. Resolving symlinks in the
+  well-known Vintage Story directories before the overlap check is Phase 4 work,
+  when the transactional installer lands and it starts to matter.
 - Session-aware data-path detection, generalized from
   `scripts/install-linux.sh:580-633`.
 - Shortcut writers: Windows `.lnk` and Start Menu, Linux `.desktop` plus a hicolor
@@ -284,6 +290,12 @@ The engine emits at least one progress line per phase and should emit at interva
 short enough that a stalled build is distinguishable from a slow one. A build that
 emits nothing for ten minutes during `dotnet build` is indistinguishable from a
 hang, and the caller will arm a timeout and kill it.
+
+`NdjsonWriter` enforces the range and the monotonicity: a value below the last
+one or above 99 is adjusted to fit, and the writer emits a `warn` log and
+increments an anomaly count when it does. A clean run triggers neither, so the
+Phase 2 conformance test asserts the anomaly count stayed zero against a real
+build stream.
 
 ### The reason enum
 
@@ -675,7 +687,7 @@ any C# test, so porting it is a net gain in coverage, not a like-for-like move.
 Coverage targets, in rough priority order: the path guards, with cases for `/`,
 `$HOME`, `$XDG_DATA_HOME`, `$HOME/.local`, a drive root, a path inside the Vintage
 Story directory, a directory holding a vanilla `Vintagestory` binary with no
-Optimum marker, and a path with a symlink component. The transactional installer,
+Optimum marker, and a symlinked install directory. The transactional installer,
 with an injected failure at each of the four steps and an assertion that the
 previous install came back. Prerequisite detection against fixture filesystems for
 each platform. The ilspycmd version-range comparison. Session-aware data-path
@@ -810,11 +822,16 @@ detection (`DataPathProbe`), the NDJSON emitter (`NdjsonWriter`), and the consen
 notice resource rewritten to match `LICENSE-SCOPE.md`. Every detection path goes
 through the `ISystemProbe` seam so tests use an in-memory host. No build driver
 yet.
-*Verification:* `Optimum.Bootstrap.Core.Tests` has 72 tests covering every
+*Verification:* `Optimum.Bootstrap.Core.Tests` has 75 tests covering every
 path-guard case in section 9, the exact ilspycmd accept and reject values from
 `scripts/tests/install-linux-prerequisites.sh`, and the NixOS and non-FHS
-behaviors from `scripts/tests/install-linux-nixos.sh`. `dotnet test
-Optimum.Installer.slnf -c Release` is green (76 tests, about five seconds).
+behaviors from `scripts/tests/install-linux-nixos.sh`. An adversarial pass against
+the shell sources drove three refinements: `command -v` detection now checks the
+execute bit and keeps searching past a non-executable match, the path guard
+rejects a symlinked leaf rather than any symlinked ancestor, and `NdjsonWriter`
+emits a `warn` and counts it when it has to adjust a caller's progress value.
+`dotnet test Optimum.Installer.slnf -c Release` is green (79 tests, about six
+seconds).
 
 **Phase 2: the CLI.** All seven verbs, wrapping the existing scripts through the
 build driver. The `--acknowledge-decompile` gate on `build`. Contract tests.

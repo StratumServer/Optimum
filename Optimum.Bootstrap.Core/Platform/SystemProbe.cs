@@ -33,6 +33,12 @@ public interface ISystemProbe
     /// <summary>True for a regular file (<c>[[ -f ]]</c>).</summary>
     bool FileExists(string path);
 
+    /// <summary>
+    /// True when the file exists and carries an execute bit (<c>[[ -x ]]</c>).
+    /// On Windows a file whose name matches an executable extension counts.
+    /// </summary>
+    bool IsExecutable(string path);
+
     /// <summary>True for a directory (<c>[[ -d ]]</c>).</summary>
     bool DirectoryExists(string path);
 
@@ -76,6 +82,22 @@ public sealed class SystemProbe : ISystemProbe
             .ToArray();
 
     public bool FileExists(string path) => File.Exists(path);
+
+    public bool IsExecutable(string path)
+    {
+        if (!File.Exists(path))
+            return false;
+        if (OperatingSystem.IsWindows())
+            return true;
+
+        try
+        {
+            UnixFileMode mode = File.GetUnixFileMode(path);
+            return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
 

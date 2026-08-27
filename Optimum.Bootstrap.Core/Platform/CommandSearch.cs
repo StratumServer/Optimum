@@ -1,8 +1,10 @@
 namespace Optimum.Bootstrap.Core.Platform;
 
 /// <summary>
-/// The C# equivalent of <c>command -v</c>: look for an executable on the probe's
-/// PATH. On Windows it also tries the usual executable extensions.
+/// The C# equivalent of <c>command -v</c>: the first <em>executable</em> match on
+/// the probe's PATH. A non-executable file of the right name is skipped and the
+/// search continues, which is what the shell does and what a broken wrapper on an
+/// early PATH entry would otherwise hide.
 /// </summary>
 public static class CommandSearch
 {
@@ -17,7 +19,7 @@ public static class CommandSearch
             foreach (string name in names)
             {
                 string candidate = Path.Combine(dir, name);
-                if (probe.FileExists(candidate))
+                if (probe.IsExecutable(candidate))
                     return candidate;
             }
         }

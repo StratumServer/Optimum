@@ -23,13 +23,28 @@ public class NdjsonWriterTests
         writer.Progress(ProgressPhase.Assemble, 250, "c");  // over the ceiling, held at 99
         writer.Success("/out/Optimum-v0.3.14-linux-x64");
 
-        JsonElement[] lines = Parse(sw.ToString());
-        Assert.Equal(4, lines.Length);
-        Assert.Equal(10, lines[0].GetProperty("progress").GetInt32());
-        Assert.Equal("decompile", lines[0].GetProperty("phase").GetString());
-        Assert.Equal(10, lines[1].GetProperty("progress").GetInt32());
-        Assert.Equal(99, lines[2].GetProperty("progress").GetInt32());
-        Assert.Equal("assemble", lines[2].GetProperty("phase").GetString());
+        int[] progress = Parse(sw.ToString())
+            .Where(l => l.GetProperty("type").GetString() == "progress")
+            .Select(l => l.GetProperty("progress").GetInt32())
+            .ToArray();
+
+        Assert.Equal([10, 10, 99], progress);
+        Assert.Equal(2, writer.AnomalyCount);
+    }
+
+    [Fact]
+    public void AClampEmitsAWarnSoTheAnomalyIsNotSilent()
+    {
+        var sw = new StringWriter();
+        var writer = new NdjsonWriter(sw);
+
+        writer.Progress(ProgressPhase.Patch, 60, "a");
+        writer.Progress(ProgressPhase.Patch, 40, "b");   // regression
+
+        JsonElement warn = Parse(sw.ToString())
+            .First(l => l.GetProperty("type").GetString() == "log");
+        Assert.Equal("warn", warn.GetProperty("level").GetString());
+        Assert.Contains("40", warn.GetProperty("message").GetString());
     }
 
     [Fact]

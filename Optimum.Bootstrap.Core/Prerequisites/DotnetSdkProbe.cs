@@ -19,7 +19,7 @@ public static class DotnetSdkProbe
     {
         foreach (string candidate in Candidates(probe))
         {
-            if (!probe.FileExists(candidate))
+            if (!probe.IsExecutable(candidate))
                 continue;
             ProcessOutcome outcome = probe.Run(candidate, ["--list-sdks"], ProbeTimeout);
             if (outcome.Started && HasNet10Line(outcome.StandardOutput))
@@ -31,9 +31,10 @@ public static class DotnetSdkProbe
 
     private static bool HasNet10Line(string listSdksOutput)
     {
+        // Matches the shell's `grep -q '^10\.'`: anchored at column 0.
         foreach (string line in listSdksOutput.Split('\n'))
         {
-            if (line.TrimStart().StartsWith("10.", StringComparison.Ordinal))
+            if (line.StartsWith("10.", StringComparison.Ordinal))
                 return true;
         }
 

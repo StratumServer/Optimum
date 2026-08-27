@@ -64,11 +64,19 @@ public class InstallPathGuardTests
     }
 
     [Fact]
-    public void RejectsAPathThatPassesThroughASymlink()
+    public void RejectsAnInstallDirectoryThatIsItselfASymlink()
     {
         FakeSystemProbe probe = Linux();
-        probe.AddSymlink("/home/tester/link");
-        AssertRejected(InstallPathGuard.Check(probe, new InstallPathRequest("/home/tester/link/opt")), "symbolic link");
+        probe.AddSymlink("/home/tester/games/optimum");
+        AssertRejected(InstallPathGuard.Check(probe, new InstallPathRequest("/home/tester/games/optimum")), "symbolic link");
+    }
+
+    [Fact]
+    public void AllowsAnInstallDirectoryUnderASymlinkedParent()
+    {
+        FakeSystemProbe probe = Linux();
+        probe.AddSymlink("/home/tester/Games");   // a second drive mounted here
+        Assert.True(InstallPathGuard.Check(probe, new InstallPathRequest("/home/tester/Games/optimum")).Ok);
     }
 
     [Fact]

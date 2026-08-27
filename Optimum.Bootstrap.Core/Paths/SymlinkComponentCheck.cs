@@ -4,9 +4,12 @@ namespace Optimum.Bootstrap.Core.Paths;
 
 /// <summary>
 /// Ports RiftLauncher's <c>assertNoSymlinkComponents</c>: walk every existing
-/// component of a path up to the root and reject the path if any component is a
-/// symbolic link. A symlink anywhere in an install or data path is a way for a
-/// later step to write outside the directory the user chose.
+/// component of a path up to the root and return the first that is a symbolic
+/// link. Use this for a path that is expected to stay within a trusted base
+/// directory, where a symlinked component is an escape vector. The install and
+/// data path guards do not use it: an arbitrary user-chosen directory legitimately
+/// sits under a symlinked home or mount point, so <see cref="InstallPathGuard"/>
+/// only rejects a symlinked leaf.
 /// </summary>
 public static class SymlinkComponentCheck
 {
