@@ -18,11 +18,17 @@ public sealed record BuildResult(bool Ok, FailureReason? Reason, string? Message
 /// <summary>
 /// The engine's build pipeline. The GUI drives one in-process; the CLI wraps one
 /// per verb. Progress and log go to the observer so the front end owns the
-/// presentation.
+/// presentation. Cancellation is two-tier: <paramref name="graceful"/> asks the
+/// running subprocess to stop (SIGINT), <paramref name="forceful"/> kills it.
+/// Passing only <paramref name="forceful"/> is a straight kill.
 /// </summary>
 public interface IBuildDriver
 {
-    Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken cancellationToken);
+    Task<BuildResult> RunAsync(
+        BuildRequest request,
+        IBuildObserver observer,
+        CancellationToken forceful,
+        CancellationToken graceful = default);
 }
 
 /// <summary>Receives everything a running build has to say.</summary>

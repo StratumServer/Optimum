@@ -176,7 +176,7 @@ public static class CliRunner
         BuildResult result;
         try
         {
-            result = await driver.RunAsync(request, output, cancellationToken);
+            result = await driver.RunAsync(request, output, cancellationToken);  // single token: SIGTERM is a straight stop for the CLI
         }
         catch (OperationCanceledException)
         {

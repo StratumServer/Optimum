@@ -6,7 +6,12 @@ using Optimum.Bootstrap.Core.Prerequisites;
 
 namespace Optimum.Installer.ViewModels;
 
-public sealed partial class PrerequisiteRowViewModel(PrerequisiteResult result) : ViewModelBase
+/// <summary>
+/// A single prerequisite row. Not a <see cref="ViewModelBase"/> so the
+/// <see cref="ViewLocator"/> never tries to resolve a view for it: it is only
+/// ever rendered through an explicit item template.
+/// </summary>
+public sealed class PrerequisiteRowViewModel(PrerequisiteResult result) : ObservableObject
 {
     public PrerequisiteResult Result { get; } = result;
 

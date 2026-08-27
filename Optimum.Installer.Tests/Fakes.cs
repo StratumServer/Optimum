@@ -16,11 +16,17 @@ public sealed class FakeBuildDriver : IBuildDriver
             return BuildResult.Success("/tmp/pkg/Optimum-v0.3.14-linux-x64");
         };
 
-    public Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+    public int RunCount { get; private set; }
+
+    public Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken forceful, CancellationToken graceful = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Behaviour(observer, cancellationToken));
+        RunCount++;
+        LastOutputDirectory = request.OutputDirectory;
+        forceful.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(observer, forceful));
     }
+
+    public string? LastOutputDirectory { get; private set; }
 }
 
 public sealed class FakePackageInstaller : IPackageInstaller
