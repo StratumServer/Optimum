@@ -30,7 +30,8 @@ public static class CliRunner
         TextWriter stdout,
         TextWriter stderr,
         ISystemProbe probe,
-        IBuildDriver buildDriver)
+        IBuildDriver buildDriver,
+        CancellationToken externalCancellation = default)
     {
         if (args.Count == 1 && args[0] == "--version")
         {
@@ -48,7 +49,7 @@ public static class CliRunner
         var rest = args.Skip(1).ToArray();
         bool json = rest.Contains("--json");
 
-        using var cancellation = new CancellationTokenSource();
+        using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(externalCancellation);
         using PosixSignalRegistration term = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnSignal);
         using PosixSignalRegistration intr = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnSignal);
         void OnSignal(PosixSignalContext context)

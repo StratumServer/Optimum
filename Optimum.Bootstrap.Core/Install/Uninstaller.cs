@@ -10,9 +10,10 @@ public sealed record UninstallResult(bool Ok, FailureReason? Reason, string? Mes
 }
 
 /// <summary>
-/// Removes an install by its <see cref="InstallManifest"/>. It never touches a
-/// directory that has no manifest, so it cannot delete a directory it did not
-/// create.
+/// Removes an install by its <see cref="InstallManifest"/>. It refuses a
+/// directory with no manifest, and it removes only manifest entries that resolve
+/// inside the install directory, so a tampered manifest cannot make it delete
+/// something elsewhere.
 /// </summary>
 public sealed class Uninstaller(ISystemProbe probe)
 {
@@ -30,10 +31,22 @@ public sealed class Uninstaller(ISystemProbe probe)
         if (manifest is null)
             return UninstallResult.Failure(FailureReason.BadInput, $"the install manifest is unreadable: {manifestPath}");
 
+        string prefix = installDir + Path.DirectorySeparatorChar;
         int removed = 0;
+        var skipped = new List<string>();
         foreach (string entry in manifest.Entries)
         {
-            string target = Path.Combine(installDir, entry);
+            string target = Path.GetFullPath(Path.Combine(installDir, entry));
+            if (target != installDir && !target.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                // A manifest entry that resolves outside the install directory
+                // (a rooted path, a `..` walk) is never removed. The deployer
+                // only ever writes leaf names, so this guards against a tampered
+                // or malformed manifest.
+                skipped.Add(entry);
+                continue;
+            }
+
             if (Directory.Exists(target))
             {
                 Directory.Delete(target, recursive: true);
@@ -44,6 +57,12 @@ public sealed class Uninstaller(ISystemProbe probe)
                 File.Delete(target);
                 removed++;
             }
+        }
+
+        if (skipped.Count > 0)
+        {
+            return new UninstallResult(false, FailureReason.BadInput,
+                "the manifest names entries outside the install directory: " + string.Join(", ", skipped), removed);
         }
 
         string optimumDir = Path.Combine(installDir, ".optimum");

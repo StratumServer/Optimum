@@ -74,17 +74,59 @@ public sealed class DeployRoundTripTests : IDisposable
     }
 
     [Fact]
-    public void DeployReplacesAnExistingOptimumInstall()
+    public void DeployRefusesToReplaceAnExistingOptimumInstall()
     {
         var probe = SystemProbe.Default;
         string package = StagePackage();
         string installDir = Path.Combine(_root, "install", "optimum");
 
         Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
-        File.WriteAllText(Path.Combine(installDir, "stale-file"), "old");
+
+        DeployResult second = new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir));
+
+        Assert.False(second.Ok);
+        Assert.Equal(FailureReason.OutputExists, second.Reason);
+        Assert.Contains("uninstall", second.Message);
+    }
+
+    [Fact]
+    public void ManifestRecordsTheVersionFromThePackageDirectoryName()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
 
         Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
-        Assert.False(File.Exists(Path.Combine(installDir, "stale-file")));
+
+        InstallManifest manifest = InstallManifest.Deserialize(
+            File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+        Assert.Equal("0.3.14", manifest.OptimumVersion);
+    }
+
+    [Fact]
+    public void UninstallSkipsAManifestEntryThatEscapesTheInstallDirectory()
+    {
+        var probe = SystemProbe.Default;
+        string installDir = Path.Combine(_root, "install", "optimum");
+        Directory.CreateDirectory(Path.Combine(installDir, ".optimum"));
+        string outside = Path.Combine(_root, "outside.txt");
+        File.WriteAllText(outside, "do not touch");
+
+        var manifest = new InstallManifest
+        {
+            OptimumVersion = "0.3.14",
+            InstalledAtUtc = DateTimeOffset.UtcNow,
+            InstallDirectory = installDir,
+            Entries = ["../outside.txt", "run.sh"],
+        };
+        File.WriteAllText(Path.Combine(installDir, InstallManifest.RelativePath), manifest.Serialize());
+        File.WriteAllText(Path.Combine(installDir, "run.sh"), "x");
+
+        UninstallResult result = new Uninstaller(probe).Uninstall(installDir);
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.BadInput, result.Reason);
+        Assert.True(File.Exists(outside));
     }
 
     [Fact]

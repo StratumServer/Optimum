@@ -116,6 +116,21 @@ public class BootstrapFailureClassifierTests
 
 public class ScriptBuildDriverPreconditionTests
 {
+    private static FakeSystemProbe ReadyProbe()
+    {
+        var probe = new FakeSystemProbe();
+        probe.Path.Add("/usr/bin");
+        foreach (string tool in new[] { "git", "perl", "python3", "curl", "tar", "chmod", "pwsh", "bash" })
+            probe.AddFile($"/usr/bin/{tool}");
+        probe.AddFile("/lib64/ld-linux-x86-64.so.2");
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "/usr/bin/dotnet";
+        probe.AddFile("/usr/bin/dotnet");
+        probe.OnCommand("/usr/bin/dotnet", "--list-sdks", "10.0.100 [/x]\n");
+        probe.OnCommand("/usr/bin/dotnet", "--version", "10.0.100\n");
+        probe.AddFile("/repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+        return probe;
+    }
+
     [Fact]
     public async Task RefusesWithBadInputWhenRequiredToolsAreMissing()
     {
@@ -129,5 +144,19 @@ public class ScriptBuildDriverPreconditionTests
         Assert.False(result.Ok);
         Assert.Equal(FailureReason.BadInput, result.Reason);
         Assert.Contains(".NET SDK", result.Message);
+    }
+
+    [Fact]
+    public async Task RefusesAnOutputDirectoryThatHoldsOnlyASubdirectory()
+    {
+        FakeSystemProbe probe = ReadyProbe();
+        probe.AddDirectory("/out");
+        probe.AddDirectory("/out/Optimum-v0.3.13-linux-x64");
+
+        BuildResult result = await new ScriptBuildDriver(probe).RunAsync(
+            new BuildRequest("/repo", "/out"), NullBuildObserver.Instance, CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.OutputExists, result.Reason);
     }
 }
