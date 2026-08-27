@@ -102,6 +102,38 @@ safe to retry.
 - No attempt to make the installer work offline on a machine with no .NET SDK and
   no network. That combination cannot produce a build.
 
+### Decisions taken 2026-08-27
+
+Four open questions from an earlier draft are now settled and the sections below
+reflect them.
+
+- **The EULA text is rewritten to match `LICENSE-SCOPE.md`.** The current text in
+  `scripts/install-windows.ps1:1964` is wrong and does not move into Core as is.
+  Phase 1 produces the corrected resource. Consent posture is B: a notice on every
+  platform and in every path, no hard click-through gate. The CLI prints the
+  notice to stderr and proceeds; the GUI shows it as a panel with a Continue
+  button, not a checkbox; RiftLauncher surfaces the text once. One legal question
+  is still out (does local decompilation of a game the user owns, for an
+  interoperable patch, require click-through consent in the jurisdictions that
+  matter). If the answer is yes, posture moves to C: a checkbox in the GUI and an
+  `--acknowledge-decompile` flag on `Optimum.Cli`, refused if absent. Posture B is
+  the working assumption and the plan is written to it.
+- **macOS distribution is deferred.** The project is not obtaining an Apple
+  Developer Program account yet, so no signed macOS installer ships. `Optimum.Cli`
+  and `Optimum.Installer` still build and run on macOS from source for anyone who
+  wants them, and `scripts/install-macos.sh` and `scripts/package-macos.sh` stay
+  as the macOS path until an account exists and a signed build ships. Revisit when
+  macOS demand justifies the 99 USD per year and the D-U-N-S lead time.
+- **macOS packaging, when it does ship, is a Velopack `.pkg`.** Not Avalonia
+  Parcel. A recurring Avalonia subscription is not justified for the current macOS
+  audience, and Velopack does macOS signing and notarization at no license cost.
+- **Velopack is confirmed on .NET 10.** A local spike on 2026-08-27 packed a
+  net10.0 self-contained console app with Velopack 1.2.0 for `linux-x64` (AppImage
+  plus a 44 KB delta from 1.0.0 to 1.0.1 against a 37 MB full package) and
+  `win-x64` (`Setup.exe` plus portable zip). Phase 0 still adds a CI job that
+  exercises the runtime update path, because the spike packed but did not apply an
+  update.
+
 ## 3. Architecture
 
 Three new projects join `VintageStory.slnx`, all MIT, all .NET 10.
@@ -463,6 +495,10 @@ at `:68-74`, the numbered picker at `:117-131`, and the version-mismatch guard a
 verification and is worth generalizing to every platform. What is retired: the
 overlay copy, the eleven-name `OPTIMUM_FILES` list, and the `--uninstall` branch.
 
+This retirement lands when macOS gets a signed release, which is deferred (see the
+decisions block in section 2). Until then `scripts/install-macos.sh` stays and the
+new installer runs on macOS only from a source build.
+
 Users of the old overlay model need a migration path. Section 12 records this as a
 risk, and the concrete answer is that `Optimum.Cli uninstall` detects a legacy
 overlay by the presence of `Optimum.dll` and `.optimum/version` next to a
@@ -577,10 +613,11 @@ decision that should not ride along inside an installer rewrite.
 
 ## 8. Packaging and distribution of the installer
 
-Velopack 1.2 or newer handles all three platforms with one toolchain and one
+Velopack 1.2 or newer handles Windows and Linux with one toolchain and one
 release feed, and it supports delta updates. On Windows it integrates signtool and
-Azure Trusted Signing. On macOS it produces a `.pkg` or a `ditto` ZIP and handles
-`codesign` and notarization. On Linux its only output format is AppImage.
+Azure Trusted Signing and produces a `Setup.exe` plus a portable zip. On Linux its
+only output format is AppImage. The spike on 2026-08-27 confirmed both for a
+net10.0 self-contained app.
 
 If `.deb` or `.rpm` packages are required, PupNet Deploy produces them, and that
 path has no auto-update. This plan does not propose `.deb` or `.rpm` for the first
@@ -588,22 +625,23 @@ release: AppImage matches what `scripts/package-linux.sh --format appimage`
 already produces for the game package, so the installer and the thing it installs
 use the same Linux distribution format.
 
-macOS requires a paid Apple Developer Program membership and notarization
-regardless of which tool builds the bundle. `README.md:254` already records the
-consequence of skipping it: an unsigned `.dmg` makes Gatekeeper warn and the user
-must right-click and Open. That is tolerable for a game package and not tolerable
-for an installer, which is exactly the kind of binary a user should refuse to run
-when the operating system warns about it.
+macOS is not part of the first distributed release. Signing and notarizing a
+macOS bundle requires a paid Apple Developer Program membership, and the project
+has decided not to obtain one yet. An unsigned installer is not an acceptable
+artifact: `README.md:254` records that an unsigned bundle makes Gatekeeper warn,
+and an installer is exactly the kind of binary a user should refuse to run when
+the operating system warns about it. So `Optimum.Installer` and `Optimum.Cli`
+build for `osx-arm64` and `osx-x64` and run for anyone who builds them, but the
+release workflow publishes nothing for macOS. `scripts/install-macos.sh` and
+`scripts/package-macos.sh` stay as the macOS path in the meantime.
 
-Open question, deliberately not decided here: Avalonia Parcel automates the `.app`
-bundle, `Info.plist`, signing, notarization, and `.dmg` in one step, but the full
-signing feature sits behind a paid Avalonia tier. Velopack does macOS signing and
-notarization at no license cost but produces a `.pkg` or a ZIP rather than a
-`.dmg`. The cost of choosing Parcel is a recurring Avalonia subscription on top of
-the Apple Developer membership. The cost of choosing Velopack is that macOS users
-get a `.pkg` where they may expect a `.dmg`, and that the project maintains the
-`.dmg` path in `scripts/package-macos.sh` separately for the game package. The
-team should decide with the subscription price in hand.
+When macOS does ship, the format is a Velopack `.pkg`. Velopack handles
+`codesign` and notarization at no license cost. Avalonia Parcel, which would
+produce a `.dmg` and automate the `Info.plist` and bundle assembly, is rejected:
+its full signing feature sits behind a recurring Avalonia subscription that the
+current macOS audience does not justify. The cost of the `.pkg` choice is that
+macOS users get a guided installer where some expect a drag-to-Applications
+window, which is a reasonable trade for a tool that then runs a long build.
 
 Ship untrimmed. Avalonia's XAML loader uses reflection heavily and trimming
 removes types the loader resolves by name, which fails at runtime rather than at
@@ -681,9 +719,11 @@ of the gate scripts move to `Optimum.Bootstrap.Core.Tests`.
 
 ### Definition of done
 
-1. A real end-to-end install on Linux, Windows, and macOS from a clean machine
-   that finishes and launches the game into a world, verified by a person, not by
-   a script.
+1. A real end-to-end install on Linux and Windows from a clean machine that
+   finishes and launches the game into a world, verified by a person, not by a
+   script. On macOS the same run from a source build of `Optimum.Installer`,
+   unsigned, accepted through the Gatekeeper right-click bypass, since macOS has
+   no signed release yet.
 2. `Optimum.Cli build --json` green on every job of the extended
    `.github/workflows/ci-platform-bootstrap.yml`, with the NDJSON conformance
    assertion running against the real stream.
@@ -719,10 +759,14 @@ valid package directory and a conformant stream. The cached archive is already
 resolved by the existing `Resolve client archive` and `Cache client archive`
 steps, so this adds compute time and no new download.
 
-**A release workflow.** Runs `vpk pack` per RID and publishes the Velopack feed.
-Signing credentials come from repository secrets. This workflow is the only one
-that touches signing, and it should refuse to publish an unsigned macOS artifact
-rather than warn about it.
+**A release workflow.** Runs `vpk pack` for `win-x64` and `linux-x64` and
+publishes the Velopack feed. Signing credentials for Windows come from repository
+secrets. This workflow is the only one that touches signing. It builds the
+`osx-arm64` and `osx-x64` binaries for archival but publishes nothing for macOS
+until an Apple Developer Program account and a signing certificate exist. Phase 0
+adds a throwaway job that runs `vpk pack` on a net10.0 hello world and applies the
+resulting update, to confirm the runtime path before Phase 5 commits to the
+toolchain.
 
 ## 11. Rollout plan
 
@@ -765,24 +809,26 @@ restores the previous install, tested on each platform. An install followed by a
 uninstall leaves no Optimum files and no orphaned shortcuts, verified by a
 filesystem diff.
 
-**Phase 5: distribution.** Velopack packaging per RID, the release workflow,
-signing on Windows and macOS.
-*Verification:* a signed installer downloads and runs on a clean machine on each
-platform without an operating system warning, and a delta update from the previous
-version applies.
+**Phase 5: distribution.** Velopack packaging for `win-x64` and `linux-x64`, the
+release workflow, signing on Windows. macOS binaries build but do not publish.
+*Verification:* a signed Windows installer and a Linux AppImage download and run
+on a clean machine without an operating system warning, and a delta update from
+the previous version applies.
 
 **Phase 6: documentation and deprecation.** Update `README.md`, add the three new
 project paths to the MIT list in `LICENSE-SCOPE.md`, note the new build and test
-targets in `CONTRIBUTING.md`, and turn `scripts/install-linux.sh`,
-`scripts/install-windows.ps1`, and `scripts/install-macos.sh` into thin shims that
-forward to `Optimum.Cli`. Fix or replace `scripts/uninstall.sh`, which today
-cannot uninstall anything: `scripts/uninstall.sh:75` exits 0 unless
-`$VS_DIR/Optimum.dll` exists, and the current Linux standalone package contains no
-`Optimum.dll`, so the script reports "Optimum not installed" and returns without
-even reaching the `.desktop` cleanup at `:122-123`.
-*Verification:* a fresh clone documents one install path, the shims work for
-anyone with the old commands in their shell history, and `scripts/uninstall.sh`
-either removes a real install or is gone.
+targets in `CONTRIBUTING.md`, and turn `scripts/install-linux.sh` and
+`scripts/install-windows.ps1` into thin shims that forward to `Optimum.Cli`. Leave
+`scripts/install-macos.sh` alone: it stays the macOS path until a signed macOS
+release exists, so its retirement waits for the Apple account and a later phase.
+Fix or replace `scripts/uninstall.sh`, which today cannot uninstall anything:
+`scripts/uninstall.sh:75` exits 0 unless `$VS_DIR/Optimum.dll` exists, and the
+current Linux standalone package contains no `Optimum.dll`, so the script reports
+"Optimum not installed" and returns without even reaching the `.desktop` cleanup
+at `:122-123`.
+*Verification:* a fresh clone documents one install path per shipped platform, the
+shims work for anyone with the old commands in their shell history, and
+`scripts/uninstall.sh` either removes a real install or is gone.
 
 **Phase 7 (out of scope, documented only).** The RiftLauncher managed-tool slice,
 built in the RiftLauncher repository against the contract in section 4. It is a
@@ -797,18 +843,23 @@ of roughly 55 to 60 MB per RID. Recorded here because a future contributor will
 propose framework-dependent publishing to shrink the download and will be right
 about the size and wrong about the outcome.
 
-**Velopack on .NET 10.** No explicit release note confirming .NET 10 support was
-found. Phase 0 should add a throwaway CI job that runs `vpk pack` against a hello
-world .NET 10 self-contained app before Phase 5 commits to the toolchain. If it
+**Velopack on .NET 10.** A local spike on 2026-08-27 packed a net10.0
+self-contained console app with Velopack 1.2.0 for `linux-x64` and `win-x64`,
+including a delta package. The spike did not apply an update at runtime, so Phase
+0 still adds a CI job that packs two versions and applies the delta. If that
 fails, the fallback is per-platform packaging with no auto-update, which is what
 the project has today.
 
-**macOS notarization.** Requires a paid Apple Developer Program membership. The
-project needs an account, a certificate, and a place to store the credentials. This
-is an administrative dependency with a lead time and it should be started during
-Phase 0, not Phase 5.
+**macOS is deferred.** The project has decided not to obtain an Apple Developer
+Program account yet, so there is no signed macOS release. The risk is that a macOS
+user finds `scripts/install-macos.sh`, which is broken in the ways section 6
+lists. Mitigation: `Optimum.Installer` builds and runs on macOS from source and
+uses the standalone-package model, so a macOS user who builds it gets a working
+install; the broken script stays only because removing it before a replacement
+ships would leave macOS with nothing. Revisit the account when downloads or issues
+show macOS demand.
 
-**Parcel versus Velopack for `.dmg`.** Open, with the cost stated in section 8.
+**Parcel versus Velopack for macOS.** Decided: Velopack `.pkg`. See section 8.
 
 **The scripts remain a dependency.** After Phase 6 the installer still needs bash
 on Linux and macOS and PowerShell on Windows, because `scripts/bootstrap.sh` and
@@ -837,13 +888,16 @@ writes to a `.partial` file and moves it into place on completion
 that a user who installed with the old script and then installs with the new one
 ends up with two copies of the game and no obvious way to tell which is which.
 
-**Is the EULA legally load-bearing?** Today it is shown only in the Windows GUI
-path (`scripts/install-windows.ps1:1953`) and skipped in `-Silent`. If acceptance
-matters, the CLI path needs an equivalent gate, which means a flag such as
-`--accept-license` and a refusal to proceed without it, which in turn means
-RiftLauncher has to surface the text and pass the flag. If it does not matter, the
-modal is a courtesy and the CLI can omit it. Someone has to decide, and the
-decision changes the CLI's argument surface, so it should be made before Phase 2.
+**Is the EULA legally load-bearing?** Working answer: no, posture B, a notice
+everywhere and no hard gate. The reasoning: the Commons Clause is a redistribution
+term and an end user running an installer is not redistributing; RiftLauncher
+already downloads the same client from the same CDN without a gate. One question
+is still out with a lawyer: does local decompilation of a game the user owns, for
+an interoperable patch, need click-through consent in the jurisdictions that
+matter. If the answer is yes, posture moves to C, which adds an
+`--acknowledge-decompile` flag to `Optimum.Cli` that is refused if absent and
+makes RiftLauncher surface the text and pass it. The plan is written to B and the
+CLI argument surface in section 4 assumes B. Confirm before Phase 2.
 
 **The EULA text is stale.** `scripts/install-windows.ps1:1964` tells the user that
 "Optimum is licensed under the GNU General Public License v3.0 with the Commons
@@ -900,7 +954,9 @@ fixup scripts `scripts/fix-base-ctor-calls.py`, `scripts/fix-closure-class.pl`, 
 
 - `scripts/install-linux.sh` becomes a shim over `Optimum.Cli`.
 - `scripts/install-windows.ps1` becomes a shim over `Optimum.Cli`.
-- `scripts/install-macos.sh` is removed; the overlay model is retired.
+- `scripts/install-macos.sh` stays until a signed macOS release exists. Its
+  removal and the overlay-model retirement wait for the Apple Developer account
+  and a later phase, not Phase 6.
 - `scripts/uninstall.sh` is fixed or replaced. See the Phase 6 verification.
 - `scripts/uninstall.ps1` stays as long as it is byte-identical to the copy the
   Windows package ships. Core's uninstaller generation should produce that file
