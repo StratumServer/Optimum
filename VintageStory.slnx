@@ -28,4 +28,15 @@
     <Project Path="Optimum.Launcher/Optimum.Launcher.csproj" />
     <Project Path="Optimum.Patcher/Optimum.Patcher.csproj" />
   </Folder>
+  <Folder Name="/Installer/">
+    <!-- The Avalonia installer stack. None of these reference a decompiled or
+         forked project, so Optimum.Installer.slnf builds and tests them without
+         a bootstrap. See INSTALLER-PLAN.md. -->
+    <Project Path="Optimum.Bootstrap.Core/Optimum.Bootstrap.Core.csproj" />
+    <Project Path="Optimum.Bootstrap.Core.Tests/Optimum.Bootstrap.Core.Tests.csproj" />
+    <Project Path="Optimum.Cli/Optimum.Cli.csproj" />
+    <Project Path="Optimum.Cli.Tests/Optimum.Cli.Tests.csproj" />
+    <Project Path="Optimum.Installer/Optimum.Installer.csproj" />
+    <Project Path="Optimum.Installer.Tests/Optimum.Installer.Tests.csproj" />
+  </Folder>
 </Solution>
