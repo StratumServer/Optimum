@@ -130,8 +130,8 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
     private PrerequisiteResult DetectAppimagetool(PrerequisiteDefinition def)
     {
         string? path = CommandSearch.Which(probe, "appimagetool")
-            ?? ExistingOrNull(Path.Combine(repoRoot, ".tools", "appimagetool"))
-            ?? ExistingOrNull(Path.Combine(probe.HomeDirectory, ".tools", "appimagetool"));
+            ?? ExecutableOrNull(Path.Combine(repoRoot, ".tools", "appimagetool"))
+            ?? ExecutableOrNull(Path.Combine(probe.HomeDirectory, ".tools", "appimagetool"));
         return path is not null
             ? Ok(def, path, null)
             : new PrerequisiteResult(def, PrerequisiteState.OptionalMissing, def.DisplayName, null, null,
@@ -163,6 +163,8 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
     }
 
     private string? ExistingOrNull(string path) => probe.FileExists(path) ? path : null;
+
+    private string? ExecutableOrNull(string path) => probe.IsExecutable(path) ? path : null;
 
     private string? ReadIlspycmdVersion(string path)
     {

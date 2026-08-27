@@ -1,3 +1,4 @@
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Platform;
@@ -30,6 +31,9 @@ public sealed record InstallerServices(
     /// </summary>
     public ISourceProvider? SourceProvider { get; init; }
 
+    /// <summary>Installs the optional AppImage packaging tool on supported Linux hosts.</summary>
+    public IAppimagetoolAcquisition? Appimagetool { get; init; }
+
     public static InstallerServices CreateReal()
     {
         var probe = SystemProbe.Default;
@@ -41,6 +45,7 @@ public sealed record InstallerServices(
         {
             Updates = new UpdateService(),
             SourceProvider = new GitSourceProvider(probe),
+            Appimagetool = new AppimagetoolAcquisition(probe),
         };
     }
 }
