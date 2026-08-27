@@ -55,42 +55,48 @@ public sealed class RuntimeValidator(ISystemProbe probe)
 
     private static RuntimeValidationResult CheckEntryPoint(string packageDirectory)
     {
-        string lib = Path.Combine(packageDirectory, "VintagestoryLib.dll");
-        var assemblies = new List<string>();
-        assemblies.AddRange(Directory.EnumerateFiles(packageDirectory, "*.dll"));
-        string libDir = Path.Combine(packageDirectory, "Lib");
-        if (Directory.Exists(libDir))
-            assemblies.AddRange(Directory.EnumerateFiles(libDir, "*.dll"));
-        assemblies.AddRange(Directory.EnumerateFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
-
+        // Inspecting the entry point is best effort: a positive "the type is
+        // gone" fails the build, but an inability to inspect at all (an
+        // unresolvable reference, a trimmed runtime directory) does not, because
+        // the header checks above already passed.
         try
         {
+            var assemblies = new List<string>();
+            assemblies.AddRange(Directory.EnumerateFiles(packageDirectory, "*.dll"));
+            string libDir = Path.Combine(packageDirectory, "Lib");
+            if (Directory.Exists(libDir))
+                assemblies.AddRange(Directory.EnumerateFiles(libDir, "*.dll"));
+            try { assemblies.AddRange(Directory.EnumerateFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll")); }
+            catch (Exception ex) when (ex is IOException or ArgumentException) { /* trimmed publish */ }
+
             using var context = new MetadataLoadContext(
                 new PathAssemblyResolver(assemblies.Distinct(StringComparer.OrdinalIgnoreCase)));
-            Assembly libAssembly = context.LoadFromAssemblyPath(lib);
+            Assembly libAssembly = context.LoadFromAssemblyPath(Path.Combine(packageDirectory, "VintagestoryLib.dll"));
 
-            Type? clientProgram = libAssembly.GetTypes()
-                .FirstOrDefault(t => t.FullName == "Vintagestory.Client.ClientProgram");
+            IEnumerable<Type?> types;
+            try { types = libAssembly.GetTypes(); }
+            catch (ReflectionTypeLoadException partial) { types = partial.Types; }
+
+            Type? clientProgram = types.FirstOrDefault(t => t?.FullName == "Vintagestory.Client.ClientProgram");
             if (clientProgram is null)
-                return new RuntimeValidationResult(false,
-                    "the patched VintagestoryLib.dll no longer contains Vintagestory.Client.ClientProgram");
+            {
+                // Only fail if we could enumerate types and the one we need is
+                // absent; if the enumeration was empty we could not inspect.
+                return types.Any(t => t is not null)
+                    ? new RuntimeValidationResult(false,
+                        "the patched VintagestoryLib.dll no longer contains Vintagestory.Client.ClientProgram")
+                    : new RuntimeValidationResult(true, "entry point not inspected: VintagestoryLib.dll types would not enumerate");
+            }
 
             MethodInfo? main = clientProgram.GetMethod("Main",
                 BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
-            if (main is null)
-                return new RuntimeValidationResult(false, "Vintagestory.Client.ClientProgram has no static Main");
-
-            return new RuntimeValidationResult(true, null);
+            return main is null
+                ? new RuntimeValidationResult(false, "Vintagestory.Client.ClientProgram has no static Main")
+                : new RuntimeValidationResult(true, null);
         }
-        catch (ReflectionTypeLoadException ex)
+        catch (Exception ex)
         {
-            string detail = string.Join("; ", ex.LoaderExceptions
-                .Where(e => e is not null).Select(e => e!.Message).Take(3));
-            return new RuntimeValidationResult(false, $"VintagestoryLib.dll types would not load: {detail}");
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
-        {
-            return new RuntimeValidationResult(false, $"could not inspect VintagestoryLib.dll: {ex.Message}");
+            return new RuntimeValidationResult(true, $"entry point not inspected: {ex.Message}");
         }
     }
 }

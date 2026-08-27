@@ -118,6 +118,47 @@ public sealed class DeployRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void AFailureAfterTheSwapKeepsTheNewInstall()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+        File.WriteAllText(Path.Combine(installDir, "from-the-old-install"), "old");
+
+        var deployer = new PackageDeployer(probe)
+        {
+            FailAtStep = step => { if (step == "commit") throw new IOException("simulated post-swap failure"); },
+        };
+        DeployResult result = deployer.Deploy(new DeployRequest(package, installDir));
+
+        // Past the swap the install is complete; a cleanup failure is not fatal.
+        Assert.True(result.Ok, result.Message);
+        Assert.False(File.Exists(Path.Combine(installDir, "from-the-old-install")));
+        Assert.True(File.Exists(Path.Combine(installDir, "run.sh")));
+        Assert.True(File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)));
+    }
+
+    [Fact]
+    public void AFailureBeforeTheSwapOnAFreshInstallLeavesNothing()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        var deployer = new PackageDeployer(probe)
+        {
+            FailAtStep = step => { if (step == "backup") throw new IOException("simulated early failure"); },
+        };
+        DeployResult result = deployer.Deploy(new DeployRequest(package, installDir));
+
+        Assert.False(result.Ok);
+        Assert.False(Directory.Exists(installDir));
+        Assert.Empty(Directory.EnumerateDirectories(Path.Combine(_root, "install"), ".optimum-*"));
+    }
+
+    [Fact]
     public void ManifestRecordsTheVersionFromThePackageDirectoryName()
     {
         var probe = SystemProbe.Default;
@@ -201,6 +242,33 @@ public sealed class DeployRoundTripTests : IDisposable
 
         Assert.False(deploy.Ok);
         Assert.Equal(FailureReason.BadInput, deploy.Reason);
+    }
+
+    [Fact]
+    public void UninstallStillRemovesShortcutsWhenAListedEntryIsAlreadyGone()
+    {
+        var probe = SystemProbe.Default;
+        string installDir = Path.Combine(_root, "install", "optimum");
+        Directory.CreateDirectory(Path.Combine(installDir, ".optimum"));
+        string shortcut = Path.Combine(_root, "menu", "optimum.desktop");
+        Directory.CreateDirectory(Path.GetDirectoryName(shortcut)!);
+        File.WriteAllText(shortcut, "[Desktop Entry]");
+
+        var manifest = new InstallManifest
+        {
+            OptimumVersion = "0.3.14",
+            InstalledAtUtc = DateTimeOffset.UtcNow,
+            InstallDirectory = installDir,
+            Entries = ["run.sh"],           // never created
+            Shortcuts = [shortcut],
+        };
+        File.WriteAllText(Path.Combine(installDir, InstallManifest.RelativePath), manifest.Serialize());
+
+        UninstallResult result = new Uninstaller(probe).Uninstall(installDir);
+
+        Assert.True(result.Ok);
+        Assert.False(File.Exists(shortcut));
+        Assert.False(Directory.Exists(installDir));
     }
 
     [Fact]

@@ -62,14 +62,20 @@ public sealed class ShortcutWriter(ISystemProbe probe)
     {
         var written = new List<string>();
         string home = probe.HomeDirectory;
-        string target = Directory.Exists(Path.Combine(installDirectory, "Optimum.app"))
-            ? Path.Combine(installDirectory, "Optimum.app")
+
+        // The link target is a real .app bundle: a nested Optimum.app, or the
+        // install directory itself when the bundle contents were laid there.
+        string nested = Path.Combine(installDirectory, "Optimum.app");
+        string target = File.Exists(Path.Combine(nested, "Contents", "Info.plist"))
+            ? nested
             : installDirectory;
+        bool isBundle = File.Exists(Path.Combine(target, "Contents", "Info.plist"));
+        string linkName = isBundle ? "Optimum.app" : "Optimum";
 
         if (kinds.HasFlag(ShortcutKinds.Menu))
-            written.AddRange(Symlink(Path.Combine(home, "Applications", "Optimum" + (target.EndsWith(".app", StringComparison.Ordinal) ? ".app" : "")), target));
+            written.AddRange(Symlink(Path.Combine(home, "Applications", linkName), target));
         if (kinds.HasFlag(ShortcutKinds.Desktop))
-            written.AddRange(Symlink(Path.Combine(home, "Desktop", "Optimum" + (target.EndsWith(".app", StringComparison.Ordinal) ? ".app" : "")), target));
+            written.AddRange(Symlink(Path.Combine(home, "Desktop", linkName), target));
 
         return written;
     }
@@ -102,7 +108,7 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         Type=Application
         Name=Optimum
         Comment=High-performance client for Vintage Story
-        Exec="{launcherPath}"
+        Exec="{EscapeExec(launcherPath)}"
         Path={workingDirectory}
         Icon={icon ?? "optimum"}
         Terminal=false
@@ -110,6 +116,23 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         StartupWMClass=Optimum
 
         """;
+
+    /// <summary>
+    /// Escapes a value for a quoted <c>Exec</c> per the Desktop Entry spec:
+    /// backslash, double quote, backtick, and dollar are backslash-escaped.
+    /// </summary>
+    private static string EscapeExec(string value)
+    {
+        var sb = new System.Text.StringBuilder(value.Length + 8);
+        foreach (char c in value)
+        {
+            if (c is '\\' or '"' or '`' or '$')
+                sb.Append('\\');
+            sb.Append(c);
+        }
+
+        return sb.ToString();
+    }
 
     private string? InstallIcon(string installDirectory, string destination)
     {

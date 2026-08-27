@@ -65,6 +65,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         string stageDir = Path.Combine(parent, $".optimum-stage-{token}");
         string backupDir = Path.Combine(parent, $".optimum-backup-{token}");
         bool backedUp = false;
+        bool committed = false;
         string? launcher = null;
 
         try
@@ -89,34 +90,57 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             Checkpoint("backup");
             if (hasExisting || Directory.Exists(installDir))
             {
-                Directory.Move(installDir, backupDir);
+                MoveDirectory(installDir, backupDir);
                 backedUp = true;
             }
 
-            Checkpoint("swap");
-            Directory.Move(stageDir, installDir);
+            try
+            {
+                Checkpoint("swap");
+                MoveDirectory(stageDir, installDir);
+                committed = true;
+            }
+            catch
+            {
+                // The swap itself failed: the target is still absent (or the
+                // move is all-or-nothing), so restore the backup and give up.
+                RestoreBackup(installDir, backupDir, backedUp);
+                throw;
+            }
 
+            // Past this point the install is complete and correct. Deleting the
+            // backup and registering shortcuts are cleanup, not the transaction.
             Checkpoint("commit");
-            if (backedUp)
-                Directory.Delete(backupDir, recursive: true);
+            string? finalLauncher = launcher is null ? null : Path.Combine(installDir, Path.GetFileName(launcher));
+            try
+            {
+                if (backedUp && Directory.Exists(backupDir))
+                    Directory.Delete(backupDir, recursive: true);
+                RegisterInstall(installDir, request, finalLauncher, observer);
+            }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
+            {
+                observer?.Log(LogLevel.Warn,
+                    $"the install is complete but a post-install step did not finish: {cleanup.Message}");
+            }
 
-            // The launcher path was written for the final install directory.
-            string? finalLauncher = launcher is null
-                ? null
-                : Path.Combine(installDir, Path.GetFileName(launcher));
-
-            RegisterInstall(installDir, request, finalLauncher, observer);
             return DeployResult.Success(installDir, finalLauncher);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            RollBack(installDir, backupDir, backedUp);
-            return DeployResult.Failure(FailureReason.EngineInternal, $"install failed and was rolled back: {ex.Message}");
+            if (committed)
+                return DeployResult.Success(installDir, launcher is null ? null : Path.Combine(installDir, Path.GetFileName(launcher)));
+
+            (bool restored, string? note) = RestoreBackup(installDir, backupDir, backedUp);
+            string message = restored || !backedUp
+                ? $"install failed and was rolled back: {ex.Message}"
+                : $"install failed and the previous install could not be restored: {ex.Message}. {note}";
+            return DeployResult.Failure(FailureReason.EngineInternal, message);
         }
         finally
         {
             TryDelete(stageDir);
-            if (Directory.Exists(backupDir) && Directory.Exists(installDir))
+            if (committed && Directory.Exists(backupDir))
                 TryDelete(backupDir);
         }
     }
@@ -125,16 +149,19 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
 
     /// <summary>
     /// After the swap: write shortcuts, register the Windows uninstall entry, and
-    /// fold both into the manifest so <see cref="Uninstaller"/> can undo them. All
-    /// best effort: a shortcut that will not write does not fail the install.
+    /// fold both into the manifest so <see cref="Uninstaller"/> can undo them. If
+    /// the manifest cannot be updated the shortcuts and registry entry are undone
+    /// so nothing is left that the manifest does not record.
     /// </summary>
     private void RegisterInstall(string installDir, DeployRequest request, string? launcher, IBuildObserver? observer)
     {
         string manifestPath = Path.Combine(installDir, InstallManifest.RelativePath);
-        InstallManifest? manifest = File.Exists(manifestPath)
-            ? InstallManifest.Deserialize(File.ReadAllText(manifestPath))
-            : null;
-        if (manifest is null)
+        string? manifestJson;
+        try { manifestJson = File.Exists(manifestPath) ? File.ReadAllText(manifestPath) : null; }
+        catch (IOException) { return; }
+        catch (UnauthorizedAccessException) { return; }
+
+        if (manifestJson is null || InstallManifest.Deserialize(manifestJson) is not { } manifest)
             return;
 
         IReadOnlyList<string> shortcuts = launcher is not null && request.Shortcuts != ShortcutKinds.None
@@ -153,18 +180,67 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                 UninstallRegistryKey = registryKey,
             }).Serialize());
         }
-        catch (IOException) { /* the shortcuts still work; the manifest just will not list them */ }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The manifest is the only record the uninstaller reads, so undo
+            // what it will not know about.
+            new ShortcutWriter(probe).Remove(shortcuts);
+            UninstallRegistration.Unregister(registryKey);
+            observer?.Log(LogLevel.Warn, "could not record shortcuts in the manifest; they were removed");
+        }
     }
 
-    private static void RollBack(string installDir, string backupDir, bool backedUp)
+    /// <summary>
+    /// Restores the pre-install tree. Returns whether it is now back in place and,
+    /// if not, a note telling the user where the backup is.
+    /// </summary>
+    private static (bool Restored, string? Note) RestoreBackup(string installDir, string backupDir, bool backedUp)
     {
-        // A partially swapped-in install is discarded; the backup goes back.
-        if (backedUp && Directory.Exists(backupDir))
+        if (!backedUp)
         {
-            if (Directory.Exists(installDir))
-                TryDelete(installDir);
-            if (!Directory.Exists(installDir))
-                try { Directory.Move(backupDir, installDir); } catch (IOException) { /* leave the backup for the user */ }
+            TryDelete(installDir);
+            return (true, null);
+        }
+
+        if (!Directory.Exists(backupDir))
+            return (!Directory.Exists(installDir) || IsOptimumInstall(installDir), null);
+
+        if (Directory.Exists(installDir))
+            TryDelete(installDir);
+
+        if (Directory.Exists(installDir))
+            return (false, $"the previous install is at {backupDir}");
+
+        try
+        {
+            Directory.Move(backupDir, installDir);
+            return (true, null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return (false, $"the previous install is at {backupDir}: {ex.Message}");
+        }
+    }
+
+    private static bool IsOptimumInstall(string directory) =>
+        File.Exists(Path.Combine(directory, InstallManifest.RelativePath));
+
+    /// <summary>
+    /// <see cref="Directory.Move"/> that turns a cross-filesystem failure into a
+    /// clear message. This bites only when the install directory is itself a
+    /// mount point, since the stage and backup always share its parent.
+    /// </summary>
+    private static void MoveDirectory(string source, string destination)
+    {
+        try
+        {
+            Directory.Move(source, destination);
+        }
+        catch (IOException ex) when (ex.Message.Contains("different", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("cross-device", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "the install directory is on a different filesystem from its parent; choose a directory whose parent is on the same filesystem", ex);
         }
     }
 

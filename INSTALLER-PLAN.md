@@ -928,11 +928,15 @@ key, a no-op elsewhere. `RuntimeValidator` took option 2 from section 7:
 `MetadataLoadContext` over `VintagestoryLib.dll`, no game code executed.
 Session-aware data-path detection was already cross-platform (`DataPathProbe`,
 Phase 1) and is used by the GUI.
-*Verification:* `Optimum.Bootstrap.Core.Tests` has 103 tests, including an
-injected failure at the swap step that restores the previous install and a
-user-added file across it, a full deploy-then-uninstall filesystem-clean check,
-in-place replacement, and the Linux `.desktop` write-and-remove round trip
-through the manifest. Windows `.lnk` and registry paths and the macOS symlink
+*Verification:* `Optimum.Bootstrap.Core.Tests` has 106 tests. The transactional
+install has a `committed` flag: a failure before the swap rolls back (tested at
+the backup and swap steps, both with and without an existing install, with a
+user-added file preserved across it); a failure after the swap keeps the new
+install and downgrades the cleanup error to a warning; a rollback that itself
+cannot restore the backup is reported as such with the backup path, not as a
+success. `uninstall` runs the shortcut, registry, and `.optimum` cleanup even
+when a listed entry will not delete. `RuntimeValidator` never fails a build it
+cannot inspect. Windows `.lnk` and registry paths and the macOS bundle symlink
 are covered by construction and need a manual check on those platforms.
 
 **Phase 5: distribution.** Velopack packaging for `win-x64` and `linux-x64`, the
