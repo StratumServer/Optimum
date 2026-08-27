@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Optimum.Bootstrap.Core</RootNamespace>
+    <AssemblyName>Optimum.Bootstrap.Core</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <Description>Reusable engine logic for the Optimum installer: prerequisite detection, acquisition, the build driver, the transactional installer, path guards, and the NDJSON protocol. No UI, no argument parsing.</Description>
+    <Version>$(OptimumVersion)</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.5" />
+  </ItemGroup>
+</Project>

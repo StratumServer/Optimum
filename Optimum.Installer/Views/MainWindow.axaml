@@ -1,0 +1,17 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Optimum.Installer.ViewModels"
+        x:Class="Optimum.Installer.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="720" Height="520"
+        WindowStartupLocation="CenterScreen"
+        Title="Optimum installer">
+  <Design.DataContext>
+    <vm:MainWindowViewModel />
+  </Design.DataContext>
+  <StackPanel Margin="24" Spacing="12" VerticalAlignment="Center">
+    <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="SemiBold" />
+    <TextBlock Text="Scaffold only. Screens land in Phase 3."
+               Opacity="0.7" />
+  </StackPanel>
+</Window>

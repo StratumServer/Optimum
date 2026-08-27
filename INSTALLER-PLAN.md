@@ -133,9 +133,10 @@ reflect them.
 - **Velopack is confirmed on .NET 10.** A local spike on 2026-08-27 packed a
   net10.0 self-contained console app with Velopack 1.2.0 for `linux-x64` (AppImage
   plus a 44 KB delta from 1.0.0 to 1.0.1 against a 37 MB full package) and
-  `win-x64` (`Setup.exe` plus portable zip). Phase 0 still adds a CI job that
-  exercises the runtime update path, because the spike packed but did not apply an
-  update.
+  `win-x64` (`Setup.exe` plus portable zip). Phase 0's `ci-installer.yml`
+  `velopack-smoke` job packs two versions of `Optimum.Cli` and asserts the delta
+  package builds. Applying an update at runtime needs a running app and is
+  verified in Phase 5.
 
 ## 3. Architecture
 
@@ -778,22 +779,27 @@ download.
 publishes the Velopack feed. Signing credentials for Windows come from repository
 secrets. This workflow is the only one that touches signing. It builds the
 `osx-arm64` and `osx-x64` binaries for archival but publishes nothing for macOS
-until an Apple Developer Program account and a signing certificate exist. Phase 0
-adds a throwaway job that runs `vpk pack` on a net10.0 hello world and applies the
-resulting update, to confirm the runtime path before Phase 5 commits to the
-toolchain.
+until an Apple Developer Program account and a signing certificate exist. The
+`velopack-smoke` job in `ci-installer.yml` already packs two versions and checks
+the delta builds; Phase 5 adds the runtime apply check once there is an app to run
+it against.
 
 ## 11. Rollout plan
 
 Each phase ships independently and leaves the repository in a working state. No
 phase depends on a later phase to be useful.
 
-**Phase 0: scaffold.** Create `Optimum.Bootstrap.Core`, `Optimum.Cli`,
-`Optimum.Installer`, and the three test projects. Add them to
-`VintageStory.slnx` under a new `/Installer/` folder. Add the push and
-pull-request workflow with a placeholder test in each project.
-*Verification:* the new workflow is green on a pull request and the run takes under
-five minutes.
+**Phase 0: scaffold.** Done. `Optimum.Bootstrap.Core`, `Optimum.Cli`,
+`Optimum.Installer`, and their three test projects exist, sit in a `/Installer/`
+folder in `VintageStory.slnx`, and build and test through `Optimum.Installer.slnf`
+without a bootstrap. `Optimum.Bootstrap.Core` carries the `ProgressPhase` and
+`FailureReason` contract types; `Optimum.Cli` answers `--version`;
+`Optimum.Installer` is a one-window Avalonia app with a headless render test.
+`.github/workflows/ci-installer.yml` runs the tests and the `velopack-smoke` job
+on push and pull request.
+*Verification:* `dotnet test Optimum.Installer.slnf -c Release` is green (eleven
+tests, one a headless Avalonia render) in about three seconds locally; the
+workflow is expected green under five minutes.
 
 **Phase 1: Core fundamentals.** The prerequisite model and detection for all three
 platforms, acquisition, the path guards, the NDJSON emitter, and the EULA
@@ -865,10 +871,11 @@ about the size and wrong about the outcome.
 
 **Velopack on .NET 10.** A local spike on 2026-08-27 packed a net10.0
 self-contained console app with Velopack 1.2.0 for `linux-x64` and `win-x64`,
-including a delta package. The spike did not apply an update at runtime, so Phase
-0 still adds a CI job that packs two versions and applies the delta. If that
-fails, the fallback is per-platform packaging with no auto-update, which is what
-the project has today.
+including a delta package, and the `velopack-smoke` job in `ci-installer.yml`
+repeats that check on every relevant push. The spike did not apply an update at
+runtime; that check waits for Phase 5 and a running app. If Velopack proves
+unworkable, the fallback is per-platform packaging with no auto-update, which is
+what the project has today.
 
 **macOS is deferred.** The project has decided not to obtain an Apple Developer
 Program account yet, so there is no signed macOS release. The risk is that a macOS
@@ -932,13 +939,16 @@ The new modal should either gate on scroll properly or drop the pretense.
 ### New
 
 - `Optimum.Bootstrap.Core/` (class library, MIT)
-- `Optimum.Bootstrap.Core.Tests/` (xUnit)
-- `Optimum.Cli/` (console application, MIT)
-- `Optimum.Cli.Tests/` (xUnit, NDJSON conformance)
-- `Optimum.Installer/` (Avalonia application, MIT)
-- `Optimum.Installer.Tests/` (Avalonia.Headless.XUnit)
-- `.github/workflows/ci-installer.yml` (push and pull request)
-- `.github/workflows/release-installer.yml` (Velopack)
+- `Optimum.Bootstrap.Core.Tests/` (xUnit v2)
+- `Optimum.Cli/` (console application, MIT, `AssemblyName` `optimum`)
+- `Optimum.Cli.Tests/` (xUnit v2, NDJSON conformance in Phase 2)
+- `Optimum.Installer/` (Avalonia 12.1 application, MIT)
+- `Optimum.Installer.Tests/` (Avalonia.Headless.XUnit, xUnit v3)
+- `Optimum.Installer.slnf` (solution filter over the six projects, for a
+  bootstrap-free build)
+- `.github/workflows/ci-installer.yml` (push and pull request: tests plus the
+  `velopack-smoke` job)
+- `.github/workflows/release-installer.yml` (Velopack, Phase 5)
 - `INSTALLER-PLAN.md` (this file)
 
 ### Modified
