@@ -76,7 +76,19 @@ public sealed class FakeSystemProbe : ISystemProbe
         FileContents.TryGetValue(path, out string? content) ? content : null;
 
     IEnumerable<string> ISystemProbe.EnumerateFiles(string directory, string searchPattern) =>
-        Files.Where(f => System.IO.Path.GetDirectoryName(f) == directory);
+        Files.Where(f => System.IO.Path.GetDirectoryName(f) == directory && Matches(f, searchPattern));
+
+    IEnumerable<string> ISystemProbe.EnumerateDirectories(string directory, string searchPattern) =>
+        Directories.Where(d => System.IO.Path.GetDirectoryName(d) == directory && Matches(d, searchPattern));
+
+    private static bool Matches(string path, string searchPattern)
+    {
+        if (searchPattern == "*")
+            return true;
+        string name = System.IO.Path.GetFileName(path);
+        string regex = "^" + System.Text.RegularExpressions.Regex.Escape(searchPattern).Replace("\\*", ".*") + "$";
+        return System.Text.RegularExpressions.Regex.IsMatch(name, regex);
+    }
 
     ProcessOutcome ISystemProbe.Run(string executable, IReadOnlyList<string> arguments, TimeSpan timeout) =>
         Commands.TryGetValue($"{executable}|{string.Join(' ', arguments)}", out ProcessOutcome outcome)

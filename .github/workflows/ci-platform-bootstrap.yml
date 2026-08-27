@@ -312,7 +312,7 @@ jobs:
   bootstrap-linux:
     name: Bootstrap linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     if: inputs.platform == 'all' || inputs.platform == 'linux'
     steps:
       - uses: actions/checkout@v4
@@ -389,6 +389,20 @@ jobs:
         shell: bash
         run: dotnet test Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj -c Release --no-build --nologo
 
+      - name: Optimum.Cli build drives the pipeline and emits a conformant stream
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/optimum-package"
+          dotnet run --project Optimum.Cli -c Release -- build \
+            --json --acknowledge-decompile \
+            --client-archive "$PWD/${{ steps.client.outputs.path }}" \
+            --output "$out" | tee "$RUNNER_TEMP/build-stream.ndjson"
+          python3 scripts/check-ndjson-stream.py < "$RUNNER_TEMP/build-stream.ndjson"
+          pkg="$(ls -d "$out"/Optimum-v*/ | head -n1)"
+          dotnet run --project Optimum.Cli -c Release -- validate --package "$pkg"
+
       - name: Upload logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -397,6 +411,7 @@ jobs:
           path: |
             .vanilla/*/vintagestory/Logs/
             *.log
+            ${{ runner.temp }}/build-stream.ndjson
           retention-days: 7
 
   bootstrap-linux-arm:

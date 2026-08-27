@@ -52,6 +52,8 @@ public interface ISystemProbe
 
     IEnumerable<string> EnumerateFiles(string directory, string searchPattern);
 
+    IEnumerable<string> EnumerateDirectories(string directory, string searchPattern);
+
     /// <summary>
     /// Runs a short-lived command and returns its output. Never throws: a spawn
     /// failure comes back as <see cref="ProcessOutcome.NotStarted"/>. The caller
@@ -128,6 +130,15 @@ public sealed class SystemProbe : ISystemProbe
         if (!Directory.Exists(directory))
             return [];
         try { return Directory.EnumerateFiles(directory, searchPattern); }
+        catch (IOException) { return []; }
+        catch (UnauthorizedAccessException) { return []; }
+    }
+
+    public IEnumerable<string> EnumerateDirectories(string directory, string searchPattern)
+    {
+        if (!Directory.Exists(directory))
+            return [];
+        try { return Directory.EnumerateDirectories(directory, searchPattern); }
         catch (IOException) { return []; }
         catch (UnauthorizedAccessException) { return []; }
     }

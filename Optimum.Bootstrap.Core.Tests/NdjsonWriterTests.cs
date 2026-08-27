@@ -53,7 +53,7 @@ public class NdjsonWriterTests
         var sw = new StringWriter();
         var writer = new NdjsonWriter(sw);
 
-        writer.Log(NdjsonLevel.Warn, "innoextract not present");
+        writer.Log(LogLevel.Warn, "innoextract not present");
         writer.Failure(FailureReason.PatchConflict, "patches/vsapi/0007 did not apply");
 
         JsonElement[] lines = Parse(sw.ToString());
@@ -69,7 +69,7 @@ public class NdjsonWriterTests
     {
         var writer = new NdjsonWriter(new StringWriter());
         writer.Success("/out");
-        Assert.Throws<InvalidOperationException>(() => writer.Log(NdjsonLevel.Info, "too late"));
+        Assert.Throws<InvalidOperationException>(() => writer.Log(LogLevel.Info, "too late"));
         Assert.Throws<InvalidOperationException>(() => writer.Progress(ProgressPhase.Verify, 50, "too late"));
     }
 

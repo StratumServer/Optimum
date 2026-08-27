@@ -1,3 +1,3 @@
 using Optimum.Cli;
 
-return CliRunner.Run(args, Console.Out, Console.Error);
+return await CliRunner.RunAsync(args, Console.Out, Console.Error);
