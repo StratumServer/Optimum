@@ -943,20 +943,28 @@ are covered by construction and need a manual check on those platforms.
 calls `VelopackApp.Build().Run()` first thing in `Main` and carries a thin
 `IUpdateService` that checks the installer's own GitHub release feed on startup
 (channel per RID, so the Windows and Linux feeds do not cross) and surfaces a
-non-blocking "a newer installer is available" banner; the check is a no-op when
-the app is not running from a Velopack install. `vpk` is a repo-local tool
+non-blocking "a newer installer is available" banner, shown only on the
+Prerequisites and Options screens (restarting for an update once the build is
+running would abandon a half-written install). The check is a no-op when the app
+is not running from a Velopack install. `vpk` is a repo-local tool
 (`.config/dotnet-tools.json`). `make installer-pack INSTALLER_RID=<rid>` publishes
-self-contained and packs. `.github/workflows/release-installer.yml` is a
-`workflow_dispatch` release that packs Windows, Linux, and macOS, uploads all
-three as artifacts, and publishes only Windows and Linux to GitHub releases;
-Windows signing is wired to a repository secret that is not yet set. The
-`ci-installer.yml` `velopack-smoke` job now packs the real `Optimum.Installer` for
+self-contained and packs. `.github/workflows/release-installer.yml` packs Windows,
+Linux, and macOS in a matrix, uploads all four as artifacts, and a separate
+`publish` job that `needs` the matrix uploads one channel at a time to a single
+`installer-v<version>` tag, so the platform jobs never race the GitHub API.
+Windows signing is a placeholder gated on a job-level secret that is not yet set.
+The `ci-installer.yml` `velopack-smoke` job packs the real `Optimum.Installer` for
 `linux-x64` and asserts the AppImage and a delta build.
 *Verification:* the local spike packed the real app (48 MB AppImage, 51 KB delta).
 `Optimum.Installer.Tests` covers the banner appearing for an available update, the
-update command applying it, and no banner otherwise (`FakeUpdateService`). A
-signed Windows installer, the Gatekeeper-free first run, and a runtime
-delta-apply still need a clean Windows and Linux machine.
+update command applying it, no banner otherwise, and the banner hiding once the
+build starts (`FakeUpdateService`). A signed Windows installer, the
+Gatekeeper-free first run, and a runtime delta-apply still need a clean Windows
+and Linux machine.
+
+Open risk: installer releases land in the game repository's release list on the
+`installer-v<version>` tag, and the installer version tracks the shared `VERSION`
+file. A dedicated releases repository would separate them; that is a follow-up.
 
 **Phase 6: documentation and deprecation.** Update `README.md`, add the three new
 project paths to the MIT list in `LICENSE-SCOPE.md`, note the new build and test

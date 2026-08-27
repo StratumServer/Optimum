@@ -1,3 +1,4 @@
+using System.Net.Http;
 using Velopack;
 using Velopack.Sources;
 
@@ -24,6 +25,7 @@ public sealed class UpdateService : IUpdateService
     public static string ReleaseRepository { get; set; } = "https://github.com/StratumServer/Optimum";
 
     private readonly UpdateManager? _manager;
+    private readonly Lock _gate = new();
     private UpdateInfo? _pending;
 
     public UpdateService()
@@ -45,20 +47,31 @@ public sealed class UpdateService : IUpdateService
             return null;
         try
         {
-            _pending = await _manager.CheckForUpdatesAsync().WaitAsync(cancellationToken);
-            return _pending?.TargetFullRelease.Version.ToString();
+            UpdateInfo? info = await _manager.CheckForUpdatesAsync();
+            lock (_gate)
+                _pending = info;
+            return info?.TargetFullRelease.Version.ToString();
         }
-        catch (Exception)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or TimeoutException or InvalidOperationException)
+        {
+            // A background check is best effort: a broken feed, a rate limit, or
+            // an offline machine must not block the wizard.
             return null;
         }
     }
 
     public async Task ApplyAsync(Action<int>? progress = null)
     {
-        if (_manager is null || _pending is null)
+        UpdateInfo? pending;
+        lock (_gate)
+            pending = _pending;
+        if (_manager is null || pending is null)
             return;
-        await _manager.DownloadUpdatesAsync(_pending, progress);
-        _manager.ApplyUpdatesAndRestart(_pending.TargetFullRelease);
+        await _manager.DownloadUpdatesAsync(pending, progress);
+        _manager.ApplyUpdatesAndRestart(pending.TargetFullRelease);
     }
 }

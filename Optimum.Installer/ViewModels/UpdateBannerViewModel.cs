@@ -21,17 +21,23 @@ public sealed partial class UpdateBannerViewModel(IUpdateService updates, string
     [ObservableProperty]
     private bool _dismissed;
 
+    [ObservableProperty]
+    private string? _error;
+
     [RelayCommand]
     private async Task Update()
     {
         Updating = true;
+        Error = null;
         try
         {
+            // On success ApplyAsync restarts the process and never returns.
             await updates.ApplyAsync(p => post(() => Progress = p));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             Updating = false;
+            Error = $"Update failed: {ex.Message}. You can keep installing and update later.";
         }
     }
 

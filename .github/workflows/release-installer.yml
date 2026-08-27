@@ -26,14 +26,19 @@ permissions:
 jobs:
   pack:
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
-          - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, channel: win }
-          - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, channel: linux }
-          - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, channel: osx, archive_only: true }
+          # `label` is only the artifact name; vpk picks the Velopack channel
+          # from the RID (win / linux / osx).
+          - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, label: win }
+          - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, label: linux }
+          - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
+          - { os: macos-13, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    env:
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -63,40 +68,70 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ steps.v.outputs.version }}"
-          [ -n "$version" ] || version="$(cat VERSION)"
           dotnet vpk pack \
             --packId Optimum.Installer \
-            --packVersion "$version" \
+            --packVersion "${{ steps.v.outputs.version }}" \
             --packDir publish/${{ matrix.rid }} \
             --mainExe ${{ matrix.exe }} \
-            --channel ${{ matrix.channel }} \
             --outputDir releases
 
       - name: Sign (Windows)
         if: matrix.rid == 'win-x64' && env.WINDOWS_CERT_BASE64 != ''
-        env:
-          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
-        run: echo "signing wired to secrets; no cert configured yet, artifact is unsigned"
+        run: echo "signtool step goes here once a certificate secret exists"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: installer-${{ matrix.rid }}
+          name: installer-${{ matrix.label }}
           path: releases/
           retention-days: 14
 
+  publish:
+    if: ${{ inputs.publish }}
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="$(cat VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download the feeds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: feeds
+
+      # One upload per channel, in sequence, into the same tag. macOS is not
+      # published (INSTALLER-PLAN.md section 2).
       - name: Publish to GitHub releases
-        if: ${{ inputs.publish && !matrix.archive_only }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -euo pipefail
           version="${{ steps.v.outputs.version }}"
-          [ -n "$version" ] || version="$(cat VERSION)"
-          dotnet vpk upload github \
-            --repoUrl https://github.com/${{ github.repository }} \
-            --channel ${{ matrix.channel }} \
-            --tag installer-v"$version" \
-            --releaseName "Optimum installer v$version" \
-            --publish
+          tag="installer-v$version"
+          for channel in win linux; do
+            dotnet vpk upload github \
+              --repoUrl "https://github.com/${{ github.repository }}" \
+              --outputDir "feeds/installer-$channel" \
+              --channel "$channel" \
+              --tag "$tag" \
+              --releaseName "Optimum installer v$version" \
+              --publish
+          done

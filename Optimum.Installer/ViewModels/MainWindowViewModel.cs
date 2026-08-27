@@ -41,7 +41,16 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UpdatePromptVisible))]
     private UpdateBannerViewModel? _updateBanner;
+
+    /// <summary>
+    /// The self-update banner only shows before the build starts. Once Progress
+    /// is running, restarting the app for an update would abandon a half-written
+    /// install.
+    /// </summary>
+    public bool UpdatePromptVisible =>
+        UpdateBanner is not null && CurrentScreen is WizardScreen.Prerequisites or WizardScreen.Options;
 
     private async Task CheckForUpdateAsync(IUpdateService updates)
     {
@@ -61,6 +70,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentViewModel))]
     [NotifyPropertyChangedFor(nameof(CanGoBack))]
+    [NotifyPropertyChangedFor(nameof(UpdatePromptVisible))]
     private WizardScreen _currentScreen = WizardScreen.Prerequisites;
 
     [ObservableProperty]

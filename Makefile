@@ -216,10 +216,10 @@ installer-publish: ## Publish the installer app self-contained for INSTALLER_RID
 		-r $(INSTALLER_RID) --self-contained -o dist/installer/$(INSTALLER_RID) --nologo
 
 installer-pack: installer-publish ## Package the installer with Velopack for INSTALLER_RID
-	dotnet tool run vpk pack \
+	dotnet tool restore
+	dotnet vpk pack \
 		--packId Optimum.Installer \
 		--packVersion $(shell cat VERSION) \
 		--packDir dist/installer/$(INSTALLER_RID) \
 		--mainExe $(if $(filter win-x64,$(INSTALLER_RID)),Optimum.Installer.exe,Optimum.Installer) \
-		--channel $(firstword $(subst -, ,$(INSTALLER_RID))) \
 		--outputDir dist/installer/releases

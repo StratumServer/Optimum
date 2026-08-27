@@ -14,15 +14,19 @@
 
       <Border DockPanel.Dock="Top" Margin="0,0,0,12" Padding="12,8"
               Background="{DynamicResource SystemAccentColorLight2}" CornerRadius="4"
-              IsVisible="{Binding UpdateBanner, Converter={x:Static ObjectConverters.IsNotNull}}">
-        <Grid ColumnDefinitions="*,Auto,Auto" DataContext="{Binding UpdateBanner}"
-              IsVisible="{Binding !Dismissed}">
-          <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center" />
-          <Button Grid.Column="1" Content="Update now" Margin="8,0,0,0"
-                  IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
-          <Button Grid.Column="2" Content="Later" Margin="8,0,0,0"
-                  Command="{Binding DismissCommand}" />
-        </Grid>
+              IsVisible="{Binding UpdatePromptVisible}">
+        <StackPanel DataContext="{Binding UpdateBanner}" IsVisible="{Binding !Dismissed}" Spacing="6">
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <Button Grid.Column="1" Content="Update now" Margin="8,0,0,0"
+                    IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
+            <Button Grid.Column="2" Content="Later" Margin="8,0,0,0"
+                    IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
+          </Grid>
+          <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
+          <TextBlock Text="{Binding Error}" Foreground="#d13438" FontSize="12"
+                     IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
       </Border>
 
       <ContentControl Content="{Binding CurrentViewModel}" />
