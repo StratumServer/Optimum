@@ -779,13 +779,16 @@ to violate: the moment `Optimum.Bootstrap.Core.Tests` references
 `Optimum.Launcher`, the workflow needs a 570 MB download and stops being a fast
 pull-request gate.
 
-**An extension to the platform workflow.** Each of the five jobs gains a step
-after the existing build that runs `Optimum.Cli build --json
---acknowledge-decompile --client-archive <cached>` and pipes the stream into the
-conformance checker. The step asserts a valid package directory and a conformant
-stream. The cached archive is already resolved by the existing `Resolve client
-archive` and `Cache client archive` steps, so this adds compute time and no new
-download.
+**An extension to the platform workflow.** The `bootstrap-linux` job runs
+`Optimum.Cli build --json --acknowledge-decompile --client-archive <cached>` end
+to end after its existing build and pipes the stream through
+`scripts/check-ndjson-stream.py`, then `Optimum.Cli validate` on the produced
+package. It keeps the manual bootstrap and build steps as well, so a driver bug
+is a distinct signal from a pipeline bug; the job timeout moved to 60 minutes to
+cover the second pipeline run. The cached archive is already resolved by the
+existing `Resolve client archive` and `Cache client archive` steps, so this adds
+compute time and no new download. The other four platform jobs get the same step
+once the driver has proven itself on Linux.
 
 **A release workflow.** Runs `vpk pack` for `win-x64` and `linux-x64` and
 publishes the Velopack feed. Signing credentials for Windows come from repository
@@ -833,13 +836,24 @@ emits a `warn` and counts it when it has to adjust a caller's progress value.
 `dotnet test Optimum.Installer.slnf -c Release` is green (79 tests, about six
 seconds).
 
-**Phase 2: the CLI.** All seven verbs, wrapping the existing scripts through the
-build driver. The `--acknowledge-decompile` gate on `build`. Contract tests.
-Extend the platform workflow.
-*Verification:* `Optimum.Cli build --json --acknowledge-decompile` produces a
-package on all five platform jobs and the conformance checker passes on each.
-`build` without the flag exits non-zero with `bad-input` and does no work. A
-deliberately broken patch fixture produces `patch-conflict` and exit non-zero.
+**Phase 2: the CLI.** Done. The seven verbs are in `Optimum.Cli` over a Core
+build layer: `ScriptBuildDriver` drives `scripts/bootstrap.*`, `dotnet build
+VintageStory.slnx`, and the platform packaging script through CliWrap, mapping
+each step to a `ProgressPhase` and a `FailureReason`
+(`BootstrapFailureClassifier` splits a failed bootstrap into `patch-conflict` and
+`decompile-failed`). `build` requires `--acknowledge-decompile` and refuses
+without it. `install` runs the Phase 1 path guard then a straight copy plus an
+`InstallManifest`; `uninstall` reverses it by that manifest; `validate` reads the
+staged assemblies' headers; `capabilities` and `preflight` answer as JSON. SIGTERM
+and SIGINT cancel a `build` and produce a `cancelled` result. `scripts/check-ndjson-stream.py`
+is the reusable conformance check, the twin of `Optimum.Cli.Tests/NdjsonStream.cs`.
+*Verification:* `Optimum.Cli.Tests` has 12 tests including the NDJSON contract
+against a scripted driver, the `patch-conflict` and `cancelled` reasons, and the
+no-flag gate. `ci-installer.yml` gained a `cli-contract` job. The
+`bootstrap-linux` job in `ci-platform-bootstrap.yml` now runs `Optimum.Cli build
+--json --acknowledge-decompile --client-archive` end to end and pipes it through
+`check-ndjson-stream.py`, then `Optimum.Cli validate` on the produced package. The
+other four platform jobs get the same step incrementally.
 
 **Phase 3: the GUI.** All five screens, the state machine, headless tests. Drives
 Core in-process. At the end of this phase the GUI can do a complete install on the
@@ -970,8 +984,9 @@ The new modal should either gate on scroll properly or drop the pretense.
 - `Optimum.Installer.Tests/` (Avalonia.Headless.XUnit, xUnit v3)
 - `Optimum.Installer.slnf` (solution filter over the six projects, for a
   bootstrap-free build)
-- `.github/workflows/ci-installer.yml` (push and pull request: tests plus the
-  `velopack-smoke` job)
+- `.github/workflows/ci-installer.yml` (push and pull request: the test job, the
+  `cli-contract` job, and the `velopack-smoke` job)
+- `scripts/check-ndjson-stream.py` (the reusable NDJSON conformance check)
 - `.github/workflows/release-installer.yml` (Velopack, Phase 5)
 - `INSTALLER-PLAN.md` (this file)
 

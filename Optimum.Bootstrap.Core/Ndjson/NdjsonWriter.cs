@@ -30,7 +30,7 @@ public sealed class NdjsonWriter(TextWriter output)
         if (clamped != percent)
         {
             AnomalyCount++;
-            WriteLog(NdjsonLevel.Warn,
+            WriteLog(LogLevel.Warn,
                 $"progress {percent} for phase {WirePhase(phase)} adjusted to {clamped}: it must be monotonic and in 0 to 99");
         }
 
@@ -44,7 +44,7 @@ public sealed class NdjsonWriter(TextWriter output)
         });
     }
 
-    public void Log(NdjsonLevel level, string message)
+    public void Log(LogLevel level, string message)
     {
         GuardOpen();
         WriteLog(level, message);
@@ -75,14 +75,14 @@ public sealed class NdjsonWriter(TextWriter output)
         });
     }
 
-    private void WriteLog(NdjsonLevel level, string message) => Write(writer =>
+    private void WriteLog(LogLevel level, string message) => Write(writer =>
     {
         writer.WriteString("type", "log");
         writer.WriteString("level", level switch
         {
-            NdjsonLevel.Info => "info",
-            NdjsonLevel.Warn => "warn",
-            NdjsonLevel.Error => "error",
+            LogLevel.Info => "info",
+            LogLevel.Warn => "warn",
+            LogLevel.Error => "error",
             _ => "info",
         });
         writer.WriteString("message", message);
@@ -118,11 +118,4 @@ public sealed class NdjsonWriter(TextWriter output)
         ProgressPhase.Assemble => "assemble",
         _ => "assemble",
     };
-}
-
-public enum NdjsonLevel
-{
-    Info,
-    Warn,
-    Error,
 }

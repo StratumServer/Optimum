@@ -61,6 +61,14 @@ public static class FailureReasonExtensions
     };
 }
 
+/// <summary>Severity of a <c>log</c> event, shared by the build pipeline and the NDJSON stream.</summary>
+public enum LogLevel
+{
+    Info,
+    Warn,
+    Error,
+}
+
 /// <summary>Assembly-level facts shared by both front ends.</summary>
 public static class CoreInfo
 {
