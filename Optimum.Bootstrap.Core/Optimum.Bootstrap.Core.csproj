@@ -12,4 +12,7 @@
   <ItemGroup>
     <PackageReference Include="CliWrap" Version="3.10.5" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Licensing/consent-notice.md" />
+  </ItemGroup>
 </Project>

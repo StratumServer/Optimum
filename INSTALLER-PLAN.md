@@ -801,13 +801,20 @@ on push and pull request.
 tests, one a headless Avalonia render) in about three seconds locally; the
 workflow is expected green under five minutes.
 
-**Phase 1: Core fundamentals.** The prerequisite model and detection for all three
-platforms, acquisition, the path guards, the NDJSON emitter, and the EULA
-resource. No build driver yet.
-*Verification:* `Optimum.Bootstrap.Core.Tests` covers every path-guard case listed
-in section 9, and the ported `install-linux-nixos.sh` and
-`install-linux-prerequisites.sh` behaviors have C# equivalents that fail when the
-behavior regresses.
+**Phase 1: Core fundamentals.** Done. `Optimum.Bootstrap.Core` now carries the
+prerequisite model and per-platform detection (`PrerequisiteScanner`,
+`DotnetSdkProbe`, the `.config/` readers, `NixEnvironment`), acquisition planning
+(`SdkAcquisition` with the NixOS and non-FHS refusals, `IlspycmdAcquisition`), the
+path guards (`InstallPathGuard`, `SymlinkComponentCheck`), session-aware data-path
+detection (`DataPathProbe`), the NDJSON emitter (`NdjsonWriter`), and the consent
+notice resource rewritten to match `LICENSE-SCOPE.md`. Every detection path goes
+through the `ISystemProbe` seam so tests use an in-memory host. No build driver
+yet.
+*Verification:* `Optimum.Bootstrap.Core.Tests` has 72 tests covering every
+path-guard case in section 9, the exact ilspycmd accept and reject values from
+`scripts/tests/install-linux-prerequisites.sh`, and the NixOS and non-FHS
+behaviors from `scripts/tests/install-linux-nixos.sh`. `dotnet test
+Optimum.Installer.slnf -c Release` is green (76 tests, about five seconds).
 
 **Phase 2: the CLI.** All seven verbs, wrapping the existing scripts through the
 build driver. The `--acknowledge-decompile` gate on `build`. Contract tests.
