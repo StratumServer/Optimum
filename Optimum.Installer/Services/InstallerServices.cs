@@ -20,6 +20,9 @@ public sealed record InstallerServices(
     /// </summary>
     public Action<Action>? UiPost { get; init; }
 
+    /// <summary>Self-update for the installer. Null in a headless test.</summary>
+    public IUpdateService? Updates { get; init; }
+
 
     public static InstallerServices CreateReal()
     {
@@ -28,6 +31,9 @@ public sealed record InstallerServices(
             probe,
             Optimum.Bootstrap.Core.Build.RepoRoot.Discover(probe),
             new ScriptBuildDriver(probe),
-            new PackageDeployer(probe));
+            new PackageDeployer(probe))
+        {
+            Updates = new UpdateService(),
+        };
     }
 }

@@ -35,6 +35,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Eula = new EulaViewModel();
         Eula.DeclineRequested += () => IsEulaOpen = false;
         Eula.AcceptRequested += () => InstallCompletion = StartInstallAsync();
+
+        if (_services.Updates is { } updates)
+            _ = CheckForUpdateAsync(updates);
+    }
+
+    [ObservableProperty]
+    private UpdateBannerViewModel? _updateBanner;
+
+    private async Task CheckForUpdateAsync(IUpdateService updates)
+    {
+        string? version = await updates.CheckAsync();
+        if (version is not null)
+        {
+            Action<Action> post = _services.UiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
+            post(() => UpdateBanner = new UpdateBannerViewModel(updates, version, post));
+        }
     }
 
     /// <summary>The running (or finished) install, so a test can await it.</summary>

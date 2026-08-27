@@ -11,6 +11,20 @@
     <DockPanel Margin="24">
       <TextBlock DockPanel.Dock="Top" Text="Optimum installer"
                  FontSize="22" FontWeight="SemiBold" Margin="0,0,0,16" />
+
+      <Border DockPanel.Dock="Top" Margin="0,0,0,12" Padding="12,8"
+              Background="{DynamicResource SystemAccentColorLight2}" CornerRadius="4"
+              IsVisible="{Binding UpdateBanner, Converter={x:Static ObjectConverters.IsNotNull}}">
+        <Grid ColumnDefinitions="*,Auto,Auto" DataContext="{Binding UpdateBanner}"
+              IsVisible="{Binding !Dismissed}">
+          <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Content="Update now" Margin="8,0,0,0"
+                  IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
+          <Button Grid.Column="2" Content="Later" Margin="8,0,0,0"
+                  Command="{Binding DismissCommand}" />
+        </Grid>
+      </Border>
+
       <ContentControl Content="{Binding CurrentViewModel}" />
     </DockPanel>
 

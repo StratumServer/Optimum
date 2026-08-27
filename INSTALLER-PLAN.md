@@ -939,11 +939,24 @@ when a listed entry will not delete. `RuntimeValidator` never fails a build it
 cannot inspect. Windows `.lnk` and registry paths and the macOS bundle symlink
 are covered by construction and need a manual check on those platforms.
 
-**Phase 5: distribution.** Velopack packaging for `win-x64` and `linux-x64`, the
-release workflow, signing on Windows. macOS binaries build but do not publish.
-*Verification:* a signed Windows installer and a Linux AppImage download and run
-on a clean machine without an operating system warning, and a delta update from
-the previous version applies.
+**Phase 5: distribution.** Done for `win-x64` and `linux-x64`. `Optimum.Installer`
+calls `VelopackApp.Build().Run()` first thing in `Main` and carries a thin
+`IUpdateService` that checks the installer's own GitHub release feed on startup
+(channel per RID, so the Windows and Linux feeds do not cross) and surfaces a
+non-blocking "a newer installer is available" banner; the check is a no-op when
+the app is not running from a Velopack install. `vpk` is a repo-local tool
+(`.config/dotnet-tools.json`). `make installer-pack INSTALLER_RID=<rid>` publishes
+self-contained and packs. `.github/workflows/release-installer.yml` is a
+`workflow_dispatch` release that packs Windows, Linux, and macOS, uploads all
+three as artifacts, and publishes only Windows and Linux to GitHub releases;
+Windows signing is wired to a repository secret that is not yet set. The
+`ci-installer.yml` `velopack-smoke` job now packs the real `Optimum.Installer` for
+`linux-x64` and asserts the AppImage and a delta build.
+*Verification:* the local spike packed the real app (48 MB AppImage, 51 KB delta).
+`Optimum.Installer.Tests` covers the banner appearing for an available update, the
+update command applying it, and no banner otherwise (`FakeUpdateService`). A
+signed Windows installer, the Gatekeeper-free first run, and a runtime
+delta-apply still need a clean Windows and Linux machine.
 
 **Phase 6: documentation and deprecation.** Update `README.md`, add the three new
 project paths to the MIT list in `LICENSE-SCOPE.md`, note the new build and test
@@ -1057,7 +1070,8 @@ The new modal should either gate on scroll properly or drop the pretense.
 - `.github/workflows/ci-installer.yml` (push and pull request: the test job, the
   `cli-contract` job, and the `velopack-smoke` job)
 - `scripts/check-ndjson-stream.py` (the reusable NDJSON conformance check)
-- `.github/workflows/release-installer.yml` (Velopack, Phase 5)
+- `.github/workflows/release-installer.yml` (Velopack pack for Windows, Linux,
+  macOS; publishes Windows and Linux)
 - `INSTALLER-PLAN.md` (this file)
 
 ### Modified

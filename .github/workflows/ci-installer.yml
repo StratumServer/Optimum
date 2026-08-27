@@ -93,26 +93,26 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Install vpk
-        run: |
-          dotnet tool install -g vpk
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+      - name: Restore local tools
+        run: dotnet tool restore
 
-      - name: Pack 0.0.1, then a delta to 0.0.2
+      - name: Pack the real installer, then a delta
         run: |
           set -euo pipefail
-          pub=$(mktemp -d)
           rel=$(mktemp -d)
 
-          dotnet publish Optimum.Cli/Optimum.Cli.csproj -c Release -r linux-x64 \
-            --self-contained -o "$pub" --nologo
-          vpk '[linux]' pack -u OptimumCliSmoke -v 0.0.1 -p "$pub" -e optimum -o "$rel"
+          dotnet publish Optimum.Installer/Optimum.Installer.csproj -c Release -r linux-x64 \
+            --self-contained -o publish/linux-x64 --nologo
+          dotnet vpk pack -u Optimum.Installer -v 0.0.1 -p publish/linux-x64 \
+            -e Optimum.Installer --channel linux -o "$rel"
 
-          # A no-op source change so the second pack produces a real delta.
-          date > "$pub/velopack-smoke-marker.txt"
-          vpk '[linux]' pack -u OptimumCliSmoke -v 0.0.2 -p "$pub" -e optimum -o "$rel"
+          # A no-op change so the second pack produces a real delta.
+          date > publish/linux-x64/velopack-smoke-marker.txt
+          dotnet vpk pack -u Optimum.Installer -v 0.0.2 -p publish/linux-x64 \
+            -e Optimum.Installer --channel linux -o "$rel"
 
           ls -la "$rel"
-          test -f "$rel"/OptimumCliSmoke-0.0.2-linux-delta.nupkg
-          test -f "$rel"/OptimumCliSmoke-0.0.2-linux-full.nupkg
-          echo "Velopack 1.x packs a .NET 10 self-contained app and builds a delta."
+          test -f "$rel"/Optimum.Installer-0.0.2-linux-delta.nupkg
+          test -f "$rel"/Optimum.Installer-0.0.2-linux-full.nupkg
+          test -f "$rel"/Optimum.Installer.AppImage
+          echo "Velopack packs the real Optimum.Installer for linux-x64 and builds a delta."
