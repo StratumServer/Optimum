@@ -37,6 +37,22 @@ public sealed class FakePackageInstaller : IPackageInstaller
     public DeployResult Deploy(DeployRequest request, IBuildObserver? observer = null) => Behaviour(request);
 }
 
+public sealed class FakeUpdateService : IUpdateService
+{
+    public string? AvailableVersion { get; set; }
+    public bool Applied { get; private set; }
+
+    public Task<string?> CheckAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(AvailableVersion);
+
+    public Task ApplyAsync(Action<int>? progress = null)
+    {
+        Applied = true;
+        progress?.Invoke(100);
+        return Task.CompletedTask;
+    }
+}
+
 public static class TestServices
 {
     public static InstallerServices Build(
@@ -44,6 +60,7 @@ public static class TestServices
         FakeSystemProbe? probe = null,
         IBuildDriver? driver = null,
         IPackageInstaller? installer = null,
+        IUpdateService? updates = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -72,6 +89,7 @@ public static class TestServices
             installer ?? new FakePackageInstaller())
         {
             UiPost = action => action(),
+            Updates = updates,
         };
     }
 }
