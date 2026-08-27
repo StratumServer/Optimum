@@ -20,7 +20,7 @@ public sealed class ChunkReadPoolLifecycleTests
             "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
         if (donorPath is null) return;
 
-        InitializeSqliteProvider();
+        Assert.True(InitializeSqliteProvider(), "A platform SQLite provider is required for the donor lifecycle test.");
         Reflection.Assembly donor = Reflection.Assembly.LoadFrom(donorPath);
         Type poolType = donor.GetType("Vintagestory.Server.OptimumChunkReadPool")!;
         Reflection.ConstructorInfo constructor = poolType
@@ -201,36 +201,49 @@ public sealed class ChunkReadPoolLifecycleTests
             connection).Compile();
     }
 
-    private static void InitializeSqliteProvider()
+    private static bool InitializeSqliteProvider()
     {
-        string? batteriesPath = TryFindRepositoryFile(
-            OperatingSystem.IsWindows()
-                ? ".vanilla/win-x64/vintagestory/Lib/SQLitePCLRaw.batteries_v2.dll"
-                : ".vanilla/linux-x64/vintagestory/Lib/SQLitePCLRaw.batteries_v2.dll");
-        batteriesPath ??= TryFindRepositoryFile(
-            ".vanilla/win-x64/vintagestory/Lib/SQLitePCLRaw.batteries_v2.dll");
-        if (batteriesPath is null) return;
-
-        string providerDirectory = Path.GetDirectoryName(batteriesPath)!;
-        string providerPath = Path.Combine(providerDirectory, "SQLitePCLRaw.provider.e_sqlite3.dll");
+        string[] providerDirectories = OperatingSystem.IsWindows()
+            ? [
+                ".vanilla/win-x64/vintagestory/Lib",
+                ".vanilla/win-x64/package-client/Lib",
+            ]
+            : [
+                ".vanilla/linux-x64/vintagestory/Lib",
+                ".vanilla/win-x64/vintagestory/Lib",
+                ".vanilla/win-x64/package-client/Lib",
+            ];
         string[] nativeNames = OperatingSystem.IsWindows()
             ? ["e_sqlite3.dll"]
             : OperatingSystem.IsMacOS()
                 ? ["libe_sqlite3.dylib", "libe_sqlite3.so"]
                 : ["libe_sqlite3.so"];
-        string? nativePath = nativeNames
-            .Select(name => Path.Combine(providerDirectory, name))
-            .FirstOrDefault(File.Exists);
-        if (!File.Exists(providerPath) || nativePath is null) return;
 
-        Reflection.Assembly provider = Reflection.Assembly.LoadFrom(providerPath);
-        System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(
-            provider,
-            (name, _, _) => name is "e_sqlite3" or "e_sqlite3.dll"
-                ? System.Runtime.InteropServices.NativeLibrary.Load(nativePath)
-                : IntPtr.Zero);
-        Reflection.Assembly batteries = Reflection.Assembly.LoadFrom(batteriesPath);
-        batteries.GetType("SQLitePCL.Batteries_V2")!.GetMethod("Init")!.Invoke(null, null);
+        foreach (string relativeDirectory in providerDirectories)
+        {
+            string? batteriesPath = TryFindRepositoryFile(
+                Path.Combine(relativeDirectory, "SQLitePCLRaw.batteries_v2.dll"));
+            if (batteriesPath is null) continue;
+
+            string providerDirectory = Path.GetDirectoryName(batteriesPath)!;
+            string providerPath = Path.Combine(providerDirectory, "SQLitePCLRaw.provider.e_sqlite3.dll");
+            string? nativePath = nativeNames
+                .Select(name => Path.Combine(providerDirectory, name))
+                .FirstOrDefault(File.Exists);
+            if (!File.Exists(providerPath) || nativePath is null) continue;
+
+            Reflection.Assembly provider = Reflection.Assembly.LoadFrom(providerPath);
+            System.Runtime.InteropServices.NativeLibrary.SetDllImportResolver(
+                provider,
+                (name, _, _) => name is "e_sqlite3" or "e_sqlite3.dll"
+                    ? System.Runtime.InteropServices.NativeLibrary.Load(nativePath)
+                    : IntPtr.Zero);
+            Reflection.Assembly batteries = Reflection.Assembly.LoadFrom(batteriesPath);
+            batteries.GetType("SQLitePCL.Batteries_V2")!.GetMethod("Init")!.Invoke(null, null);
+            return true;
+        }
+
+        return false;
     }
 
     private static string? TryFindRepositoryFile(string relativePath)
