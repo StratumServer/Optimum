@@ -45,7 +45,10 @@ jobs:
       - name: Resolve version
         id: v
         shell: bash
-        run: printf 'version=%s\n' "${{ inputs.version || '' }}" > /dev/null; echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="$(cat VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Restore local tools
         run: dotnet tool restore
