@@ -67,8 +67,8 @@ The installer shows a ✓/✗ checklist of required tools, offers to install any
 git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 make package-appimage
-chmod +x Optimum-v0.3.13-linux-x64.AppImage
-./Optimum-v0.3.13-linux-x64.AppImage
+chmod +x Optimum-v0.3.14-linux-x64.AppImage
+./Optimum-v0.3.14-linux-x64.AppImage
 ```
 
 If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/`.
@@ -132,7 +132,7 @@ The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story inst
 ```powershell
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.3.13-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.3.14-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
@@ -217,9 +217,9 @@ make package-win          # Windows zip (native Windows or off-platform with inn
 Or call the scripts directly:
 
 ```bash
-./scripts/package-linux.sh                     # Optimum-v0.3.13-linux-x64.tar.gz
+./scripts/package-linux.sh                     # Optimum-v0.3.14-linux-x64.tar.gz
 ./scripts/package-linux.sh --format zip
-./scripts/package-linux.sh --format appimage   # Optimum-v0.3.13-linux-x64.AppImage
+./scripts/package-linux.sh --format appimage   # Optimum-v0.3.14-linux-x64.AppImage
 ./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
 ./scripts/package-macos.sh --arch x64          # Intel .dmg
 ./scripts/package-all.sh                       # all capable targets at once
