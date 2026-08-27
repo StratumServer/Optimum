@@ -34,8 +34,27 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     public IAsyncRelayCommand? ActionCommand { get; }
 
     public string Name => Result.Definition.DisplayName;
-    public string Status => Result.State.ToString();
-    public string Detail => ActionStatus ?? Result.Label;
+    public string StatusLabel => Result.State switch
+    {
+        PrerequisiteState.Ok => "Ready",
+        PrerequisiteState.OptionalMissing => "Optional",
+        PrerequisiteState.Outdated => "Update needed",
+        _ => "Required",
+    };
+
+    public bool IsReady => Result.State == PrerequisiteState.Ok;
+    public bool IsOptional => Result.State == PrerequisiteState.OptionalMissing;
+    public bool NeedsAttention => Result.State is PrerequisiteState.Missing or PrerequisiteState.Outdated;
+
+    public string Detail => ActionStatus ?? Result.State switch
+    {
+        PrerequisiteState.Ok when Result.DetectedVersion is { Length: > 0 } version =>
+            $"Version {version}. Used for {Result.Definition.UsedBy}.",
+        PrerequisiteState.Ok => $"Available for {Result.Definition.UsedBy}.",
+        PrerequisiteState.OptionalMissing => $"Only needed for {Result.Definition.UsedBy}.",
+        PrerequisiteState.Outdated => $"Install a supported version, then check again. Used for {Result.Definition.UsedBy}.",
+        _ => $"Install this tool, then check again. Used for {Result.Definition.UsedBy}.",
+    };
 
     /// <summary>The action button label, or null when there is nothing to do.</summary>
     public string? ActionLabel => _install is null ? null : Installing ? "Installing..." : "Install";
@@ -199,8 +218,12 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
                 ? "Optimum source is not on this machine. It will be downloaded from GitHub."
                 : "Run the installer from inside an Optimum checkout."
         : BlockingCount == 0
-            ? "All required tools are present."
-            : $"{BlockingCount} required tool(s) still missing.";
+            ? Rows.Any(row => row.IsOptional)
+                ? "Ready to continue. Optional tools can be added now or later."
+                : "Your system is ready for Optimum."
+            : BlockingCount == 1
+                ? "One required tool needs attention before you can continue."
+                : $"{BlockingCount} required tools need attention before you can continue.";
 
     [RelayCommand]
     public void Rescan()

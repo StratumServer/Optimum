@@ -60,6 +60,13 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     [ObservableProperty]
     private bool _cancelRequested;
 
+    [ObservableProperty]
+    private bool _confirmCancel;
+
+    public string PercentLabel => $"{Math.Round(Percent):0}%";
+
+    partial void OnPercentChanged(double value) => OnPropertyChanged(nameof(PercentLabel));
+
     public async Task RunAsync()
     {
         _stopwatch.Start();
@@ -123,6 +130,7 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     [RelayCommand]
     private void Cancel()
     {
+        ConfirmCancel = false;
         CancelRequested = true;
         _post(() => StatusDetail = "cancelling");
         _graceful.Cancel();
@@ -133,6 +141,16 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
                 _forceful.Cancel();
         }, TaskScheduler.Default);
     }
+
+    [RelayCommand]
+    private void RequestCancel()
+    {
+        if (!CancelRequested)
+            ConfirmCancel = true;
+    }
+
+    [RelayCommand]
+    private void KeepInstalling() => ConfirmCancel = false;
 
     void IBuildObserver.Phase(ProgressPhase phase, int percent, string detail) => Phase(phase, percent, detail);
 

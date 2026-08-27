@@ -3,42 +3,61 @@
         xmlns:vm="using:Optimum.Installer.ViewModels"
         x:Class="Optimum.Installer.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Width="760" Height="560"
-        MinWidth="640" MinHeight="480"
+        Width="860" Height="660"
+        MinWidth="720" MinHeight="620"
         WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource AppBackgroundBrush}"
         Title="{Binding Title}">
-  <Panel>
-    <DockPanel Margin="24">
-      <TextBlock DockPanel.Dock="Top" Text="Optimum installer"
-                 FontSize="22" FontWeight="SemiBold" Margin="0,0,0,16" />
+  <Grid RowDefinitions="Auto,Auto,*">
+    <Border Grid.Row="0" Background="{DynamicResource AppSurfaceBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
+            Padding="28,18,28,16">
+      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
+        <Border Grid.RowSpan="2" Grid.Column="0" Width="44" Height="44" CornerRadius="10"
+                Background="{DynamicResource AppAccentBrush}" Margin="0,0,14,0">
+          <TextBlock Text="O" FontSize="21" FontWeight="Bold"
+                     Foreground="{DynamicResource AppOnAccentBrush}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Border>
+        <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
+          <TextBlock Text="Optimum installer" FontSize="14" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding CurrentStepLabel}" Classes="muted" FontSize="12" />
+        </StackPanel>
+        <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,14,24,0" Spacing="3">
+          <TextBlock Text="{Binding CurrentStepTitle}" FontSize="22" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding CurrentStepDescription}" Classes="muted"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Grid.RowSpan="2" Grid.Column="2" Width="156"
+                    VerticalAlignment="Bottom" Spacing="6">
+          <TextBlock Text="Setup progress" Classes="muted" FontSize="12"
+                     HorizontalAlignment="Right" />
+          <ProgressBar Minimum="0" Maximum="100" Value="{Binding CurrentStepProgress}"
+                       Height="6" AutomationProperties.Name="Setup progress" />
+        </StackPanel>
+      </Grid>
+    </Border>
 
-      <Border DockPanel.Dock="Top" Margin="0,0,0,12" Padding="12,8"
-              Background="{DynamicResource SystemAccentColorLight2}" CornerRadius="4"
+    <Border Grid.Row="1" Margin="28,14,28,0" Padding="14,10"
+              Background="{DynamicResource AppWarningSurfaceBrush}"
+              BorderBrush="{DynamicResource AppWarningBrush}" BorderThickness="1" CornerRadius="8"
               IsVisible="{Binding UpdatePromptVisible}">
         <StackPanel DataContext="{Binding UpdateBanner}" IsVisible="{Binding !Dismissed}" Spacing="6">
           <Grid ColumnDefinitions="*,Auto,Auto">
-            <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center"
+                       TextWrapping="Wrap" FontWeight="SemiBold" />
             <Button Grid.Column="1" Content="Update now" Margin="8,0,0,0"
                     IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
             <Button Grid.Column="2" Content="Later" Margin="8,0,0,0"
                     IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
           </Grid>
           <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
-          <TextBlock Text="{Binding Error}" Foreground="#d13438" FontSize="12"
+          <TextBlock Text="{Binding Error}" Foreground="{DynamicResource AppDangerBrush}" FontSize="12"
                      IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
-      </Border>
-
-      <ContentControl Content="{Binding CurrentViewModel}" />
-    </DockPanel>
-
-    <Border IsVisible="{Binding IsEulaOpen}" Background="#99000000">
-      <Border Background="{DynamicResource ThemeBackgroundBrush}"
-              CornerRadius="6" Padding="20" Margin="60"
-              MaxWidth="560" MaxHeight="460"
-              HorizontalAlignment="Center" VerticalAlignment="Center">
-        <ContentControl Content="{Binding Eula}" />
-      </Border>
     </Border>
-  </Panel>
+
+    <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
+                    Margin="28,18,28,24" />
+  </Grid>
 </Window>
