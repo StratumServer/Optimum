@@ -129,14 +129,18 @@ public sealed class SystemProbe : ISystemProbe
             if (process is null)
                 return ProcessOutcome.NotStarted;
 
-            string stdout = process.StandardOutput.ReadToEnd();
-            string stderr = process.StandardError.ReadToEnd();
-            if (!process.WaitForExit(timeout))
+            // Drain both pipes concurrently so a child that fills one buffer
+            // while we block on the other cannot deadlock the probe.
+            Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync();
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync();
+
+            if (!process.WaitForExit((int)Math.Min(timeout.TotalMilliseconds, int.MaxValue)))
             {
                 try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
                 return ProcessOutcome.NotStarted;
             }
-            return new ProcessOutcome(true, process.ExitCode, stdout, stderr);
+
+            return new ProcessOutcome(true, process.ExitCode, stdoutTask.GetAwaiter().GetResult(), stderrTask.GetAwaiter().GetResult());
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
