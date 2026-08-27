@@ -171,7 +171,7 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             return null;
         string firstLine = outcome.StandardOutput.Split('\n').FirstOrDefault() ?? string.Empty;
         string[] tokens = firstLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        return tokens.Length >= 2 ? tokens[1] : null;
+        return tokens.Length >= 2 ? tokens[1].Trim() : null;
     }
 
     public static (int major, int minor)? ParseInnoextractVersion(string output)

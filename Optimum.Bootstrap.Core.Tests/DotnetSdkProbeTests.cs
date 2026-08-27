@@ -44,4 +44,17 @@ public class DotnetSdkProbeTests
 
         Assert.Equal("/usr/bin/dotnet", DotnetSdkProbe.Find(probe));
     }
+
+    [Fact]
+    public void SkipsANonExecutableFileEarlierOnPathAndKeepsSearching()
+    {
+        var probe = new FakeSystemProbe();
+        probe.Path.Add("/broken");
+        probe.Path.Add("/usr/bin");
+        probe.AddNonExecutableFile("/broken/dotnet");
+        probe.AddFile("/usr/bin/dotnet");
+        probe.OnCommand("/usr/bin/dotnet", "--list-sdks", "10.0.100 [/usr/lib/dotnet/sdk]\n");
+
+        Assert.Equal("/usr/bin/dotnet", DotnetSdkProbe.Find(probe));
+    }
 }

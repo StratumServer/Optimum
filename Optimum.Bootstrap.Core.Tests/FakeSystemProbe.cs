@@ -15,6 +15,9 @@ public sealed class FakeSystemProbe : ISystemProbe
     public HashSet<string> Files { get; } = new();
     public HashSet<string> Directories { get; } = new();
     public HashSet<string> Symlinks { get; } = new();
+
+    /// <summary>Files that exist but lack an execute bit. Everything else in <see cref="Files"/> is executable.</summary>
+    public HashSet<string> NonExecutable { get; } = new();
     public Dictionary<string, string> FileContents { get; } = new();
 
     /// <summary>Keyed on <c>"exe|arg1 arg2"</c>. Falls back to <see cref="ProcessOutcome.NotStarted"/>.</summary>
@@ -40,6 +43,13 @@ public sealed class FakeSystemProbe : ISystemProbe
         return this;
     }
 
+    public FakeSystemProbe AddNonExecutableFile(string path)
+    {
+        Files.Add(path);
+        NonExecutable.Add(path);
+        return this;
+    }
+
     public FakeSystemProbe OnCommand(string exe, string args, string stdout = "", int exitCode = 0)
     {
         Commands[$"{exe}|{args}"] = new ProcessOutcome(true, exitCode, stdout, string.Empty);
@@ -52,6 +62,8 @@ public sealed class FakeSystemProbe : ISystemProbe
     IReadOnlyList<string> ISystemProbe.PathDirectories => Path;
 
     bool ISystemProbe.FileExists(string path) => Files.Contains(path);
+
+    bool ISystemProbe.IsExecutable(string path) => Files.Contains(path) && !NonExecutable.Contains(path);
 
     bool ISystemProbe.DirectoryExists(string path) => Directories.Contains(path);
 

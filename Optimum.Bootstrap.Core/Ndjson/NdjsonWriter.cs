@@ -6,7 +6,9 @@ namespace Optimum.Bootstrap.Core.Ndjson;
 /// Emits the engine's NDJSON stream from INSTALLER-PLAN.md section 4: one JSON
 /// object per line on stdout, progress that never decreases and never reaches
 /// 100, and exactly one terminal <c>result</c> line. The writer enforces those
-/// invariants so a caller's parser never has to defend against the engine.
+/// invariants so a caller's parser never has to defend against the engine. When
+/// it has to adjust a caller's progress value it also emits a <c>warn</c> log and
+/// counts it, so an engine-side miscalculation is visible rather than silent.
 /// </summary>
 public sealed class NdjsonWriter(TextWriter output)
 {
@@ -17,10 +19,21 @@ public sealed class NdjsonWriter(TextWriter output)
 
     public bool ResultWritten => _resultWritten;
 
+    /// <summary>How many times <see cref="Progress"/> had to rewrite a caller's value.</summary>
+    public int AnomalyCount { get; private set; }
+
     public void Progress(ProgressPhase phase, int percent, string detail)
     {
         GuardOpen();
+
         int clamped = Math.Clamp(percent, _lastPercent, BootstrapProgress.MaxEnginePercent);
+        if (clamped != percent)
+        {
+            AnomalyCount++;
+            WriteLog(NdjsonLevel.Warn,
+                $"progress {percent} for phase {WirePhase(phase)} adjusted to {clamped}: it must be monotonic and in 0 to 99");
+        }
+
         _lastPercent = clamped;
         Write(writer =>
         {
@@ -34,18 +47,7 @@ public sealed class NdjsonWriter(TextWriter output)
     public void Log(NdjsonLevel level, string message)
     {
         GuardOpen();
-        Write(writer =>
-        {
-            writer.WriteString("type", "log");
-            writer.WriteString("level", level switch
-            {
-                NdjsonLevel.Info => "info",
-                NdjsonLevel.Warn => "warn",
-                NdjsonLevel.Error => "error",
-                _ => "info",
-            });
-            writer.WriteString("message", message);
-        });
+        WriteLog(level, message);
     }
 
     public void Success(string runtimePath)
@@ -72,6 +74,19 @@ public sealed class NdjsonWriter(TextWriter output)
             writer.WriteString("message", message);
         });
     }
+
+    private void WriteLog(NdjsonLevel level, string message) => Write(writer =>
+    {
+        writer.WriteString("type", "log");
+        writer.WriteString("level", level switch
+        {
+            NdjsonLevel.Info => "info",
+            NdjsonLevel.Warn => "warn",
+            NdjsonLevel.Error => "error",
+            _ => "info",
+        });
+        writer.WriteString("message", message);
+    });
 
     private void GuardOpen()
     {

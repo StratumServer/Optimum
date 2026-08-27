@@ -46,8 +46,13 @@ public static partial class InstallPathGuard
                 return InstallPathVerdict.Reject($"The install directory cannot be {reserved}.");
         }
 
-        if (SymlinkComponentCheck.FirstSymlinkComponent(probe, install) is { } link)
-            return InstallPathVerdict.Reject($"The install path passes through a symbolic link: {link}");
+        // Leaf only: a symlinked home or a symlinked parent (a second drive
+        // mounted at ~/Games) is normal and the OS resolves it consistently. A
+        // symlinked install directory itself is the risk, because the
+        // transactional install and uninstall would then operate on the link's
+        // target rather than the directory the user named.
+        if (probe.PathExists(install) && probe.IsSymbolicLink(install))
+            return InstallPathVerdict.Reject($"The install directory is a symbolic link: {install}. Choose a real directory.");
 
         foreach (string vsDir in KnownVintageStoryDirectories(probe))
         {
@@ -72,8 +77,8 @@ public static partial class InstallPathGuard
         if (request.DataPath is { } dataRaw && !string.IsNullOrWhiteSpace(dataRaw))
         {
             string data = Canonical(probe, dataRaw);
-            if (SymlinkComponentCheck.FirstSymlinkComponent(probe, data) is { } dataLink)
-                return InstallPathVerdict.Reject($"The data path passes through a symbolic link: {dataLink}");
+            if (probe.PathExists(data) && probe.IsSymbolicLink(data))
+                return InstallPathVerdict.Reject($"The data path is a symbolic link: {data}. Choose a real directory.");
             if (IsWithinOrEqual(probe, data, install))
                 return InstallPathVerdict.Reject("The data path cannot be inside the install directory.");
             foreach (string vsDir in KnownVintageStoryDirectories(probe))
