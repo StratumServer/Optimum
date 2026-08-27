@@ -7,7 +7,7 @@ body:
     id: optimum-version
     attributes:
       label: Optimum version
-      placeholder: "0.3.13"
+      placeholder: "0.3.14"
     validations:
       required: true
   - type: input

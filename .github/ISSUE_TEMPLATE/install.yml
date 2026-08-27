@@ -38,7 +38,7 @@ body:
     id: to-version
     attributes:
       label: Installing or updating to version
-      placeholder: "0.3.13"
+      placeholder: "0.3.14"
     validations:
       required: true
   - type: textarea
@@ -47,7 +47,7 @@ body:
       label: Steps taken
       description: Exact commands run, or exact clicks in the installer UI.
       placeholder: |
-        1. Downloaded the v0.3.13 release
+        1. Downloaded the v0.3.14 release
         2. Ran ...
         3. ...
     validations:
