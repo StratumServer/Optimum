@@ -1,4 +1,5 @@
 using Optimum.Bootstrap.Core;
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Tests;
 using Optimum.Installer.Services;
@@ -110,6 +111,70 @@ public class OptionsViewModelTests
 
 public class PrerequisitesViewModelTests
 {
+    [Fact]
+    public async Task AppimagetoolInstallActionRunsAndRescansTheTool()
+    {
+        var probe = new FakeSystemProbe();
+        var acquisition = new FakeAppimagetoolAcquisition
+        {
+            Behaviour = repoRoot =>
+            {
+                string path = AppimagetoolAcquisition.TargetPath(repoRoot);
+                probe.AddFile(path);
+                return ToolAcquisitionResult.Success(path);
+            },
+        };
+        InstallerServices services = TestServices.Build(probe: probe, appimagetool: acquisition);
+        var vm = new PrerequisitesViewModel(
+            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, services.UiPost);
+
+        PrerequisiteRowViewModel before = vm.Rows.Single(
+            row => row.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool);
+        Assert.Equal("Install", before.ActionLabel);
+        Assert.NotNull(before.ActionCommand);
+
+        await before.ActionCommand!.ExecuteAsync(null);
+
+        Assert.Equal(1, acquisition.Calls);
+        PrerequisiteRowViewModel after = vm.Rows.Single(
+            row => row.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool);
+        Assert.Equal(Bootstrap.Core.Prerequisites.PrerequisiteState.Ok, after.Result.State);
+        Assert.Null(after.ActionCommand);
+        Assert.Null(after.ActionLabel);
+    }
+
+    [Fact]
+    public void UnsupportedActionsAreNotShownAsWorkingButtons()
+    {
+        InstallerServices services = TestServices.Build(appimagetool: new FakeAppimagetoolAcquisition());
+        var vm = new PrerequisitesViewModel(
+            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, services.UiPost);
+
+        Assert.All(vm.Rows.Where(row => row.Result.Definition.Id
+                != Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool),
+            row => Assert.Null(row.ActionCommand));
+    }
+
+    [Fact]
+    public async Task AppimagetoolInstallFailureIsVisibleInTheRow()
+    {
+        var acquisition = new FakeAppimagetoolAcquisition
+        {
+            Behaviour = _ => ToolAcquisitionResult.Failure(
+                FailureReason.SourceUnavailable, "curl exit 22"),
+        };
+        InstallerServices services = TestServices.Build(appimagetool: acquisition);
+        var vm = new PrerequisitesViewModel(
+            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, services.UiPost);
+        PrerequisiteRowViewModel row = vm.Rows.Single(
+            item => item.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+
+        Assert.Contains("curl exit 22", row.Detail);
+        Assert.Equal("Install", row.ActionLabel);
+    }
+
     [Fact]
     public void ReportsRepoRootMissingWhenThereIsNoCheckout()
     {

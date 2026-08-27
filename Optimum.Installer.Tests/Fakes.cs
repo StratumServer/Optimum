@@ -1,4 +1,5 @@
 using Optimum.Bootstrap.Core;
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Tests;
@@ -55,6 +56,22 @@ public sealed class FakeSourceProvider : ISourceProvider
     }
 }
 
+public sealed class FakeAppimagetoolAcquisition : IAppimagetoolAcquisition
+{
+    public Func<string, ToolAcquisitionResult> Behaviour { get; set; } =
+        static repoRoot => ToolAcquisitionResult.Success(AppimagetoolAcquisition.TargetPath(repoRoot));
+
+    public int Calls { get; private set; }
+
+    public Task<ToolAcquisitionResult> InstallAsync(
+        string repoRoot, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(repoRoot));
+    }
+}
+
 public sealed class FakeUpdateService : IUpdateService
 {
     public string? AvailableVersion { get; set; }
@@ -80,6 +97,7 @@ public static class TestServices
         IPackageInstaller? installer = null,
         IUpdateService? updates = null,
         ISourceProvider? sourceProvider = null,
+        IAppimagetoolAcquisition? appimagetool = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -110,6 +128,7 @@ public static class TestServices
             UiPost = action => action(),
             Updates = updates,
             SourceProvider = sourceProvider,
+            Appimagetool = appimagetool,
         };
     }
 }

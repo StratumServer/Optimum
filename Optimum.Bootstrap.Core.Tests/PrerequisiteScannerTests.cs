@@ -48,6 +48,20 @@ public class PrerequisiteScannerTests
     }
 
     [Fact]
+    public void AppimagetoolInThePrivateToolDirectoryMustBeExecutable()
+    {
+        FakeSystemProbe probe = LinuxWithCoreTools();
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "/absent/dotnet";
+        probe.AddNonExecutableFile("/repo/.tools/appimagetool");
+
+        PrerequisiteResult appimagetool = new PrerequisiteScanner(probe, "/repo").Scan()
+            .Single(r => r.Definition.Id == PrerequisiteId.Appimagetool);
+
+        Assert.Equal(PrerequisiteState.OptionalMissing, appimagetool.State);
+        Assert.Equal(AcquisitionKind.Automatic, appimagetool.Acquisition);
+    }
+
+    [Fact]
     public void AllRequiredPresentWhenTheSdkAndAnInRangeDecompilerAreThere()
     {
         FakeSystemProbe probe = LinuxWithCoreTools();

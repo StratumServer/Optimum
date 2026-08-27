@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Optimum.Bootstrap.Core;
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
@@ -13,30 +14,87 @@ namespace Optimum.Installer.ViewModels;
 /// <see cref="ViewLocator"/> never tries to resolve a view for it: it is only
 /// ever rendered through an explicit item template.
 /// </summary>
-public sealed class PrerequisiteRowViewModel(PrerequisiteResult result) : ObservableObject
+public sealed class PrerequisiteRowViewModel : ObservableObject
 {
-    public PrerequisiteResult Result { get; } = result;
+    private readonly Func<PrerequisiteResult, Task<ToolAcquisitionResult>>? _install;
+    private bool _installing;
+    private string? _actionStatus;
+
+    public PrerequisiteRowViewModel(
+        PrerequisiteResult result,
+        Func<PrerequisiteResult, Task<ToolAcquisitionResult>>? install = null)
+    {
+        Result = result;
+        _install = install;
+        if (_install is not null)
+            ActionCommand = new AsyncRelayCommand(InstallAsync, () => !Installing);
+    }
+
+    public PrerequisiteResult Result { get; }
+    public IAsyncRelayCommand? ActionCommand { get; }
 
     public string Name => Result.Definition.DisplayName;
     public string Status => Result.State.ToString();
-    public string Detail => Result.Label;
+    public string Detail => ActionStatus ?? Result.Label;
 
     /// <summary>The action button label, or null when there is nothing to do.</summary>
-    public string? ActionLabel => Result.Acquisition switch
-    {
-        AcquisitionKind.Automatic => "Install",
-        AcquisitionKind.Manual => "Copy command",
-        AcquisitionKind.DownloadPage => "Download",
-        _ => null,
-    };
+    public string? ActionLabel => _install is null ? null : Installing ? "Installing..." : "Install";
 
-    public string? ActionDetail => Result.AcquisitionCommand ?? Result.DownloadUrl;
+    public bool Installing
+    {
+        get => _installing;
+        private set
+        {
+            if (!SetProperty(ref _installing, value))
+                return;
+            OnPropertyChanged(nameof(ActionLabel));
+            (ActionCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+        }
+    }
+
+    public string? ActionDetail => ActionStatus ?? Result.AcquisitionCommand ?? Result.DownloadUrl;
+
+    public string? ActionStatus
+    {
+        get => _actionStatus;
+        private set
+        {
+            if (SetProperty(ref _actionStatus, value))
+            {
+                OnPropertyChanged(nameof(Detail));
+                OnPropertyChanged(nameof(ActionDetail));
+            }
+        }
+    }
+
+    private async Task InstallAsync()
+    {
+        if (_install is null || Installing)
+            return;
+
+        Installing = true;
+        ActionStatus = "Downloading appimagetool...";
+        try
+        {
+            ToolAcquisitionResult result = await _install(Result);
+            ActionStatus = result.Ok ? "Installed." : result.Message ?? "Installation failed.";
+        }
+        catch (Exception ex)
+        {
+            ActionStatus = $"Installation failed: {ex.Message}";
+        }
+        finally
+        {
+            Installing = false;
+        }
+    }
 }
 
 public sealed partial class PrerequisitesViewModel : ViewModelBase
 {
     private readonly ISystemProbe _probe;
     private readonly ISourceProvider? _sourceProvider;
+    private readonly IAppimagetoolAcquisition? _appimagetool;
     private readonly Action<Action> _post;
     private string? _repoRoot;
 
@@ -44,11 +102,13 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         ISystemProbe probe,
         string? repoRoot,
         ISourceProvider? sourceProvider = null,
+        IAppimagetoolAcquisition? appimagetool = null,
         Action<Action>? uiPost = null)
     {
         _probe = probe;
         _repoRoot = repoRoot;
         _sourceProvider = sourceProvider;
+        _appimagetool = appimagetool;
         _post = uiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
         Rescan();
     }
@@ -158,9 +218,31 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         RepoRootMissing = false;
         var results = new PrerequisiteScanner(_probe, _repoRoot).Scan();
         foreach (var result in results)
-            Rows.Add(new PrerequisiteRowViewModel(result));
+        {
+            bool canInstallAppimagetool = result.Definition.Id == PrerequisiteId.Appimagetool
+                && result.Acquisition == AcquisitionKind.Automatic
+                && _appimagetool is not null;
+            Rows.Add(new PrerequisiteRowViewModel(
+                result, canInstallAppimagetool ? InstallAppimagetoolAsync : null));
+        }
         BlockingCount = results.Count(r => r.BlocksBuild);
         OnPropertyChanged(nameof(Summary));
+    }
+
+    private async Task<ToolAcquisitionResult> InstallAppimagetoolAsync(PrerequisiteResult prerequisite)
+    {
+        if (_appimagetool is null || _repoRoot is null
+            || prerequisite.Definition.Id != PrerequisiteId.Appimagetool)
+        {
+            return ToolAcquisitionResult.Failure(FailureReason.BadInput,
+                "appimagetool installation is not available");
+        }
+
+        ToolAcquisitionResult result = await _appimagetool.InstallAsync(
+            _repoRoot, NullBuildObserver.Instance, CancellationToken.None);
+        if (result.Ok)
+            _post(Rescan);
+        return result;
     }
 
     /// <summary>Bridges the source download's progress to a single status line.</summary>

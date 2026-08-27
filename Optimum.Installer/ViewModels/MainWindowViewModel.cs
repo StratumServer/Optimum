@@ -30,7 +30,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _repoRoot = services.RepoRoot;
 
         Action<Action> post = _services.UiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
-        Prerequisites = new PrerequisitesViewModel(services.Probe, services.RepoRoot, services.SourceProvider, post);
+        Prerequisites = new PrerequisitesViewModel(
+            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, post);
         Prerequisites.ContinueRequested += root =>
         {
             _repoRoot = root;
