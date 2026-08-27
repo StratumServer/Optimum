@@ -10,14 +10,15 @@ namespace Optimum.Cli.Tests;
 public class CliRunnerTests
 {
     private static async Task<(int Code, string Stdout, string Stderr)> Run(
-        string[] args, ISystemProbe? probe = null, IBuildDriver? driver = null)
+        string[] args, ISystemProbe? probe = null, IBuildDriver? driver = null, CancellationToken cancel = default)
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         int code = await CliRunner.RunAsync(
             args, stdout, stderr,
             probe ?? new FakeSystemProbe(),
-            driver ?? new FakeBuildDriver());
+            driver ?? new FakeBuildDriver(),
+            cancel);
         return (code, stdout.ToString(), stderr.ToString());
     }
 
@@ -108,26 +109,46 @@ public class CliRunnerTests
     }
 
     [Fact]
-    public async Task BuildCancellationYieldsCancelled()
+    public async Task BuildMapsACancelledTokenToTheCancelledResult()
     {
         var probe = RepoProbe();
+        // A driver that reports whatever the token says, the way CliWrap does
+        // when a signal trips mid-run.
         var driver = new FakeBuildDriver
         {
             Behaviour = (_, token) =>
             {
                 token.ThrowIfCancellationRequested();
-                throw new OperationCanceledException();
+                return BuildResult.Success("/should/not/reach");
             },
         };
-        driver.Behaviour = (_, _) => throw new OperationCanceledException();
+
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
 
         var (code, stdout, _) = await Run(
             ["build", "--acknowledge-decompile", "--json", "--output", "/tmp/out", "--repo-root", "/repo"],
-            probe, driver);
+            probe, driver, cancelled.Token);
 
         Assert.Equal(CliRunner.ExitError, code);
         NdjsonStream stream = NdjsonStream.Parse(stdout);
+        stream.AssertContract();
         Assert.Equal("cancelled", stream.Terminal.GetProperty("reason").GetString());
+    }
+
+    [Fact]
+    public async Task BuildJsonStreamHasNoProgressAnomaliesOnACleanRun()
+    {
+        var probe = RepoProbe();
+        var (_, stdout, _) = await Run(
+            ["build", "--acknowledge-decompile", "--json", "--output", "/tmp/out", "--repo-root", "/repo"],
+            probe);
+
+        bool anyClampWarning = NdjsonStream.Parse(stdout).Lines.Any(l =>
+            l.GetProperty("type").GetString() == "log"
+            && l.GetProperty("level").GetString() == "warn"
+            && l.GetProperty("message").GetString()!.Contains("adjusted to"));
+        Assert.False(anyClampWarning);
     }
 
     [Fact]

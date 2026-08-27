@@ -229,16 +229,23 @@ binary before spawning and refuse to run it if it is a symlink. All path argumen
 must be absolute. The engine rejects a relative path with `bad-input` rather than
 resolving it against an ambient working directory.
 
+`build`, `preflight`, and `capabilities` need an Optimum checkout, because the
+engine drives `scripts/` there. They find it by walking up from the working
+directory for `forks.json` next to `scripts/bootstrap.sh`, or take `--repo-root
+<abs>`. A caller that spawns the engine from outside a checkout must pass
+`--repo-root`. This dependency goes away only when the scripts are ported into
+Core, which is out of scope for the current plan (section 2).
+
 ### Verbs
 
 | Verb | Arguments | Effect |
 | --- | --- | --- |
-| `preflight` | `[--json]` | Detect prerequisites. No side effects, no writes, no network. |
-| `build` | `--acknowledge-decompile` `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--json]` | Bootstrap, build, and package into `--output`. Refuses with `bad-input` if `--acknowledge-decompile` is absent. |
-| `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Transactional deploy, shortcuts, uninstaller registration. |
+| `preflight` | `[--repo-root <abs>]` `[--json]` | Detect prerequisites. No side effects, no writes, no network. |
+| `build` | `--acknowledge-decompile` `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--repo-root <abs>]` `[--json]` | Bootstrap, check patches, build, package into `--output`, and validate the runtime. `--output` must be empty or absent. Refuses with `bad-input` if `--acknowledge-decompile` is absent. |
+| `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Deploy into an empty or absent `--install-dir` and write an install manifest. Phase 2 refuses a non-empty directory; the in-place backup-and-rollback replace is Phase 4. |
 | `validate` | `--package <abs>` `[--json]` | Run the runtime validation described in section 7. |
-| `uninstall` | `--install-dir <abs>` `[--json]` | Remove an install using its manifest. |
-| `capabilities` | `--json` | Report supported game versions and patch set ids. |
+| `uninstall` | `--install-dir <abs>` `[--json]` | Remove an install by its manifest. Manifest entries that resolve outside the install directory are refused, not followed. |
+| `capabilities` | `[--repo-root <abs>]` `[--json]` | Report supported game versions and patch set ids. |
 | `--version` | none | Print one plain line and exit 0. |
 
 `build` is the verb RiftLauncher calls. Everything else exists for the GUI, for
@@ -246,9 +253,13 @@ scripting, and for CI.
 
 ### NDJSON schema
 
-With `--json`, stdout carries one JSON object per line and nothing else. Without
-`--json`, stdout carries human-readable text and the schema does not apply. stderr
-is always free-form human log and callers must not parse it.
+The operation verbs (`build`, `install`, `validate`, `uninstall`) carry a stream:
+with `--json`, stdout is one JSON object per line and nothing else, ending in
+exactly one terminal `result`. Without `--json` it is human-readable text. The
+query verbs (`preflight`, `capabilities`) answer with a single JSON document
+(`preflight` an array, `capabilities` an object) and do not use the stream shape.
+stderr is always free-form human log, including a subprocess's own output, and
+callers must not parse it.
 
 Progress:
 
@@ -324,11 +335,14 @@ exit from a wrapper, a shell, or a signal after the work completed is a more
 likely explanation than a lying result line. A caller that sees a non-zero exit
 and no result line at all must synthesize `engine-internal`.
 
-On SIGTERM the engine stops the current phase, removes whatever it wrote under
-`--output`, emits `{"type":"result","ok":false,"reason":"cancelled"}`, and exits
-non-zero. If the process cannot emit the line (SIGKILL, or a crash inside the
-handler), the caller falls back to `engine-internal`. On Windows the equivalent is
-`CancelKeyPress` plus a job-object kill from the caller.
+On SIGTERM or SIGINT the engine stops the current phase and cleans up. Because
+`--output` was required to be empty or absent, cleanup removes the directory when
+the engine created it and removes only the new contents when it pre-existed;
+either way nothing the engine did not write is touched. It then emits
+`{"type":"result","ok":false,"reason":"cancelled"}` and exits non-zero. If the
+process cannot emit the line (SIGKILL, or a crash inside the handler), the caller
+falls back to `engine-internal`. `PosixSignalRegistration` handles both signals on
+Windows as well.
 
 ### Path discipline
 
@@ -837,23 +851,34 @@ emits a `warn` and counts it when it has to adjust a caller's progress value.
 seconds).
 
 **Phase 2: the CLI.** Done. The seven verbs are in `Optimum.Cli` over a Core
-build layer: `ScriptBuildDriver` drives `scripts/bootstrap.*`, `dotnet build
-VintageStory.slnx`, and the platform packaging script through CliWrap, mapping
-each step to a `ProgressPhase` and a `FailureReason`
+build layer. `ScriptBuildDriver` drives, in order, `scripts/bootstrap.*`, `dotnet
+build VintageStory.slnx`, `scripts/check-patches.sh --strict-unavailable`, the
+platform packaging script, and a header-level `RuntimeValidator` on the produced
+package, mapping each step to a `ProgressPhase` and a `FailureReason`
 (`BootstrapFailureClassifier` splits a failed bootstrap into `patch-conflict` and
-`decompile-failed`). `build` requires `--acknowledge-decompile` and refuses
-without it. `install` runs the Phase 1 path guard then a straight copy plus an
-`InstallManifest`; `uninstall` reverses it by that manifest; `validate` reads the
-staged assemblies' headers; `capabilities` and `preflight` answer as JSON. SIGTERM
-and SIGINT cancel a `build` and produce a `cancelled` result. `scripts/check-ndjson-stream.py`
-is the reusable conformance check, the twin of `Optimum.Cli.Tests/NdjsonStream.cs`.
-*Verification:* `Optimum.Cli.Tests` has 12 tests including the NDJSON contract
-against a scripted driver, the `patch-conflict` and `cancelled` reasons, and the
-no-flag gate. `ci-installer.yml` gained a `cli-contract` job. The
-`bootstrap-linux` job in `ci-platform-bootstrap.yml` now runs `Optimum.Cli build
---json --acknowledge-decompile --client-archive` end to end and pipes it through
-`check-ndjson-stream.py`, then `Optimum.Cli validate` on the produced package. The
-other four platform jobs get the same step incrementally.
+`decompile-failed`). It forwards `--client-archive` to both bootstrap and
+packaging so neither half re-downloads the client, locates the package per
+platform (an `Optimum-v*` directory on Windows and Linux, `Optimum.app` on
+macOS), and on cancellation removes only what it wrote. `build` requires
+`--acknowledge-decompile`. `install` runs the Phase 1 path guard then a copy into
+an empty directory plus an `InstallManifest` (it refuses a non-empty target;
+in-place replace with rollback is Phase 4); `uninstall` reverses it by that
+manifest and refuses an entry that resolves outside the install directory;
+`validate` reads the staged assemblies' headers; `capabilities` and `preflight`
+answer with a single JSON document. SIGTERM and SIGINT cancel a `build` and
+produce a `cancelled` result. `scripts/check-ndjson-stream.py` is the reusable
+conformance check, the twin of `Optimum.Cli.Tests/NdjsonStream.cs`.
+*Verification:* `Optimum.Cli.Tests` has 13 tests including the NDJSON contract
+against a scripted driver, the `patch-conflict` and `cancelled` reasons, the
+no-flag gate, and a clean run with no progress anomalies. An adversarial pass
+against the shell scripts drove the client-archive forwarding, the macOS package
+location, the empty-output guard and the scoped cancellation cleanup, the
+manifest-entry containment in `uninstall`, and `install` refusing to overwrite.
+`ci-installer.yml` gained a `cli-contract` job. The `bootstrap-linux` job in
+`ci-platform-bootstrap.yml` now runs `Optimum.Cli build --json
+--acknowledge-decompile --client-archive` end to end through
+`check-ndjson-stream.py`, then `Optimum.Cli validate`. The other four platform
+jobs get the same step incrementally.
 
 **Phase 3: the GUI.** All five screens, the state machine, headless tests. Drives
 Core in-process. At the end of this phase the GUI can do a complete install on the

@@ -27,10 +27,11 @@ public sealed record DeployResult(bool Ok, FailureReason? Reason, string? Messag
 }
 
 /// <summary>
-/// Deploys a staged package to a chosen directory and records an
+/// Deploys a staged package to an empty or absent directory and records an
 /// <see cref="InstallManifest"/>. Phase 2 does a straight copy after the path
-/// guard clears; the stage, backup, and rollback dance from
-/// <c>Install-StagedPackage</c> lands in Phase 4.
+/// guard clears and refuses to touch a directory that already holds anything;
+/// replacing an existing install in place, with a backup and rollback, is Phase
+/// 4. To reinstall now, run <c>uninstall</c> first.
 /// </summary>
 public sealed class PackageDeployer(ISystemProbe probe)
 {
@@ -50,14 +51,13 @@ public sealed class PackageDeployer(ISystemProbe probe)
 
         if (Directory.Exists(installDir) && Directory.EnumerateFileSystemEntries(installDir).Any())
         {
-            string manifestPath = Path.Combine(installDir, InstallManifest.RelativePath);
-            if (!File.Exists(manifestPath))
-                return DeployResult.Failure(FailureReason.OutputExists,
-                    $"the install directory is not empty and carries no Optimum manifest: {installDir}");
-            observer?.Log(LogLevel.Info, "replacing an existing Optimum install");
-            Directory.Delete(installDir, recursive: true);
+            bool isOptimumInstall = File.Exists(Path.Combine(installDir, InstallManifest.RelativePath));
+            return DeployResult.Failure(FailureReason.OutputExists, isOptimumInstall
+                ? $"an Optimum install already exists at {installDir}. Run `optimum uninstall --install-dir {installDir}` first."
+                : $"the install directory is not empty: {installDir}");
         }
 
+        observer?.Log(LogLevel.Info, $"deploying {Path.GetFileName(request.PackageDirectory)} to {installDir}");
         Directory.CreateDirectory(installDir);
         var entries = new List<string>();
         foreach (string entry in Directory.EnumerateFileSystemEntries(request.PackageDirectory))
@@ -80,8 +80,7 @@ public sealed class PackageDeployer(ISystemProbe probe)
         if (request.DataPath is not null)
             entries.Add("datapath.cfg");
 
-        string version = probe.ReadText(Path.Combine(request.PackageDirectory, ".optimum", "version"))?.Trim()
-            ?? "dev";
+        string version = ResolveVersion(probe, request.PackageDirectory);
 
         var manifest = new InstallManifest
         {
@@ -131,6 +130,28 @@ public sealed class PackageDeployer(ISystemProbe probe)
 
     private static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
+    /// <summary>
+    /// The package version, from the <c>Optimum-v&lt;version&gt;-&lt;rid&gt;</c> directory
+    /// name the packaging scripts produce, falling back to a <c>.optimum/version</c>
+    /// file and then to <c>dev</c>.
+    /// </summary>
+    private static string ResolveVersion(ISystemProbe probe, string packageDirectory)
+    {
+        string name = Path.GetFileName(packageDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (name.StartsWith("Optimum-v", StringComparison.Ordinal))
+        {
+            string rest = name["Optimum-v".Length..];
+            int dash = rest.IndexOf('-');
+            string version = dash > 0 ? rest[..dash] : rest;
+            if (version.Length > 0)
+                return version;
+        }
+
+        return probe.ReadText(Path.Combine(packageDirectory, ".optimum", "version"))?.Trim() is { Length: > 0 } fromFile
+            ? fromFile
+            : "dev";
+    }
+
     private static void MakeExecutable(string path)
     {
         if (OperatingSystem.IsWindows() || !File.Exists(path))
@@ -148,8 +169,8 @@ public sealed class PackageDeployer(ISystemProbe probe)
     {
         Directory.CreateDirectory(destination);
         foreach (string dir in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
-            Directory.CreateDirectory(dir.Replace(source, destination, StringComparison.Ordinal));
+            Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, dir)));
         foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-            File.Copy(file, file.Replace(source, destination, StringComparison.Ordinal), overwrite: true);
+            File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)), overwrite: true);
     }
 }

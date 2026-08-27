@@ -1,6 +1,7 @@
 using System.Text;
 using CliWrap;
 using CliWrap.EventStream;
+using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
 
@@ -8,9 +9,10 @@ namespace Optimum.Bootstrap.Core.Build;
 
 /// <summary>
 /// The real build pipeline: it drives <c>scripts/bootstrap.*</c>,
-/// <c>dotnet build VintageStory.slnx</c>, and the platform packaging script
-/// through CliWrap, the same sequence <c>.github/workflows/ci-platform-bootstrap.yml</c>
-/// runs by hand. It never reimplements those scripts.
+/// <c>dotnet build VintageStory.slnx</c>, <c>scripts/check-patches.sh</c>, and
+/// the platform packaging script through CliWrap, the same sequence
+/// <c>.github/workflows/ci-platform-bootstrap.yml</c> runs by hand. It never
+/// reimplements those scripts.
 /// </summary>
 public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
 {
@@ -21,11 +23,13 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         if (missing.Length > 0)
             return BuildResult.Failure(FailureReason.BadInput, "Required tools missing: " + string.Join(", ", missing));
 
-        if (probe.DirectoryExists(request.OutputDirectory)
-            && probe.EnumerateFiles(request.OutputDirectory, "*").Any())
+        bool outputPreexisted = probe.DirectoryExists(request.OutputDirectory);
+        if (outputPreexisted
+            && (probe.EnumerateFiles(request.OutputDirectory, "*").Any()
+                || probe.EnumerateDirectories(request.OutputDirectory, "*").Any()))
         {
             return BuildResult.Failure(FailureReason.OutputExists,
-                $"The output directory is not empty: {request.OutputDirectory}");
+                $"The output directory must be empty or absent: {request.OutputDirectory}");
         }
 
         Directory.CreateDirectory(request.OutputDirectory);
@@ -33,7 +37,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         try
         {
             StepOutcome bootstrap = await RunStep(
-                BootstrapCommand(request), request.RepoRoot, ProgressPhase.Decompile, 2, 50, observer,
+                BootstrapCommand(request), request.RepoRoot, ProgressPhase.Decompile, 2, 48, observer,
                 clearPlatformEnv: false, cancellationToken);
             if (!bootstrap.Ok)
             {
@@ -42,17 +46,25 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                     $"bootstrap exited {bootstrap.ExitCode}");
             }
 
-            observer.Phase(ProgressPhase.Patch, 52, "patches applied");
+            observer.Phase(ProgressPhase.Patch, 50, "patches applied");
 
             StepOutcome build = await RunStep(
                 (DotnetExecutable(), ["build", "VintageStory.slnx", "-c", "Release", "--nologo"]),
-                request.RepoRoot, ProgressPhase.Assemble, 55, 85, observer,
+                request.RepoRoot, ProgressPhase.Assemble, 52, 82, observer,
                 clearPlatformEnv: true, cancellationToken);
             if (!build.Ok)
                 return BuildResult.Failure(FailureReason.AssembleFailed, $"dotnet build exited {build.ExitCode}");
 
+            StepOutcome checkPatches = await RunStep(
+                ("bash", ["scripts/check-patches.sh", "--strict-unavailable"]),
+                request.RepoRoot, ProgressPhase.Patch, 82, 86, observer,
+                clearPlatformEnv: false, cancellationToken);
+            if (!checkPatches.Ok)
+                return BuildResult.Failure(FailureReason.PatchConflict,
+                    $"check-patches.sh exited {checkPatches.ExitCode}: a patch did not survive the decompile round trip");
+
             StepOutcome package = await RunStep(
-                PackageCommand(request), request.RepoRoot, ProgressPhase.Assemble, 85, 96, observer,
+                PackageCommand(request), request.RepoRoot, ProgressPhase.Assemble, 86, 95, observer,
                 clearPlatformEnv: false, cancellationToken);
             if (!package.Ok)
                 return BuildResult.Failure(FailureReason.AssembleFailed, $"packaging exited {package.ExitCode}");
@@ -60,36 +72,41 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
             string? produced = LocatePackage(request.OutputDirectory);
             if (produced is null)
                 return BuildResult.Failure(FailureReason.AssembleFailed,
-                    $"the packaging script produced no package directory under {request.OutputDirectory}");
+                    $"the packaging script produced no package under {request.OutputDirectory}");
+
+            observer.Phase(ProgressPhase.Verify, 96, "validating the runtime");
+            RuntimeValidationResult validation = new RuntimeValidator(probe).Validate(produced);
+            if (!validation.Ok)
+                return BuildResult.Failure(FailureReason.VerificationFailed, validation.Detail ?? "runtime validation failed");
 
             observer.Phase(ProgressPhase.Verify, 98, "package produced");
             return BuildResult.Success(produced);
         }
         catch (OperationCanceledException)
         {
-            TryClean(request.OutputDirectory);
+            CleanOutput(request.OutputDirectory, outputPreexisted);
             return BuildResult.Failure(FailureReason.Cancelled, "the build was cancelled");
         }
     }
 
     private (string Exe, IReadOnlyList<string> Args) BootstrapCommand(BuildRequest request)
     {
-        var args = new List<string>();
         if (probe.Os == OsKind.Windows)
         {
-            args.AddRange(["-File", "scripts/bootstrap.ps1"]);
-            args.AddRange(["-ClientArchive", request.ClientArchive ?? "__skip__"]);
+            List<string> win = ["-File", "scripts/bootstrap.ps1"];
+            if (request.ClientArchive is not null)
+                win.AddRange(["-ClientArchive", request.ClientArchive]);
             if (request.Version is not null)
-                args.AddRange(["-Version", request.Version]);
-            return ("pwsh", args);
+                win.AddRange(["-Version", request.Version]);
+            return ("pwsh", win);
         }
 
-        args.Add("scripts/bootstrap.sh");
+        List<string> unix = ["scripts/bootstrap.sh"];
         if (request.ClientArchive is not null)
-            args.AddRange(["--client-archive", request.ClientArchive]);
+            unix.AddRange(["--client-archive", request.ClientArchive]);
         if (request.Version is not null)
-            args.AddRange(["--version", request.Version]);
-        return ("bash", args);
+            unix.AddRange(["--version", request.Version]);
+        return ("bash", unix);
     }
 
     private (string Exe, IReadOnlyList<string> Args) PackageCommand(BuildRequest request)
@@ -98,14 +115,18 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         switch (probe.Os)
         {
             case OsKind.Windows:
-                return ("pwsh", ["-File", "scripts/package.ps1", "-OutputDir", output]);
+                List<string> win = ["-File", "scripts/package.ps1", "-OutputDir", output];
+                if (request.ClientArchive is not null) win.AddRange(["-ClientArchive", request.ClientArchive]);
+                return ("pwsh", win);
             case OsKind.MacOs:
                 string arch = probe.Arch == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64";
                 List<string> mac = ["scripts/package-macos.sh", "--output", output, "--arch", arch];
+                if (request.ClientArchive is not null) mac.AddRange(["--client-archive", request.ClientArchive]);
                 if (request.Version is not null) mac.AddRange(["--version", request.Version]);
                 return ("bash", mac);
             default:
                 List<string> linux = ["scripts/package-linux.sh", "--output", output];
+                if (request.ClientArchive is not null) linux.AddRange(["--client-archive", request.ClientArchive]);
                 if (request.Version is not null) linux.AddRange(["--version", request.Version]);
                 return ("bash", linux);
         }
@@ -113,10 +134,22 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
 
     private string DotnetExecutable() => DotnetSdkProbe.Find(probe) ?? "dotnet";
 
-    private static string? LocatePackage(string outputDirectory)
+    /// <summary>
+    /// The package artifact the platform's packaging script produces: a
+    /// <c>Optimum-v*</c> directory on Windows and Linux, an <c>Optimum.app</c>
+    /// bundle on macOS.
+    /// </summary>
+    private string? LocatePackage(string outputDirectory)
     {
         if (!Directory.Exists(outputDirectory))
             return null;
+
+        if (probe.Os == OsKind.MacOs)
+        {
+            string app = Path.Combine(outputDirectory, "Optimum.app");
+            return Directory.Exists(app) ? app : null;
+        }
+
         return Directory.EnumerateDirectories(outputDirectory, "Optimum-v*")
             .Where(d => !Path.GetFileName(d).StartsWith('.'))
             .OrderBy(d => d, StringComparer.Ordinal)
@@ -177,12 +210,29 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
 
     private static string Trim(string line) => line.Length <= 120 ? line : line[..120];
 
-    private static void TryClean(string directory)
+    /// <summary>
+    /// Removes what the build wrote. The output guard guarantees the directory
+    /// was empty or absent, so when it pre-existed only its new contents are
+    /// removed and the directory itself is left in place.
+    /// </summary>
+    private static void CleanOutput(string directory, bool preexisted)
     {
         try
         {
-            if (Directory.Exists(directory))
+            if (!Directory.Exists(directory))
+                return;
+            if (!preexisted)
+            {
                 Directory.Delete(directory, recursive: true);
+                return;
+            }
+            foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (Directory.Exists(entry))
+                    Directory.Delete(entry, recursive: true);
+                else
+                    File.Delete(entry);
+            }
         }
         catch (IOException) { /* best effort */ }
         catch (UnauthorizedAccessException) { /* best effort */ }
