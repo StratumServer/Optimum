@@ -242,7 +242,7 @@ Core, which is out of scope for the current plan (section 2).
 | --- | --- | --- |
 | `preflight` | `[--repo-root <abs>]` `[--json]` | Detect prerequisites. No side effects, no writes, no network. |
 | `build` | `--acknowledge-decompile` `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--repo-root <abs>]` `[--json]` | Bootstrap, check patches, build, package into `--output`, and validate the runtime. `--output` must be empty or absent. Refuses with `bad-input` if `--acknowledge-decompile` is absent. |
-| `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Deploy into an empty or absent `--install-dir` and write an install manifest. Phase 2 refuses a non-empty directory; the in-place backup-and-rollback replace is Phase 4. |
+| `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Transactional deploy: stage the new tree beside the target, move an existing Optimum install aside, swap with one rename, delete the backup, roll back on any failure. Writes an install manifest, the requested shortcuts, and on Windows the uninstall registry entry. A non-empty directory that is not an Optimum install is refused. |
 | `validate` | `--package <abs>` `[--json]` | Run the runtime validation described in section 7. |
 | `uninstall` | `--install-dir <abs>` `[--json]` | Remove an install by its manifest. Manifest entries that resolve outside the install directory are refused, not followed. |
 | `capabilities` | `[--repo-root <abs>]` `[--json]` | Report supported game versions and patch set ids. |
@@ -640,18 +640,21 @@ packages ship pre-patched DLLs and never run the Cecil transplant at launch, whi
 means the `.optimum/donors/` directory that `scripts/package-linux.sh:267-274`
 carefully populates has no consumer on those platforms.
 
-Two options, and Phase 4 must pick one:
+Two options were on the table:
 
 1. Ship `Optimum.Launcher` in the Linux and macOS packages, add the two markers,
    and get true parity plus a real `--validate-only`. This is the larger change and
    it alters what those packages contain.
-2. Implement `validate` in Core as an assembly-load and JIT probe over the staged
-   DLLs, without the launcher. This is smaller, gets most of the value, and leaves
-   the Linux and macOS packaging model as it is.
+2. Implement `validate` in Core over the staged DLLs, without the launcher.
 
-Option 2 is the recommendation for Phase 4 and option 1 belongs in a separate
-proposal, because changing what a shipped package contains is a release-facing
-decision that should not ride along inside an installer rewrite.
+Phase 4 took option 2. `RuntimeValidator` checks the package layout, that the
+three engine assemblies parse, and then loads `VintagestoryLib.dll` into a
+`MetadataLoadContext` (metadata only, no execution, no native dependencies) and
+confirms `Vintagestory.Client.ClientProgram` still has a static `Main`. That
+catches a patch that removed the entry point without the risk of loading game
+code into the installer process. The full JIT probe from `Optimum.exe
+--validate-only` stays available for a later proposal that changes what the
+Linux and macOS packages contain.
 
 ## 8. Packaging and distribution of the installer
 
@@ -911,14 +914,26 @@ on its own timer, two-tier graceful-then-forceful cancellation through
 on retry, and a scroll-read gate extracted to a pure `ScrollReadGate` so it is
 tested directly. A real install per platform is still a manual check.
 
-**Phase 4: unification.** The transactional installer on all three platforms, the
-registered uninstaller and install manifest on all three, unified shortcuts,
-session-aware data-path detection on all three, and the `validate` decision from
-section 7.
-*Verification:* an injected failure at each step of the transactional install
-restores the previous install, tested on each platform. An install followed by an
-uninstall leaves no Optimum files and no orphaned shortcuts, verified by a
-filesystem diff.
+**Phase 4: unification.** Done. `PackageDeployer` is transactional on every
+platform: it stages the whole new tree beside the target (so the final swap is
+one rename), moves an existing Optimum install to `.optimum-backup-<token>`,
+swaps the stage in, and deletes the backup; any failure rolls back to the
+previous install and the `finally` clears the stage and backup directories. A
+`FailAtStep` hook drives the rollback tests. `ShortcutWriter` writes the
+menu and desktop shortcuts per platform (Linux `.desktop` plus a hicolor icon,
+Windows `.lnk` through `WScript.Shell`, macOS a symlink into `~/Applications`),
+records their paths in the manifest, and removes them on uninstall.
+`UninstallRegistration` writes and removes the Windows `Optimum_is1` uninstall
+key, a no-op elsewhere. `RuntimeValidator` took option 2 from section 7:
+`MetadataLoadContext` over `VintagestoryLib.dll`, no game code executed.
+Session-aware data-path detection was already cross-platform (`DataPathProbe`,
+Phase 1) and is used by the GUI.
+*Verification:* `Optimum.Bootstrap.Core.Tests` has 103 tests, including an
+injected failure at the swap step that restores the previous install and a
+user-added file across it, a full deploy-then-uninstall filesystem-clean check,
+in-place replacement, and the Linux `.desktop` write-and-remove round trip
+through the manifest. Windows `.lnk` and registry paths and the macOS symlink
+are covered by construction and need a manual check on those platforms.
 
 **Phase 5: distribution.** Velopack packaging for `win-x64` and `linux-x64`, the
 release workflow, signing on Windows. macOS binaries build but do not publish.

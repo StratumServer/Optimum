@@ -74,19 +74,47 @@ public sealed class DeployRoundTripTests : IDisposable
     }
 
     [Fact]
-    public void DeployRefusesToReplaceAnExistingOptimumInstall()
+    public void DeployReplacesAnExistingOptimumInstallInPlace()
     {
         var probe = SystemProbe.Default;
         string package = StagePackage();
         string installDir = Path.Combine(_root, "install", "optimum");
 
         Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+        File.WriteAllText(Path.Combine(installDir, "stale-from-old-install"), "old");
 
-        DeployResult second = new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir));
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
 
-        Assert.False(second.Ok);
-        Assert.Equal(FailureReason.OutputExists, second.Reason);
-        Assert.Contains("uninstall", second.Message);
+        Assert.False(File.Exists(Path.Combine(installDir, "stale-from-old-install")));
+        Assert.True(File.Exists(Path.Combine(installDir, "run.sh")));
+        // No stage or backup directories left behind.
+        Assert.Empty(Directory.EnumerateDirectories(Path.GetDirectoryName(installDir)!, ".optimum-*"));
+    }
+
+    [Fact]
+    public void AFailureDuringTheSwapRollsBackToThePreviousInstall()
+    {
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+
+        Assert.True(new PackageDeployer(probe).Deploy(new DeployRequest(package, installDir)).Ok);
+        string manifestBefore = File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath));
+        File.WriteAllText(Path.Combine(installDir, "user-added-mod"), "keep across a failed reinstall");
+
+        var deployer = new PackageDeployer(probe)
+        {
+            FailAtStep = step => { if (step == "swap") throw new IOException("simulated swap failure"); },
+        };
+        DeployResult result = deployer.Deploy(new DeployRequest(package, installDir));
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.EngineInternal, result.Reason);
+        Assert.Contains("rolled back", result.Message);
+        // The previous install is intact, including the user's file.
+        Assert.True(File.Exists(Path.Combine(installDir, "user-added-mod")));
+        Assert.Equal(manifestBefore, File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)));
+        Assert.Empty(Directory.EnumerateDirectories(Path.GetDirectoryName(installDir)!, ".optimum-*"));
     }
 
     [Fact]
@@ -127,6 +155,39 @@ public sealed class DeployRoundTripTests : IDisposable
         Assert.False(result.Ok);
         Assert.Equal(FailureReason.BadInput, result.Reason);
         Assert.True(File.Exists(outside));
+    }
+
+    [Fact]
+    public void MenuShortcutIsRecordedInTheManifestAndRemovedByUninstall()
+    {
+        if (OperatingSystem.IsWindows())
+            return; // this path exercises the Linux .desktop writer
+
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        string installDir = Path.Combine(_root, "install", "optimum");
+        string dataHome = Path.Combine(_root, "xdg-data");
+        string? previous = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+        try
+        {
+            Assert.True(new PackageDeployer(probe).Deploy(
+                new DeployRequest(package, installDir, DataPath: null, ShortcutKinds.Menu)).Ok);
+
+            string entry = Path.Combine(dataHome, "applications", "optimum.desktop");
+            Assert.True(File.Exists(entry));
+
+            InstallManifest manifest = InstallManifest.Deserialize(
+                File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+            Assert.Contains(entry, manifest.Shortcuts);
+
+            Assert.True(new Uninstaller(probe).Uninstall(installDir).Ok);
+            Assert.False(File.Exists(entry));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previous);
+        }
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Optimum.Bootstrap.Core.Platform;
 
 namespace Optimum.Bootstrap.Core.Install;
@@ -6,11 +7,12 @@ namespace Optimum.Bootstrap.Core.Install;
 public sealed record RuntimeValidationResult(bool Ok, string? Detail);
 
 /// <summary>
-/// A conservative check that a staged package is a complete runtime: the layout
-/// holds, the patched engine assemblies exist and are non-empty, and each parses
-/// as a managed assembly. It reads assembly headers without loading game code
-/// into this process. The full JIT probe from <c>Optimum.exe --validate-only</c>
-/// is a Phase 4 decision (see INSTALLER-PLAN.md section 7).
+/// Checks that a staged package is a complete runtime without running any game
+/// code (INSTALLER-PLAN.md section 7, option 2). The layout holds, the patched
+/// engine assemblies exist and parse, and a metadata-only load of
+/// <c>VintagestoryLib.dll</c> still exposes <c>Vintagestory.Client.ClientProgram</c>
+/// with a static <c>Main</c>. The full JIT probe stays with
+/// <c>Optimum.exe --validate-only</c>, which those packages could ship later.
 /// </summary>
 public sealed class RuntimeValidator(ISystemProbe probe)
 {
@@ -32,7 +34,6 @@ public sealed class RuntimeValidator(ISystemProbe probe)
             string path = Path.Combine(packageDirectory, name);
             if (!probe.FileExists(path))
                 return new RuntimeValidationResult(false, $"missing assembly: {name}");
-
             try
             {
                 if (new FileInfo(path).Length == 0)
@@ -49,6 +50,47 @@ public sealed class RuntimeValidator(ISystemProbe probe)
             }
         }
 
-        return new RuntimeValidationResult(true, null);
+        return CheckEntryPoint(packageDirectory);
+    }
+
+    private static RuntimeValidationResult CheckEntryPoint(string packageDirectory)
+    {
+        string lib = Path.Combine(packageDirectory, "VintagestoryLib.dll");
+        var assemblies = new List<string>();
+        assemblies.AddRange(Directory.EnumerateFiles(packageDirectory, "*.dll"));
+        string libDir = Path.Combine(packageDirectory, "Lib");
+        if (Directory.Exists(libDir))
+            assemblies.AddRange(Directory.EnumerateFiles(libDir, "*.dll"));
+        assemblies.AddRange(Directory.EnumerateFiles(RuntimeEnvironment.GetRuntimeDirectory(), "*.dll"));
+
+        try
+        {
+            using var context = new MetadataLoadContext(
+                new PathAssemblyResolver(assemblies.Distinct(StringComparer.OrdinalIgnoreCase)));
+            Assembly libAssembly = context.LoadFromAssemblyPath(lib);
+
+            Type? clientProgram = libAssembly.GetTypes()
+                .FirstOrDefault(t => t.FullName == "Vintagestory.Client.ClientProgram");
+            if (clientProgram is null)
+                return new RuntimeValidationResult(false,
+                    "the patched VintagestoryLib.dll no longer contains Vintagestory.Client.ClientProgram");
+
+            MethodInfo? main = clientProgram.GetMethod("Main",
+                BindingFlags.Public | BindingFlags.Static | BindingFlags.NonPublic);
+            if (main is null)
+                return new RuntimeValidationResult(false, "Vintagestory.Client.ClientProgram has no static Main");
+
+            return new RuntimeValidationResult(true, null);
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            string detail = string.Join("; ", ex.LoaderExceptions
+                .Where(e => e is not null).Select(e => e!.Message).Take(3));
+            return new RuntimeValidationResult(false, $"VintagestoryLib.dll types would not load: {detail}");
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
+        {
+            return new RuntimeValidationResult(false, $"could not inspect VintagestoryLib.dll: {ex.Message}");
+        }
     }
 }

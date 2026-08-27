@@ -31,6 +31,14 @@ public sealed record InstallManifest
     [JsonPropertyName("entries")]
     public required IReadOnlyList<string> Entries { get; init; }
 
+    /// <summary>Absolute paths of shortcuts and menu entries the install wrote outside the install directory.</summary>
+    [JsonPropertyName("shortcuts")]
+    public IReadOnlyList<string> Shortcuts { get; init; } = [];
+
+    /// <summary>A Windows uninstall registry key to remove, if one was registered.</summary>
+    [JsonPropertyName("uninstallRegistryKey")]
+    public string? UninstallRegistryKey { get; init; }
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

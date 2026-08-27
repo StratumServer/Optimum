@@ -11,8 +11,12 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="CliWrap" Version="3.10.5" />
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="9.0.0" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Licensing/consent-notice.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Optimum.Bootstrap.Core.Tests" />
   </ItemGroup>
 </Project>

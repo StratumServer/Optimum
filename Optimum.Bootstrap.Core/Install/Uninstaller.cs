@@ -65,6 +65,14 @@ public sealed class Uninstaller(ISystemProbe probe)
                 "the manifest names entries outside the install directory: " + string.Join(", ", skipped), removed);
         }
 
+        if (manifest.Shortcuts.Count > 0)
+        {
+            new ShortcutWriter(probe).Remove(manifest.Shortcuts);
+            removed += manifest.Shortcuts.Count;
+        }
+
+        UninstallRegistration.Unregister(manifest.UninstallRegistryKey);
+
         string optimumDir = Path.Combine(installDir, ".optimum");
         if (Directory.Exists(optimumDir))
         {

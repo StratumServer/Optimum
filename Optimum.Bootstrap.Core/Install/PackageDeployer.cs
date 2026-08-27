@@ -27,14 +27,18 @@ public sealed record DeployResult(bool Ok, FailureReason? Reason, string? Messag
 }
 
 /// <summary>
-/// Deploys a staged package to an empty or absent directory and records an
-/// <see cref="InstallManifest"/>. Phase 2 does a straight copy after the path
-/// guard clears and refuses to touch a directory that already holds anything;
-/// replacing an existing install in place, with a backup and rollback, is Phase
-/// 4. To reinstall now, run <c>uninstall</c> first.
+/// Deploys a staged package transactionally, ported from <c>Install-StagedPackage</c>
+/// in <c>scripts/install-windows.ps1</c>: build the whole new tree next to the
+/// target, move an existing install aside, swap the new tree in with one rename,
+/// then delete the backup. Any failure rolls back to the previous install. An
+/// existing Optimum install (one with a manifest) is replaced this way; a
+/// non-empty directory that is not an Optimum install is refused.
 /// </summary>
 public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
 {
+    /// <summary>Test hook: throws for the named step to exercise rollback.</summary>
+    internal Action<string>? FailAtStep { get; set; }
+
     public DeployResult Deploy(DeployRequest request, IBuildObserver? observer = null)
     {
         InstallPathVerdict guard = InstallPathGuard.Check(probe, new InstallPathRequest(
@@ -48,93 +52,167 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                 "the package directory is not a staged Optimum package: " + string.Join("; ", layout.Problems));
 
         string installDir = Path.GetFullPath(request.InstallDirectory);
+        string? parent = Path.GetDirectoryName(installDir);
+        if (parent is null)
+            return DeployResult.Failure(FailureReason.BadInput, $"the install directory has no parent: {installDir}");
 
-        if (Directory.Exists(installDir) && Directory.EnumerateFileSystemEntries(installDir).Any())
+        bool hasExisting = Directory.Exists(installDir) && Directory.EnumerateFileSystemEntries(installDir).Any();
+        if (hasExisting && !File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)))
+            return DeployResult.Failure(FailureReason.OutputExists, $"the install directory is not empty: {installDir}");
+
+        Directory.CreateDirectory(parent);
+        string token = Guid.NewGuid().ToString("N")[..12];
+        string stageDir = Path.Combine(parent, $".optimum-stage-{token}");
+        string backupDir = Path.Combine(parent, $".optimum-backup-{token}");
+        bool backedUp = false;
+        string? launcher = null;
+
+        try
         {
-            bool isOptimumInstall = File.Exists(Path.Combine(installDir, InstallManifest.RelativePath));
-            return DeployResult.Failure(FailureReason.OutputExists, isOptimumInstall
-                ? $"an Optimum install already exists at {installDir}. Run `optimum uninstall --install-dir {installDir}` first."
-                : $"the install directory is not empty: {installDir}");
-        }
+            Checkpoint("stage");
+            observer?.Log(LogLevel.Info, $"staging {Path.GetFileName(request.PackageDirectory)} beside {installDir}");
+            CopyDirectory(request.PackageDirectory, stageDir);
 
-        observer?.Log(LogLevel.Info, $"deploying {Path.GetFileName(request.PackageDirectory)} to {installDir}");
-        Directory.CreateDirectory(installDir);
-        var entries = new List<string>();
-        foreach (string entry in Directory.EnumerateFileSystemEntries(request.PackageDirectory))
+            MakeExecutable(Path.Combine(stageDir, "Optimum"));
+            MakeExecutable(Path.Combine(stageDir, "run.sh"));
+
+            var entries = Directory.EnumerateFileSystemEntries(stageDir)
+                .Select(Path.GetFileName).Where(n => n is not null).Select(n => n!).ToList();
+            launcher = WriteLauncher(stageDir, installDir, request.DataPath);
+            if (launcher is not null)
+                entries.Add(Path.GetFileName(launcher));
+            if (request.DataPath is not null)
+                entries.Add("datapath.cfg");
+
+            WriteManifest(stageDir, installDir, request, launcher, entries);
+
+            Checkpoint("backup");
+            if (hasExisting || Directory.Exists(installDir))
+            {
+                Directory.Move(installDir, backupDir);
+                backedUp = true;
+            }
+
+            Checkpoint("swap");
+            Directory.Move(stageDir, installDir);
+
+            Checkpoint("commit");
+            if (backedUp)
+                Directory.Delete(backupDir, recursive: true);
+
+            // The launcher path was written for the final install directory.
+            string? finalLauncher = launcher is null
+                ? null
+                : Path.Combine(installDir, Path.GetFileName(launcher));
+
+            RegisterInstall(installDir, request, finalLauncher, observer);
+            return DeployResult.Success(installDir, finalLauncher);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            string name = Path.GetFileName(entry);
-            entries.Add(name);
-            string target = Path.Combine(installDir, name);
-            if (Directory.Exists(entry))
-                CopyDirectory(entry, target);
-            else
-                File.Copy(entry, target, overwrite: true);
+            RollBack(installDir, backupDir, backedUp);
+            return DeployResult.Failure(FailureReason.EngineInternal, $"install failed and was rolled back: {ex.Message}");
         }
+        finally
+        {
+            TryDelete(stageDir);
+            if (Directory.Exists(backupDir) && Directory.Exists(installDir))
+                TryDelete(backupDir);
+        }
+    }
 
-        MakeExecutable(Path.Combine(installDir, "Optimum"));
-        MakeExecutable(Path.Combine(installDir, "run.sh"));
+    private void Checkpoint(string step) => FailAtStep?.Invoke(step);
 
-        string? launcher = WriteLauncher(installDir, request.DataPath);
-        if (launcher is not null && !entries.Contains(Path.GetFileName(launcher)))
-            entries.Add(Path.GetFileName(launcher));
-        if (request.DataPath is not null)
-            entries.Add("datapath.cfg");
+    /// <summary>
+    /// After the swap: write shortcuts, register the Windows uninstall entry, and
+    /// fold both into the manifest so <see cref="Uninstaller"/> can undo them. All
+    /// best effort: a shortcut that will not write does not fail the install.
+    /// </summary>
+    private void RegisterInstall(string installDir, DeployRequest request, string? launcher, IBuildObserver? observer)
+    {
+        string manifestPath = Path.Combine(installDir, InstallManifest.RelativePath);
+        InstallManifest? manifest = File.Exists(manifestPath)
+            ? InstallManifest.Deserialize(File.ReadAllText(manifestPath))
+            : null;
+        if (manifest is null)
+            return;
 
-        string version = ResolveVersion(probe, request.PackageDirectory);
+        IReadOnlyList<string> shortcuts = launcher is not null && request.Shortcuts != ShortcutKinds.None
+            ? new ShortcutWriter(probe).Create(installDir, launcher, request.Shortcuts)
+            : [];
+        if (shortcuts.Count > 0)
+            observer?.Log(LogLevel.Info, $"created {shortcuts.Count} shortcut(s)");
 
+        string? registryKey = UninstallRegistration.Register(installDir, manifest.OptimumVersion);
+
+        try
+        {
+            File.WriteAllText(manifestPath, (manifest with
+            {
+                Shortcuts = shortcuts,
+                UninstallRegistryKey = registryKey,
+            }).Serialize());
+        }
+        catch (IOException) { /* the shortcuts still work; the manifest just will not list them */ }
+    }
+
+    private static void RollBack(string installDir, string backupDir, bool backedUp)
+    {
+        // A partially swapped-in install is discarded; the backup goes back.
+        if (backedUp && Directory.Exists(backupDir))
+        {
+            if (Directory.Exists(installDir))
+                TryDelete(installDir);
+            if (!Directory.Exists(installDir))
+                try { Directory.Move(backupDir, installDir); } catch (IOException) { /* leave the backup for the user */ }
+        }
+    }
+
+    private void WriteManifest(
+        string stageDir, string installDir, DeployRequest request, string? launcher, IEnumerable<string> entries)
+    {
         var manifest = new InstallManifest
         {
-            OptimumVersion = version,
+            OptimumVersion = ResolveVersion(probe, request.PackageDirectory),
             InstalledAtUtc = DateTimeOffset.UtcNow,
             InstallDirectory = installDir,
             DataPath = request.DataPath,
-            Launcher = launcher,
+            Launcher = launcher is null ? null : Path.Combine(installDir, Path.GetFileName(launcher)),
             Entries = entries.Distinct().OrderBy(e => e, StringComparer.Ordinal).ToArray(),
         };
-        Directory.CreateDirectory(Path.Combine(installDir, ".optimum"));
-        File.WriteAllText(Path.Combine(installDir, InstallManifest.RelativePath), manifest.Serialize());
-
-        return DeployResult.Success(installDir, launcher);
+        Directory.CreateDirectory(Path.Combine(stageDir, ".optimum"));
+        File.WriteAllText(Path.Combine(stageDir, InstallManifest.RelativePath), manifest.Serialize());
     }
 
-    private string? WriteLauncher(string installDir, string? dataPath)
+    private string? WriteLauncher(string stageDir, string finalInstallDir, string? dataPath)
     {
+        if (dataPath is not null)
+            Directory.CreateDirectory(dataPath);
+
         if (probe.Os == OsKind.Windows)
         {
-            string cmd = Path.Combine(installDir, "optimum-launch.cmd");
-            string body = dataPath is not null
+            string cmd = Path.Combine(stageDir, "optimum-launch.cmd");
+            File.WriteAllText(cmd, dataPath is not null
                 ? $"@echo off\r\ncd /d \"%~dp0\"\r\nOptimum.exe --dataPath \"{dataPath}\" %*\r\n"
-                : "@echo off\r\ncd /d \"%~dp0\"\r\nOptimum.exe %*\r\n";
-            File.WriteAllText(cmd, body);
+                : "@echo off\r\ncd /d \"%~dp0\"\r\nOptimum.exe %*\r\n");
             if (dataPath is not null)
-            {
-                Directory.CreateDirectory(dataPath);
-                File.WriteAllText(Path.Combine(installDir, "datapath.cfg"), dataPath);
-            }
+                File.WriteAllText(Path.Combine(stageDir, "datapath.cfg"), dataPath);
             return cmd;
         }
 
-        string sh = Path.Combine(installDir, "optimum-launch.sh");
-        string script = dataPath is not null
+        string sh = Path.Combine(stageDir, "optimum-launch.sh");
+        File.WriteAllText(sh, dataPath is not null
             ? $"#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"${{BASH_SOURCE[0]}}\")\"\nexec ./run.sh --dataPath {ShellQuote(dataPath)} \"$@\"\n"
-            : "#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"${BASH_SOURCE[0]}\")\"\nexec ./run.sh \"$@\"\n";
-        File.WriteAllText(sh, script);
+            : "#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"${BASH_SOURCE[0]}\")\"\nexec ./run.sh \"$@\"\n");
         MakeExecutable(sh);
         if (dataPath is not null)
-        {
-            Directory.CreateDirectory(dataPath);
-            File.WriteAllText(Path.Combine(installDir, "datapath.cfg"), dataPath);
-        }
+            File.WriteAllText(Path.Combine(stageDir, "datapath.cfg"), dataPath);
+        _ = finalInstallDir;
         return sh;
     }
 
     private static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";
 
-    /// <summary>
-    /// The package version, from the <c>Optimum-v&lt;version&gt;-&lt;rid&gt;</c> directory
-    /// name the packaging scripts produce, falling back to a <c>.optimum/version</c>
-    /// file and then to <c>dev</c>.
-    /// </summary>
     private static string ResolveVersion(ISystemProbe probe, string packageDirectory)
     {
         string name = Path.GetFileName(packageDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
@@ -172,5 +250,16 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, dir)));
         foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
             File.Copy(file, Path.Combine(destination, Path.GetRelativePath(source, file)), overwrite: true);
+    }
+
+    private static void TryDelete(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
+        }
+        catch (IOException) { /* best effort */ }
+        catch (UnauthorizedAccessException) { /* best effort */ }
     }
 }
