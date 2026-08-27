@@ -28,6 +28,8 @@ Optimum-v*-mac-*/
 bin/
 obj/
 dist/
+publish/
+/releases/
 
 # IDE
 .vs/

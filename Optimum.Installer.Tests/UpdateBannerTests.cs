@@ -28,6 +28,26 @@ public class UpdateBannerTests
     }
 
     [Fact]
+    public async Task TheBannerIsHiddenOnceTheBuildStarts()
+    {
+        var vm = new MainWindowViewModel(TestServices.Build(updates: new FakeUpdateService { AvailableVersion = "0.4.0" }));
+        await Task.Yield();
+        Assert.True(vm.UpdatePromptVisible);
+
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        Assert.True(vm.UpdatePromptVisible); // still on Options
+
+        vm.Options.ContinueCommand.Execute(null);
+        vm.Eula.ScrolledToEnd = true;
+        vm.Eula.Accepted = true;
+        vm.Eula.AcceptCommand.Execute(null);
+        await vm.InstallCompletion;
+
+        Assert.Equal(WizardScreen.Completion, vm.CurrentScreen);
+        Assert.False(vm.UpdatePromptVisible);
+    }
+
+    [Fact]
     public async Task NoAvailableUpdateLeavesTheBannerNull()
     {
         var vm = new MainWindowViewModel(TestServices.Build(updates: new FakeUpdateService { AvailableVersion = null }));
