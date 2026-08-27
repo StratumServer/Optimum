@@ -229,19 +229,20 @@ binary before spawning and refuse to run it if it is a symlink. All path argumen
 must be absolute. The engine rejects a relative path with `bad-input` rather than
 resolving it against an ambient working directory.
 
-`build`, `preflight`, and `capabilities` need an Optimum checkout, because the
+`build`, `preflight`, and `capabilities` use an Optimum checkout because the
 engine drives `scripts/` there. They find it by walking up from the working
 directory for `forks.json` next to `scripts/bootstrap.sh`, or take `--repo-root
-<abs>`. A caller that spawns the engine from outside a checkout must pass
-`--repo-root`. This dependency goes away only when the scripts are ported into
-Core, which is out of scope for the current plan (section 2).
+<abs>`. `build` also accepts `--acquire-source`: when no checkout is found, Core
+performs a shallow HTTPS clone at the matching release tag into the platform's
+user cache. `--source-cache <abs>` overrides the cache root. `preflight` and
+`capabilities` remain read-only and never acquire a checkout.
 
 ### Verbs
 
 | Verb | Arguments | Effect |
 | --- | --- | --- |
 | `preflight` | `[--repo-root <abs>]` `[--json]` | Detect prerequisites. No side effects, no writes, no network. |
-| `build` | `--acknowledge-decompile` `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--repo-root <abs>]` `[--json]` | Bootstrap, check patches, build, package into `--output`, and validate the runtime. `--output` must be empty or absent. Refuses with `bad-input` if `--acknowledge-decompile` is absent. |
+| `build` | `--acknowledge-decompile` `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--repo-root <abs>]` `[--acquire-source]` `[--source-cache <abs>]` `[--json]` | Bootstrap, check patches, build, package into `--output`, and validate the runtime. `--output` must be empty or absent. Refuses with `bad-input` if `--acknowledge-decompile` is absent. When no checkout is available, `--acquire-source` clones the matching source into the user cache. |
 | `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Transactional deploy: stage the new tree beside the target, move an existing Optimum install aside, swap with one rename, delete the backup, roll back on any failure. Writes an install manifest, the requested shortcuts, and on Windows the uninstall registry entry. A non-empty directory that is not an Optimum install is refused. |
 | `validate` | `--package <abs>` `[--json]` | Run the runtime validation described in section 7. |
 | `uninstall` | `--install-dir <abs>` `[--json]` | Remove an install by its manifest. Manifest entries that resolve outside the install directory are refused, not followed. |
@@ -323,6 +324,7 @@ caller and must be announced through `capabilities`.
 | `assemble-failed` | `dotnet build` or a packaging script failed. |
 | `verification-failed` | The package built but failed the runtime validation in section 7. |
 | `output-exists` | `--output` already contains an artifact and the engine will not overwrite it. |
+| `source-unavailable` | The requested Optimum source could not be cloned, verified, or promoted into the cache. |
 | `cancelled` | The engine received SIGTERM and stopped. Partial output was rolled back. |
 | `engine-internal` | An unexpected fault in the engine. Always accompanied by a `message`. |
 
@@ -432,6 +434,13 @@ row shows the detected install path and its version, read from the executable
 rather than from a registry key, because the in-game updater rewrites the
 executable and leaves the registry stale (`Get-VsExeVersion`,
 `scripts/install-windows.ps1:191`).
+
+A standalone installer starts this screen without a repository root. It offers
+to clone the matching Optimum release into the platform's user cache, reports
+git progress in the screen, verifies the checkout markers, and then runs the
+normal prerequisite scan. A clone lands in a unique staging sibling and replaces
+the cache only after verification, so cancellation or a failed promotion does
+not destroy a previously usable checkout.
 
 **Install options.** Install folder with a Browse button and live validation.
 Optional separate data folder, defaulting to the detected session folder from
@@ -986,6 +995,16 @@ the legacy `install-*-legacy` files also stay until then.
 *Verification:* a fresh clone's `README.md` documents the installer and CLI first;
 `scripts/uninstall.sh` removes a manifest-based install by delegating to
 `optimum uninstall` and a legacy install by its file list.
+
+**Standalone source acquisition.** Done after the first packaged AppImage test
+showed that requiring the current directory to be an Optimum checkout made the
+published installer unusable. Core now owns a reusable `ISourceProvider` and a
+transactional shallow Git clone into the per-version user cache. The GUI offers
+the clone on its Prerequisites screen and carries the resolved root through the
+rest of the wizard. The CLI exposes the same path through `build
+--acquire-source` and `--source-cache`. The Vintage Story client and the pinned
+Anego forks are still fetched later by `scripts/bootstrap.*`; they are never
+added to the installer package or the Optimum source cache.
 
 **Phase 7 (out of scope, documented only).** The RiftLauncher managed-tool slice,
 built in the RiftLauncher repository against the contract in section 4. It is a

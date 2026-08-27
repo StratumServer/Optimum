@@ -116,6 +116,61 @@ public class PrerequisitesViewModelTests
         var vm = new PrerequisitesViewModel(new FakeSystemProbe(), repoRoot: null);
         Assert.True(vm.RepoRootMissing);
         Assert.False(vm.CanContinue);
+        Assert.False(vm.CanAcquireSource);
+        Assert.Contains("inside an Optimum checkout", vm.Summary);
+    }
+
+    [Fact]
+    public void OffersToDownloadTheSourceWhenGivenAProvider()
+    {
+        var vm = new PrerequisitesViewModel(
+            new FakeSystemProbe(), repoRoot: null, new FakeSourceProvider(), uiPost: a => a());
+
+        Assert.True(vm.CanAcquireSource);
+        Assert.Contains("downloaded from GitHub", vm.Summary);
+    }
+
+    [Fact]
+    public async Task DownloadingTheSourceClearsTheMissingStateAndScans()
+    {
+        var probe = new FakeSystemProbe();
+        probe.Path.Add("/usr/bin");
+        foreach (string tool in new[] { "dotnet", "git", "perl", "python3", "curl", "tar", "chmod", "pwsh", "bash" })
+            probe.AddFile($"/usr/bin/{tool}");
+        probe.OnCommand("/usr/bin/dotnet", "--list-sdks", "10.0.100 [/x]\n");
+        probe.OnCommand("/usr/bin/dotnet", "--version", "10.0.100\n");
+        probe.AddFile("/downloaded-repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+        probe.AddFile("/downloaded-repo/scripts/bootstrap.sh");
+        var provider = new FakeSourceProvider();
+
+        string? continuedWith = null;
+        var vm = new PrerequisitesViewModel(probe, repoRoot: null, provider, uiPost: a => a());
+        vm.ContinueRequested += root => continuedWith = root;
+
+        await vm.AcquireSourceCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, provider.Calls);
+        Assert.False(vm.RepoRootMissing);
+        Assert.NotEmpty(vm.Rows);
+
+        vm.ContinueCommand.Execute(null);
+        Assert.Equal("/downloaded-repo", continuedWith);
+    }
+
+    [Fact]
+    public async Task AFailedDownloadShowsTheError()
+    {
+        var provider = new FakeSourceProvider
+        {
+            Behaviour = _ => SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable, "git clone failed (exit 128)"),
+        };
+        var vm = new PrerequisitesViewModel(new FakeSystemProbe(), repoRoot: null, provider, uiPost: a => a());
+
+        await vm.AcquireSourceCommand.ExecuteAsync(null);
+
+        Assert.True(vm.RepoRootMissing);
+        Assert.False(vm.CanContinue);
+        Assert.Contains("git clone failed", vm.Summary);
     }
 }
 

@@ -39,6 +39,7 @@ public enum FailureReason
     AssembleFailed,
     VerificationFailed,
     OutputExists,
+    SourceUnavailable,
     Cancelled,
     EngineInternal,
 }
@@ -55,6 +56,7 @@ public static class FailureReasonExtensions
         FailureReason.AssembleFailed => "assemble-failed",
         FailureReason.VerificationFailed => "verification-failed",
         FailureReason.OutputExists => "output-exists",
+        FailureReason.SourceUnavailable => "source-unavailable",
         FailureReason.Cancelled => "cancelled",
         FailureReason.EngineInternal => "engine-internal",
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),

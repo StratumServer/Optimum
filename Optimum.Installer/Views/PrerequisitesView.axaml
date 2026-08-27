@@ -4,7 +4,24 @@
              x:Class="Optimum.Installer.Views.PrerequisitesView"
              x:DataType="vm:PrerequisitesViewModel">
   <DockPanel>
-    <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" Margin="0,0,0,12" />
+    <TextBlock DockPanel.Dock="Top" Text="{Binding Summary}" TextWrapping="Wrap" Margin="0,0,0,12" />
+
+    <Border DockPanel.Dock="Top" IsVisible="{Binding RepoRootMissing}"
+            Background="#22808080" CornerRadius="4" Padding="12" Margin="0,0,0,12">
+      <StackPanel Spacing="8">
+        <TextBlock Text="The Optimum source is cloned from github.com/StratumServer/Optimum into your user cache. The game files and pinned upstream forks are fetched later during the build."
+                   TextWrapping="Wrap" Opacity="0.8" FontSize="12" />
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <Button Content="Download source" Classes="accent"
+                  IsVisible="{Binding CanAcquireSource}"
+                  Command="{Binding AcquireSourceCommand}" />
+          <ProgressBar IsIndeterminate="True" Width="120" Height="4"
+                       IsVisible="{Binding AcquiringSource}" />
+          <TextBlock Text="{Binding SourceStatus}" Opacity="0.7" FontSize="12"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
 
     <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                 HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">

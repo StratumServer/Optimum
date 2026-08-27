@@ -97,6 +97,30 @@ public class WizardStateMachineTests
     }
 
     [Fact]
+    public async Task AcquiredSourceRootFlowsThroughTheWizardIntoTheBuild()
+    {
+        var probe = new Optimum.Bootstrap.Core.Tests.FakeSystemProbe();
+        probe.AddFile("/downloaded-repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+        probe.AddFile("/downloaded-repo/scripts/bootstrap.sh");
+        var driver = new FakeBuildDriver();
+        var sourceProvider = new FakeSourceProvider();
+        var vm = new MainWindowViewModel(TestServices.Build(
+            repoRoot: null, probe: probe, driver: driver, sourceProvider: sourceProvider));
+
+        await vm.Prerequisites.AcquireSourceCommand.ExecuteAsync(null);
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.ContinueCommand.Execute(null);
+        vm.Eula.ScrolledToEnd = true;
+        vm.Eula.Accepted = true;
+        vm.Eula.AcceptCommand.Execute(null);
+        await vm.InstallCompletion;
+
+        Assert.Equal(1, sourceProvider.Calls);
+        Assert.Equal("/downloaded-repo", driver.LastRepoRoot);
+        Assert.True(vm.Completion!.Succeeded);
+    }
+
+    [Fact]
     public async Task AFailedBuildLandsOnCompletionWithRetry()
     {
         var driver = new FakeBuildDriver
