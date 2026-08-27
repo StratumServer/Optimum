@@ -12,7 +12,7 @@ body:
     attributes:
       label: Optimum version
       description: From the launcher log line "[Optimum] Optimum vX.Y.Z", or the splash screen.
-      placeholder: "0.3.13"
+      placeholder: "0.3.14"
     validations:
       required: true
   - type: input
