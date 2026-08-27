@@ -9,6 +9,13 @@ project files in these paths:
 
 - `.config/**`
 - `.github/**`
+- `Optimum.Bootstrap.Core/**`
+- `Optimum.Bootstrap.Core.TestSupport/**`
+- `Optimum.Bootstrap.Core.Tests/**`
+- `Optimum.Cli/**`
+- `Optimum.Cli.Tests/**`
+- `Optimum.Installer/**`
+- `Optimum.Installer.Tests/**`
 - `Optimum.Launcher/**`
 - `Optimum.Launcher.Tests/**`
 - `Optimum.Patcher/**`
@@ -18,8 +25,10 @@ project files in these paths:
 - `scripts/**`
 - `Directory.Build.props`
 - `Directory.Build.targets`
+- `INSTALLER-PLAN.md`
 - `Makefile`
 - `NuGet.config`
+- `Optimum.Installer.slnf`
 - `VERSION`
 - `VintageStory-core.slnf`
 - `VintageStory.slnx`
