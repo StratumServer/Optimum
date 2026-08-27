@@ -29,6 +29,15 @@ internal sealed class OptimumChunkReadPool : IDisposable
     public bool IsOpen => !disposed && connections.Length > 0;
 
     public OptimumChunkReadPool(string filename, int workers, bool corruptionProtection)
+        : this(filename, workers, corruptionProtection, null)
+    {
+    }
+
+    internal OptimumChunkReadPool(
+        string filename,
+        int workers,
+        bool corruptionProtection,
+        Action<SqliteConnection>? afterConnectionOpened)
     {
         workers = Math.Max(1, Math.Min(8, workers));
         connections = new SqliteConnection[workers];
@@ -36,38 +45,47 @@ internal sealed class OptimumChunkReadPool : IDisposable
         freeSlots = new ConcurrentBag<int>();
         available = new SemaphoreSlim(workers, workers);
 
-        for (int i = 0; i < workers; i++)
+        try
         {
-            DbConnectionStringBuilder conf = new DbConnectionStringBuilder
+            for (int i = 0; i < workers; i++)
             {
-                { "Data Source", filename },
-                { "Pooling", "false" },
-                { "Mode", "ReadOnly" },
-            };
-            SqliteConnection conn = new SqliteConnection(conf.ToString());
-            conn.Open();
+                DbConnectionStringBuilder conf = new DbConnectionStringBuilder
+                {
+                    { "Data Source", filename },
+                    { "Pooling", "false" },
+                    { "Mode", "ReadOnly" },
+                };
+                SqliteConnection conn = new SqliteConnection(conf.ToString());
+                connections[i] = conn;
+                conn.Open();
+                afterConnectionOpened?.Invoke(conn);
 
-            using (SqliteCommand pragma = conn.CreateCommand())
-            {
-                pragma.CommandTimeout = 1;
-                pragma.CommandText = corruptionProtection
-                    ? "PRAGMA journal_mode=WAL;PRAGMA synchronous=Normal;PRAGMA query_only=ON;"
-                    : "PRAGMA query_only=ON;";
-                pragma.ExecuteNonQuery();
+                using (SqliteCommand pragma = conn.CreateCommand())
+                {
+                    pragma.CommandTimeout = 1;
+                    pragma.CommandText = corruptionProtection
+                        ? "PRAGMA journal_mode=WAL;PRAGMA synchronous=Normal;PRAGMA query_only=ON;"
+                        : "PRAGMA query_only=ON;";
+                    pragma.ExecuteNonQuery();
+                }
+
+                SqliteCommand cmd = conn.CreateCommand();
+                getChunkCmds[i] = cmd;
+                cmd.CommandText = "SELECT data FROM chunk WHERE position=@position";
+                SqliteParameter p = cmd.CreateParameter();
+                p.ParameterName = "position";
+                p.DbType = DbType.UInt64;
+                p.Value = 0UL;
+                cmd.Parameters.Add(p);
+                cmd.Prepare();
+
+                freeSlots.Add(i);
             }
-
-            SqliteCommand cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT data FROM chunk WHERE position=@position";
-            SqliteParameter p = cmd.CreateParameter();
-            p.ParameterName = "position";
-            p.DbType = DbType.UInt64;
-            p.Value = 0UL;
-            cmd.Parameters.Add(p);
-            cmd.Prepare();
-
-            connections[i] = conn;
-            getChunkCmds[i] = cmd;
-            freeSlots.Add(i);
+        }
+        catch
+        {
+            Dispose();
+            throw;
         }
     }
 
