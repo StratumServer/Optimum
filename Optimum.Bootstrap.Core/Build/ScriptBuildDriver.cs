@@ -7,6 +7,11 @@ using Optimum.Bootstrap.Core.Prerequisites;
 
 namespace Optimum.Bootstrap.Core.Build;
 
+file static class Encodings
+{
+    public static readonly Encoding Utf8 = new UTF8Encoding(false);
+}
+
 /// <summary>
 /// The real build pipeline: it drives <c>scripts/bootstrap.*</c>,
 /// <c>dotnet build VintageStory.slnx</c>, <c>scripts/check-patches.sh</c>, and
@@ -16,7 +21,11 @@ namespace Optimum.Bootstrap.Core.Build;
 /// </summary>
 public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
 {
-    public async Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+    public async Task<BuildResult> RunAsync(
+        BuildRequest request,
+        IBuildObserver observer,
+        CancellationToken forceful,
+        CancellationToken graceful = default)
     {
         var scanner = new PrerequisiteScanner(probe, request.RepoRoot);
         string[] missing = scanner.Scan().Where(r => r.BlocksBuild).Select(r => r.Definition.DisplayName).ToArray();
@@ -38,7 +47,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         {
             StepOutcome bootstrap = await RunStep(
                 BootstrapCommand(request), request.RepoRoot, ProgressPhase.Decompile, 2, 48, observer,
-                clearPlatformEnv: false, cancellationToken);
+                clearPlatformEnv: false, forceful, graceful);
             if (!bootstrap.Ok)
             {
                 return BuildResult.Failure(
@@ -51,21 +60,21 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
             StepOutcome build = await RunStep(
                 (DotnetExecutable(), ["build", "VintageStory.slnx", "-c", "Release", "--nologo"]),
                 request.RepoRoot, ProgressPhase.Assemble, 52, 82, observer,
-                clearPlatformEnv: true, cancellationToken);
+                clearPlatformEnv: true, forceful, graceful);
             if (!build.Ok)
                 return BuildResult.Failure(FailureReason.AssembleFailed, $"dotnet build exited {build.ExitCode}");
 
             StepOutcome checkPatches = await RunStep(
                 ("bash", ["scripts/check-patches.sh", "--strict-unavailable"]),
                 request.RepoRoot, ProgressPhase.Patch, 82, 86, observer,
-                clearPlatformEnv: false, cancellationToken);
+                clearPlatformEnv: false, forceful, graceful);
             if (!checkPatches.Ok)
                 return BuildResult.Failure(FailureReason.PatchConflict,
                     $"check-patches.sh exited {checkPatches.ExitCode}: a patch did not survive the decompile round trip");
 
             StepOutcome package = await RunStep(
                 PackageCommand(request), request.RepoRoot, ProgressPhase.Assemble, 86, 95, observer,
-                clearPlatformEnv: false, cancellationToken);
+                clearPlatformEnv: false, forceful, graceful);
             if (!package.Ok)
                 return BuildResult.Failure(FailureReason.AssembleFailed, $"packaging exited {package.ExitCode}");
 
@@ -164,7 +173,8 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         int endPercent,
         IBuildObserver observer,
         bool clearPlatformEnv,
-        CancellationToken cancellationToken)
+        CancellationToken forceful,
+        CancellationToken graceful)
     {
         observer.Phase(phase, startPercent, $"{command.Exe} {string.Join(' ', command.Args)}");
 
@@ -180,7 +190,8 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         if (clearPlatformEnv)
             cmd = cmd.WithEnvironmentVariables(env => env.Set("Platform", null).Set("PLATFORM", null));
 
-        await foreach (CommandEvent commandEvent in cmd.ListenAsync(cancellationToken))
+        await foreach (CommandEvent commandEvent in
+            cmd.ListenAsync(Encodings.Utf8, Encodings.Utf8, forceful, graceful))
         {
             switch (commandEvent)
             {

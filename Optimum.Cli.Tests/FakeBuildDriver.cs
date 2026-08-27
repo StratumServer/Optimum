@@ -20,10 +20,10 @@ public sealed class FakeBuildDriver : IBuildDriver
             return BuildResult.Success("/out/Optimum-v0.3.14-linux-x64");
         };
 
-    public Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+    public Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken forceful, CancellationToken graceful = default)
     {
         WasRun = true;
-        cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult(Behaviour(observer, cancellationToken));
+        forceful.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(observer, forceful));
     }
 }

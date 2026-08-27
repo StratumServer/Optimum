@@ -7,6 +7,20 @@ using Xunit;
 
 namespace Optimum.Installer.Tests;
 
+public class ScrollReadGateTests
+{
+    [Theory]
+    [InlineData(200, 300, 0, true)]    // fits, no scroll needed
+    [InlineData(1000, 300, 0, false)]  // long, at the top
+    [InlineData(1000, 300, 400, false)] // long, mid-scroll
+    [InlineData(1000, 300, 700, true)] // long, scrolled to the bottom
+    [InlineData(0, 300, 0, false)]     // extent not measured yet
+    public void ReadToEnd(double extent, double viewport, double offset, bool expected)
+    {
+        Assert.Equal(expected, ScrollReadGate.ReadToEnd(extent, viewport, offset));
+    }
+}
+
 public class EulaViewModelTests
 {
     [Fact]
@@ -137,6 +151,34 @@ public class ProgressViewModelTests
         Assert.NotNull(outcome);
         Assert.True(outcome!.Succeeded);
         Assert.Equal(100, vm.Percent);
+    }
+
+    [Fact]
+    public async Task TheTemporaryBuildDirectoryIsDeletedAfterwards()
+    {
+        string? capturedOutput = null;
+        var driver = new FakeBuildDriver
+        {
+            Behaviour = (_, _) => BuildResult.Success("/tmp/pkg/Optimum-v0.3.14-linux-x64"),
+        };
+        var services = TestServices.Build(driver: driver);
+        var vm = new ProgressViewModel(services,
+            new InstallSession("/repo", "/home/tester/games/optimum", null, null, Bootstrap.Core.Install.ShortcutKinds.None),
+            action => action());
+
+        // Have the driver create the directory the way the real one does.
+        driver.Behaviour = (_, _) =>
+        {
+            capturedOutput = driver.LastOutputDirectory;
+            Directory.CreateDirectory(capturedOutput!);
+            File.WriteAllText(Path.Combine(capturedOutput!, "marker"), "x");
+            return BuildResult.Success("/tmp/pkg/Optimum-v0.3.14-linux-x64");
+        };
+
+        await vm.RunAsync();
+
+        Assert.NotNull(capturedOutput);
+        Assert.False(Directory.Exists(capturedOutput!));
     }
 
     [Fact]

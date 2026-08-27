@@ -112,8 +112,48 @@ public class WizardStateMachineTests
         await vm.InstallCompletion;
 
         Assert.Equal(WizardScreen.Completion, vm.CurrentScreen);
-        Assert.True(vm.Completion!.Failed);
+        Assert.True(vm.Completion!.CanRetry);
+        Assert.False(vm.Completion.Succeeded);
 
+        vm.Completion!.RetryCommand.Execute(null);
+        Assert.Equal(WizardScreen.Prerequisites, vm.CurrentScreen);
+        Assert.Null(vm.Completion);
+    }
+
+    [Fact]
+    public async Task AcceptingTheEulaTwiceRunsTheBuildOnlyOnce()
+    {
+        var driver = new FakeBuildDriver();
+        var vm = Wizard(driver);
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.ContinueCommand.Execute(null);
+        vm.Eula.ScrolledToEnd = true;
+        vm.Eula.Accepted = true;
+
+        vm.Eula.AcceptCommand.Execute(null);
+        vm.Eula.AcceptCommand.Execute(null);
+        await vm.InstallCompletion;
+
+        Assert.Equal(1, driver.RunCount);
+    }
+
+    [Fact]
+    public async Task ACancelledBuildCanBeRetried()
+    {
+        var driver = new FakeBuildDriver
+        {
+            Behaviour = (_, _) => BuildResult.Failure(FailureReason.Cancelled, "the build was cancelled"),
+        };
+        var vm = Wizard(driver);
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.ContinueCommand.Execute(null);
+        vm.Eula.ScrolledToEnd = true;
+        vm.Eula.Accepted = true;
+        vm.Eula.AcceptCommand.Execute(null);
+        await vm.InstallCompletion;
+
+        Assert.True(vm.Completion!.Cancelled);
+        Assert.True(vm.Completion.CanRetry);
         vm.Completion.RetryCommand.Execute(null);
         Assert.Equal(WizardScreen.Prerequisites, vm.CurrentScreen);
     }

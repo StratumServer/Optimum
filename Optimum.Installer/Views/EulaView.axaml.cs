@@ -8,16 +8,16 @@ public partial class EulaView : UserControl
 {
     public EulaView() => AvaloniaXamlLoader.Load(this);
 
+    // ScrollChanged fires for extent, viewport, and offset changes, so it also
+    // fires once when layout gives the ScrollViewer its real extent. That covers
+    // both "the notice fits" and "scrolled to the bottom" without hooking
+    // LayoutUpdated, which loops.
     private void OnScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
         if (sender is not ScrollViewer scroller || DataContext is not EulaViewModel vm)
             return;
 
-        // Treat a viewport that shows all the text, or a scroll within a few
-        // pixels of the bottom, as "read to the end".
-        bool atEnd = scroller.Extent.Height <= scroller.Viewport.Height + 1
-            || scroller.Offset.Y >= scroller.Extent.Height - scroller.Viewport.Height - 4;
-        if (atEnd)
+        if (ScrollReadGate.ReadToEnd(scroller.Extent.Height, scroller.Viewport.Height, scroller.Offset.Y))
             vm.ScrolledToEnd = true;
     }
 }

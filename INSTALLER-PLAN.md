@@ -466,6 +466,7 @@ Progress --success--> Completion(ok)
 Progress --failure--> Completion(error)
 Progress --Cancel--> Completion(cancelled)
 Completion(error) --Retry--> Prerequisites
+Completion(cancelled) --Retry--> Prerequisites
 ```
 
 Backwards navigation is allowed from Options to Prerequisites and blocked once
@@ -897,12 +898,18 @@ through `InstallerLogFilter` (ported from the Windows installer's filter).
 resolves each view model to its view. `FakeSystemProbe` moved to a plain
 `Optimum.Bootstrap.Core.TestSupport` project so the v2 and v3 test projects can
 both use it.
-*Verification:* `Optimum.Installer.Tests` has 27 tests (25 plain xUnit v3 on the
+*Verification:* `Optimum.Installer.Tests` has 35 tests (33 plain xUnit v3 on the
 view models plus two `Avalonia.Headless.XUnit` render tests), green on
 `ubuntu-latest` with no xvfb, covering the state machine transitions, the
-Continue gating, the EULA gate, inline validation, the log filter, and the
-build-then-deploy flow against fakes. A real install per platform is still a
-manual check.
+Continue gating, the EULA gate, inline validation, the log filter, the
+build-then-deploy flow against fakes, re-entrancy on double-accept, retry from a
+cancelled run, and temp-directory cleanup. An adversarial pass drove: the Launch
+button running the launcher directly rather than through `xdg-open`, the
+temporary build tree being deleted after the deploy, an elapsed clock that ticks
+on its own timer, two-tier graceful-then-forceful cancellation through
+`IBuildDriver.RunAsync`, a re-entrancy guard on accept, a rebuilt Options screen
+on retry, and a scroll-read gate extracted to a pure `ScrollReadGate` so it is
+tested directly. A real install per platform is still a manual check.
 
 **Phase 4: unification.** The transactional installer on all three platforms, the
 registered uninstaller and install manifest on all three, unified shortcuts,

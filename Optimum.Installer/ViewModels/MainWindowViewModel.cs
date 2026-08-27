@@ -21,6 +21,7 @@ public enum WizardScreen
 public sealed partial class MainWindowViewModel : ViewModelBase
 {
     private readonly InstallerServices _services;
+    private bool _installStarted;
 
     public MainWindowViewModel(InstallerServices services)
     {
@@ -29,9 +30,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Prerequisites = new PrerequisitesViewModel(services.Probe, services.RepoRoot);
         Prerequisites.ContinueRequested += () => CurrentScreen = WizardScreen.Options;
 
-        Options = new OptionsViewModel(services.Probe, services.RepoRoot);
-        Options.BackRequested += () => CurrentScreen = WizardScreen.Prerequisites;
-        Options.ContinueRequested += OpenEula;
+        Options = BuildOptions();
 
         Eula = new EulaViewModel();
         Eula.DeclineRequested += () => IsEulaOpen = false;
@@ -53,7 +52,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     public PrerequisitesViewModel Prerequisites { get; }
 
-    public OptionsViewModel Options { get; }
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentViewModel))]
+    private OptionsViewModel _options = null!;
 
     public EulaViewModel Eula { get; }
 
@@ -75,6 +76,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         _ => Prerequisites,
     };
 
+    private OptionsViewModel BuildOptions()
+    {
+        var options = new OptionsViewModel(_services.Probe, _services.RepoRoot);
+        options.BackRequested += () => CurrentScreen = WizardScreen.Prerequisites;
+        options.ContinueRequested += OpenEula;
+        return options;
+    }
+
     private void OpenEula()
     {
         Eula.Reset();
@@ -83,8 +92,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task StartInstallAsync()
     {
-        if (!Eula.CanAccept || _services.RepoRoot is null)
+        if (_installStarted || !Eula.CanAccept || _services.RepoRoot is null)
             return;
+        _installStarted = true;
 
         IsEulaOpen = false;
 
@@ -109,12 +119,15 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         var completion = new CompletionViewModel(outcome);
         completion.RetryRequested += RestartFromPrerequisites;
         Completion = completion;
+        Progress = null;
         CurrentScreen = WizardScreen.Completion;
     }
 
     private void RestartFromPrerequisites()
     {
+        _installStarted = false;
         Prerequisites.Rescan();
+        Options = BuildOptions();
         Progress = null;
         Completion = null;
         CurrentScreen = WizardScreen.Prerequisites;
