@@ -31,7 +31,8 @@ public static class CliRunner
         TextWriter stderr,
         ISystemProbe probe,
         IBuildDriver buildDriver,
-        CancellationToken externalCancellation = default)
+        CancellationToken externalCancellation = default,
+        ISourceProvider? sourceProvider = null)
     {
         if (args.Count == 1 && args[0] == "--version")
         {
@@ -64,7 +65,7 @@ public static class CliRunner
         {
             "preflight" => Preflight(rest, probe, output),
             "capabilities" => Capabilities(rest, probe, stdout, stderr),
-            "build" => await Build(rest, probe, buildDriver, output, cancellation.Token),
+            "build" => await Build(rest, probe, buildDriver, sourceProvider ?? new GitSourceProvider(probe), output, cancellation.Token),
             "install" => Install(rest, probe, output),
             "validate" => Validate(rest, probe, output),
             "uninstall" => Uninstall(rest, probe, output),
@@ -136,12 +137,13 @@ public static class CliRunner
         IReadOnlyList<string> args,
         ISystemProbe probe,
         IBuildDriver driver,
+        ISourceProvider sourceProvider,
         EngineOutput output,
         CancellationToken cancellationToken)
     {
         var parsed = new CliArgs(args, new HashSet<string>
         {
-            "--output", "--client-archive", "--version", "--repo-root",
+            "--output", "--client-archive", "--version", "--repo-root", "--source-cache",
         });
         if (parsed.Errors.Count > 0)
             return output.Failure(FailureReason.BadInput, string.Join("; ", parsed.Errors));
@@ -167,11 +169,45 @@ public static class CliRunner
                 return output.Failure(FailureReason.BadInput, $"--client-archive does not exist: {clientArchive}");
         }
 
+        string? sourceCache = parsed.Get("--source-cache");
+        if (sourceCache is not null && !Path.IsPathRooted(sourceCache))
+            return output.Failure(FailureReason.BadInput, $"--source-cache must be an absolute path: {sourceCache}");
+
         string? repoRoot = ResolveRepoRoot(probe, parsed.Get("--repo-root"));
         if (repoRoot is null)
-            return output.Failure(FailureReason.BadInput, "run this from inside an Optimum checkout, or pass --repo-root");
+        {
+            if (!parsed.Has("--acquire-source"))
+            {
+                return output.Failure(FailureReason.BadInput,
+                    "run this from inside an Optimum checkout, pass --repo-root, or pass --acquire-source to download it");
+            }
 
-        var request = new BuildRequest(repoRoot, Path.GetFullPath(outputDir), clientArchive, parsed.Get("--version"));
+            SourceAcquisitionResult acquired;
+            try
+            {
+                acquired = await sourceProvider.EnsureAsync(
+                    new SourceRequest(CoreInfo.Version, sourceCache), output, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return output.Failure(FailureReason.Cancelled, "the source download was cancelled");
+            }
+            catch (Exception ex)
+            {
+                return output.Failure(FailureReason.SourceUnavailable,
+                    $"could not obtain the Optimum source: {ex.Message}");
+            }
+
+            if (!acquired.Ok || string.IsNullOrWhiteSpace(acquired.RepoRoot))
+            {
+                return output.Failure(
+                    acquired.Reason ?? FailureReason.SourceUnavailable,
+                    acquired.Message ?? "could not obtain the Optimum source");
+            }
+            repoRoot = acquired.RepoRoot;
+        }
+
+        var request = new BuildRequest(repoRoot!, Path.GetFullPath(outputDir), clientArchive, parsed.Get("--version"));
 
         BuildResult result;
         try
@@ -290,7 +326,7 @@ public static class CliRunner
         stderr.WriteLine("usage: optimum <verb> [--json] [flags]");
         stderr.WriteLine("verbs:");
         stderr.WriteLine("  preflight     [--repo-root <dir>]");
-        stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>]");
+        stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>] [--acquire-source [--source-cache <abs>]]");
         stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop]");
         stderr.WriteLine("  validate      --package <abs>");
         stderr.WriteLine("  uninstall     --install-dir <abs>");

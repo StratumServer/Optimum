@@ -10,7 +10,8 @@ namespace Optimum.Cli.Tests;
 public class CliRunnerTests
 {
     private static async Task<(int Code, string Stdout, string Stderr)> Run(
-        string[] args, ISystemProbe? probe = null, IBuildDriver? driver = null, CancellationToken cancel = default)
+        string[] args, ISystemProbe? probe = null, IBuildDriver? driver = null, CancellationToken cancel = default,
+        ISourceProvider? sourceProvider = null)
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
@@ -18,8 +19,28 @@ public class CliRunnerTests
             args, stdout, stderr,
             probe ?? new FakeSystemProbe(),
             driver ?? new FakeBuildDriver(),
-            cancel);
+            cancel,
+            sourceProvider);
         return (code, stdout.ToString(), stderr.ToString());
+    }
+
+    private sealed class StubSourceProvider(SourceAcquisitionResult result) : ISourceProvider
+    {
+        public int Calls { get; private set; }
+
+        public Task<SourceAcquisitionResult> EnsureAsync(
+            SourceRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return Task.FromResult(result);
+        }
+    }
+
+    private sealed class ThrowingSourceProvider : ISourceProvider
+    {
+        public Task<SourceAcquisitionResult> EnsureAsync(
+            SourceRequest request, IBuildObserver observer, CancellationToken cancellationToken) =>
+            throw new IOException("clone process could not start");
     }
 
     [Fact]
@@ -197,6 +218,81 @@ public class CliRunnerTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task BuildWithoutACheckoutPointsAtAcquireSource()
+    {
+        var (code, _, stderr) = await Run(["build", "--acknowledge-decompile", "--output", "/tmp/out"]);
+        Assert.Equal(CliRunner.ExitUsage, code);
+        Assert.Contains("--acquire-source", stderr);
+    }
+
+    [Fact]
+    public async Task BuildAcquiresTheSourceWhenAskedAndThereIsNoCheckout()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/downloaded/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+        probe.AddFile("/downloaded/scripts/bootstrap.sh");
+        var driver = new FakeBuildDriver();
+        var provider = new StubSourceProvider(SourceAcquisitionResult.Success("/downloaded"));
+
+        var (code, stdout, _) = await Run(
+            ["build", "--acknowledge-decompile", "--output", "/tmp/out", "--acquire-source"],
+            probe, driver, sourceProvider: provider);
+
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.Equal(1, provider.Calls);
+        Assert.True(driver.WasRun);
+        Assert.Contains("Optimum-v0.3.14-linux-x64", stdout);
+    }
+
+    [Fact]
+    public async Task BuildSurfacesASourceDownloadFailure()
+    {
+        var provider = new StubSourceProvider(
+            SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable, "git clone failed (exit 128)"));
+
+        var (code, _, stderr) = await Run(
+            ["build", "--acknowledge-decompile", "--output", "/tmp/out", "--acquire-source"],
+            sourceProvider: provider);
+
+        Assert.Equal(CliRunner.ExitError, code);
+        Assert.Contains("source-unavailable", stderr);
+    }
+
+    [Fact]
+    public async Task BuildRejectsAMalformedSuccessfulSourceResult()
+    {
+        var provider = new StubSourceProvider(new SourceAcquisitionResult(true, null, null, null));
+
+        var (code, _, stderr) = await Run(
+            ["build", "--acknowledge-decompile", "--output", "/tmp/out", "--acquire-source"],
+            sourceProvider: provider);
+
+        Assert.Equal(CliRunner.ExitError, code);
+        Assert.Contains("source-unavailable", stderr);
+    }
+
+    [Fact]
+    public async Task BuildConvertsAnUnexpectedSourceProviderFaultToAResult()
+    {
+        var (code, _, stderr) = await Run(
+            ["build", "--acknowledge-decompile", "--output", "/tmp/out", "--acquire-source"],
+            sourceProvider: new ThrowingSourceProvider());
+
+        Assert.Equal(CliRunner.ExitError, code);
+        Assert.Contains("source-unavailable", stderr);
+        Assert.Contains("could not start", stderr);
+    }
+
+    [Fact]
+    public async Task BuildRejectsARelativeSourceCachePath()
+    {
+        var (code, _, stderr) = await Run(
+            ["build", "--acknowledge-decompile", "--output", "/tmp/out", "--acquire-source", "--source-cache", "rel/cache"]);
+        Assert.Equal(CliRunner.ExitUsage, code);
+        Assert.Contains("absolute", stderr);
     }
 
     private static FakeSystemProbe RepoProbe()

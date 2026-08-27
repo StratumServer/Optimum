@@ -23,6 +23,12 @@ public sealed record InstallerServices(
     /// <summary>Self-update for the installer. Null in a headless test.</summary>
     public IUpdateService? Updates { get; init; }
 
+    /// <summary>
+    /// Downloads the Optimum source when <see cref="RepoRoot"/> is null (a
+    /// standalone installer that is not inside a checkout). Null in a headless
+    /// test that supplies its own repo root.
+    /// </summary>
+    public ISourceProvider? SourceProvider { get; init; }
 
     public static InstallerServices CreateReal()
     {
@@ -34,6 +40,7 @@ public sealed record InstallerServices(
             new PackageDeployer(probe))
         {
             Updates = new UpdateService(),
+            SourceProvider = new GitSourceProvider(probe),
         };
     }
 }

@@ -21,11 +21,13 @@ public sealed class FakeBuildDriver : IBuildDriver
     public Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken forceful, CancellationToken graceful = default)
     {
         RunCount++;
+        LastRepoRoot = request.RepoRoot;
         LastOutputDirectory = request.OutputDirectory;
         forceful.ThrowIfCancellationRequested();
         return Task.FromResult(Behaviour(observer, forceful));
     }
 
+    public string? LastRepoRoot { get; private set; }
     public string? LastOutputDirectory { get; private set; }
 }
 
@@ -35,6 +37,22 @@ public sealed class FakePackageInstaller : IPackageInstaller
         static request => DeployResult.Success(request.InstallDirectory, request.InstallDirectory + "/optimum-launch.sh");
 
     public DeployResult Deploy(DeployRequest request, IBuildObserver? observer = null) => Behaviour(request);
+}
+
+public sealed class FakeSourceProvider : ISourceProvider
+{
+    public Func<SourceRequest, SourceAcquisitionResult> Behaviour { get; set; } =
+        static _ => SourceAcquisitionResult.Success("/downloaded-repo");
+
+    public int Calls { get; private set; }
+
+    public Task<SourceAcquisitionResult> EnsureAsync(
+        SourceRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        observer.Phase(ProgressPhase.Decompile, 1, "cloning");
+        return Task.FromResult(Behaviour(request));
+    }
 }
 
 public sealed class FakeUpdateService : IUpdateService
@@ -61,6 +79,7 @@ public static class TestServices
         IBuildDriver? driver = null,
         IPackageInstaller? installer = null,
         IUpdateService? updates = null,
+        ISourceProvider? sourceProvider = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -90,6 +109,7 @@ public static class TestServices
         {
             UiPost = action => action(),
             Updates = updates,
+            SourceProvider = sourceProvider,
         };
     }
 }

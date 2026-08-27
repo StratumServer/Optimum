@@ -22,13 +22,21 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 {
     private readonly InstallerServices _services;
     private bool _installStarted;
+    private string? _repoRoot;
 
     public MainWindowViewModel(InstallerServices services)
     {
         _services = services;
+        _repoRoot = services.RepoRoot;
 
-        Prerequisites = new PrerequisitesViewModel(services.Probe, services.RepoRoot);
-        Prerequisites.ContinueRequested += () => CurrentScreen = WizardScreen.Options;
+        Action<Action> post = _services.UiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
+        Prerequisites = new PrerequisitesViewModel(services.Probe, services.RepoRoot, services.SourceProvider, post);
+        Prerequisites.ContinueRequested += root =>
+        {
+            _repoRoot = root;
+            Options = BuildOptions();
+            CurrentScreen = WizardScreen.Options;
+        };
 
         Options = BuildOptions();
 
@@ -104,7 +112,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private OptionsViewModel BuildOptions()
     {
-        var options = new OptionsViewModel(_services.Probe, _services.RepoRoot);
+        var options = new OptionsViewModel(_services.Probe, _repoRoot);
         options.BackRequested += () => CurrentScreen = WizardScreen.Prerequisites;
         options.ContinueRequested += OpenEula;
         return options;
@@ -118,14 +126,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private async Task StartInstallAsync()
     {
-        if (_installStarted || !Eula.CanAccept || _services.RepoRoot is null)
+        if (_installStarted || !Eula.CanAccept || _repoRoot is null)
             return;
         _installStarted = true;
 
         IsEulaOpen = false;
 
         var session = new InstallSession(
-            _services.RepoRoot,
+            _repoRoot,
             Options.InstallDirectory,
             Options.ResolvedDataPath,
             Options.SelectedVersion,
