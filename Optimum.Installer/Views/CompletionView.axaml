@@ -3,22 +3,42 @@
              xmlns:vm="using:Optimum.Installer.ViewModels"
              x:Class="Optimum.Installer.Views.CompletionView"
              x:DataType="vm:CompletionViewModel">
-  <StackPanel Spacing="12" VerticalAlignment="Center">
-    <TextBlock Text="{Binding Headline}" FontSize="18" FontWeight="SemiBold" />
-    <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
-    <TextBlock Text="{Binding InstallDirectory}" Opacity="0.7" FontSize="12"
-               IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+  <Grid>
+    <Border Classes="card" MaxWidth="620"
+            HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel Spacing="14">
+        <Border Width="64" Height="6" CornerRadius="3"
+                Background="{DynamicResource AppAccentBrush}"
+                HorizontalAlignment="Left" />
+        <StackPanel Spacing="5">
+          <TextBlock Text="{Binding Headline}" FontSize="24" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding Message}" Classes="muted" TextWrapping="Wrap" />
+        </StackPanel>
 
-    <StackPanel Orientation="Horizontal" Spacing="8">
-      <Button Content="Launch Optimum" Classes="accent"
-              IsVisible="{Binding Succeeded}"
-              Command="{Binding LaunchCommand}" />
-      <Button Content="Try again"
-              IsVisible="{Binding CanRetry}"
-              Command="{Binding RetryCommand}" />
-      <Button Content="View log"
-              IsVisible="{Binding !Succeeded}"
-              Command="{Binding ViewLogCommand}" />
-    </StackPanel>
-  </StackPanel>
+        <Border Classes="subtleCard"
+                IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+          <StackPanel Spacing="3">
+            <TextBlock Text="Installed at" Classes="muted" FontSize="12" />
+            <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <TextBlock Text="If the installation did not finish, retry after resolving the message above. The log keeps the technical details."
+                   Classes="muted" FontSize="12" TextWrapping="Wrap"
+                   IsVisible="{Binding !Succeeded}" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="Launch Optimum" Classes="accent"
+                  IsVisible="{Binding Succeeded}"
+                  Command="{Binding LaunchCommand}" />
+          <Button Content="Try again" Classes="accent"
+                  IsVisible="{Binding CanRetry}"
+                  Command="{Binding RetryCommand}" />
+          <Button Content="Open installation log"
+                  IsVisible="{Binding !Succeeded}"
+                  Command="{Binding ViewLogCommand}" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
 </UserControl>

@@ -29,6 +29,7 @@ public class EulaViewModelTests
     {
         var vm = new EulaViewModel();
         Assert.Contains("decompil", vm.ConsentText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("# Before", vm.ConsentText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -256,6 +257,24 @@ public class InstallerLogFilterTests
 
 public class ProgressViewModelTests
 {
+    [Fact]
+    public void CancellingRequiresAnExplicitConfirmation()
+    {
+        var vm = new ProgressViewModel(
+            TestServices.Build(),
+            new InstallSession("/repo", "/home/tester/games/optimum", null, null,
+                Bootstrap.Core.Install.ShortcutKinds.None),
+            action => action());
+
+        vm.RequestCancelCommand.Execute(null);
+        Assert.True(vm.ConfirmCancel);
+        Assert.False(vm.CancelRequested);
+
+        vm.KeepInstallingCommand.Execute(null);
+        Assert.False(vm.ConfirmCancel);
+        Assert.False(vm.CancelRequested);
+    }
+
     [Fact]
     public async Task ACleanRunReportsSuccessAndAHundredPercent()
     {

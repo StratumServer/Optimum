@@ -27,7 +27,7 @@ public class WizardStateMachineTests
     }
 
     [Fact]
-    public void PrerequisitesToOptionsToEula()
+    public void PrerequisitesToOptionsToReview()
     {
         var vm = Wizard();
 
@@ -38,7 +38,10 @@ public class WizardStateMachineTests
 
         vm.Options.ContinueCommand.Execute(null);
         Assert.True(vm.IsEulaOpen);
-        Assert.Equal(WizardScreen.Options, vm.CurrentScreen);
+        Assert.Equal(WizardScreen.Review, vm.CurrentScreen);
+        Assert.Equal(3, vm.CurrentStepNumber);
+        Assert.Equal("Step 3 of 4", vm.CurrentStepLabel);
+        Assert.Equal(vm.Options.InstallDirectory, vm.Eula.InstallDirectory);
     }
 
     [Fact]
@@ -62,6 +65,39 @@ public class WizardStateMachineTests
 
         Assert.False(vm.IsEulaOpen);
         Assert.Equal(WizardScreen.Options, vm.CurrentScreen);
+    }
+
+    [Fact]
+    public void WizardHeaderExplainsEachStep()
+    {
+        var vm = Wizard();
+        Assert.Equal("Check your system", vm.CurrentStepTitle);
+        Assert.Equal(25, vm.CurrentStepProgress);
+
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        Assert.Equal("Choose how Optimum is installed", vm.CurrentStepTitle);
+        Assert.Equal(50, vm.CurrentStepProgress);
+
+        vm.Options.ContinueCommand.Execute(null);
+        Assert.Equal("Review before installing", vm.CurrentStepTitle);
+        Assert.Equal(75, vm.CurrentStepProgress);
+    }
+
+    [Fact]
+    public void ReviewSummarizesDataVersionAndShortcuts()
+    {
+        var vm = Wizard();
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.UseSeparateDataFolder = true;
+        vm.Options.DataPath = "/home/tester/vs-data";
+        vm.Options.CreateMenuEntry = false;
+        vm.Options.CreateDesktopShortcut = true;
+
+        vm.Options.ContinueCommand.Execute(null);
+
+        Assert.Equal("/home/tester/vs-data", vm.Eula.DataPathSummary);
+        Assert.Equal("Desktop shortcut", vm.Eula.ShortcutSummary);
+        Assert.NotEmpty(vm.Eula.VersionSummary);
     }
 
     [Fact]

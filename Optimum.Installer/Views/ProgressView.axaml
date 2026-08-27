@@ -3,36 +3,64 @@
              xmlns:vm="using:Optimum.Installer.ViewModels"
              x:Class="Optimum.Installer.Views.ProgressView"
              x:DataType="vm:ProgressViewModel">
-  <DockPanel>
-    <StackPanel DockPanel.Dock="Top" Spacing="6">
-      <TextBlock Text="{Binding PhaseLabel}" FontWeight="SemiBold" FontSize="15" />
-      <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" />
-      <Grid ColumnDefinitions="*,Auto">
-        <TextBlock Grid.Column="0" Text="{Binding StatusDetail}" Opacity="0.7" FontSize="12"
-                   TextTrimming="CharacterEllipsis" />
-        <TextBlock Grid.Column="1" Opacity="0.7" FontSize="12">
-          <Run Text="{Binding Elapsed}" />
-          <Run Text="  " />
-          <Run Text="{Binding EstimatedRemaining}" />
-        </TextBlock>
-      </Grid>
-    </StackPanel>
-
-    <Button DockPanel.Dock="Bottom" Content="Cancel" HorizontalAlignment="Right"
-            Margin="0,12,0,0"
-            IsEnabled="{Binding !CancelRequested}"
-            Command="{Binding CancelCommand}" />
-
-    <Border BorderBrush="#40808080" BorderThickness="1" CornerRadius="4" Margin="0,12">
-      <ScrollViewer>
-        <ItemsControl ItemsSource="{Binding Log}" Margin="8">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:LogLine">
-              <TextBlock Text="{Binding Text}" FontFamily="monospace" FontSize="12" TextWrapping="Wrap" />
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Grid.Row="0" Classes="card">
+      <StackPanel Spacing="9">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Grid.Column="0" Spacing="2">
+            <TextBlock Text="{Binding PhaseLabel}" FontWeight="SemiBold" FontSize="17" />
+            <TextBlock Text="{Binding StatusDetail}" Classes="muted"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+          <TextBlock Grid.Column="1" Text="{Binding PercentLabel}" FontSize="22"
+                     FontWeight="SemiBold" VerticalAlignment="Center" Margin="16,0,0,0" />
+        </Grid>
+        <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" Height="8"
+                     AutomationProperties.Name="Installation progress" />
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Grid.Column="0" Text="This can take several minutes on the first run."
+                     Classes="muted" FontSize="12" />
+          <TextBlock Grid.Column="1" Classes="muted" FontSize="12">
+            <Run Text="Elapsed " />
+            <Run Text="{Binding Elapsed}" />
+            <Run Text="  " />
+            <Run Text="{Binding EstimatedRemaining}" />
+          </TextBlock>
+        </Grid>
+      </StackPanel>
     </Border>
-  </DockPanel>
+
+    <Expander Grid.Row="1" Header="Installation details" Margin="0,12,0,0"
+              IsExpanded="False">
+      <Border Classes="card" Padding="0" Margin="0,8,0,0">
+        <ScrollViewer>
+          <ItemsControl ItemsSource="{Binding Log}" Margin="12">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:LogLine">
+                <TextBlock Text="{Binding Text}" FontFamily="monospace" FontSize="12"
+                           TextWrapping="Wrap" Margin="0,2" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </Expander>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
+      <Border Grid.Column="0" Background="{DynamicResource AppWarningSurfaceBrush}"
+              CornerRadius="8" Padding="12,8" Margin="0,0,12,0"
+              IsVisible="{Binding ConfirmCancel}">
+        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+          <TextBlock Text="Stop the installation?" Foreground="{DynamicResource AppWarningBrush}"
+                     FontWeight="SemiBold" VerticalAlignment="Center" />
+          <Button Content="Keep installing" Command="{Binding KeepInstallingCommand}" />
+          <Button Content="Stop" Command="{Binding CancelCommand}" />
+        </StackPanel>
+      </Border>
+      <Button Grid.Column="1" Content="Cancel installation"
+              IsEnabled="{Binding !CancelRequested}"
+              IsVisible="{Binding !ConfirmCancel}"
+              Command="{Binding RequestCancelCommand}" />
+    </Grid>
+  </Grid>
 </UserControl>

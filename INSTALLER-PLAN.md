@@ -450,17 +450,21 @@ when a `patches-<version>-bridge/` directory offers an alternate, matching
 inline, not on Continue, so the user does not fill in three fields and then learn
 the first one was wrong.
 
-**EULA modal.** Mandatory, scrollable, with an acceptance checkbox that gates the
-Continue button. Shown on every attempt to start an install, as the Windows
-installer does at `scripts/install-windows.ps1:1953`.
+**Review and consent.** A full wizard step summarizes the install directory,
+data path, target version, and shortcuts before any work starts. The local build
+notice remains mandatory and scrollable, with an acceptance checkbox that gates
+the Start installation button. Back returns to Install options without losing
+the user's choices.
 
 **Progress and log.** A phase label driven by the `BootstrapProgress` phase, a
-determinate progress bar, an honest elapsed and estimated remaining time, and a
-filtered log pane. The filter reproduces the Windows behavior at
+determinate progress bar, and honest elapsed and estimated remaining times. The
+filtered technical log is collapsed by default so the current action remains
+primary. The filter reproduces the Windows behavior at
 `scripts/install-windows.ps1:1281-1301`: phase markers drive the status label, a
 whitelist of progress prefixes shows verbatim, and any line matching `error`,
-`FAILED`, `ERROR`, or `throw` always shows regardless of the whitelist. A Cancel
-button issues the two-tier CliWrap cancellation (graceful token, then forceful).
+`FAILED`, `ERROR`, or `throw` always shows regardless of the whitelist. Cancel
+requires confirmation before it issues the two-tier CliWrap cancellation
+(graceful token, then forceful).
 
 **Completion.** On success, a Launch button and the install path. On failure, the
 reason, the message, and a View Log button that opens the saved log.
@@ -468,9 +472,9 @@ reason, the message, and a View Log button that opens the saved log.
 ### State machine
 
 ```
-Prerequisites --Continue--> Options --Continue--> EULA
-EULA --Accept--> Progress
-EULA --Decline--> Options
+Prerequisites --Continue--> Options --Review--> ReviewAndConsent
+ReviewAndConsent --Start--> Progress
+ReviewAndConsent --Back--> Options
 Progress --success--> Completion(ok)
 Progress --failure--> Completion(error)
 Progress --Cancel--> Completion(cancelled)
@@ -497,7 +501,7 @@ Progress starts, because the build is already writing to disk.
 | `optimum-launch.sh` and `datapath.cfg` | `scripts/install-linux.sh:742-764` | Core shortcut and launcher writers |
 | `.desktop` entry and hicolor icon | `scripts/install-linux.sh:766-790, 876-886` | Core shortcut writers |
 | WinForms wizard sections and dark/light detection | `scripts/install-windows.ps1` GUI block | Avalonia views with theme-aware resources |
-| EULA modal | `scripts/install-windows.ps1:1953-2027` | Core EULA resource, Installer modal with a real checkbox gate, posture C per section 2 |
+| EULA gate | `scripts/install-windows.ps1:1953-2027` | Core EULA resource, full Review and consent step with a real checkbox gate, posture C per section 2 |
 | Vintage Story auto-detection | `scripts/install-windows.ps1:204-294` | Core detection |
 | `Resolve-DotNetPath` probes | `scripts/install-windows.ps1:336` | Core detection |
 | `Assert-SafeInstallerPaths`, `Assert-DirectoryWritable` | `scripts/install-windows.ps1:152, 123` | Core path guards |
@@ -895,9 +899,10 @@ jobs get the same step incrementally.
 
 **Phase 3: the GUI.** Done. `Optimum.Installer` is an Avalonia 12 MVVM app that
 drives Core in-process, never the CLI. `MainWindowViewModel` is the wizard shell
-and state machine: Prerequisites, Options, a mandatory EULA modal over Options,
-Progress, Completion, with backward navigation only from Options to Prerequisites
-and blocked once Progress starts. `PrerequisitesViewModel` renders
+and state machine: Prerequisites, Options, Review and consent, Progress, and
+Completion. A persistent four-step header explains the user's position and the
+next decision. Backward navigation is available until Progress starts.
+`PrerequisitesViewModel` renders
 `PrerequisiteScanner` rows and gates Continue on `BlocksBuild`.
 `OptionsViewModel` defaults the install directory per platform, runs
 `InstallPathGuard` on every keystroke into an inline error, picks up a detected
@@ -910,12 +915,13 @@ through `InstallerLogFilter` (ported from the Windows installer's filter).
 resolves each view model to its view. `FakeSystemProbe` moved to a plain
 `Optimum.Bootstrap.Core.TestSupport` project so the v2 and v3 test projects can
 both use it.
-*Verification:* `Optimum.Installer.Tests` has 35 tests (33 plain xUnit v3 on the
+*Verification:* `Optimum.Installer.Tests` has 49 tests (47 plain xUnit v3 on the
 view models plus two `Avalonia.Headless.XUnit` render tests), green on
 `ubuntu-latest` with no xvfb, covering the state machine transitions, the
 Continue gating, the EULA gate, inline validation, the log filter, the
 build-then-deploy flow against fakes, re-entrancy on double-accept, retry from a
-cancelled run, and temp-directory cleanup. An adversarial pass drove: the Launch
+cancelled run, temp-directory cleanup, the four-step header, review summary, and
+cancel confirmation. An adversarial pass drove: the Launch
 button running the launcher directly rather than through `xdg-open`, the
 temporary build tree being deleted after the deploy, an elapsed clock that ticks
 on its own timer, two-tier graceful-then-forceful cancellation through

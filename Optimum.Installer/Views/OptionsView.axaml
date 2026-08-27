@@ -3,40 +3,74 @@
              xmlns:vm="using:Optimum.Installer.ViewModels"
              x:Class="Optimum.Installer.Views.OptionsView"
              x:DataType="vm:OptionsViewModel">
-  <DockPanel>
-    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                HorizontalAlignment="Right" Spacing="8" Margin="0,12,0,0">
-      <Button Content="Back" Command="{Binding BackCommand}" />
-      <Button Content="Continue" Classes="accent"
-              IsEnabled="{Binding CanContinue}"
-              Command="{Binding ContinueCommand}" />
-    </StackPanel>
+  <Grid RowDefinitions="*,Auto">
+    <ScrollViewer Grid.Row="0">
+      <StackPanel Spacing="12">
+        <Border Classes="card">
+          <StackPanel Spacing="10">
+            <StackPanel Spacing="3">
+              <TextBlock Text="Install location" Classes="sectionTitle" />
+              <TextBlock Text="Choose an empty folder that you own. The installer builds Optimum in a temporary workspace before moving it here."
+                         Classes="muted" TextWrapping="Wrap" />
+            </StackPanel>
+            <TextBox Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
+                     AutomationProperties.Name="Install directory" TabIndex="1" />
+          </StackPanel>
+        </Border>
 
-    <StackPanel Spacing="14">
-      <StackPanel Spacing="4">
-        <TextBlock Text="Install directory" FontWeight="SemiBold" />
-        <TextBox Text="{Binding InstallDirectory}" />
+        <Border Classes="card">
+          <StackPanel Spacing="8">
+            <StackPanel Spacing="3">
+              <TextBlock Text="Game data" Classes="sectionTitle" />
+              <TextBlock Text="By default, Optimum uses the same settings, worlds, and signed-in session as Vintage Story. Choose a specific folder only when you want to keep them separate."
+                         Classes="muted" TextWrapping="Wrap" />
+            </StackPanel>
+            <CheckBox Content="Use a specific Vintage Story data folder"
+                      IsChecked="{Binding UseSeparateDataFolder}" TabIndex="2" />
+            <StackPanel Spacing="4" IsVisible="{Binding UseSeparateDataFolder}" Margin="24,0,0,0">
+              <TextBox Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
+                       AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
+              <TextBlock Text="{Binding DataPathHint}" Classes="muted" FontSize="12"
+                         TextWrapping="Wrap"
+                         IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <Border Classes="card">
+          <Grid ColumnDefinitions="*,*">
+            <StackPanel Grid.Column="0" Spacing="8" Margin="0,0,18,0">
+              <TextBlock Text="Shortcuts" Classes="sectionTitle" />
+              <CheckBox Content="Add an application menu entry"
+                        IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
+              <CheckBox Content="Create a desktop shortcut"
+                        IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
+            </StackPanel>
+            <StackPanel Grid.Column="1" Spacing="8" IsVisible="{Binding ShowVersionChoice}">
+              <TextBlock Text="Vintage Story version" Classes="sectionTitle" />
+              <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
+                        AutomationProperties.Name="Vintage Story version" TabIndex="6" />
+              <TextBlock Text="Use the recommended version unless you need a supported compatibility bridge."
+                         Classes="muted" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+          </Grid>
+        </Border>
+
+        <Border Background="{DynamicResource AppDangerSurfaceBrush}" CornerRadius="8" Padding="12"
+                IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+          <TextBlock Text="{Binding ValidationError}" Foreground="{DynamicResource AppDangerBrush}"
+                     TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive" />
+        </Border>
       </StackPanel>
+    </ScrollViewer>
 
-      <CheckBox Content="Use a separate data folder"
-                IsChecked="{Binding UseSeparateDataFolder}" />
-      <StackPanel Spacing="4" IsVisible="{Binding UseSeparateDataFolder}">
-        <TextBox Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder" />
-        <TextBlock Text="{Binding DataPathHint}" Opacity="0.7" FontSize="12"
-                   IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-      </StackPanel>
-
-      <StackPanel Spacing="4" IsVisible="{Binding ShowVersionChoice}">
-        <TextBlock Text="Vintage Story version" FontWeight="SemiBold" />
-        <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}" />
-      </StackPanel>
-
-      <CheckBox Content="Add an application menu entry" IsChecked="{Binding CreateMenuEntry}" />
-      <CheckBox Content="Create a desktop shortcut" IsChecked="{Binding CreateDesktopShortcut}" />
-
-      <TextBlock Text="{Binding ValidationError}" Foreground="#d13438"
-                 TextWrapping="Wrap"
-                 IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-    </StackPanel>
-  </DockPanel>
+    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
+      <TextBlock Grid.Column="0" Text="You can review these choices before installation starts."
+                 Classes="muted" FontSize="12" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Back" Margin="8,0,0,0"
+              Command="{Binding BackCommand}" TabIndex="7" />
+      <Button Grid.Column="2" Content="Review installation" Classes="accent" Margin="8,0,0,0"
+              IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="8" />
+    </Grid>
+  </Grid>
 </UserControl>

@@ -3,10 +3,86 @@
              xmlns:local="using:Optimum.Installer"
              x:Class="Optimum.Installer.App"
              RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppBackgroundBrush" Color="#F4F6F9" />
+          <SolidColorBrush x:Key="AppSurfaceBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="AppSurfaceSubtleBrush" Color="#EEF2F6" />
+          <SolidColorBrush x:Key="AppBorderBrush" Color="#D8E0EA" />
+          <SolidColorBrush x:Key="AppTextBrush" Color="#172033" />
+          <SolidColorBrush x:Key="AppMutedTextBrush" Color="#526176" />
+          <SolidColorBrush x:Key="AppAccentBrush" Color="#4F46E5" />
+          <SolidColorBrush x:Key="AppOnAccentBrush" Color="#FFFFFF" />
+          <SolidColorBrush x:Key="AppSuccessBrush" Color="#176B4D" />
+          <SolidColorBrush x:Key="AppSuccessSurfaceBrush" Color="#E4F5ED" />
+          <SolidColorBrush x:Key="AppWarningBrush" Color="#8A4B08" />
+          <SolidColorBrush x:Key="AppWarningSurfaceBrush" Color="#FFF1D6" />
+          <SolidColorBrush x:Key="AppDangerBrush" Color="#B42318" />
+          <SolidColorBrush x:Key="AppDangerSurfaceBrush" Color="#FDECEA" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppBackgroundBrush" Color="#10151D" />
+          <SolidColorBrush x:Key="AppSurfaceBrush" Color="#181F29" />
+          <SolidColorBrush x:Key="AppSurfaceSubtleBrush" Color="#202A36" />
+          <SolidColorBrush x:Key="AppBorderBrush" Color="#354253" />
+          <SolidColorBrush x:Key="AppTextBrush" Color="#F4F7FB" />
+          <SolidColorBrush x:Key="AppMutedTextBrush" Color="#B2BDCC" />
+          <SolidColorBrush x:Key="AppAccentBrush" Color="#8C93FF" />
+          <SolidColorBrush x:Key="AppOnAccentBrush" Color="#101424" />
+          <SolidColorBrush x:Key="AppSuccessBrush" Color="#79DCB3" />
+          <SolidColorBrush x:Key="AppSuccessSurfaceBrush" Color="#193B31" />
+          <SolidColorBrush x:Key="AppWarningBrush" Color="#FFD080" />
+          <SolidColorBrush x:Key="AppWarningSurfaceBrush" Color="#443316" />
+          <SolidColorBrush x:Key="AppDangerBrush" Color="#FF9B91" />
+          <SolidColorBrush x:Key="AppDangerSurfaceBrush" Color="#482421" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
   <Application.DataTemplates>
     <local:ViewLocator />
   </Application.DataTemplates>
   <Application.Styles>
     <FluentTheme />
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.sectionTitle">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.card">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="16" />
+    </Style>
+    <Style Selector="Border.subtleCard">
+      <Setter Property="Background" Value="{DynamicResource AppSurfaceSubtleBrush}" />
+      <Setter Property="CornerRadius" Value="8" />
+      <Setter Property="Padding" Value="14" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="Padding" Value="16,8" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="MinHeight" Value="40" />
+      <Setter Property="CornerRadius" Value="6" />
+    </Style>
+    <Style Selector="CheckBox">
+      <Setter Property="MinHeight" Value="32" />
+    </Style>
   </Application.Styles>
 </Application>

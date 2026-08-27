@@ -3,24 +3,64 @@
              xmlns:vm="using:Optimum.Installer.ViewModels"
              x:Class="Optimum.Installer.Views.EulaView"
              x:DataType="vm:EulaViewModel">
-  <DockPanel>
-    <TextBlock DockPanel.Dock="Top" Text="Before you continue"
-               FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10" />
-
-    <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,10,0,0">
-      <CheckBox Content="I have read and accept this notice"
-                IsChecked="{Binding Accepted}"
-                x:Name="AcceptBox" />
-      <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
-        <Button Content="Decline" Command="{Binding DeclineCommand}" />
-        <Button Content="Accept and continue" Classes="accent"
-                IsEnabled="{Binding CanAccept}"
-                Command="{Binding AcceptCommand}" />
+  <Grid RowDefinitions="Auto,*,Auto">
+    <Border Grid.Row="0" Classes="card" Margin="0,0,0,12">
+      <StackPanel Spacing="10">
+        <TextBlock Text="Your choices" Classes="sectionTitle" />
+        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+          <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2" Margin="0,0,18,10">
+            <TextBlock Text="Install to" Classes="muted" FontSize="12" />
+            <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="SemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2" Margin="0,0,0,10">
+            <TextBlock Text="Game data" Classes="muted" FontSize="12" />
+            <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2" Margin="0,0,18,0">
+            <TextBlock Text="Vintage Story version" Classes="muted" FontSize="12" />
+            <TextBlock Text="{Binding VersionSummary}" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+            <TextBlock Text="Shortcuts" Classes="muted" FontSize="12" />
+            <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" />
+          </StackPanel>
+        </Grid>
       </StackPanel>
-    </StackPanel>
+    </Border>
 
-    <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged">
-      <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
-    </ScrollViewer>
-  </DockPanel>
+    <Border Grid.Row="1" Classes="card" Padding="0">
+      <Grid RowDefinitions="Auto,*,Auto">
+        <StackPanel Grid.Row="0" Margin="16,14,16,10" Spacing="3">
+          <TextBlock Text="Local build notice" Classes="sectionTitle" />
+          <TextBlock Text="Optimum is built from your own Vintage Story installation. Read the notice before starting."
+                     Classes="muted" TextWrapping="Wrap" />
+        </StackPanel>
+        <Border Grid.Row="1" Background="{DynamicResource AppSurfaceSubtleBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,1"
+                Padding="16,12">
+          <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged"
+                        AutomationProperties.Name="Optimum local build notice">
+            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
+          </ScrollViewer>
+        </Border>
+        <StackPanel Grid.Row="2" Margin="16,10,16,14" Spacing="6">
+          <CheckBox Content="I have read and accept this notice"
+                    IsChecked="{Binding Accepted}"
+                    x:Name="AcceptBox" TabIndex="1" />
+          <TextBlock Text="{Binding ScrollHint}" Classes="muted" FontSize="12"
+                     AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
+      <TextBlock Grid.Column="0" Text="Nothing is downloaded or installed until you start."
+                 Classes="muted" FontSize="12" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Back" Margin="8,0,0,0"
+              Command="{Binding DeclineCommand}" TabIndex="2" />
+      <Button Grid.Column="2" Content="Start installation" Classes="accent" Margin="8,0,0,0"
+              IsEnabled="{Binding CanAccept}"
+              Command="{Binding AcceptCommand}" TabIndex="3" />
+    </Grid>
+  </Grid>
 </UserControl>
