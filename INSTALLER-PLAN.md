@@ -966,20 +966,26 @@ Open risk: installer releases land in the game repository's release list on the
 `installer-v<version>` tag, and the installer version tracks the shared `VERSION`
 file. A dedicated releases repository would separate them; that is a follow-up.
 
-**Phase 6: documentation and deprecation.** Update `README.md`, add the three new
-project paths to the MIT list in `LICENSE-SCOPE.md`, note the new build and test
-targets in `CONTRIBUTING.md`, and turn `scripts/install-linux.sh` and
-`scripts/install-windows.ps1` into thin shims that forward to `Optimum.Cli`. Leave
-`scripts/install-macos.sh` alone: it stays the macOS path until a signed macOS
-release exists, so its retirement waits for the Apple account and a later phase.
-Fix or replace `scripts/uninstall.sh`, which today cannot uninstall anything:
-`scripts/uninstall.sh:75` exits 0 unless `$VS_DIR/Optimum.dll` exists, and the
-current Linux standalone package contains no `Optimum.dll`, so the script reports
-"Optimum not installed" and returns without even reaching the `.desktop` cleanup
-at `:122-123`.
-*Verification:* a fresh clone documents one install path per shipped platform, the
-shims work for anyone with the old commands in their shell history, and
-`scripts/uninstall.sh` either removes a real install or is gone.
+**Phase 6: documentation and deprecation.** Mostly done. `LICENSE-SCOPE.md` now
+lists all six installer projects, the test-support project, `Optimum.Installer.slnf`,
+and this file under MIT. `README.md` leads with a graphical-installer and a
+command-line section, with the per-platform scripts kept below as the original
+path. `CONTRIBUTING.md` documents `make installer-test` and `make installer-pack`.
+`scripts/uninstall.sh` is rewritten: it delegates to `optimum uninstall` for a
+manifest-based install and falls back to the legacy overlay removal, so it
+actually removes an install now. `scripts/install-linux.sh` and
+`scripts/install-windows.ps1` carry a notice pointing at the maintained path but
+stay functional.
+
+Deferred: turning `install-linux.sh` and `install-windows.ps1` into thin shims
+over `Optimum.Cli`. Replacing a working installer with an unverified shim is
+exactly what section 13's own risk notes warn against; the swap waits for a green
+`Optimum.Cli build` end to end on every platform CI job (the `bootstrap-linux`
+job runs it today; the other four are pending). `scripts/install-macos.sh` and
+the legacy `install-*-legacy` files also stay until then.
+*Verification:* a fresh clone's `README.md` documents the installer and CLI first;
+`scripts/uninstall.sh` removes a manifest-based install by delegating to
+`optimum uninstall` and a legacy install by its file list.
 
 **Phase 7 (out of scope, documented only).** The RiftLauncher managed-tool slice,
 built in the RiftLauncher repository against the contract in section 4. It is a
@@ -1109,16 +1115,17 @@ The new modal should either gate on scroll properly or drop the pretense.
 fixup scripts `scripts/fix-base-ctor-calls.py`, `scripts/fix-closure-class.pl`, and
 `scripts/fix-event-reads.py`.
 
-### Deprecated in Phase 6
+### Deprecation status
 
-- `scripts/install-linux.sh` becomes a shim over `Optimum.Cli`.
-- `scripts/install-windows.ps1` becomes a shim over `Optimum.Cli`.
-- `scripts/install-macos.sh` stays until a signed macOS release exists. Its
-  removal and the overlay-model retirement wait for the Apple Developer account
-  and a later phase, not Phase 6.
-- `scripts/uninstall.sh` is fixed or replaced. See the Phase 6 verification.
+- `scripts/uninstall.sh` is done: it delegates to `optimum uninstall` for a
+  manifest-based install and keeps the legacy overlay removal as a fallback.
+- `scripts/install-linux.sh` and `scripts/install-windows.ps1` carry a notice but
+  stay functional. They become shims over `Optimum.Cli` once `Optimum.Cli build`
+  is green end to end on every platform CI job.
+- `scripts/install-macos.sh` stays until a signed macOS release exists; its
+  removal and the overlay-model retirement wait for the Apple Developer account.
 - `scripts/uninstall.ps1` stays as long as it is byte-identical to the copy the
   Windows package ships. Core's uninstaller generation should produce that file
   rather than keeping two copies in sync by hand.
-- `scripts/install-linux-legacy.sh` and `scripts/install-windows-legacy.ps1` are
-  already legacy and can go at the same time.
+- `scripts/install-linux-legacy.sh` and `scripts/install-windows-legacy.ps1` go
+  with the shim swap.

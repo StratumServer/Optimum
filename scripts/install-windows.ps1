@@ -2,6 +2,11 @@
 .SYNOPSIS
 Optimum graphical installer for Windows x64.
 
+This script still works. The maintained path is now the cross-platform graphical
+installer (Optimum.Installer) or the command line (Optimum.Cli), both under
+INSTALLER-PLAN.md. When the CLI has a green end to end run on every platform CI
+job this script becomes a thin wrapper around `optimum build` and `optimum install`.
+
 Detects prerequisites, shows their status in a branded dark-themed panel, and
 lets the user resolve missing items before building. Requires an existing local
 Vintage Story installation for decompilation and packaging.
