@@ -3,15 +3,24 @@
         xmlns:vm="using:Optimum.Installer.ViewModels"
         x:Class="Optimum.Installer.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Width="720" Height="520"
+        Width="760" Height="560"
+        MinWidth="640" MinHeight="480"
         WindowStartupLocation="CenterScreen"
-        Title="Optimum installer">
-  <Design.DataContext>
-    <vm:MainWindowViewModel />
-  </Design.DataContext>
-  <StackPanel Margin="24" Spacing="12" VerticalAlignment="Center">
-    <TextBlock Text="{Binding Title}" FontSize="20" FontWeight="SemiBold" />
-    <TextBlock Text="Scaffold only. Screens land in Phase 3."
-               Opacity="0.7" />
-  </StackPanel>
+        Title="{Binding Title}">
+  <Panel>
+    <DockPanel Margin="24">
+      <TextBlock DockPanel.Dock="Top" Text="Optimum installer"
+                 FontSize="22" FontWeight="SemiBold" Margin="0,0,0,16" />
+      <ContentControl Content="{Binding CurrentViewModel}" />
+    </DockPanel>
+
+    <Border IsVisible="{Binding IsEulaOpen}" Background="#99000000">
+      <Border Background="{DynamicResource ThemeBackgroundBrush}"
+              CornerRadius="6" Padding="20" Margin="60"
+              MaxWidth="560" MaxHeight="460"
+              HorizontalAlignment="Center" VerticalAlignment="Center">
+        <ContentControl Content="{Binding Eula}" />
+      </Border>
+    </Border>
+  </Panel>
 </Window>

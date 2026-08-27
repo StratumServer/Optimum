@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Optimum.Installer.Services;
 using Optimum.Installer.ViewModels;
 using Optimum.Installer.Views;
 
@@ -16,7 +17,7 @@ public partial class App : Application
         {
             desktop.MainWindow = new MainWindow
             {
-                DataContext = new MainWindowViewModel(),
+                DataContext = new MainWindowViewModel(InstallerServices.CreateReal()),
             };
         }
 

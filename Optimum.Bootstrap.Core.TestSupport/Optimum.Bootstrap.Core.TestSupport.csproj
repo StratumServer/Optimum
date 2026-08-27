@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Optimum.Bootstrap.Core.TestSupport</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <Description>Shared fakes for the installer test projects. No test framework dependency, so v2 and v3 test projects can both use it.</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Optimum.Bootstrap.Core\Optimum.Bootstrap.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,71 @@
+using Optimum.Bootstrap.Core;
+using Optimum.Bootstrap.Core.Build;
+using Optimum.Bootstrap.Core.Install;
+using Optimum.Bootstrap.Core.Tests;
+using Optimum.Installer.Services;
+
+namespace Optimum.Installer.Tests;
+
+public sealed class FakeBuildDriver : IBuildDriver
+{
+    public Func<IBuildObserver, CancellationToken, BuildResult> Behaviour { get; set; } =
+        static (observer, _) =>
+        {
+            observer.Phase(ProgressPhase.Decompile, 10, "decompiling");
+            observer.Phase(ProgressPhase.Assemble, 80, "compiling");
+            return BuildResult.Success("/tmp/pkg/Optimum-v0.3.14-linux-x64");
+        };
+
+    public Task<BuildResult> RunAsync(BuildRequest request, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(observer, cancellationToken));
+    }
+}
+
+public sealed class FakePackageInstaller : IPackageInstaller
+{
+    public Func<DeployRequest, DeployResult> Behaviour { get; set; } =
+        static request => DeployResult.Success(request.InstallDirectory, request.InstallDirectory + "/optimum-launch.sh");
+
+    public DeployResult Deploy(DeployRequest request, IBuildObserver? observer = null) => Behaviour(request);
+}
+
+public static class TestServices
+{
+    public static InstallerServices Build(
+        string? repoRoot = "/repo",
+        FakeSystemProbe? probe = null,
+        IBuildDriver? driver = null,
+        IPackageInstaller? installer = null,
+        bool dotnetPresent = true)
+    {
+        probe ??= new FakeSystemProbe();
+        probe.Path.Add("/usr/bin");
+        foreach (string tool in new[] { "git", "perl", "python3", "curl", "tar", "chmod", "pwsh", "bash" })
+            if (!probe.Files.Contains($"/usr/bin/{tool}"))
+                probe.AddFile($"/usr/bin/{tool}");
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = dotnetPresent ? "/opt/dotnet/dotnet" : "/absent/dotnet";
+        if (dotnetPresent)
+        {
+            probe.AddFile("/opt/dotnet/dotnet");
+            probe.OnCommand("/opt/dotnet/dotnet", "--list-sdks", "10.0.100 [/x]\n");
+            probe.OnCommand("/opt/dotnet/dotnet", "--version", "10.0.100\n");
+        }
+        probe.AddFile("/lib64/ld-linux-x86-64.so.2");
+        if (repoRoot is not null)
+        {
+            probe.AddFile($"{repoRoot}/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+            probe.AddFile($"{repoRoot}/scripts/bootstrap.sh");
+        }
+
+        return new InstallerServices(
+            probe,
+            repoRoot,
+            driver ?? new FakeBuildDriver(),
+            installer ?? new FakePackageInstaller())
+        {
+            UiPost = action => action(),
+        };
+    }
+}

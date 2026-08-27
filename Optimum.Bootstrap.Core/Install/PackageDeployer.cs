@@ -33,7 +33,7 @@ public sealed record DeployResult(bool Ok, FailureReason? Reason, string? Messag
 /// replacing an existing install in place, with a backup and rollback, is Phase
 /// 4. To reinstall now, run <c>uninstall</c> first.
 /// </summary>
-public sealed class PackageDeployer(ISystemProbe probe)
+public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
 {
     public DeployResult Deploy(DeployRequest request, IBuildObserver? observer = null)
     {

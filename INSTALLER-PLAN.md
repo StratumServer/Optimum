@@ -880,11 +880,29 @@ manifest-entry containment in `uninstall`, and `install` refusing to overwrite.
 `check-ndjson-stream.py`, then `Optimum.Cli validate`. The other four platform
 jobs get the same step incrementally.
 
-**Phase 3: the GUI.** All five screens, the state machine, headless tests. Drives
-Core in-process. At the end of this phase the GUI can do a complete install on the
-platform the developer is sitting at.
-*Verification:* `Optimum.Installer.Tests` green on `ubuntu-latest` with no xvfb,
-plus one manual install per platform.
+**Phase 3: the GUI.** Done. `Optimum.Installer` is an Avalonia 12 MVVM app that
+drives Core in-process, never the CLI. `MainWindowViewModel` is the wizard shell
+and state machine: Prerequisites, Options, a mandatory EULA modal over Options,
+Progress, Completion, with backward navigation only from Options to Prerequisites
+and blocked once Progress starts. `PrerequisitesViewModel` renders
+`PrerequisiteScanner` rows and gates Continue on `BlocksBuild`.
+`OptionsViewModel` defaults the install directory per platform, runs
+`InstallPathGuard` on every keystroke into an inline error, picks up a detected
+data folder from `DataPathProbe`, and shows a version selector only when
+`Capabilities` reports a bridge set. `EulaViewModel` gates accept on a
+scroll-to-end plus a checkbox. `ProgressViewModel` is its own `IBuildObserver`,
+runs `ScriptBuildDriver` then `PackageDeployer`, and filters raw subprocess lines
+through `InstallerLogFilter` (ported from the Windows installer's filter).
+`CompletionViewModel` offers Launch, Try again, or View log. A `ViewLocator`
+resolves each view model to its view. `FakeSystemProbe` moved to a plain
+`Optimum.Bootstrap.Core.TestSupport` project so the v2 and v3 test projects can
+both use it.
+*Verification:* `Optimum.Installer.Tests` has 27 tests (25 plain xUnit v3 on the
+view models plus two `Avalonia.Headless.XUnit` render tests), green on
+`ubuntu-latest` with no xvfb, covering the state machine transitions, the
+Continue gating, the EULA gate, inline validation, the log filter, and the
+build-then-deploy flow against fakes. A real install per platform is still a
+manual check.
 
 **Phase 4: unification.** The transactional installer on all three platforms, the
 registered uninstaller and install manifest on all three, unified shortcuts,
@@ -1002,12 +1020,13 @@ The new modal should either gate on scroll properly or drop the pretense.
 ### New
 
 - `Optimum.Bootstrap.Core/` (class library, MIT)
+- `Optimum.Bootstrap.Core.TestSupport/` (shared fakes, no test framework, MIT)
 - `Optimum.Bootstrap.Core.Tests/` (xUnit v2)
 - `Optimum.Cli/` (console application, MIT, `AssemblyName` `optimum`)
-- `Optimum.Cli.Tests/` (xUnit v2, NDJSON conformance in Phase 2)
-- `Optimum.Installer/` (Avalonia 12.1 application, MIT)
+- `Optimum.Cli.Tests/` (xUnit v2, NDJSON conformance)
+- `Optimum.Installer/` (Avalonia 12 MVVM application, MIT)
 - `Optimum.Installer.Tests/` (Avalonia.Headless.XUnit, xUnit v3)
-- `Optimum.Installer.slnf` (solution filter over the six projects, for a
+- `Optimum.Installer.slnf` (solution filter over the installer projects, for a
   bootstrap-free build)
 - `.github/workflows/ci-installer.yml` (push and pull request: the test job, the
   `cli-contract` job, and the `velopack-smoke` job)
