@@ -109,15 +109,18 @@ reflect them.
 
 - **The EULA text is rewritten to match `LICENSE-SCOPE.md`.** The current text in
   `scripts/install-windows.ps1:1964` is wrong and does not move into Core as is.
-  Phase 1 produces the corrected resource. Consent posture is B: a notice on every
-  platform and in every path, no hard click-through gate. The CLI prints the
-  notice to stderr and proceeds; the GUI shows it as a panel with a Continue
-  button, not a checkbox; RiftLauncher surfaces the text once. One legal question
-  is still out (does local decompilation of a game the user owns, for an
-  interoperable patch, require click-through consent in the jurisdictions that
-  matter). If the answer is yes, posture moves to C: a checkbox in the GUI and an
-  `--acknowledge-decompile` flag on `Optimum.Cli`, refused if absent. Posture B is
-  the working assumption and the plan is written to it.
+  Phase 1 produces the corrected resource, and it gets a legal review pass before
+  it ships.
+- **Consent posture is C: a hard click-through gate everywhere.** Local
+  decompilation of the user's own Vintage Story copy needs explicit consent, so
+  the notice is not enough. The GUI shows a mandatory modal with an acceptance
+  checkbox that gates Continue. `Optimum.Cli build` requires
+  `--acknowledge-decompile` and refuses with `bad-input` if it is absent, which
+  means CI, scripts, and `--non-interactive` runs must all pass it. RiftLauncher
+  renders the text in its own UI, collects the acknowledgment, and passes the flag
+  when it spawns the engine. The consent covers the license terms and the fact
+  that Optimum decompiles a proprietary game on the user's machine to build the
+  patch.
 - **macOS distribution is deferred.** The project is not obtaining an Apple
   Developer Program account yet, so no signed macOS installer ships. `Optimum.Cli`
   and `Optimum.Installer` still build and run on macOS from source for anyone who
@@ -224,7 +227,7 @@ resolving it against an ambient working directory.
 | Verb | Arguments | Effect |
 | --- | --- | --- |
 | `preflight` | `[--json]` | Detect prerequisites. No side effects, no writes, no network. |
-| `build` | `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--json]` | Bootstrap, build, and package into `--output`. |
+| `build` | `--acknowledge-decompile` `--output <abs>` `[--client-archive <abs>]` `[--version <v>]` `[--json]` | Bootstrap, build, and package into `--output`. Refuses with `bad-input` if `--acknowledge-decompile` is absent. |
 | `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Transactional deploy, shortcuts, uninstaller registration. |
 | `validate` | `--package <abs>` `[--json]` | Run the runtime validation described in section 7. |
 | `uninstall` | `--install-dir <abs>` `[--json]` | Remove an install using its manifest. |
@@ -322,6 +325,17 @@ writes inside `--input`, never writes to the user's game directory during `build
 and never follows a symlink out of `--output`. The caller re-validates the output
 before registering it, because the engine's guarantee is a promise and the
 caller's check is a fact.
+
+### Consent
+
+`build` decompiles a proprietary game on the user's machine, which needs the
+user's explicit consent (see the decisions block in section 2). The engine does
+not carry the consent text or a UI for it. The caller owns both: it shows the
+license and decompilation notice, collects an affirmative acknowledgment, and only
+then spawns `build` with `--acknowledge-decompile`. The engine treats a missing
+flag as `bad-input` and does no work. `preflight`, `install`, `validate`,
+`uninstall`, and `capabilities` do not decompile anything and do not take the
+flag.
 
 ### Division of labour with RiftLauncher
 
@@ -446,7 +460,7 @@ Progress starts, because the build is already writing to disk.
 | `optimum-launch.sh` and `datapath.cfg` | `scripts/install-linux.sh:742-764` | Core shortcut and launcher writers |
 | `.desktop` entry and hicolor icon | `scripts/install-linux.sh:766-790, 876-886` | Core shortcut writers |
 | WinForms wizard sections and dark/light detection | `scripts/install-windows.ps1` GUI block | Avalonia views with theme-aware resources |
-| EULA modal | `scripts/install-windows.ps1:1953-2027` | Core EULA resource, Installer modal, and see the open question in section 12 |
+| EULA modal | `scripts/install-windows.ps1:1953-2027` | Core EULA resource, Installer modal with a real checkbox gate, posture C per section 2 |
 | Vintage Story auto-detection | `scripts/install-windows.ps1:204-294` | Core detection |
 | `Resolve-DotNetPath` probes | `scripts/install-windows.ps1:336` | Core detection |
 | `Assert-SafeInstallerPaths`, `Assert-DirectoryWritable` | `scripts/install-windows.ps1:152, 123` | Core path guards |
@@ -753,11 +767,12 @@ to violate: the moment `Optimum.Bootstrap.Core.Tests` references
 pull-request gate.
 
 **An extension to the platform workflow.** Each of the five jobs gains a step
-after the existing build that runs `Optimum.Cli build --json --client-archive
-<cached>` and pipes the stream into the conformance checker. The step asserts a
-valid package directory and a conformant stream. The cached archive is already
-resolved by the existing `Resolve client archive` and `Cache client archive`
-steps, so this adds compute time and no new download.
+after the existing build that runs `Optimum.Cli build --json
+--acknowledge-decompile --client-archive <cached>` and pipes the stream into the
+conformance checker. The step asserts a valid package directory and a conformant
+stream. The cached archive is already resolved by the existing `Resolve client
+archive` and `Cache client archive` steps, so this adds compute time and no new
+download.
 
 **A release workflow.** Runs `vpk pack` for `win-x64` and `linux-x64` and
 publishes the Velopack feed. Signing credentials for Windows come from repository
@@ -789,10 +804,12 @@ in section 9, and the ported `install-linux-nixos.sh` and
 behavior regresses.
 
 **Phase 2: the CLI.** All seven verbs, wrapping the existing scripts through the
-build driver. Contract tests. Extend the platform workflow.
-*Verification:* `Optimum.Cli build --json` produces a package on all five platform
-jobs and the conformance checker passes on each. A deliberately broken patch
-fixture produces `patch-conflict` and exit non-zero.
+build driver. The `--acknowledge-decompile` gate on `build`. Contract tests.
+Extend the platform workflow.
+*Verification:* `Optimum.Cli build --json --acknowledge-decompile` produces a
+package on all five platform jobs and the conformance checker passes on each.
+`build` without the flag exits non-zero with `bad-input` and does no work. A
+deliberately broken patch fixture produces `patch-conflict` and exit non-zero.
 
 **Phase 3: the GUI.** All five screens, the state machine, headless tests. Drives
 Core in-process. At the end of this phase the GUI can do a complete install on the
@@ -834,7 +851,10 @@ shims work for anyone with the old commands in their shell history, and
 built in the RiftLauncher repository against the contract in section 4. It is a
 standard feature slice there: a domain service, a port, an IPC channel group, a
 handler, and a renderer adapter, with the engine spawned through the existing
-worker pool driver.
+worker pool driver. It also needs a consent screen that shows the decompilation
+notice and collects an acknowledgment before the first `build`, because
+`Optimum.Cli` refuses `build` without `--acknowledge-decompile`. That screen is
+part of the slice, not an afterthought.
 
 ## 12. Risks and open questions
 
@@ -888,16 +908,14 @@ writes to a `.partial` file and moves it into place on completion
 that a user who installed with the old script and then installs with the new one
 ends up with two copies of the game and no obvious way to tell which is which.
 
-**Is the EULA legally load-bearing?** Working answer: no, posture B, a notice
-everywhere and no hard gate. The reasoning: the Commons Clause is a redistribution
-term and an end user running an installer is not redistributing; RiftLauncher
-already downloads the same client from the same CDN without a gate. One question
-is still out with a lawyer: does local decompilation of a game the user owns, for
-an interoperable patch, need click-through consent in the jurisdictions that
-matter. If the answer is yes, posture moves to C, which adds an
-`--acknowledge-decompile` flag to `Optimum.Cli` that is refused if absent and
-makes RiftLauncher surface the text and pass it. The plan is written to B and the
-CLI argument surface in section 4 assumes B. Confirm before Phase 2.
+**The EULA is legally load-bearing.** Resolved: local decompilation needs the
+user's explicit consent, so posture C applies. The GUI gates on a checkbox,
+`Optimum.Cli build` requires `--acknowledge-decompile`, and RiftLauncher renders
+the text and passes the flag. The remaining work is drafting the consent text in
+Phase 1 and getting it a legal review before the first release. This is the one
+item on the list that puts a hard dependency on another team's feature: the
+RiftLauncher slice cannot ship until it has a consent UI, so Phase 7 has to plan
+for that rather than treating the spawn as a bare process call.
 
 **The EULA text is stale.** `scripts/install-windows.ps1:1964` tells the user that
 "Optimum is licensed under the GNU General Public License v3.0 with the Commons
