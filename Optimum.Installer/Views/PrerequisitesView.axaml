@@ -19,23 +19,22 @@
       <StackPanel Spacing="12">
 
         <suki:GlassCard IsVisible="{Binding RepoRootMissing}">
-          <suki:GroupBox Header="Optimum source">
-            <StackPanel Spacing="12">
-              <TextBlock Text="The matching public Optimum source is downloaded into your user cache. Vintage Story files are fetched later on this computer and are never bundled with the installer."
-                         Classes="Caption" TextWrapping="Wrap" />
-              <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                <Button Content="Download source" Classes="Flat"
-                        IsVisible="{Binding CanAcquireSource}"
-                        IsEnabled="{Binding !AcquiringSource}"
-                        Command="{Binding AcquireSourceCommand}" />
-                <ProgressBar IsIndeterminate="True" Width="130" Height="4"
-                             IsVisible="{Binding AcquiringSource}"
-                             AutomationProperties.Name="Downloading Optimum source" />
-                <TextBlock Text="{Binding SourceStatus}" Classes="Caption"
-                           VerticalAlignment="Center" TextWrapping="Wrap" />
-              </StackPanel>
+          <StackPanel Spacing="10">
+            <TextBlock Text="Optimum source" Classes="h5" />
+            <TextBlock Text="The matching public Optimum source is downloaded into your user cache. Vintage Story files are fetched later on this computer and are never bundled with the installer."
+                       Classes="Caption" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+              <Button Content="Download source" Classes="Flat"
+                      IsVisible="{Binding CanAcquireSource}"
+                      IsEnabled="{Binding !AcquiringSource}"
+                      Command="{Binding AcquireSourceCommand}" />
+              <ProgressBar IsIndeterminate="True" Width="130" Height="4"
+                           IsVisible="{Binding AcquiringSource}"
+                           AutomationProperties.Name="Downloading Optimum source" />
+              <TextBlock Text="{Binding SourceStatus}" Classes="Caption"
+                         VerticalAlignment="Center" TextWrapping="Wrap" />
             </StackPanel>
-          </suki:GroupBox>
+          </StackPanel>
         </suki:GlassCard>
 
         <ItemsControl ItemsSource="{Binding AttentionRows}">
