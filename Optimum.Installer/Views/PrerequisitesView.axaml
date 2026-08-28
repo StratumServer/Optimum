@@ -4,7 +4,7 @@
              xmlns:conv="using:Optimum.Installer.Views"
              x:Class="Optimum.Installer.Views.PrerequisitesView"
              x:DataType="vm:PrerequisitesViewModel">
-  <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+  <Grid RowDefinitions="Auto,*,Auto">
 
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,14">
       <TextBlock Grid.Column="0" Text="{Binding Summary}" Classes="muted"
@@ -14,67 +14,78 @@
               AutomationProperties.Name="Check system requirements again" />
     </Grid>
 
-    <Border Grid.Row="1" Classes="card" Margin="0,0,0,12"
-            IsVisible="{Binding RepoRootMissing}">
-      <StackPanel Spacing="12">
-        <StackPanel Spacing="3">
-          <TextBlock Text="Optimum source" Classes="sectionTitle" />
-          <TextBlock Text="The matching public Optimum source is downloaded into your user cache. Vintage Story files are fetched later on this computer and are never bundled with the installer."
-                     Classes="muted" TextWrapping="Wrap" />
-        </StackPanel>
-        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-          <Button Content="Download source" Classes="accent"
-                  IsVisible="{Binding CanAcquireSource}"
-                  IsEnabled="{Binding !AcquiringSource}"
-                  Command="{Binding AcquireSourceCommand}" />
-          <ProgressBar IsIndeterminate="True" Width="130" Height="4"
-                       IsVisible="{Binding AcquiringSource}"
-                       AutomationProperties.Name="Downloading Optimum source" />
-          <TextBlock Text="{Binding SourceStatus}" Classes="muted"
-                     VerticalAlignment="Center" TextWrapping="Wrap" />
-        </StackPanel>
+    <!-- The row list can grow past the window on a bare machine, so it scrolls
+         while the summary above and the Continue button below stay pinned. -->
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel>
+
+        <Border Classes="card" Margin="0,0,0,12"
+                IsVisible="{Binding RepoRootMissing}">
+          <StackPanel Spacing="12">
+            <StackPanel Spacing="3">
+              <TextBlock Text="Optimum source" Classes="sectionTitle" />
+              <TextBlock Text="The matching public Optimum source is downloaded into your user cache. Vintage Story files are fetched later on this computer and are never bundled with the installer."
+                         Classes="muted" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+              <Button Content="Download source" Classes="accent"
+                      IsVisible="{Binding CanAcquireSource}"
+                      IsEnabled="{Binding !AcquiringSource}"
+                      Command="{Binding AcquireSourceCommand}" />
+              <ProgressBar IsIndeterminate="True" Width="130" Height="4"
+                           IsVisible="{Binding AcquiringSource}"
+                           AutomationProperties.Name="Downloading Optimum source" />
+              <TextBlock Text="{Binding SourceStatus}" Classes="muted"
+                         VerticalAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <!-- Only the tools that need a decision. Everything already in place is the
+             one line below. -->
+        <ItemsControl ItemsSource="{Binding AttentionRows}" Margin="0,0,0,4">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PrerequisiteRowViewModel">
+              <Border Classes="card" Margin="0,0,0,8" Padding="16,13">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <Border Grid.Column="0" Width="8" Height="8" CornerRadius="4" Margin="0,7,13,0"
+                          VerticalAlignment="Top"
+                          Background="{Binding IsOptional, Converter={x:Static conv:InstallerConverters.OptionalOrBlockingDot}}" />
+                  <StackPanel Grid.Column="1" Spacing="2">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <TextBlock Text="{Binding StatusLabel}" Classes="fieldLabel" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding ManualCommand}" FontFamily="{DynamicResource MonoFont}"
+                                         FontSize="12" Margin="0,3,0,0"
+                                         IsVisible="{Binding ManualCommand, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+                  <Button Grid.Column="2" Content="{Binding ActionLabel}" Classes="accent" Margin="14,0,0,0"
+                          VerticalAlignment="Center"
+                          IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                          Command="{Binding ActionCommand}"
+                          ToolTip.Tip="{Binding ActionDetail}" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Classes="subtleCard" VerticalAlignment="Top"
+                IsVisible="{Binding HasReadyTools}">
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Grid.Column="0" Text="&#x2713;" Foreground="{DynamicResource AppSuccessBrush}"
+                       FontWeight="Bold" VerticalAlignment="Top" Margin="0,0,10,0" />
+            <TextBlock Grid.Column="1" Text="{Binding ReadySummary}" Classes="muted"
+                       FontSize="12.5" TextWrapping="Wrap" />
+          </Grid>
+        </Border>
+
       </StackPanel>
-    </Border>
+    </ScrollViewer>
 
-    <!-- Only the tools that need a decision. Everything already in place is the
-         one line below. -->
-    <ItemsControl Grid.Row="2" ItemsSource="{Binding AttentionRows}" Margin="0,0,0,4">
-      <ItemsControl.ItemTemplate>
-        <DataTemplate x:DataType="vm:PrerequisiteRowViewModel">
-          <Border Classes="card" Margin="0,0,0,8" Padding="16,13">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-              <Border Grid.Column="0" Width="8" Height="8" CornerRadius="4" Margin="0,7,13,0"
-                      VerticalAlignment="Top"
-                      Background="{Binding IsOptional, Converter={x:Static conv:InstallerConverters.OptionalOrBlockingDot}}" />
-              <StackPanel Grid.Column="1" Spacing="2">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                  <TextBlock Text="{Binding StatusLabel}" Classes="fieldLabel" VerticalAlignment="Center" />
-                </StackPanel>
-                <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
-              </StackPanel>
-              <Button Grid.Column="2" Content="{Binding ActionLabel}" Classes="accent" Margin="14,0,0,0"
-                      VerticalAlignment="Center"
-                      IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                      Command="{Binding ActionCommand}"
-                      ToolTip.Tip="{Binding ActionDetail}" />
-            </Grid>
-          </Border>
-        </DataTemplate>
-      </ItemsControl.ItemTemplate>
-    </ItemsControl>
-
-    <Border Grid.Row="3" Classes="subtleCard" VerticalAlignment="Top"
-            IsVisible="{Binding HasReadyTools}">
-      <Grid ColumnDefinitions="Auto,*">
-        <TextBlock Grid.Column="0" Text="&#x2713;" Foreground="{DynamicResource AppSuccessBrush}"
-                   FontWeight="Bold" VerticalAlignment="Top" Margin="0,0,10,0" />
-        <TextBlock Grid.Column="1" Text="{Binding ReadySummary}" Classes="muted"
-                   FontSize="12.5" TextWrapping="Wrap" />
-      </Grid>
-    </Border>
-
-    <StackPanel Grid.Row="4" Orientation="Horizontal"
+    <StackPanel Grid.Row="2" Orientation="Horizontal"
                 HorizontalAlignment="Right" Margin="0,16,0,0">
       <Button Content="Continue" Classes="accent"
               IsEnabled="{Binding CanContinue}"

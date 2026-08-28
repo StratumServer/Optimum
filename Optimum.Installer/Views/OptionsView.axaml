@@ -10,8 +10,12 @@
         <Border Classes="card">
           <StackPanel Spacing="10">
             <TextBlock Text="Install location" Classes="sectionTitle" />
-            <TextBox Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
-                     AutomationProperties.Name="Install directory" TabIndex="1" />
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
+                       AutomationProperties.Name="Install directory" TabIndex="1" />
+              <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseInstallDirectory"
+                      AutomationProperties.Name="Browse for an install directory" />
+            </Grid>
             <TextBlock Text="An empty folder you own. Optimum is built in a temporary workspace and moved here when it is ready."
                        Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
           </StackPanel>
@@ -25,8 +29,12 @@
             <TextBlock Text="Off: Optimum shares Vintage Story's settings, worlds, and signed-in session. On: it keeps its own."
                        Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
             <StackPanel Spacing="5" IsVisible="{Binding UseSeparateDataFolder}">
-              <TextBox Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
-                       AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
+                         AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
+                <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseDataPath"
+                        AutomationProperties.Name="Browse for a Vintage Story data folder" />
+              </Grid>
               <TextBlock Text="{Binding DataPathHint}" Classes="muted" FontSize="12"
                          TextWrapping="Wrap"
                          IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />

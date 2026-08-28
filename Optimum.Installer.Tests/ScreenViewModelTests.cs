@@ -146,15 +146,79 @@ public class PrerequisitesViewModelTests
     }
 
     [Fact]
-    public void UnsupportedActionsAreNotShownAsWorkingButtons()
+    public void AutomaticRowsWithoutAWiredInstallerAndManualOrNoneRowsHaveNoButton()
     {
         InstallerServices services = TestServices.Build(appimagetool: new FakeAppimagetoolAcquisition());
         var vm = new PrerequisitesViewModel(
             services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, services.UiPost);
 
-        Assert.All(vm.Rows.Where(row => row.Result.Definition.Id
-                != Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool),
-            row => Assert.Null(row.ActionCommand));
+        foreach (var row in vm.Rows)
+        {
+            bool wiredAutomatic = row.Result.Acquisition == Bootstrap.Core.Prerequisites.AcquisitionKind.Automatic
+                && row.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool;
+            bool downloadPage = row.Result.Acquisition == Bootstrap.Core.Prerequisites.AcquisitionKind.DownloadPage
+                && !string.IsNullOrEmpty(row.Result.DownloadUrl);
+            if (wiredAutomatic || downloadPage)
+                Assert.NotNull(row.ActionCommand);
+            else
+                Assert.Null(row.ActionCommand);
+        }
+    }
+
+    [Fact]
+    public void ADownloadPageRowOffersAGetItButton()
+    {
+        InstallerServices services = TestServices.Build();
+        var vm = new PrerequisitesViewModel(
+            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, services.UiPost);
+
+        PrerequisiteRowViewModel inno = vm.Rows.Single(
+            r => r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Innoextract);
+        Assert.Equal("Get it", inno.ActionLabel);
+        Assert.NotNull(inno.ActionCommand);
+    }
+
+    [Fact]
+    public async Task WindowsWithoutTheSdkRunsTheWiredSdkInstaller()
+    {
+        var probe = new FakeSystemProbe { Os = Bootstrap.Core.Platform.OsKind.Windows, HomeDirectory = "C:/Users/tester" };
+        probe.Path.Add("C:/ps");
+        probe.AddFile("C:/ps/powershell.exe");
+        probe.Path.Add("C:/git");
+        probe.AddFile("C:/git/git.exe");
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "C:/absent/dotnet.exe";
+        probe.AddFile("C:/repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+
+        var sdk = new FakeSdkAcquisition();
+        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a(), sdk: sdk);
+
+        PrerequisiteRowViewModel dotnet = vm.Rows.Single(
+            r => r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Dotnet);
+        Assert.Equal("Install", dotnet.ActionLabel);
+
+        await dotnet.ActionCommand!.ExecuteAsync(null);
+        Assert.Equal(1, sdk.Calls);
+    }
+
+    [Fact]
+    public void WindowsWithoutGitOffersItsDownloadPage()
+    {
+        var probe = new FakeSystemProbe { Os = Bootstrap.Core.Platform.OsKind.Windows, HomeDirectory = "C:/Users/tester" };
+        probe.Path.Add("C:/ps");
+        probe.AddFile("C:/ps/powershell.exe");
+        probe.Path.Add("C:/dotnet");
+        probe.AddFile("C:/dotnet/dotnet.exe");
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "C:/dotnet/dotnet.exe";
+        probe.OnCommand("C:/dotnet/dotnet.exe", "--list-sdks", "10.0.100 [C:/sdk]\n");
+        probe.OnCommand("C:/dotnet/dotnet.exe", "--version", "10.0.100\n");
+        probe.AddFile("C:/repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+
+        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a());
+
+        PrerequisiteRowViewModel git = vm.Rows.Single(
+            r => r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Git);
+        Assert.Equal("Get it", git.ActionLabel);
+        Assert.NotNull(git.ActionCommand);
     }
 
     [Fact]

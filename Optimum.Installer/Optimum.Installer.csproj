@@ -23,7 +23,9 @@
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Diagnostics" Version="12.1.1" Condition="'$(Configuration)' == 'Debug'" />
+    <!-- Avalonia.Diagnostics is not published for 12.x (nuget tops out at
+         11.3.20), so a Debug restore of this project fails with NU1102. The
+         dev-tools overlay is optional; drop it until a 12.x build ships. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Velopack" Version="1.2.0" />
   </ItemGroup>

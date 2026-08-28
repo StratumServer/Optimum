@@ -47,7 +47,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         Action<Action> post = _services.UiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
         Prerequisites = new PrerequisitesViewModel(
-            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, post);
+            services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, post,
+            services.Sdk, services.Ilspycmd);
         Prerequisites.ContinueRequested += root =>
         {
             // Keep the user's Options choices when they step back to Prerequisites
