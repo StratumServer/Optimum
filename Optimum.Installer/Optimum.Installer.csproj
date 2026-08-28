@@ -14,9 +14,16 @@
     <Version>$(OptimumVersion)</Version>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Bundled OFL 1.1 fonts: Figtree (body), Fraunces 72pt (display),
+         Geist Mono (log). Licences ship beside the executable. -->
+    <AvaloniaResource Include="Assets/Fonts/*.ttf" />
+    <Content Include="Assets/Fonts/OFL-*.txt" CopyToOutputDirectory="PreserveNewest">
+      <Link>licences/%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
     <!-- SukiUI supplies the theme and controls (SukiWindow, VerticalStepper,
          GlassCard, InfoBar, WaveProgress). It replaces Avalonia.Themes.Fluent
          and pulls Avalonia.Themes.Simple + Skia + DataGrid + ColorPicker. -->

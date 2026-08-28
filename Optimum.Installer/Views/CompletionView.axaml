@@ -24,8 +24,8 @@
       <suki:GlassCard Padding="14"
                       IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
         <StackPanel Spacing="2">
-          <TextBlock Text="INSTALLED AT" Classes="Caption Primary" />
-          <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="12.5" />
+          <TextBlock Text="INSTALLED AT" Classes="eyebrow Primary" />
+          <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="14" />
         </StackPanel>
       </suki:GlassCard>
 

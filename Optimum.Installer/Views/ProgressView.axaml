@@ -42,8 +42,7 @@
           <ItemsControl ItemsSource="{Binding Log}">
             <ItemsControl.ItemTemplate>
               <DataTemplate x:DataType="vm:LogLine">
-                <TextBlock Text="{Binding Text}" FontFamily="monospace" FontSize="11.5"
-                           LineHeight="16"
+                <TextBlock Text="{Binding Text}" Classes="log"
                            Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
                            TextWrapping="Wrap" Margin="0,1.5" />
               </DataTemplate>

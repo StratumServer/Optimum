@@ -4,14 +4,95 @@
              xmlns:local="using:Optimum.Installer"
              x:Class="Optimum.Installer.App"
              RequestedThemeVariant="Default">
+  <Application.Resources>
+    <FontFamily x:Key="BodyFont">avares://Optimum.Installer/Assets/Fonts#Figtree</FontFamily>
+    <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts#Fraunces 72pt</FontFamily>
+    <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts#Geist Mono</FontFamily>
+  </Application.Resources>
+
   <Application.DataTemplates>
     <local:ViewLocator />
   </Application.DataTemplates>
+
   <Application.Styles>
     <suki:SukiTheme ThemeColor="Orange" />
 
-    <!-- A little tightening on top of SukiUI: the wizard is a dense form, so the
-         cards do not need the default 20px radius or the hover animation. -->
+    <!-- Type scale, 16px base for accessibility. Figtree for body, Fraunces
+         for display headings. Line height is 1.5 on body copy. -->
+    <Style Selector="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+      <Setter Property="FontSize" Value="16" />
+      <Setter Property="LineHeight" Value="24" />
+    </Style>
+    <Style Selector="SelectableTextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+
+    <!-- Secondary / hint copy: one step down, never below 14. -->
+    <Style Selector="TextBlock.Caption">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="LineHeight" Value="20" />
+    </Style>
+
+    <!-- Uppercase eyebrow labels ("STEP 1 OF 4", "INSTALL TO"). -->
+    <Style Selector="TextBlock.eyebrow">
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LetterSpacing" Value="0.8" />
+    </Style>
+
+    <!-- Section title inside a card. -->
+    <Style Selector="TextBlock.h5">
+      <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+      <Setter Property="FontSize" Value="18" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LineHeight" Value="24" />
+    </Style>
+
+    <!-- Progress percentage readout. -->
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+      <Setter Property="FontSize" Value="34" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LineHeight" Value="40" />
+    </Style>
+
+    <!-- Page title. -->
+    <Style Selector="TextBlock.h3">
+      <Setter Property="FontFamily" Value="{StaticResource DisplayFont}" />
+      <Setter Property="FontSize" Value="28" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="LineHeight" Value="36" />
+    </Style>
+
+    <!-- Buttons and inputs: 15px, comfortably above the 14 floor without
+         crowding the wizard footer. -->
+    <Style Selector="Button">
+      <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="40" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="40" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="MinHeight" Value="40" />
+    </Style>
+    <Style Selector="CheckBox">
+      <Setter Property="MinHeight" Value="32" />
+    </Style>
+
+    <!-- Monospace log lines. -->
+    <Style Selector="TextBlock.log">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="13" />
+      <Setter Property="LineHeight" Value="18" />
+    </Style>
+
     <Style Selector="suki|GlassCard">
       <Setter Property="CornerRadius" Value="10" />
       <Setter Property="IsAnimated" Value="False" />

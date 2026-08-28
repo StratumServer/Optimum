@@ -9,20 +9,20 @@
     <suki:GlassCard Grid.Row="0" Margin="0,0,0,12" Padding="16">
       <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
         <StackPanel Grid.Row="0" Grid.Column="0" Spacing="1" Margin="0,0,16,10">
-          <TextBlock Text="INSTALL TO" Classes="Caption Primary" />
-          <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="12.5" />
+          <TextBlock Text="INSTALL TO" Classes="eyebrow Primary" />
+          <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="14" />
         </StackPanel>
         <StackPanel Grid.Row="0" Grid.Column="1" Spacing="1" Margin="0,0,0,10">
-          <TextBlock Text="GAME DATA" Classes="Caption Primary" />
-          <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" FontSize="12.5" />
+          <TextBlock Text="GAME DATA" Classes="eyebrow Primary" />
+          <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" FontSize="14" />
         </StackPanel>
         <StackPanel Grid.Row="1" Grid.Column="0" Spacing="1" Margin="0,0,16,0">
-          <TextBlock Text="VERSION" Classes="Caption Primary" />
-          <TextBlock Text="{Binding VersionSummary}" FontSize="12.5" />
+          <TextBlock Text="VERSION" Classes="eyebrow Primary" />
+          <TextBlock Text="{Binding VersionSummary}" FontSize="14" />
         </StackPanel>
         <StackPanel Grid.Row="1" Grid.Column="1" Spacing="1">
-          <TextBlock Text="SHORTCUTS" Classes="Caption Primary" />
-          <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontSize="12.5" />
+          <TextBlock Text="SHORTCUTS" Classes="eyebrow Primary" />
+          <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontSize="14" />
         </StackPanel>
       </Grid>
     </suki:GlassCard>
@@ -37,7 +37,7 @@
         <Border Grid.Row="1" BorderBrush="{DynamicResource SukiBorderBrush}" BorderThickness="0,1,0,0">
           <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged" Padding="18,14"
                         AutomationProperties.Name="Optimum build notice">
-            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" FontSize="13" LineHeight="20" />
+            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" FontSize="15" LineHeight="23" />
           </ScrollViewer>
         </Border>
       </Grid>

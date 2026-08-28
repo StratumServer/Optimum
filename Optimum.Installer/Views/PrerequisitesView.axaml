@@ -62,8 +62,8 @@
                       <TextBlock Text="{Binding StatusLabel}" Classes="Caption" VerticalAlignment="Center" />
                     </StackPanel>
                     <TextBlock Text="{Binding Detail}" Classes="Caption" TextWrapping="Wrap" />
-                    <SelectableTextBlock Text="{Binding ManualCommand}" FontFamily="monospace"
-                                         FontSize="12" Margin="0,3,0,0"
+                    <SelectableTextBlock Text="{Binding ManualCommand}"
+                                         FontFamily="{StaticResource MonoFont}" FontSize="13" Margin="0,3,0,0"
                                          IsVisible="{Binding ManualCommand, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                   </StackPanel>
                   <Button Grid.Column="2" Content="{Binding ActionLabel}" Classes="Flat" Margin="14,0,0,0"
