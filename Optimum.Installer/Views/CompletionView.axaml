@@ -1,44 +1,42 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Optimum.Installer.ViewModels"
+             xmlns:conv="using:Optimum.Installer.Views"
              x:Class="Optimum.Installer.Views.CompletionView"
              x:DataType="vm:CompletionViewModel">
-  <Grid>
-    <Border Classes="card" MaxWidth="620"
-            HorizontalAlignment="Center" VerticalAlignment="Center">
-      <StackPanel Spacing="14">
-        <Border Width="64" Height="6" CornerRadius="3"
-                Background="{DynamicResource AppAccentBrush}"
-                HorizontalAlignment="Left" />
-        <StackPanel Spacing="5">
-          <TextBlock Text="{Binding Headline}" FontSize="24" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding Message}" Classes="muted" TextWrapping="Wrap" />
-        </StackPanel>
+  <Grid RowDefinitions="*,Auto,*">
+    <StackPanel Grid.Row="1" Spacing="16" MaxWidth="520" HorizontalAlignment="Left">
 
-        <Border Classes="subtleCard"
-                IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-          <StackPanel Spacing="3">
-            <TextBlock Text="Installed at" Classes="muted" FontSize="12" />
-            <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" />
-          </StackPanel>
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Border Width="30" Height="30" CornerRadius="4" VerticalAlignment="Center"
+                Background="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeSurface}}">
+          <TextBlock Text="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeGlyph}}"
+                     FontWeight="Bold" FontSize="15"
+                     Foreground="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeInk}}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
-
-        <TextBlock Text="If the installation did not finish, retry after resolving the message above. The log keeps the technical details."
-                   Classes="muted" FontSize="12" TextWrapping="Wrap"
-                   IsVisible="{Binding !Succeeded}" />
-
-        <StackPanel Orientation="Horizontal" Spacing="8">
-          <Button Content="Launch Optimum" Classes="accent"
-                  IsVisible="{Binding Succeeded}"
-                  Command="{Binding LaunchCommand}" />
-          <Button Content="Try again" Classes="accent"
-                  IsVisible="{Binding CanRetry}"
-                  Command="{Binding RetryCommand}" />
-          <Button Content="Open installation log"
-                  IsVisible="{Binding !Succeeded}"
-                  Command="{Binding ViewLogCommand}" />
-        </StackPanel>
+        <TextBlock Text="{Binding Headline}" Classes="display" VerticalAlignment="Center" />
       </StackPanel>
-    </Border>
+
+      <TextBlock Text="{Binding Subtext}" Classes="muted" TextWrapping="Wrap" />
+
+      <Border Classes="subtleCard"
+              IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+        <StackPanel Spacing="2">
+          <TextBlock Text="INSTALLED AT" Classes="fieldLabel" />
+          <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="12.5" />
+        </StackPanel>
+      </Border>
+
+      <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+        <Button Content="Launch Optimum" Classes="accent"
+                IsVisible="{Binding Succeeded}" IsEnabled="{Binding CanLaunch}"
+                Command="{Binding LaunchCommand}" />
+        <Button Content="Try again" Classes="accent"
+                IsVisible="{Binding CanRetry}" Command="{Binding RetryCommand}" />
+        <Button Content="Open log" Classes="ghost"
+                IsVisible="{Binding ShowLog}" Command="{Binding ViewLogCommand}" />
+      </StackPanel>
+    </StackPanel>
   </Grid>
 </UserControl>

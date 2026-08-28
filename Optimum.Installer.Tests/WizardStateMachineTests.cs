@@ -55,6 +55,22 @@ public class WizardStateMachineTests
     }
 
     [Fact]
+    public void SteppingBackToPrerequisitesAndForwardKeepsTheOptionsChoices()
+    {
+        var vm = Wizard();
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.InstallDirectory = "/home/tester/custom/optimum";
+        vm.Options.CreateDesktopShortcut = true;
+
+        vm.Options.BackCommand.Execute(null);
+        vm.Prerequisites.ContinueCommand.Execute(null);
+
+        Assert.Equal(WizardScreen.Options, vm.CurrentScreen);
+        Assert.Equal("/home/tester/custom/optimum", vm.Options.InstallDirectory);
+        Assert.True(vm.Options.CreateDesktopShortcut);
+    }
+
+    [Fact]
     public void DecliningTheEulaKeepsTheUserOnOptions()
     {
         var vm = Wizard();
@@ -73,14 +89,33 @@ public class WizardStateMachineTests
         var vm = Wizard();
         Assert.Equal("Check your system", vm.CurrentStepTitle);
         Assert.Equal(25, vm.CurrentStepProgress);
+        Assert.Equal(StepState.Current, vm.Steps[0].State);
+        Assert.Equal(StepState.Upcoming, vm.Steps[1].State);
 
         vm.Prerequisites.ContinueCommand.Execute(null);
-        Assert.Equal("Choose how Optimum is installed", vm.CurrentStepTitle);
+        Assert.Equal("Set up the install", vm.CurrentStepTitle);
         Assert.Equal(50, vm.CurrentStepProgress);
+        Assert.Equal(StepState.Done, vm.Steps[0].State);
+        Assert.Equal(StepState.Current, vm.Steps[1].State);
 
         vm.Options.ContinueCommand.Execute(null);
-        Assert.Equal("Review before installing", vm.CurrentStepTitle);
+        Assert.Equal("Review and consent", vm.CurrentStepTitle);
         Assert.Equal(75, vm.CurrentStepProgress);
+    }
+
+    [Fact]
+    public async Task EveryRailStepReadsAsDoneOnceTheInstallFinishes()
+    {
+        var vm = Wizard();
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.ContinueCommand.Execute(null);
+        vm.Eula.ScrolledToEnd = true;
+        vm.Eula.Accepted = true;
+        vm.Eula.AcceptCommand.Execute(null);
+        await vm.InstallCompletion;
+
+        Assert.False(vm.HeaderVisible);
+        Assert.All(vm.Steps, step => Assert.Equal(StepState.Done, step.State));
     }
 
     [Fact]

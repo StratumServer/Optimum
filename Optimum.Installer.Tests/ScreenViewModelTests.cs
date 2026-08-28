@@ -94,7 +94,8 @@ public class OptionsViewModelTests
 
         var vm = new OptionsViewModel(probe, "/repo");
 
-        Assert.True(vm.UseSeparateDataFolder);
+        // Prefilled and hinted, but not opted into: the default shares the folder.
+        Assert.False(vm.UseSeparateDataFolder);
         Assert.Equal("/home/tester/.config/VintagestoryData", vm.DataPath);
         Assert.Contains("session", vm.DataPathHint!);
     }
@@ -273,6 +274,57 @@ public class ProgressViewModelTests
         vm.KeepInstallingCommand.Execute(null);
         Assert.False(vm.ConfirmCancel);
         Assert.False(vm.CancelRequested);
+    }
+
+    private static InstallSession Session() =>
+        new("/repo", "/home/tester/games/optimum", null, null, Bootstrap.Core.Install.ShortcutKinds.None);
+
+    [Fact]
+    public async Task ClickingCancelAfterTheRunFinishesIsANoOpNotACrash()
+    {
+        // The Progress view can still be on screen for a beat after RunAsync
+        // returns; a late click on Cancel must not touch a disposed CTS.
+        var vm = new ProgressViewModel(TestServices.Build(), Session(), action => action());
+        await vm.RunAsync();
+
+        Exception? thrown = Record.Exception(() =>
+        {
+            vm.RequestCancelCommand.Execute(null);
+            vm.CancelCommand.Execute(null);
+        });
+
+        Assert.Null(thrown);
+    }
+
+    [Fact]
+    public async Task CancellingMidRunEndsTheBuildWithoutAnUnobservedException()
+    {
+        var unobserved = new List<Exception>();
+        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, e) => { unobserved.Add(e.Exception); e.SetObserved(); };
+        TaskScheduler.UnobservedTaskException += handler;
+        try
+        {
+            var driver = new GatedBuildDriver();
+            var vm = new ProgressViewModel(TestServices.Build(driver: driver), Session(), action => action());
+
+            Task run = vm.RunAsync();
+            vm.RequestCancelCommand.Execute(null);
+            vm.CancelCommand.Execute(null);
+            await run;
+
+            Assert.True(vm.CancelRequested);
+
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= handler;
+        }
+
+        Assert.Empty(unobserved);
     }
 
     [Fact]

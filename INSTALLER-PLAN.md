@@ -900,34 +900,52 @@ jobs get the same step incrementally.
 **Phase 3: the GUI.** Done. `Optimum.Installer` is an Avalonia 12 MVVM app that
 drives Core in-process, never the CLI. `MainWindowViewModel` is the wizard shell
 and state machine: Prerequisites, Options, Review and consent, Progress, and
-Completion. A persistent four-step header explains the user's position and the
-next decision. Backward navigation is available until Progress starts.
-`PrerequisitesViewModel` renders
-`PrerequisiteScanner` rows and gates Continue on `BlocksBuild`.
+Completion. A left step rail ("Strata": four stacked layers, current lit in
+copper, done layers checked) and a content header explain the user's position
+and the next decision; the header resolves away on Completion so the finished
+rail carries the state. Stepping back to Prerequisites and forward again keeps
+the Options choices. `PrerequisitesViewModel` renders `PrerequisiteScanner`
+rows, gates Continue on `BlocksBuild`, and folds every ready tool into one
+summary line so only the rows that need a decision show as cards.
 `OptionsViewModel` defaults the install directory per platform, runs
-`InstallPathGuard` on every keystroke into an inline error, picks up a detected
-data folder from `DataPathProbe`, and shows a version selector only when
-`Capabilities` reports a bridge set. `EulaViewModel` gates accept on a
-scroll-to-end plus a checkbox. `ProgressViewModel` is its own `IBuildObserver`,
-runs `ScriptBuildDriver` then `PackageDeployer`, and filters raw subprocess lines
-through `InstallerLogFilter` (ported from the Windows installer's filter).
-`CompletionViewModel` offers Launch, Try again, or View log. A `ViewLocator`
-resolves each view model to its view. `FakeSystemProbe` moved to a plain
-`Optimum.Bootstrap.Core.TestSupport` project so the v2 and v3 test projects can
-both use it.
-*Verification:* `Optimum.Installer.Tests` has 49 tests (47 plain xUnit v3 on the
+`InstallPathGuard` on every keystroke into an inline error, prefills a detected
+data folder from `DataPathProbe` without opting into it, and shows a version
+selector only when `Capabilities` reports a bridge set. `EulaViewModel` gates
+accept on a scroll-to-end plus a checkbox. `ProgressViewModel` is its own
+`IBuildObserver`, runs `ScriptBuildDriver` then `PackageDeployer`, and filters
+raw subprocess lines through `InstallerLogFilter` into an always-visible,
+auto-scrolling log pane. `CompletionViewModel` offers Launch, Try again, or
+Open log. A `ViewLocator` resolves each view model to its view. `FakeSystemProbe`
+moved to a plain `Optimum.Bootstrap.Core.TestSupport` project so the v2 and v3
+test projects can both use it.
+
+The visual layer is the "Strata" design system in `App.axaml`: a paper/ink
+palette with an oxidised-copper accent and moss/clay status colours, both
+themes; Spectral (SIL OFL, bundled under `Assets/Fonts/`, see `LICENSE-SCOPE.md`)
+for step titles with Inter for body and a monospace face for the log; three
+button tiers (primary `.accent`, secondary outline, tertiary `.ghost`) on a low
+corner radius; Fluent's checkbox and text-field accents remapped onto the copper.
+
+*Verification:* `Optimum.Installer.Tests` has 55 tests (53 plain xUnit v3 on the
 view models plus two `Avalonia.Headless.XUnit` render tests), green on
 `ubuntu-latest` with no xvfb, covering the state machine transitions, the
 Continue gating, the EULA gate, inline validation, the log filter, the
 build-then-deploy flow against fakes, re-entrancy on double-accept, retry from a
-cancelled run, temp-directory cleanup, the four-step header, review summary, and
-cancel confirmation. An adversarial pass drove: the Launch
-button running the launcher directly rather than through `xdg-open`, the
-temporary build tree being deleted after the deploy, an elapsed clock that ticks
-on its own timer, two-tier graceful-then-forceful cancellation through
-`IBuildDriver.RunAsync`, a re-entrancy guard on accept, a rebuilt Options screen
-on retry, and a scroll-read gate extracted to a pure `ScrollReadGate` so it is
-tested directly. A real install per platform is still a manual check.
+cancelled run, temp-directory cleanup, the rail step states, the Options choices
+surviving a step back, review summary, cancel confirmation, a late Cancel click
+after the run finishes being a no-op (not an `ObjectDisposedException`), a
+mid-run cancel leaving no unobserved task exception, and the update banner
+hiding on dismiss and staying off the Review screen. An adversarial pass drove:
+the Launch button running the launcher directly rather than through `xdg-open`,
+the temporary build tree being deleted after the deploy, an elapsed clock that
+ticks on its own timer, two-tier graceful-then-forceful cancellation through
+`IBuildDriver.RunAsync`, a re-entrancy guard on accept, and a scroll-read gate
+extracted to a pure `ScrollReadGate` so it is tested directly. The consent
+`ScrollChanged` wiring and a real install per platform are still manual checks;
+all five screens were captured headless (light and dark) through a
+`CaptureRenderedFrame` harness for the visual pass, and the packaged `linux-x64`
+AppImage was launched and confirmed to render with the bundled font and all
+converters resolved.
 
 **Phase 4: unification.** Done. `PackageDeployer` is transactional on every
 platform: it stages the whole new tree beside the target (so the final swap is

@@ -13,6 +13,20 @@ public enum WizardScreen
     Completion,
 }
 
+public enum StepState
+{
+    Done,
+    Current,
+    Upcoming,
+}
+
+/// <summary>One layer of the step rail (INSTALLER-PLAN.md section 5).</summary>
+public sealed record WizardStep(int Number, string Name, StepState State)
+{
+    public bool IsCurrent => State == StepState.Current;
+    public bool IsDone => State == StepState.Done;
+}
+
 /// <summary>
 /// The wizard shell and its state machine (INSTALLER-PLAN.md section 5).
 /// Prerequisites, Options, and Review allow the user to move backward; navigation
@@ -24,6 +38,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private readonly InstallerServices _services;
     private bool _installStarted;
     private string? _repoRoot;
+    private string? _optionsRepoRoot;
 
     public MainWindowViewModel(InstallerServices services)
     {
@@ -35,8 +50,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, post);
         Prerequisites.ContinueRequested += root =>
         {
-            _repoRoot = root;
-            Options = BuildOptions();
+            // Keep the user's Options choices when they step back to Prerequisites
+            // and forward again. Only rebuild if the resolved source root changed
+            // (a mid-wizard source download) or a retry cleared the screen.
+            if (Options is null || _optionsRepoRoot != root)
+            {
+                _repoRoot = root;
+                Options = BuildOptions();
+            }
             CurrentScreen = WizardScreen.Options;
         };
 
@@ -44,7 +65,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
         Eula = new EulaViewModel();
         Eula.DeclineRequested += () => CurrentScreen = WizardScreen.Options;
-        Eula.AcceptRequested += () => InstallCompletion = StartInstallAsync();
+        Eula.AcceptRequested += () =>
+        {
+            // A second accept must not replace the in-flight task with a
+            // completed one; keep the first run as the awaitable.
+            if (!_installStarted)
+                InstallCompletion = StartInstallAsync();
+        };
 
         if (_services.Updates is { } updates)
             _ = CheckForUpdateAsync(updates);
@@ -55,13 +82,24 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private UpdateBannerViewModel? _updateBanner;
 
     /// <summary>
-    /// The self-update banner only shows before the build starts. Once Progress
-    /// is running, restarting the app for an update would abandon a half-written
-    /// install.
+    /// The self-update banner only shows on the two screens before consent. Once
+    /// the user is reviewing the notice or a build is running, restarting the app
+    /// for an update would interrupt consent or abandon a half-written install.
+    /// It also hides once the user dismisses it.
     /// </summary>
     public bool UpdatePromptVisible =>
-        UpdateBanner is not null
-        && CurrentScreen is WizardScreen.Prerequisites or WizardScreen.Options or WizardScreen.Review;
+        UpdateBanner is { Dismissed: false }
+        && CurrentScreen is WizardScreen.Prerequisites or WizardScreen.Options;
+
+    partial void OnUpdateBannerChanged(UpdateBannerViewModel? value)
+    {
+        if (value is not null)
+            value.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName is nameof(UpdateBannerViewModel.Dismissed))
+                    OnPropertyChanged(nameof(UpdatePromptVisible));
+            };
+    }
 
     private async Task CheckForUpdateAsync(IUpdateService updates)
     {
@@ -88,7 +126,34 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(CurrentStepTitle))]
     [NotifyPropertyChangedFor(nameof(CurrentStepDescription))]
     [NotifyPropertyChangedFor(nameof(CurrentStepProgress))]
+    [NotifyPropertyChangedFor(nameof(Steps))]
+    [NotifyPropertyChangedFor(nameof(HeaderVisible))]
     private WizardScreen _currentScreen = WizardScreen.Prerequisites;
+
+    private static readonly string[] StepNames = ["System", "Options", "Review", "Install"];
+
+    /// <summary>The four rail layers, restated on every screen change.</summary>
+    public IReadOnlyList<WizardStep> Steps
+    {
+        get
+        {
+            int current = CurrentStepNumber;
+            bool installed = CurrentScreen == WizardScreen.Completion && Completion?.Succeeded == true;
+            var steps = new WizardStep[StepNames.Length];
+            for (int i = 0; i < StepNames.Length; i++)
+            {
+                int number = i + 1;
+                StepState state = installed || number < current ? StepState.Done
+                    : number == current ? StepState.Current
+                    : StepState.Upcoming;
+                steps[i] = new WizardStep(number, StepNames[i], state);
+            }
+            return steps;
+        }
+    }
+
+    /// <summary>The content header is hidden once the wizard resolves into Completion.</summary>
+    public bool HeaderVisible => CurrentScreen != WizardScreen.Completion;
 
     /// <summary>Compatibility name for callers that need to know whether consent is active.</summary>
     public bool IsEulaOpen => CurrentScreen == WizardScreen.Review;
@@ -106,22 +171,22 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     public string CurrentStepTitle => CurrentScreen switch
     {
         WizardScreen.Prerequisites => "Check your system",
-        WizardScreen.Options => "Choose how Optimum is installed",
-        WizardScreen.Review => "Review before installing",
-        WizardScreen.Progress => "Installing Optimum",
-        WizardScreen.Completion when Completion?.Succeeded == true => "Installation complete",
-        WizardScreen.Completion => "Installation needs attention",
+        WizardScreen.Options => "Set up the install",
+        WizardScreen.Review => "Review and consent",
+        WizardScreen.Progress => "Building Optimum",
+        WizardScreen.Completion when Completion?.Succeeded == true => "Optimum is installed",
+        WizardScreen.Completion => "The install stopped",
         _ => "Optimum installer",
     };
 
     public string CurrentStepDescription => CurrentScreen switch
     {
-        WizardScreen.Prerequisites => "Make sure the required source and tools are ready.",
-        WizardScreen.Options => "Choose the destination, game data, version, and shortcuts.",
-        WizardScreen.Review => "Confirm your choices and accept the local build notice.",
-        WizardScreen.Progress => "Keep this window open while Optimum is built and installed.",
+        WizardScreen.Prerequisites => "The tools and source Optimum needs to build on this computer.",
+        WizardScreen.Options => "Where Optimum goes, the game data it uses, and the shortcuts to add.",
+        WizardScreen.Review => "Confirm the summary, then read and accept the build notice.",
+        WizardScreen.Progress => "This runs on your computer and can take a few minutes the first time.",
         WizardScreen.Completion when Completion?.Succeeded == true => "Optimum is ready to launch.",
-        WizardScreen.Completion => "Review the message below, then retry when you are ready.",
+        WizardScreen.Completion => "Nothing on your system was changed. Fix the issue below, then try again.",
         _ => string.Empty,
     };
 
@@ -148,6 +213,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentViewModel))]
+    [NotifyPropertyChangedFor(nameof(Steps))]
     private CompletionViewModel? _completion;
 
     public bool CanGoBack => CurrentScreen == WizardScreen.Options;
@@ -163,6 +229,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private OptionsViewModel BuildOptions()
     {
+        _optionsRepoRoot = _repoRoot;
         var options = new OptionsViewModel(_services.Probe, _repoRoot);
         options.BackRequested += () => CurrentScreen = WizardScreen.Prerequisites;
         options.ContinueRequested += OpenReview;

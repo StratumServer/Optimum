@@ -15,10 +15,15 @@ public sealed partial class CompletionViewModel(InstallOutcome outcome) : ViewMo
     public bool CanRetry => !Outcome.Succeeded;
 
     public string Headline => Outcome.Succeeded
-        ? "Optimum is installed."
+        ? "Optimum is installed"
         : Outcome.Cancelled
-            ? "The install was cancelled."
-            : "The install did not finish.";
+            ? "The install was cancelled"
+            : "The install stopped";
+
+    /// <summary>A line that adds to the headline rather than repeating it.</summary>
+    public string Subtext => Outcome.Succeeded
+        ? "Launch it from the button below, or from your application menu."
+        : Outcome.Message;
 
     public string Message => Outcome.Message;
     public string? InstallDirectory => Outcome.InstallDirectory;
@@ -26,6 +31,9 @@ public sealed partial class CompletionViewModel(InstallOutcome outcome) : ViewMo
     public bool CanLaunch => Outcome.Launcher is not null && File.Exists(Outcome.Launcher);
 
     public bool HasLog => File.Exists(Outcome.RawLogPath);
+
+    /// <summary>The log button is only useful when something went wrong.</summary>
+    public bool ShowLog => HasLog && !Outcome.Succeeded;
 
     public event Action? RetryRequested;
 

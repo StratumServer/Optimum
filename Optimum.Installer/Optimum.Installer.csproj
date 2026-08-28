@@ -14,6 +14,11 @@
     <Version>$(OptimumVersion)</Version>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Spectral (SIL OFL 1.1) is the display face for step titles; see
+         Assets/Fonts/OFL-Spectral.txt and LICENSE-SCOPE.md. -->
+    <AvaloniaResource Include="Assets/Fonts/*.ttf" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
