@@ -25,6 +25,9 @@ public sealed record WizardStep(int Number, string Name, StepState State)
 {
     public bool IsCurrent => State == StepState.Current;
     public bool IsDone => State == StepState.Done;
+
+    /// <summary>Current or already done: the step the rail fills in.</summary>
+    public bool IsReached => State is StepState.Current or StepState.Done;
 }
 
 /// <summary>

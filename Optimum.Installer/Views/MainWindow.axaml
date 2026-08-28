@@ -24,8 +24,35 @@
   <Grid ColumnDefinitions="220,*">
 
     <suki:GlassCard Grid.Column="0" Margin="12" CornerRadius="12" Padding="20,24">
-      <suki:VerticalStepper Index="{Binding StepIndex}" Steps="{Binding StepLabels}"
-                            VerticalAlignment="Top" />
+      <!-- A plain, static rail: SukiUI's VerticalStepper reflows the label of
+           the active step (it reveals a description slot), which makes the text
+           jump on every step change. -->
+      <ItemsControl ItemsSource="{Binding Steps}" VerticalAlignment="Top">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:WizardStep">
+            <Grid ColumnDefinitions="28,*" Height="48">
+              <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14" VerticalAlignment="Center"
+                      Background="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepCircleBrush}}"
+                      BorderBrush="{DynamicResource SukiControlBorderBrush}"
+                      BorderThickness="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepCircleBorder}}">
+                <Panel>
+                  <TextBlock Text="{Binding Number}" FontSize="13" FontWeight="SemiBold"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
+                             Foreground="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepLabelBrush}}"
+                             IsVisible="{Binding !IsDone}" />
+                  <PathIcon Data="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"
+                            Width="12" Height="12" Foreground="White"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsVisible="{Binding IsDone}" />
+                </Panel>
+              </Border>
+              <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" Margin="12,0,0,0"
+                         FontSize="15" FontWeight="SemiBold"
+                         Foreground="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepLabelBrush}}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
     </suki:GlassCard>
 
     <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="28,24,28,24">

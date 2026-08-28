@@ -27,6 +27,20 @@ public static class InstallerConverters
     public static readonly IValueConverter OutcomeGlyph =
         new FuncValueConverter<bool, string>(ok => ok ? "✓" : "!");
 
+    /// <summary>A reached step's circle is filled with the accent; a pending one is hollow.</summary>
+    public static readonly IValueConverter StepCircleBrush =
+        new FuncValueConverter<bool, IBrush?>(reached =>
+            reached ? Brush("SukiPrimaryColor") : new SolidColorBrush(Colors.Transparent));
+
+    /// <summary>A pending step's circle has a 1.5px outline; a reached one has none.</summary>
+    public static readonly IValueConverter StepCircleBorder =
+        new FuncValueConverter<bool, Thickness>(reached => new Thickness(reached ? 0 : 1.5));
+
+    /// <summary>Reached step labels are full strength; pending ones are muted.</summary>
+    public static readonly IValueConverter StepLabelBrush =
+        new FuncValueConverter<bool, IBrush?>(reached =>
+            Brush(reached ? "SukiText" : "SukiLowText"));
+
     /// <summary>Log line level ("error"/"warn"/other) → its colour.</summary>
     public static readonly IValueConverter LogLevelBrush =
         new FuncValueConverter<string, IBrush?>(level => Brush(level switch
