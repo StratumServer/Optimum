@@ -1,51 +1,52 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
              xmlns:vm="using:Optimum.Installer.ViewModels"
              x:Class="Optimum.Installer.Views.OptionsView"
              x:DataType="vm:OptionsViewModel">
   <Grid RowDefinitions="*,Auto">
-    <ScrollViewer Grid.Row="0">
+    <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Disabled">
       <StackPanel Spacing="12">
 
-        <Border Classes="card">
+        <suki:GlassCard Padding="18">
           <StackPanel Spacing="10">
-            <TextBlock Text="Install location" Classes="sectionTitle" />
+            <TextBlock Text="Install location" Classes="h5" />
             <Grid ColumnDefinitions="*,Auto">
               <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
                        AutomationProperties.Name="Install directory" TabIndex="1" />
-              <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseInstallDirectory"
+              <Button Grid.Column="1" Content="Browse" Classes="Basic" Margin="8,0,0,0" Click="BrowseInstallDirectory"
                       AutomationProperties.Name="Browse for an install directory" />
             </Grid>
             <TextBlock Text="An empty folder you own. Optimum is built in a temporary workspace and moved here when it is ready."
-                       Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+                       Classes="Caption" TextWrapping="Wrap" />
           </StackPanel>
-        </Border>
+        </suki:GlassCard>
 
-        <Border Classes="card">
+        <suki:GlassCard Padding="18">
           <StackPanel Spacing="10">
-            <TextBlock Text="Game data" Classes="sectionTitle" />
+            <TextBlock Text="Game data" Classes="h5" />
             <CheckBox Content="Use a separate Vintage Story data folder"
                       IsChecked="{Binding UseSeparateDataFolder}" TabIndex="2" />
             <TextBlock Text="Off: Optimum shares Vintage Story's settings, worlds, and signed-in session. On: it keeps its own."
-                       Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+                       Classes="Caption" TextWrapping="Wrap" />
             <StackPanel Spacing="5" IsVisible="{Binding UseSeparateDataFolder}">
               <Grid ColumnDefinitions="*,Auto">
                 <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
                          AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
-                <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseDataPath"
+                <Button Grid.Column="1" Content="Browse" Classes="Basic" Margin="8,0,0,0" Click="BrowseDataPath"
                         AutomationProperties.Name="Browse for a Vintage Story data folder" />
               </Grid>
-              <TextBlock Text="{Binding DataPathHint}" Classes="muted" FontSize="12"
+              <TextBlock Text="{Binding DataPathHint}" Classes="Caption"
                          TextWrapping="Wrap"
                          IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
           </StackPanel>
-        </Border>
+        </suki:GlassCard>
 
-        <Border Classes="card">
+        <suki:GlassCard Padding="18">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Grid.Column="0" Spacing="9">
-              <TextBlock Text="Shortcuts" Classes="sectionTitle" />
+              <TextBlock Text="Shortcuts" Classes="h5" />
               <CheckBox Content="Add an application menu entry"
                         IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
               <CheckBox Content="Create a desktop shortcut"
@@ -53,30 +54,28 @@
             </StackPanel>
             <StackPanel Grid.Column="1" Spacing="7" Width="240" Margin="24,0,0,0"
                         IsVisible="{Binding ShowVersionChoice}">
-              <TextBlock Text="Vintage Story version" Classes="sectionTitle" />
+              <TextBlock Text="Vintage Story version" Classes="h5" />
               <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
                         HorizontalAlignment="Stretch"
                         AutomationProperties.Name="Vintage Story version" TabIndex="6" />
               <TextBlock Text="Use the recommended version unless you need a compatibility bridge."
-                         Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                         Classes="Caption" TextWrapping="Wrap" />
             </StackPanel>
           </Grid>
-        </Border>
+        </suki:GlassCard>
 
-        <Border Background="{DynamicResource AppDangerSurfaceBrush}"
-                BorderBrush="{DynamicResource AppDangerBrush}" BorderThickness="1"
-                CornerRadius="4" Padding="12"
-                IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-          <TextBlock Text="{Binding ValidationError}" Foreground="{DynamicResource AppDangerBrush}"
-                     TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive" />
-        </Border>
+        <suki:GlassCard Padding="12"
+                        IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+          <TextBlock Text="{Binding ValidationError}" Classes="Danger" TextWrapping="Wrap"
+                     AutomationProperties.LiveSetting="Assertive" />
+        </suki:GlassCard>
       </StackPanel>
     </ScrollViewer>
 
     <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,16,0,0">
-      <Button Grid.Column="0" Content="Back" Classes="ghost"
+      <Button Grid.Column="0" Content="Back" Classes="Basic"
               Command="{Binding BackCommand}" TabIndex="8" />
-      <Button Grid.Column="2" Content="Review" Classes="accent"
+      <Button Grid.Column="2" Content="Review" Classes="Flat"
               IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="7" />
     </Grid>
   </Grid>

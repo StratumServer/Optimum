@@ -1,107 +1,65 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:vm="using:Optimum.Installer.ViewModels"
-        x:Class="Optimum.Installer.Views.MainWindow"
-        x:DataType="vm:MainWindowViewModel"
-        Width="920" Height="700"
-        MinWidth="840" MinHeight="640"
-        WindowStartupLocation="CenterScreen"
-        Background="{DynamicResource AppBackgroundBrush}"
-        RenderOptions.TextRenderingMode="Antialias"
-        Title="{Binding Title}">
-  <Grid ColumnDefinitions="228,*">
+<suki:SukiWindow xmlns="https://github.com/avaloniaui"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:suki="https://github.com/kikipoulet/SukiUI"
+                 xmlns:vm="using:Optimum.Installer.ViewModels"
+                 x:Class="Optimum.Installer.Views.MainWindow"
+                 x:DataType="vm:MainWindowViewModel"
+                 Width="920" Height="700"
+                 MinWidth="840" MinHeight="640"
+                 WindowStartupLocation="CenterScreen"
+                 CanFullScreen="False"
+                 BackgroundStyle="Flat"
+                 BackgroundAnimationEnabled="False"
+                 RenderOptions.TextRenderingMode="Antialias"
+                 Title="{Binding Title}">
 
-    <!-- The step rail: a cut face of rock, four layers deep. -->
-    <Border Grid.Column="0" Background="{DynamicResource AppRailBrush}">
-      <Grid RowDefinitions="Auto,*,Auto" Margin="24,26,20,22">
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="11" Margin="0,0,0,30">
-          <Border Width="34" Height="34" CornerRadius="4"
-                  Background="{DynamicResource AppAccentBrush}">
-            <TextBlock Text="O" FontFamily="{DynamicResource DisplayFont}" FontSize="19"
-                       FontWeight="SemiBold" Foreground="{DynamicResource AppOnAccentBrush}"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-          </Border>
-          <TextBlock Text="Optimum" FontFamily="{DynamicResource DisplayFont}" FontSize="18"
-                     FontWeight="SemiBold" Foreground="{DynamicResource AppRailTextBrush}"
-                     VerticalAlignment="Center" />
-        </StackPanel>
+  <suki:SukiWindow.LogoContent>
+    <Border Width="22" Height="22" CornerRadius="4" VerticalAlignment="Center"
+            Background="{DynamicResource SukiPrimaryColor}">
+      <TextBlock Text="O" FontSize="13" FontWeight="SemiBold"
+                 Foreground="White"
+                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+    </Border>
+  </suki:SukiWindow.LogoContent>
 
-        <ItemsControl Grid.Row="1" ItemsSource="{Binding Steps}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:WizardStep">
-              <Grid ColumnDefinitions="3,Auto,*" Margin="0,0,0,4" MinHeight="50">
-                <Border Grid.Column="0" Width="3" CornerRadius="2"
-                        Background="{DynamicResource AppAccentBrush}"
-                        IsVisible="{Binding IsCurrent}" />
-                <Border Grid.Column="1" Width="24" Height="24" CornerRadius="4" Margin="15,0,13,0"
-                        VerticalAlignment="Center"
-                        Background="{DynamicResource AppRailStepBrush}">
-                  <Panel>
-                    <TextBlock Text="{Binding Number}" FontSize="12" FontWeight="SemiBold"
-                               Foreground="{DynamicResource AppRailTextBrush}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               IsVisible="{Binding !IsDone}" />
-                    <TextBlock Text="&#x2713;" FontSize="13" FontWeight="Bold"
-                               Foreground="{DynamicResource AppAccentBrush}"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               IsVisible="{Binding IsDone}" />
-                  </Panel>
-                </Border>
-                <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center"
-                           FontFamily="{DynamicResource DisplayFont}" FontSize="14"
-                           Foreground="{DynamicResource AppRailTextBrush}"
-                           IsVisible="{Binding !IsCurrent}" />
-                <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center"
-                           FontFamily="{DynamicResource DisplayFont}" FontSize="14.5" FontWeight="SemiBold"
-                           Foreground="#F1EBDC"
-                           IsVisible="{Binding IsCurrent}" />
-              </Grid>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
+  <Grid ColumnDefinitions="216,*">
 
-        <TextBlock Grid.Row="2" Text="{Binding Title}" Classes="muted" FontSize="11"
-                   Foreground="{DynamicResource AppRailStepBrush}" />
-      </Grid>
+    <!-- Step rail -->
+    <Border Grid.Column="0" Padding="24,28"
+            Background="{DynamicResource SukiCardBackground}">
+      <suki:VerticalStepper Index="{Binding StepIndex}" Steps="{Binding StepLabels}"
+                            VerticalAlignment="Top" />
     </Border>
 
     <!-- Content column -->
-    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*">
-      <StackPanel Grid.Row="0" Margin="34,28,34,18" Spacing="7"
-                  IsVisible="{Binding HeaderVisible}">
-        <TextBlock Text="{Binding CurrentStepLabel}" Classes="eyebrow" />
-        <TextBlock Text="{Binding CurrentStepTitle}" Classes="display" />
-        <TextBlock Text="{Binding CurrentStepDescription}" Classes="muted" TextWrapping="Wrap"
-                   MaxWidth="560" HorizontalAlignment="Left" />
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="32,26,32,26">
+      <StackPanel Grid.Row="0" Spacing="4" IsVisible="{Binding HeaderVisible}">
+        <TextBlock Text="{Binding CurrentStepLabel}" Classes="Caption Primary" />
+        <TextBlock Text="{Binding CurrentStepTitle}" Classes="h3" />
+        <TextBlock Text="{Binding CurrentStepDescription}" Classes="Caption"
+                   TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
+                   Margin="0,2,0,0" />
       </StackPanel>
 
-      <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom" Margin="34,0"
-              Background="{DynamicResource AppHairlineBrush}"
-              IsVisible="{Binding HeaderVisible}" />
-
-      <Border Grid.Row="1" Margin="34,16,34,0" Padding="14,11"
-              Background="{DynamicResource AppWarningSurfaceBrush}"
-              BorderBrush="{DynamicResource AppWarningBrush}" BorderThickness="1" CornerRadius="4"
-              IsVisible="{Binding UpdatePromptVisible}">
-        <StackPanel DataContext="{Binding UpdateBanner}" Spacing="7">
+      <suki:GlassCard Grid.Row="1" Margin="0,16,0,0" Padding="16,12"
+                      IsVisible="{Binding UpdatePromptVisible}">
+        <StackPanel DataContext="{Binding UpdateBanner}" Spacing="8">
           <Grid ColumnDefinitions="*,Auto,Auto">
             <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center"
-                       TextWrapping="Wrap" FontWeight="SemiBold"
-                       Foreground="{DynamicResource AppWarningBrush}" />
-            <Button Grid.Column="1" Content="Update now" Classes="accent" Margin="10,0,0,0"
+                       TextWrapping="Wrap" FontWeight="SemiBold" Classes="Warning" />
+            <Button Grid.Column="1" Content="Update now" Classes="Flat" Margin="10,0,0,0"
                     IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
-            <Button Grid.Column="2" Content="Later" Classes="ghost" Margin="6,0,0,0"
+            <Button Grid.Column="2" Content="Later" Classes="Basic" Margin="6,0,0,0"
                     IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
           </Grid>
           <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
-          <TextBlock Text="{Binding Error}" Foreground="{DynamicResource AppDangerBrush}" FontSize="12"
-                     TextWrapping="Wrap"
+          <TextBlock Text="{Binding Error}" Classes="Danger" FontSize="12" TextWrapping="Wrap"
                      IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
-      </Border>
+      </suki:GlassCard>
 
-      <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
-                      Margin="34,22,34,26" />
+      <suki:SukiTransitioningContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
+                                            Margin="0,20,0,0" />
     </Grid>
   </Grid>
-</Window>
+</suki:SukiWindow>

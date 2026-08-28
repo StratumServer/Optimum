@@ -14,15 +14,13 @@
     <Version>$(OptimumVersion)</Version>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Spectral (SIL OFL 1.1) is the display face for step titles; see
-         Assets/Fonts/OFL-Spectral.txt and LICENSE-SCOPE.md. -->
-    <AvaloniaResource Include="Assets/Fonts/*.ttf" />
-  </ItemGroup>
-  <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.1" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+    <!-- SukiUI supplies the theme and controls (SukiWindow, VerticalStepper,
+         GlassCard, InfoBar, WaveProgress). It replaces Avalonia.Themes.Fluent
+         and pulls Avalonia.Themes.Simple + Skia + DataGrid + ColorPicker. -->
+    <PackageReference Include="SukiUI" Version="7.0.1" />
     <!-- Avalonia.Diagnostics is not published for 12.x (nuget tops out at
          11.3.20), so a Debug restore of this project fails with NU1102. The
          dev-tools overlay is optional; drop it until a 12.x build ships. -->

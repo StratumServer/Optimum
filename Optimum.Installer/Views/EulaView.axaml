@@ -1,57 +1,57 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
              xmlns:vm="using:Optimum.Installer.ViewModels"
              x:Class="Optimum.Installer.Views.EulaView"
              x:DataType="vm:EulaViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
 
-    <Border Grid.Row="0" Classes="subtleCard" Margin="0,0,0,12">
-      <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" >
+    <suki:GlassCard Grid.Row="0" Margin="0,0,0,12" Padding="16">
+      <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
         <StackPanel Grid.Row="0" Grid.Column="0" Spacing="1" Margin="0,0,16,10">
-          <TextBlock Text="INSTALL TO" Classes="fieldLabel" />
+          <TextBlock Text="INSTALL TO" Classes="Caption Primary" />
           <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="12.5" />
         </StackPanel>
         <StackPanel Grid.Row="0" Grid.Column="1" Spacing="1" Margin="0,0,0,10">
-          <TextBlock Text="GAME DATA" Classes="fieldLabel" />
+          <TextBlock Text="GAME DATA" Classes="Caption Primary" />
           <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" FontSize="12.5" />
         </StackPanel>
         <StackPanel Grid.Row="1" Grid.Column="0" Spacing="1" Margin="0,0,16,0">
-          <TextBlock Text="VERSION" Classes="fieldLabel" />
+          <TextBlock Text="VERSION" Classes="Caption Primary" />
           <TextBlock Text="{Binding VersionSummary}" FontSize="12.5" />
         </StackPanel>
         <StackPanel Grid.Row="1" Grid.Column="1" Spacing="1">
-          <TextBlock Text="SHORTCUTS" Classes="fieldLabel" />
+          <TextBlock Text="SHORTCUTS" Classes="Caption Primary" />
           <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontSize="12.5" />
         </StackPanel>
       </Grid>
-    </Border>
+    </suki:GlassCard>
 
-    <Border Grid.Row="1" Classes="card" Padding="0">
+    <suki:GlassCard Grid.Row="1" Padding="0">
       <Grid RowDefinitions="Auto,*">
         <StackPanel Grid.Row="0" Margin="18,15,18,10" Spacing="2">
-          <TextBlock Text="Build notice" Classes="sectionTitle" />
+          <TextBlock Text="Build notice" Classes="h5" />
           <TextBlock Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
-                     Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+                     Classes="Caption" TextWrapping="Wrap" />
         </StackPanel>
-        <Border Grid.Row="1" Background="{DynamicResource AppSurfaceSubtleBrush}"
-                BorderBrush="{DynamicResource AppHairlineBrush}" BorderThickness="0,1,0,0">
+        <Border Grid.Row="1" BorderBrush="{DynamicResource SukiBorderBrush}" BorderThickness="0,1,0,0">
           <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged" Padding="18,14"
                         AutomationProperties.Name="Optimum build notice">
             <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" FontSize="13" LineHeight="20" />
           </ScrollViewer>
         </Border>
       </Grid>
-    </Border>
+    </suki:GlassCard>
 
     <StackPanel Grid.Row="2" Spacing="8" Margin="0,12,0,0">
       <CheckBox Content="I have read and accept this notice"
                 IsChecked="{Binding Accepted}" x:Name="AcceptBox" TabIndex="1" />
       <Grid ColumnDefinitions="*,Auto,Auto">
-        <TextBlock Grid.Column="0" Text="{Binding ScrollHint}" Classes="muted" FontSize="12"
+        <TextBlock Grid.Column="0" Text="{Binding ScrollHint}" Classes="Caption"
                    VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
-        <Button Grid.Column="1" Content="Back" Classes="ghost" Margin="8,0,0,0"
+        <Button Grid.Column="1" Content="Back" Classes="Basic" Margin="8,0,0,0"
                 Command="{Binding DeclineCommand}" TabIndex="2" />
-        <Button Grid.Column="2" Content="Start install" Classes="accent" Margin="8,0,0,0"
+        <Button Grid.Column="2" Content="Start install" Classes="Flat" Margin="8,0,0,0"
                 IsEnabled="{Binding CanAccept}" Command="{Binding AcceptCommand}" TabIndex="3" />
       </Grid>
     </StackPanel>
