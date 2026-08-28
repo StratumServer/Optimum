@@ -11,6 +11,7 @@
                  BackgroundStyle="Flat"
                  BackgroundAnimationEnabled="False"
                  TextOptions.TextRenderingMode="Antialias"
+                 FontFamily="{StaticResource BodyFont}"
                  Title="{Binding Title}">
 
   <suki:SukiWindow.LogoContent>
