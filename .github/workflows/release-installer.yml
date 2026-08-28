@@ -75,6 +75,57 @@ jobs:
             --mainExe ${{ matrix.exe }} \
             --outputDir releases
 
+      # vpk has no name-override flag. Rename the user-facing artifacts (setup,
+      # portable, AppImage) to Optimum-v<version>-<rid>-Installer.<ext> and fix
+      # the reference in assets.<channel>.json so `vpk upload` still finds them.
+      # The .nupkg / releases.<channel>.json / RELEASES-<channel> feed files keep
+      # their Velopack names - the updater fetches those by name and users never
+      # see them. "Installer" in the name keeps these distinct from the
+      # ready-to-run game packages (Optimum-v<version>-<rid>.{zip,AppImage,dmg}).
+      - name: Rename artifacts to the Optimum scheme
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.version }}"
+          rid="${{ matrix.rid }}"
+          case "$rid" in
+            win-x64)   channel=win ;;
+            linux-x64) channel=linux ;;
+            osx-*)     channel=osx ;;
+            *) echo "unknown rid: $rid" >&2; exit 1 ;;
+          esac
+          cd releases
+          assets="assets.$channel.json"
+
+          rename() {
+            local old="$1" new="$2" tmp
+            [ -f "$old" ] || { echo "skip (absent): $old"; return 0; }
+            mv "$old" "$new"
+            tmp="$(mktemp)"
+            jq --arg o "$old" --arg n "$new" \
+              'map(if .RelativeFileName == $o then .RelativeFileName = $n else . end)' \
+              "$assets" > "$tmp"
+            mv "$tmp" "$assets"
+            echo "renamed: $old -> $new"
+          }
+
+          case "$channel" in
+            win)
+              rename "Optimum.Installer-win-Setup.exe"   "Optimum-v$v-$rid-Setup.exe"
+              rename "Optimum.Installer-win-Portable.zip" "Optimum-v$v-$rid-Installer-Portable.zip"
+              ;;
+            linux)
+              rename "Optimum.Installer.AppImage"        "Optimum-v$v-$rid-Installer.AppImage"
+              ;;
+            osx)
+              rename "Optimum.Installer-osx-Setup.pkg"   "Optimum-v$v-$rid-Installer.pkg"
+              rename "Optimum.Installer-osx-Portable.zip" "Optimum-v$v-$rid-Installer-Portable.zip"
+              ;;
+          esac
+
+          echo "--- releases/ ---"; ls -la
+          echo "--- $assets ---"; cat "$assets"
+
       - name: Sign (Windows)
         if: matrix.rid == 'win-x64' && env.WINDOWS_CERT_BASE64 != ''
         run: echo "signtool step goes here once a certificate secret exists"
