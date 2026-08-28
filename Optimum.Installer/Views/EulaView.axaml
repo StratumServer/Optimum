@@ -7,8 +7,9 @@
   <Grid RowDefinitions="Auto,*,Auto">
 
     <suki:GlassCard Grid.Row="0" Margin="0,0,0,12">
-      <suki:GroupBox Header="Summary">
-        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
+      <StackPanel Spacing="10">
+        <TextBlock Text="Summary" Classes="h5" />
+        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
           <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2" Margin="0,0,16,12">
             <TextBlock Text="Install to" Classes="Caption" />
             <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="DemiBold" />
@@ -26,21 +27,20 @@
             <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontWeight="DemiBold" />
           </StackPanel>
         </Grid>
-      </suki:GroupBox>
+      </StackPanel>
     </suki:GlassCard>
 
     <suki:GlassCard Grid.Row="1">
-      <suki:GroupBox Header="Build notice">
-        <Grid RowDefinitions="Auto,*">
-          <TextBlock Grid.Row="0" Margin="0,0,0,8"
-                     Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
-                     Classes="Caption" TextWrapping="Wrap" />
-          <ScrollViewer Grid.Row="1" x:Name="Scroller" ScrollChanged="OnScrollChanged"
-                        AutomationProperties.Name="Optimum build notice">
-            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
-          </ScrollViewer>
-        </Grid>
-      </suki:GroupBox>
+      <Grid RowDefinitions="Auto,Auto,*">
+        <TextBlock Grid.Row="0" Text="Build notice" Classes="h5" />
+        <TextBlock Grid.Row="1" Margin="0,4,0,8"
+                   Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
+                   Classes="Caption" TextWrapping="Wrap" />
+        <ScrollViewer Grid.Row="2" x:Name="Scroller" ScrollChanged="OnScrollChanged"
+                      AutomationProperties.Name="Optimum build notice">
+          <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
+        </ScrollViewer>
+      </Grid>
     </suki:GlassCard>
 
     <StackPanel Grid.Row="2" Spacing="10" Margin="0,12,0,0">
