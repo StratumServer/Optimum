@@ -19,7 +19,11 @@
            Width="22" Height="22" VerticalAlignment="Center" />
   </suki:SukiWindow.LogoContent>
 
-  <Grid ColumnDefinitions="188,*">
+  <Panel>
+    <!-- Faint grain over the flat window colour. -->
+    <Border Background="{StaticResource GrainBrush}" IsHitTestVisible="False" />
+
+    <Grid ColumnDefinitions="188,*">
 
     <suki:GlassCard Grid.Column="0" Margin="10" CornerRadius="12" Padding="16,22">
       <!-- A plain, static rail: SukiUI's VerticalStepper reflows the label of
@@ -89,5 +93,6 @@
       <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}" Margin="0,12,0,0"
                       IsVisible="{x:Static views:MotionSettings.ReduceMotion}" />
     </Grid>
-  </Grid>
+    </Grid>
+  </Panel>
 </suki:SukiWindow>

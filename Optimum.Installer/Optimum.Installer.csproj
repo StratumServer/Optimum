@@ -18,6 +18,7 @@
          commands). Licences ship beside the executable. -->
     <AvaloniaResource Include="Assets/Fonts/**/*.ttf" />
     <AvaloniaResource Include="Assets/optimum-logo.png" />
+    <AvaloniaResource Include="Assets/optimum-grain.png" />
     <None Include="Assets/Fonts/Lexend/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-Lexend.txt" />
     <None Include="Assets/Fonts/JetBrainsMono/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-JetBrainsMono.txt" />
   </ItemGroup>
