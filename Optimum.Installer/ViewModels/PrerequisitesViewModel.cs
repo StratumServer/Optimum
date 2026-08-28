@@ -134,6 +134,16 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
 
     public ObservableCollection<PrerequisiteRowViewModel> Rows { get; } = [];
 
+    /// <summary>Rows that need a decision: missing, outdated, or an optional tool
+    /// the user can install now. The rest are folded into <see cref="ReadySummary"/>.</summary>
+    public ObservableCollection<PrerequisiteRowViewModel> AttentionRows { get; } = [];
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasReadyTools))]
+    private string _readySummary = string.Empty;
+
+    public bool HasReadyTools => ReadySummary.Length > 0;
+
     /// <summary>True while there is no Optimum checkout on the machine yet.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CanContinue))]
@@ -239,16 +249,30 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         }
 
         RepoRootMissing = false;
+        AttentionRows.Clear();
         var results = new PrerequisiteScanner(_probe, _repoRoot).Scan();
+        var ready = new List<string>();
         foreach (var result in results)
         {
             bool canInstallAppimagetool = result.Definition.Id == PrerequisiteId.Appimagetool
                 && result.Acquisition == AcquisitionKind.Automatic
                 && _appimagetool is not null;
-            Rows.Add(new PrerequisiteRowViewModel(
-                result, canInstallAppimagetool ? InstallAppimagetoolAsync : null));
+            var row = new PrerequisiteRowViewModel(
+                result, canInstallAppimagetool ? InstallAppimagetoolAsync : null);
+            Rows.Add(row);
+
+            if (result.State == PrerequisiteState.Ok)
+                ready.Add(result.Definition.DisplayName);
+            else
+                AttentionRows.Add(row);
         }
         BlockingCount = results.Count(r => r.BlocksBuild);
+        ReadySummary = ready.Count switch
+        {
+            0 => string.Empty,
+            1 => $"{ready[0]} is ready.",
+            _ => $"{ready.Count} tools ready: {string.Join(", ", ready)}.",
+        };
         OnPropertyChanged(nameof(Summary));
     }
 

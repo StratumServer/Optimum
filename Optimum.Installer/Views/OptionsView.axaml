@@ -6,28 +6,25 @@
   <Grid RowDefinitions="*,Auto">
     <ScrollViewer Grid.Row="0">
       <StackPanel Spacing="12">
+
         <Border Classes="card">
           <StackPanel Spacing="10">
-            <StackPanel Spacing="3">
-              <TextBlock Text="Install location" Classes="sectionTitle" />
-              <TextBlock Text="Choose an empty folder that you own. The installer builds Optimum in a temporary workspace before moving it here."
-                         Classes="muted" TextWrapping="Wrap" />
-            </StackPanel>
+            <TextBlock Text="Install location" Classes="sectionTitle" />
             <TextBox Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
                      AutomationProperties.Name="Install directory" TabIndex="1" />
+            <TextBlock Text="An empty folder you own. Optimum is built in a temporary workspace and moved here when it is ready."
+                       Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
           </StackPanel>
         </Border>
 
         <Border Classes="card">
-          <StackPanel Spacing="8">
-            <StackPanel Spacing="3">
-              <TextBlock Text="Game data" Classes="sectionTitle" />
-              <TextBlock Text="By default, Optimum uses the same settings, worlds, and signed-in session as Vintage Story. Choose a specific folder only when you want to keep them separate."
-                         Classes="muted" TextWrapping="Wrap" />
-            </StackPanel>
-            <CheckBox Content="Use a specific Vintage Story data folder"
+          <StackPanel Spacing="10">
+            <TextBlock Text="Game data" Classes="sectionTitle" />
+            <CheckBox Content="Use a separate Vintage Story data folder"
                       IsChecked="{Binding UseSeparateDataFolder}" TabIndex="2" />
-            <StackPanel Spacing="4" IsVisible="{Binding UseSeparateDataFolder}" Margin="24,0,0,0">
+            <TextBlock Text="Off: Optimum shares Vintage Story's settings, worlds, and signed-in session. On: it keeps its own."
+                       Classes="muted" FontSize="12.5" TextWrapping="Wrap" />
+            <StackPanel Spacing="5" IsVisible="{Binding UseSeparateDataFolder}">
               <TextBox Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
                        AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
               <TextBlock Text="{Binding DataPathHint}" Classes="muted" FontSize="12"
@@ -38,25 +35,29 @@
         </Border>
 
         <Border Classes="card">
-          <Grid ColumnDefinitions="*,*">
-            <StackPanel Grid.Column="0" Spacing="8" Margin="0,0,18,0">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Grid.Column="0" Spacing="9">
               <TextBlock Text="Shortcuts" Classes="sectionTitle" />
               <CheckBox Content="Add an application menu entry"
                         IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
               <CheckBox Content="Create a desktop shortcut"
                         IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="8" IsVisible="{Binding ShowVersionChoice}">
+            <StackPanel Grid.Column="1" Spacing="7" Width="240" Margin="24,0,0,0"
+                        IsVisible="{Binding ShowVersionChoice}">
               <TextBlock Text="Vintage Story version" Classes="sectionTitle" />
               <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
+                        HorizontalAlignment="Stretch"
                         AutomationProperties.Name="Vintage Story version" TabIndex="6" />
-              <TextBlock Text="Use the recommended version unless you need a supported compatibility bridge."
+              <TextBlock Text="Use the recommended version unless you need a compatibility bridge."
                          Classes="muted" FontSize="12" TextWrapping="Wrap" />
             </StackPanel>
           </Grid>
         </Border>
 
-        <Border Background="{DynamicResource AppDangerSurfaceBrush}" CornerRadius="8" Padding="12"
+        <Border Background="{DynamicResource AppDangerSurfaceBrush}"
+                BorderBrush="{DynamicResource AppDangerBrush}" BorderThickness="1"
+                CornerRadius="4" Padding="12"
                 IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
           <TextBlock Text="{Binding ValidationError}" Foreground="{DynamicResource AppDangerBrush}"
                      TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive" />
@@ -64,13 +65,11 @@
       </StackPanel>
     </ScrollViewer>
 
-    <Grid Grid.Row="1" ColumnDefinitions="*,Auto,Auto" Margin="0,14,0,0">
-      <TextBlock Grid.Column="0" Text="You can review these choices before installation starts."
-                 Classes="muted" FontSize="12" VerticalAlignment="Center" />
-      <Button Grid.Column="1" Content="Back" Margin="8,0,0,0"
-              Command="{Binding BackCommand}" TabIndex="7" />
-      <Button Grid.Column="2" Content="Review installation" Classes="accent" Margin="8,0,0,0"
-              IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="8" />
+    <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,16,0,0">
+      <Button Grid.Column="0" Content="Back" Classes="ghost"
+              Command="{Binding BackCommand}" TabIndex="8" />
+      <Button Grid.Column="2" Content="Review" Classes="accent"
+              IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="7" />
     </Grid>
   </Grid>
 </UserControl>

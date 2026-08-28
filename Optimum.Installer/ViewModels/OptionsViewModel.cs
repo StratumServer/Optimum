@@ -22,7 +22,9 @@ public sealed partial class OptionsViewModel : ViewModelBase
         DataPathDetection detected = DataPathProbe.Detect(probe);
         if (detected.Path is not null)
         {
-            UseSeparateDataFolder = true;
+            // Prefill the field so it is ready if the user opts into a separate
+            // folder, but leave the box unchecked: the default already shares
+            // Vintage Story's data, which is what most people want.
             DataPath = detected.Path;
             DataPathHint = detected.HasActiveSession
                 ? "Detected a Vintage Story data folder with a signed-in session."

@@ -28,6 +28,7 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     private readonly CancellationTokenSource _forceful = new();
     private readonly CancellationTokenSource _graceful = new();
     private readonly Stopwatch _stopwatch = new();
+    private volatile bool _finished;
     private readonly StringBuilder _rawLog = new();
     private readonly Lock _rawLogGate = new();
 
@@ -81,9 +82,10 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
         finally
         {
             _stopwatch.Stop();
+            // Stop honouring Cancel before the CTS objects go away, so a late
+            // click on the still-visible button is a no-op rather than a throw.
+            _finished = true;
             TryDeleteDirectory(outputDirectory);
-            _forceful.Dispose();
-            _graceful.Dispose();
         }
 
         var settled = new TaskCompletionSource();
@@ -94,6 +96,10 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
             settled.SetResult();
         });
         await settled.Task;
+
+        // Safe now: the Progress view (and its Cancel button) has been swapped out.
+        _forceful.Dispose();
+        _graceful.Dispose();
     }
 
     private async Task<InstallOutcome> BuildAndDeployAsync(string outputDirectory)
@@ -130,16 +136,32 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     [RelayCommand]
     private void Cancel()
     {
+        if (_finished)
+            return;
+
         ConfirmCancel = false;
         CancelRequested = true;
         _post(() => StatusDetail = "cancelling");
-        _graceful.Cancel();
+        TryCancel(_graceful);
         // Force-kill if the pipeline has not stopped on its own after a grace period.
         _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ =>
         {
-            if (!_forceful.IsCancellationRequested)
-                _forceful.Cancel();
+            if (!_finished)
+                TryCancel(_forceful);
         }, TaskScheduler.Default);
+    }
+
+    private static void TryCancel(CancellationTokenSource source)
+    {
+        try
+        {
+            if (!source.IsCancellationRequested)
+                source.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The run finished and tore the source down between the guard and here.
+        }
     }
 
     [RelayCommand]
@@ -176,9 +198,9 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     private void RefreshClock()
     {
         Elapsed = FormatDuration(_stopwatch.Elapsed);
-        EstimatedRemaining = Percent is > 8 and < 99
+        EstimatedRemaining = Percent is > 8 and < 99 && _stopwatch.Elapsed.TotalSeconds >= 8
             ? "about " + FormatDuration(TimeSpan.FromSeconds(
-                _stopwatch.Elapsed.TotalSeconds * (100 - Percent) / Percent)) + " left (rough)"
+                _stopwatch.Elapsed.TotalSeconds * (100 - Percent) / Percent)) + " left"
             : null;
     }
 

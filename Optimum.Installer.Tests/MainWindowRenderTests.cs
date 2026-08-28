@@ -32,5 +32,4 @@ public class MainWindowRenderTests
         Assert.Empty(window.GetVisualDescendants().OfType<PrerequisitesView>());
         Assert.NotEmpty(window.GetVisualDescendants().OfType<OptionsView>());
     }
-
 }

@@ -3,61 +3,104 @@
         xmlns:vm="using:Optimum.Installer.ViewModels"
         x:Class="Optimum.Installer.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
-        Width="860" Height="660"
-        MinWidth="720" MinHeight="620"
+        Width="920" Height="700"
+        MinWidth="840" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppBackgroundBrush}"
         Title="{Binding Title}">
-  <Grid RowDefinitions="Auto,Auto,*">
-    <Border Grid.Row="0" Background="{DynamicResource AppSurfaceBrush}"
-            BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="0,0,0,1"
-            Padding="28,18,28,16">
-      <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,*,Auto">
-        <Border Grid.RowSpan="2" Grid.Column="0" Width="44" Height="44" CornerRadius="10"
-                Background="{DynamicResource AppAccentBrush}" Margin="0,0,14,0">
-          <TextBlock Text="O" FontSize="21" FontWeight="Bold"
-                     Foreground="{DynamicResource AppOnAccentBrush}"
-                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-        </Border>
-        <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
-          <TextBlock Text="Optimum installer" FontSize="14" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding CurrentStepLabel}" Classes="muted" FontSize="12" />
+  <Grid ColumnDefinitions="228,*">
+
+    <!-- The step rail: a cut face of rock, four layers deep. -->
+    <Border Grid.Column="0" Background="{DynamicResource AppRailBrush}">
+      <Grid RowDefinitions="Auto,*,Auto" Margin="24,26,20,22">
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="11" Margin="0,0,0,30">
+          <Border Width="34" Height="34" CornerRadius="4"
+                  Background="{DynamicResource AppAccentBrush}">
+            <TextBlock Text="O" FontFamily="{DynamicResource DisplayFont}" FontSize="19"
+                       FontWeight="SemiBold" Foreground="{DynamicResource AppOnAccentBrush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="Optimum" FontFamily="{DynamicResource DisplayFont}" FontSize="18"
+                     FontWeight="SemiBold" Foreground="{DynamicResource AppRailTextBrush}"
+                     VerticalAlignment="Center" />
         </StackPanel>
-        <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,14,24,0" Spacing="3">
-          <TextBlock Text="{Binding CurrentStepTitle}" FontSize="22" FontWeight="SemiBold" />
-          <TextBlock Text="{Binding CurrentStepDescription}" Classes="muted"
-                     TextWrapping="Wrap" />
-        </StackPanel>
-        <StackPanel Grid.RowSpan="2" Grid.Column="2" Width="156"
-                    VerticalAlignment="Bottom" Spacing="6">
-          <TextBlock Text="Setup progress" Classes="muted" FontSize="12"
-                     HorizontalAlignment="Right" />
-          <ProgressBar Minimum="0" Maximum="100" Value="{Binding CurrentStepProgress}"
-                       Height="6" AutomationProperties.Name="Setup progress" />
-        </StackPanel>
+
+        <ItemsControl Grid.Row="1" ItemsSource="{Binding Steps}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:WizardStep">
+              <Grid ColumnDefinitions="3,Auto,*" Margin="0,0,0,4" MinHeight="50">
+                <Border Grid.Column="0" Width="3" CornerRadius="2"
+                        Background="{DynamicResource AppAccentBrush}"
+                        IsVisible="{Binding IsCurrent}" />
+                <Border Grid.Column="1" Width="24" Height="24" CornerRadius="4" Margin="15,0,13,0"
+                        VerticalAlignment="Center"
+                        Background="{DynamicResource AppRailStepBrush}">
+                  <Panel>
+                    <TextBlock Text="{Binding Number}" FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppRailTextBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsVisible="{Binding !IsDone}" />
+                    <TextBlock Text="&#x2713;" FontSize="13" FontWeight="Bold"
+                               Foreground="{DynamicResource AppAccentBrush}"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               IsVisible="{Binding IsDone}" />
+                  </Panel>
+                </Border>
+                <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center"
+                           FontFamily="{DynamicResource DisplayFont}" FontSize="14"
+                           Foreground="{DynamicResource AppRailTextBrush}"
+                           IsVisible="{Binding !IsCurrent}" />
+                <TextBlock Grid.Column="2" Text="{Binding Name}" VerticalAlignment="Center"
+                           FontFamily="{DynamicResource DisplayFont}" FontSize="14.5" FontWeight="SemiBold"
+                           Foreground="#F1EBDC"
+                           IsVisible="{Binding IsCurrent}" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Grid.Row="2" Text="{Binding Title}" Classes="muted" FontSize="11"
+                   Foreground="{DynamicResource AppRailStepBrush}" />
       </Grid>
     </Border>
 
-    <Border Grid.Row="1" Margin="28,14,28,0" Padding="14,10"
+    <!-- Content column -->
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*">
+      <StackPanel Grid.Row="0" Margin="34,28,34,18" Spacing="7"
+                  IsVisible="{Binding HeaderVisible}">
+        <TextBlock Text="{Binding CurrentStepLabel}" Classes="eyebrow" />
+        <TextBlock Text="{Binding CurrentStepTitle}" Classes="display" />
+        <TextBlock Text="{Binding CurrentStepDescription}" Classes="muted" TextWrapping="Wrap"
+                   MaxWidth="560" HorizontalAlignment="Left" />
+      </StackPanel>
+
+      <Border Grid.Row="0" Height="1" VerticalAlignment="Bottom" Margin="34,0"
+              Background="{DynamicResource AppHairlineBrush}"
+              IsVisible="{Binding HeaderVisible}" />
+
+      <Border Grid.Row="1" Margin="34,16,34,0" Padding="14,11"
               Background="{DynamicResource AppWarningSurfaceBrush}"
-              BorderBrush="{DynamicResource AppWarningBrush}" BorderThickness="1" CornerRadius="8"
+              BorderBrush="{DynamicResource AppWarningBrush}" BorderThickness="1" CornerRadius="4"
               IsVisible="{Binding UpdatePromptVisible}">
-        <StackPanel DataContext="{Binding UpdateBanner}" IsVisible="{Binding !Dismissed}" Spacing="6">
+        <StackPanel DataContext="{Binding UpdateBanner}" Spacing="7">
           <Grid ColumnDefinitions="*,Auto,Auto">
             <TextBlock Grid.Column="0" Text="{Binding Message}" VerticalAlignment="Center"
-                       TextWrapping="Wrap" FontWeight="SemiBold" />
-            <Button Grid.Column="1" Content="Update now" Margin="8,0,0,0"
+                       TextWrapping="Wrap" FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppWarningBrush}" />
+            <Button Grid.Column="1" Content="Update now" Classes="accent" Margin="10,0,0,0"
                     IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
-            <Button Grid.Column="2" Content="Later" Margin="8,0,0,0"
+            <Button Grid.Column="2" Content="Later" Classes="ghost" Margin="6,0,0,0"
                     IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
           </Grid>
           <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
           <TextBlock Text="{Binding Error}" Foreground="{DynamicResource AppDangerBrush}" FontSize="12"
+                     TextWrapping="Wrap"
                      IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
-    </Border>
+      </Border>
 
-    <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
-                    Margin="28,18,28,24" />
+      <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
+                      Margin="34,22,34,26" />
+    </Grid>
   </Grid>
 </Window>

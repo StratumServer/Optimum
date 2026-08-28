@@ -48,6 +48,32 @@ public class UpdateBannerTests
     }
 
     [Fact]
+    public async Task DismissingTheBannerHidesItButKeepsTheViewModel()
+    {
+        var vm = new MainWindowViewModel(TestServices.Build(updates: new FakeUpdateService { AvailableVersion = "0.4.0" }));
+        await Task.Yield();
+        Assert.True(vm.UpdatePromptVisible);
+
+        vm.UpdateBanner!.DismissCommand.Execute(null);
+
+        Assert.False(vm.UpdatePromptVisible);
+        Assert.NotNull(vm.UpdateBanner);
+    }
+
+    [Fact]
+    public async Task TheBannerIsNotShownOnTheReviewScreen()
+    {
+        var vm = new MainWindowViewModel(TestServices.Build(updates: new FakeUpdateService { AvailableVersion = "0.4.0" }));
+        await Task.Yield();
+
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        vm.Options.ContinueCommand.Execute(null);
+
+        Assert.Equal(WizardScreen.Review, vm.CurrentScreen);
+        Assert.False(vm.UpdatePromptVisible);
+    }
+
+    [Fact]
     public async Task NoAvailableUpdateLeavesTheBannerNull()
     {
         var vm = new MainWindowViewModel(TestServices.Build(updates: new FakeUpdateService { AvailableVersion = null }));

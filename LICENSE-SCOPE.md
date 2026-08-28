@@ -38,6 +38,13 @@ project files in these paths:
 - `install-windows.cmd`
 - `install-windows.ps1`
 
+## Bundled fonts
+
+- `Optimum.Installer/Assets/Fonts/Spectral-*.ttf` — Spectral, © 2017 The Spectral
+  Project Authors, licensed under the SIL Open Font License 1.1. The full licence
+  text is alongside the files in `Optimum.Installer/Assets/Fonts/OFL-Spectral.txt`.
+  The MIT grant above does not extend to these files.
+
 ## Historical and upstream terms
 
 These paths remain outside the MIT grant:

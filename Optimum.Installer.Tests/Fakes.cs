@@ -32,6 +32,37 @@ public sealed class FakeBuildDriver : IBuildDriver
     public string? LastOutputDirectory { get; private set; }
 }
 
+/// <summary>
+/// A driver that reports some progress then blocks until <see cref="Release"/> is
+/// called, so a test can inspect the Progress screen mid-run and exercise cancel.
+/// </summary>
+public sealed class GatedBuildDriver : IBuildDriver
+{
+    private readonly TaskCompletionSource _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public bool ObservedForcefulCancellation { get; private set; }
+
+    public void Release() => _gate.TrySetResult();
+
+    public async Task<BuildResult> RunAsync(
+        BuildRequest request, IBuildObserver observer, CancellationToken forceful, CancellationToken graceful = default)
+    {
+        observer.Phase(ProgressPhase.Decompile, 30, "decompiling");
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(forceful, graceful);
+        try
+        {
+            await _gate.Task.WaitAsync(stop.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            ObservedForcefulCancellation = forceful.IsCancellationRequested;
+            return BuildResult.Failure(FailureReason.Cancelled, "the build was cancelled");
+        }
+
+        return BuildResult.Success("/tmp/pkg/Optimum-linux-x64");
+    }
+}
+
 public sealed class FakePackageInstaller : IPackageInstaller
 {
     public Func<DeployRequest, DeployResult> Behaviour { get; set; } =
