@@ -16,13 +16,13 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        // The Optimum mark: an oxidised-gold gear around a teal gem. The gem
-        // colour is the accent the whole installer runs on; the gear gold is
-        // the secondary.
+        // Cyan throughout: a deep cyan primary (buttons, step markers, links,
+        // progress) and a brighter cyan accent. The window surfaces are set to
+        // matching cyan-slate tones in App.axaml so nothing reads green or grey.
         SukiTheme.GetInstance().ChangeColorTheme(new SukiColorTheme(
             "Optimum",
-            primary: Color.Parse("#009E7F"),
-            accent: Color.Parse("#C8A84B")));
+            primary: Color.Parse("#0B7C97"),
+            accent: Color.Parse("#22A5C2")));
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {

@@ -20,23 +20,24 @@
                   TileMode="Tile" Stretch="None"
                   DestinationRect="0,0,128,128" />
 
-      <!-- A recessed surface for the long-text panes (build notice, build log)
-           so they read as a distinct region rather than blending into the card. -->
+      <!-- Cyan-slate surfaces, set explicitly so nothing is left to SukiUI's
+           primary-derived background (which skews green) or its neutral-grey
+           card fill. Everything leans blue (B > G) to stay cyan, not teal.
+             AppSurfaceBrush     - the window ground, under the grain
+             SukiGlassCardOpaque - every card and the rail (GlassCard IsOpaque)
+             InsetSurfaceBrush   - recessed panes (build notice, build log) -->
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Light">
-          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#ECECEA" />
-          <SolidColorBrush x:Key="InsetBorderBrush" Color="#D6D6D2" />
-          <!-- Opaque card fill. SukiUI's own opaque key is a flat neutral grey
-               (#fcfcfc / #333333); the window base is tinted by the Optimum
-               primary, so a neutral card reads as the wrong colour against it.
-               These are the values a translucent GlassCard composites to over
-               the flat window surface — same hue, one step lifted. -->
-          <Color x:Key="SukiGlassCardOpaqueBackground">#FAFAFA</Color>
+          <SolidColorBrush x:Key="AppSurfaceBrush" Color="#E8F0F2" />
+          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#DCE8EA" />
+          <SolidColorBrush x:Key="InsetBorderBrush" Color="#C3D5D8" />
+          <Color x:Key="SukiGlassCardOpaqueBackground">#F6FAFB</Color>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
-          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#1C1D1B" />
-          <SolidColorBrush x:Key="InsetBorderBrush" Color="#3A3B38" />
-          <Color x:Key="SukiGlassCardOpaqueBackground">#393926</Color>
+          <SolidColorBrush x:Key="AppSurfaceBrush" Color="#102A31" />
+          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#0B2026" />
+          <SolidColorBrush x:Key="InsetBorderBrush" Color="#294D57" />
+          <Color x:Key="SukiGlassCardOpaqueBackground">#193B44</Color>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>

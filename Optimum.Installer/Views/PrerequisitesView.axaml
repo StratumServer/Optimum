@@ -70,7 +70,8 @@
 
         <suki:GlassCard IsVisible="{Binding HasReadyTools}">
           <Grid ColumnDefinitions="Auto,*">
-            <TextBlock Grid.Column="0" Text="&#x2713;" Classes="Success" FontWeight="Bold"
+            <TextBlock Grid.Column="0" Text="&#x2713;" FontWeight="Bold"
+                       Foreground="{DynamicResource SukiPrimaryColor}"
                        FontSize="18" Margin="0,0,12,0" VerticalAlignment="Top" />
             <StackPanel Grid.Column="1" Spacing="4">
               <TextBlock Text="System tools ready" FontWeight="DemiBold" />

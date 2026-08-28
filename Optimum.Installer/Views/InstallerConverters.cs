@@ -18,10 +18,11 @@ public static class InstallerConverters
         new FuncValueConverter<bool, NotificationType>(ok =>
             ok ? NotificationType.Success : NotificationType.Error);
 
-    /// <summary>Install outcome → the colour of the completion badge.</summary>
+    /// <summary>Install outcome → the colour of the completion badge. A pass is
+    /// the cyan primary (the installer runs on cyan, not green); a failure is red.</summary>
     public static readonly IValueConverter OutcomeBrush =
         new FuncValueConverter<bool, IBrush?>(ok =>
-            Brush(ok ? "SukiSuccessColor" : "SukiDangerColor"));
+            Brush(ok ? "SukiPrimaryColor" : "SukiDangerColor"));
 
     /// <summary>Install outcome → the badge glyph.</summary>
     public static readonly IValueConverter OutcomeGlyph =
