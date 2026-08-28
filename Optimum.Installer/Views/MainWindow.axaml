@@ -10,7 +10,6 @@
                  CanFullScreen="False"
                  BackgroundStyle="Flat"
                  BackgroundAnimationEnabled="False"
-                 TextOptions.TextRenderingMode="Antialias"
                  FontFamily="{StaticResource BodyFont}"
                  Title="{Binding Title}">
 
@@ -37,7 +36,7 @@
       <StackPanel Grid.Row="0" Spacing="6" IsVisible="{Binding HeaderVisible}">
         <TextBlock Text="{Binding CurrentStepLabel}" Classes="eyebrow Primary" />
         <TextBlock Text="{Binding CurrentStepTitle}" Classes="h3" />
-        <TextBlock Text="{Binding CurrentStepDescription}" Classes="Caption"
+        <TextBlock Text="{Binding CurrentStepDescription}" Classes="lede"
                    TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left"
                    Margin="0,3,0,0" />
       </StackPanel>

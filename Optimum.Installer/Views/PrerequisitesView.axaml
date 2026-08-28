@@ -8,7 +8,7 @@
   <Grid RowDefinitions="Auto,*,Auto">
 
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,14">
-      <TextBlock Grid.Column="0" Text="{Binding Summary}" Classes="Caption"
+      <TextBlock Grid.Column="0" Text="{Binding Summary}" Classes="lede"
                  TextWrapping="Wrap" VerticalAlignment="Center" />
       <Button Grid.Column="1" Content="Check again" Classes="Basic" Margin="16,0,0,0"
               VerticalAlignment="Center" Command="{Binding RescanCommand}"
@@ -84,7 +84,9 @@
             <TextBlock Grid.Column="0" Text="&#x2713;" Foreground="White" FontWeight="Bold" FontSize="13"
                        HorizontalAlignment="Center" Margin="0,1,12,0" Width="22" TextAlignment="Center"
                        VerticalAlignment="Top" />
-            <TextBlock Grid.Column="1" Text="{Binding ReadySummary}" Classes="Caption" TextWrapping="Wrap" />
+            <TextBlock Grid.Column="1" Text="{Binding ReadySummary}" TextWrapping="Wrap"
+                       FontFamily="{StaticResource MonoFont}" FontSize="15" LineHeight="22"
+                       Foreground="{DynamicResource SukiLowText}" />
           </Grid>
         </suki:GlassCard>
 

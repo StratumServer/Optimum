@@ -19,7 +19,7 @@
         <TextBlock Text="{Binding Headline}" Classes="h3" VerticalAlignment="Center" />
       </StackPanel>
 
-      <TextBlock Text="{Binding Subtext}" Classes="Caption" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding Subtext}" Classes="lede" TextWrapping="Wrap" />
 
       <suki:GlassCard Padding="14"
                       IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
