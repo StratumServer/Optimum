@@ -26,10 +26,17 @@
         <ResourceDictionary x:Key="Light">
           <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#ECECEA" />
           <SolidColorBrush x:Key="InsetBorderBrush" Color="#D6D6D2" />
+          <!-- Opaque card fill. SukiUI's own opaque key is a flat neutral grey
+               (#fcfcfc / #333333); the window base is tinted by the Optimum
+               primary, so a neutral card reads as the wrong colour against it.
+               These are the values a translucent GlassCard composites to over
+               the flat window surface — same hue, one step lifted. -->
+          <Color x:Key="SukiGlassCardOpaqueBackground">#FAFAFA</Color>
         </ResourceDictionary>
         <ResourceDictionary x:Key="Dark">
           <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#1C1D1B" />
           <SolidColorBrush x:Key="InsetBorderBrush" Color="#3A3B38" />
+          <Color x:Key="SukiGlassCardOpaqueBackground">#393926</Color>
         </ResourceDictionary>
       </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>
@@ -78,12 +85,10 @@
 
     <!-- Tighter corners than SukiUI's 20px default (at 20 the rounding clips the
          last line of text in a card whose padding is smaller than the radius),
-         and opaque so the window grain does not bleed through the cards. -->
+         and opaque (with the tinted fill above) so the window grain does not
+         bleed through the cards. -->
     <Style Selector="suki|GlassCard">
       <Setter Property="CornerRadius" Value="12" />
-      <Setter Property="IsOpaque" Value="True" />
-    </Style>
-    <Style Selector="suki|InfoBar">
       <Setter Property="IsOpaque" Value="True" />
     </Style>
   </Application.Styles>
