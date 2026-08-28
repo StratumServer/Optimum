@@ -36,14 +36,19 @@
       <Setter Property="FontSize" Value="14" />
       <Setter Property="Foreground" Value="{DynamicResource SukiLowText}" />
     </Style>
+    <!-- Headings need their own line height: the 22 above would clip Lexend's
+         caps at these sizes. -->
     <Style Selector="TextBlock.h5">
       <Setter Property="FontSize" Value="17" />
+      <Setter Property="LineHeight" Value="24" />
     </Style>
     <Style Selector="TextBlock.h3">
       <Setter Property="FontSize" Value="27" />
+      <Setter Property="LineHeight" Value="34" />
     </Style>
     <Style Selector="TextBlock.h2">
       <Setter Property="FontSize" Value="32" />
+      <Setter Property="LineHeight" Value="40" />
     </Style>
   </Application.Styles>
 </Application>
