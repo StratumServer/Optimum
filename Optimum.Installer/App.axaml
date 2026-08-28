@@ -76,10 +76,15 @@
       <Setter Property="Margin" Value="0" />
     </Style>
 
-    <!-- Tighter corners than SukiUI's 20px default: at 20 the rounding clips the
-         last line of text in a card whose padding is smaller than the radius. -->
+    <!-- Tighter corners than SukiUI's 20px default (at 20 the rounding clips the
+         last line of text in a card whose padding is smaller than the radius),
+         and opaque so the window grain does not bleed through the cards. -->
     <Style Selector="suki|GlassCard">
       <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="IsOpaque" Value="True" />
+    </Style>
+    <Style Selector="suki|InfoBar">
+      <Setter Property="IsOpaque" Value="True" />
     </Style>
   </Application.Styles>
 </Application>
