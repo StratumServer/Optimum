@@ -20,5 +20,30 @@
 
   <Application.Styles>
     <suki:SukiTheme ThemeColor="Orange" />
+
+    <!-- Accessibility on top of the SukiUI scale: body up to 15/1.5, headings
+         a step larger, and secondary copy on a real 7:1 grey instead of
+         SukiUI's near-#8a8a8a caption colour. -->
+    <Style Selector="TextBlock">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="LineHeight" Value="22" />
+    </Style>
+    <Style Selector="SelectableTextBlock">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="LineHeight" Value="22" />
+    </Style>
+    <Style Selector="TextBlock.Caption">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Foreground" Value="{DynamicResource SukiLowText}" />
+    </Style>
+    <Style Selector="TextBlock.h5">
+      <Setter Property="FontSize" Value="17" />
+    </Style>
+    <Style Selector="TextBlock.h3">
+      <Setter Property="FontSize" Value="27" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontSize" Value="32" />
+    </Style>
   </Application.Styles>
 </Application>
