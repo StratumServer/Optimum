@@ -508,3 +508,41 @@ public class ProgressViewModelTests
     }
 }
 
+
+public class CompletionViewModelTests
+{
+    private static InstallOutcome Success(string launcher) =>
+        new(Succeeded: true, Cancelled: false, Message: "ok",
+            InstallDirectory: "/opt/optimum", Launcher: launcher, RawLogPath: "/does/not/exist.log");
+
+    [Fact]
+    public async Task LaunchDisablesTheButtonAndThenAsksTheShellToExit()
+    {
+        string launcher = Path.Combine(Path.GetTempPath(), "optimum-launch-" + Guid.NewGuid().ToString("N") + ".sh");
+        await File.WriteAllTextAsync(launcher, "#!/bin/sh\nexit 0\n");
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(launcher,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        try
+        {
+            var vm = new CompletionViewModel(Success(launcher));
+            bool exitAsked = false;
+            vm.ExitRequested += () => exitAsked = true;
+
+            Assert.True(vm.LaunchCommand.CanExecute(null));
+
+            System.Threading.Tasks.Task run = vm.LaunchCommand.ExecuteAsync(null);
+            Assert.True(vm.Launching);
+            Assert.False(vm.LaunchCommand.CanExecute(null));
+            Assert.Equal("Launching Optimum...", vm.LaunchLabel);
+
+            await run.WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.True(exitAsked);
+        }
+        finally
+        {
+            File.Delete(launcher);
+        }
+    }
+}

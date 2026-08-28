@@ -26,10 +26,9 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = new MainWindow
-            {
-                DataContext = new MainWindowViewModel(InstallerServices.CreateReal()),
-            };
+            var shell = new MainWindowViewModel(InstallerServices.CreateReal());
+            shell.ExitRequested += () => desktop.Shutdown();
+            desktop.MainWindow = new MainWindow { DataContext = shell };
         }
 
         base.OnFrameworkInitializationCompleted();
