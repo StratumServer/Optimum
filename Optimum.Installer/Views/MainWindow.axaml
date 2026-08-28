@@ -7,6 +7,7 @@
         MinWidth="840" MinHeight="640"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppBackgroundBrush}"
+        RenderOptions.TextRenderingMode="Antialias"
         Title="{Binding Title}">
   <Grid ColumnDefinitions="228,*">
 
