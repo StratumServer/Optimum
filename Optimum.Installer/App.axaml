@@ -82,8 +82,9 @@
       <Setter Property="LineHeight" Value="42" />
     </Style>
 
-    <!-- Buttons and inputs: 17px text, 44px min height (touch target). -->
-    <Style Selector="Button">
+    <!-- Buttons and inputs: 17px text, 44px min height (touch target). The
+         window-chrome buttons are excluded: SukiWindow sizes those itself. -->
+    <Style Selector="Button:not(.WindowControlsButton)">
       <Setter Property="FontFamily" Value="{StaticResource BodyFont}" />
       <Setter Property="FontSize" Value="17" />
       <Setter Property="MinHeight" Value="44" />
