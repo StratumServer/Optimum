@@ -19,16 +19,19 @@
            Width="22" Height="22" VerticalAlignment="Center" />
   </suki:SukiWindow.LogoContent>
 
-  <Grid ColumnDefinitions="220,*">
+  <Grid ColumnDefinitions="188,*">
 
-    <suki:GlassCard Grid.Column="0" Margin="12" CornerRadius="12" Padding="20,24">
+    <suki:GlassCard Grid.Column="0" Margin="10" CornerRadius="12" Padding="16,22">
       <!-- A plain, static rail: SukiUI's VerticalStepper reflows the label of
            the active step (it reveals a description slot), which makes the text
-           jump on every step change. -->
-      <ItemsControl ItemsSource="{Binding Steps}" VerticalAlignment="Top">
+           jump on every step change. Each row is a fixed width and the list is
+           centred, so the gap left of the circle matches the gap right of the
+           label. -->
+      <ItemsControl ItemsSource="{Binding Steps}" VerticalAlignment="Top"
+                    HorizontalAlignment="Center">
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:WizardStep">
-            <Grid ColumnDefinitions="28,*" Height="48">
+            <Grid ColumnDefinitions="28,Auto" Height="48" Width="104">
               <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14" VerticalAlignment="Center"
                       Background="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepCircleBrush}}"
                       BorderBrush="{DynamicResource SukiControlBorderBrush}"
