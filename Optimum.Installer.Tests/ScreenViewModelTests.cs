@@ -318,6 +318,20 @@ public class InstallerLogFilterTests
     {
         Assert.Equal(kept, InstallerLogFilter.IsInteresting(line));
     }
+
+    [Theory]
+    [InlineData("Compilação com êxito.", "info")]
+    [InlineData("Decompiling exact VSEssentials runtime donor...", "info")]
+    [InlineData("You are not using the latest version of the tool, please update.", "warn")]
+    [InlineData("Latest version is '11.0.0.9375' (yours is '10.1.0.8386')", "warn")]
+    [InlineData("warning CS0168: variable declared but never used", "warn")]
+    [InlineData("error: patch failed", "error")]
+    [InlineData("hunk #3 FAILED at 210", "error")]
+    [InlineData("System.IO.IOException: disk full", "error")]
+    public void ClassifyPicksSeverityFromContentNotStream(string line, string expected)
+    {
+        Assert.Equal(expected, InstallerLogFilter.Classify(line, fromStdErr: true));
+    }
 }
 
 public class ProgressViewModelTests
@@ -480,3 +494,4 @@ public class ProgressViewModelTests
         Assert.DoesNotContain(vm.Log, l => l.Text.Contains("Determining projects"));
     }
 }
+

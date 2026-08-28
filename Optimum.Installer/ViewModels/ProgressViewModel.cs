@@ -204,7 +204,10 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
         lock (_rawLogGate)
             _rawLog.AppendLine(line);
         if (isError || InstallerLogFilter.IsInteresting(line))
-            _post(() => Log.Add(new LogLine(isError ? "error" : "info", line)));
+        {
+            string level = InstallerLogFilter.Classify(line, isError);
+            _post(() => Log.Add(new LogLine(level, line)));
+        }
     }
 
     private void Phase(ProgressPhase phase, int percent, string detail) => _post(() =>
