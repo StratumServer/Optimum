@@ -80,19 +80,23 @@
   <Application.Styles>
     <FluentTheme />
 
+    <!-- LineHeight lives on the wrapping copy, not the universal selector: a
+         LineHeight below a face's natural line box (Spectral SemiBold's is
+         ~1.52 em) makes Avalonia clip the descender and drop the top leading,
+         which was pushing the page heading's "y" into the text below it. -->
     <Style Selector="TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
       <Setter Property="FontSize" Value="14" />
-      <Setter Property="LineHeight" Value="20" />
     </Style>
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource AppMutedTextBrush}" />
+      <Setter Property="LineHeight" Value="20" />
     </Style>
     <Style Selector="TextBlock.display">
       <Setter Property="FontFamily" Value="{DynamicResource DisplayFont}" />
       <Setter Property="FontSize" Value="27" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="LineHeight" Value="32" />
+      <Setter Property="LineHeight" Value="42" />
     </Style>
     <Style Selector="TextBlock.sectionTitle">
       <Setter Property="FontSize" Value="14" />
@@ -133,6 +137,8 @@
       <Setter Property="Padding" Value="16,8" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
       <Setter Property="Background" Value="{DynamicResource AppSurfaceBrush}" />
       <Setter Property="Foreground" Value="{DynamicResource AppTextBrush}" />
       <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
@@ -154,9 +160,13 @@
       <Setter Property="Opacity" Value="0.42" />
     </Style>
 
+    <!-- No BorderThickness override here. The presenter already paints the
+         border in the accent colour, so keeping 1 px is pixel-identical in
+         appearance and keeps the content box the same height as the outlined
+         tiers; a 0 px border shifted the accent label 1 px above the ghost
+         button beside it in every footer. -->
     <Style Selector="Button.accent">
       <Setter Property="Foreground" Value="{DynamicResource AppOnAccentBrush}" />
-      <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
