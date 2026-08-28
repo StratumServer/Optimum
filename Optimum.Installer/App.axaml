@@ -134,7 +134,10 @@
          .ghost is tertiary. Low corner radius throughout: cut, not moulded. -->
     <Style Selector="Button">
       <Setter Property="MinHeight" Value="38" />
-      <Setter Property="Padding" Value="16,8" />
+      <!-- ~2px more top than bottom: Inter's line box carries empty descent
+           space and the button labels have no descenders, so a symmetric box
+           makes the ink sit visibly above centre. This lands it optically. -->
+      <Setter Property="Padding" Value="16,10,16,6" />
       <Setter Property="CornerRadius" Value="4" />
       <Setter Property="FontWeight" Value="SemiBold" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
