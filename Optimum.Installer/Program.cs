@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Media;
 using Velopack;
 
 namespace Optimum.Installer;
@@ -19,6 +20,14 @@ internal static class Program
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
-            .WithInterFont()
+            .With(new FontManagerOptions
+            {
+                DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts#Figtree",
+                FontFallbacks =
+                [
+                    new FontFallback { FontFamily = new FontFamily("Segoe UI") },
+                    new FontFallback { FontFamily = new FontFamily("Inter") },
+                ],
+            })
             .LogToTrace();
 }

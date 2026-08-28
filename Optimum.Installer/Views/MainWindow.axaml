@@ -10,7 +10,7 @@
                  CanFullScreen="False"
                  BackgroundStyle="Flat"
                  BackgroundAnimationEnabled="False"
-                 RenderOptions.TextRenderingMode="Antialias"
+                 TextOptions.TextRenderingMode="Antialias"
                  Title="{Binding Title}">
 
   <suki:SukiWindow.LogoContent>
@@ -34,7 +34,7 @@
     <!-- Content column -->
     <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="32,26,32,26">
       <StackPanel Grid.Row="0" Spacing="4" IsVisible="{Binding HeaderVisible}">
-        <TextBlock Text="{Binding CurrentStepLabel}" Classes="Caption Primary" />
+        <TextBlock Text="{Binding CurrentStepLabel}" Classes="eyebrow Primary" />
         <TextBlock Text="{Binding CurrentStepTitle}" Classes="h3" />
         <TextBlock Text="{Binding CurrentStepDescription}" Classes="Caption"
                    TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
@@ -53,7 +53,7 @@
                     IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
           </Grid>
           <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
-          <TextBlock Text="{Binding Error}" Classes="Danger" FontSize="12" TextWrapping="Wrap"
+          <TextBlock Text="{Binding Error}" Classes="Danger" FontSize="14" TextWrapping="Wrap"
                      IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
       </suki:GlassCard>
