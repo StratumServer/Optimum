@@ -49,7 +49,7 @@ public static class SdkAcquisition
 
         var plan = new Plan(
             windows ? "https://dot.net/v1/dotnet-install.ps1" : "https://dot.net/v1/dotnet-install.sh",
-            windows ? "pwsh" : "bash",
+            windows ? PowerShellHost.Resolve(probe) ?? "powershell" : "bash",
             args,
             installDir);
 
