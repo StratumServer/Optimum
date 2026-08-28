@@ -3,15 +3,23 @@ using Optimum.Bootstrap.Core.Platform;
 namespace Optimum.Bootstrap.Core.Prerequisites;
 
 /// <summary>
-/// Detects every tool the bootstrap and packaging scripts need. The tool list is
-/// the one in <c>scripts/check-prereqs.sh</c>; the per-tool detection folds in
+/// Detects every tool the bootstrap and packaging scripts need.
+///
+/// On Linux and macOS the tool list is the one in <c>scripts/check-prereqs.sh</c>
+/// (a bash script describing what the <em>shell</em> pipeline needs). On Windows
+/// that list does not apply: <c>scripts/bootstrap.ps1</c> reimplements every
+/// fixup natively in PowerShell with "no perl/python3 dependency", and
+/// <c>scripts/install-windows.ps1</c> requires only the .NET SDK, Git, and
+/// PowerShell. The Windows list reflects that. The per-tool detection folds in
 /// the richer probes from the two GUI installers.
 /// </summary>
 public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
-    private static readonly PrerequisiteDefinition[] Definitions =
+    internal const string GitForWindowsUrl = "https://git-scm.com/download/win";
+
+    private static readonly PrerequisiteDefinition[] UnixDefinitions =
     [
         new(PrerequisiteId.Dotnet, "dotnet", ".NET SDK 10", RequirementLevel.Required, "bootstrap, build"),
         new(PrerequisiteId.Git, "git", "Git", RequirementLevel.Required, "bootstrap, extract-patches"),
@@ -30,6 +38,17 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         new(PrerequisiteId.Appimagetool, "appimagetool", "appimagetool", RequirementLevel.Optional, "package-linux.sh --format appimage (auto-downloads)"),
     ];
 
+    private static readonly PrerequisiteDefinition[] WindowsDefinitions =
+    [
+        new(PrerequisiteId.Dotnet, "dotnet", ".NET SDK 10", RequirementLevel.Required, "bootstrap, build"),
+        new(PrerequisiteId.Git, "git", "Git", RequirementLevel.Required, "bootstrap, extract-patches"),
+        new(PrerequisiteId.Pwsh, "pwsh", "PowerShell", RequirementLevel.Required, "bootstrap.ps1, package.ps1"),
+        new(PrerequisiteId.Ilspycmd, "ilspycmd", "ilspycmd (decompiler)", RequirementLevel.Optional, "bootstrap (auto-installs via dotnet tool)"),
+    ];
+
+    private PrerequisiteDefinition[] Definitions =>
+        probe.Os == OsKind.Windows ? WindowsDefinitions : UnixDefinitions;
+
     public IReadOnlyList<PrerequisiteResult> Scan() => Definitions.Select(Detect).ToArray();
 
     public bool AllRequiredPresent() => Scan().All(r => !r.BlocksBuild);
@@ -41,6 +60,8 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         PrerequisiteId.Innoextract => DetectInnoextract(def),
         PrerequisiteId.Mkisofs => DetectEither(def, "mkisofs", "genisoimage"),
         PrerequisiteId.Appimagetool => DetectAppimagetool(def),
+        PrerequisiteId.Pwsh => DetectPowerShell(def),
+        PrerequisiteId.Git when probe.Os == OsKind.Windows => DetectGitOnWindows(def),
         _ => DetectPlain(def),
     };
 
@@ -51,6 +72,34 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             return Ok(def, path, null);
 
         return Missing(def, DistroAcquisition(def.Command));
+    }
+
+    /// <summary>
+    /// PowerShell 7 (<c>pwsh</c>) satisfies the row everywhere; on Windows the
+    /// built-in Windows PowerShell 5.1 is an accepted fallback, so the row is
+    /// almost always Ready there.
+    /// </summary>
+    private PrerequisiteResult DetectPowerShell(PrerequisiteDefinition def)
+    {
+        string? path = PowerShellHost.Find(probe);
+        if (path is not null)
+            return Ok(def, path, null);
+
+        return probe.Os == OsKind.Windows
+            ? new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
+                AcquisitionKind.DownloadPage, null, "https://aka.ms/powershell")
+            : Missing(def, DistroAcquisition("pwsh"));
+    }
+
+    /// <summary>Git for Windows is a signed installer, not a package; point the user at it.</summary>
+    private PrerequisiteResult DetectGitOnWindows(PrerequisiteDefinition def)
+    {
+        string? path = CommandSearch.Which(probe, def.Command);
+        if (path is not null)
+            return Ok(def, path, null);
+
+        return new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
+            AcquisitionKind.DownloadPage, null, GitForWindowsUrl);
     }
 
     private PrerequisiteResult DetectEither(PrerequisiteDefinition def, string first, string second)

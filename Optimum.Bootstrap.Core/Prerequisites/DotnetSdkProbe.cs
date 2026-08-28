@@ -8,8 +8,8 @@ namespace Optimum.Bootstrap.Core.Prerequisites;
 /// <c>Resolve-DotNetPath</c> in <c>scripts/install-windows.ps1</c>: PATH first,
 /// then a per-platform candidate list, then run <c>--list-sdks</c> on each and
 /// accept the one that reports a <c>10.</c> line. <c>OPTIMUM_DOTNET_CANDIDATES</c>
-/// (colon-separated) replaces the default list, which is how the shell tests
-/// point detection at a stub.
+/// (separated by <c>:</c> on Unix, <c>;</c> on Windows) replaces the default
+/// list, which is how the shell tests point detection at a stub.
 /// </summary>
 public static class DotnetSdkProbe
 {
@@ -50,7 +50,11 @@ public static class DotnetSdkProbe
         string? overrideList = probe.GetEnvironmentVariable("OPTIMUM_DOTNET_CANDIDATES");
         if (!string.IsNullOrEmpty(overrideList))
         {
-            foreach (string entry in overrideList.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            // Split on the *simulated* platform's separator, not the host's, so a
+            // Windows-shaped probe parses `C:\a;C:\b` even when the test runs on
+            // Linux. In production probe.Os always matches the host.
+            char separator = probe.Os == OsKind.Windows ? ';' : ':';
+            foreach (string entry in overrideList.Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
                 yield return entry;
             yield break;
         }

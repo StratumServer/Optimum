@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Optimum.Bootstrap.Core.Acquisition;
+using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
 using Xunit;
 
@@ -15,6 +16,35 @@ public class NixEnvironmentTests
         probe.AddFile("/lib64/ld-linux-x86-64.so.2");
 
         Assert.True(NixEnvironment.DownloadedSdkRunnable(probe));
+    }
+
+    [Theory]
+    [InlineData(OsKind.Windows)]
+    [InlineData(OsKind.MacOs)]
+    public void TheNonFhsCheckIsLinuxOnly(OsKind os)
+    {
+        var probe = new FakeSystemProbe { Os = os };
+        // A leftover NIX_STORE / interpreter override must not make a native
+        // Windows or macOS host look non-FHS.
+        probe.Environment["NIX_STORE"] = "/nix/store";
+        probe.Environment["OPTIMUM_GLIBC_INTERPRETER"] = "/tmp/missing-ld-linux";
+
+        Assert.False(NixEnvironment.IsNixOs(probe));
+        Assert.Equal(string.Empty, NixEnvironment.GlibcInterpreterPath(probe));
+        Assert.True(NixEnvironment.DownloadedSdkRunnable(probe));
+    }
+
+    [Fact]
+    public void SdkAcquisitionBuildsAWindowsPlan()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows, HomeDirectory = @"C:\Users\tester" };
+
+        SdkAcquisition.Decision decision = SdkAcquisition.Evaluate(probe, @"C:\repo");
+
+        Assert.True(decision.CanRunScript);
+        Assert.NotNull(decision.Plan);
+        Assert.EndsWith("dotnet-install.ps1", decision.Plan!.ScriptUrl);
+        Assert.Contains("-NoPath", decision.Plan.Arguments);
     }
 
     [Fact]

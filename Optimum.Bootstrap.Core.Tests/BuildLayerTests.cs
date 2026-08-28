@@ -1,6 +1,7 @@
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
+using Optimum.Bootstrap.Core.Platform;
 using Xunit;
 
 namespace Optimum.Bootstrap.Core.Tests;
@@ -158,5 +159,45 @@ public class ScriptBuildDriverPreconditionTests
 
         Assert.False(result.Ok);
         Assert.Equal(FailureReason.OutputExists, result.Reason);
+    }
+
+    [Fact]
+    public async Task AnUnspawnableStepExecutableFailsTheBuildInsteadOfHangingTheWizard()
+    {
+        // A Windows-shaped probe whose PowerShell "exists" only on the fake
+        // PATH: the build passes preconditions, then RunStep tries to spawn a
+        // real `powershell` that is not on this (Linux) test host. The spawn
+        // failure must come back as a classified BuildResult, not an exception.
+        string root = Path.Combine(Path.GetTempPath(), "optimum-spawn-" + Guid.NewGuid().ToString("N")[..8]);
+        string repo = Path.Combine(root, "repo");
+        string output = Path.Combine(root, "out");
+        Directory.CreateDirectory(repo);
+        File.WriteAllText(Path.Combine(repo, "forks.json"), """{ "vintageStoryVersion": "1.22.7" }""");
+
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.Path.Add("C:/ps");
+        probe.AddFile("C:/ps/powershell.exe");
+        probe.Path.Add("C:/git");
+        probe.AddFile("C:/git/git.exe");
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "C:/dotnet/dotnet.exe";
+        probe.AddFile("C:/dotnet/dotnet.exe");
+        probe.OnCommand("C:/dotnet/dotnet.exe", "--list-sdks", "10.0.100 [C:\\sdk]\n");
+        probe.OnCommand("C:/dotnet/dotnet.exe", "--version", "10.0.100\n");
+        probe.AddFile(Path.Combine(repo, "forks.json"), """{ "vintageStoryVersion": "1.22.7" }""");
+
+        try
+        {
+            BuildResult result = await new ScriptBuildDriver(probe).RunAsync(
+                new BuildRequest(repo, output), NullBuildObserver.Instance, CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(30));
+
+            Assert.False(result.Ok);
+            Assert.NotNull(result.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 }

@@ -9,14 +9,19 @@ namespace Optimum.Bootstrap.Core.Prerequisites;
 /// the system dynamic linker; on NixOS and other non-FHS systems that linker
 /// lives in the Nix store, so the downloaded SDK cannot run. Core keeps the same
 /// refusal and the same <c>nix profile install</c> substitute.
+///
+/// The whole concept is Linux-only: the checks short-circuit on Windows and
+/// macOS, where the <c>dot.net</c> installer ships a native runtime with no
+/// glibc interpreter dependency.
 /// </summary>
 public static class NixEnvironment
 {
     public const string DotnetSdkInstallCommand = "nix profile install nixpkgs#dotnet-sdk_10";
 
     public static bool IsNixOs(ISystemProbe probe) =>
-        probe.PathExists("/etc/NIXOS")
-        || !string.IsNullOrEmpty(probe.GetEnvironmentVariable("NIX_STORE"));
+        probe.Os == OsKind.Linux
+        && (probe.PathExists("/etc/NIXOS")
+            || !string.IsNullOrEmpty(probe.GetEnvironmentVariable("NIX_STORE")));
 
     /// <summary>
     /// The dynamic linker path for the current architecture, or an empty string
@@ -26,6 +31,9 @@ public static class NixEnvironment
     /// </summary>
     public static string GlibcInterpreterPath(ISystemProbe probe)
     {
+        if (probe.Os != OsKind.Linux)
+            return string.Empty;
+
         string? overridePath = probe.GetEnvironmentVariable("OPTIMUM_GLIBC_INTERPRETER");
         if (!string.IsNullOrEmpty(overridePath))
             return overridePath;
