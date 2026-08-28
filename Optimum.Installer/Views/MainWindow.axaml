@@ -30,7 +30,8 @@
 
     <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="28,24,28,24">
       <StackPanel Grid.Row="0" Spacing="2" IsVisible="{Binding HeaderVisible}">
-        <TextBlock Text="{Binding CurrentStepLabel}" Classes="Primary" FontWeight="DemiBold" />
+        <TextBlock Text="{Binding CurrentStepLabel}" Classes="Primary" FontWeight="DemiBold"
+                   FontSize="13" LetterSpacing="1.5" />
         <TextBlock Text="{Binding CurrentStepTitle}" Classes="h2"
                    FontFamily="{DynamicResource DisplayFont}" />
         <TextBlock Text="{Binding CurrentStepDescription}" Classes="Caption"
