@@ -103,6 +103,38 @@ public sealed class FakeAppimagetoolAcquisition : IAppimagetoolAcquisition
     }
 }
 
+public sealed class FakeSdkAcquisition : ISdkAcquisition
+{
+    public Func<string, ToolAcquisitionResult> Behaviour { get; set; } =
+        static _ => ToolAcquisitionResult.Success("/opt/dotnet/dotnet");
+
+    public int Calls { get; private set; }
+
+    public Task<ToolAcquisitionResult> InstallAsync(
+        string repoRoot, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(repoRoot));
+    }
+}
+
+public sealed class FakeIlspycmdAcquisition : IIlspycmdAcquisition
+{
+    public Func<string, ToolAcquisitionResult> Behaviour { get; set; } =
+        static _ => ToolAcquisitionResult.Success("/home/tester/.dotnet/tools/ilspycmd");
+
+    public int Calls { get; private set; }
+
+    public Task<ToolAcquisitionResult> InstallAsync(
+        string repoRoot, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(repoRoot));
+    }
+}
+
 public sealed class FakeUpdateService : IUpdateService
 {
     public string? AvailableVersion { get; set; }
@@ -129,6 +161,8 @@ public static class TestServices
         IUpdateService? updates = null,
         ISourceProvider? sourceProvider = null,
         IAppimagetoolAcquisition? appimagetool = null,
+        ISdkAcquisition? sdk = null,
+        IIlspycmdAcquisition? ilspycmd = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -160,6 +194,8 @@ public static class TestServices
             Updates = updates,
             SourceProvider = sourceProvider,
             Appimagetool = appimagetool,
+            Sdk = sdk,
+            Ilspycmd = ilspycmd,
         };
     }
 }

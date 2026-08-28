@@ -104,6 +104,26 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
 
     private async Task<InstallOutcome> BuildAndDeployAsync(string outputDirectory)
     {
+        try
+        {
+            return await RunBuildAndDeployAsync(outputDirectory);
+        }
+        catch (OperationCanceledException)
+        {
+            return WriteOutcome(cancelled: true, "the install was cancelled", null, null);
+        }
+        catch (Exception ex)
+        {
+            // Nothing may escape this method: RunAsync's finally has no catch, so
+            // an unhandled exception here would leave the wizard on the Progress
+            // screen forever with an unobserved faulted task.
+            ((IBuildObserver)this).Log(LogLevel.Error, ex.Message);
+            return WriteOutcome(cancelled: false, $"the install failed: {ex.Message}", null, null);
+        }
+    }
+
+    private async Task<InstallOutcome> RunBuildAndDeployAsync(string outputDirectory)
+    {
         BuildResult build;
         try
         {

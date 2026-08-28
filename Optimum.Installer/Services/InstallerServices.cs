@@ -34,6 +34,12 @@ public sealed record InstallerServices(
     /// <summary>Installs the optional AppImage packaging tool on supported Linux hosts.</summary>
     public IAppimagetoolAcquisition? Appimagetool { get; init; }
 
+    /// <summary>Acquires a .NET SDK in place when one is missing. Null in a headless test.</summary>
+    public ISdkAcquisition? Sdk { get; init; }
+
+    /// <summary>Installs or realigns the pinned ilspycmd. Null in a headless test.</summary>
+    public IIlspycmdAcquisition? Ilspycmd { get; init; }
+
     public static InstallerServices CreateReal()
     {
         var probe = SystemProbe.Default;
@@ -46,6 +52,8 @@ public sealed record InstallerServices(
             Updates = new UpdateService(),
             SourceProvider = new GitSourceProvider(probe),
             Appimagetool = new AppimagetoolAcquisition(probe),
+            Sdk = new SdkInstaller(probe),
+            Ilspycmd = new IlspycmdInstaller(probe),
         };
     }
 }
