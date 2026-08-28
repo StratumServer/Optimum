@@ -30,16 +30,20 @@
       </StackPanel>
     </suki:GlassCard>
 
-    <suki:GlassCard Grid.Row="1">
+    <suki:GlassCard Grid.Row="1" Padding="0">
       <Grid RowDefinitions="Auto,Auto,*">
-        <TextBlock Grid.Row="0" Text="Build notice" Classes="h5" />
-        <TextBlock Grid.Row="1" Margin="0,4,0,8"
+        <TextBlock Grid.Row="0" Text="Build notice" Classes="h5" Margin="16,14,16,0" />
+        <TextBlock Grid.Row="1" Margin="16,4,16,10"
                    Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
                    Classes="Caption" TextWrapping="Wrap" />
-        <ScrollViewer Grid.Row="2" x:Name="Scroller" ScrollChanged="OnScrollChanged"
-                      AutomationProperties.Name="Optimum build notice">
-          <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
-        </ScrollViewer>
+        <Border Grid.Row="2" Background="{DynamicResource InsetSurfaceBrush}"
+                BorderBrush="{DynamicResource InsetBorderBrush}" BorderThickness="0,1,0,0"
+                CornerRadius="0,0,12,12">
+          <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged" Padding="16,12"
+                        AutomationProperties.Name="Optimum build notice">
+            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
+          </ScrollViewer>
+        </Border>
       </Grid>
     </suki:GlassCard>
 
