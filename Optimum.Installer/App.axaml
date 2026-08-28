@@ -6,11 +6,11 @@
              RequestedThemeVariant="Default">
   <Application.Resources>
     <ResourceDictionary>
-      <!-- SukiUI reads DefaultFontFamily throughout its theme; the other two
-           are used inline where a display or monospace face is wanted. -->
-      <FontFamily x:Key="DefaultFontFamily">avares://Optimum.Installer/Assets/Fonts/Figtree/Figtree-VF.ttf#Figtree</FontFamily>
-      <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts/Fraunces/Fraunces.ttf#Fraunces</FontFamily>
-      <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts/GeistMono/GeistMono-VF.ttf#Geist Mono</FontFamily>
+      <!-- Lexend for all UI text (SukiUI reads DefaultFontFamily throughout its
+           theme); JetBrains Mono inline for the log and command lines. -->
+      <FontFamily x:Key="DefaultFontFamily">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
+      <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
+      <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts/JetBrainsMono/JetBrainsMono-VF.ttf#JetBrains Mono</FontFamily>
     </ResourceDictionary>
   </Application.Resources>
 

@@ -1,8 +1,8 @@
-Copyright 2018 The Fraunces Project Authors (https://github.com/undercasetype/Fraunces)
+Copyright 2018 The Lexend Project Authors (https://github.com/googlefonts/lexend), with Reserved Font Name “RevReading Lexend”.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
-http://scripts.sil.org/OFL
+https://scripts.sil.org/OFL
 
 
 -----------------------------------------------------------

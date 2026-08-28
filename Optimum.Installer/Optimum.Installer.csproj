@@ -14,12 +14,11 @@
     <Version>$(OptimumVersion)</Version>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Bundled OFL 1.1 fonts: Figtree (body), Fraunces (display), Geist Mono
-         (log). One folder per family. Licences ship beside the executable. -->
+    <!-- Bundled OFL 1.1 fonts: Lexend (all UI text), JetBrains Mono (log and
+         commands). Licences ship beside the executable. -->
     <AvaloniaResource Include="Assets/Fonts/**/*.ttf" />
-    <None Include="Assets/Fonts/Figtree/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-Figtree.txt" />
-    <None Include="Assets/Fonts/Fraunces/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-Fraunces.txt" />
-    <None Include="Assets/Fonts/GeistMono/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-GeistMono.txt" />
+    <None Include="Assets/Fonts/Lexend/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-Lexend.txt" />
+    <None Include="Assets/Fonts/JetBrainsMono/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-JetBrainsMono.txt" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.1.1" />
