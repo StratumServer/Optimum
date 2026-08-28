@@ -18,6 +18,15 @@ public static class InstallerConverters
         new FuncValueConverter<bool, NotificationType>(ok =>
             ok ? NotificationType.Success : NotificationType.Error);
 
+    /// <summary>Install outcome → the colour of the completion badge.</summary>
+    public static readonly IValueConverter OutcomeBrush =
+        new FuncValueConverter<bool, IBrush?>(ok =>
+            Brush(ok ? "SukiSuccessColor" : "SukiDangerColor"));
+
+    /// <summary>Install outcome → the badge glyph.</summary>
+    public static readonly IValueConverter OutcomeGlyph =
+        new FuncValueConverter<bool, string>(ok => ok ? "✓" : "!");
+
     /// <summary>Log line level ("error"/"warn"/other) → its colour.</summary>
     public static readonly IValueConverter LogLevelBrush =
         new FuncValueConverter<string, IBrush?>(level => Brush(level switch
