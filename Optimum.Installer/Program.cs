@@ -22,11 +22,10 @@ internal static class Program
             .UsePlatformDetect()
             .With(new FontManagerOptions
             {
+                // Figtree is also the app-wide default so any text outside a
+                // SukiUI template (tooltips, flyouts) matches.
                 DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts/Figtree/Figtree-VF.ttf#Figtree",
-                FontFallbacks =
-                [
-                    new FontFallback { FontFamily = new FontFamily("Segoe UI") },
-                ],
+                FontFallbacks = [new FontFallback { FontFamily = new FontFamily("Segoe UI") }],
             })
             .LogToTrace();
 }
