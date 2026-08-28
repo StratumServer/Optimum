@@ -6,9 +6,9 @@
              x:DataType="vm:OptionsViewModel">
   <Grid RowDefinitions="*,Auto">
     <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel Spacing="12">
+      <StackPanel Spacing="10">
 
-        <suki:GlassCard Padding="18">
+        <suki:GlassCard Padding="16">
           <StackPanel Spacing="10">
             <TextBlock Text="Install location" Classes="h5" />
             <Grid ColumnDefinitions="*,Auto">
@@ -22,7 +22,7 @@
           </StackPanel>
         </suki:GlassCard>
 
-        <suki:GlassCard Padding="18">
+        <suki:GlassCard Padding="16">
           <StackPanel Spacing="10">
             <TextBlock Text="Game data" Classes="h5" />
             <CheckBox Content="Use a separate Vintage Story data folder"
@@ -43,7 +43,7 @@
           </StackPanel>
         </suki:GlassCard>
 
-        <suki:GlassCard Padding="18">
+        <suki:GlassCard Padding="16">
           <Grid ColumnDefinitions="*,Auto">
             <StackPanel Grid.Column="0" Spacing="9">
               <TextBlock Text="Shortcuts" Classes="h5" />
