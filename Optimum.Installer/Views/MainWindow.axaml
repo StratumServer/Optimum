@@ -1,0 +1,99 @@
+<suki:SukiWindow xmlns="https://github.com/avaloniaui"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                 xmlns:suki="https://github.com/kikipoulet/SukiUI"
+                 xmlns:vm="using:Optimum.Installer.ViewModels"
+                 xmlns:views="using:Optimum.Installer.Views"
+                 x:Class="Optimum.Installer.Views.MainWindow"
+                 x:DataType="vm:MainWindowViewModel"
+                 Width="960" Height="800"
+                 MinWidth="880" MinHeight="740"
+                 WindowStartupLocation="CenterScreen"
+                 CanFullScreen="False"
+                 BackgroundStyle="Flat"
+                 BackgroundAnimationEnabled="False"
+                 Icon="avares://Optimum.Installer/Assets/optimum-logo.png"
+                 Title="{Binding Title}">
+
+  <suki:SukiWindow.LogoContent>
+    <Image Source="avares://Optimum.Installer/Assets/optimum-logo.png"
+           Width="22" Height="22" VerticalAlignment="Center" />
+  </suki:SukiWindow.LogoContent>
+
+  <!-- Opaque cyan-slate ground: covers SukiUI's primary-derived shader
+       background (which skews green) with a flat surface, then the grain. -->
+  <Panel Background="{DynamicResource AppSurfaceBrush}">
+    <Border Background="{StaticResource GrainBrush}" IsHitTestVisible="False" />
+
+    <Grid ColumnDefinitions="188,*">
+
+    <suki:GlassCard Grid.Column="0" Margin="10" CornerRadius="12" Padding="16,22">
+      <!-- A plain, static rail: SukiUI's VerticalStepper reflows the label of
+           the active step (it reveals a description slot), which makes the text
+           jump on every step change. Each row is a fixed width and the list is
+           centred, so the gap left of the circle matches the gap right of the
+           label. -->
+      <ItemsControl ItemsSource="{Binding Steps}" VerticalAlignment="Top"
+                    HorizontalAlignment="Center">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:WizardStep">
+            <Grid ColumnDefinitions="28,Auto" Height="48" Width="104">
+              <Border Grid.Column="0" Width="28" Height="28" CornerRadius="14" VerticalAlignment="Center"
+                      Background="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepCircleBrush}}"
+                      BorderBrush="{DynamicResource SukiControlBorderBrush}"
+                      BorderThickness="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepCircleBorder}}">
+                <Panel>
+                  <TextBlock Text="{Binding Number}" FontSize="13" FontWeight="SemiBold"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
+                             Foreground="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepLabelBrush}}"
+                             IsVisible="{Binding !IsDone}" />
+                  <PathIcon Data="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"
+                            Width="12" Height="12" Foreground="White"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            IsVisible="{Binding IsDone}" />
+                </Panel>
+              </Border>
+              <TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" Margin="12,0,0,0"
+                         FontSize="15" FontWeight="SemiBold"
+                         Foreground="{Binding IsReached, Converter={x:Static views:InstallerConverters.StepLabelBrush}}" />
+            </Grid>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </suki:GlassCard>
+
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="28,20,28,20">
+      <StackPanel Grid.Row="0" Spacing="2" IsVisible="{Binding HeaderVisible}">
+        <TextBlock Text="{Binding CurrentStepLabel}" Classes="Primary" FontWeight="DemiBold"
+                   FontSize="13" LetterSpacing="1.5" />
+        <TextBlock Text="{Binding CurrentStepTitle}" Classes="h2"
+                   FontFamily="{DynamicResource DisplayFont}" />
+        <TextBlock Text="{Binding CurrentStepDescription}" Classes="Caption"
+                   TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left" />
+      </StackPanel>
+
+      <suki:GlassCard Grid.Row="1" Margin="0,14,0,0" IsVisible="{Binding UpdatePromptVisible}">
+        <StackPanel DataContext="{Binding UpdateBanner}" Spacing="10">
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <TextBlock Grid.Column="0" Text="{Binding Message}" Classes="Warning"
+                       VerticalAlignment="Center" TextWrapping="Wrap" FontWeight="DemiBold" />
+            <Button Grid.Column="1" Content="Update now" Classes="Flat" Margin="10,0,0,0"
+                    IsEnabled="{Binding !Updating}" Command="{Binding UpdateCommand}" />
+            <Button Grid.Column="2" Content="Later" Margin="8,0,0,0"
+                    IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
+          </Grid>
+          <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
+          <TextBlock Text="{Binding Error}" Classes="Danger" TextWrapping="Wrap"
+                     IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+      </suki:GlassCard>
+
+      <!-- Skip the fade entirely when the OS asks for reduced motion. -->
+      <suki:SukiTransitioningContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
+                                            Margin="0,12,0,0"
+                                            IsVisible="{x:Static views:MotionSettings.AllowMotion}" />
+      <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}" Margin="0,12,0,0"
+                      IsVisible="{x:Static views:MotionSettings.ReduceMotion}" />
+    </Grid>
+    </Grid>
+  </Panel>
+</suki:SukiWindow>

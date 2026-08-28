@@ -200,3 +200,26 @@ package-macos: build ## Package macOS (.dmg/.app); ARCH=arm64 or x64
 
 package-win: build ## Package Windows x64 (folder + zip); needs innoextract >= 1.11 off-Windows without package-client cache
 	pwsh scripts/package.ps1 -Zip -Version $(VERSION) $(if $(CLIENT_ARCHIVE),-ClientArchive "$(CLIENT_ARCHIVE)")
+
+# ---------------------------------------------------------------------------
+# The Avalonia installer app (INSTALLER-PLAN.md). Independent of the game
+# build: no bootstrap, no decompile.
+# ---------------------------------------------------------------------------
+
+INSTALLER_RID ?= linux-x64
+
+installer-test: ## Build and test the installer projects (no bootstrap)
+	dotnet test Optimum.Installer.slnf -c Release --nologo
+
+installer-publish: ## Publish the installer app self-contained for INSTALLER_RID
+	dotnet publish Optimum.Installer/Optimum.Installer.csproj -c Release \
+		-r $(INSTALLER_RID) --self-contained -o dist/installer/$(INSTALLER_RID) --nologo
+
+installer-pack: installer-publish ## Package the installer with Velopack for INSTALLER_RID
+	dotnet tool restore
+	dotnet vpk pack \
+		--packId Optimum.Installer \
+		--packVersion $(shell cat VERSION) \
+		--packDir dist/installer/$(INSTALLER_RID) \
+		--mainExe $(if $(filter win-x64,$(INSTALLER_RID)),Optimum.Installer.exe,Optimum.Installer) \
+		--outputDir dist/installer/releases

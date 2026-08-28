@@ -1,0 +1,188 @@
+name: Release installer
+
+# Packages the Avalonia installer with Velopack for Windows and Linux and
+# publishes the feed. macOS binaries are built for archival but not published:
+# there is no Apple Developer Program account yet (INSTALLER-PLAN.md section 2).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (defaults to the VERSION file)'
+        required: false
+        type: string
+      publish:
+        description: 'Upload the Velopack feed to GitHub releases'
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-installer
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # `label` is only the artifact name; vpk picks the Velopack channel
+          # from the RID (win / linux / osx).
+          - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, label: win }
+          - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, label: linux }
+          - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
+          - { os: macos-13, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="$(cat VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Publish self-contained
+        run: >
+          dotnet publish Optimum.Installer/Optimum.Installer.csproj -c Release
+          -r ${{ matrix.rid }} --self-contained
+          -o publish/${{ matrix.rid }} --nologo
+
+      - name: Pack with Velopack
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet vpk pack \
+            --packId Optimum.Installer \
+            --packVersion "${{ steps.v.outputs.version }}" \
+            --packDir publish/${{ matrix.rid }} \
+            --mainExe ${{ matrix.exe }} \
+            --outputDir releases
+
+      # vpk has no name-override flag. Rename the user-facing artifacts (setup,
+      # portable, AppImage) to Optimum-v<version>-<rid>-Installer.<ext> and fix
+      # the reference in assets.<channel>.json so `vpk upload` still finds them.
+      # The .nupkg / releases.<channel>.json / RELEASES-<channel> feed files keep
+      # their Velopack names - the updater fetches those by name and users never
+      # see them. "Installer" in the name keeps these distinct from the
+      # ready-to-run game packages (Optimum-v<version>-<rid>.{zip,AppImage,dmg}).
+      - name: Rename artifacts to the Optimum scheme
+        shell: bash
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.version }}"
+          rid="${{ matrix.rid }}"
+          case "$rid" in
+            win-x64)   channel=win ;;
+            linux-x64) channel=linux ;;
+            osx-*)     channel=osx ;;
+            *) echo "unknown rid: $rid" >&2; exit 1 ;;
+          esac
+          cd releases
+          assets="assets.$channel.json"
+
+          rename() {
+            local old="$1" new="$2" tmp
+            [ -f "$old" ] || { echo "skip (absent): $old"; return 0; }
+            mv "$old" "$new"
+            tmp="$(mktemp)"
+            jq --arg o "$old" --arg n "$new" \
+              'map(if .RelativeFileName == $o then .RelativeFileName = $n else . end)' \
+              "$assets" > "$tmp"
+            mv "$tmp" "$assets"
+            echo "renamed: $old -> $new"
+          }
+
+          case "$channel" in
+            win)
+              rename "Optimum.Installer-win-Setup.exe"   "Optimum-v$v-$rid-Setup.exe"
+              rename "Optimum.Installer-win-Portable.zip" "Optimum-v$v-$rid-Installer-Portable.zip"
+              ;;
+            linux)
+              rename "Optimum.Installer.AppImage"        "Optimum-v$v-$rid-Installer.AppImage"
+              ;;
+            osx)
+              rename "Optimum.Installer-osx-Setup.pkg"   "Optimum-v$v-$rid-Installer.pkg"
+              rename "Optimum.Installer-osx-Portable.zip" "Optimum-v$v-$rid-Installer-Portable.zip"
+              ;;
+          esac
+
+          echo "--- releases/ ---"; ls -la
+          echo "--- $assets ---"; cat "$assets"
+
+      - name: Sign (Windows)
+        if: matrix.rid == 'win-x64' && env.WINDOWS_CERT_BASE64 != ''
+        run: echo "signtool step goes here once a certificate secret exists"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.label }}
+          path: releases/
+          retention-days: 14
+
+  publish:
+    if: ${{ inputs.publish }}
+    needs: pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Resolve version
+        id: v
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          [ -n "$version" ] || version="$(cat VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download the feeds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: feeds
+
+      # One upload per channel, in sequence, into the same tag. macOS is not
+      # published (INSTALLER-PLAN.md section 2).
+      - name: Publish to GitHub releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.v.outputs.version }}"
+          tag="installer-v$version"
+          for channel in win linux; do
+            dotnet vpk upload github \
+              --repoUrl "https://github.com/${{ github.repository }}" \
+              --outputDir "feeds/installer-$channel" \
+              --channel "$channel" \
+              --tag "$tag" \
+              --releaseName "Optimum installer v$version" \
+              --publish
+          done

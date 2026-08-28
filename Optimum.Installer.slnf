@@ -1,0 +1,14 @@
+{
+  "solution": {
+    "path": "VintageStory.slnx",
+    "projects": [
+      "Optimum.Bootstrap.Core/Optimum.Bootstrap.Core.csproj",
+      "Optimum.Bootstrap.Core.TestSupport/Optimum.Bootstrap.Core.TestSupport.csproj",
+      "Optimum.Bootstrap.Core.Tests/Optimum.Bootstrap.Core.Tests.csproj",
+      "Optimum.Cli/Optimum.Cli.csproj",
+      "Optimum.Cli.Tests/Optimum.Cli.Tests.csproj",
+      "Optimum.Installer/Optimum.Installer.csproj",
+      "Optimum.Installer.Tests/Optimum.Installer.Tests.csproj"
+    ]
+  }
+}

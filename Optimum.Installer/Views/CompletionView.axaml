@@ -1,0 +1,41 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             xmlns:conv="using:Optimum.Installer.Views"
+             x:Class="Optimum.Installer.Views.CompletionView"
+             x:DataType="vm:CompletionViewModel">
+  <StackPanel Spacing="18" VerticalAlignment="Top">
+
+    <StackPanel Orientation="Horizontal" Spacing="14">
+      <Border Width="44" Height="44" CornerRadius="22" VerticalAlignment="Center"
+              Background="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeBrush}}">
+        <TextBlock Text="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeGlyph}}"
+                   FontSize="22" FontWeight="Bold" Foreground="White"
+                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+      </Border>
+      <TextBlock Text="{Binding Headline}" Classes="h2" VerticalAlignment="Center" />
+    </StackPanel>
+
+    <TextBlock Text="{Binding Subtext}" TextWrapping="Wrap" MaxWidth="620" />
+
+    <suki:GlassCard IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+      <StackPanel Spacing="4">
+        <TextBlock Text="Installed at" Classes="Caption" />
+        <SelectableTextBlock Text="{Binding InstallDirectory}" FontWeight="DemiBold" TextWrapping="Wrap"
+                             FontFamily="{DynamicResource MonoFont}" />
+      </StackPanel>
+    </suki:GlassCard>
+
+    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
+      <Button Content="{Binding LaunchLabel}" Classes="Flat"
+              IsVisible="{Binding Succeeded}"
+              suki:ButtonExtensions.ShowProgress="{Binding Launching}"
+              Command="{Binding LaunchCommand}" />
+      <Button Content="Try again" Classes="Flat"
+              IsVisible="{Binding CanRetry}" Command="{Binding RetryCommand}" />
+      <Button Content="Open log"
+              IsVisible="{Binding ShowLog}" Command="{Binding ViewLogCommand}" />
+    </StackPanel>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,94 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             xmlns:conv="using:Optimum.Installer.Views"
+             x:Class="Optimum.Installer.Views.PrerequisitesView"
+             x:DataType="vm:PrerequisitesViewModel">
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
+      <TextBlock Grid.Column="0" Text="{Binding Summary}"
+                 TextWrapping="Wrap" VerticalAlignment="Center" />
+      <Button Grid.Column="1" Content="Check again" Margin="16,0,0,0"
+              VerticalAlignment="Center" Command="{Binding RescanCommand}"
+              AutomationProperties.Name="Check system requirements again" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="12">
+
+        <suki:GlassCard IsVisible="{Binding RepoRootMissing}">
+          <StackPanel Spacing="10">
+            <TextBlock Text="Optimum source" Classes="h5" />
+            <TextBlock Text="The matching public Optimum source is downloaded into your user cache. Vintage Story files are fetched later on this computer and are never bundled with the installer."
+                       Classes="Caption" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+              <Button Content="Download source" Classes="Flat"
+                      IsVisible="{Binding CanAcquireSource}"
+                      IsEnabled="{Binding !AcquiringSource}"
+                      Command="{Binding AcquireSourceCommand}" />
+              <ProgressBar IsIndeterminate="True" Width="130" Height="4"
+                           IsVisible="{Binding AcquiringSource}"
+                           AutomationProperties.Name="Downloading Optimum source" />
+              <TextBlock Text="{Binding SourceStatus}" Classes="Caption"
+                         VerticalAlignment="Center" TextWrapping="Wrap" />
+            </StackPanel>
+          </StackPanel>
+        </suki:GlassCard>
+
+        <ItemsControl ItemsSource="{Binding AttentionRows}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><StackPanel Spacing="10" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:PrerequisiteRowViewModel">
+              <suki:GlassCard>
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Spacing="4">
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                      <TextBlock Text="{Binding Name}" FontWeight="DemiBold" />
+                      <TextBlock Text="{Binding StatusLabel}" FontWeight="DemiBold"
+                                 Foreground="{Binding IsOptional, Converter={x:Static conv:InstallerConverters.StatusBrush}}"
+                                 VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding Detail}" Classes="Caption" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding ManualCommand}"
+                                         FontFamily="{DynamicResource MonoFont}"
+                                         IsVisible="{Binding ManualCommand, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                  </StackPanel>
+                  <Button Grid.Column="1" Content="{Binding ActionLabel}" Classes="Flat" Margin="16,0,0,0"
+                          VerticalAlignment="Center"
+                          IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                          Command="{Binding ActionCommand}"
+                          ToolTip.Tip="{Binding ActionDetail}" />
+                </Grid>
+              </suki:GlassCard>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <suki:GlassCard IsVisible="{Binding HasReadyTools}">
+          <Grid ColumnDefinitions="Auto,*">
+            <TextBlock Grid.Column="0" Text="&#x2713;" FontWeight="Bold"
+                       Foreground="{DynamicResource SukiPrimaryColor}"
+                       FontSize="18" Margin="0,0,12,0" VerticalAlignment="Top" />
+            <StackPanel Grid.Column="1" Spacing="4">
+              <TextBlock Text="System tools ready" FontWeight="DemiBold" />
+              <SelectableTextBlock Text="{Binding ReadySummary}" TextWrapping="Wrap"
+                                   FontFamily="{DynamicResource MonoFont}" />
+            </StackPanel>
+          </Grid>
+        </suki:GlassCard>
+
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal"
+                HorizontalAlignment="Right" Margin="0,16,0,0">
+      <Button Content="Continue" Classes="Flat"
+              IsEnabled="{Binding CanContinue}"
+              Command="{Binding ContinueCommand}" />
+    </StackPanel>
+  </Grid>
+</UserControl>
