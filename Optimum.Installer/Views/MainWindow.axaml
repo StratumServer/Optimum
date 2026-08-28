@@ -2,6 +2,7 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:suki="https://github.com/kikipoulet/SukiUI"
                  xmlns:vm="using:Optimum.Installer.ViewModels"
+                 xmlns:views="using:Optimum.Installer.Views"
                  x:Class="Optimum.Installer.Views.MainWindow"
                  x:DataType="vm:MainWindowViewModel"
                  Width="960" Height="760"
@@ -52,8 +53,12 @@
         </StackPanel>
       </suki:GlassCard>
 
+      <!-- Skip the fade entirely when the OS asks for reduced motion. -->
       <suki:SukiTransitioningContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
-                                            Margin="0,18,0,0" />
+                                            Margin="0,18,0,0"
+                                            IsVisible="{x:Static views:MotionSettings.AllowMotion}" />
+      <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}" Margin="0,18,0,0"
+                      IsVisible="{x:Static views:MotionSettings.ReduceMotion}" />
     </Grid>
   </Grid>
 </suki:SukiWindow>
