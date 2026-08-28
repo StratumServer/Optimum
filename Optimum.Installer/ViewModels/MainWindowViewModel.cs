@@ -287,10 +287,14 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         await progress.RunAsync();
     }
 
+    /// <summary>Raised when the shell should close (the launched game is up).</summary>
+    public event Action? ExitRequested;
+
     private void OnBuildFinished(InstallOutcome outcome)
     {
         var completion = new CompletionViewModel(outcome);
         completion.RetryRequested += RestartFromPrerequisites;
+        completion.ExitRequested += () => ExitRequested?.Invoke();
         Completion = completion;
         Progress = null;
         CurrentScreen = WizardScreen.Completion;
