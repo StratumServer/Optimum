@@ -123,6 +123,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [NotifyPropertyChangedFor(nameof(UpdatePromptVisible))]
     [NotifyPropertyChangedFor(nameof(IsEulaOpen))]
     [NotifyPropertyChangedFor(nameof(CurrentStepNumber))]
+    [NotifyPropertyChangedFor(nameof(StepIndex))]
     [NotifyPropertyChangedFor(nameof(CurrentStepLabel))]
     [NotifyPropertyChangedFor(nameof(CurrentStepTitle))]
     [NotifyPropertyChangedFor(nameof(CurrentStepDescription))]
@@ -132,6 +133,12 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     private WizardScreen _currentScreen = WizardScreen.Prerequisites;
 
     private static readonly string[] StepNames = ["System", "Options", "Review", "Install"];
+
+    /// <summary>The rail labels for <c>suki:VerticalStepper</c>.</summary>
+    public IReadOnlyList<string> StepLabels => StepNames;
+
+    /// <summary>Zero-based current step for <c>suki:VerticalStepper.Index</c>.</summary>
+    public int StepIndex => CurrentStepNumber - 1;
 
     /// <summary>The four rail layers, restated on every screen change.</summary>
     public IReadOnlyList<WizardStep> Steps

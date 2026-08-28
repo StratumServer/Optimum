@@ -1,5 +1,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
              xmlns:vm="using:Optimum.Installer.ViewModels"
              xmlns:conv="using:Optimum.Installer.Views"
              x:Class="Optimum.Installer.Views.CompletionView"
@@ -8,33 +9,33 @@
     <StackPanel Grid.Row="1" Spacing="16" MaxWidth="520" HorizontalAlignment="Left">
 
       <StackPanel Orientation="Horizontal" Spacing="12">
-        <Border Width="30" Height="30" CornerRadius="4" VerticalAlignment="Center"
+        <Border Width="34" Height="34" CornerRadius="6" VerticalAlignment="Center"
                 Background="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeSurface}}">
           <TextBlock Text="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeGlyph}}"
-                     FontWeight="Bold" FontSize="15"
+                     FontWeight="Bold" FontSize="17"
                      Foreground="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeInk}}"
                      HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Border>
-        <TextBlock Text="{Binding Headline}" Classes="display" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Headline}" Classes="h3" VerticalAlignment="Center" />
       </StackPanel>
 
-      <TextBlock Text="{Binding Subtext}" Classes="muted" TextWrapping="Wrap" />
+      <TextBlock Text="{Binding Subtext}" Classes="Caption" TextWrapping="Wrap" />
 
-      <Border Classes="subtleCard"
-              IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+      <suki:GlassCard Padding="14"
+                      IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
         <StackPanel Spacing="2">
-          <TextBlock Text="INSTALLED AT" Classes="fieldLabel" />
+          <TextBlock Text="INSTALLED AT" Classes="Caption Primary" />
           <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="12.5" />
         </StackPanel>
-      </Border>
+      </suki:GlassCard>
 
       <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
-        <Button Content="Launch Optimum" Classes="accent"
+        <Button Content="Launch Optimum" Classes="Flat"
                 IsVisible="{Binding Succeeded}" IsEnabled="{Binding CanLaunch}"
                 Command="{Binding LaunchCommand}" />
-        <Button Content="Try again" Classes="accent"
+        <Button Content="Try again" Classes="Flat"
                 IsVisible="{Binding CanRetry}" Command="{Binding RetryCommand}" />
-        <Button Content="Open log" Classes="ghost"
+        <Button Content="Open log" Classes="Basic"
                 IsVisible="{Binding ShowLog}" Command="{Binding ViewLogCommand}" />
       </StackPanel>
     </StackPanel>

@@ -1,75 +1,69 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
              xmlns:vm="using:Optimum.Installer.ViewModels"
              xmlns:conv="using:Optimum.Installer.Views"
              x:Class="Optimum.Installer.Views.ProgressView"
              x:DataType="vm:ProgressViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
 
-    <Border Grid.Row="0" Classes="card">
+    <suki:GlassCard Grid.Row="0" Padding="18">
       <StackPanel Spacing="12">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
-            <TextBlock Text="{Binding PhaseLabel}" FontFamily="{DynamicResource DisplayFont}"
-                       FontSize="17" FontWeight="SemiBold" />
-            <TextBlock Text="{Binding StatusDetail}" Classes="muted" FontSize="12.5"
+            <TextBlock Text="{Binding PhaseLabel}" Classes="h5" />
+            <TextBlock Text="{Binding StatusDetail}" Classes="Caption"
                        TextWrapping="Wrap"
                        IsVisible="{Binding StatusDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
-          <TextBlock Grid.Column="1" Text="{Binding PercentLabel}"
-                     FontFamily="{DynamicResource DisplayFont}" FontSize="24" FontWeight="SemiBold"
+          <TextBlock Grid.Column="1" Text="{Binding PercentLabel}" Classes="h2"
                      VerticalAlignment="Center" Margin="16,0,0,0" />
         </Grid>
         <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" Height="6"
                      AutomationProperties.Name="Installation progress" />
         <Grid ColumnDefinitions="*,Auto">
           <TextBlock Grid.Column="0" Text="Runs locally. The first build takes the longest."
-                     Classes="muted" FontSize="12" />
+                     Classes="Caption" />
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
-            <TextBlock Classes="muted" FontSize="12">
+            <TextBlock Classes="Caption">
               <Run Text="Elapsed " /><Run Text="{Binding Elapsed}" />
             </TextBlock>
-            <TextBlock Text="{Binding EstimatedRemaining}" Classes="muted" FontSize="12"
+            <TextBlock Text="{Binding EstimatedRemaining}" Classes="Caption"
                        IsVisible="{Binding EstimatedRemaining, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Grid>
       </StackPanel>
-    </Border>
+    </suki:GlassCard>
 
-    <Border Grid.Row="1" Classes="card" Padding="0" Margin="0,12,0,0">
-      <Grid RowDefinitions="Auto,*">
-        <TextBlock Grid.Row="0" Text="BUILD LOG" Classes="fieldLabel" Margin="16,12,16,8" />
-        <Border Grid.Row="1" Background="{DynamicResource AppSurfaceSubtleBrush}"
-                BorderBrush="{DynamicResource AppHairlineBrush}" BorderThickness="0,1,0,0">
-          <ScrollViewer x:Name="LogScroller" Padding="16,10">
-            <ItemsControl ItemsSource="{Binding Log}">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="vm:LogLine">
-                  <TextBlock Text="{Binding Text}" FontFamily="{DynamicResource MonoFont}" FontSize="11.5"
-                             LineHeight="16"
-                             Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
-                             TextWrapping="Wrap" Margin="0,1.5" />
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-          </ScrollViewer>
-        </Border>
-      </Grid>
-    </Border>
+    <Expander Grid.Row="1" Header="Build log" Margin="0,12,0,0"
+              HorizontalAlignment="Stretch">
+      <Border Height="220">
+        <ScrollViewer x:Name="LogScroller" Padding="4,8">
+          <ItemsControl ItemsSource="{Binding Log}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:LogLine">
+                <TextBlock Text="{Binding Text}" FontFamily="monospace" FontSize="11.5"
+                           LineHeight="16"
+                           Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
+                           TextWrapping="Wrap" Margin="0,1.5" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </ScrollViewer>
+      </Border>
+    </Expander>
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
-      <Border Grid.Column="0" Background="{DynamicResource AppWarningSurfaceBrush}"
-              BorderBrush="{DynamicResource AppWarningBrush}" BorderThickness="1"
-              CornerRadius="4" Padding="12,9" Margin="0,0,12,0"
-              IsVisible="{Binding ConfirmCancel}">
+      <suki:GlassCard Grid.Column="0" Padding="12,9" Margin="0,0,12,0"
+                      IsVisible="{Binding ConfirmCancel}">
         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-          <TextBlock Text="Stop the installation?" Foreground="{DynamicResource AppWarningBrush}"
+          <TextBlock Text="Stop the installation?" Classes="Warning"
                      FontWeight="SemiBold" VerticalAlignment="Center" />
-          <Button Content="Keep going" Classes="ghost" Command="{Binding KeepInstallingCommand}" />
-          <Button Content="Stop" Command="{Binding CancelCommand}" />
+          <Button Content="Keep going" Classes="Basic" Command="{Binding KeepInstallingCommand}" />
+          <Button Content="Stop" Classes="Danger" Command="{Binding CancelCommand}" />
         </StackPanel>
-      </Border>
-      <Button Grid.Column="1" Content="Cancel" Classes="ghost"
+      </suki:GlassCard>
+      <Button Grid.Column="1" Content="Cancel" Classes="Basic"
               IsEnabled="{Binding !CancelRequested}"
               IsVisible="{Binding !ConfirmCancel}"
               Command="{Binding RequestCancelCommand}" />
