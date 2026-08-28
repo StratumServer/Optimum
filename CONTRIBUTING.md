@@ -20,6 +20,20 @@ make run     # launch and test in-game
 
 See the [Building from Source](https://github.com/StratumServer/Optimum/wiki/Building-from-Source) wiki page for prerequisites and details.
 
+### Installer
+
+The installer stack (`Optimum.Bootstrap.Core`, `Optimum.Cli`, `Optimum.Installer`)
+builds and tests without a bootstrap, so it has its own commands:
+
+```bash
+make installer-test                          # dotnet test Optimum.Installer.slnf
+make installer-pack INSTALLER_RID=linux-x64  # Velopack package for one RID
+```
+
+The design and phase status are in `INSTALLER-PLAN.md`. New installer code is
+tested against an in-memory `ISystemProbe`; the shell scripts under `scripts/`
+stay as the execution layer the engine drives.
+
 ## Architecture
 
 Optimum has three components:

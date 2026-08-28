@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
+             xmlns:vm="using:Optimum.Installer.ViewModels"
+             x:Class="Optimum.Installer.Views.EulaView"
+             x:DataType="vm:EulaViewModel">
+  <Grid RowDefinitions="Auto,*,Auto">
+
+    <suki:GlassCard Grid.Row="0" Margin="0,0,0,12">
+      <StackPanel Spacing="10">
+        <TextBlock Text="Summary" Classes="h5" />
+        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+          <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2" Margin="0,0,16,12">
+            <TextBlock Text="Install to" Classes="Caption" />
+            <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="DemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2" Margin="0,0,0,12">
+            <TextBlock Text="Game data" Classes="Caption" />
+            <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" FontWeight="DemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2" Margin="0,0,16,0">
+            <TextBlock Text="Version" Classes="Caption" />
+            <TextBlock Text="{Binding VersionSummary}" FontWeight="DemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+            <TextBlock Text="Shortcuts" Classes="Caption" />
+            <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontWeight="DemiBold" />
+          </StackPanel>
+        </Grid>
+      </StackPanel>
+    </suki:GlassCard>
+
+    <suki:GlassCard Grid.Row="1" Padding="0">
+      <Grid RowDefinitions="Auto,Auto,*">
+        <TextBlock Grid.Row="0" Text="Build notice" Classes="h5" Margin="16,14,16,0" />
+        <TextBlock Grid.Row="1" Margin="16,4,16,10"
+                   Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
+                   Classes="Caption" TextWrapping="Wrap" />
+        <Border Grid.Row="2" Background="{DynamicResource InsetSurfaceBrush}"
+                BorderBrush="{DynamicResource InsetBorderBrush}" BorderThickness="0,1,0,0"
+                CornerRadius="0,0,12,12">
+          <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged" Padding="16,12"
+                        AutomationProperties.Name="Optimum build notice">
+            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
+          </ScrollViewer>
+        </Border>
+      </Grid>
+    </suki:GlassCard>
+
+    <StackPanel Grid.Row="2" Spacing="10" Margin="0,12,0,0">
+      <CheckBox Content="I have read and accept this notice"
+                IsChecked="{Binding Accepted}" x:Name="AcceptBox" TabIndex="1" />
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock Grid.Column="0" Text="{Binding ScrollHint}" Classes="Caption"
+                   VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
+        <Button Grid.Column="1" Content="Back" Margin="8,0,0,0"
+                Command="{Binding DeclineCommand}" TabIndex="2" />
+        <Button Grid.Column="2" Content="Start install" Classes="Flat" Margin="8,0,0,0"
+                IsEnabled="{Binding CanAccept}" Command="{Binding AcceptCommand}" TabIndex="3" />
+      </Grid>
+    </StackPanel>
+  </Grid>
+</UserControl>

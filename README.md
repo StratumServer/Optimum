@@ -49,6 +49,33 @@ release fixes and validation record.
 
 Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
 
+### Graphical installer
+
+`Optimum.Installer` is a cross-platform wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build. Windows and Linux builds are published as a signed installer and an AppImage; on macOS it currently runs from a source build.
+
+```bash
+git clone https://github.com/StratumServer/Optimum.git
+cd Optimum
+make installer-test                 # build and test the installer (no bootstrap)
+dotnet run --project Optimum.Installer -c Release
+```
+
+### Command line
+
+`Optimum.Cli` is the same engine without a window, for scripting and CI:
+
+```bash
+optimum preflight --json                                   # prerequisite report
+optimum build --acknowledge-decompile --output /abs/out    # decompile, patch, build, package
+optimum build --acknowledge-decompile --acquire-source --output /abs/out # also clone source when outside a checkout
+optimum install --package /abs/out/Optimum-v* --install-dir ~/.local/share/optimum
+optimum uninstall --install-dir ~/.local/share/optimum
+```
+
+`build` decompiles your copy of Vintage Story locally and requires `--acknowledge-decompile`. `--acquire-source` performs a shallow HTTPS clone at the matching release tag and caches it under the platform's user cache directory. Pass `--source-cache <absolute-path>` to override the cache root.
+
+The sections below are the original per-platform scripts. They still work.
+
 ### Linux
 
 **Interactive installer** (guided, checks and installs prerequisites):

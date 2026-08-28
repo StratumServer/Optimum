@@ -9,6 +9,13 @@ project files in these paths:
 
 - `.config/**`
 - `.github/**`
+- `Optimum.Bootstrap.Core/**`
+- `Optimum.Bootstrap.Core.TestSupport/**`
+- `Optimum.Bootstrap.Core.Tests/**`
+- `Optimum.Cli/**`
+- `Optimum.Cli.Tests/**`
+- `Optimum.Installer/**`
+- `Optimum.Installer.Tests/**`
 - `Optimum.Launcher/**`
 - `Optimum.Launcher.Tests/**`
 - `Optimum.Patcher/**`
@@ -18,8 +25,10 @@ project files in these paths:
 - `scripts/**`
 - `Directory.Build.props`
 - `Directory.Build.targets`
+- `INSTALLER-PLAN.md`
 - `Makefile`
 - `NuGet.config`
+- `Optimum.Installer.slnf`
 - `VERSION`
 - `VintageStory-core.slnf`
 - `VintageStory.slnx`
@@ -28,6 +37,13 @@ project files in these paths:
 - `install-linux.sh`
 - `install-windows.cmd`
 - `install-windows.ps1`
+
+## Bundled fonts
+
+- `Optimum.Installer/Assets/Fonts/Spectral-*.ttf` — Spectral, © 2017 The Spectral
+  Project Authors, licensed under the SIL Open Font License 1.1. The full licence
+  text is alongside the files in `Optimum.Installer/Assets/Fonts/OFL-Spectral.txt`.
+  The MIT grant above does not extend to these files.
 
 ## Historical and upstream terms
 

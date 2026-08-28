@@ -1,0 +1,118 @@
+name: Installer CI
+
+on:
+  push:
+    paths: &installer_paths
+      - 'Optimum.Bootstrap.Core/**'
+      - 'Optimum.Bootstrap.Core.Tests/**'
+      - 'Optimum.Cli/**'
+      - 'Optimum.Cli.Tests/**'
+      - 'Optimum.Installer/**'
+      - 'Optimum.Installer.Tests/**'
+      - 'Optimum.Installer.slnf'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'global.json'
+      - 'NuGet.config'
+      - '.github/workflows/ci-installer.yml'
+  pull_request:
+    paths: *installer_paths
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-installer-${{ hashFiles('Optimum.Bootstrap.Core/**/*.csproj', 'Optimum.Cli/**/*.csproj', 'Optimum.Installer/**/*.csproj', 'Optimum.*.Tests/**/*.csproj') }}
+          restore-keys: |
+            nuget-installer-
+
+      - name: Test
+        run: dotnet test Optimum.Installer.slnf -c Release --nologo
+
+  cli-contract:
+    name: CLI contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build the CLI
+        run: dotnet build Optimum.Cli/Optimum.Cli.csproj -c Release --nologo
+
+      - name: Verbs answer and the consent gate holds
+        run: |
+          set -euo pipefail
+          cli() { dotnet exec Optimum.Cli/bin/Release/net10.0/optimum.dll "$@"; }
+
+          test "$(cli --version)" = "$(cat VERSION)"
+
+          cli capabilities --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['pinnedVersion']"
+          cli preflight --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert any(x['id']=='Dotnet' for x in d)"
+
+          # build without --acknowledge-decompile must refuse and still emit a terminal result.
+          set +e
+          cli build --json --output /tmp/should-not-build > stream.ndjson
+          code=$?
+          set -e
+          test "$code" -eq 2
+          python3 scripts/check-ndjson-stream.py < stream.ndjson
+          python3 -c "import json; r=json.loads(open('stream.ndjson').read().splitlines()[-1]); assert r['reason']=='bad-input', r"
+          test ! -e /tmp/should-not-build
+
+  velopack-smoke:
+    name: Velopack on .NET 10
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore local tools
+        run: dotnet tool restore
+
+      - name: Pack the real installer, then a delta
+        run: |
+          set -euo pipefail
+          rel=$(mktemp -d)
+
+          dotnet publish Optimum.Installer/Optimum.Installer.csproj -c Release -r linux-x64 \
+            --self-contained -o publish/linux-x64 --nologo
+          dotnet vpk pack -u Optimum.Installer -v 0.0.1 -p publish/linux-x64 \
+            -e Optimum.Installer --channel linux -o "$rel"
+
+          # A no-op change so the second pack produces a real delta.
+          date > publish/linux-x64/velopack-smoke-marker.txt
+          dotnet vpk pack -u Optimum.Installer -v 0.0.2 -p publish/linux-x64 \
+            -e Optimum.Installer --channel linux -o "$rel"
+
+          ls -la "$rel"
+          test -f "$rel"/Optimum.Installer-0.0.2-linux-delta.nupkg
+          test -f "$rel"/Optimum.Installer-0.0.2-linux-full.nupkg
+          test -f "$rel"/Optimum.Installer.AppImage
+          echo "Velopack packs the real Optimum.Installer for linux-x64 and builds a delta."

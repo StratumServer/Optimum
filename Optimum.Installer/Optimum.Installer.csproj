@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Optimum.Installer</RootNamespace>
+    <AssemblyName>Optimum.Installer</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <Description>Avalonia GUI for the Optimum installer. Links Optimum.Bootstrap.Core in-process.</Description>
+    <Version>$(OptimumVersion)</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Bundled OFL 1.1 fonts: Lexend (all UI text), JetBrains Mono (log and
+         commands). Licences ship beside the executable. -->
+    <AvaloniaResource Include="Assets/Fonts/**/*.ttf" />
+    <AvaloniaResource Include="Assets/optimum-logo.png" />
+    <AvaloniaResource Include="Assets/optimum-grain.png" />
+    <None Include="Assets/Fonts/Lexend/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-Lexend.txt" />
+    <None Include="Assets/Fonts/JetBrainsMono/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-JetBrainsMono.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.1.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.1" />
+    <!-- SukiUI supplies the theme and controls (SukiWindow, VerticalStepper,
+         GlassCard, InfoBar, WaveProgress). It replaces Avalonia.Themes.Fluent
+         and pulls Avalonia.Themes.Simple + Skia + DataGrid + ColorPicker. -->
+    <PackageReference Include="SukiUI" Version="7.0.1" />
+    <!-- Avalonia.Diagnostics is not published for 12.x (nuget tops out at
+         11.3.20), so a Debug restore of this project fails with NU1102. The
+         dev-tools overlay is optional; drop it until a 12.x build ships. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Optimum.Bootstrap.Core\Optimum.Bootstrap.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Optimum.Installer.Tests" />
+  </ItemGroup>
+</Project>

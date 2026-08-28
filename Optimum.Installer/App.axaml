@@ -1,0 +1,96 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:suki="https://github.com/kikipoulet/SukiUI"
+             xmlns:local="using:Optimum.Installer"
+             x:Class="Optimum.Installer.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <!-- Lexend for all UI text (SukiUI reads DefaultFontFamily throughout its
+           theme); JetBrains Mono inline for the log and command lines. -->
+      <FontFamily x:Key="DefaultFontFamily">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
+      <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
+      <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts/JetBrainsMono/JetBrainsMono-VF.ttf#JetBrains Mono</FontFamily>
+
+      <!-- A faint tiled grain over the flat window background, so the surface
+           reads as a material rather than raw colour. Alpha is baked low (~5%);
+           it sits over both themes. -->
+      <ImageBrush x:Key="GrainBrush"
+                  Source="avares://Optimum.Installer/Assets/optimum-grain.png"
+                  TileMode="Tile" Stretch="None"
+                  DestinationRect="0,0,128,128" />
+
+      <!-- Cyan-slate surfaces, set explicitly so nothing is left to SukiUI's
+           primary-derived background (which skews green) or its neutral-grey
+           card fill. Everything leans blue (B > G) to stay cyan, not teal.
+             AppSurfaceBrush     - the window ground, under the grain
+             SukiGlassCardOpaque - every card and the rail (GlassCard IsOpaque)
+             InsetSurfaceBrush   - recessed panes (build notice, build log) -->
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="AppSurfaceBrush" Color="#E8F0F2" />
+          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#DCE8EA" />
+          <SolidColorBrush x:Key="InsetBorderBrush" Color="#C3D5D8" />
+          <Color x:Key="SukiGlassCardOpaqueBackground">#F6FAFB</Color>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="AppSurfaceBrush" Color="#102A31" />
+          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#0B2026" />
+          <SolidColorBrush x:Key="InsetBorderBrush" Color="#294D57" />
+          <Color x:Key="SukiGlassCardOpaqueBackground">#193B44</Color>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+
+  <Application.DataTemplates>
+    <local:ViewLocator />
+  </Application.DataTemplates>
+
+  <Application.Styles>
+    <!-- The colour theme is switched to the Optimum brand palette in App.axaml.cs. -->
+    <suki:SukiTheme />
+
+    <!-- Accessibility on top of the SukiUI scale: body up to 15/1.5, headings
+         a step larger, and secondary copy on a real 7:1 grey instead of
+         SukiUI's near-#8a8a8a caption colour. -->
+    <Style Selector="TextBlock">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="LineHeight" Value="22" />
+    </Style>
+    <Style Selector="SelectableTextBlock">
+      <Setter Property="FontSize" Value="15" />
+      <Setter Property="LineHeight" Value="22" />
+    </Style>
+    <Style Selector="TextBlock.Caption">
+      <Setter Property="FontSize" Value="14" />
+      <Setter Property="Foreground" Value="{DynamicResource SukiLowText}" />
+    </Style>
+    <!-- Headings: own line height (the 22 above would clip Lexend's caps) and
+         no baked-in margin (SukiUI ships h2/h3/h4 with 12-20px of it). -->
+    <Style Selector="TextBlock.h5">
+      <Setter Property="FontSize" Value="17" />
+      <Setter Property="LineHeight" Value="24" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="TextBlock.h3">
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="LineHeight" Value="32" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="TextBlock.h2">
+      <Setter Property="FontSize" Value="29" />
+      <Setter Property="LineHeight" Value="36" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+
+    <!-- Tighter corners than SukiUI's 20px default (at 20 the rounding clips the
+         last line of text in a card whose padding is smaller than the radius),
+         and opaque (with the tinted fill above) so the window grain does not
+         bleed through the cards. -->
+    <Style Selector="suki|GlassCard">
+      <Setter Property="CornerRadius" Value="12" />
+      <Setter Property="IsOpaque" Value="True" />
+    </Style>
+  </Application.Styles>
+</Application>
