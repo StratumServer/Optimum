@@ -5,8 +5,8 @@
                  xmlns:views="using:Optimum.Installer.Views"
                  x:Class="Optimum.Installer.Views.MainWindow"
                  x:DataType="vm:MainWindowViewModel"
-                 Width="960" Height="760"
-                 MinWidth="880" MinHeight="680"
+                 Width="960" Height="800"
+                 MinWidth="880" MinHeight="740"
                  WindowStartupLocation="CenterScreen"
                  CanFullScreen="False"
                  BackgroundStyle="Flat"
@@ -53,7 +53,7 @@
       </ItemsControl>
     </suki:GlassCard>
 
-    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="28,24,28,24">
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="28,20,28,20">
       <StackPanel Grid.Row="0" Spacing="2" IsVisible="{Binding HeaderVisible}">
         <TextBlock Text="{Binding CurrentStepLabel}" Classes="Primary" FontWeight="DemiBold"
                    FontSize="13" LetterSpacing="1.5" />
@@ -81,9 +81,9 @@
 
       <!-- Skip the fade entirely when the OS asks for reduced motion. -->
       <suki:SukiTransitioningContentControl Grid.Row="2" Content="{Binding CurrentViewModel}"
-                                            Margin="0,18,0,0"
+                                            Margin="0,12,0,0"
                                             IsVisible="{x:Static views:MotionSettings.AllowMotion}" />
-      <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}" Margin="0,18,0,0"
+      <ContentControl Grid.Row="2" Content="{Binding CurrentViewModel}" Margin="0,12,0,0"
                       IsVisible="{x:Static views:MotionSettings.ReduceMotion}" />
     </Grid>
   </Grid>
