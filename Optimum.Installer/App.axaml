@@ -12,6 +12,14 @@
       <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
       <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts/JetBrainsMono/JetBrainsMono-VF.ttf#JetBrains Mono</FontFamily>
 
+      <!-- A faint tiled grain over the flat window background, so the surface
+           reads as a material rather than raw colour. Alpha is baked low (~5%);
+           it sits over both themes. -->
+      <ImageBrush x:Key="GrainBrush"
+                  Source="avares://Optimum.Installer/Assets/optimum-grain.png"
+                  TileMode="Tile" Stretch="None"
+                  DestinationRect="0,0,128,128" />
+
       <!-- A recessed surface for the long-text panes (build notice, build log)
            so they read as a distinct region rather than blending into the card. -->
       <ResourceDictionary.ThemeDictionaries>
