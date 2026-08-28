@@ -137,8 +137,13 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     /// <summary>The rail labels for <c>suki:VerticalStepper</c>.</summary>
     public IReadOnlyList<string> StepLabels => StepNames;
 
-    /// <summary>Zero-based current step for <c>suki:VerticalStepper.Index</c>.</summary>
-    public int StepIndex => CurrentStepNumber - 1;
+    /// <summary>Zero-based current step for <c>suki:VerticalStepper.Index</c>.
+    /// On a successful completion it points past the last step so the rail
+    /// shows every step done rather than the last one still "current".</summary>
+    public int StepIndex =>
+        CurrentScreen == WizardScreen.Completion && Completion?.Succeeded == true
+            ? StepNames.Length
+            : CurrentStepNumber - 1;
 
     /// <summary>The four rail layers, restated on every screen change.</summary>
     public IReadOnlyList<WizardStep> Steps
@@ -222,6 +227,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(CurrentViewModel))]
     [NotifyPropertyChangedFor(nameof(Steps))]
+    [NotifyPropertyChangedFor(nameof(StepIndex))]
     private CompletionViewModel? _completion;
 
     public bool CanGoBack => CurrentScreen == WizardScreen.Options;
