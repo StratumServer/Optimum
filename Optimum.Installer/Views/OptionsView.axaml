@@ -19,6 +19,9 @@
               </Grid>
               <TextBlock Text="An empty folder you own. Optimum is built in a temporary workspace and moved here when it is ready."
                          Classes="Caption" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding ValidationError}" Classes="Danger" FontWeight="DemiBold"
+                         TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive"
+                         IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
           </suki:GroupBox>
         </suki:GlassCard>
@@ -67,9 +70,6 @@
           </Grid>
         </suki:GlassCard>
 
-        <suki:InfoBar Severity="Error" IsClosable="False"
-                      Title="{Binding ValidationError}"
-                      IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
       </StackPanel>
     </ScrollViewer>
 
