@@ -982,9 +982,13 @@ running would abandon a half-written install). The check is a no-op when the app
 is not running from a Velopack install. `vpk` is a repo-local tool
 (`.config/dotnet-tools.json`). `make installer-pack INSTALLER_RID=<rid>` publishes
 self-contained and packs. `.github/workflows/release-installer.yml` packs Windows,
-Linux, and macOS in a matrix, uploads all four as artifacts, and a separate
-`publish` job that `needs` the matrix uploads one channel at a time to a single
-`installer-v<version>` tag, so the platform jobs never race the GitHub API.
+Linux, and macOS in a matrix, renames the user-facing assets to
+`Optimum-v<version>-<rid>-Installer.<ext>` (`vpk` has no name-override flag, so a
+post-pack step renames them and patches `assets.<channel>.json`; the `.nupkg` and
+`releases.<channel>.json` feed files keep their Velopack names), uploads all four
+as artifacts, and a separate `publish` job that `needs` the matrix uploads one
+channel at a time to a single `installer-v<version>` tag, so the platform jobs
+never race the GitHub API.
 Windows signing is a placeholder gated on a job-level secret that is not yet set.
 The `ci-installer.yml` `velopack-smoke` job packs the real `Optimum.Installer` for
 `linux-x64` and asserts the AppImage and a delta build.
