@@ -34,19 +34,24 @@
       </Grid>
     </suki:GlassCard>
 
-    <Expander Grid.Row="1" Header="Build log" Margin="0,12,0,0" HorizontalAlignment="Stretch">
-      <ScrollViewer x:Name="LogScroller" MaxHeight="240" Padding="4,8">
-        <ItemsControl ItemsSource="{Binding Log}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate x:DataType="vm:LogLine">
-              <TextBlock Text="{Binding Text}" FontFamily="{DynamicResource MonoFont}" FontSize="13"
-                         Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
-                         TextWrapping="Wrap" Margin="0,1.5" />
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
-    </Expander>
+    <suki:GlassCard Grid.Row="1" Margin="0,12,0,0" Padding="0">
+      <Grid RowDefinitions="Auto,*">
+        <TextBlock Grid.Row="0" Text="Build log" Classes="h5" Margin="16,14,16,8" />
+        <Border Grid.Row="1" BorderBrush="{DynamicResource SukiBorderBrush}" BorderThickness="0,1,0,0">
+          <ScrollViewer x:Name="LogScroller" Padding="16,10">
+            <ItemsControl ItemsSource="{Binding Log}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:LogLine">
+                  <TextBlock Text="{Binding Text}" FontFamily="{DynamicResource MonoFont}" FontSize="13"
+                             Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
+                             TextWrapping="Wrap" Margin="0,1.5" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </Border>
+      </Grid>
+    </suki:GlassCard>
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
       <suki:GlassCard Grid.Column="0" Margin="0,0,12,0" IsVisible="{Binding ConfirmCancel}">
