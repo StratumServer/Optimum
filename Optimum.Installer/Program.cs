@@ -22,11 +22,10 @@ internal static class Program
             .UsePlatformDetect()
             .With(new FontManagerOptions
             {
-                DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts#Figtree",
+                DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts/Figtree/Figtree-VF.ttf#Figtree",
                 FontFallbacks =
                 [
                     new FontFallback { FontFamily = new FontFamily("Segoe UI") },
-                    new FontFallback { FontFamily = new FontFamily("Inter") },
                 ],
             })
             .LogToTrace();

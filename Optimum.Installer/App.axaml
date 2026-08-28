@@ -5,9 +5,9 @@
              x:Class="Optimum.Installer.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
-    <FontFamily x:Key="BodyFont">avares://Optimum.Installer/Assets/Fonts#Figtree</FontFamily>
-    <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts#Fraunces 72pt</FontFamily>
-    <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts#Geist Mono</FontFamily>
+    <FontFamily x:Key="BodyFont">avares://Optimum.Installer/Assets/Fonts/Figtree/Figtree-VF.ttf#Figtree</FontFamily>
+    <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts/Fraunces/Fraunces.ttf#Fraunces</FontFamily>
+    <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts/GeistMono/GeistMono-VF.ttf#Geist Mono</FontFamily>
   </Application.Resources>
 
   <Application.DataTemplates>
