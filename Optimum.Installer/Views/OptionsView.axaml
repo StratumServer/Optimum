@@ -10,7 +10,8 @@
 
         <suki:GlassCard>
           <suki:GroupBox Header="Install location">
-            <StackPanel Spacing="10">
+            <StackPanel Spacing="6">
+              <TextBlock Text="Install folder path" Classes="Caption" FontWeight="DemiBold" />
               <Grid ColumnDefinitions="*,Auto">
                 <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
                          AutomationProperties.Name="Install directory" TabIndex="1" />
@@ -34,6 +35,7 @@
               <TextBlock Text="Off: Optimum shares Vintage Story's settings, worlds, and signed-in session. On: it keeps its own."
                          Classes="Caption" TextWrapping="Wrap" />
               <StackPanel Spacing="6" IsVisible="{Binding UseSeparateDataFolder}">
+                <TextBlock Text="Data folder path" Classes="Caption" FontWeight="DemiBold" />
                 <Grid ColumnDefinitions="*,Auto">
                   <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
                            AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
