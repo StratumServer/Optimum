@@ -119,4 +119,69 @@ public class PrerequisiteScannerTests
     {
         Assert.Equal((major, minor), PrerequisiteScanner.ParseInnoextractVersion(output));
     }
+
+    // Forward-slash paths: FakeSystemProbe matches literal strings and the code
+    // under test joins with Path.Combine, which uses the host separator when the
+    // tests run on Linux. .NET on Windows accepts forward slashes anyway.
+    private static FakeSystemProbe WindowsHost()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows, HomeDirectory = "C:/Users/tester" };
+        probe.Path.Add("C:/Windows/System32/WindowsPowerShell/v1.0");
+        probe.AddFile("C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe");
+        return probe;
+    }
+
+    private static void AddWindowsDotnet(FakeSystemProbe probe)
+    {
+        probe.Path.Add("C:/Program Files/dotnet");
+        probe.AddFile("C:/Program Files/dotnet/dotnet.exe");
+        probe.OnCommand("C:/Program Files/dotnet/dotnet.exe", "--list-sdks", "10.0.100 [C:\\sdk]\n");
+        probe.OnCommand("C:/Program Files/dotnet/dotnet.exe", "--version", "10.0.100\n");
+    }
+
+    [Fact]
+    public void WindowsDoesNotDemandUnixToolsAndClearsWithJustDotnetAndGit()
+    {
+        FakeSystemProbe probe = WindowsHost();
+        probe.Path.Add("C:/Program Files/Git/cmd");
+        probe.AddFile("C:/Program Files/Git/cmd/git.exe");
+        AddWindowsDotnet(probe);
+
+        IReadOnlyList<PrerequisiteResult> results = new PrerequisiteScanner(probe, @"C:\repo").Scan();
+
+        Assert.DoesNotContain(results, r => r.Definition.Id is PrerequisiteId.Perl
+            or PrerequisiteId.Python3 or PrerequisiteId.Chmod or PrerequisiteId.Tar
+            or PrerequisiteId.Curl or PrerequisiteId.Appimagetool);
+        Assert.Empty(results.Where(r => r.BlocksBuild));
+        Assert.Equal(PrerequisiteState.Ok, results.Single(r => r.Definition.Id == PrerequisiteId.Pwsh).State);
+    }
+
+    [Fact]
+    public void WindowsWithoutTheSdkOffersAnAutomaticInstallNotANonFhsRefusal()
+    {
+        FakeSystemProbe probe = WindowsHost();
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "C:/absent/dotnet.exe";
+
+        PrerequisiteResult dotnet = new PrerequisiteScanner(probe, "C:/repo").Scan()
+            .Single(r => r.Definition.Id == PrerequisiteId.Dotnet);
+
+        Assert.Equal(PrerequisiteState.Missing, dotnet.State);
+        Assert.Equal(AcquisitionKind.Automatic, dotnet.Acquisition);
+        Assert.DoesNotContain("non-FHS", dotnet.Label);
+    }
+
+    [Fact]
+    public void WindowsWithoutGitPointsAtGitForWindows()
+    {
+        FakeSystemProbe probe = WindowsHost();
+        AddWindowsDotnet(probe);
+
+        PrerequisiteResult git = new PrerequisiteScanner(probe, "C:/repo").Scan()
+            .Single(r => r.Definition.Id == PrerequisiteId.Git);
+
+        Assert.Equal(PrerequisiteState.Missing, git.State);
+        Assert.Equal(AcquisitionKind.DownloadPage, git.Acquisition);
+        Assert.Equal(PrerequisiteScanner.GitForWindowsUrl, git.DownloadUrl);
+        Assert.True(git.BlocksBuild);
+    }
 }

@@ -64,13 +64,26 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
             if (!build.Ok)
                 return BuildResult.Failure(FailureReason.AssembleFailed, $"dotnet build exited {build.ExitCode}");
 
-            StepOutcome checkPatches = await RunStep(
-                ("bash", ["scripts/check-patches.sh", "--strict-unavailable"]),
-                request.RepoRoot, ProgressPhase.Patch, 82, 86, observer,
-                clearPlatformEnv: false, forceful, graceful);
-            if (!checkPatches.Ok)
-                return BuildResult.Failure(FailureReason.PatchConflict,
-                    $"check-patches.sh exited {checkPatches.ExitCode}: a patch did not survive the decompile round trip");
+            // check-patches.sh is a POSIX shell script with no PowerShell port.
+            // On Windows the only `bash` on a stock machine is System32\bash.exe
+            // (WSL), which would run the script against a different filesystem
+            // view with a different dotnet and git — silently wrong. Skip it
+            // there; install-windows.ps1 never ran this check either.
+            if (probe.Os == OsKind.Windows)
+            {
+                observer.Phase(ProgressPhase.Patch, 86,
+                    "skipped the decompile round-trip check (needs a POSIX shell)");
+            }
+            else
+            {
+                StepOutcome checkPatches = await RunStep(
+                    ("bash", ["scripts/check-patches.sh", "--strict-unavailable"]),
+                    request.RepoRoot, ProgressPhase.Patch, 82, 86, observer,
+                    clearPlatformEnv: false, forceful, graceful);
+                if (!checkPatches.Ok)
+                    return BuildResult.Failure(FailureReason.PatchConflict,
+                        $"check-patches.sh exited {checkPatches.ExitCode}: a patch did not survive the decompile round trip");
+            }
 
             StepOutcome package = await RunStep(
                 PackageCommand(request), request.RepoRoot, ProgressPhase.Assemble, 86, 95, observer,
@@ -107,7 +120,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                 win.AddRange(["-ClientArchive", request.ClientArchive]);
             if (request.Version is not null)
                 win.AddRange(["-Version", request.Version]);
-            return ("pwsh", win);
+            return (PwshExecutable(), win);
         }
 
         List<string> unix = ["scripts/bootstrap.sh"];
@@ -126,7 +139,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
             case OsKind.Windows:
                 List<string> win = ["-File", "scripts/package.ps1", "-OutputDir", output];
                 if (request.ClientArchive is not null) win.AddRange(["-ClientArchive", request.ClientArchive]);
-                return ("pwsh", win);
+                return (PwshExecutable(), win);
             case OsKind.MacOs:
                 string arch = probe.Arch == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64";
                 List<string> mac = ["scripts/package-macos.sh", "--output", output, "--arch", arch];
@@ -142,6 +155,13 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
     }
 
     private string DotnetExecutable() => DotnetSdkProbe.Find(probe) ?? "dotnet";
+
+    /// <summary>
+    /// The PowerShell interpreter for the bootstrap and packaging scripts:
+    /// <c>pwsh</c> when present, Windows PowerShell 5.1 as the Windows fallback.
+    /// </summary>
+    private string PwshExecutable() =>
+        PowerShellHost.Resolve(probe) ?? (probe.Os == OsKind.Windows ? "powershell" : "pwsh");
 
     /// <summary>
     /// The package artifact the platform's packaging script produces: a
@@ -190,29 +210,42 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         if (clearPlatformEnv)
             cmd = cmd.WithEnvironmentVariables(env => env.Set("Platform", null).Set("PLATFORM", null));
 
-        await foreach (CommandEvent commandEvent in
-            cmd.ListenAsync(Encodings.Utf8, Encodings.Utf8, forceful, graceful))
+        try
         {
-            switch (commandEvent)
+            await foreach (CommandEvent commandEvent in
+                cmd.ListenAsync(Encodings.Utf8, Encodings.Utf8, forceful, graceful))
             {
-                case StandardOutputCommandEvent stdout:
-                    observer.RawOutput(false, stdout.Text);
-                    collected.AppendLine(stdout.Text);
-                    if (++linesSincePhase >= 25 && reported < endPercent - 1)
-                    {
-                        reported++;
-                        linesSincePhase = 0;
-                        observer.Phase(phase, reported, Trim(stdout.Text));
-                    }
-                    break;
-                case StandardErrorCommandEvent stderr:
-                    observer.RawOutput(true, stderr.Text);
-                    collected.AppendLine(stderr.Text);
-                    break;
-                case ExitedCommandEvent exited:
-                    exitCode = exited.ExitCode;
-                    break;
+                switch (commandEvent)
+                {
+                    case StandardOutputCommandEvent stdout:
+                        observer.RawOutput(false, stdout.Text);
+                        collected.AppendLine(stdout.Text);
+                        if (++linesSincePhase >= 25 && reported < endPercent - 1)
+                        {
+                            reported++;
+                            linesSincePhase = 0;
+                            observer.Phase(phase, reported, Trim(stdout.Text));
+                        }
+                        break;
+                    case StandardErrorCommandEvent stderr:
+                        observer.RawOutput(true, stderr.Text);
+                        collected.AppendLine(stderr.Text);
+                        break;
+                    case ExitedCommandEvent exited:
+                        exitCode = exited.ExitCode;
+                        break;
+                }
             }
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+        {
+            // The executable is not on PATH / could not be spawned. Report it as
+            // a failed step so RunAsync classifies it instead of the exception
+            // escaping unobserved and hanging the wizard on the Progress screen.
+            string message = $"could not start '{command.Exe}': {ex.Message}";
+            observer.RawOutput(true, message);
+            observer.Phase(phase, endPercent, message);
+            return new StepOutcome(false, -1, message);
         }
 
         observer.Phase(phase, endPercent, exitCode == 0 ? "done" : $"exited {exitCode}");
