@@ -19,8 +19,9 @@
            Width="22" Height="22" VerticalAlignment="Center" />
   </suki:SukiWindow.LogoContent>
 
-  <Panel>
-    <!-- Faint grain over the flat window colour. -->
+  <!-- Opaque cyan-slate ground: covers SukiUI's primary-derived shader
+       background (which skews green) with a flat surface, then the grain. -->
+  <Panel Background="{DynamicResource AppSurfaceBrush}">
     <Border Background="{StaticResource GrainBrush}" IsHitTestVisible="False" />
 
     <Grid ColumnDefinitions="188,*">
