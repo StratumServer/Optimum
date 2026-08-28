@@ -312,9 +312,13 @@ public class InstallerLogFilterTests
     [InlineData("[Optimum] Applying patches", true)]
     [InlineData("Restored /home/x", true)]
     [InlineData("  at System.String.Format (Exception)", true)]
+    [InlineData("You are not using the latest version of the tool, please update.", true)]
     [InlineData("Determining projects to restore...", false)]
     [InlineData("  copying 1834 files", false)]
-    public void KeepsAlarmingAndWhitelistedLinesOnly(string line, bool kept)
+    // Routine compiler / SDK warnings are dropped from the visible pane.
+    [InlineData("Core.cs(970,68): warning CS0618: \"ItemWearable\" é obsoleto", false)]
+    [InlineData("targets(94,5): warning NETSDK1086: uma FrameworkReference foi incluída", false)]
+    public void KeepsFailuresAdvisoriesAndProgressOnly(string line, bool kept)
     {
         Assert.Equal(kept, InstallerLogFilter.IsInteresting(line));
     }
@@ -322,12 +326,21 @@ public class InstallerLogFilterTests
     [Theory]
     [InlineData("Compilação com êxito.", "info")]
     [InlineData("Decompiling exact VSEssentials runtime donor...", "info")]
+    [InlineData("Patches: 116 applied, 0 skipped, 0 failed (filter: all)", "info")]
+    [InlineData("    0 Error(s)", "info")]
+    // Compiler noise, if it slips through, is info -- not a blocker.
+    [InlineData("Core.cs(970,68): warning CS0618: \"ItemWearable\" é obsoleto", "info")]
+    [InlineData("targets(94,5): warning NETSDK1086: uma FrameworkReference", "info")]
+    // Actionable advisory from the decompiler.
     [InlineData("You are not using the latest version of the tool, please update.", "warn")]
     [InlineData("Latest version is '11.0.0.9375' (yours is '10.1.0.8386')", "warn")]
-    [InlineData("warning CS0168: variable declared but never used", "warn")]
+    // Real failures.
+    [InlineData("Core.cs(12,5): error CS1002: ; expected", "error")]
     [InlineData("error: patch failed", "error")]
     [InlineData("hunk #3 FAILED at 210", "error")]
     [InlineData("System.IO.IOException: disk full", "error")]
+    [InlineData("Build FAILED.", "error")]
+    [InlineData("    2 Error(s)", "error")]
     public void ClassifyPicksSeverityFromContentNotStream(string line, string expected)
     {
         Assert.Equal(expected, InstallerLogFilter.Classify(line, fromStdErr: true));
