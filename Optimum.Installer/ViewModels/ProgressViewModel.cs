@@ -203,11 +203,13 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     {
         lock (_rawLogGate)
             _rawLog.AppendLine(line);
-        if (isError || InstallerLogFilter.IsInteresting(line))
-        {
-            string level = InstallerLogFilter.Classify(line, isError);
+
+        // The full stream is in the raw log; the visible pane shows only a real
+        // failure or something on the progress / advisory whitelist. A routine
+        // compiler warning on stderr no longer floods it.
+        string level = InstallerLogFilter.Classify(line, isError);
+        if (level == "error" || InstallerLogFilter.IsInteresting(line))
             _post(() => Log.Add(new LogLine(level, line)));
-        }
     }
 
     private void Phase(ProgressPhase phase, int percent, string detail) => _post(() =>
