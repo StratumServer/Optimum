@@ -11,6 +11,19 @@
       <FontFamily x:Key="DefaultFontFamily">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
       <FontFamily x:Key="DisplayFont">avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend</FontFamily>
       <FontFamily x:Key="MonoFont">avares://Optimum.Installer/Assets/Fonts/JetBrainsMono/JetBrainsMono-VF.ttf#JetBrains Mono</FontFamily>
+
+      <!-- A recessed surface for the long-text panes (build notice, build log)
+           so they read as a distinct region rather than blending into the card. -->
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#ECECEA" />
+          <SolidColorBrush x:Key="InsetBorderBrush" Color="#D6D6D2" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+          <SolidColorBrush x:Key="InsetSurfaceBrush" Color="#1C1D1B" />
+          <SolidColorBrush x:Key="InsetBorderBrush" Color="#3A3B38" />
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
     </ResourceDictionary>
   </Application.Resources>
 
@@ -37,19 +50,28 @@
       <Setter Property="FontSize" Value="14" />
       <Setter Property="Foreground" Value="{DynamicResource SukiLowText}" />
     </Style>
-    <!-- Headings need their own line height: the 22 above would clip Lexend's
-         caps at these sizes. -->
+    <!-- Headings: own line height (the 22 above would clip Lexend's caps) and
+         no baked-in margin (SukiUI ships h2/h3/h4 with 12-20px of it). -->
     <Style Selector="TextBlock.h5">
       <Setter Property="FontSize" Value="17" />
       <Setter Property="LineHeight" Value="24" />
+      <Setter Property="Margin" Value="0" />
     </Style>
     <Style Selector="TextBlock.h3">
-      <Setter Property="FontSize" Value="27" />
-      <Setter Property="LineHeight" Value="34" />
+      <Setter Property="FontSize" Value="26" />
+      <Setter Property="LineHeight" Value="32" />
+      <Setter Property="Margin" Value="0" />
     </Style>
     <Style Selector="TextBlock.h2">
-      <Setter Property="FontSize" Value="32" />
-      <Setter Property="LineHeight" Value="40" />
+      <Setter Property="FontSize" Value="29" />
+      <Setter Property="LineHeight" Value="36" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+
+    <!-- Tighter corners than SukiUI's 20px default: at 20 the rounding clips the
+         last line of text in a card whose padding is smaller than the radius. -->
+    <Style Selector="suki|GlassCard">
+      <Setter Property="CornerRadius" Value="12" />
     </Style>
   </Application.Styles>
 </Application>
