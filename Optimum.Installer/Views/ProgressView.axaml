@@ -7,23 +7,18 @@
              x:DataType="vm:ProgressViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
 
-    <suki:GlassCard Grid.Row="0" Padding="18">
-      <StackPanel Spacing="12">
-        <Grid ColumnDefinitions="*,Auto">
-          <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
-            <TextBlock Text="{Binding PhaseLabel}" Classes="h5" />
-            <TextBlock Text="{Binding StatusDetail}" Classes="Caption"
-                       TextWrapping="Wrap"
-                       IsVisible="{Binding StatusDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          </StackPanel>
-          <TextBlock Grid.Column="1" Text="{Binding PercentLabel}" Classes="h2"
-                     VerticalAlignment="Center" Margin="16,0,0,0" />
-        </Grid>
-        <ProgressBar Minimum="0" Maximum="100" Value="{Binding Percent}" Height="6"
-                     AutomationProperties.Name="Installation progress" />
-        <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Grid.Column="0" Text="Runs locally. The first build takes the longest."
-                     Classes="Caption" />
+    <suki:GlassCard Grid.Row="0">
+      <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
+        <suki:WaveProgress Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
+                           Width="88" Height="88" Value="{Binding Percent}"
+                           VerticalAlignment="Center" Margin="0,0,20,0" />
+        <StackPanel Grid.Row="0" Grid.Column="1" Spacing="3" VerticalAlignment="Center">
+          <TextBlock Text="{Binding PhaseLabel}" Classes="h5" />
+          <TextBlock Text="{Binding StatusDetail}" Classes="Caption" TextWrapping="Wrap"
+                     IsVisible="{Binding StatusDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+        </StackPanel>
+        <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,Auto" Margin="0,10,0,0">
+          <TextBlock Grid.Column="0" Text="Runs locally. The first build takes the longest." Classes="Caption" />
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
             <TextBlock Classes="Caption">
               <Run Text="Elapsed " /><Run Text="{Binding Elapsed}" />
@@ -32,37 +27,33 @@
                        IsVisible="{Binding EstimatedRemaining, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
           </StackPanel>
         </Grid>
-      </StackPanel>
+      </Grid>
     </suki:GlassCard>
 
-    <Expander Grid.Row="1" Header="Build log" Margin="0,12,0,0"
-              HorizontalAlignment="Stretch">
-      <Border Height="220">
-        <ScrollViewer x:Name="LogScroller" Padding="4,8">
-          <ItemsControl ItemsSource="{Binding Log}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:LogLine">
-                <TextBlock Text="{Binding Text}" Classes="log"
-                           Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
-                           TextWrapping="Wrap" Margin="0,1.5" />
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </ScrollViewer>
-      </Border>
+    <Expander Grid.Row="1" Header="Build log" Margin="0,12,0,0" HorizontalAlignment="Stretch">
+      <ScrollViewer x:Name="LogScroller" MaxHeight="240" Padding="4,8">
+        <ItemsControl ItemsSource="{Binding Log}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:LogLine">
+              <TextBlock Text="{Binding Text}" FontFamily="{DynamicResource MonoFont}" FontSize="13"
+                         Foreground="{Binding Level, Converter={x:Static conv:InstallerConverters.LogLevelBrush}}"
+                         TextWrapping="Wrap" Margin="0,1.5" />
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </ScrollViewer>
     </Expander>
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
-      <suki:GlassCard Grid.Column="0" Padding="12,9" Margin="0,0,12,0"
-                      IsVisible="{Binding ConfirmCancel}">
-        <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-          <TextBlock Text="Stop the installation?" Classes="Warning"
-                     FontWeight="SemiBold" VerticalAlignment="Center" />
-          <Button Content="Keep going" Classes="Basic" Command="{Binding KeepInstallingCommand}" />
-          <Button Content="Stop" Classes="Danger" Command="{Binding CancelCommand}" />
+      <suki:GlassCard Grid.Column="0" Margin="0,0,12,0" IsVisible="{Binding ConfirmCancel}">
+        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+          <TextBlock Text="Stop the installation?" Classes="Warning" FontWeight="DemiBold"
+                     VerticalAlignment="Center" />
+          <Button Content="Keep going" Command="{Binding KeepInstallingCommand}" />
+          <Button Content="Stop" Classes="Flat" Command="{Binding CancelCommand}" />
         </StackPanel>
       </suki:GlassCard>
-      <Button Grid.Column="1" Content="Cancel" Classes="Basic"
+      <Button Grid.Column="1" Content="Cancel"
               IsEnabled="{Binding !CancelRequested}"
               IsVisible="{Binding !ConfirmCancel}"
               Command="{Binding RequestCancelCommand}" />

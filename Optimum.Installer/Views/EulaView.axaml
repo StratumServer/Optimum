@@ -6,50 +6,50 @@
              x:DataType="vm:EulaViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
 
-    <suki:GlassCard Grid.Row="0" Margin="0,0,0,12" Padding="16">
-      <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
-        <StackPanel Grid.Row="0" Grid.Column="0" Spacing="1" Margin="0,0,16,10">
-          <TextBlock Text="INSTALL TO" Classes="eyebrow Primary" />
-          <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="SemiBold" FontSize="16" />
-        </StackPanel>
-        <StackPanel Grid.Row="0" Grid.Column="1" Spacing="1" Margin="0,0,0,10">
-          <TextBlock Text="GAME DATA" Classes="eyebrow Primary" />
-          <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" FontSize="16" />
-        </StackPanel>
-        <StackPanel Grid.Row="1" Grid.Column="0" Spacing="1" Margin="0,0,16,0">
-          <TextBlock Text="VERSION" Classes="eyebrow Primary" />
-          <TextBlock Text="{Binding VersionSummary}" FontSize="16" />
-        </StackPanel>
-        <StackPanel Grid.Row="1" Grid.Column="1" Spacing="1">
-          <TextBlock Text="SHORTCUTS" Classes="eyebrow Primary" />
-          <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontSize="16" />
-        </StackPanel>
-      </Grid>
+    <suki:GlassCard Grid.Row="0" Margin="0,0,0,12">
+      <suki:GroupBox Header="Summary">
+        <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
+          <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2" Margin="0,0,16,12">
+            <TextBlock Text="Install to" Classes="Caption" />
+            <TextBlock Text="{Binding InstallDirectory}" TextWrapping="Wrap" FontWeight="DemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2" Margin="0,0,0,12">
+            <TextBlock Text="Game data" Classes="Caption" />
+            <TextBlock Text="{Binding DataPathSummary}" TextWrapping="Wrap" FontWeight="DemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="0" Spacing="2" Margin="0,0,16,0">
+            <TextBlock Text="Version" Classes="Caption" />
+            <TextBlock Text="{Binding VersionSummary}" FontWeight="DemiBold" />
+          </StackPanel>
+          <StackPanel Grid.Row="1" Grid.Column="1" Spacing="2">
+            <TextBlock Text="Shortcuts" Classes="Caption" />
+            <TextBlock Text="{Binding ShortcutSummary}" TextWrapping="Wrap" FontWeight="DemiBold" />
+          </StackPanel>
+        </Grid>
+      </suki:GroupBox>
     </suki:GlassCard>
 
-    <suki:GlassCard Grid.Row="1" Padding="0">
-      <Grid RowDefinitions="Auto,*">
-        <StackPanel Grid.Row="0" Margin="18,15,18,10" Spacing="2">
-          <TextBlock Text="Build notice" Classes="h5" />
-          <TextBlock Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
+    <suki:GlassCard Grid.Row="1">
+      <suki:GroupBox Header="Build notice">
+        <Grid RowDefinitions="Auto,*">
+          <TextBlock Grid.Row="0" Margin="0,0,0,8"
+                     Text="Optimum is compiled from your own Vintage Story installation. Read to the end to continue."
                      Classes="Caption" TextWrapping="Wrap" />
-        </StackPanel>
-        <Border Grid.Row="1" BorderBrush="{DynamicResource SukiBorderBrush}" BorderThickness="0,1,0,0">
-          <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged" Padding="18,14"
+          <ScrollViewer Grid.Row="1" x:Name="Scroller" ScrollChanged="OnScrollChanged"
                         AutomationProperties.Name="Optimum build notice">
-            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" FontSize="17" LineHeight="27" />
+            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" />
           </ScrollViewer>
-        </Border>
-      </Grid>
+        </Grid>
+      </suki:GroupBox>
     </suki:GlassCard>
 
-    <StackPanel Grid.Row="2" Spacing="8" Margin="0,12,0,0">
+    <StackPanel Grid.Row="2" Spacing="10" Margin="0,12,0,0">
       <CheckBox Content="I have read and accept this notice"
                 IsChecked="{Binding Accepted}" x:Name="AcceptBox" TabIndex="1" />
       <Grid ColumnDefinitions="*,Auto,Auto">
         <TextBlock Grid.Column="0" Text="{Binding ScrollHint}" Classes="Caption"
                    VerticalAlignment="Center" AutomationProperties.LiveSetting="Polite" />
-        <Button Grid.Column="1" Content="Back" Classes="Basic" Margin="8,0,0,0"
+        <Button Grid.Column="1" Content="Back" Margin="8,0,0,0"
                 Command="{Binding DeclineCommand}" TabIndex="2" />
         <Button Grid.Column="2" Content="Start install" Classes="Flat" Margin="8,0,0,0"
                 IsEnabled="{Binding CanAccept}" Command="{Binding AcceptCommand}" TabIndex="3" />

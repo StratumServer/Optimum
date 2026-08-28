@@ -6,75 +6,75 @@
              x:DataType="vm:OptionsViewModel">
   <Grid RowDefinitions="*,Auto">
     <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Disabled">
-      <StackPanel Spacing="10">
+      <StackPanel Spacing="14">
 
-        <suki:GlassCard Padding="16">
-          <StackPanel Spacing="10">
-            <TextBlock Text="Install location" Classes="h5" />
-            <Grid ColumnDefinitions="*,Auto">
-              <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
-                       AutomationProperties.Name="Install directory" TabIndex="1" />
-              <Button Grid.Column="1" Content="Browse" Classes="Basic" Margin="8,0,0,0" Click="BrowseInstallDirectory"
-                      AutomationProperties.Name="Browse for an install directory" />
-            </Grid>
-            <TextBlock Text="An empty folder you own. Optimum is built in a temporary workspace and moved here when it is ready."
-                       Classes="Caption" TextWrapping="Wrap" />
-          </StackPanel>
-        </suki:GlassCard>
-
-        <suki:GlassCard Padding="16">
-          <StackPanel Spacing="10">
-            <TextBlock Text="Game data" Classes="h5" />
-            <CheckBox Content="Use a separate Vintage Story data folder"
-                      IsChecked="{Binding UseSeparateDataFolder}" TabIndex="2" />
-            <TextBlock Text="Off: Optimum shares Vintage Story's settings, worlds, and signed-in session. On: it keeps its own."
-                       Classes="Caption" TextWrapping="Wrap" />
-            <StackPanel Spacing="5" IsVisible="{Binding UseSeparateDataFolder}">
+        <suki:GlassCard>
+          <suki:GroupBox Header="Install location">
+            <StackPanel Spacing="10">
               <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
-                         AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
-                <Button Grid.Column="1" Content="Browse" Classes="Basic" Margin="8,0,0,0" Click="BrowseDataPath"
-                        AutomationProperties.Name="Browse for a Vintage Story data folder" />
+                <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
+                         AutomationProperties.Name="Install directory" TabIndex="1" />
+                <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseInstallDirectory"
+                        AutomationProperties.Name="Browse for an install directory" />
               </Grid>
-              <TextBlock Text="{Binding DataPathHint}" Classes="Caption"
-                         TextWrapping="Wrap"
-                         IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-            </StackPanel>
-          </StackPanel>
-        </suki:GlassCard>
-
-        <suki:GlassCard Padding="16">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Grid.Column="0" Spacing="9">
-              <TextBlock Text="Shortcuts" Classes="h5" />
-              <CheckBox Content="Add an application menu entry"
-                        IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
-              <CheckBox Content="Create a desktop shortcut"
-                        IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
-            </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="7" Width="240" Margin="24,0,0,0"
-                        IsVisible="{Binding ShowVersionChoice}">
-              <TextBlock Text="Vintage Story version" Classes="h5" />
-              <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
-                        HorizontalAlignment="Stretch"
-                        AutomationProperties.Name="Vintage Story version" TabIndex="6" />
-              <TextBlock Text="Use the recommended version unless you need a compatibility bridge."
+              <TextBlock Text="An empty folder you own. Optimum is built in a temporary workspace and moved here when it is ready."
                          Classes="Caption" TextWrapping="Wrap" />
             </StackPanel>
+          </suki:GroupBox>
+        </suki:GlassCard>
+
+        <suki:GlassCard>
+          <suki:GroupBox Header="Game data">
+            <StackPanel Spacing="10">
+              <CheckBox Content="Use a separate Vintage Story data folder"
+                        IsChecked="{Binding UseSeparateDataFolder}" TabIndex="2" />
+              <TextBlock Text="Off: Optimum shares Vintage Story's settings, worlds, and signed-in session. On: it keeps its own."
+                         Classes="Caption" TextWrapping="Wrap" />
+              <StackPanel Spacing="6" IsVisible="{Binding UseSeparateDataFolder}">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
+                           AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
+                  <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseDataPath"
+                          AutomationProperties.Name="Browse for a Vintage Story data folder" />
+                </Grid>
+                <TextBlock Text="{Binding DataPathHint}" Classes="Caption" TextWrapping="Wrap"
+                           IsVisible="{Binding DataPathHint, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              </StackPanel>
+            </StackPanel>
+          </suki:GroupBox>
+        </suki:GlassCard>
+
+        <suki:GlassCard>
+          <Grid ColumnDefinitions="*,Auto">
+            <suki:GroupBox Grid.Column="0" Header="Shortcuts">
+              <StackPanel Spacing="8">
+                <CheckBox Content="Add an application menu entry"
+                          IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
+                <CheckBox Content="Create a desktop shortcut"
+                          IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
+              </StackPanel>
+            </suki:GroupBox>
+            <suki:GroupBox Grid.Column="1" Header="Vintage Story version" Width="250" Margin="20,0,0,0"
+                          IsVisible="{Binding ShowVersionChoice}">
+              <StackPanel Spacing="7">
+                <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
+                          HorizontalAlignment="Stretch"
+                          AutomationProperties.Name="Vintage Story version" TabIndex="6" />
+                <TextBlock Text="Use the recommended version unless you need a compatibility bridge."
+                           Classes="Caption" TextWrapping="Wrap" />
+              </StackPanel>
+            </suki:GroupBox>
           </Grid>
         </suki:GlassCard>
 
-        <suki:GlassCard Padding="12"
-                        IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-          <TextBlock Text="{Binding ValidationError}" Classes="Danger" TextWrapping="Wrap"
-                     AutomationProperties.LiveSetting="Assertive" />
-        </suki:GlassCard>
+        <suki:InfoBar Severity="Error" IsClosable="False"
+                      Title="{Binding ValidationError}"
+                      IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
       </StackPanel>
     </ScrollViewer>
 
     <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,16,0,0">
-      <Button Grid.Column="0" Content="Back" Classes="Basic"
-              Command="{Binding BackCommand}" TabIndex="8" />
+      <Button Grid.Column="0" Content="Back" Command="{Binding BackCommand}" TabIndex="8" />
       <Button Grid.Column="2" Content="Review" Classes="Flat"
               IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="7" />
     </Grid>

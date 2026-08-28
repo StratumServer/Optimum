@@ -6,36 +6,27 @@
              x:Class="Optimum.Installer.Views.CompletionView"
              x:DataType="vm:CompletionViewModel">
   <Grid RowDefinitions="*,Auto,*">
-    <StackPanel Grid.Row="1" Spacing="16" MaxWidth="520" HorizontalAlignment="Left">
+    <StackPanel Grid.Row="1" Spacing="18" MaxWidth="560" HorizontalAlignment="Left">
 
-      <StackPanel Orientation="Horizontal" Spacing="12">
-        <Border Width="34" Height="34" CornerRadius="6" VerticalAlignment="Center"
-                Background="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeSurface}}">
-          <TextBlock Text="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeGlyph}}"
-                     FontWeight="Bold" FontSize="17"
-                     Foreground="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeInk}}"
-                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-        </Border>
-        <TextBlock Text="{Binding Headline}" Classes="h3" VerticalAlignment="Center" />
-      </StackPanel>
+      <suki:InfoBar IsClosable="False"
+                    Severity="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeSeverity}}"
+                    Title="{Binding Headline}" Message="{Binding Subtext}" />
 
-      <TextBlock Text="{Binding Subtext}" Classes="lede" TextWrapping="Wrap" />
-
-      <suki:GlassCard Padding="14"
-                      IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-        <StackPanel Spacing="2">
-          <TextBlock Text="INSTALLED AT" Classes="eyebrow Primary" />
-          <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="16" />
+      <suki:GlassCard IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+        <StackPanel Spacing="3">
+          <TextBlock Text="Installed at" Classes="Caption" />
+          <SelectableTextBlock Text="{Binding InstallDirectory}" FontWeight="DemiBold" TextWrapping="Wrap"
+                               FontFamily="{DynamicResource MonoFont}" />
         </StackPanel>
       </suki:GlassCard>
 
-      <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="10">
         <Button Content="Launch Optimum" Classes="Flat"
                 IsVisible="{Binding Succeeded}" IsEnabled="{Binding CanLaunch}"
                 Command="{Binding LaunchCommand}" />
         <Button Content="Try again" Classes="Flat"
                 IsVisible="{Binding CanRetry}" Command="{Binding RetryCommand}" />
-        <Button Content="Open log" Classes="Basic"
+        <Button Content="Open log"
                 IsVisible="{Binding ShowLog}" Command="{Binding ViewLogCommand}" />
       </StackPanel>
     </StackPanel>
