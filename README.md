@@ -51,7 +51,9 @@ Optimum compiles from source because Vintage Story is proprietary. The first bui
 
 ### Graphical installer
 
-`Optimum.Installer` is a cross-platform wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build. Windows and Linux builds are published as a signed installer and an AppImage; on macOS it currently runs from a source build.
+`Optimum.Installer` is a cross-platform Avalonia wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build.
+
+The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.14-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.14-linux-x64-Installer.AppImage`). The macOS builds are archival only. Nothing is code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first run; on macOS the installer runs from a source build.
 
 ```bash
 git clone https://github.com/StratumServer/Optimum.git
@@ -144,7 +146,7 @@ libraries. Add or remove entries if your build needs a different native set.
 
 ### Windows
 
-**GUI installer** (checks prerequisites, offers downloads, choose install folder):
+**Interactive installer** (PowerShell panel; checks prerequisites, offers downloads, choose install folder):
 
 ```powershell
 git clone https://github.com/StratumServer/Optimum.git
