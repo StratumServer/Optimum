@@ -17,6 +17,7 @@
     <!-- Bundled OFL 1.1 fonts: Lexend (all UI text), JetBrains Mono (log and
          commands). Licences ship beside the executable. -->
     <AvaloniaResource Include="Assets/Fonts/**/*.ttf" />
+    <AvaloniaResource Include="Assets/optimum-logo.png" />
     <None Include="Assets/Fonts/Lexend/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-Lexend.txt" />
     <None Include="Assets/Fonts/JetBrainsMono/OFL.txt" CopyToOutputDirectory="PreserveNewest" Link="licences/OFL-JetBrainsMono.txt" />
   </ItemGroup>

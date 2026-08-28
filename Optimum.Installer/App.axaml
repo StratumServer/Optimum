@@ -19,7 +19,8 @@
   </Application.DataTemplates>
 
   <Application.Styles>
-    <suki:SukiTheme ThemeColor="Orange" />
+    <!-- The colour theme is switched to the Optimum brand palette in App.axaml.cs. -->
+    <suki:SukiTheme />
 
     <!-- Accessibility on top of the SukiUI scale: body up to 15/1.5, headings
          a step larger, and secondary copy on a real 7:1 grey instead of

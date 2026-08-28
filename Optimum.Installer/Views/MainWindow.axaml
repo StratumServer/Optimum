@@ -11,14 +11,12 @@
                  CanFullScreen="False"
                  BackgroundStyle="Flat"
                  BackgroundAnimationEnabled="False"
+                 Icon="avares://Optimum.Installer/Assets/optimum-logo.png"
                  Title="{Binding Title}">
 
   <suki:SukiWindow.LogoContent>
-    <Border Width="20" Height="20" CornerRadius="4" VerticalAlignment="Center"
-            Background="{DynamicResource SukiPrimaryColor}">
-      <TextBlock Text="O" FontSize="12" FontWeight="DemiBold" Foreground="White"
-                 HorizontalAlignment="Center" VerticalAlignment="Center" />
-    </Border>
+    <Image Source="avares://Optimum.Installer/Assets/optimum-logo.png"
+           Width="22" Height="22" VerticalAlignment="Center" />
   </suki:SukiWindow.LogoContent>
 
   <Grid ColumnDefinitions="220,*">
