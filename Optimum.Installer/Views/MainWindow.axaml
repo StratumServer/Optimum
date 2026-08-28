@@ -4,8 +4,8 @@
                  xmlns:vm="using:Optimum.Installer.ViewModels"
                  x:Class="Optimum.Installer.Views.MainWindow"
                  x:DataType="vm:MainWindowViewModel"
-                 Width="920" Height="700"
-                 MinWidth="840" MinHeight="640"
+                 Width="980" Height="820"
+                 MinWidth="900" MinHeight="720"
                  WindowStartupLocation="CenterScreen"
                  CanFullScreen="False"
                  BackgroundStyle="Flat"
@@ -23,23 +23,23 @@
     </Border>
   </suki:SukiWindow.LogoContent>
 
-  <Grid ColumnDefinitions="216,*">
+  <Grid ColumnDefinitions="232,*">
 
     <!-- Step rail -->
-    <Border Grid.Column="0" Padding="24,28"
+    <Border Grid.Column="0" Padding="28,32"
             Background="{DynamicResource SukiCardBackground}">
       <suki:VerticalStepper Index="{Binding StepIndex}" Steps="{Binding StepLabels}"
                             VerticalAlignment="Top" />
     </Border>
 
     <!-- Content column -->
-    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="32,26,32,26">
-      <StackPanel Grid.Row="0" Spacing="4" IsVisible="{Binding HeaderVisible}">
+    <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="36,30,36,30">
+      <StackPanel Grid.Row="0" Spacing="6" IsVisible="{Binding HeaderVisible}">
         <TextBlock Text="{Binding CurrentStepLabel}" Classes="eyebrow Primary" />
         <TextBlock Text="{Binding CurrentStepTitle}" Classes="h3" />
         <TextBlock Text="{Binding CurrentStepDescription}" Classes="Caption"
-                   TextWrapping="Wrap" MaxWidth="560" HorizontalAlignment="Left"
-                   Margin="0,2,0,0" />
+                   TextWrapping="Wrap" MaxWidth="620" HorizontalAlignment="Left"
+                   Margin="0,3,0,0" />
       </StackPanel>
 
       <suki:GlassCard Grid.Row="1" Margin="0,16,0,0" Padding="16,12"
@@ -54,7 +54,7 @@
                     IsEnabled="{Binding !Updating}" Command="{Binding DismissCommand}" />
           </Grid>
           <ProgressBar Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding Updating}" />
-          <TextBlock Text="{Binding Error}" Classes="Danger" FontSize="14" TextWrapping="Wrap"
+          <TextBlock Text="{Binding Error}" Classes="Danger" FontSize="16" TextWrapping="Wrap"
                      IsVisible="{Binding Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
         </StackPanel>
       </suki:GlassCard>

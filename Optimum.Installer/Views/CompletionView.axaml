@@ -25,7 +25,7 @@
                       IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
         <StackPanel Spacing="2">
           <TextBlock Text="INSTALLED AT" Classes="eyebrow Primary" />
-          <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="14" />
+          <TextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="16" />
         </StackPanel>
       </suki:GlassCard>
 
