@@ -22,9 +22,9 @@ internal static class Program
             .UsePlatformDetect()
             .With(new FontManagerOptions
             {
-                // Figtree is also the app-wide default so any text outside a
+                // Lexend is also the app-wide default so any text outside a
                 // SukiUI template (tooltips, flyouts) matches.
-                DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts/Figtree/Figtree-VF.ttf#Figtree",
+                DefaultFamilyName = "avares://Optimum.Installer/Assets/Fonts/Lexend/Lexend-VF.ttf#Lexend",
                 FontFallbacks = [new FontFallback { FontFamily = new FontFamily("Segoe UI") }],
             })
             .LogToTrace();
