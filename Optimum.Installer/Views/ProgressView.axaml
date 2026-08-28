@@ -9,9 +9,13 @@
 
     <suki:GlassCard Grid.Row="0">
       <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto">
-        <suki:WaveProgress Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
-                           Width="88" Height="88" Value="{Binding Percent}"
-                           VerticalAlignment="Center" Margin="0,0,20,0" />
+        <Panel Grid.Row="0" Grid.RowSpan="2" Grid.Column="0"
+               Width="84" Height="84" VerticalAlignment="Center" Margin="0,0,20,0">
+          <suki:CircleProgressBar Value="{Binding Percent}" StrokeWidth="7"
+                                  Width="84" Height="84" />
+          <TextBlock Text="{Binding PercentLabel}" FontWeight="DemiBold" FontSize="18"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Panel>
         <StackPanel Grid.Row="0" Grid.Column="1" Spacing="3" VerticalAlignment="Center">
           <TextBlock Text="{Binding PhaseLabel}" Classes="h5" />
           <TextBlock Text="{Binding StatusDetail}" Classes="Caption" TextWrapping="Wrap"
