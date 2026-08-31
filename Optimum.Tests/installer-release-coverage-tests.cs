@@ -610,6 +610,53 @@ public class InstallerReleaseCoverageTests
         Assert.Contains("<DebugSymbols>true</DebugSymbols>", project);
     }
 
+    [Fact]
+    public void LinuxInstallerStagesWithoutABuiltThenDeletedArchive()
+    {
+        // Regression guard: install-linux.sh ran package-linux.sh in its
+        // default targz mode into a temp directory, then copied only the
+        // staged folder into place and deleted the tar.gz unread. On a small
+        // or tmpfs /tmp that unused ~600 MB archive stalled the install before
+        // any files reached the target (issue #23 follow-up, install onto
+        // /mnt/zoomin). The installer now requests the folder alone, and the
+        // temp tree is removed by an EXIT trap set only for direct execution.
+        foreach (string relativePath in new[] { "scripts/install-linux.sh", "scripts/install-linux-legacy.sh" })
+        {
+            string installer = Read(relativePath);
+            Assert.Contains("--format none", installer);
+            Assert.Contains("trap cleanup_stage EXIT", installer);
+            Assert.DoesNotContain("rm -rf \"$(dirname \"$temp_source\")\"", installer);
+        }
+
+        string packager = Read("scripts/package-linux.sh");
+        Assert.Contains("\"$FORMAT\" != \"none\"", packager);
+        Assert.Contains("Skipping archive (--format none)", packager);
+
+        string powershellPackager = Read("scripts/package-linux.ps1");
+        Assert.Contains("'targz', 'zip', 'none'", powershellPackager);
+        Assert.Contains("$Format -eq 'none'", powershellPackager);
+    }
+
+    [Fact]
+    public void LinuxInstallerStagingShellTestPasses()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        string script = PatchReader.FindRepositoryFile("scripts/tests/install-linux-staging.sh");
+        using Process process = Process.Start(new ProcessStartInfo("bash", script)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        })!;
+        process.WaitForExit();
+
+        Assert.True(process.ExitCode == 0, process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd());
+    }
+
     private static string Match(string source, string pattern)
     {
         System.Text.RegularExpressions.Match match = Regex.Match(source, pattern);

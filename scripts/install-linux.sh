@@ -38,6 +38,16 @@ CREATE_MENU=1
 CREATE_DESKTOP=0
 INTERACTIVE=1
 
+# Scratch directory for the staged package, removed on exit (see the run guard
+# at the end of the file, which installs the trap only for direct execution).
+STAGE_ROOT=""
+cleanup_stage() {
+    if [[ -n "$STAGE_ROOT" && -d "$STAGE_ROOT" ]]; then
+        rm -rf "$STAGE_ROOT"
+    fi
+    return 0
+}
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -707,17 +717,19 @@ build_and_package() {
     fi
 
     log "Packaging Linux build..."
-    local stage_root
-    stage_root="$(mktemp -d)"
-    local pkg_args=(--output "$stage_root")
+    STAGE_ROOT="$(mktemp -d)"
+    # --format none: we copy the staged folder into place below, so the archive
+    # step only builds a tar.gz we delete unread. On a small or tmpfs /tmp that
+    # extra ~600 MB has stalled the install before any files land.
+    local pkg_args=(--output "$STAGE_ROOT" --format none)
     if [[ -n "$VERSION" ]]; then pkg_args+=(--version "$VERSION"); fi
 
     bash "$SCRIPT_DIR/package-linux.sh" "${pkg_args[@]}"
 
     local built_dir
-    built_dir="$(find "$stage_root" -maxdepth 1 -type d -name 'Optimum-v*-linux-x64' | sort | tail -n 1)"
+    built_dir="$(find "$STAGE_ROOT" -maxdepth 1 -type d -name 'Optimum-v*-linux-x64' | sort | tail -n 1)"
     if [[ -z "$built_dir" ]]; then
-        die "Linux package folder not found under $stage_root"
+        die "Linux package folder not found under $STAGE_ROOT"
     fi
     BUILT_DIR="$built_dir"
 }
@@ -861,22 +873,16 @@ main() {
 
     # Step 4: Build or use existing package
     local source_dir="$PACKAGE_DIR"
-    local temp_source=""
 
     if [[ -z "$source_dir" ]]; then
         BUILT_DIR=""
         build_and_package
-        temp_source="$BUILT_DIR"
-        source_dir="$temp_source"
+        source_dir="$BUILT_DIR"
     fi
 
-    # Step 5: Install
+    # Step 5: Install (the staged copy is removed by cleanup_stage on exit)
     install_from_dir "$source_dir"
     write_launcher
-
-    if [[ -n "$temp_source" ]]; then
-        rm -rf "$(dirname "$temp_source")"
-    fi
 
     # Step 6: Icon
     local icon_dir="$XDG_DATA_HOME/icons/hicolor/256x256/apps"
@@ -923,5 +929,6 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    trap cleanup_stage EXIT
     main
 fi
