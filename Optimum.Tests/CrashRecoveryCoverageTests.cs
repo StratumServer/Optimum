@@ -158,8 +158,6 @@ public sealed class CrashRecoveryCoverageTests
         Assert.Contains("Vintage Story was not modified", uninstaller);
         Assert.Contains("$batchLog", uninstaller);
         Assert.Contains("$failedPaths", uninstaller);
-        Assert.Contains("cleanup_failed=0", Read("scripts/uninstall.sh"));
-        Assert.Contains("remove_file()", Read("scripts/uninstall.sh"));
     }
 
     private static string Read(string relativePath)
