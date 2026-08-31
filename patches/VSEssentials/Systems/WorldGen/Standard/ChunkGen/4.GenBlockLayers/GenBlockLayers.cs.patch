@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs
-index 55b134c..c2bc003 100644
+index 55b134c..29dc54f 100644
 --- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs
 +++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/4.GenBlockLayers/GenBlockLayers.cs
 @@ -1,7 +1,8 @@
@@ -11,14 +11,17 @@ index 55b134c..c2bc003 100644
  using Vintagestory.API.MathTools;
  using Vintagestory.API.Server;
  
-@@ -12,19 +13,32 @@ namespace Vintagestory.ServerMods
+@@ -12,19 +13,36 @@ namespace Vintagestory.ServerMods
  
      public class GenBlockLayers : ModStdWorldGen
      {
          private ICoreServerAPI api;
  
 -        List<int> BlockLayersIds = new List<int>();
--        LCGRandom rnd;
++        // Compatibility field for mods that access GenBlockLayers through
++        // reflection (for example, Watersheds). Optimum's own generation uses
++        // the per-thread workspace below.
+         LCGRandom rnd;
          int mapheight;
          ClampedSimplexNoise grassDensity;
          ClampedSimplexNoise grassHeight;
@@ -48,13 +51,12 @@ index 55b134c..c2bc003 100644
          public SimplexNoise distort2dz;
  
          public override bool ShouldLoad(EnumAppSide side)
-@@ -81,13 +95,14 @@ namespace Vintagestory.ServerMods
-             LoadGlobalConfig(api);
+@@ -82,12 +100,14 @@ namespace Vintagestory.ServerMods
  
              api.ObjectCache.Remove(BlockLayerConfig.cacheKey);
              blockLayerConfig = BlockLayerConfig.GetInstance(api);
  
--            rnd = new LCGRandom(api.WorldManager.Seed);
+             rnd = new LCGRandom(api.WorldManager.Seed);
 -            grassDensity = new ClampedSimplexNoise(new double[] { 4 }, new double[] { 0.5 }, rnd.NextInt());
 -            grassHeight = new ClampedSimplexNoise(new double[] { 1.5 }, new double[] { 0.5 }, rnd.NextInt());
 +            LCGRandom initRandom = new LCGRandom(api.WorldManager.Seed);
@@ -66,7 +68,7 @@ index 55b134c..c2bc003 100644
  
              boilingWaterBlockId = gcfg.boilingWaterBlockId;
          }
-@@ -96,11 +111,12 @@ namespace Vintagestory.ServerMods
+@@ -96,11 +116,12 @@ namespace Vintagestory.ServerMods
          {
              var chunks = request.Chunks;
              int chunkX = request.ChunkX;
@@ -80,7 +82,7 @@ index 55b134c..c2bc003 100644
              IntDataMap2D climateMap = chunks[0].MapChunk.MapRegion.ClimateMap;
              IntDataMap2D beachMap = chunks[0].MapChunk.MapRegion.BeachMap;
              IntDataMap2D biomeMap = chunks[0].MapChunk.MapRegion.BiomeMap;
-@@ -257,10 +273,13 @@ namespace Vintagestory.ServerMods
+@@ -257,10 +278,13 @@ namespace Vintagestory.ServerMods
              return (int)(distx / 5);
          }
  
@@ -94,7 +96,7 @@ index 55b134c..c2bc003 100644
              bool underWater = false;
              bool isOcean = false;
              bool underIce = false;
-@@ -303,23 +322,24 @@ namespace Vintagestory.ServerMods
+@@ -303,23 +327,24 @@ namespace Vintagestory.ServerMods
                      {
                          chunks[0].MapChunk.TopRockIdMap[lz * chunksize + lx] = blockId;
                          if (underIce) break;   // radfast 30.1.24: Note, under ice we do not set the sea/lake floor layers (gravel etc), for consistency with legacy worldgen prior to 1.19.4
@@ -121,7 +123,7 @@ index 55b134c..c2bc003 100644
                  else
                  {
                      if ((i > 0 && temp > -18) || j > 0) return pos.Y;
-@@ -359,10 +379,12 @@ namespace Vintagestory.ServerMods
+@@ -359,10 +384,12 @@ namespace Vintagestory.ServerMods
              }
          }
  
@@ -134,7 +136,7 @@ index 55b134c..c2bc003 100644
              double extraGrass = Math.Max(0, rainRel * tempRel - 0.25);
  
              if (rndVal <= GameMath.Clamp(forestRel - extraGrass, 0.05, 0.99) || posY >= mapheight - 1 || posY < 1) return;
-@@ -406,21 +428,24 @@ namespace Vintagestory.ServerMods
+@@ -406,21 +433,24 @@ namespace Vintagestory.ServerMods
          }
  
  
@@ -160,7 +162,7 @@ index 55b134c..c2bc003 100644
                  BlockLayer bl = blockLayerConfig.Blocklayers[j];
                  float yDist = bl.CalcYDistance(posY, mapheight);
                  float trfDist = bl.CalcTrfDistance(temperature, rainRel, fertilityRel);
-@@ -434,16 +459,16 @@ namespace Vintagestory.ServerMods
+@@ -434,16 +464,16 @@ namespace Vintagestory.ServerMods
                  if (trfDist + yDist <= posRand)
                  {
                      int blockId = bl.GetBlockId(posRand, temperature, rainRel, fertilityRel, firstBlockId, pos, mapheight, biome);
@@ -179,7 +181,7 @@ index 55b134c..c2bc003 100644
                          }
  
                          posY--;
-@@ -454,11 +479,11 @@ namespace Vintagestory.ServerMods
+@@ -454,11 +484,11 @@ namespace Vintagestory.ServerMods
                          heightRel = ((float)posY - TerraGenConfig.seaLevel) / ((float)api.WorldManager.MapSizeY - TerraGenConfig.seaLevel);
                          fertilityRel = Climate.GetFertilityFromUnscaledTemp((int)(rainRel * 255), unscaledTemp, heightRel) / 255f;
                      }
@@ -192,7 +194,7 @@ index 55b134c..c2bc003 100644
              int lakeBedId;
              if (isOcean)
              {
-@@ -466,14 +491,14 @@ namespace Vintagestory.ServerMods
+@@ -466,14 +496,14 @@ namespace Vintagestory.ServerMods
              }
              else
              {
