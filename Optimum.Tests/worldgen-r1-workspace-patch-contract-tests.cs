@@ -1,3 +1,8 @@
+using System;
+using System.Linq.Expressions;
+using System.Reflection;
+using Vintagestory.API.MathTools;
+using Vintagestory.ServerMods;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -18,6 +23,26 @@ public sealed class WorldgenR1WorkspacePatchContractTests
         Assert.Contains("provinceMapLock", rock);
         Assert.Contains("ThreadLocal<LCGRandom> caveRandThreadLocal", caves);
         Assert.Contains("ThreadLocal<BlockLayerWorkspace> workspaces", layers);
+        Assert.Contains("LCGRandom rnd;", layers);
+    }
+
+    [Fact]
+    public void ReflectiveBlockLayerAdaptersCanResolveTheLegacyRandomField()
+    {
+        FieldInfo? field = typeof(GenBlockLayers).GetField(
+            "rnd",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+
+        Assert.NotNull(field);
+        Assert.Equal(typeof(LCGRandom), field!.FieldType);
+
+        ParameterExpression instance = Expression.Parameter(typeof(GenBlockLayers), "instance");
+        Expression getterBody = Expression.Field(instance, field);
+        Func<GenBlockLayers, LCGRandom> getter = Expression.Lambda<Func<GenBlockLayers, LCGRandom>>(
+            getterBody,
+            instance).Compile();
+
+        Assert.NotNull(getter);
     }
 
     [Fact]
