@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Builds a ready-to-run Optimum package for Linux (x64). Downloads the official
 # Vintage Story Linux client, overlays the optimized DLLs, renames the launcher
-# to Optimum, and packages as tar.gz (default), zip, or AppImage.
+# to Optimum, and packages as tar.gz (default), zip, or AppImage. Pass
+# --format none to stop after the staged folder and skip the archive, which is
+# what the installer wants (it copies the folder into place, it does not need a
+# tarball it would only delete).
 # Requires a successful build first (dotnet build VintageStory.slnx -c Release).
 #
 # Usage:
@@ -39,8 +42,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ "$FORMAT" != "targz" && "$FORMAT" != "zip" && "$FORMAT" != "appimage" ]]; then
-    echo "Error: --format must be 'targz', 'zip', or 'appimage'" >&2
+if [[ "$FORMAT" != "targz" && "$FORMAT" != "zip" && "$FORMAT" != "appimage" && "$FORMAT" != "none" ]]; then
+    echo "Error: --format must be 'targz', 'zip', 'appimage', or 'none'" >&2
     exit 1
 fi
 
@@ -437,6 +440,9 @@ DESKTOP
 }
 
 case "$FORMAT" in
+    none)
+        echo "Skipping archive (--format none): $STAGE_DIR"
+        ;;
     zip)
         OUT="$OUTPUT_DIR/${NAME}.zip"
         rm -f "$OUT"

@@ -1,4 +1,4 @@
-name: Bootstrap scripts
+name: Shell scripts
 
 on:
   push:
@@ -7,8 +7,12 @@ on:
       - 'scripts/bootstrap.ps1'
       - 'scripts/git-repository.sh'
       - 'scripts/git-repository.ps1'
-      - 'scripts/tests/bootstrap-git-repository.sh'
-      - '.github/workflows/ci-bootstrap-scripts.yml'
+      - 'scripts/install-linux.sh'
+      - 'scripts/install-linux-legacy.sh'
+      - 'scripts/package-linux.sh'
+      - 'scripts/package-linux.ps1'
+      - 'scripts/tests/**'
+      - '.github/workflows/ci-scripts.yml'
   pull_request:
     paths: *script_paths
 
@@ -26,3 +30,13 @@ jobs:
 
       - name: bootstrap-git-test
         run: make bootstrap-git-test
+
+  installer-staging:
+    name: Linux installer stages without a throwaway archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install-linux-staging test
+        run: bash scripts/tests/install-linux-staging.sh
