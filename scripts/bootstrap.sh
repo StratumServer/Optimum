@@ -503,7 +503,7 @@ if [[ -f "$forks_file" ]]; then
     if [[ ! -d "$dest" ]]; then
       echo "Cloning reference: $name"
       git -c core.autocrlf=false -c core.eol=lf clone --quiet --depth=1 "$url" "$dest" 2>/dev/null
-      git -C "$dest" checkout --quiet "$ref" 2>/dev/null
+      optimum_git_in_clone "$dest" checkout --quiet "$ref" 2>/dev/null
     fi
   done < <(
     python3 - "$forks_file" <<'PY'
