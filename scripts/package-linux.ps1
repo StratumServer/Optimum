@@ -12,7 +12,8 @@ executable bit on the Optimum launcher; extract-then-`chmod +x Optimum` fixes it
 Where to write the package. Default: repo root.
 
 .PARAMETER Format
-Archive format: targz (default) or zip.
+Archive format: targz (default), zip, or none. Use none to stop after the
+staged folder and skip the archive.
 
 .PARAMETER Version
 Vintage Story version. Default: 1.22.7.
@@ -28,7 +29,7 @@ pwsh ./scripts/package-linux.ps1 -Format zip -OutputDir /mnt/d/Downloads
 [CmdletBinding()]
 param(
     [string]$OutputDir,
-    [ValidateSet('targz', 'zip')]
+    [ValidateSet('targz', 'zip', 'none')]
     [string]$Format = 'targz',
     [string]$Version,
     [string]$ClientArchive
@@ -197,18 +198,22 @@ try {
     Write-Host "Folder ready: $stageDir" -ForegroundColor Green
 
     # 7. Package.
-    if ($Format -eq 'zip') {
-        $out = Join-Path $OutputDir "$name.zip"
-        if (Test-Path $out) { Remove-Item -Force $out }
-        Compress-Archive -Path $stageDir -DestinationPath $out -CompressionLevel Optimal
+    if ($Format -eq 'none') {
+        Write-Host "Skipping archive (-Format none): $stageDir" -ForegroundColor Green
     } else {
-        $out = Join-Path $OutputDir "$name.tar.gz"
-        if (Test-Path $out) { Remove-Item -Force $out }
-        Invoke-NativeStep { tar -czf $out -C $OutputDir $name }
-        if ($LASTEXITCODE -ne 0) { throw "tar packaging failed for $out" }
+        if ($Format -eq 'zip') {
+            $out = Join-Path $OutputDir "$name.zip"
+            if (Test-Path $out) { Remove-Item -Force $out }
+            Compress-Archive -Path $stageDir -DestinationPath $out -CompressionLevel Optimal
+        } else {
+            $out = Join-Path $OutputDir "$name.tar.gz"
+            if (Test-Path $out) { Remove-Item -Force $out }
+            Invoke-NativeStep { tar -czf $out -C $OutputDir $name }
+            if ($LASTEXITCODE -ne 0) { throw "tar packaging failed for $out" }
+        }
+        $size = [math]::Round((Get-Item $out).Length / 1MB)
+        Write-Host "Done: $out (${size}MB)" -ForegroundColor Green
     }
-    $size = [math]::Round((Get-Item $out).Length / 1MB)
-    Write-Host "Done: $out (${size}MB)" -ForegroundColor Green
 } finally {
     Pop-Location
 }
