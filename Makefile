@@ -39,7 +39,7 @@ ifneq ($(CLIENT_ARCHIVE),)
 endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
-.PHONY: help check check-patches check-compat check-shaders bootstrap build clean refresh patches patch-il deploy run run-creative run-connect \
+.PHONY: help check check-patches check-compat check-shaders bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
@@ -60,6 +60,9 @@ check-shaders: ## Verify optimized shader overlays are not truncated
 
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
+
+bootstrap-git-test: ## Verify cloned repositories survive Git environment overrides
+	bash scripts/tests/bootstrap-git-repository.sh
 
 build: ## Build Release (runs bootstrap if missing or incomplete)
 	@if [ ! -f .bootstrap-complete ]; then $(MAKE) bootstrap; fi

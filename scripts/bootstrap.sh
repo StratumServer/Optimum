@@ -21,6 +21,12 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 # script only ever talks to repositories it names explicitly.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
+# The clone loop also uses explicit repository paths. This matters on hosts
+# where Git's implicit discovery still selects the wrong repository after a
+# successful clone.
+# shellcheck disable=SC1091
+source "$script_dir/git-repository.sh"
+
 usage() {
   cat <<'EOF'
 Usage: scripts/bootstrap.sh [--version VERSION] [--client-archive PATH] [--refresh]
@@ -462,15 +468,15 @@ if [[ -f "$forks_file" ]]; then
       rm -rf "$base"
       echo "Cloning $name at $ref"
       git -c core.autocrlf=false -c core.eol=lf clone --quiet "$url" "$base"
-      if [[ ! -d "$base/.git" ]]; then
-        echo "Cloning $name succeeded but left no repository at $base" >&2
+      if ! optimum_git_in_clone "$base" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Cloning $name succeeded but Git could not use the repository at $base" >&2
         echo "Check the URL in forks.json and your git environment (GIT_DIR," >&2
         echo "GIT_WORK_TREE), then retry." >&2
         exit 1
       fi
-      git -C "$base" config core.autocrlf false
-      git -C "$base" config core.eol lf
-      git -C "$base" checkout --quiet "$ref"
+      optimum_git_in_clone "$base" config core.autocrlf false
+      optimum_git_in_clone "$base" config core.eol lf
+      optimum_git_in_clone "$base" checkout --quiet "$ref"
       rm -rf "$base/.git"
       normalize_lf "$base"
     fi
