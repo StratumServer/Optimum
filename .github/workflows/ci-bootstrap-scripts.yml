@@ -1,0 +1,28 @@
+name: Bootstrap scripts
+
+on:
+  push:
+    paths: &script_paths
+      - 'scripts/bootstrap.sh'
+      - 'scripts/bootstrap.ps1'
+      - 'scripts/git-repository.sh'
+      - 'scripts/git-repository.ps1'
+      - 'scripts/tests/bootstrap-git-repository.sh'
+      - '.github/workflows/ci-bootstrap-scripts.yml'
+  pull_request:
+    paths: *script_paths
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  git-repository:
+    name: Clone helpers survive a hostile Git environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bootstrap-git-test
+        run: make bootstrap-git-test

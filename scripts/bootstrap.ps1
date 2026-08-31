@@ -47,7 +47,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/_exec.ps1"
+# Explicit repository-path helper for cloned working trees (mirrors bootstrap.sh).
+. "$PSScriptRoot/git-repository.ps1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
+
+# A GIT_DIR inherited from the calling environment (some tools and shell rc
+# files export it) overrides repository discovery for every git call below:
+# the clone succeeds, then the very next `git` against that clone dies with
+# "fatal: not in a git directory". Drop it, along with its siblings, so this
+# script only ever talks to repositories it names explicitly.
+foreach ($gitEnv in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE') {
+    Remove-Item -Path "Env:$gitEnv" -ErrorAction SilentlyContinue
+}
 
 # Resolve VS version from forks.json if not passed explicitly.
 if (-not $Version) {
@@ -715,9 +726,9 @@ try {
                 Write-Host "Cloning $name at $($fork.ref)"
                 Invoke-NativeStep { git -c core.autocrlf=false -c core.eol=lf clone --quiet $fork.url $base 2>$null }
                 if ($LASTEXITCODE -ne 0) { throw "git clone failed for $name ($($fork.url))." }
-                Invoke-NativeStep { git -C $base config core.autocrlf false }
-                Invoke-NativeStep { git -C $base config core.eol lf }
-                Invoke-NativeStep { git -C $base checkout --quiet $fork.ref }
+                Invoke-NativeStep { Invoke-GitInClone $base config core.autocrlf false }
+                Invoke-NativeStep { Invoke-GitInClone $base config core.eol lf }
+                Invoke-NativeStep { Invoke-GitInClone $base checkout --quiet $fork.ref }
                 if ($LASTEXITCODE -ne 0) { throw "git checkout $($fork.ref) failed for $name." }
                 Remove-Item -Recurse -Force (Join-Path $base '.git')
                 Convert-ToLf $base
@@ -737,7 +748,7 @@ try {
                 if (-not (Test-Path $dest)) {
                     Write-Host "Cloning reference: $($r.name)"
                     Invoke-NativeStep { git -c core.autocrlf=false -c core.eol=lf clone --quiet --depth=1 $r.url $dest 2>$null }
-                    Invoke-NativeStep { git -C $dest checkout --quiet $r.ref 2>$null }
+                    Invoke-NativeStep { Invoke-GitInClone $dest checkout --quiet $r.ref 2>$null }
                 }
             }
         }
