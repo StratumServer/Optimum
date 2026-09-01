@@ -34,6 +34,60 @@ public class ExtendedTests
         Assert.Equal(expectedRadius, radius);
     }
 
+    // ===== DynamicLight: K-nearest selection at maxDynLights = 0 (issue #60) =====
+
+    [Theory]
+    [InlineData(0, 3, 0)]   // #60: cap 0 with lights in range means no selection and no throw
+    [InlineData(-1, 3, 0)]  // a negative cap from a hand-edited config behaves the same
+    [InlineData(2, 5, 2)]   // over capacity: keep the two nearest
+    [InlineData(4, 2, 2)]   // under capacity: keep all
+    public void DynamicLight_KNearestSelection_HandlesZeroCap(int maxDynLights, int candidateCount, int expectedSelected)
+    {
+        // Mirrors the K-nearest scratch loop in SystemRenderPlayerEffects.onBeforeRender.
+        // Before the fix, maxDynLights 0 sized _lightScratchDistSq to length 0 and the
+        // eviction branch read index [0] from it, which is the IndexOutOfRangeException.
+        double[] candidateDistSq = new double[candidateCount];
+        for (int i = 0; i < candidateCount; i++)
+        {
+            candidateDistSq[i] = candidateCount - i; // strictly descending distance
+        }
+
+        int selected;
+        if (maxDynLights <= 0)
+        {
+            selected = 0;
+        }
+        else if (candidateCount > maxDynLights)
+        {
+            double[] scratch = new double[maxDynLights];
+            int count = 0;
+            foreach (double distSq in candidateDistSq)
+            {
+                if (count < maxDynLights)
+                {
+                    scratch[count++] = distSq;
+                }
+                else
+                {
+                    int farthest = 0;
+                    double farthestDist = scratch[0];
+                    for (int k = 1; k < count; k++)
+                    {
+                        if (scratch[k] > farthestDist) { farthest = k; farthestDist = scratch[k]; }
+                    }
+                    if (distSq < farthestDist) { scratch[farthest] = distSq; }
+                }
+            }
+            selected = count;
+        }
+        else
+        {
+            selected = candidateCount;
+        }
+
+        Assert.Equal(expectedSelected, selected);
+    }
+
     // ===== BackgroundFpsLimiter =====
 
     [Theory]

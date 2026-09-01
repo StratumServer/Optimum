@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..707d868 100644
+index 2eca300..938b3b3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 2eca300..707d868 100644
  namespace Vintagestory.Client.NoObf;
  
  public class SystemRenderPlayerEffects : ClientSystem
-@@ -31,22 +33,128 @@ public class SystemRenderPlayerEffects : ClientSystem
+@@ -31,22 +33,136 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
@@ -82,7 +82,15 @@ index 2eca300..707d868 100644
 +			// internally (GameMain owns that code), but we avoid the sort
 +			// allocation and read LightHsv once per entity in the add loop.
 +			array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, HasLight);
-+			if (array.Length > maxDynLights)
++			if (maxDynLights <= 0)
++			{
++				// Optimum: maxDynLights 0 (the low-end graphics presets) renders no
++				// dynamic lights, matching vanilla. The K-nearest path sizes its
++				// scratch arrays to maxDynLights, so running it at 0 reads
++				// _lightScratchDistSq[0] from a zero-length array (issue #60).
++				array = Array.Empty<Entity>();
++			}
++			else if (array.Length > maxDynLights)
 +			{
 +				// K-nearest selection into scratch arrays, no LINQ, no delegate.
 +				if (_lightScratch == null || _lightScratch.Length < maxDynLights)
