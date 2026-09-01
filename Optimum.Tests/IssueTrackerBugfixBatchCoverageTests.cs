@@ -156,6 +156,25 @@ public class IssueTrackerBugfixBatchCoverageTests
         Assert.Contains("AddSlider(onOptimumShadowDistChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 20), \"optShadowDist\")", source);
     }
 
+    [Theory]
+    [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
+    public void DynamicLightKNearestSkipsTheScratchPathWhenMaxDynLightsIsZero(string relativePath)
+    {
+        // #60: the low-end graphics presets set maxDynamicLights to 0. The K-nearest
+        // path sizes _lightScratch / _lightScratchDistSq to maxDynLights, so at 0 the
+        // eviction branch reads _lightScratchDistSq[0] from a zero-length array and
+        // throws IndexOutOfRangeException on the first light entity in range. The
+        // guard has to run before the over-capacity branch and leave no lights.
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
+
+        Assert.Contains("if (maxDynLights <= 0)", source);
+        Assert.Contains("array = Array.Empty<Entity>();", source);
+
+        int guardIndex = source.IndexOf("if (maxDynLights <= 0)", StringComparison.Ordinal);
+        int scratchBranchIndex = source.IndexOf("else if (array.Length > maxDynLights)", StringComparison.Ordinal);
+        Assert.True(guardIndex >= 0 && scratchBranchIndex > guardIndex, "the zero guard must precede the over-capacity branch");
+    }
+
     private static string FindRepositoryFile(string relativePath)
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
