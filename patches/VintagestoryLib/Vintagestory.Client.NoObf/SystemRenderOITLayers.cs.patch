@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..8414cd7 100644
+index bba43f6..d855d51 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -18,45 +18,95 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -18,66 +18,188 @@ public class SystemRenderOITLayers : ClientSystem
  		public int RenderRange => 1;
  
  		public BeforeOIT(ICoreClientAPI capi)
@@ -34,7 +34,8 @@ index bba43f6..8414cd7 100644
 +			if (SystemRenderOITLayers.optimumOitDisabled) return;
 +			IShaderProgram currentActiveShader = null;
 +			try
-+			{
+ 			{
+-				rebuild();
 +				if (capi == null || capi.Render == null || capi.Shader == null || capi.Render.FrameBuffers == null || capi.Render.FrameBuffers.Count <= 1)
 +				{
 +					SystemRenderOITLayers.DisableOptimumOit(capi, "render resources are unavailable");
@@ -57,7 +58,17 @@ index bba43f6..8414cd7 100644
 +				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Stop();
 +				program.Use();
 +				program.Uniform("OITreveal", 6);
-+				GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
++				// The accumulation sampler has no typed setter on IShaderProgram,
++				// so it is pointed at its unit directly.
++				Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++				if (optimumDevice != null)
++				{
++					optimumDevice.SetSamplerUnit(program.ProgramId, "OITaccumulation", 7);
++				}
++				else
++				{
++					GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
++				}
 +				program.Stop();
 +				programByName.Use();
 +				programByName.Uniform("liquidDepth", 4);
@@ -74,14 +85,32 @@ index bba43f6..8414cd7 100644
 +					}
 +				}
 +				DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
++				float[] array3 = new float[4];
++				float[] array4 = new float[4] { 1f, 1f, 1f, 1f };
++				if (optimumDevice != null)
++				{
++					// Attachments 0 and 1 hold revealage and multiply down from
++					// one; 3, 4 and 5 accumulate additively from zero. Attachment
++					// 2 is written by the pass itself and keeps vanilla blending.
++					optimumDevice.SetDrawBuffers(currentTransparentfb.FboId, 0x3F);
++					optimumDevice.SetBlendFuncSeparate(0, 774, 0, 774, 0);
++					optimumDevice.SetBlendFuncSeparate(1, 774, 0, 774, 0);
++					optimumDevice.SetBlendFuncSeparate(3, 1, 1, 1, 1);
++					optimumDevice.SetBlendFuncSeparate(4, 1, 1, 1, 1);
++					optimumDevice.SetBlendFuncSeparate(5, 1, 1, 1, 1);
++					optimumDevice.ClearColor(0, array4[0], array4[1], array4[2], array4[3]);
++					optimumDevice.ClearColor(1, array4[0], array4[1], array4[2], array4[3]);
++					optimumDevice.ClearColor(3, array3[0], array3[1], array3[2], array3[3]);
++					optimumDevice.ClearColor(4, array3[0], array3[1], array3[2], array3[3]);
++					optimumDevice.ClearColor(5, array3[0], array3[1], array3[2], array3[3]);
++					return;
++				}
 +				GL.DrawBuffers(array2.Length, array2);
 +				GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0);
 +				GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0);
 +				GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1);
 +				GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1);
 +				GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-+				float[] array3 = new float[4];
-+				float[] array4 = new float[4] { 1f, 1f, 1f, 1f };
 +				GL.ClearBuffer((ClearBuffer)6144, 0, array4);
 +				GL.ClearBuffer((ClearBuffer)6144, 1, array4);
 +				GL.ClearBuffer((ClearBuffer)6144, 3, array3);
@@ -89,8 +118,7 @@ index bba43f6..8414cd7 100644
 +				GL.ClearBuffer((ClearBuffer)6144, 5, array3);
 +			}
 +			catch (Exception e)
- 			{
--				rebuild();
++			{
 +				SystemRenderOITLayers.DisableOptimumOit(capi, "OIT render callback failed", e);
 +				try { freeResources(); } catch { }
 +				try
@@ -125,8 +153,20 @@ index bba43f6..8414cd7 100644
  
  		private void freeResources()
  		{
- 			GL.DeleteTexture(accumTextureId);
-@@ -65,11 +114,11 @@ public class SystemRenderOITLayers : ClientSystem
+-			GL.DeleteTexture(accumTextureId);
+-			GL.DeleteTexture(revealTextureId);
++			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++			if (optimumDevice != null)
++			{
++				optimumDevice.DeleteTexture(accumTextureId);
++				optimumDevice.DeleteTexture(revealTextureId);
++			}
++			else
++			{
++				GL.DeleteTexture(accumTextureId);
++				GL.DeleteTexture(revealTextureId);
++			}
+ 			accumTextureId = 0;
  			revealTextureId = 0;
  		}
  
@@ -134,12 +174,55 @@ index bba43f6..8414cd7 100644
  		{
 -			freeResources();
 +			try { freeResources(); } catch (Exception e) { SystemRenderOITLayers.DisableOptimumOit(capi, "OIT resource cleanup failed", e); }
++		}
++
++		/// <summary>
++		/// Optimum: the sampling both OIT targets use - nearest filtering and
++		/// clamped wrapping, because they are read back per fragment at exactly
++		/// the coordinate that produced them.
++		/// </summary>
++		private static void SetOptimumOitSampling(
++			Vintagestory.API.Config.IOptimumGraphicsDevice device, int textureId)
++		{
++			device.SetTextureParameter(textureId, Vintagestory.API.Config.OptimumGlConstants.TextureMinFilter, 9728);
++			device.SetTextureParameter(textureId, Vintagestory.API.Config.OptimumGlConstants.TextureMagFilter, 9728);
++			device.SetTextureParameter(textureId, Vintagestory.API.Config.OptimumGlConstants.TextureWrapS, 33071);
++			device.SetTextureParameter(textureId, Vintagestory.API.Config.OptimumGlConstants.TextureWrapT, 33071);
  		}
  
  		private void rebuild()
  		{
  			freeResources();
-@@ -104,15 +153,24 @@ public class SystemRenderOITLayers : ClientSystem
+ 			transparentfb = capi.Render.FrameBuffers[1];
+ 			int width = transparentfb.Width;
+ 			int height = transparentfb.Height;
++			// The accumulation target is a three-layer 2D array, one layer per
++			// OIT weight bucket, attached layer by layer at colour attachments
++			// 3, 4 and 5. The device addresses textures directly, so there is no
++			// framebuffer or texture to bind first.
++			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++			if (optimumDevice != null)
++			{
++				revealTextureId = optimumDevice.CreateTexture2DRaw(width, height,
++					Vintagestory.API.Config.OptimumGlConstants.Rgba8, IntPtr.Zero, 0);
++				SetOptimumOitSampling(optimumDevice, revealTextureId);
++
++				accumTextureId = optimumDevice.CreateTexture2DArray(width, height, layers,
++					EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba);
++				SetOptimumOitSampling(optimumDevice, accumTextureId);
++
++				optimumDevice.AttachTexture(transparentfb.FboId, EnumFramebufferAttachment.ColorAttachment0, revealTextureId, 0);
++				optimumDevice.AttachTexture(transparentfb.FboId, EnumFramebufferAttachment.ColorAttachment3, accumTextureId, 0);
++				optimumDevice.AttachTexture(transparentfb.FboId, EnumFramebufferAttachment.ColorAttachment4, accumTextureId, 1);
++				optimumDevice.AttachTexture(transparentfb.FboId, (EnumFramebufferAttachment)36069, accumTextureId, 2);
++				return;
++			}
+ 			GL.BindFramebuffer((FramebufferTarget)36160, transparentfb.FboId);
+ 			revealTextureId = GL.GenTexture();
+ 			GL.BindTexture((TextureTarget)3553, revealTextureId);
+ 			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32849, width, height, 0, (PixelFormat)6407, (PixelType)5121, (IntPtr)0);
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
+@@ -104,15 +226,32 @@ public class SystemRenderOITLayers : ClientSystem
  
  		public int RenderRange => 1;
  
@@ -153,6 +236,14 @@ index bba43f6..8414cd7 100644
 +			if (SystemRenderOITLayers.optimumOitDisabled || revealTextureId == 0 || accumTextureId == 0) return;
 +			try
 +			{
++				// Units 6 and 7, matching the sampler assignments BeforeOIT made.
++				Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++				if (optimumDevice != null)
++				{
++					optimumDevice.BindTexture(6, revealTextureId);
++					optimumDevice.BindTexture(7, accumTextureId);
++					return;
++				}
 +				GL.ActiveTexture((TextureUnit)33990);
 +				GL.BindTexture((TextureTarget)3553, revealTextureId);
 +				GL.ActiveTexture((TextureUnit)33991);
@@ -169,7 +260,7 @@ index bba43f6..8414cd7 100644
  		public void Dispose()
  		{
  		}
-@@ -122,19 +180,50 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -122,19 +261,65 @@ public class SystemRenderOITLayers : ClientSystem
  
  	private static int accumTextureId;
  
@@ -187,6 +278,21 @@ index bba43f6..8414cd7 100644
 +			DrawBuffersEnum.ColorAttachment1,
 +			DrawBuffersEnum.ColorAttachment2
 +		};
++		// Back to the three attachments and blend factors LoadFrameBuffer sets up
++		// for the vanilla transparent pass.
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			FrameBufferRef transparent = ScreenManager.Platform?.FrameBuffers?[1];
++			if (transparent != null && !transparent.Disposed)
++			{
++				optimumDevice.SetDrawBuffers(transparent.FboId, 0x7);
++			}
++			optimumDevice.SetBlendFuncSeparate(0, 1, 1, 1, 1);
++			optimumDevice.SetBlendFuncSeparate(1, 0, 769, 0, 769);
++			optimumDevice.SetBlendFuncSeparate(2, 770, 771, 770, 771);
++			return;
++		}
 +		GL.DrawBuffers(vanillaBuffers.Length, vanillaBuffers);
 +		GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
 +		GL.BlendFunc(1, (BlendingFactorSrc)0, (BlendingFactorDest)769);

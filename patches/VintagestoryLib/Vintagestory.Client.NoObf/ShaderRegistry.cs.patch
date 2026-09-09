@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..edaaa34 100644
+index 4a24e75..f57b7b1 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..edaaa34 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,149 @@ public class ShaderRegistry
+@@ -181,39 +183,160 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -110,13 +110,13 @@ index 4a24e75..edaaa34 100644
 +			List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
 +			many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
 +			foreach (IAsset item in many)
-+			{
-+				includes[item.Name] = item.ToText();
-+			}
-+			for (int i = 0; i < nextPassId; i++)
  			{
 -				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
 -				flag = shaderProgram.Compile() && flag;
++				includes[item.Name] = item.ToText();
++			}
++			for (int i = 0; i < nextPassId; i++)
++			{
 +				ShaderProgram shaderProgram = shaderPrograms[i];
 +				if (shaderProgram != null)
 +				{
@@ -147,10 +147,21 @@ index 4a24e75..edaaa34 100644
 +		if (OptimumConfig.EffectiveRenderScale < 1.0f)
 +		{
 +			float terrainLodBias = MathF.Log2(OptimumConfig.EffectiveRenderScale);
-+			GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
-+			GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
-+			GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
-+			GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
++			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++			if (optimumDevice != null)
++			{
++				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], OptimumGlConstants.TextureLodBias, terrainLodBias);
++				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], OptimumGlConstants.TextureLodBias, terrainLodBias);
++				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], OptimumGlConstants.TextureLodBias, terrainLodBias);
++				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], OptimumGlConstants.TextureLodBias, terrainLodBias);
++			}
++			else
++			{
++				GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
++				GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
++				GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
++				GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
++			}
 +		}
  		return flag;
  	}
@@ -173,7 +184,7 @@ index 4a24e75..edaaa34 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +408,11 @@ public class ShaderRegistry
+@@ -296,11 +419,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -186,7 +197,7 @@ index 4a24e75..edaaa34 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +445,27 @@ public class ShaderRegistry
+@@ -333,10 +456,27 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";

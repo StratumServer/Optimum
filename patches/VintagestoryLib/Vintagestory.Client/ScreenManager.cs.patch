@@ -1,0 +1,32 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
+index b5000e7..8bc52fb 100644
+--- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
++++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
+@@ -731,13 +731,25 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 		Platform.CheckGlError();
+ 		FrameProfiler.Mark("doneRender2Default");
+ 		Mat4f.Identity(api.renderapi.pMatrix);
+ 		Mat4f.Ortho(api.renderapi.pMatrix, 0f, Platform.WindowSize.Width, Platform.WindowSize.Height, 0f, 0f, 20001f);
+ 		Platform.GlDepthFunc(EnumDepthFunction.Lequal);
++		// Mono.Cecil transplant.
++		// Both GL calls clamp: glClearBuffer's depth value and glDepthRange's
++		// bounds are clamped to [0, 1], so 20000 means 1 and the depth range is
++		// left at its default. The device path clears to the same 1.
+ 		float num = 20000f;
+-		GL.ClearBuffer((ClearBuffer)6145, 0, ref num);
+-		GL.DepthRange(0f, 20000f);
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.ClearDepth(1f);
++		}
++		else
++		{
++			GL.ClearBuffer((ClearBuffer)6145, 0, ref num);
++			GL.DepthRange(0f, 20000f);
++		}
+ 		Platform.GlEnableDepthTest();
+ 		Platform.GlDisableCullFace();
+ 		Platform.GlToggleBlend(on: true);
+ 		CurrentScreen.RenderAfterBlit(dt);
+ 		if (CurrentScreen.RenderBg && !Platform.IsShuttingDown)

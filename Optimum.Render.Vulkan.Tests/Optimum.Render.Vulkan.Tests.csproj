@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>annotations</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <!-- The vanilla shaders are proprietary and never committed, so corpus tests
+         skip on a checkout that has not bootstrapped rather than failing. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Optimum.Render.Vulkan\Optimum.Render.Vulkan.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Unlike the renderer project, the test host has to load this at runtime,
+         so it is copied to the output directory. -->
+    <Reference Include="VintagestoryAPI">
+      <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

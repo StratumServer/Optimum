@@ -1,0 +1,146 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
+index ac7f262..4e1d839 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
+@@ -52,11 +52,19 @@ public class SystemRenderSunMoon : ClientSystem
+ 		MeshData customQuadModelData = QuadMeshUtilExt.GetCustomQuadModelData(0f, 0f, 0f, ImageSize, ImageSize, byte.MaxValue, byte.MaxValue, byte.MaxValue, byte.MaxValue);
+ 		customQuadModelData.Flags = new int[4];
+ 		quadModel = game.Platform.UploadMesh(customQuadModelData);
+ 		game.eventManager.RegisterRenderer(OnRenderFrame3D, EnumRenderStage.Opaque, Name, 0.3);
+ 		game.eventManager.RegisterRenderer(OnRenderFrame3DPost, EnumRenderStage.Opaque, Name, 999.0);
+-		GL.GenQueries(1, out occlQueryId);
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			occlQueryId = optimumDevice.CreateOcclusionQuery();
++		}
++		else
++		{
++			GL.GenQueries(1, out occlQueryId);
++		}
+ 	}
+ 
+ 	private void OnRenderFrame3DPost(float obj)
+ 	{
+ 		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
+@@ -75,11 +83,21 @@ public class SystemRenderSunMoon : ClientSystem
+ 		ClientPlatformAbstract platform = game.Platform;
+ 		platform.GlEnableDepthTest();
+ 		platform.GlToggleBlend(on: true);
+ 		platform.GlDisableCullFace();
+ 		platform.GlDepthMask(flag: false);
+-		GL.ColorMask(false, false, false, false);
++		// The sun occlusion probe draws a quad purely to be counted by the query;
++		// nothing of it should reach the colour buffer.
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetColorMask(false, false, false, false);
++		}
++		else
++		{
++			GL.ColorMask(false, false, false, false);
++		}
+ 		Vec3f sunPosition = game.Calendar.SunPosition;
+ 		Quaternion val = CreateLookRotation(new Vector3(sunPosition.X, sunPosition.Y, sunPosition.Z));
+ 		sunmat = Matrix4.CreateTranslation((float)(-ImageSize / 2), (float)(-ImageSize), (float)(-ImageSize / 2)) * Matrix4.CreateScale(sunScale, sunScale * 7f, sunScale) * Matrix4.CreateFromQuaternion(val) * Matrix4.CreateTranslation(new Vector3(sunPosition.X, sunPosition.Y, sunPosition.Z));
+ 		ShaderProgramStandard standard = ShaderPrograms.Standard;
+ 		standard.Use();
+@@ -101,35 +119,67 @@ public class SystemRenderSunMoon : ClientSystem
+ 		standard.ProjectionMatrix = game.api.renderapi.CurrentProjectionMatrix;
+ 		standard.Tex2D = suntextureId;
+ 		if (firstTickDone)
+ 		{
+ 			int num = default(int);
+-			GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34919, out num);
+-			if (num > 0)
++			if (optimumDevice != null)
++			{
++				if (optimumDevice.IsQueryResultAvailable(occlQueryId))
++				{
++					targetSunSpec = GameMath.Clamp((float)optimumDevice.GetQueryResult(occlQueryId) / 1500f, 0f, 1f);
++					nowQuerying = false;
++				}
++			}
++			else
+ 			{
+-				int num2 = default(int);
+-				GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34918, out num2);
+-				targetSunSpec = GameMath.Clamp((float)num2 / 1500f, 0f, 1f);
+-				nowQuerying = false;
++				GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34919, out num);
++				if (num > 0)
++				{
++					int num2 = default(int);
++					GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34918, out num2);
++					targetSunSpec = GameMath.Clamp((float)num2 / 1500f, 0f, 1f);
++					nowQuerying = false;
++				}
+ 			}
+ 		}
+ 		firstTickDone = true;
+ 		bool flag = false;
+ 		if (!nowQuerying)
+ 		{
+-			GL.BeginQuery((QueryTarget)35092, occlQueryId);
++			if (optimumDevice != null)
++			{
++				optimumDevice.BeginOcclusionQuery(occlQueryId);
++			}
++			else
++			{
++				GL.BeginQuery((QueryTarget)35092, occlQueryId);
++			}
+ 			nowQuerying = true;
+ 			flag = true;
+ 		}
+ 		platform.RenderMesh(quadModel);
+ 		standard.Stop();
+ 		if (flag)
+ 		{
+-			GL.EndQuery((QueryTarget)35092);
++			if (optimumDevice != null)
++			{
++				optimumDevice.EndOcclusionQuery(occlQueryId);
++			}
++			else
++			{
++				GL.EndQuery((QueryTarget)35092);
++			}
+ 		}
+ 		platform.GlDepthMask(flag: true);
+-		GL.ColorMask(true, true, true, true);
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetColorMask(true, true, true, true);
++		}
++		else
++		{
++			GL.ColorMask(true, true, true, true);
++		}
+ 	}
+ 
+ 	public void OnRenderFrame3D(float dt)
+ 	{
+ 		ClientPlatformAbstract platform = game.Platform;
+@@ -420,11 +470,19 @@ public class SystemRenderSunMoon : ClientSystem
+ 		game.Platform.GLDeleteTexture(suntextureId);
+ 		for (int i = 0; i < moontextureIds.Length; i++)
+ 		{
+ 			game.Platform.GLDeleteTexture(moontextureIds[i]);
+ 		}
+-		GL.DeleteQuery(occlQueryId);
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.DeleteQuery(occlQueryId);
++		}
++		else
++		{
++			GL.DeleteQuery(occlQueryId);
++		}
+ 	}
+ 
+ 	public override EnumClientSystemType GetSystemType()
+ 	{
+ 		return EnumClientSystemType.Render;

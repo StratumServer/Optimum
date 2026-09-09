@@ -159,7 +159,7 @@ check_cecil_cross_reference() {
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.(Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
+  done < <(grep -oE '"Vintagestory\.(ClientNative|Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
   for rel in "${!cecil_owned[@]}"; do
     if [[ -z "${expected["$rel"]:-}" ]]; then

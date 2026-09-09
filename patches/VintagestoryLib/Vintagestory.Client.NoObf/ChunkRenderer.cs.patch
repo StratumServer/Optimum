@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..ce28235 100644
+index 431e51a..46d578c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -41,7 +41,7 @@ index 431e51a..ce28235 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +123,45 @@ public class ChunkRenderer
+@@ -105,10 +123,61 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -58,13 +58,7 @@ index 431e51a..ce28235 100644
 +		{
 +			if (!float.IsNaN(optimumTextureLodBias))
 +			{
-+				GL.ActiveTexture((TextureUnit)33984);
-+				for (int i = 0; i < textureIds.Length; i++)
-+				{
-+					GL.BindTexture((TextureTarget)3553, textureIds[i]);
-+					GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, 0f);
-+				}
-+				GL.BindTexture((TextureTarget)3553, 0);
++				SetOptimumTextureLodBias(0f);
 +				optimumTextureLodBias = float.NaN;
 +			}
 +			return;
@@ -74,20 +68,42 @@ index 431e51a..ce28235 100644
 +		{
 +			return;
 +		}
++		SetOptimumTextureLodBias(textureLodBias);
++		optimumTextureLodBias = textureLodBias;
++	}
++
++	/// <summary>
++	/// Optimum: applies a texture LOD bias to every block atlas.
++	///
++	/// The GL form binds each texture to unit 0 and sets the parameter on the
++	/// binding; the device addresses the texture directly, so there is nothing to
++	/// bind and nothing to restore afterwards.
++	/// </summary>
++	private void SetOptimumTextureLodBias(float bias)
++	{
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			for (int k = 0; k < textureIds.Length; k++)
++			{
++				optimumDevice.SetTextureParameter(textureIds[k],
++					Vintagestory.API.Config.OptimumGlConstants.TextureLodBias, bias);
++			}
++			return;
++		}
 +		GL.ActiveTexture((TextureUnit)33984);
 +		for (int i = 0; i < textureIds.Length; i++)
 +		{
 +			GL.BindTexture((TextureTarget)3553, textureIds[i]);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, textureLodBias);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);
 +		}
 +		GL.BindTexture((TextureTarget)3553, 0);
-+		optimumTextureLodBias = textureLodBias;
  	}
  
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -170,10 +223,11 @@ public class ChunkRenderer
+@@ -170,10 +239,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -99,7 +115,7 @@ index 431e51a..ce28235 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,14 +262,25 @@ public class ChunkRenderer
+@@ -208,14 +278,25 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -110,7 +126,9 @@ index 431e51a..ce28235 100644
 +		// At 60-270 blocks a chunk subtends 1-3 texels in the 1024² shadow map;
 +		// thin foliage casts no resolvable shadow at that distance.
 +		if (!ClientSettings.OptimumShadowFarVegetation || game.currentRenderStage != EnumRenderStage.ShadowFar)
-+		{
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
 +			OptimumDiagnostics.ShadowFarVegetation.Hit();
 +			for (int k = 0; k < textureIds.Length; k++)
 +			{
@@ -119,16 +137,56 @@ index 431e51a..ce28235 100644
 +			}
 +		}
 +		else
- 		{
--			chunkshadowmap.Tex2d2D = textureIds[k];
--			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++		{
 +			OptimumDiagnostics.ShadowFarVegetation.Skip();
  		}
  		for (int l = 0; l < textureIds.Length; l++)
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -442,11 +507,11 @@ public class ChunkRenderer
+@@ -318,19 +399,32 @@ public class ChunkRenderer
+ 		chunkopaque.Stop();
+ 		ScreenManager.FrameProfiler.Mark("rend3D-ret-opnc");
+ 		game.GlPopMatrix();
+ 		if (game.unbindSamplers)
+ 		{
+-			GL.BindSampler(0, 0);
+-			GL.BindSampler(1, 0);
+-			GL.BindSampler(2, 0);
+-			GL.BindSampler(3, 0);
+-			GL.BindSampler(4, 0);
+-			GL.BindSampler(5, 0);
+-			GL.BindSampler(6, 0);
+-			GL.BindSampler(7, 0);
+-			GL.BindSampler(8, 0);
++			// Optimum: clears any sampler override on the nine units the chunk
++			// passes use, so the next pass gets each texture's own filtering.
++			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++			if (optimumDevice != null)
++			{
++				for (int k = 0; k < 9; k++)
++				{
++					optimumDevice.BindSampler(k, 0);
++				}
++			}
++			else
++			{
++				GL.BindSampler(0, 0);
++				GL.BindSampler(1, 0);
++				GL.BindSampler(2, 0);
++				GL.BindSampler(3, 0);
++				GL.BindSampler(4, 0);
++				GL.BindSampler(5, 0);
++				GL.BindSampler(6, 0);
++				GL.BindSampler(7, 0);
++				GL.BindSampler(8, 0);
++			}
+ 		}
+ 	}
+ 
+ 	internal void RenderOIT(float deltaTime)
+ 	{
+@@ -442,11 +536,11 @@ public class ChunkRenderer
  		masterPool.DisposeAllPools(game.api);
  	}
  

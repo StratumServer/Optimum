@@ -404,6 +404,36 @@ public static class OptimumConfig
     public static float RenderScale = 1.0f;
 
     /// <summary>
+    /// Which renderer the client runs: "opengl", "vulkan", or "auto".
+    ///
+    /// OpenGL is the default and stays so until the Vulkan backend reaches
+    /// parity. "auto" means Vulkan where the vendor and driver are known good and
+    /// OpenGL everywhere else, so it can be switched on per-vendor as the matrix
+    /// goes green without asking anyone to change a setting.
+    ///
+    /// A string rather than an enum because it is persisted in optimum.json,
+    /// where an unrecognised value should degrade to OpenGL rather than fail to
+    /// parse the whole file.
+    /// </summary>
+    public static string Renderer = "opengl";
+
+    /// <summary>True when the configuration asks for Vulkan at all.</summary>
+    public static bool WantsVulkanRenderer =>
+        string.Equals(Renderer, "vulkan", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Renderer, "auto", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when Vulkan was reached through "auto" rather than asked for by name.
+    ///
+    /// The two are not the same decision. "vulkan" is a choice the player made and
+    /// is honoured wherever the backend runs at all; "auto" is a default they
+    /// never chose, so it only selects the backend on driver families it has been
+    /// exercised against and stays on OpenGL everywhere else.
+    /// </summary>
+    public static bool RendererSelectedAutomatically =>
+        string.Equals(Renderer, "auto", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// R4: cap the god-rays post-process at 100 texture samples when enabled.
     /// The disabled path sends the vanilla 180-sample limit. This option can
     /// change the post-process image, so it stays off by default.
@@ -447,6 +477,28 @@ public static class OptimumConfig
 
     public static bool IsShaderFeatureDisabled(string feature) =>
         _shaderCompatibilityScanFailed || _shaderCompatibilityDisabledFeatures.Contains(feature);
+
+    /// <summary>
+    /// Whether the launcher's mod compatibility scan actually produced a report.
+    ///
+    /// <see cref="IsShaderFeatureDisabled" /> deliberately treats a missing scan
+    /// as "everything disabled", which is the right fail-safe but makes the two
+    /// cases indistinguishable to a caller that wants to explain itself. The
+    /// renderer selection reports "the scan has not run" separately from "a mod
+    /// requires OpenGL", because the remedies are completely different.
+    /// </summary>
+    public static bool ShaderCompatibilityScanAvailable => !_shaderCompatibilityScanFailed;
+
+    /// <summary>
+    /// Whether the scan named this feature, ignoring the "scan failed means all
+    /// disabled" fallback that <see cref="IsShaderFeatureDisabled" /> applies.
+    ///
+    /// Only correct for decisions that are not shader features - the renderer
+    /// backend is the one such decision - because for a real shader feature the
+    /// conservative fallback is the whole point.
+    /// </summary>
+    public static bool IsFeatureExplicitlyDisabled(string feature) =>
+        _shaderCompatibilityDisabledFeatures.Contains(feature);
 
     public static void SetGreedyMeshShaderAbi(bool vertexShaderReady, bool fragmentShaderReady)
     {
@@ -623,6 +675,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshFarDistance), GreedyMeshFarDistance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
+        (nameof(OptimumConfigData.Renderer), Renderer),
         (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
@@ -714,6 +767,14 @@ public static class OptimumConfig
             GreedyMeshFarDistanceSq = (double)GreedyMeshFarDistance * GreedyMeshFarDistance;
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
+            // An unrecognised value means OpenGL rather than a parse failure, so
+            // a hand-edited config cannot leave the client unable to start.
+            Renderer = data.Renderer switch
+            {
+                "vulkan" => "vulkan",
+                "auto" => "auto",
+                _ => "opengl",
+            };
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
@@ -782,6 +843,7 @@ public static class OptimumConfig
             GreedyMeshFarDistance = GreedyMeshFarDistance,
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
+            Renderer = Renderer,
             GodRaysSampleCap = GodRaysSampleCapEnabled,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
@@ -858,6 +920,7 @@ internal sealed class OptimumConfigData
     public int GreedyMeshFarDistance { get; set; } = 0;
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
+    public string Renderer { get; set; } = "opengl";
     public bool GodRaysSampleCap { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;

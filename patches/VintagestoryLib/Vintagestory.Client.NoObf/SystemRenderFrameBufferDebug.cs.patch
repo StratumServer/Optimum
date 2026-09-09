@@ -1,0 +1,95 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs
+index cb0a94d..559049f 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs
+@@ -136,54 +136,54 @@ internal class SystemRenderFrameBufferDebug : ClientSystem
+ 			int shadowMapQuality = ClientSettings.ShadowMapQuality;
+ 			if (shadowMapQuality > 0)
+ 			{
+ 				frameBufferRef = game.Platform.FrameBuffers[11];
+ 				debugdepthbuffer.DepthSampler2D = frameBufferRef.DepthTextureId;
+-				GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, 0);
++				SetOptimumDepthCompare(frameBufferRef.DepthTextureId, 0);
+ 				game.GlPushMatrix();
+ 				game.GlTranslate(gUIScale * 170f, gUIScale * 10f, gUIScale * 50f);
+ 				game.GlScale(gUIScale * 300f, gUIScale * 300f, 0.0);
+ 				game.GlScale(0.5, 0.5, 0.0);
+ 				game.GlTranslate(1.0, 1.0, 0.0);
+ 				game.GlRotate(180f, 1.0, 0.0, 0.0);
+ 				debugdepthbuffer.ProjectionMatrix = game.CurrentProjectionMatrix;
+ 				debugdepthbuffer.ModelViewMatrix = game.CurrentModelViewMatrix;
+ 				game.Platform.RenderMesh(quadModel);
+ 				game.GlPopMatrix();
+-				GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, 34894);
++				SetOptimumDepthCompare(frameBufferRef.DepthTextureId, 34894);
+ 			}
+ 			if (shadowMapQuality > 1)
+ 			{
+ 				frameBufferRef = game.Platform.FrameBuffers[12];
+ 				debugdepthbuffer.DepthSampler2D = frameBufferRef.DepthTextureId;
+-				GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, 0);
++				SetOptimumDepthCompare(frameBufferRef.DepthTextureId, 0);
+ 				game.GlPushMatrix();
+ 				game.GlTranslate(gUIScale * 170f, gUIScale * 320f, gUIScale * 50f);
+ 				game.GlScale(gUIScale * 300f, gUIScale * 300f, 0.0);
+ 				game.GlScale(0.5, 0.5, 0.0);
+ 				game.GlTranslate(1.0, 1.0, 0.0);
+ 				game.GlRotate(180f, 1.0, 0.0, 0.0);
+ 				debugdepthbuffer.ProjectionMatrix = game.CurrentProjectionMatrix;
+ 				debugdepthbuffer.ModelViewMatrix = game.CurrentModelViewMatrix;
+ 				game.Platform.RenderMesh(quadModel);
+ 				game.GlPopMatrix();
+-				GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, 34894);
++				SetOptimumDepthCompare(frameBufferRef.DepthTextureId, 34894);
+ 			}
+ 			frameBufferRef = game.Platform.FrameBuffers[5];
+ 			debugdepthbuffer.DepthSampler2D = frameBufferRef.DepthTextureId;
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, 0);
++			SetOptimumDepthCompare(frameBufferRef.DepthTextureId, 0);
+ 			game.GlPushMatrix();
+ 			game.GlTranslate(gUIScale * 170f, gUIScale * 630f, gUIScale * 50f);
+ 			game.GlScale(gUIScale * 300f, gUIScale * 300f, 0.0);
+ 			game.GlScale(0.5, 0.5, 0.0);
+ 			game.GlTranslate(1.0, 1.0, 0.0);
+ 			game.GlRotate(180f, 1.0, 0.0, 0.0);
+ 			debugdepthbuffer.ProjectionMatrix = game.CurrentProjectionMatrix;
+ 			debugdepthbuffer.ModelViewMatrix = game.CurrentModelViewMatrix;
+ 			game.Platform.RenderMesh(quadModel);
+ 			game.GlPopMatrix();
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, 34894);
++			SetOptimumDepthCompare(frameBufferRef.DepthTextureId, 34894);
+ 			debugdepthbuffer.Stop();
+ 			game.guiShaderProg.Use();
+ 			game.Platform.GlDisableDepthTest();
+ 			game.Render2DLoadedTexture(labels[13], gUIScale * 170f, gUIScale * 630f);
+ 			if (shadowMapQuality > 0)
+@@ -198,10 +198,29 @@ internal class SystemRenderFrameBufferDebug : ClientSystem
+ 			game.Render2DLoadedTexture(labels[6], (float)game.Width - gUIScale * 170f, gUIScale * (float)num);
+ 			game.Platform.GlToggleBlend(on: true);
+ 		}
+ 	}
+ 
++	/// <summary>
++	/// Optimum: switches a shadow map's depth-compare mode.
++	///
++	/// The debug overlay reads shadow maps as plain values rather than through
++	/// the comparison sampler, then puts the comparison back. In GL that is a
++	/// parameter on whatever is bound; the device takes the texture itself.
++	/// </summary>
++	private static void SetOptimumDepthCompare(int textureId, int mode)
++	{
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetTextureParameter(textureId,
++				Vintagestory.API.Config.OptimumGlConstants.TextureCompareMode, mode);
++			return;
++		}
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, mode);
++	}
++
+ 	private TextCommandResult CmdWoit(TextCommandCallingArgs textCommandCallingArgs)
+ 	{
+ 		framebufferDebug = !framebufferDebug;
+ 		return TextCommandResult.Success();
+ 	}

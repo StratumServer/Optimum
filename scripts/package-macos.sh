@@ -162,6 +162,20 @@ cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$APP_DIR/Mods/"
 
+# The Vulkan renderer. macOS has no Vulkan driver of its own, so this only ever
+# runs through MoltenVK; it ships so the assembly is present and the backend can
+# report a real reason when it is not selectable, rather than failing to load.
+cp -f "$MOD_OUT/Optimum.Render.Vulkan.dll" "$APP_DIR/"
+for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
+    [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$APP_DIR/"
+done
+SHADERC_NATIVE="$MOD_OUT/runtimes/osx-x64/native/libshaderc_shared.dylib"
+if [[ -f "$SHADERC_NATIVE" ]]; then
+    cp -f "$SHADERC_NATIVE" "$APP_DIR/Lib/"
+else
+    echo "warning: no native shaderc at $SHADERC_NATIVE; the Vulkan renderer will not load" >&2
+fi
+
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
 # It also needs the vanilla mod DLLs in .optimum/vanilla/Mods/ as baselines.

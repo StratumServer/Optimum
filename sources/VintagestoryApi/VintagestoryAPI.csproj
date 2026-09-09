@@ -34,6 +34,8 @@
     <Compile Remove="Common\Entity\EntityType.cs" />
     <Compile Remove="Common\Effect\AmbientModifier.cs" />
     <Compile Remove="Client\optimum-entity-render-batch.cs" />
+    <Compile Remove="Client\optimum-render-device.cs" />
+    <Compile Remove="Client\optimum-render-bootstrap.cs" />
     <Compile Remove="Config\AdaptiveWorkerController.cs" />
     <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />

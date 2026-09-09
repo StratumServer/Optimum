@@ -1,0 +1,32 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
+index 4548001..4c5f0d5 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
+@@ -82,10 +82,27 @@ public class SvgLoader
+ 		((Surface)intoSurface).MarkDirty();
+ 	}
+ 
+ 	public unsafe LoadedTexture LoadSvg(IAsset svgAsset, int textureWidth, int textureHeight, int width = 0, int height = 0, int? color = null)
+ 	{
++		// The rasterizer writes straight RGBA bytes, unlike the Cairo paths which
++		// hand over BGRA, so this is the plain RGBA8 upload.
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			int optimumTextureId;
++			fixed (byte* pixels = rasterizeSvg(svgAsset, textureWidth, textureHeight, width, height, color))
++			{
++				optimumTextureId = optimumDevice.CreateTexture2DRaw(textureWidth, textureHeight,
++					Vintagestory.API.Config.OptimumGlConstants.Rgba8, (IntPtr)(nint)pixels, 4);
++			}
++			optimumDevice.SetTextureParameter(optimumTextureId,
++				Vintagestory.API.Config.OptimumGlConstants.TextureMinFilter, 9729);
++			optimumDevice.SetTextureParameter(optimumTextureId,
++				Vintagestory.API.Config.OptimumGlConstants.TextureMagFilter, 9729);
++			return new LoadedTexture(capi, optimumTextureId, width, height);
++		}
+ 		int num = GL.GenTexture();
+ 		GL.BindTexture((TextureTarget)3553, num);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
+ 		fixed (byte* ptr = rasterizeSvg(svgAsset, textureWidth, textureHeight, width, height, color))

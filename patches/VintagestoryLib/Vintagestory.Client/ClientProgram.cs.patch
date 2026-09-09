@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..240ab8f 100644
+index afa4d5f..56cf7b7 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -48,3 +48,80 @@ index afa4d5f..240ab8f 100644
  		new ClientProgram(rawArgs);
  	}
  
+@@ -295,12 +330,76 @@ public class ClientProgram
+ 		};
+ 		if (RuntimeEnv.OS == OS.Mac)
+ 		{
+ 			val2.Flags = (ContextFlags)2;
+ 		}
++		// Optimum: pick the renderer before the window opens.
++		//
++		// A window created with no graphics API cannot be handed back to OpenGL
++		// without being destroyed and reopened, so the decision has to be final
++		// here. ShouldTryVulkan loads the backend assembly and creates a throwaway
++		// device to answer it, because driver support for the features this
++		// renderer needs cannot be inferred from a vendor string.
++		//
++		// Everything below is written without lambdas so the body survives the
++		// Mono.Cecil transplant.
++		// optimum.json is normally read on the first rendered frame, from
++		// ClientPlatformWindows.EnsureOptimumDefaults - which is far too late to
++		// choose a backend, since the window has been created by then. Loading it
++		// here is idempotent: the later call re-reads the same file.
++		OptimumConfig.SetDataPath(GamePaths.DataPath);
++		OptimumConfig.Load();
++
++		bool optimumUseVulkan = false;
++		if (OptimumConfig.WantsVulkanRenderer)
++		{
++			string optimumRendererReason;
++			optimumUseVulkan = OptimumRenderBootstrap.ShouldTryVulkan(GamePaths.DataPath, out optimumRendererReason);
++			if (!optimumUseVulkan)
++			{
++				OptimumRender.FallBackToOpenGL(optimumRendererReason);
++				Console.WriteLine("[Optimum] OpenGL renderer: " + optimumRendererReason);
++			}
++			else if (OptimumRenderBootstrap.Advisory != null)
++			{
++				Console.WriteLine("[Optimum] Vulkan renderer: " + OptimumRenderBootstrap.Advisory);
++			}
++		}
++		if (optimumUseVulkan)
++		{
++			val2.API = ContextAPI.NoAPI;
++			OptimumRender.NoGraphicsApiWindow = true;
++		}
+ 		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
+ 		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
++		if (optimumUseVulkan)
++		{
++			string optimumInstallReason;
++			// The window's own client size, not ClientSettings: those carry the
++			// windowed dimensions even when the window just opened fullscreen,
++			// and the device sizes its default render target from this. A target
++			// smaller than the window clips every draw to its top-left corner,
++			// because the viewport comes from the window instead.
++			bool optimumInstalled = OptimumRenderBootstrap.Install(
++				(IntPtr)((NativeWindow)gameWindowNative).WindowPtr,
++				((NativeWindow)gameWindowNative).ClientSize.X,
++				((NativeWindow)gameWindowNative).ClientSize.Y,
++				GamePaths.DataPath,
++				out optimumInstallReason);
++
++			if (!optimumInstalled)
++			{
++				// The probe passed but the surface or swapchain did not come up.
++				// The window has no graphics API at this point, so it has to be
++				// replaced rather than reused.
++				OptimumRender.FallBackToOpenGL(optimumInstallReason);
++				Console.WriteLine("[Optimum] Vulkan unavailable, reopening for OpenGL: " + optimumInstallReason);
++				((NativeWindow)gameWindowNative).Close();
++				val2.API = ContextAPI.OpenGL;
++				gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
++			}
++		}
+ 		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
+ 		{
+ 			try
+ 			{
+ 				((NativeWindow)gameWindowNative).CenterWindow();
