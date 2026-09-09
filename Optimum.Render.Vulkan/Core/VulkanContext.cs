@@ -42,6 +42,7 @@ internal sealed class VulkanCapabilities
     public float MaxSamplerLodBias;
     public int MaxBoundDescriptorSets;
     public ulong MinUniformBufferOffsetAlignment;
+    public ulong MaxUniformBufferRange;
 }
 
 /// <summary>
@@ -574,6 +575,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             MaxSamplerLodBias = properties.Limits.MaxSamplerLodBias,
             MaxBoundDescriptorSets = (int)properties.Limits.MaxBoundDescriptorSets,
             MinUniformBufferOffsetAlignment = properties.Limits.MinUniformBufferOffsetAlignment,
+            MaxUniformBufferRange = properties.Limits.MaxUniformBufferRange,
         };
     }
 

@@ -240,8 +240,26 @@ internal sealed class GlStateTracker
     public void SetViewport(int x, int y, int width, int height) =>
         Viewport = new Rect2D(new Offset2D(x, y), new Extent2D((uint)Math.Max(0, width), (uint)Math.Max(0, height)));
 
-    public void SetScissor(int x, int y, int width, int height) =>
-        Scissor = new Rect2D(new Offset2D(x, y), new Extent2D((uint)Math.Max(0, width), (uint)Math.Max(0, height)));
+    /// <summary>
+    /// Records the scissor rectangle, clipped to the positive quadrant.
+    ///
+    /// glScissor takes a signed origin and the game passes negative ones - a
+    /// dialog that extends past the top of the screen produces y = -72. GL clips
+    /// the rectangle against the framebuffer and keeps the visible remainder;
+    /// Vulkan rejects a negative offset outright. Moving the origin back to zero
+    /// and taking the same amount off the extent leaves the identical region.
+    /// </summary>
+    public void SetScissor(int x, int y, int width, int height)
+    {
+        int clippedX = Math.Max(0, x);
+        int clippedY = Math.Max(0, y);
+        width -= clippedX - x;
+        height -= clippedY - y;
+
+        Scissor = new Rect2D(
+            new Offset2D(clippedX, clippedY),
+            new Extent2D((uint)Math.Max(0, width), (uint)Math.Max(0, height)));
+    }
 
     public void SetScissorEnabled(bool enabled) => ScissorEnabled = enabled;
 

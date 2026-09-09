@@ -367,6 +367,40 @@ public class GlStateTrackerTests
         Assert.Equal(FrontFace.Clockwise, GlStateTracker.FrontFace);
     }
 
+    /// <summary>
+    /// The game scissors dialogs that run off the top of the screen, which gives
+    /// glScissor a negative y. GL clips such a rectangle and keeps the visible
+    /// part; Vulkan rejects the negative offset and drops the draw, so the same
+    /// region has to be expressed without one.
+    /// </summary>
+    [Fact]
+    public void ANegativeScissorOriginIsClippedToTheSameVisibleRegion()
+    {
+        var tracker = new GlStateTracker();
+
+        tracker.SetScissor(-20, -72, 300, 200);
+
+        Assert.Equal(0, tracker.Scissor.Offset.X);
+        Assert.Equal(0, tracker.Scissor.Offset.Y);
+
+        // The rectangle still ends where it did: -20 + 300 and -72 + 200.
+        Assert.Equal(280u, tracker.Scissor.Extent.Width);
+        Assert.Equal(128u, tracker.Scissor.Extent.Height);
+    }
+
+    [Fact]
+    public void AScissorEntirelyOffscreenBecomesEmptyRatherThanNegative()
+    {
+        var tracker = new GlStateTracker();
+
+        tracker.SetScissor(-50, -50, 20, 20);
+
+        Assert.Equal(0, tracker.Scissor.Offset.X);
+        Assert.Equal(0, tracker.Scissor.Offset.Y);
+        Assert.Equal(0u, tracker.Scissor.Extent.Width);
+        Assert.Equal(0u, tracker.Scissor.Extent.Height);
+    }
+
     [Fact]
     public void ResetRestoresTheDefaultsAFreshContextWouldHave()
     {

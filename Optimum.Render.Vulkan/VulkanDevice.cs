@@ -57,6 +57,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// See the placeholder note in BindDescriptors.
     /// </summary>
     private int _placeholderTexture;
+    private VulkanBuffer? _placeholderUniforms;
 
     /// <summary>Texture bound to each unit, and any sampler overriding the texture's own state.</summary>
     private readonly int[] _boundTextures = new int[GlStateTracker.MaxTextureUnits];
@@ -254,6 +255,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _shaderCompiler = new ShaderCompiler();
         CreateDefaultAttributeBuffer();
         CreatePlaceholderTexture();
+        CreatePlaceholderUniformBuffer();
 
         if (!headless)
         {
@@ -358,6 +360,32 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             _placeholderTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm);
             _textures.Upload(_placeholderTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4);
+        }
+    }
+
+    /// <summary>
+    /// Builds the zero-filled buffer that fills any shader-declared uniform block
+    /// the client has not supplied a buffer for yet.
+    ///
+    /// Same reasoning as the placeholder texture: leaving the binding undefined
+    /// makes every draw with that program invalid, so a program whose UBO has not
+    /// been created yet would take the whole frame down rather than read zeroes.
+    /// GL reads zeroes from an unbacked block, so this is also the closer match.
+    /// </summary>
+    private void CreatePlaceholderUniformBuffer()
+    {
+        // Large enough for the blocks the game declares - the animation transform
+        // block is the biggest at a few tens of kilobytes - and clamped to what
+        // the device will actually let a descriptor address.
+        ulong size = Math.Min(65536UL, Math.Max(16384UL, _context!.Capabilities.MaxUniformBufferRange));
+
+        _placeholderUniforms = new VulkanBuffer(_context, size,
+            BufferUsageFlags.UniformBufferBit,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+
+        if (_placeholderUniforms.Mapped != IntPtr.Zero)
+        {
+            new Span<byte>((void*)_placeholderUniforms.Mapped, (int)size).Clear();
         }
     }
 
@@ -793,6 +821,21 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     // ------------------------------------------------------------ uniform buffers
 
     private readonly Dictionary<int, VulkanBuffer> _uniformBuffers = new();
+
+    /// <summary>Block name each uniform buffer was created for.</summary>
+    private readonly Dictionary<int, string> _uniformBufferBlocks = new();
+
+    /// <summary>
+    /// The buffer currently supplying each named block.
+    ///
+    /// The client's UBO binds with glBindBufferBase to binding point 0 and names
+    /// the block when it creates the buffer, so the block name is what actually
+    /// identifies which declaration a buffer feeds. Vulkan has no such global
+    /// binding point, so the association is kept here and resolved per draw
+    /// against the program's own declared blocks.
+    /// </summary>
+    private readonly Dictionary<string, int> _boundUniformBuffers = new(StringComparer.Ordinal);
+
     private int _nextUniformBufferId = 1;
 
     public int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size)
@@ -803,6 +846,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         int id = _nextUniformBufferId++;
         _uniformBuffers[id] = buffer;
+        _uniformBufferBlocks[id] = blockName ?? "";
+
+        // GL's glBindBufferBase in the client's constructor takes effect at once,
+        // and a buffer is only ever created to be used.
+        if (!string.IsNullOrEmpty(blockName)) _boundUniformBuffers[blockName] = id;
         return id;
     }
 
@@ -815,11 +863,32 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         System.Buffer.MemoryCopy((void*)data, (void*)(buffer.Mapped + offset), size, size);
     }
 
-    public void BindUniformBuffer(int handle) { }
+    public void BindUniformBuffer(int handle)
+    {
+        if (_uniformBufferBlocks.TryGetValue(handle, out string? blockName) && blockName.Length > 0)
+        {
+            _boundUniformBuffers[blockName] = handle;
+        }
+    }
+
+    /// <summary>
+    /// Deliberately does not break the block association.
+    ///
+    /// The client's Unbind is glBindBuffer(UNIFORM_BUFFER, 0), which clears the
+    /// generic target and leaves the glBindBufferBase index binding standing -
+    /// and the index binding is what feeds the shader. Dropping the association
+    /// here would unbind the block the client still expects to be supplied.
+    /// </summary>
     public void UnbindUniformBuffer(int handle) { }
 
     public void DeleteUniformBuffer(int handle)
     {
+        if (_uniformBufferBlocks.Remove(handle, out string? blockName) &&
+            _boundUniformBuffers.TryGetValue(blockName, out int bound) && bound == handle)
+        {
+            _boundUniformBuffers.Remove(blockName);
+        }
+
         if (_uniformBuffers.Remove(handle, out VulkanBuffer? buffer))
         {
             _frames.DeferDeletion(buffer);
@@ -1211,6 +1280,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         }
 
         commandBuffer = Commands;
+
+        // Before the scope opens, not after: a layout transition is illegal
+        // inside one, so anything this draw samples has to be put right first.
+        TransitionSampledTextures(commandBuffer, program);
         _targets.EnsureRendering(commandBuffer);
 
         int formatsId = _targets.FormatsIdOf(target);
@@ -1268,44 +1341,124 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         return true;
     }
 
+    /// <summary>
+    /// Puts every texture this draw samples into the layout a shader read needs.
+    ///
+    /// GL has no notion of image layout: a texture uploaded a moment ago, or one
+    /// an earlier pass rendered into, can be sampled straight away. Vulkan wants
+    /// it in SHADER_READ_ONLY_OPTIMAL at the point the descriptor is accessed and
+    /// rejects the draw otherwise, and a transition cannot be recorded inside a
+    /// rendering scope - so a texture found in the wrong layout closes the scope,
+    /// transitions, and the scope reopens around the draw.
+    ///
+    /// An attachment of the framebuffer being drawn into is skipped: it has to
+    /// keep its attachment layout, EnsureRendering already transitions the ones
+    /// left out of the draw, and sampling what you are writing is a feedback loop
+    /// GL does not allow either.
+    /// </summary>
+    private void TransitionSampledTextures(CommandBuffer commandBuffer, ShaderProgramResources program)
+    {
+        if (program.Interface.Samplers.Count == 0) return;
+
+        bool placeholderNeeded = false;
+
+        for (int i = 0; i < program.Interface.Samplers.Count; i++)
+        {
+            SamplerBinding declared = program.Interface.Samplers[i];
+            int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped)
+                ? mapped
+                : declared.Binding;
+
+            VulkanTexture? texture = (uint)unit < GlStateTracker.MaxTextureUnits
+                ? _textures.Get(_boundTextures[unit])
+                : null;
+
+            if (texture == null)
+            {
+                // BindDescriptors will reach for the placeholder here, so that is
+                // what this draw actually samples.
+                placeholderNeeded = true;
+                continue;
+            }
+
+            if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
+            if (_targets.IsAttachmentOfBound(_boundTextures[unit])) continue;
+
+            _targets.EndRendering(commandBuffer);
+            _textures.TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
+        }
+
+        if (!placeholderNeeded) return;
+
+        VulkanTexture? placeholder = _textures.Get(_placeholderTexture);
+        if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) return;
+
+        _targets.EndRendering(commandBuffer);
+        _textures.TransitionTexture(commandBuffer, placeholder, ImageLayout.ShaderReadOnlyOptimal);
+    }
+
     private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program)
     {
         Vk api = _context.Api;
 
         // Set 0: the generated uniform block, uploaded into this frame's ring and
-        // reached through a dynamic offset so the set itself never changes.
+        // reached through a dynamic offset so the set itself never changes, plus
+        // one entry for every block the shader declared for itself.
         uint dynamicOffset = 0;
-        if (program.Interface.HasUniformBlock)
+        bool hasGeneratedBlock = program.Interface.HasUniformBlock;
+
+        if (hasGeneratedBlock || program.Interface.UniformBlocks.Count > 0)
         {
-            _lastUniformAllocationOk =
-                _frames.Current.TryAllocateUniforms(program.UniformShadow.Length, out RingAllocation allocation);
-            if (_lastUniformAllocationOk)
+            var buffers = new List<BufferBindingValue>(1 + program.Interface.UniformBlocks.Count);
+
+            if (hasGeneratedBlock)
             {
-                fixed (byte* source = program.UniformShadow)
+                _lastUniformAllocationOk =
+                    _frames.Current.TryAllocateUniforms(program.UniformShadow.Length, out RingAllocation allocation);
+                if (_lastUniformAllocationOk)
                 {
-                    System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
-                        program.UniformShadow.Length, program.UniformShadow.Length);
+                    fixed (byte* source = program.UniformShadow)
+                    {
+                        System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
+                            program.UniformShadow.Length, program.UniformShadow.Length);
+                    }
+                    dynamicOffset = allocation.Offset;
+                    program.MarkUniformsClean();
                 }
-                dynamicOffset = allocation.Offset;
-                program.MarkUniformsClean();
+
+                buffers.Add(new BufferBindingValue(
+                    ProgramInterfaceLayout.DefaultBlockBinding,
+                    _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length));
+            }
+
+            // A block the shader declares is fed by whichever UBO the client
+            // created under that name; one it has not created yet reads zeroes
+            // rather than leaving the descriptor undefined.
+            foreach (BlockBinding block in program.Interface.UniformBlocks)
+            {
+                VulkanBuffer? blockBuffer = null;
+                if (_boundUniformBuffers.TryGetValue(block.BlockName, out int handle))
+                {
+                    _uniformBuffers.TryGetValue(handle, out blockBuffer);
+                }
+                blockBuffer ??= _placeholderUniforms;
+                if (blockBuffer == null) continue;
+
+                buffers.Add(new BufferBindingValue(
+                    (uint)block.Binding, blockBuffer.Handle, 0, blockBuffer.Size));
             }
 
             var uniformContents = new DescriptorSetContents(
                 program.ProgramId, ProgramInterfaceLayout.DefaultBlockSet,
-                Array.Empty<SamplerBindingValue>(),
-                new[]
-                {
-                    new BufferBindingValue(
-                        ProgramInterfaceLayout.DefaultBlockBinding,
-                        _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length),
-                });
+                Array.Empty<SamplerBindingValue>(), buffers.ToArray());
 
             DescriptorSet uniformSet = _descriptors.Get(
                 uniformContents, program.SetLayouts[ProgramInterfaceLayout.DefaultBlockSet]);
 
             uint offset = dynamicOffset;
             api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
-                ProgramInterfaceLayout.DefaultBlockSet, 1, &uniformSet, 1, &offset);
+                ProgramInterfaceLayout.DefaultBlockSet, 1, &uniformSet,
+                hasGeneratedBlock ? 1u : 0u, hasGeneratedBlock ? &offset : null);
         }
 
         // Set 1: one combined image sampler per declared sampler, resolved through
@@ -1575,6 +1728,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         _indirectScratch?.Dispose();
         _defaultAttributes?.Dispose();
+        _placeholderUniforms?.Dispose();
         _swapchain?.Dispose();
         _shaderCompiler?.Dispose();
         _frames?.Dispose();

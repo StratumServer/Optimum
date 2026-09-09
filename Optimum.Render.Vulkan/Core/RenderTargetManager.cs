@@ -131,6 +131,28 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     private bool _needsRestart;
 
     /// <summary>
+    /// Whether a texture takes part in the rendering scope the bound framebuffer
+    /// is about to open, and so has to keep its attachment layout.
+    ///
+    /// Only slots the draw actually writes count. A colour attachment masked out
+    /// of glDrawBuffers is not part of the scope at all, and the composition pass
+    /// samples exactly such a slot - so it has to stay transitionable, or it is
+    /// read in the colour-attachment layout it was left in.
+    /// </summary>
+    public bool IsAttachmentOfBound(int textureId)
+    {
+        if (_bound == null || textureId <= 0) return false;
+        if (_bound.DepthTextureId == textureId) return true;
+
+        for (int i = 0; i < _bound.Color.Length; i++)
+        {
+            if (_bound.Color[i].TextureId != textureId) continue;
+            if ((_bound.DrawBufferMask & (1u << i)) != 0) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// Binds a framebuffer. Nothing is recorded here: GL lets a bind be followed
     /// by more state changes before anything is drawn, so the scope opens lazily
     /// at the first draw or clear.
@@ -175,6 +197,24 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
         var attachments = new RenderingAttachmentInfo[Math.Max(count, 0)];
 
+        // Every slot the draw does not write may be sampled instead, so it has to
+        // be readable. This runs over all of them, not just the ones below the
+        // highest enabled index: the composition pass renders into attachment 0
+        // while sampling attachment 1, and a loop bounded by the attachment count
+        // would never reach the slot it samples.
+        for (int i = 0; i < framebuffer.Color.Length; i++)
+        {
+            AttachmentSlot unused = framebuffer.Color[i];
+            if (!unused.IsBound) continue;
+            if ((framebuffer.DrawBufferMask & (1u << i)) != 0) continue;
+
+            VulkanTexture? excluded = _textures.Get(unused.TextureId);
+            if (excluded != null)
+            {
+                _textures.TransitionTexture(commandBuffer, excluded, ImageLayout.ShaderReadOnlyOptimal);
+            }
+        }
+
         for (int i = 0; i < count; i++)
         {
             bool enabled = (framebuffer.DrawBufferMask & (1u << i)) != 0;
@@ -193,17 +233,6 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                     LoadOp = AttachmentLoadOp.DontCare,
                     StoreOp = AttachmentStoreOp.DontCare,
                 };
-
-                // An attachment left out of the draw may be sampled instead, so
-                // it has to be readable.
-                if (slot.IsBound)
-                {
-                    VulkanTexture? excluded = _textures.Get(slot.TextureId);
-                    if (excluded != null)
-                    {
-                        _textures.TransitionTexture(commandBuffer, excluded, ImageLayout.ShaderReadOnlyOptimal);
-                    }
-                }
                 continue;
             }
 
