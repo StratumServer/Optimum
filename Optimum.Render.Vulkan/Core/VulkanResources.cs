@@ -7,6 +7,23 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 
 namespace Optimum.Render.Vulkan.Core;
 
+/// <summary>
+/// Process-unique ids for device resources.
+///
+/// A Vulkan handle identifies an object only while it lives: destroy an image
+/// view and the driver is free to hand the very same handle value to the next
+/// one created. Anything that remembers a resource by handle - the descriptor
+/// set cache does - would then mistake the newcomer for the dead one and serve
+/// a set that points at freed memory. An id that is never reused is what such
+/// a cache has to key on instead.
+/// </summary>
+internal static class ResourceIds
+{
+    private static long _next;
+
+    public static ulong Next() => (ulong)Interlocked.Increment(ref _next);
+}
+
 /// <summary>A device buffer with its backing memory.</summary>
 internal sealed unsafe class VulkanBuffer : IDisposable
 {
@@ -16,6 +33,9 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     public Buffer Handle { get; }
     public DeviceMemory Memory { get; }
     public ulong Size { get; }
+
+    /// <summary>Never reused, unlike <see cref="Handle" />; see <see cref="ResourceIds" />.</summary>
+    public ulong Id { get; } = ResourceIds.Next();
     /// <summary>Non-zero when the allocation is host visible and mapped.</summary>
     public IntPtr Mapped { get; private set; }
 
@@ -186,6 +206,13 @@ internal static class VulkanResult
     /// <summary>Called with a description the moment something fails.</summary>
     public static Action<string>? OnFailure;
 
+    /// <summary>
+    /// Asked to describe a device loss after the fact, so the message can say
+    /// what the GPU was doing rather than only that it stopped. Null when
+    /// nothing on the device can answer.
+    /// </summary>
+    public static Func<string?>? DescribeDeviceLoss;
+
     public static void Check(Result result, string operation)
     {
         if (result == Result.Success || result == Result.SuboptimalKhr) return;
@@ -198,6 +225,21 @@ internal static class VulkanResult
             ? operation + " reported the device was lost. The GPU driver aborted the work this " +
               "backend submitted; the session cannot continue."
             : operation + " failed with " + result;
+
+        if (lost)
+        {
+            string? detail;
+            try
+            {
+                detail = DescribeDeviceLoss?.Invoke();
+            }
+            catch (Exception e)
+            {
+                detail = "Describing the loss itself failed: " + e.Message;
+            }
+            if (!string.IsNullOrEmpty(detail)) message += " " + detail;
+            message += " (" + VulkanMemory.LiveAllocations + " live device allocations.)";
+        }
 
         OnFailure?.Invoke(message);
         throw new InvalidOperationException(message);

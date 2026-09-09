@@ -40,6 +40,10 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public Image Image { get; init; }
     public DeviceMemory Memory { get; init; }
     public ImageView View { get; init; }
+
+    /// <summary>Never reused, unlike <see cref="View" />; see <see cref="ResourceIds" />.</summary>
+    public ulong Id { get; } = ResourceIds.Next();
+
     public Format Format { get; init; }
     public uint Width { get; init; }
     public uint Height { get; init; }
@@ -353,6 +357,11 @@ internal sealed unsafe class TextureManager : IDisposable
 
         _commands.SubmitAndWait(commandBuffer =>
         {
+            if (_context.CheckpointsAvailable)
+            {
+                _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Upload(textureId, width, height));
+            }
+
             TransitionTexture(commandBuffer, texture, ImageLayout.TransferDstOptimal);
 
             var region = new BufferImageCopy
@@ -382,6 +391,11 @@ internal sealed unsafe class TextureManager : IDisposable
             Vk api = _context.Api;
             int mipWidth = (int)texture.Width;
             int mipHeight = (int)texture.Height;
+
+            if (_context.CheckpointsAvailable)
+            {
+                _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Mipmaps(textureId, texture.MipLevels));
+            }
 
             TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
 

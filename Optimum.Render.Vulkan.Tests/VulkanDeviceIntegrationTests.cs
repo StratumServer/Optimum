@@ -634,6 +634,118 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
+    /// <summary>
+    /// The loading-screen crash. A texture is deleted and a new one takes its
+    /// place; the driver may give the new image view the very handle value the
+    /// old one had. A set cache keyed by handle then serves the stale set and the
+    /// GPU reads freed memory. The cache must drop a deleted texture's sets and
+    /// serve a successor its own, and the deferred free must land only after
+    /// every frame that could have bound the old set has finished - which the
+    /// validation layer checks for us.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void ADeletedTextureTakesItsDescriptorSetsWithIt()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 8;
+
+            int program = LinkProgram(seam, """
+                #version 330 core
+                out vec2 uv;
+                void main(void)
+                {
+                    float x = -1.0 + float((gl_VertexID & 1) << 2);
+                    float y = -1.0 + float((gl_VertexID & 2) << 1);
+                    gl_Position = vec4(x, y, 0.0, 1.0);
+                    uv = vec2((x + 1.0) * 0.5, (y + 1.0) * 0.5);
+                }
+                """, """
+                #version 330 core
+                uniform sampler2D source;
+                in vec2 uv;
+                out vec4 outColor;
+                void main(void) { outColor = texture(source, uv); }
+                """);
+
+            int target = seam.CreateTexture2D(size, size,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(size, size);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
+            seam.SetDrawBuffers(framebuffer, 0b1);
+
+            int first = SolidTexture(seam, size, 10, 20, 30);
+
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.UseProgram(program);
+            seam.SetSamplerUnit(program, "source", 0);
+            seam.BindTexture(0, first);
+            seam.SetViewport(0, 0, size, size);
+            seam.DrawFullscreenTriangle();
+            seam.Present();
+
+            int cachedWhileAlive = device!.CachedDescriptorSets;
+            Assert.True(cachedWhileAlive >= 1, "the draw should have cached a sampler set");
+
+            seam.DeleteTexture(first);
+
+            // The next frame evicts the set; two more let the deferred free run
+            // once the frame that bound it has signalled its fence.
+            for (int i = 0; i < 3; i++)
+            {
+                seam.BeginFrame();
+                seam.Present();
+            }
+            Assert.Equal(cachedWhileAlive - 1, device.CachedDescriptorSets);
+
+            int second = SolidTexture(seam, size, 200, 100, 50);
+
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.UseProgram(program);
+            seam.SetSamplerUnit(program, "source", 0);
+            seam.BindTexture(0, second);
+            seam.SetViewport(0, 0, size, size);
+            seam.DrawFullscreenTriangle();
+            seam.Present();
+
+            var pixels = new byte[size * size * 4];
+            fixed (byte* destination = pixels)
+            {
+                seam.BindFramebuffer(framebuffer);
+                seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)destination);
+            }
+
+            int centre = (size / 2 * size + size / 2) * 4;
+            Assert.Equal(200, pixels[centre + 0]);
+            Assert.Equal(100, pixels[centre + 1]);
+            Assert.Equal(50, pixels[centre + 2]);
+
+            AssertClean(seam);
+        }
+    }
+
+    private static unsafe int SolidTexture(IOptimumGraphicsDevice seam, int size, byte r, byte g, byte b)
+    {
+        var pixels = new byte[size * size * 4];
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i + 0] = r;
+            pixels[i + 1] = g;
+            pixels[i + 2] = b;
+            pixels[i + 3] = 255;
+        }
+
+        fixed (byte* data = pixels)
+        {
+            return seam.CreateTexture2D(size, size,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, (IntPtr)data, false);
+        }
+    }
+
     private static void AssertClean(IOptimumGraphicsDevice device)
     {
         string? diagnostics = device.GetError();

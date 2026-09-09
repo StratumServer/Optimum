@@ -95,6 +95,25 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// <summary>Marks a diagnostic the layers reported at error severity.</summary>
     public const string ErrorPrefix = "[error] ";
 
+    /// <summary>
+    /// Whether the driver records GPU checkpoints (VK_NV_device_diagnostic_checkpoints).
+    ///
+    /// A device loss otherwise says only that the GPU gave up. With checkpoints
+    /// the driver also reports the last marker each pipeline stage reached, which
+    /// names the draw or copy it was executing when it stopped. NVIDIA only; on
+    /// by default where present, off with OPTIMUM_VULKAN_CHECKPOINTS=0.
+    /// </summary>
+    public bool CheckpointsAvailable { get; private set; }
+
+    /// <summary>Whether VK_EXT_device_fault can describe a loss after the fact.</summary>
+    public bool DeviceFaultAvailable { get; private set; }
+
+    // Loaded by address rather than through an extension package: two entry
+    // points do not justify a dependency and another native DLL to ship.
+    private nint _cmdSetCheckpoint;
+    private nint _getQueueCheckpointData;
+    private ExtDeviceFault? _deviceFault;
+
     private ExtDebugUtils? _debugUtils;
     private DebugUtilsMessengerEXT _debugMessenger;
     private Action<string>? _debugCallback;
@@ -475,6 +494,38 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         PhysicalDeviceFeatures available = Api.GetPhysicalDeviceFeatures(PhysicalDevice);
 
+        // Diagnostics for a lost device. Both are optional and cost nothing when
+        // the GPU is healthy, so they are taken wherever the driver offers them.
+        HashSet<string> deviceExtensionsAvailable = EnumerateDeviceExtensions();
+        bool checkpointsDisabled =
+            Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_CHECKPOINTS") is "0" or "off" or "false";
+        bool wantCheckpoints = !checkpointsDisabled && IntPtr.Size == 8
+            && deviceExtensionsAvailable.Contains("VK_NV_device_diagnostic_checkpoints");
+
+        var faultFeatures = new PhysicalDeviceFaultFeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceFaultFeaturesExt,
+        };
+        bool wantDeviceFault = false;
+        if (deviceExtensionsAvailable.Contains("VK_EXT_device_fault"))
+        {
+            var query = new PhysicalDeviceFeatures2
+            {
+                SType = StructureType.PhysicalDeviceFeatures2,
+                PNext = &faultFeatures,
+            };
+            Api.GetPhysicalDeviceFeatures2(PhysicalDevice, &query);
+            wantDeviceFault = faultFeatures.DeviceFault;
+
+            // Re-request only the feature that is wanted; the query may have
+            // reported others this backend has no use for.
+            faultFeatures = new PhysicalDeviceFaultFeaturesEXT
+            {
+                SType = StructureType.PhysicalDeviceFaultFeaturesExt,
+                DeviceFault = wantDeviceFault,
+            };
+        }
+
         var enabledFeatures = new PhysicalDeviceFeatures
         {
             IndependentBlend = true,
@@ -491,6 +542,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         var vulkan13 = new PhysicalDeviceVulkan13Features
         {
             SType = StructureType.PhysicalDeviceVulkan13Features,
+            PNext = wantDeviceFault ? &faultFeatures : null,
             DynamicRendering = true,
             Synchronization2 = true,
         };
@@ -510,6 +562,8 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         var deviceExtensions = new List<string>();
         if (!options.Headless) deviceExtensions.Add("VK_KHR_swapchain");
+        if (wantCheckpoints) deviceExtensions.Add("VK_NV_device_diagnostic_checkpoints");
+        if (wantDeviceFault) deviceExtensions.Add("VK_EXT_device_fault");
 
         nint extensionsPtr = deviceExtensions.Count > 0
             ? SilkMarshal.StringArrayToPtr(deviceExtensions)
@@ -541,8 +595,138 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
+        LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
         return true;
+    }
+
+    private HashSet<string> EnumerateDeviceExtensions()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        uint count = 0;
+        Result result = Api.EnumerateDeviceExtensionProperties(PhysicalDevice, (byte*)null, &count, null);
+        if (result != Result.Success || count == 0) return names;
+
+        var properties = new ExtensionProperties[count];
+        fixed (ExtensionProperties* propertiesPtr = properties)
+        {
+            Api.EnumerateDeviceExtensionProperties(PhysicalDevice, (byte*)null, &count, propertiesPtr);
+
+            // The name is a fixed-size buffer, readable only through a pointer.
+            for (int i = 0; i < count; i++)
+            {
+                string? name = SilkMarshal.PtrToString((nint)propertiesPtr[i].ExtensionName);
+                if (name != null) names.Add(name);
+            }
+        }
+        return names;
+    }
+
+    private void LoadDiagnosticExtensions(bool checkpoints, bool deviceFault)
+    {
+        if (checkpoints)
+        {
+            nint set = (nint)Api.GetDeviceProcAddr(Device, "vkCmdSetCheckpointNV").Handle;
+            nint get = (nint)Api.GetDeviceProcAddr(Device, "vkGetQueueCheckpointDataNV").Handle;
+            if (set != 0 && get != 0)
+            {
+                _cmdSetCheckpoint = set;
+                _getQueueCheckpointData = get;
+                CheckpointsAvailable = true;
+            }
+        }
+
+        if (deviceFault && Api.TryGetDeviceExtension(Instance, Device, out ExtDeviceFault fault))
+        {
+            _deviceFault = fault;
+            DeviceFaultAvailable = true;
+        }
+    }
+
+    /// <summary>Records a checkpoint marker into the command stream. No-op without the extension.</summary>
+    public void CmdSetCheckpoint(CommandBuffer commandBuffer, nint marker)
+    {
+        if (_cmdSetCheckpoint == 0) return;
+        ((delegate* unmanaged<CommandBuffer, void*, void>)_cmdSetCheckpoint)(commandBuffer, (void*)marker);
+    }
+
+    /// <summary>
+    /// The last checkpoint each stage of the graphics queue reached. Meaningful
+    /// after a device loss. The caller synchronises the queue.
+    /// </summary>
+    public List<(PipelineStageFlags Stage, nint Marker)> ReadQueueCheckpoints()
+    {
+        var checkpoints = new List<(PipelineStageFlags, nint)>();
+        if (_getQueueCheckpointData == 0) return checkpoints;
+
+        var get = (delegate* unmanaged<Queue, uint*, CheckpointDataNV*, void>)_getQueueCheckpointData;
+
+        uint count = 0;
+        get(GraphicsQueue, &count, null);
+        if (count == 0) return checkpoints;
+
+        var data = new CheckpointDataNV[count];
+        for (int i = 0; i < data.Length; i++) data[i].SType = StructureType.CheckpointDataNV;
+        fixed (CheckpointDataNV* dataPtr = data)
+        {
+            get(GraphicsQueue, &count, dataPtr);
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            checkpoints.Add((data[i].Stage, (nint)data[i].PCheckpointMarker));
+        }
+        return checkpoints;
+    }
+
+    /// <summary>The driver's own account of a device loss, or null without the extension.</summary>
+    public string? ReadDeviceFault()
+    {
+        if (_deviceFault == null) return null;
+
+        var counts = new DeviceFaultCountsEXT { SType = StructureType.DeviceFaultCountsExt };
+        if (_deviceFault.GetDeviceFaultInfo(Device, &counts, null) != Result.Success) return null;
+
+        var addresses = new DeviceFaultAddressInfoEXT[Math.Max(counts.AddressInfoCount, 1u)];
+        var vendors = new DeviceFaultVendorInfoEXT[Math.Max(counts.VendorInfoCount, 1u)];
+        var info = new DeviceFaultInfoEXT { SType = StructureType.DeviceFaultInfoExt };
+
+        // The binary blob is vendor-private and can be large; it is not asked for.
+        counts.VendorBinarySize = 0;
+
+        var text = new System.Text.StringBuilder();
+
+        fixed (DeviceFaultAddressInfoEXT* addressPtr = addresses)
+        fixed (DeviceFaultVendorInfoEXT* vendorPtr = vendors)
+        {
+            info.PAddressInfos = counts.AddressInfoCount > 0 ? addressPtr : null;
+            info.PVendorInfos = counts.VendorInfoCount > 0 ? vendorPtr : null;
+
+            Result result = _deviceFault.GetDeviceFaultInfo(Device, &counts, &info);
+            if (result != Result.Success && result != Result.Incomplete) return null;
+
+            // The description strings are fixed-size buffers, readable only
+            // through a pointer, so everything is formatted while still pinned.
+            DeviceFaultInfoEXT* infoPtr = &info;
+            string description = SilkMarshal.PtrToString((nint)infoPtr->Description) ?? "";
+            text.Append("Driver fault report: '").Append(description.Trim()).Append('\'');
+
+            for (int i = 0; i < counts.AddressInfoCount; i++)
+            {
+                text.Append("; ").Append(addressPtr[i].AddressType)
+                    .Append(" at 0x").Append(addressPtr[i].ReportedAddress.ToString("x"))
+                    .Append(" (precision ").Append(addressPtr[i].AddressPrecision).Append(')');
+            }
+            for (int i = 0; i < counts.VendorInfoCount; i++)
+            {
+                string vendor = SilkMarshal.PtrToString((nint)vendorPtr[i].Description) ?? "";
+                text.Append("; vendor code ").Append(vendorPtr[i].VendorFaultCode)
+                    .Append(" data ").Append(vendorPtr[i].VendorFaultData)
+                    .Append(" '").Append(vendor.Trim()).Append('\'');
+            }
+        }
+        return text.ToString();
     }
 
     private VulkanCapabilities ReadCapabilities()

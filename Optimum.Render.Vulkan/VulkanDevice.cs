@@ -33,10 +33,19 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     private RenderTargetManager _targets = null!;
     private GraphicsPipelineCache _pipelines = null!;
     private DescriptorCache _descriptors = null!;
+
+    /// <summary>How many descriptor sets the cache currently holds. For tests.</summary>
+    internal int CachedDescriptorSets => _descriptors.Count;
     private FrameRing _frames = null!;
     private ShaderCompiler _shaderCompiler = null!;
 
     private readonly Dictionary<int, ShaderProgramResources> _programs = new();
+
+    /// <summary>Pass names by program id, so a device-loss report can name the shader.</summary>
+    private readonly Dictionary<int, string> _programNames = new();
+
+    private uint _frameCounter;
+    private uint _uniformExhaustionReportedFrame = uint.MaxValue;
     private readonly Dictionary<IShader, StagedStage> _stagedStages = new();
     private readonly List<string> _diagnostics = new();
 
@@ -242,8 +251,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             _diagnostics.Add(VulkanContext.ErrorPrefix + message);
             MirrorValidationMessage(message);
         };
+        VulkanResult.DescribeDeviceLoss = DescribeDeviceLoss;
         MirrorValidationMessage("--- device up on " + _context.Capabilities.DeviceName +
-            "; validation layers " + (_context.ValidationEnabled ? "ENABLED" : "NOT AVAILABLE"));
+            "; validation layers " + (_context.ValidationEnabled ? "ENABLED" : "NOT AVAILABLE") +
+            "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
+            "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE"));
         _setupCommands = new VulkanCommands(_context);
         _state = new GlStateTracker();
         _textures = new TextureManager(_context, _setupCommands);
@@ -392,8 +404,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     private void DestroyDefaultFramebuffer()
     {
         if (_defaultFramebuffer > 0) _targets.Delete(_defaultFramebuffer);
-        if (_defaultColor > 0) _textures.Delete(_defaultColor, _frames);
-        if (_defaultDepth > 0) _textures.Delete(_defaultDepth, _frames);
+        if (_defaultColor > 0) ReleaseTexture(_defaultColor);
+        if (_defaultDepth > 0) ReleaseTexture(_defaultDepth);
 
         _defaultFramebuffer = 0;
         _defaultColor = 0;
@@ -452,7 +464,85 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         _frames.BeginFrame();
         _frameActive = true;
+        _frameCounter++;
+        Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
+
+        // Sets naming resources deleted since last frame leave the cache now and
+        // are freed once the ring has cycled past every frame that could have
+        // bound them.
+        IDisposable? freedSets = _descriptors.CollectReleases();
+        if (freedSets != null) _frames.DeferDeletion(freedSets);
     }
+
+    /// <summary>
+    /// Leaves a marker the driver reports back if the GPU stops. Free when the
+    /// extension is absent; one small command otherwise.
+    /// </summary>
+    private void Checkpoint(CommandBuffer commandBuffer, nint marker)
+    {
+        if (_context.CheckpointsAvailable) _context.CmdSetCheckpoint(commandBuffer, marker);
+    }
+
+    /// <summary>
+    /// What the GPU was doing when it was lost, from the driver's checkpoint and
+    /// fault records. VulkanResult.Check calls this on the first loss.
+    ///
+    /// Reading checkpoints wants the queue synchronised like any other queue
+    /// call, but the thread that noticed the loss may already hold the lock, or
+    /// another may be inside a submit that is about to fail. A bounded wait keeps
+    /// the crash report from deadlocking behind the crash it is describing.
+    /// </summary>
+    private string? DescribeDeviceLoss()
+    {
+        if (_context == null) return null;
+
+        var text = new System.Text.StringBuilder();
+
+        if (_context.CheckpointsAvailable)
+        {
+            bool locked = System.Threading.Monitor.TryEnter(_context.QueueLock, 2000);
+            try
+            {
+                List<(PipelineStageFlags Stage, nint Marker)> checkpoints = _context.ReadQueueCheckpoints();
+                if (checkpoints.Count == 0)
+                {
+                    text.Append("The driver recorded no GPU checkpoints.");
+                }
+                else
+                {
+                    text.Append("Last GPU checkpoint per stage -");
+                    foreach ((PipelineStageFlags stage, nint marker) in checkpoints)
+                    {
+                        text.Append(' ').Append(StageName(stage)).Append(": ")
+                            .Append(CheckpointMarker.Describe(marker, ProgramNameOf)).Append(';');
+                    }
+                }
+            }
+            finally
+            {
+                if (locked) System.Threading.Monitor.Exit(_context.QueueLock);
+            }
+        }
+        else
+        {
+            text.Append("GPU checkpoints are not available on this driver.");
+        }
+
+        string? fault = _context.DeviceFaultAvailable ? _context.ReadDeviceFault() : null;
+        if (fault != null) text.Append(' ').Append(fault).Append('.');
+
+        return text.ToString();
+    }
+
+    private string? ProgramNameOf(int programId) =>
+        _programNames.TryGetValue(programId, out string? name) ? name : null;
+
+    private static string StageName(PipelineStageFlags stage) => stage switch
+    {
+        PipelineStageFlags.TopOfPipeBit => "last started",
+        PipelineStageFlags.BottomOfPipeBit => "last completed",
+        _ => stage.ToString(),
+    };
 
     public void Present()
     {
@@ -481,6 +571,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             return;
         }
 
+        Checkpoint(commandBuffer, CheckpointMarker.PresentBlit(imageIndex, _frameCounter));
         BlitToSwapchain(commandBuffer, imageIndex);
 
         _frames.EndFrame(imageAvailable, renderFinished);
@@ -676,6 +767,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             }
         }
         _programs[programId] = new ShaderProgramResources(_context, programId, translated);
+        _programNames[programId] = program.PassName ?? "";
         return programId;
     }
 
@@ -702,6 +794,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void DeleteProgram(int programId)
     {
         if (!_programs.Remove(programId, out ShaderProgramResources? program)) return;
+        _programNames.Remove(programId);
         _frames.DeferDeletion(program);
     }
 
@@ -891,6 +984,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         if (_uniformBuffers.Remove(handle, out VulkanBuffer? buffer))
         {
+            // Same hazard as a texture: a set naming this buffer must not
+            // survive to be served for a successor with the same handle.
+            _descriptors.Release(buffer.Id);
             _frames.DeferDeletion(buffer);
         }
     }
@@ -970,7 +1066,23 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void GenerateMipmaps(int textureId) => _textures.GenerateMipmaps(textureId);
 
-    public void DeleteTexture(int textureId) => _textures.Delete(textureId, _frames);
+    public void DeleteTexture(int textureId) => ReleaseTexture(textureId);
+
+    /// <summary>
+    /// Deletes a texture and evicts every descriptor set that names it.
+    ///
+    /// The eviction is the important half. The texture itself is destroyed a
+    /// ring cycle later, but a cached set would outlive it and, once the driver
+    /// reused the view handle for a new texture, be served to draws of that new
+    /// texture - which is a GPU read of freed memory. The GUI re-renders its text
+    /// into fresh textures constantly, so this was the loading-screen crash.
+    /// </summary>
+    private void ReleaseTexture(int textureId)
+    {
+        VulkanTexture? texture = _textures.Get(textureId);
+        if (texture != null) _descriptors.Release(texture.Id);
+        _textures.Delete(textureId, _frames);
+    }
 
     public void SetTextureParameter(int textureId, int parameterName, int value) =>
         _textures.SetParameter(textureId, parameterName, value);
@@ -1211,6 +1323,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void DrawMeshInstanced(int meshId, int instanceCount)
     {
         if (!PrepareDraw(_meshes.LayoutIdOf(meshId), out CommandBuffer commandBuffer)) return;
+        Checkpoint(commandBuffer,
+            CheckpointMarker.Draw(CheckpointKind.Draw, _state.CurrentProgram, _targets.Bound?.Id ?? 0, meshId));
         if (RenderTrace.Enabled)
         {
             RenderTrace.Write("draw mesh=" + meshId + " program=" + _state.CurrentProgram +
@@ -1232,6 +1346,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void DrawMeshMulti(int meshId, int[] indicesStarts, int[] indicesSizes, int groupCount, bool ssbo)
     {
         if (!PrepareDraw(_meshes.LayoutIdOf(meshId), out CommandBuffer commandBuffer)) return;
+        Checkpoint(commandBuffer,
+            CheckpointMarker.Draw(CheckpointKind.DrawMulti, _state.CurrentProgram, _targets.Bound?.Id ?? 0, meshId));
 
         VulkanBuffer indirect = EnsureIndirectScratch(groupCount);
         _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect);
@@ -1240,6 +1356,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void DrawFullscreenTriangle()
     {
         if (!PrepareDraw(MeshManager.EmptyLayoutId, out CommandBuffer commandBuffer)) return;
+        Checkpoint(commandBuffer,
+            CheckpointMarker.Draw(CheckpointKind.Fullscreen, _state.CurrentProgram, _targets.Bound?.Id ?? 0, 0));
         if (RenderTrace.Enabled)
         {
             RenderTrace.Write("fullscreen program=" + _state.CurrentProgram +
@@ -1425,6 +1543,20 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                     dynamicOffset = allocation.Offset;
                     program.MarkUniformsClean();
                 }
+                else if (_uniformExhaustionReportedFrame != _frameCounter)
+                {
+                    // The draw goes ahead reading offset zero of the ring, which
+                    // is some other draw's block: wrong, and for a shader that
+                    // loops on a uniform count, possibly fatal. Said once per
+                    // frame so a long frame does not flood the log.
+                    _uniformExhaustionReportedFrame = _frameCounter;
+                    string message = VulkanContext.ErrorPrefix + "uniform ring exhausted in frame " + _frameCounter +
+                        " (" + _frames.Current.UniformBytesUsed + " of " + _frames.Current.UniformCapacity +
+                        " bytes used) at a draw with program " + program.ProgramId +
+                        " '" + ProgramNameOf(program.ProgramId) + "'";
+                    _diagnostics.Add(message);
+                    MirrorValidationMessage(message);
+                }
 
                 buffers.Add(new BufferBindingValue(
                     ProgramInterfaceLayout.DefaultBlockBinding,
@@ -1445,7 +1577,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 if (blockBuffer == null) continue;
 
                 buffers.Add(new BufferBindingValue(
-                    (uint)block.Binding, blockBuffer.Handle, 0, blockBuffer.Size));
+                    (uint)block.Binding, blockBuffer.Handle, 0, blockBuffer.Size, blockBuffer.Id));
             }
 
             var uniformContents = new DescriptorSetContents(
@@ -1475,6 +1607,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
                 ImageView view = default;
                 Sampler sampler = default;
+                ulong resource = 0;
 
                 if ((uint)unit < GlStateTracker.MaxTextureUnits)
                 {
@@ -1482,6 +1615,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                     if (texture != null)
                     {
                         view = texture.View;
+                        resource = texture.Id;
                         // A sampler bound to the unit overrides the texture's own
                         // state, which is what glBindSampler means.
                         sampler = _unitSamplerOverrides[unit].Handle != 0
@@ -1490,7 +1624,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                     }
                 }
 
-                bindings[i] = new SamplerBindingValue((uint)declared.Binding, view, sampler);
+                bindings[i] = new SamplerBindingValue((uint)declared.Binding, view, sampler, resource);
             }
 
             // A sampler the client left unbound gets the placeholder rather than
@@ -1506,7 +1640,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 if (placeholder == null) break;
 
                 bindings[i] = new SamplerBindingValue(
-                    bindings[i].Binding, placeholder.View, _textures.Samplers.Get(placeholder.State));
+                    bindings[i].Binding, placeholder.View, _textures.Samplers.Get(placeholder.State),
+                    placeholder.Id);
             }
 
             bool complete = true;
