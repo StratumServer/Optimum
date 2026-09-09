@@ -44,8 +44,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// <summary>Pass names by program id, so a device-loss report can name the shader.</summary>
     private readonly Dictionary<int, string> _programNames = new();
 
+    /// <summary>Scratch for the SSBO path's pruned custom ints, grown as needed.</summary>
+    private int[] _prunedCustomInts = [];
+
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
+    private int _renderThreadId = -1;
     private readonly Dictionary<IShader, StagedStage> _stagedStages = new();
     private readonly List<string> _diagnostics = new();
 
@@ -66,11 +70,19 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// See the placeholder note in BindDescriptors.
     /// </summary>
     private int _placeholderTexture;
+    private int _placeholderArrayTexture;
+    private int _placeholderCubeTexture;
+    private int _placeholderDepthTexture;
     private VulkanBuffer? _placeholderUniforms;
 
     /// <summary>Texture bound to each unit, and any sampler overriding the texture's own state.</summary>
     private readonly int[] _boundTextures = new int[GlStateTracker.MaxTextureUnits];
     private readonly Sampler[] _unitSamplerOverrides = new Sampler[GlStateTracker.MaxTextureUnits];
+
+    // Atlas composition reads one tile while writing another in the same image.
+    // Reuse a snapshot image, but refresh its contents before each such draw.
+    private readonly Dictionary<int, int> _feedbackCopies = new();
+    private readonly Dictionary<int, int> _sampledTextureOverrides = new();
 
     private int _nextProgramId = 1;
     private bool _frameActive;
@@ -227,6 +239,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             {
                 _diagnostics.Add(message);
                 MirrorValidationMessage(message);
+                if (RenderTrace.Enabled)
+                    RenderTrace.Write("validation: program=" + (_state?.CurrentProgram ?? 0) +
+                        " target=" + (_targets?.Bound?.Id ?? -1) + " " + message);
             },
             // Surface extensions have to be enabled at instance creation, before
             // any surface can exist, so the window system is asked first.
@@ -257,6 +272,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE"));
         _setupCommands = new VulkanCommands(_context);
+        // Only the render thread records frames, so only its synchronous submits
+        // can race one; a worker's upload is ordered by the queue lock alone.
+        _setupCommands.BeforeSynchronousSubmit = () =>
+        {
+            if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) FlushFrame();
+        };
         _state = new GlStateTracker();
         _textures = new TextureManager(_context, _setupCommands);
         _meshes = new MeshManager(_context, _state);
@@ -372,7 +393,71 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             _placeholderTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm);
             _textures.Upload(_placeholderTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4);
+
+            // A descriptor's view type has to match the sampler's dimensionality
+            // - a 2D view in a sampler2DArray slot is invalid, not merely black -
+            // so an arrayed and a cube placeholder stand in for those samplers.
+            _placeholderArrayTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm, layers: 2);
+            for (uint layer = 0; layer < 2; layer++)
+            {
+                _textures.Upload(_placeholderArrayTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4, layer);
+            }
+
+            _placeholderCubeTexture = _textures.Create(1, 1, Format.R8G8B8A8Unorm, layers: 6, cube: true);
+            for (uint face = 0; face < 6; face++)
+            {
+                _textures.Upload(_placeholderCubeTexture, 0, 0, 0, 1, 1, (IntPtr)pixels, 4, face);
+            }
         }
+
+        // A shadow sampler compares against depth, so its placeholder is a depth
+        // texel at the far plane: every comparison passes and nothing is shadowed,
+        // which is what a missing shadow map looks like on GL. The state enables
+        // comparison so the sampler object matches the sampler declaration too.
+        float far = 1f;
+        _placeholderDepthTexture = _textures.Create(1, 1, Format.D32Sfloat);
+        _textures.Upload(_placeholderDepthTexture, 0, 0, 0, 1, 1, (IntPtr)(&far), 4);
+        VulkanTexture? depthPlaceholder = _textures.Get(_placeholderDepthTexture);
+        if (depthPlaceholder != null)
+        {
+            depthPlaceholder.State = depthPlaceholder.State with { CompareEnable = true };
+        }
+    }
+
+    /// <summary>
+    /// The placeholder that fits a sampler's declaration: a shadow sampler
+    /// compares against depth and needs a depth format, the others need the
+    /// matching view type. An arrayed shadow sampler gets the 2D depth
+    /// placeholder, which the trace will show should the game ever declare one.
+    /// </summary>
+    private int PlaceholderFor(string samplerType) =>
+        samplerType.Contains("Shadow", StringComparison.Ordinal) ? _placeholderDepthTexture
+        : samplerType.Contains("Cube", StringComparison.Ordinal) ? _placeholderCubeTexture
+        : samplerType.Contains("Array", StringComparison.Ordinal) ? _placeholderArrayTexture
+        : _placeholderTexture;
+
+    /// <summary>
+    /// Whether a texture can legally sit behind a sampler of the given type. A
+    /// shadow sampler on a colour texture is the case that matters: GL leaves the
+    /// comparison undefined, Vulkan rejects the descriptor, and the game reaches
+    /// it whenever a shadow map slot exists without a shadow map behind it.
+    /// </summary>
+    private static bool TextureSuitsSampler(VulkanTexture texture, string samplerType)
+    {
+        if (samplerType.Contains("Shadow", StringComparison.Ordinal)
+            && !TextureManager.IsDepthFormat(texture.Format))
+        {
+            return false;
+        }
+
+        // The view type has to match the sampler's dimensionality, which GL
+        // enforces through its texture targets: a 2D texture cannot be bound
+        // where a sampler2DArray reads, nor an array where a sampler2D does.
+        bool wantsCube = samplerType.Contains("Cube", StringComparison.Ordinal);
+        bool wantsArray = samplerType.Contains("Array", StringComparison.Ordinal);
+        if (wantsCube) return texture.Cube;
+        if (wantsArray) return texture.Layers > 1 && !texture.Cube;
+        return texture.Layers == 1 && !texture.Cube;
     }
 
     /// <summary>
@@ -464,7 +549,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         _frames.BeginFrame();
         _frameActive = true;
+        _renderThreadId = Environment.CurrentManagedThreadId;
         _frameCounter++;
+        _indirectFrameUsage = 0;
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
 
         // Sets naming resources deleted since last frame leave the cache now and
@@ -472,7 +559,23 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         // bound them.
         IDisposable? freedSets = _descriptors.CollectReleases();
         if (freedSets != null) _frames.DeferDeletion(freedSets);
+
+        VulkanStats.NoteFrame();
+        if (StatsLogPath != null &&
+            VulkanStats.SampleIfDue(TimeSpan.FromSeconds(1)) is { } sample)
+        {
+            try
+            {
+                System.IO.File.AppendAllText(StatsLogPath, sample + "\n");
+            }
+            catch (System.IO.IOException)
+            {
+            }
+        }
     }
+
+    /// <summary>Where per-second backend counters go, when asked for.</summary>
+    private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
 
     /// <summary>
     /// Leaves a marker the driver reports back if the GPU stops. Free when the
@@ -547,6 +650,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void Present()
     {
         if (!_frameActive) return;
+
+        if (TextureDump.Wanted) DumpRequestedTextures();
 
         CommandBuffer commandBuffer = _frames.Current.CommandBuffer;
 
@@ -1017,6 +1122,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         if (pixels != IntPtr.Zero && bytesPerPixel > 0)
         {
             _textures.Upload(id, 0, 0, 0, (uint)width, (uint)height, pixels, bytesPerPixel);
+
+            // A chain that was asked for has to be filled here. GL's texture is
+            // complete the moment glGenerateMipmap runs, but an image created
+            // with levels and never blitted into keeps whatever its memory held,
+            // and every sample above level 0 reads that - which looks like other
+            // textures bleeding onto a surface as it turns away from the camera.
+            if (generateMipmaps) _textures.GenerateMipmaps(id);
         }
         RenderTrace.TextureCreated(id, width, height, format, pixels, bytesPerPixel);
         return id;
@@ -1064,6 +1176,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels,
             pixelFormat == EnumTexturePixelFormat.Red ? 1 : 4);
 
+    public void UploadTexture2DRaw(
+        int textureId, int level, int x, int y, int width, int height, IntPtr pixels, int bytesPerPixel)
+    {
+        if (bytesPerPixel <= 0) return;
+        _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels, bytesPerPixel);
+    }
+
     public void GenerateMipmaps(int textureId) => _textures.GenerateMipmaps(textureId);
 
     public void DeleteTexture(int textureId) => ReleaseTexture(textureId);
@@ -1079,9 +1198,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// </summary>
     private void ReleaseTexture(int textureId)
     {
+        if (_feedbackCopies.Remove(textureId, out int copy)) ReleaseTexture(copy);
+        _sampledTextureOverrides.Remove(textureId);
         VulkanTexture? texture = _textures.Get(textureId);
         if (texture != null) _descriptors.Release(texture.Id);
         _textures.Delete(textureId, _frames);
+        VulkanStats.NoteTextureDeleted();
     }
 
     public void SetTextureParameter(int textureId, int parameterName, int value) =>
@@ -1104,7 +1226,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         if ((uint)unit >= GlStateTracker.MaxTextureUnits) return;
         _boundTextures[unit] = textureId;
+        if (RenderTrace.Enabled) RenderTrace.Write("bind unit=" + unit + " texture=" + textureId);
     }
+
+    public void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
+        int width, int height, short[] pixels) =>
+        _textures.UploadNormalizedShorts(textureId, level, x, y, width, height, pixels);
 
     public void BindTextureCube(int unit, int textureId) => BindTexture(unit, textureId);
 
@@ -1220,16 +1347,20 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public int CreateMesh(MeshData data, bool staticDraw)
     {
+        // Sized as GL's UploadMesh sizes them. Every part follows the vertex
+        // count except flags, which GL allocates at the array's full length -
+        // a mesh that later grows within that capacity updates its flags in
+        // place there, and would overflow a vertex-count-sized buffer here.
         int vertices = data.VerticesCount;
         int id = _meshes.CreateEmpty(
             data.xyz != null ? vertices * 3 * sizeof(float) : 0,
             data.Normals != null ? vertices * sizeof(int) : 0,
             data.Uv != null ? vertices * 2 * sizeof(float) : 0,
             data.Rgba != null ? vertices * 4 : 0,
-            data.Flags != null ? vertices * sizeof(int) : 0,
+            data.Flags != null ? data.Flags.Length * sizeof(int) : 0,
             data.IndicesCount * sizeof(int),
             data.CustomFloats, data.CustomShorts, data.CustomBytes, data.CustomInts,
-            data.mode, staticDraw, ssbo: false);
+            data.mode, staticDraw, ssbo: false, signedCustomShorts: true);
 
         UpdateMesh(id, data);
         return id;
@@ -1243,51 +1374,147 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _meshes.CreateEmpty(xyzSize, normalsSize, uvSize, rgbaSize, flagsSize, indicesSize,
             customFloats, customShorts, customBytes, customInts, drawMode, staticDraw, ssbo);
 
+    /// <summary>
+    /// Writes a mesh's data, honouring the destination offset each part carries.
+    ///
+    /// Those offsets are the whole point. The game pools chunk meshes: one large
+    /// mesh holds many chunks, and each chunk is handed the same mesh with the
+    /// byte offset of its own slice in every part. GL's updateVAO takes that
+    /// offset as the destination for a glBufferSubData, so writing it at zero
+    /// instead stacks every chunk in the world on top of the first one - which
+    /// renders as no terrain at all.
+    ///
+    /// The counts are per part as well, not VerticesCount: a part can be absent
+    /// or shorter than the vertex count, and the custom buffers have no fixed
+    /// relationship to it.
+    /// </summary>
     public void UpdateMesh(int meshId, MeshData data)
     {
-        int vertices = data.VerticesCount;
+        // An SSBO mesh's xyz slot holds packed face records, written through
+        // UpdateMeshStorageBuffer; positions never belong there. The game hands
+        // the same MeshData to both calls, so without this the positions would
+        // land on top of the records - or, depending on order, under them.
+        bool ssbo = _meshes.IsSsbo(meshId);
 
-        if (data.xyz != null)
+        if (data.xyz != null && data.XyzCount > 0 && !ssbo)
         {
             fixed (float* source = data.xyz)
             {
-                _meshes.Write(meshId, MeshManager.BufferXyz, 0, (IntPtr)source, vertices * 3 * sizeof(float));
+                _meshes.Write(meshId, MeshManager.BufferXyz, data.XyzOffset,
+                    (IntPtr)source, data.XyzCount * sizeof(float));
             }
         }
-        if (data.Uv != null)
-        {
-            fixed (float* source = data.Uv)
-            {
-                _meshes.Write(meshId, MeshManager.BufferUv, 0, (IntPtr)source, vertices * 2 * sizeof(float));
-            }
-        }
-        if (data.Rgba != null)
-        {
-            fixed (byte* source = data.Rgba)
-            {
-                _meshes.Write(meshId, MeshManager.BufferRgba, 0, (IntPtr)source, vertices * 4);
-            }
-        }
-        if (data.Flags != null)
-        {
-            fixed (int* source = data.Flags)
-            {
-                _meshes.Write(meshId, MeshManager.BufferFlags, 0, (IntPtr)source, vertices * sizeof(int));
-            }
-        }
-        if (data.Normals != null)
+        // The normals, uv and flags streams have no buffer on an SSBO mesh - the
+        // face records carry what the shader needs from them - so GL's SSBO
+        // update path never writes them either.
+        if (data.Normals != null && data.VerticesCount > 0 && !ssbo)
         {
             fixed (int* source = data.Normals)
             {
-                _meshes.Write(meshId, MeshManager.BufferNormals, 0, (IntPtr)source, vertices * sizeof(int));
+                _meshes.Write(meshId, MeshManager.BufferNormals, data.NormalsOffset,
+                    (IntPtr)source, data.VerticesCount * sizeof(int));
             }
         }
-        if (data.Indices != null)
+        if (data.Uv != null && data.UvCount > 0 && !ssbo)
+        {
+            fixed (float* source = data.Uv)
+            {
+                _meshes.Write(meshId, MeshManager.BufferUv, data.UvOffset,
+                    (IntPtr)source, data.UvCount * sizeof(float));
+            }
+        }
+        if (data.Rgba != null && data.RgbaCount > 0)
+        {
+            fixed (byte* source = data.Rgba)
+            {
+                _meshes.Write(meshId, MeshManager.BufferRgba, data.RgbaOffset,
+                    (IntPtr)source, data.RgbaCount);
+            }
+        }
+        if (data.Flags != null && data.FlagsCount > 0 && !ssbo)
+        {
+            fixed (int* source = data.Flags)
+            {
+                _meshes.Write(meshId, MeshManager.BufferFlags, data.FlagsOffset,
+                    (IntPtr)source, data.FlagsCount * sizeof(int));
+            }
+        }
+        if (data.CustomFloats != null && data.CustomFloats.Count > 0)
+        {
+            fixed (float* source = data.CustomFloats.Values)
+            {
+                _meshes.Write(meshId, MeshManager.BufferCustomFloat, data.CustomFloats.BaseOffset,
+                    (IntPtr)source, data.CustomFloats.Count * sizeof(float));
+            }
+        }
+        if (data.CustomShorts != null && data.CustomShorts.Count > 0)
+        {
+            fixed (short* source = data.CustomShorts.Values)
+            {
+                _meshes.Write(meshId, MeshManager.BufferCustomShort, data.CustomShorts.BaseOffset,
+                    (IntPtr)source, data.CustomShorts.Count * sizeof(short));
+            }
+        }
+        if (data.CustomInts != null && data.CustomInts.Count > 0)
+        {
+            if (ssbo)
+            {
+                WritePrunedCustomInts(meshId, data.CustomInts);
+            }
+            else
+            {
+                fixed (int* source = data.CustomInts.Values)
+                {
+                    _meshes.Write(meshId, MeshManager.BufferCustomInt, data.CustomInts.BaseOffset,
+                        (IntPtr)source, data.CustomInts.Count * sizeof(int));
+                }
+            }
+        }
+        if (data.CustomBytes != null && data.CustomBytes.Count > 0)
+        {
+            fixed (byte* source = data.CustomBytes.Values)
+            {
+                _meshes.Write(meshId, MeshManager.BufferCustomByte, data.CustomBytes.BaseOffset,
+                    (IntPtr)source, data.CustomBytes.Count);
+            }
+        }
+        // An SSBO mesh never takes indices from the data: GL draws every such
+        // mesh through one shared index buffer holding the fixed quad pattern,
+        // filled once at allocation, and its update path leaves indices alone.
+        // The mesh here got the same pattern when it was created.
+        if (data.Indices != null && data.IndicesCount > 0 && !ssbo)
         {
             fixed (int* source = data.Indices)
             {
-                _meshes.Write(meshId, -1, 0, (IntPtr)source, data.IndicesCount * sizeof(int));
+                _meshes.Write(meshId, -1, data.IndicesOffset,
+                    (IntPtr)source, data.IndicesCount * sizeof(int));
             }
+        }
+    }
+
+    /// <summary>
+    /// Writes the custom ints as the SSBO path stores them: two per vertex go in
+    /// and only the second of each pair is kept, the first being the colormap
+    /// data that the face record already carries. The destination offset halves
+    /// with the stride. A part with a single int per vertex is not bound at all
+    /// on this path, so there is nothing to write.
+    /// </summary>
+    private void WritePrunedCustomInts(int meshId, CustomMeshDataPartInt customInts)
+    {
+        if (customInts.InterleaveStride <= 4) return;
+
+        int kept = customInts.Count / 2;
+        if (kept <= 0) return;
+
+        if (_prunedCustomInts.Length < kept) _prunedCustomInts = new int[kept];
+
+        int[] values = customInts.Values;
+        for (int i = 0; i < kept; i++) _prunedCustomInts[i] = values[i * 2 + 1];
+
+        fixed (int* source = _prunedCustomInts)
+        {
+            _meshes.Write(meshId, MeshManager.BufferCustomInt, customInts.BaseOffset / 2,
+                (IntPtr)source, kept * sizeof(int));
         }
     }
 
@@ -1322,7 +1549,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void DrawMeshInstanced(int meshId, int instanceCount)
     {
-        if (!PrepareDraw(_meshes.LayoutIdOf(meshId), out CommandBuffer commandBuffer)) return;
+        if (!PrepareDraw(_meshes.LayoutIdOf(meshId), meshId, out CommandBuffer commandBuffer)) return;
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.Draw, _state.CurrentProgram, _targets.Bound?.Id ?? 0, meshId));
         if (RenderTrace.Enabled)
@@ -1345,17 +1572,32 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void DrawMeshMulti(int meshId, int[] indicesStarts, int[] indicesSizes, int groupCount, bool ssbo)
     {
-        if (!PrepareDraw(_meshes.LayoutIdOf(meshId), out CommandBuffer commandBuffer)) return;
+        if (!PrepareDraw(_meshes.LayoutIdOf(meshId), meshId, out CommandBuffer commandBuffer)) return;
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.DrawMulti, _state.CurrentProgram, _targets.Bound?.Id ?? 0, meshId));
 
-        VulkanBuffer indirect = EnsureIndirectScratch(groupCount);
-        _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect);
+        VulkanBuffer indirect = AllocateIndirect(groupCount, out ulong indirectOffset);
+
+        // The chunk pass is the only storage-buffer multi-draw, and units 0 and
+        // 1 are terrainTex and terrainTexLinear, so this is the block atlas.
+        if (ssbo && TextureDump.WantsTerrain)
+        {
+            TextureDump.RequestTerrain(_boundTextures[0], _boundTextures[1]);
+        }
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("multidraw mesh=" + meshId + " program=" + _state.CurrentProgram +
+                " groups=" + groupCount + " first=" + (groupCount > 0 ? indicesStarts[0] + "/" + indicesSizes[0] : "-") +
+                " target=" + (_targets.Bound?.Id ?? -1) + " cull=" + _state.CullEnabled + "/" + _state.CullMode +
+                " depthTest=" + _state.DepthTest + " uniforms=" + _lastUniformAllocationOk +
+                " indirectOffset=" + indirectOffset);
+        }
+        _meshes.DrawMulti(commandBuffer, meshId, indicesStarts, indicesSizes, groupCount, indirect, indirectOffset);
     }
 
     public void DrawFullscreenTriangle()
     {
-        if (!PrepareDraw(MeshManager.EmptyLayoutId, out CommandBuffer commandBuffer)) return;
+        if (!PrepareDraw(MeshManager.EmptyLayoutId, 0, out CommandBuffer commandBuffer)) return;
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.Fullscreen, _state.CurrentProgram, _targets.Bound?.Id ?? 0, 0));
         if (RenderTrace.Enabled)
@@ -1372,7 +1614,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// upload, and the dynamic state. This is where the recorded GL state finally
     /// becomes Vulkan commands.
     /// </summary>
-    private bool PrepareDraw(int vertexLayoutId, out CommandBuffer commandBuffer)
+    private bool PrepareDraw(int vertexLayoutId, int meshId, out CommandBuffer commandBuffer)
     {
         commandBuffer = default;
         if (!_frameActive)
@@ -1398,6 +1640,17 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         }
 
         commandBuffer = Commands;
+
+        // Primitive mode belongs to the mesh, just as it does to GL's VAO.
+        // Apply it before both pipeline selection and dynamic state emission.
+        // Fullscreen draws have no mesh and must reset a preceding line draw.
+        _state.SetTopology(_meshes.Get(meshId)?.DrawMode ?? EnumDrawMode.Triangles);
+
+        // A draw that samples the bound depth attachment with depth writes off is
+        // GL's way of reading scene depth mid-pass; the scope holds depth
+        // read-only for it, and returns to writable for the next draw that needs
+        // to write. Decided before the scope opens, since it decides the layout.
+        _targets.SetDepthReadOnly(SamplesBoundDepthWithoutWriting(program));
 
         // Before the scope opens, not after: a layout transition is illegal
         // inside one, so anything this draw samples has to be put right first.
@@ -1454,7 +1707,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 VertexLayoutDescription.DefaultAttributeBinding, 1, &defaults, &offset);
         }
 
-        BindDescriptors(commandBuffer, program);
+        BindDescriptors(commandBuffer, program, meshId);
         ApplyDynamicState(commandBuffer, target);
         return true;
     }
@@ -1469,13 +1722,29 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// rendering scope - so a texture found in the wrong layout closes the scope,
     /// transitions, and the scope reopens around the draw.
     ///
-    /// An attachment of the framebuffer being drawn into is skipped: it has to
-    /// keep its attachment layout, EnsureRendering already transitions the ones
-    /// left out of the draw, and sampling what you are writing is a feedback loop
-    /// GL does not allow either.
+    /// A sampled colour attachment is snapshotted first: atlas composition reads
+    /// an existing tile while drawing into another tile of the same texture.
     /// </summary>
+    /// <summary>
+    /// Whether any sampler this program reads through is bound to the depth
+    /// attachment of the current framebuffer while depth writes are off.
+    /// </summary>
+    private bool SamplesBoundDepthWithoutWriting(ShaderProgramResources program)
+    {
+        if (_state.DepthWrite || program.Interface.Samplers.Count == 0) return false;
+
+        foreach (SamplerBinding declared in program.Interface.Samplers)
+        {
+            int unit = program.SamplerUnits.TryGetValue(declared.Name, out int mapped) ? mapped : declared.Binding;
+            if ((uint)unit >= GlStateTracker.MaxTextureUnits) continue;
+            if (_targets.IsBoundDepth(_boundTextures[unit])) return true;
+        }
+        return false;
+    }
+
     private void TransitionSampledTextures(CommandBuffer commandBuffer, ShaderProgramResources program)
     {
+        _sampledTextureOverrides.Clear();
         if (program.Interface.Samplers.Count == 0) return;
 
         bool placeholderNeeded = false;
@@ -1499,8 +1768,28 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 continue;
             }
 
+            // The bound depth attachment read with writes off: EnsureRendering
+            // puts it in the read-only layout, which serves both uses at once.
+            if (_targets.DepthReadOnly && _targets.IsBoundDepth(_boundTextures[unit])) continue;
+
+            if (_targets.IsAttachmentOfBound(_boundTextures[unit]))
+            {
+                if (texture.Aspect == ImageAspectFlags.ColorBit)
+                {
+                    SnapshotColorAttachment(commandBuffer, _boundTextures[unit], texture);
+                    continue;
+                }
+                if (RenderTrace.Enabled)
+                {
+                    RenderTrace.Write("feedback: program " + program.ProgramId + " '" +
+                        ProgramNameOf(program.ProgramId) + "' samples texture " + _boundTextures[unit] +
+                        " (layout " + texture.Layout + ") which is a written attachment of framebuffer " +
+                        (_targets.Bound?.Id ?? -1));
+                }
+                continue;
+            }
+
             if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
-            if (_targets.IsAttachmentOfBound(_boundTextures[unit])) continue;
 
             _targets.EndRendering(commandBuffer);
             _textures.TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
@@ -1508,14 +1797,57 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         if (!placeholderNeeded) return;
 
-        VulkanTexture? placeholder = _textures.Get(_placeholderTexture);
-        if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) return;
+        foreach (int id in new[]
+                 {
+                     _placeholderTexture, _placeholderArrayTexture, _placeholderCubeTexture, _placeholderDepthTexture,
+                 })
+        {
+            VulkanTexture? placeholder = _textures.Get(id);
+            if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
 
-        _targets.EndRendering(commandBuffer);
-        _textures.TransitionTexture(commandBuffer, placeholder, ImageLayout.ShaderReadOnlyOptimal);
+            _targets.EndRendering(commandBuffer);
+            _textures.TransitionTexture(commandBuffer, placeholder, ImageLayout.ShaderReadOnlyOptimal);
+        }
     }
 
-    private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program)
+    private void SnapshotColorAttachment(CommandBuffer commandBuffer, int textureId, VulkanTexture source)
+    {
+        if (_sampledTextureOverrides.ContainsKey(textureId)) return;
+
+        _targets.EndRendering(commandBuffer);
+        if (!_feedbackCopies.TryGetValue(textureId, out int copyId))
+        {
+            copyId = _textures.Create(source.Width, source.Height, source.Format,
+                layers: source.Layers, cube: source.Cube,
+                generateMipmaps: source.MipLevels > 1);
+            _feedbackCopies.Add(textureId, copyId);
+        }
+        VulkanTexture copy = _textures.Get(copyId)!;
+        copy.State = source.State;
+
+        _textures.TransitionTexture(commandBuffer, source, ImageLayout.TransferSrcOptimal);
+        _textures.TransitionTexture(commandBuffer, copy, ImageLayout.TransferDstOptimal);
+        for (uint level = 0; level < source.MipLevels; level++)
+        {
+            var region = new ImageCopy
+            {
+                SrcSubresource = new ImageSubresourceLayers(source.Aspect, level, 0, source.Layers),
+                DstSubresource = new ImageSubresourceLayers(copy.Aspect, level, 0, copy.Layers),
+                Extent = new Extent3D(Math.Max(1u, source.Width >> (int)level),
+                    Math.Max(1u, source.Height >> (int)level), 1),
+            };
+            _context.Api.CmdCopyImage(commandBuffer, source.Image, ImageLayout.TransferSrcOptimal,
+                copy.Image, ImageLayout.TransferDstOptimal, 1, &region);
+        }
+        _textures.TransitionTexture(commandBuffer, copy, ImageLayout.ShaderReadOnlyOptimal);
+        _sampledTextureOverrides.Add(textureId, copyId);
+        if (RenderTrace.Enabled)
+            RenderTrace.Write("snapshot texture=" + textureId + " copy=" + copyId +
+                " size=" + source.Width + "x" + source.Height + " mips=" + source.MipLevels);
+        // EnsureRendering transitions the source back to its attachment layout.
+    }
+
+    private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
         Vk api = _context.Api;
 
@@ -1611,7 +1943,21 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
                 if ((uint)unit < GlStateTracker.MaxTextureUnits)
                 {
-                    VulkanTexture? texture = _textures.Get(_boundTextures[unit]);
+                    int textureId = _sampledTextureOverrides.TryGetValue(_boundTextures[unit], out int copy)
+                        ? copy : _boundTextures[unit];
+                    VulkanTexture? texture = _textures.Get(textureId);
+                    if (texture != null && !TextureSuitsSampler(texture, declared.TypeName))
+                    {
+                        // Left unbound on purpose, so the placeholder that suits
+                        // the sampler takes the slot below.
+                        if (RenderTrace.Enabled)
+                        {
+                            RenderTrace.Write("sampler '" + declared.Name + "' (" + declared.TypeName +
+                                ") on program " + program.ProgramId + " has texture " + _boundTextures[unit] +
+                                " of format " + texture.Format + " bound, which it cannot sample; using a placeholder");
+                        }
+                        texture = null;
+                    }
                     if (texture != null)
                     {
                         view = texture.View;
@@ -1624,7 +1970,14 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                     }
                 }
 
-                bindings[i] = new SamplerBindingValue((uint)declared.Binding, view, sampler, resource);
+                // The bound depth attachment, sampled with writes off, is read in
+                // the layout the scope holds it in rather than shader-read-only.
+                ImageLayout layout = view.Handle != 0 && _targets.DepthReadOnly
+                                     && _targets.IsBoundDepth(_boundTextures[unit])
+                    ? ImageLayout.DepthReadOnlyOptimal
+                    : ImageLayout.ShaderReadOnlyOptimal;
+
+                bindings[i] = new SamplerBindingValue((uint)declared.Binding, view, sampler, resource, layout);
             }
 
             // A sampler the client left unbound gets the placeholder rather than
@@ -1633,11 +1986,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             // behaviour that costs the device rather than one texture. GL is
             // permissive here - sampling an unbound texture reads black and the
             // draw proceeds - so the placeholder is also the closer emulation.
-            VulkanTexture? placeholder = _textures.Get(_placeholderTexture);
             for (int i = 0; i < bindings.Length; i++)
             {
                 if (bindings[i].View.Handle != 0 && bindings[i].Sampler.Handle != 0) continue;
-                if (placeholder == null) break;
+
+                VulkanTexture? placeholder =
+                    _textures.Get(PlaceholderFor(program.Interface.Samplers[i].TypeName));
+                if (placeholder == null) continue;
 
                 bindings[i] = new SamplerBindingValue(
                     bindings[i].Binding, placeholder.View, _textures.Samplers.Get(placeholder.State),
@@ -1663,6 +2018,42 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             else if (RenderTrace.Enabled)
             {
                 RenderTrace.Write("draw with an incomplete sampler set on program " + program.ProgramId);
+            }
+        }
+
+        // Set 2: the storage buffers a shader reads its own vertices from.
+        //
+        // The SSBO chunk path does not use vertex attributes at all - the chunk
+        // shaders declare `readonly buffer faceDataBuf` and index it by
+        // gl_VertexID, with the packed face records living in the mesh's xyz
+        // slot. Without this set bound the shader reads nothing and the terrain
+        // is simply absent, which is exactly how it presented.
+        if (program.Interface.StorageBlocks.Count > 0 && meshId > 0)
+        {
+            var storage = new List<BufferBindingValue>(program.Interface.StorageBlocks.Count);
+            foreach (BlockBinding block in program.Interface.StorageBlocks)
+            {
+                VulkanBuffer? buffer = _meshes.BufferOf(meshId, MeshManager.BufferXyz);
+                if (buffer == null) continue;
+
+                storage.Add(new BufferBindingValue(
+                    (uint)block.Binding, buffer.Handle, 0, buffer.Size, buffer.Id));
+            }
+
+            if (storage.Count == program.Interface.StorageBlocks.Count)
+            {
+                DescriptorSet storageSet = _descriptors.Get(
+                    new DescriptorSetContents(program.ProgramId, ProgramInterfaceLayout.StorageSet,
+                        Array.Empty<SamplerBindingValue>(), storage.ToArray()),
+                    program.SetLayouts[ProgramInterfaceLayout.StorageSet]);
+
+                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
+                    ProgramInterfaceLayout.StorageSet, 1, &storageSet, 0, null);
+            }
+            else if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write("draw with an incomplete storage set on program " + program.ProgramId +
+                    " mesh " + meshId);
             }
         }
     }
@@ -1703,17 +2094,47 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     }
 
     private VulkanBuffer? _indirectScratch;
+    private ulong _indirectCursor;
+    private ulong _indirectFrameUsage;
+    private ulong _indirectPeakFrameUsage;
 
-    private VulkanBuffer EnsureIndirectScratch(int groupCount)
+    /// <summary>
+    /// Hands out a region of the indirect-command buffer for one multi-draw.
+    ///
+    /// The commands are written on the CPU when the draw is recorded and read by
+    /// the GPU when it executes, which is later - after every other draw of the
+    /// frame has been recorded too. So each draw needs its own region: writing
+    /// them all at offset zero meant every multi-draw in a frame executed with
+    /// the ranges of whichever was recorded last, and the chunk pass is hundreds
+    /// of them.
+    ///
+    /// The buffer is a ring that wraps, sized to hold four times the busiest
+    /// frame seen, so a wrap can never reach a region a frame still in flight is
+    /// reading. A buffer that has to grow is deferred rather than freed, because
+    /// draws already recorded this frame still name it.
+    /// </summary>
+    private VulkanBuffer AllocateIndirect(int groupCount, out ulong offset)
     {
         ulong needed = (ulong)Math.Max(groupCount, 1) * (ulong)sizeof(DrawIndexedIndirectCommand);
-        if (_indirectScratch != null && _indirectScratch.Size >= needed) return _indirectScratch;
 
-        if (_indirectScratch != null) _frames.DeferDeletion(_indirectScratch);
+        _indirectFrameUsage += needed;
+        if (_indirectFrameUsage > _indirectPeakFrameUsage) _indirectPeakFrameUsage = _indirectFrameUsage;
 
-        _indirectScratch = new VulkanBuffer(_context, Math.Max(needed * 2, 4096),
-            BufferUsageFlags.IndirectBufferBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+        ulong required = Math.Max(Math.Max(_indirectPeakFrameUsage * 4, needed), 256UL * 1024);
+        if (_indirectScratch == null || _indirectScratch.Size < required)
+        {
+            if (_indirectScratch != null) _frames.DeferDeletion(_indirectScratch);
+
+            _indirectScratch = new VulkanBuffer(_context, required,
+                BufferUsageFlags.IndirectBufferBit,
+                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            _indirectCursor = 0;
+        }
+
+        if (_indirectCursor + needed > _indirectScratch.Size) _indirectCursor = 0;
+
+        offset = _indirectCursor;
+        _indirectCursor += needed;
         return _indirectScratch;
     }
 
@@ -1741,8 +2162,18 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         if (!_frameActive || !_queries.TryGetValue(queryId, out QueryPool pool)) return;
 
-        _context.Api.CmdResetQueryPool(Commands, pool, 0, 1);
-        _context.Api.CmdBeginQuery(Commands, pool, 0, 0);
+        // A query pool can only be reset outside a rendering scope, and a query
+        // begun inside one has to end inside that same one. So the scope closes
+        // for the reset and reopens before the query begins; the draw the query
+        // covers then finds it already open. glBeginQuery resets implicitly, so
+        // the per-query reset is the same cost GL pays - the scope restart is
+        // the extra. Batching resets at frame start would be cheaper but would
+        // erase results the game may still be about to read.
+        CommandBuffer commandBuffer = Commands;
+        _targets.EndRendering(commandBuffer);
+        _context.Api.CmdResetQueryPool(commandBuffer, pool, 0, 1);
+        _targets.EnsureRendering(commandBuffer);
+        _context.Api.CmdBeginQuery(commandBuffer, pool, 0, 0);
     }
 
     public void EndOcclusionQuery(int queryId)
@@ -1763,22 +2194,89 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         return status == Result.Success;
     }
 
+    /// <summary>
+    /// The samples an occlusion query counted, waiting for it like
+    /// glGetQueryObject does - but never forever.
+    ///
+    /// A query recorded in the current frame has not been submitted yet, and a
+    /// wait on it would block the very thread that will submit it. The frame is
+    /// flushed first, so the wait is on work the GPU actually has. If the result
+    /// still does not arrive, the wait gives up, says so, and reports every
+    /// sample as passed: for a query that gates culling, "visible" is the
+    /// failure that costs a few draws, and "hidden" the one that removes the
+    /// world.
+    /// </summary>
     public int GetQueryResult(int queryId)
     {
         if (!_queries.TryGetValue(queryId, out QueryPool pool)) return 0;
 
+        FlushFrame();
+
+        long deadline = System.Diagnostics.Stopwatch.GetTimestamp() + System.Diagnostics.Stopwatch.Frequency * 2;
         ulong result = 0;
-        _context.Api.GetQueryPoolResults(
-            _context.Device, pool, 0, 1, sizeof(ulong), &result, sizeof(ulong),
-            QueryResultFlags.Result64Bit | QueryResultFlags.ResultWaitBit);
-        return (int)Math.Min(result, int.MaxValue);
+        while (true)
+        {
+            Result status = _context.Api.GetQueryPoolResults(
+                _context.Device, pool, 0, 1, sizeof(ulong), &result, sizeof(ulong),
+                QueryResultFlags.Result64Bit);
+            if (status == Result.Success) return (int)Math.Min(result, int.MaxValue);
+            if (status != Result.NotReady) VulkanResult.Check(status, "vkGetQueryPoolResults");
+
+            if (System.Diagnostics.Stopwatch.GetTimestamp() > deadline)
+            {
+                string message = VulkanContext.ErrorPrefix + "occlusion query " + queryId +
+                    " produced no result within two seconds of being flushed; reporting it as visible";
+                _diagnostics.Add(message);
+                MirrorValidationMessage(message);
+                return int.MaxValue;
+            }
+            System.Threading.Thread.Yield();
+        }
+    }
+
+    /// <summary>
+    /// Submits everything the frame has recorded so far and continues it in the
+    /// next slot, so a result read on the CPU - a query, a pixel readback - can
+    /// see work the frame already issued. Presenting instead would end the frame,
+    /// and every draw after the read would be dropped.
+    /// </summary>
+    private void FlushFrame()
+    {
+        if (!_frameActive) return;
+
+        _targets.EndRendering(Commands);
+        _frames.EndFrame();
+        _frames.BeginFrame();
+        _frameCounter++;
+        Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
     }
 
     public void DeleteQuery(int queryId)
     {
         if (_queries.Remove(queryId, out QueryPool pool))
         {
-            _context.Api.DestroyQueryPool(_context.Device, pool, null);
+            // A frame still executing may be writing this pool; it goes through
+            // the ring like any other resource a recorded command can name.
+            _frames.DeferDeletion(new QueryPoolRelease(_context, pool));
+        }
+    }
+
+    private sealed class QueryPoolRelease : IDisposable
+    {
+        private readonly VulkanContext _context;
+        private QueryPool _pool;
+
+        public QueryPoolRelease(VulkanContext context, QueryPool pool)
+        {
+            _context = context;
+            _pool = pool;
+        }
+
+        public void Dispose()
+        {
+            if (_pool.Handle == 0) return;
+            _context.Api.DestroyQueryPool(_context.Device, _pool, null);
+            _pool = default;
         }
     }
 
@@ -1793,6 +2291,62 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// backend never flips Y, the image in memory is laid out exactly as GL laid
     /// it out, so those paths keep working untouched.
     /// </summary>
+    /// <summary>
+    /// Reads back every texture OPTIMUM_DUMP_TEXTURES asked for. Debug only; see
+    /// <see cref="TextureDump" /> for why it exists.
+    /// </summary>
+    private void DumpRequestedTextures()
+    {
+        foreach (int textureId in TextureDump.Take())
+        {
+            VulkanTexture? texture = _textures.Get(textureId);
+            if (texture == null)
+            {
+                RenderTrace.Write("texture dump: no texture " + textureId);
+                continue;
+            }
+
+            int width = (int)texture.Width;
+            int height = (int)texture.Height;
+            ulong bytes = (ulong)width * (ulong)height * 4;
+
+            FlushFrame();
+            _context.Api.DeviceWaitIdle(_context.Device);
+
+            using var readback = new VulkanBuffer(_context, bytes,
+                BufferUsageFlags.TransferDstBit,
+                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+
+            ImageLayout restore = texture.Layout;
+            _setupCommands.SubmitAndWait(commandBuffer =>
+            {
+                _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
+
+                var region = new BufferImageCopy
+                {
+                    ImageSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+                    ImageOffset = new Offset3D(0, 0, 0),
+                    ImageExtent = new Extent3D((uint)width, (uint)height, 1),
+                };
+                _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
+                    ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
+            });
+
+            bool bgra = texture.Format is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb;
+            string? written = TextureDump.Write(textureId, width, height, bgra,
+                new ReadOnlySpan<byte>((void*)readback.Mapped, (int)bytes));
+
+            RenderTrace.Write("texture dump: " + textureId + " " + width + "x" + height +
+                " " + texture.Format + " mips=" + texture.MipLevels + " -> " + (written ?? "failed"));
+
+            if (restore != ImageLayout.Undefined)
+            {
+                _setupCommands.SubmitAndWait(commandBuffer =>
+                    _textures.TransitionTexture(commandBuffer, texture, restore));
+            }
+        }
+    }
+
     public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
         if (destination == IntPtr.Zero || width <= 0 || height <= 0) return;
@@ -1803,9 +2357,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         VulkanTexture? texture = _textures.Get(target.Color[0].TextureId);
         if (texture == null) return;
 
-        // Readback has to see finished work, so any recording frame is closed
-        // out first rather than racing it.
-        if (_frameActive) Present();
+        // Readback has to see finished work, so what the frame has recorded is
+        // submitted first. Flushing rather than presenting keeps the frame open:
+        // the game reads pixels mid-frame and carries on drawing, and a present
+        // here silently dropped everything it drew afterwards.
+        FlushFrame();
         _context.Api.DeviceWaitIdle(_context.Device);
 
         ulong bytes = (ulong)width * (ulong)height * 4;

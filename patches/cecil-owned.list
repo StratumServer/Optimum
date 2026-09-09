@@ -18,6 +18,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patc
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch

@@ -196,10 +196,10 @@ public class VertexAttributeDefaultTests
         Assert.True(VulkanDevice.IsSupported(false, out _, out string driver));
         Assert.False(string.IsNullOrWhiteSpace(driver));
 
-        // Automatic: allowed too, because both development drivers are on the
-        // list. If this ever fails the machine grew a driver worth adding.
-        Assert.True(VulkanDevice.IsSupported(true, out string automaticReason, out _),
-            "automatic selection refused driver '" + driver + "': " + automaticReason);
+        // A supported software driver can be explicitly selected without being
+        // on the automatic allow-list (SwiftShader is one such driver).
+        Assert.Equal(VulkanDevice.IsAllowedForAutomaticSelection(driver),
+            VulkanDevice.IsSupported(true, out _, out _));
     }
 
     /// <summary>

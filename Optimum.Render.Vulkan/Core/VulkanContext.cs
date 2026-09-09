@@ -82,6 +82,13 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// enforced.
     /// </summary>
     public object QueueLock { get; } = new();
+
+    /// <summary>
+    /// Backs every buffer and image out of a few large blocks. See
+    /// <see cref="VulkanAllocator" /> for why one allocation per resource is not
+    /// an option.
+    /// </summary>
+    public VulkanAllocator Allocator { get; private set; } = null!;
     public VulkanCapabilities Capabilities { get; private set; } = new();
 
     /// <summary>
@@ -597,6 +604,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
         LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
+        Allocator = new VulkanAllocator(this);
         return true;
     }
 
@@ -774,6 +782,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         if (Device.Handle != 0)
         {
             Api.DeviceWaitIdle(Device);
+
+            // Memory blocks are freed while the device still exists, and after
+            // the wait, so nothing is executing against them.
+            Allocator?.Dispose();
             Api.DestroyDevice(Device, null);
         }
 

@@ -38,6 +38,204 @@ public class VulkanDeviceIntegrationTests
         return false;
     }
 
+    [SkippableTheory]
+    [InlineData(EnumDrawMode.Lines)]
+    [InlineData(EnumDrawMode.LineStrip)]
+    public unsafe void IndexedLineMeshesDrawOnlyEdgesAndRestoreTriangleTopology(EnumDrawMode mode)
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 32;
+            int program = LinkProgram(seam, """
+                #version 330 core
+                layout(location = 0) in vec3 position;
+                void main() { gl_Position = vec4(position, 1); }
+                """, """
+                #version 330 core
+                out vec4 color;
+                void main() { color = vec4(1); }
+                """);
+            // Deliberately shuffled vertices: drawing without these indices
+            // introduces diagonals through the otherwise empty box interior.
+            var data = new MeshData(4, 8) {
+                xyz = new float[] { -.75f, -.75f, 0, .75f, .75f, 0,
+                                    .75f, -.75f, 0, -.75f, .75f, 0 },
+                VerticesCount = 4,
+                Indices = mode == EnumDrawMode.Lines
+                    ? new[] { 0, 2, 2, 1, 1, 3, 3, 0 }
+                    : new[] { 0, 2, 1, 3, 0 },
+                IndicesCount = mode == EnumDrawMode.Lines ? 8 : 5,
+                mode = mode
+            };
+            int mesh = seam.CreateMesh(data, true);
+            int texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(size, size);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, texture, 0);
+            seam.SetDrawBuffers(framebuffer, 1);
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.UseProgram(program);
+            seam.SetViewport(0, 0, size, size);
+            seam.SetDepthTest(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.SetLineWidth(1);
+            seam.ClearColor(0, 0, 0, 0, 1);
+            seam.DrawMeshInstanced(mesh, 1);
+            seam.Present();
+            var pixels = new byte[size * size * 4];
+            fixed (byte* destination = pixels)
+                seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)destination);
+            int lit = 0;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                byte red = pixels[(y * size + x) * 4];
+                if (red != 0) lit++;
+                if (x >= 8 && x < 24 && y >= 8 && y < 24) Assert.Equal(0, red);
+            }
+            Assert.InRange(lit, 80, 112);
+
+            // A following triangle mesh must change topology class again.
+            data.mode = EnumDrawMode.Triangles;
+            data.Indices = new[] { 0, 2, 1, 0, 1, 3 };
+            data.IndicesCount = 6;
+            int triangles = seam.CreateMesh(data, true);
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.DrawMesh(triangles);
+            seam.Present();
+            fixed (byte* destination = pixels)
+                seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)destination);
+            Assert.Equal(255, pixels[(16 * size + 16) * 4]);
+            AssertClean(seam);
+        }
+    }
+
+    [SkippableFact]
+    public unsafe void CloudMapShortUploadsKeepFullDensityAndBrightness()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            int program = LinkProgram(seam, """
+                #version 330 core
+                void main() {
+                    gl_Position = vec4(-1 + ((gl_VertexID & 1) << 2),
+                                       -1 + ((gl_VertexID & 2) << 1), 0, 1);
+                }
+                """, """
+                #version 330 core
+                uniform sampler2D cloudData;
+                out vec4 color;
+                void main() {
+                    // Check all 16 bits before the UNORM8 render target can round
+                    // half density to either 127 or 128 (both legal in Vulkan).
+                    // A raw signed-short upload, wrong scale, or missing negative
+                    // clamp must still fail its channel, independently of the GPU.
+                    uvec4 stored = uvec4(round(texelFetch(cloudData, ivec2(0), 0) * 65535.0));
+                    color = vec4(equal(stored, uvec4(65535, 32769, 0, 0)));
+                }
+                """);
+            int texture = seam.CreateTexture2DRaw(1, 1, 0x805B, IntPtr.Zero, 0); // GL_RGBA16
+            short[] source = { short.MaxValue, 16384, 0, short.MinValue };
+            seam.UploadTexture2DNormalizedShorts(texture, 0, 0, 0, 1, 1, source);
+            Assert.Equal(new short[] { short.MaxValue, 16384, 0, short.MinValue }, source);
+
+            int target = seam.CreateTexture2D(1, 1, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(1, 1);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
+            seam.SetDrawBuffers(framebuffer, 1);
+            seam.SetSamplerUnit(program, "cloudData", 0);
+            seam.BindTexture(0, texture);
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.UseProgram(program);
+            seam.SetViewport(0, 0, 1, 1);
+            seam.SetDepthTest(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.DrawFullscreenTriangle();
+            seam.Present();
+            var output = new byte[4];
+            fixed (byte* destination = output)
+                seam.ReadDefaultFramebuffer(0, 0, 1, 1, (IntPtr)destination);
+            Assert.Equal(new byte[] { 255, 255, 255, 255 }, output);
+            AssertClean(seam);
+        }
+    }
+
+    [SkippableFact]
+    public unsafe void AtlasCopiesWithinTheSameTextureReadTheContentsBeforeEachDraw()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            int program = LinkProgram(seam, """
+                #version 330 core
+                void main() {
+                    gl_Position = vec4(-1 + ((gl_VertexID & 1) << 2),
+                                       -1 + ((gl_VertexID & 2) << 1), 0, 1);
+                }
+                """, """
+                #version 330 core
+                uniform sampler2D atlas;
+                out vec4 color;
+                void main() {
+                    color = texelFetch(atlas, ivec2(gl_FragCoord.x < 1.0 ? 1 : 0, 0), 0);
+                }
+                """, "atlas-self-copy");
+            byte[] original = { 255, 0, 0, 255, 0, 255, 0, 255 };
+            byte[] swapped = { 0, 255, 0, 255, 255, 0, 0, 255 };
+            int texture;
+            fixed (byte* pixels = original)
+                texture = seam.CreateTexture2D(2, 1, EnumTextureInternalFormat.Rgba8,
+                    EnumTexturePixelFormat.Rgba, (IntPtr)pixels, false);
+            int framebuffer = seam.CreateFramebuffer(2, 1);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, texture, 0);
+            seam.SetSamplerUnit(program, "atlas", 0);
+            seam.BindTexture(0, texture);
+
+            // The first draw starts with a shader-readable upload; later draws
+            // start with a colour attachment. Refreshing the snapshot and leaving
+            // the client's texture binding intact must both hold across frames.
+            for (int frame = 0; frame < 4; frame++)
+            {
+                seam.BeginFrame();
+                seam.BindFramebuffer(framebuffer);
+                if (frame == 0)
+                {
+                    var before = new byte[8];
+                    fixed (byte* destination = before)
+                        seam.ReadDefaultFramebuffer(0, 0, 2, 1, (IntPtr)destination);
+                    Assert.Equal(original, before);
+                }
+                seam.UseProgram(program);
+                seam.SetViewport(0, 0, 2, 1);
+                seam.SetDepthTest(false);
+                seam.SetCullFace(false);
+                seam.SetBlend(false, EnumBlendMode.Standard);
+                seam.DrawFullscreenTriangle();
+                seam.Present();
+                var output = new byte[8];
+                fixed (byte* destination = output)
+                    seam.ReadDefaultFramebuffer(0, 0, 2, 1, (IntPtr)destination);
+                _output.WriteLine("frame " + frame + ": " + string.Join(", ", output));
+                AssertClean(seam);
+                Assert.Equal(frame % 2 == 0 ? swapped : original, output);
+            }
+            seam.DeleteFramebuffer(framebuffer);
+            seam.DeleteTexture(texture);
+            AssertClean(seam);
+        }
+    }
+
     /// <summary>
     /// A minimal shader stand-in. The client passes its own IShader and
     /// IShaderProgram implementations across the seam, so the device must work
@@ -743,6 +941,76 @@ public class VulkanDeviceIntegrationTests
         {
             return seam.CreateTexture2D(size, size,
                 EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, (IntPtr)data, false);
+        }
+    }
+
+    /// <summary>
+    /// The pooled-chunk case. One mesh holds many chunks; each is written with
+    /// the byte offset of its own slice in every part, exactly as GL's
+    /// glBufferSubData destination offset works.
+    ///
+    /// Writing them all at zero is not a subtle corruption - every chunk in the
+    /// world lands on top of the first, which renders as no terrain at all.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void AMeshUpdateWritesEachPartAtItsOwnDestinationOffset()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int verticesPerSlice = 3;
+            const int slices = 4;
+
+            int meshId = seam.CreateEmptyMesh(
+                xyzSize: slices * verticesPerSlice * 3 * sizeof(float),
+                normalsSize: 0,
+                uvSize: slices * verticesPerSlice * 2 * sizeof(float),
+                rgbaSize: slices * verticesPerSlice * 4,
+                flagsSize: 0,
+                indicesSize: slices * verticesPerSlice * sizeof(int),
+                customFloats: null, customShorts: null, customBytes: null, customInts: null,
+                drawMode: EnumDrawMode.Triangles, staticDraw: false, ssbo: false);
+            Assert.True(meshId > 0);
+
+            // Each slice writes a value identifying itself, at its own offset.
+            for (int slice = 0; slice < slices; slice++)
+            {
+                var xyz = new float[verticesPerSlice * 3];
+                for (int i = 0; i < xyz.Length; i++) xyz[i] = slice * 100 + i;
+
+                // XyzCount is derived from VerticesCount, so only the offset and
+                // the vertex count need setting.
+                var data = new MeshData(verticesPerSlice, verticesPerSlice)
+                {
+                    xyz = xyz,
+                    XyzOffset = slice * verticesPerSlice * 3 * sizeof(float),
+                    VerticesCount = verticesPerSlice,
+                };
+
+                seam.UpdateMesh(meshId, data);
+            }
+
+            // Read the whole buffer back and confirm each slice kept its place.
+            IntPtr mapped = seam.GetMappedPointer(meshId, EnumMeshBufferPart.Xyz);
+            Assert.NotEqual(IntPtr.Zero, mapped);
+
+            var actual = new float[slices * verticesPerSlice * 3];
+            fixed (float* destination = actual)
+            {
+                System.Buffer.MemoryCopy((void*)mapped, destination,
+                    actual.Length * sizeof(float), actual.Length * sizeof(float));
+            }
+
+            for (int slice = 0; slice < slices; slice++)
+            {
+                int at = slice * verticesPerSlice * 3;
+                Assert.Equal(slice * 100f, actual[at]);
+                Assert.Equal(slice * 100f + 1, actual[at + 1]);
+            }
+
+            seam.DeleteMesh(meshId);
+            AssertClean(seam);
         }
     }
 

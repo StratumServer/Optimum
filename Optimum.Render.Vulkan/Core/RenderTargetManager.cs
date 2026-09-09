@@ -131,6 +131,29 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     private bool _needsRestart;
 
     /// <summary>
+    /// Whether the scope holds its depth attachment in the read-only layout.
+    ///
+    /// GL lets a pass sample the depth buffer it is drawing against as long as
+    /// depth writes are off - the liquid pass reads scene depth that way to fade
+    /// water at its edges. Vulkan allows the same only if the attachment is in
+    /// DEPTH_READ_ONLY_OPTIMAL for both the attachment and the descriptor, so
+    /// the scope switches layout for such draws and back for the next that
+    /// writes depth.
+    /// </summary>
+    public bool DepthReadOnly { get; private set; }
+
+    public void SetDepthReadOnly(bool readOnly)
+    {
+        if (DepthReadOnly == readOnly) return;
+        DepthReadOnly = readOnly;
+        if (_renderingActive) _needsRestart = true;
+    }
+
+    /// <summary>Whether a texture is the bound framebuffer's depth attachment.</summary>
+    public bool IsBoundDepth(int textureId) =>
+        _bound != null && textureId > 0 && _bound.DepthTextureId == textureId;
+
+    /// <summary>
     /// Whether a texture takes part in the rendering scope the bound framebuffer
     /// is about to open, and so has to keep its attachment layout.
     ///
@@ -266,12 +289,15 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             VulkanTexture? depth = _textures.Get(framebuffer.DepthTextureId);
             if (depth != null)
             {
-                _textures.TransitionTexture(commandBuffer, depth, ImageLayout.DepthAttachmentOptimal);
+                ImageLayout depthLayout = DepthReadOnly
+                    ? ImageLayout.DepthReadOnlyOptimal
+                    : ImageLayout.DepthAttachmentOptimal;
+                _textures.TransitionTexture(commandBuffer, depth, depthLayout);
                 depthAttachment = new RenderingAttachmentInfo
                 {
                     SType = StructureType.RenderingAttachmentInfo,
                     ImageView = depth.View,
-                    ImageLayout = ImageLayout.DepthAttachmentOptimal,
+                    ImageLayout = depthLayout,
                     LoadOp = AttachmentLoadOp.Load,
                     StoreOp = AttachmentStoreOp.Store,
                 };
@@ -315,6 +341,16 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     public void ClearColor(CommandBuffer commandBuffer, int attachment, float r, float g, float b, float a)
     {
         if (_bound == null) return;
+
+        // glClearBuffer names a draw buffer, and one that glDrawBuffers left out
+        // is simply not cleared. The scope only carries attachments up to the
+        // highest selected one, so a clear aimed past that - the game clears
+        // attachments 2 and 3 of the primary target while only 0 and 1 are
+        // selected - would name an attachment the scope does not have.
+        if ((uint)attachment >= (uint)_bound.Color.Length) return;
+        if (!_bound.Color[attachment].IsBound) return;
+        if ((_bound.DrawBufferMask & (1u << attachment)) == 0) return;
+
         EnsureRendering(commandBuffer);
         if (!_renderingActive) return;
 
@@ -336,6 +372,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     public void ClearDepth(CommandBuffer commandBuffer, float depth)
     {
         if (_bound == null || _bound.DepthTextureId <= 0) return;
+
+        // A read-only depth attachment cannot be cleared; a clear is a write.
+        SetDepthReadOnly(false);
         EnsureRendering(commandBuffer);
         if (!_renderingActive) return;
 

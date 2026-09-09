@@ -1,0 +1,30 @@
+diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
+index ce8dd81..7a0905b 100644
+--- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
++++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
+@@ -73,10 +73,25 @@ namespace FluffyClouds {
+             program.Uniform("PerceptionEffectIntensity", capi.Render.ShaderUniforms.PerceptionEffectIntensity);
+             program.BindTexture2D("depthTex", capi.Render.FrameBuffers[(int)EnumFrameBuffer.Primary].DepthTextureId, 0);
+             program.BindTexture2D("cloudMap", map.TextureMap, 8);
+             program.BindTexture2D("cloudCol", map.TextureCol, 9);
+ 
++            // Optimum: state goes through the device on its own backend, where
++            // the GL binding does not exist.
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            if (optimumDevice != null)
++            {
++                optimumDevice.SetDepthTest(false);
++                optimumDevice.SetBlend(true, EnumBlendMode.Standard);
++
++                capi.Render.RenderMesh(quad);
++
++                optimumDevice.SetDepthTest(true);
++                program.Stop();
++                return;
++            }
++
+             GL.Disable(EnableCap.DepthTest);
+             GL.Enable(EnableCap.Blend);
+ 
+             capi.Render.RenderMesh(quad);
+ 

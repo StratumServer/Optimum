@@ -1,0 +1,173 @@
+diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
+index 4252128..b43c07b 100644
+--- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
++++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
+@@ -219,10 +219,22 @@ namespace FluffyClouds {
+ 
+             return success;
+         }
+ 
+         void FreeGlResources(){
++            // Optimum: the device owns these on its own backend, where the GL
++            // binding does not exist and the raw calls throw.
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            if (optimumDevice != null)
++            {
++                optimumDevice.DeleteTexture(TextureData1);
++                optimumDevice.DeleteTexture(TextureData2);
++                optimumDevice.DeleteTexture(TextureMap);
++                optimumDevice.DeleteTexture(TextureCol);
++                optimumDevice.DeleteFramebuffer(Framebuffer);
++                return;
++            }
+ 
+             GL.DeleteTexture(TextureData1);
+             GL.DeleteTexture(TextureData2);
+             GL.DeleteTexture(TextureMap);
+             GL.DeleteTexture(TextureCol);
+@@ -336,15 +348,25 @@ namespace FluffyClouds {
+                 (float)(((double)committedState.CenterTilePos.Z * CloudTileSize - capi.World.DefaultSpawnPosition.Z + windOffsetZ) / CloudTileSize)
+             );
+ 
+             matrix.Set(capi.Render.CameraMatrixOriginf);
+ 
+-            int fb;
+-            GL.GetInteger(GetPName.FramebufferBinding, out fb);
+-
++            // Optimum: the device keeps no queryable binding to read back, so the
++            // target the API considers current is what gets restored afterwards.
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            FrameBufferRef optimumSavedTarget = null;
++            int fb = 0;
+             int[] vp = new int[4];
+-            GL.GetInteger(GetPName.Viewport, vp);
++            if (optimumDevice != null)
++            {
++                optimumSavedTarget = capi.Render.CurrentFrameBuffer;
++            }
++            else
++            {
++                GL.GetInteger(GetPName.FramebufferBinding, out fb);
++                GL.GetInteger(GetPName.Viewport, vp);
++            }
+ 
+             prog.Use();
+ 
+             prog.Uniform("dayLight", Math.Max(0, capi.World.Calendar.DayLightStrength - capi.World.Calendar.MoonLightStrength*0.95f));
+             prog.Uniform("globalCloudBrightness", capi.Ambient.BlendedCloudBrightness);
+@@ -362,12 +384,45 @@ namespace FluffyClouds {
+             prog.BindTexture2D("mapData2", TextureData2, 9);
+             prog.UniformMatrix("viewMatrix", matrix.Values);
+ 
+             prog.Uniform("pointLightQuantity", capi.Render.ShaderUniforms.PointLightsCount);
+             if(capi.Render.ShaderUniforms.PointLightsCount > 0){
+-                GL.Uniform3(GL.GetUniformLocation(programId, "pointLights"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLights3);
+-                GL.Uniform3(GL.GetUniformLocation(programId, "pointLightColors"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLightColors3);
++                if (optimumDevice != null)
++                {
++                    optimumDevice.SetUniformArray3(programId, optimumDevice.GetUniformLocation(programId, "pointLights"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLights3);
++                    optimumDevice.SetUniformArray3(programId, optimumDevice.GetUniformLocation(programId, "pointLightColors"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLightColors3);
++                }
++                else
++                {
++                    GL.Uniform3(GL.GetUniformLocation(programId, "pointLights"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLights3);
++                    GL.Uniform3(GL.GetUniformLocation(programId, "pointLightColors"), capi.Render.ShaderUniforms.PointLightsCount, capi.Render.ShaderUniforms.PointLightColors3);
++                }
++            }
++
++            if (optimumDevice != null)
++            {
++                optimumDevice.BindFramebuffer(Framebuffer);
++                optimumDevice.SetViewport(0, 0, CloudTileLength, CloudTileLength);
++                optimumDevice.SetBlend(false, EnumBlendMode.Standard);
++                optimumDevice.SetDepthTest(false);
++
++                capi.Render.RenderMesh(quad);
++
++                optimumDevice.SetDepthTest(true);
++                optimumDevice.SetBlend(true, EnumBlendMode.Standard);
++                if (optimumSavedTarget != null)
++                {
++                    optimumDevice.BindFramebuffer(optimumSavedTarget.FboId);
++                    optimumDevice.SetViewport(0, 0, optimumSavedTarget.Width, optimumSavedTarget.Height);
++                }
++                else
++                {
++                    optimumDevice.BindDefaultFramebuffer();
++                    optimumDevice.SetViewport(0, 0, capi.Render.FrameWidth, capi.Render.FrameHeight);
++                }
++                prog.Stop();
++                return;
+             }
+ 
+             GL.BindFramebuffer(FramebufferTarget.Framebuffer, Framebuffer);
+             GL.Viewport(0, 0, CloudTileLength, CloudTileLength);
+             GL.Disable(EnableCap.Blend);
+@@ -399,18 +454,41 @@ namespace FluffyClouds {
+                 TextureDataBuffer1[j * 4 + 2] = tile.CloudOpaqueness;
+                 TextureDataBuffer1[j * 4 + 3] = tile.Brightness;
+                 TextureDataBuffer2[j * 4]     = tile.UndulatingCloudMode;
+             }
+ 
++            // GL converts the signed-short source to normalized RGBA16 storage.
++            // Copying the bits directly would turn full density (32767) into 0.5.
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            if (optimumDevice != null)
++            {
++                optimumDevice.UploadTexture2DNormalizedShorts(TextureData1, 0, 0, 0, CloudTileLength, CloudTileLength, TextureDataBuffer1);
++                optimumDevice.UploadTexture2DNormalizedShorts(TextureData2, 0, 0, 0, CloudTileLength, CloudTileLength, TextureDataBuffer2);
++                return;
++            }
++
+             GL.BindTexture(TextureTarget.Texture2D, TextureData1);
+             GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, CloudTileLength, CloudTileLength, PixelFormat.Rgba, PixelType.Short, TextureDataBuffer1);
+             GL.BindTexture(TextureTarget.Texture2D, TextureData2);
+             GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, CloudTileLength, CloudTileLength, PixelFormat.Rgba, PixelType.Short, TextureDataBuffer2);
+ 
+         }
+ 
+         int makeTexture(int width, PixelInternalFormat internalFormat, PixelFormat format, PixelType type){
++            // Optimum: the device takes the GL internal-format token directly and
++            // maps it; the sampling parameters are the GL tokens as well.
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            if (optimumDevice != null)
++            {
++                int optimumTexture = optimumDevice.CreateTexture2DRaw(width, width, (int)internalFormat, IntPtr.Zero, 0);
++                optimumDevice.SetTextureParameter(optimumTexture, (int)TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
++                optimumDevice.SetTextureParameter(optimumTexture, (int)TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
++                optimumDevice.SetTextureParameter(optimumTexture, (int)TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
++                optimumDevice.SetTextureParameter(optimumTexture, (int)TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
++                return optimumTexture;
++            }
++
+             int texture = GL.GenTexture();
+             GL.BindTexture(TextureTarget.Texture2D, texture);
+             GL.TexImage2D(TextureTarget.Texture2D, 0, internalFormat, width, width, 0, format, type, 0);
+             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+@@ -453,10 +531,25 @@ namespace FluffyClouds {
+             TextureData2 = makeTexture(CloudTileLength, PixelInternalFormat.Rgba16, PixelFormat.Rgba, PixelType.Short);
+ 
+             TextureDataBuffer1 = new short[CloudTileLength * CloudTileLength * 4];
+             TextureDataBuffer2 = new short[CloudTileLength * CloudTileLength * 4];
+ 
++            // Optimum: the device's framebuffer objects are created and attached
++            // without binding anything, so nothing needs saving or restoring.
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            if (optimumDevice != null)
++            {
++                TextureMap = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);
++                TextureCol = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);
++
++                Framebuffer = optimumDevice.CreateFramebuffer(CloudTileLength, CloudTileLength);
++                optimumDevice.AttachTexture(Framebuffer, EnumFramebufferAttachment.ColorAttachment0, TextureMap, 0);
++                optimumDevice.AttachTexture(Framebuffer, EnumFramebufferAttachment.ColorAttachment1, TextureCol, 0);
++                optimumDevice.SetDrawBuffers(Framebuffer, 0b11);
++                return;
++            }
++
+             int fb;
+             GL.GetInteger(GetPName.FramebufferBinding, out fb);
+ 
+             TextureMap = makeTexture(CloudTileLength, PixelInternalFormat.Rgba32f, PixelFormat.Rgba, PixelType.Float);
+ 

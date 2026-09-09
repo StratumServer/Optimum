@@ -14,6 +14,19 @@ namespace Optimum.Render.Vulkan.Core;
 /// value and resolving to a cached sampler at bind time reproduces the GL
 /// behaviour without creating an object per texture.
 /// </summary>
+/// <param name="Mipmapped">
+/// Whether the GL min filter is one of the four MIPMAP forms. GL treats
+/// GL_NEAREST and GL_LINEAR as "level 0 only" however many levels the texture
+/// has, and Vulkan has no such filter - it always picks a level from the range
+/// the sampler allows. So this decides the sampler's LOD clamp, and without it
+/// a texture that merely owns a mip chain gets minified through it on surfaces
+/// GL would have sampled sharp.
+/// </param>
+/// <param name="MaxLevel">
+/// GL_TEXTURE_MAX_LEVEL, the highest mip the texture is allowed to use, or a
+/// negative value for no limit. The client clamps this to the mipmap quality
+/// setting after building a chain.
+/// </param>
 internal readonly record struct SamplerState(
     Filter MagFilter,
     Filter MinFilter,
@@ -23,12 +36,22 @@ internal readonly record struct SamplerState(
     float LodBias,
     bool CompareEnable,
     float MaxAnisotropy,
-    BorderColor BorderColor)
+    BorderColor BorderColor,
+    bool Mipmapped = false,
+    int MaxLevel = -1)
 {
     public static SamplerState Default => new(
         Filter.Nearest, Filter.Nearest, SamplerMipmapMode.Nearest,
         SamplerAddressMode.Repeat, SamplerAddressMode.Repeat,
         0f, false, 1f, BorderColor.FloatOpaqueBlack);
+
+    /// <summary>
+    /// The sampler's LOD ceiling. Anything under 1 confines sampling to level 0,
+    /// which is what a non-mipmapping GL filter means.
+    /// </summary>
+    public float LodCeiling => !Mipmapped ? 0.25f
+        : MaxLevel >= 0 ? MaxLevel + 1f
+        : Vk.LodClampNone;
 }
 
 /// <summary>A texture, its memory, its view, and the GL state attached to it.</summary>
@@ -38,7 +61,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
     private bool _disposed;
 
     public Image Image { get; init; }
-    public DeviceMemory Memory { get; init; }
+    public MemoryAllocation Allocation { get; init; }
     public ImageView View { get; init; }
 
     /// <summary>Never reused, unlike <see cref="View" />; see <see cref="ResourceIds" />.</summary>
@@ -49,6 +72,9 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public uint Height { get; init; }
     public uint MipLevels { get; init; }
     public uint Layers { get; init; }
+
+    /// <summary>Whether the view is a cube rather than a six-layer array.</summary>
+    public bool Cube { get; init; }
     public ImageAspectFlags Aspect { get; init; }
 
     /// <summary>Mutable, as glTexParameter is.</summary>
@@ -105,11 +131,7 @@ internal sealed unsafe class VulkanTexture : IDisposable
         _layerViews.Clear();
         if (View.Handle != 0) api.DestroyImageView(_context.Device, View, null);
         if (Image.Handle != 0) api.DestroyImage(_context.Device, Image, null);
-        if (Memory.Handle != 0)
-        {
-            api.FreeMemory(_context.Device, Memory, null);
-            VulkanMemory.NoteFree();
-        }
+        if (Allocation.IsValid) _context.Allocator.Free(Allocation);
     }
 }
 
@@ -157,7 +179,7 @@ internal sealed unsafe class SamplerCache : IDisposable
             // GL_COMPARE_REF_TO_TEXTURE mode the shadow passes enable.
             CompareOp = CompareOp.LessOrEqual,
             MinLod = 0f,
-            MaxLod = Vk.LodClampNone,
+            MaxLod = state.LodCeiling,
             BorderColor = state.BorderColor,
             UnnormalizedCoordinates = false,
         };
@@ -194,6 +216,23 @@ internal sealed unsafe class SamplerCache : IDisposable
 /// </summary>
 internal sealed unsafe class TextureManager : IDisposable
 {
+    /// <summary>GL_SHORT source pixels converted to GL_RGBA16 storage.</summary>
+    internal static ushort ShortToUnorm16(short value) =>
+        (ushort)((Math.Max(0, (int)value) * 65535L + 16383) / 32767);
+
+    public void UploadNormalizedShorts(int id, int level, int x, int y,
+        int width, int height, ReadOnlySpan<short> pixels)
+    {
+        int count = checked(width * height * 4);
+        var converted = new ushort[count];
+        for (int i = 0; i < count; i++) converted[i] = ShortToUnorm16(pixels[i]);
+
+        fixed (ushort* source = converted)
+        {
+            Upload(id, level, x, y, (uint)width, (uint)height, (IntPtr)source, 8);
+        }
+    }
+
     private readonly VulkanContext _context;
     private readonly VulkanCommands _commands;
     private readonly List<VulkanTexture?> _textures = new();
@@ -293,16 +332,10 @@ internal sealed unsafe class TextureManager : IDisposable
         }
 
         api.GetImageMemoryRequirements(_context.Device, image, out MemoryRequirements requirements);
-        var allocateInfo = new MemoryAllocateInfo
-        {
-            SType = StructureType.MemoryAllocateInfo,
-            AllocationSize = requirements.Size,
-            MemoryTypeIndex = VulkanMemory.FindMemoryType(
-                _context, requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit),
-        };
-        DeviceMemory memory = VulkanMemory.Allocate(_context, allocateInfo,
+        MemoryAllocation allocation = _context.Allocator.Allocate(
+            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
             $"a {width}x{height} {format} image");
-        api.BindImageMemory(_context.Device, image, memory, 0);
+        api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset);
 
         uint viewLayers = cube ? 6 : layers;
         var viewInfo = new ImageViewCreateInfo
@@ -320,13 +353,14 @@ internal sealed unsafe class TextureManager : IDisposable
         var texture = new VulkanTexture(_context)
         {
             Image = image,
-            Memory = memory,
+            Allocation = allocation,
             View = view,
             Format = format,
             Width = width,
             Height = height,
             MipLevels = mipLevels,
             Layers = viewLayers,
+            Cube = cube,
             Aspect = aspect,
         };
 
@@ -453,6 +487,7 @@ internal sealed unsafe class TextureManager : IDisposable
             GlEnums.TextureWrapS => state with { AddressU = GlEnums.AddressModeFrom(integer) },
             GlEnums.TextureWrapT => state with { AddressV = GlEnums.AddressModeFrom(integer) },
             GlEnums.TextureLodBias => state with { LodBias = value },
+            GlEnums.TextureMaxLevel => state with { MaxLevel = integer },
             GlEnums.TextureCompareMode => state with
             {
                 CompareEnable = integer == GlEnums.TextureCompareRefToTexture,
@@ -464,7 +499,12 @@ internal sealed unsafe class TextureManager : IDisposable
     private static SamplerState ApplyMinFilter(SamplerState state, int glFilter)
     {
         (Filter filter, SamplerMipmapMode mode) = GlEnums.MinFilterFrom(glFilter);
-        return state with { MinFilter = filter, MipmapMode = mode };
+        return state with
+        {
+            MinFilter = filter,
+            MipmapMode = mode,
+            Mipmapped = GlEnums.MinFilterUsesMipmaps(glFilter),
+        };
     }
 
     /// <summary>

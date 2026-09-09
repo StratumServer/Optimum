@@ -18,6 +18,18 @@ namespace Optimum.Render.Vulkan.Tests;
 /// </summary>
 public class TextureManagerTests
 {
+    [Theory]
+    [InlineData(short.MinValue, 0)]
+    [InlineData(-1, 0)]
+    [InlineData(0, 0)]
+    [InlineData(1, 2)]
+    [InlineData(16384, 32769)]
+    [InlineData(short.MaxValue, ushort.MaxValue)]
+    public void SignedShortTextureInputIsNormalizedBeforeUnsignedStorage(short source, int expected)
+    {
+        Assert.Equal((ushort)expected, TextureManager.ShortToUnorm16(source));
+    }
+
     private readonly ITestOutputHelper _output;
 
     public TextureManagerTests(ITestOutputHelper output) => _output = output;
@@ -90,6 +102,51 @@ public class TextureManagerTests
 
             // Nothing has been bound, so no sampler exists yet.
             Assert.Equal(0, textures.Samplers.Count);
+        }
+    }
+
+    /// <summary>
+    /// A GL min filter decides whether the mip chain is sampled at all, and the
+    /// sampler's LOD clamp is the only place Vulkan can say so.
+    ///
+    /// GL_LINEAR and GL_NEAREST read level 0 however many levels the image owns;
+    /// only the four MIPMAP filters descend the chain, and GL_TEXTURE_MAX_LEVEL
+    /// then caps how far. Vulkan has no non-mipmapping filter - a sampler always
+    /// picks a level out of [MinLod, MaxLod] - so leaving MaxLod unclamped lets
+    /// a texture that merely owns a chain be minified through it. On the block
+    /// atlas that puts unrelated block textures onto every surface that turns
+    /// away from the camera, while whatever is drawn flat stays correct.
+    /// </summary>
+    [SkippableFact]
+    public void OnlyAMipmappingFilterLetsTheSamplerLeaveLevelZero()
+    {
+        Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
+        using (context)
+        {
+            using var commands = new VulkanCommands(context!);
+            using var textures = new TextureManager(context!, commands);
+
+            int id = textures.Create(16, 16, Format.R8G8B8A8Unorm, generateMipmaps: true);
+            Assert.True(textures.Get(id)!.MipLevels > 1, "the texture should own a chain to sample");
+
+            // What the atlas upload sets: linear, and so level 0 only.
+            textures.SetParameter(id, GlEnums.TextureMinFilter, 0x2601);   // GL_LINEAR
+            SamplerState linear = textures.Get(id)!.State;
+            Assert.False(linear.Mipmapped);
+            Assert.True(linear.LodCeiling < 1f,
+                $"a non-mipmapping filter must confine sampling to level 0, got {linear.LodCeiling}");
+
+            // What BuildMipMaps sets once a chain exists, capped to the setting.
+            textures.SetParameter(id, GlEnums.TextureMinFilter, 0x2702);   // NEAREST_MIPMAP_LINEAR
+            textures.SetParameter(id, GlEnums.TextureMaxLevel, 3);
+            SamplerState mipmapped = textures.Get(id)!.State;
+            Assert.True(mipmapped.Mipmapped);
+            Assert.Equal(3, mipmapped.MaxLevel);
+            Assert.Equal(4f, mipmapped.LodCeiling);
+
+            // Uncapped stays uncapped.
+            textures.SetParameter(id, GlEnums.TextureMaxLevel, -1);
+            Assert.Equal(Vk.LodClampNone, textures.Get(id)!.State.LodCeiling);
         }
     }
 

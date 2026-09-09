@@ -135,6 +135,15 @@ public static class ModPatcher
             },
             Methods:
             [
+                // Vulkan backend: the cloud renderers call OpenGL directly for
+                // their map framebuffer, tile textures and state; on the device
+                // path those go through the render seam instead.
+                new("FluffyClouds.CloudRendererMap", "FreeGlResources", 0),
+                new("FluffyClouds.CloudRendererMap", "OnRenderFrame", 2),
+                new("FluffyClouds.CloudRendererMap", "WriteTexture", 0),
+                new("FluffyClouds.CloudRendererMap", "makeTexture", 4),
+                new("FluffyClouds.CloudRendererMap", "InitCloudTiles", 1),
+                new("FluffyClouds.CloudRendererVolumetric", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.BlockEntityParticleEmitter", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorCollectEntities", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),

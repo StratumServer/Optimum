@@ -31,11 +31,19 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     private bool _disposed;
 
     public Buffer Handle { get; }
-    public DeviceMemory Memory { get; }
     public ulong Size { get; }
 
     /// <summary>Never reused, unlike <see cref="Handle" />; see <see cref="ResourceIds" />.</summary>
     public ulong Id { get; } = ResourceIds.Next();
+
+    private MemoryAllocation _allocation;
+
+    /// <summary>Which block this buffer's memory came from. For tests.</summary>
+    internal ulong MemoryHandleForTest => _allocation.Memory.Handle;
+
+    /// <summary>The block, offset and size this buffer occupies. For tests.</summary>
+    internal MemoryAllocation Allocation => _allocation;
+
     /// <summary>Non-zero when the allocation is host visible and mapped.</summary>
     public IntPtr Mapped { get; private set; }
 
@@ -61,23 +69,12 @@ internal sealed unsafe class VulkanBuffer : IDisposable
 
         api.GetBufferMemoryRequirements(context.Device, buffer, out MemoryRequirements requirements);
 
-        var allocateInfo = new MemoryAllocateInfo
-        {
-            SType = StructureType.MemoryAllocateInfo,
-            AllocationSize = requirements.Size,
-            MemoryTypeIndex = VulkanMemory.FindMemoryType(context, requirements.MemoryTypeBits, properties),
-        };
+        // A buffer is linear, so it shares blocks only with other buffers.
+        _allocation = context.Allocator.Allocate(
+            requirements, properties, linear: true, $"a {size} byte buffer");
 
-        DeviceMemory memory = VulkanMemory.Allocate(context, allocateInfo, $"a {size} byte buffer");
-        Memory = memory;
-        api.BindBufferMemory(context.Device, buffer, memory, 0);
-
-        if (properties.HasFlag(MemoryPropertyFlags.HostVisibleBit))
-        {
-            void* mapped;
-            api.MapMemory(context.Device, memory, 0, size, 0, &mapped);
-            Mapped = (IntPtr)mapped;
-        }
+        api.BindBufferMemory(context.Device, buffer, _allocation.Memory, _allocation.Offset);
+        Mapped = _allocation.Mapped;
     }
 
     public void Dispose()
@@ -85,15 +82,11 @@ internal sealed unsafe class VulkanBuffer : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        Vk api = _context.Api;
-        if (Mapped != IntPtr.Zero)
-        {
-            api.UnmapMemory(_context.Device, Memory);
-            Mapped = IntPtr.Zero;
-        }
-        api.DestroyBuffer(_context.Device, Handle, null);
-        api.FreeMemory(_context.Device, Memory, null);
-        VulkanMemory.NoteFree();
+        // The mapping belongs to the block, not to this buffer, so it is not
+        // unmapped here - the region simply goes back to the pool.
+        Mapped = IntPtr.Zero;
+        _context.Api.DestroyBuffer(_context.Device, Handle, null);
+        _context.Allocator.Free(_allocation);
     }
 }
 
@@ -104,8 +97,9 @@ internal sealed unsafe class VulkanImage : IDisposable
     private bool _disposed;
 
     public Image Handle { get; }
-    public DeviceMemory Memory { get; }
     public ImageView View { get; }
+
+    private MemoryAllocation _allocation;
     public Format Format { get; }
     public uint Width { get; }
     public uint Height { get; }
@@ -148,16 +142,11 @@ internal sealed unsafe class VulkanImage : IDisposable
         Handle = image;
 
         api.GetImageMemoryRequirements(context.Device, image, out MemoryRequirements requirements);
-        var allocateInfo = new MemoryAllocateInfo
-        {
-            SType = StructureType.MemoryAllocateInfo,
-            AllocationSize = requirements.Size,
-            MemoryTypeIndex = VulkanMemory.FindMemoryType(
-                context, requirements.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit),
-        };
-        DeviceMemory memory = VulkanMemory.Allocate(context, allocateInfo, "an image");
-        Memory = memory;
-        api.BindImageMemory(context.Device, image, memory, 0);
+
+        // Optimally tiled, so it never shares a block with a buffer.
+        _allocation = context.Allocator.Allocate(
+            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false, "an image");
+        api.BindImageMemory(context.Device, image, _allocation.Memory, _allocation.Offset);
 
         var viewInfo = new ImageViewCreateInfo
         {
@@ -182,8 +171,7 @@ internal sealed unsafe class VulkanImage : IDisposable
         Vk api = _context.Api;
         api.DestroyImageView(_context.Device, View, null);
         api.DestroyImage(_context.Device, Handle, null);
-        api.FreeMemory(_context.Device, Memory, null);
-        VulkanMemory.NoteFree();
+        _context.Allocator.Free(_allocation);
     }
 }
 
@@ -279,6 +267,7 @@ internal static unsafe class VulkanMemory
         }
 
         NoteAllocation();
+        VulkanStats.NoteAllocation();
         return memory;
     }
 
@@ -359,12 +348,27 @@ internal sealed unsafe class VulkanCommands : IDisposable
     /// uploads reach this from asset-loading worker threads while the render
     /// thread is submitting frames.
     /// </summary>
+    /// <summary>
+    /// Runs before every synchronous submit, outside the queue lock. The device
+    /// uses it to flush a frame it is in the middle of recording: a synchronous
+    /// submit executes before that frame does, so any layout transition the
+    /// frame has already recorded is not yet true on the GPU, and a setup
+    /// command that assumed it would corrupt the image or fail the submit.
+    /// </summary>
+    public Action? BeforeSynchronousSubmit;
+
     public void SubmitAndWait(Action<CommandBuffer> record)
     {
+        BeforeSynchronousSubmit?.Invoke();
+
+        // Timed from before the lock: waiting for the render thread to release
+        // the queue is as much a part of an upload's cost as the GPU work.
+        long start = System.Diagnostics.Stopwatch.GetTimestamp();
         lock (_context.QueueLock)
         {
             SubmitAndWaitLocked(record);
         }
+        VulkanStats.NoteUpload(System.Diagnostics.Stopwatch.GetTimestamp() - start);
     }
 
     private void SubmitAndWaitLocked(Action<CommandBuffer> record)

@@ -119,6 +119,7 @@ internal static class GlEnums
         0x822D => Format.R16Sfloat,            // GL_R16F
         0x8C3A => Format.B10G11R11UfloatPack32,// GL_R11F_G11F_B10F
         0x8814 => Format.R32G32B32A32Sfloat,   // GL_RGBA32F
+        0x805B => Format.R16G16B16A16Unorm,    // GL_RGBA16, the cloud map's tile data
         0x8051 => Format.R8G8B8A8Unorm,        // GL_RGB8, promoted: RGB is not a
         0x1907 => Format.R8G8B8A8Unorm,        // GL_RGB     guaranteed attachment format
         0x8DAB => Format.D32Sfloat,            // GL_DEPTH_COMPONENT32F
@@ -151,6 +152,14 @@ internal static class GlEnums
         _ => (Filter.Nearest, SamplerMipmapMode.Nearest),
     };
 
+    /// <summary>
+    /// Whether a GL min filter samples the mip chain at all. Only the four
+    /// MIPMAP forms do; GL_NEAREST and GL_LINEAR read level 0 however many
+    /// levels the texture owns.
+    /// </summary>
+    public static bool MinFilterUsesMipmaps(int glFilter) =>
+        glFilter is 0x2700 or 0x2701 or 0x2702 or 0x2703;
+
     public static SamplerAddressMode AddressModeFrom(int glWrap) => glWrap switch
     {
         0x2901 => SamplerAddressMode.Repeat,             // GL_REPEAT
@@ -167,6 +176,7 @@ internal static class GlEnums
     public const int TextureWrapT = 0x2803;
     public const int TextureCompareMode = 0x884C;
     public const int TextureLodBias = 0x8501;
+    public const int TextureMaxLevel = 0x813D;
     public const int TextureBorderColor = 0x1004;
     public const int TextureCompareModeNone = 0;
     public const int TextureCompareRefToTexture = 0x884E;

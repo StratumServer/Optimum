@@ -132,7 +132,7 @@ internal sealed unsafe class MeshManager : IDisposable
         int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize,
         CustomMeshDataPartFloat? customFloats, CustomMeshDataPartShort? customShorts,
         CustomMeshDataPartByte? customBytes, CustomMeshDataPartInt? customInts,
-        EnumDrawMode drawMode, bool staticDraw, bool ssbo)
+        EnumDrawMode drawMode, bool staticDraw, bool ssbo, bool signedCustomShorts = false)
     {
         var mesh = new VulkanMesh
         {
@@ -144,27 +144,48 @@ internal sealed unsafe class MeshManager : IDisposable
         var builder = new VertexLayoutBuilder();
 
         // The order here is the order the GL allocator assigns attribute slots.
-        AddDedicated(mesh, builder, BufferXyz, xyzSize, 3, GlFloat, normalized: false, integer: false, ssbo);
-        AddDedicated(mesh, builder, BufferNormals, normalsSize, 4, GlInt2101010Rev, normalized: true, integer: false, ssbo);
-        AddDedicated(mesh, builder, BufferUv, uvSize, 2, GlFloat, normalized: false, integer: false, ssbo);
+        // With SSBO vertex fetch the xyz slot holds packed face records rather
+        // than positions: one 64-byte record per four vertices, so 16 bytes per
+        // vertex where a position is 12. GL sizes that buffer as xyzSize / 12 * 16
+        // and so must this, or the last quarter of every pool is out of range -
+        // which robust buffer access reads back as zeros, collapsing those faces
+        // onto the origin and stretching their neighbours across the screen.
+        int xyzSlotSize = ssbo ? xyzSize / 12 * 16 : xyzSize;
+        AddDedicated(mesh, builder, BufferXyz, xyzSlotSize, 3, GlFloat, normalized: false, integer: false, ssbo);
+
+        // Normals, uv and flags have no vertex binding on the SSBO path: their
+        // contents ride in the packed face records instead, and GL's SSBO
+        // allocator creates neither a buffer nor an attribute pointer for them.
+        // Adding one here would push rgba off location 0, so the shader's
+        // rgbaLightIn would read the uv stream - block light taken from atlas
+        // coordinates, which tints the terrain by texture position.
+        AddDedicated(mesh, builder, BufferNormals, ssbo ? 0 : normalsSize, 4, GlInt2101010Rev, normalized: true, integer: false, ssbo);
+        AddDedicated(mesh, builder, BufferUv, ssbo ? 0 : uvSize, 2, GlFloat, normalized: false, integer: false, ssbo);
         AddDedicated(mesh, builder, BufferRgba, rgbaSize, 4, GlUnsignedByte, normalized: true, integer: false, ssbo);
-        AddDedicated(mesh, builder, BufferFlags, flagsSize, 1, GlInt, normalized: false, integer: true, ssbo);
+        AddDedicated(mesh, builder, BufferFlags, ssbo ? 0 : flagsSize, 1, GlInt, normalized: false, integer: true, ssbo);
 
         AddCustom(mesh, builder, BufferCustomFloat, customFloats?.AllocationSize * 4 ?? 0,
             customFloats?.InterleaveSizes, customFloats?.InterleaveOffsets,
             customFloats?.InterleaveStride ?? 0, GlFloat, false, false,
             customFloats?.Instanced ?? false);
 
+        // AllocateEmptyMesh/AddCustoms uses GL_UNSIGNED_SHORT for float
+        // inputs, including the packed secondary UVs of topsoil. UploadMesh
+        // uses GL_SHORT instead (legacy clouds rely on signed offsets).
+        // Integer inputs use GL_SHORT on both paths.
+        int shortType = signedCustomShorts || customShorts?.Conversion == DataConversion.Integer
+            ? GlShort : GlUnsignedShort;
         AddCustom(mesh, builder, BufferCustomShort, customShorts?.AllocationSize * 2 ?? 0,
             customShorts?.InterleaveSizes, customShorts?.InterleaveOffsets,
-            customShorts?.InterleaveStride ?? 0, GlShort,
+            customShorts?.InterleaveStride ?? 0, shortType,
             customShorts?.Conversion == DataConversion.NormalizedFloat,
             customShorts?.Conversion == DataConversion.Integer,
             customShorts?.Instanced ?? false);
 
-        AddCustom(mesh, builder, BufferCustomInt, customInts?.AllocationSize * 4 ?? 0,
-            customInts?.InterleaveSizes, customInts?.InterleaveOffsets,
-            customInts?.InterleaveStride ?? 0, GlInt,
+        (int intBytes, int[]? intSizes, int[]? intOffsets, int intStride) =
+            PruneCustomInts(customInts, ssbo);
+
+        AddCustom(mesh, builder, BufferCustomInt, intBytes, intSizes, intOffsets, intStride, GlInt,
             customInts?.Conversion == DataConversion.NormalizedFloat,
             customInts?.Conversion == DataConversion.Integer,
             customInts?.Instanced ?? false);
@@ -180,12 +201,39 @@ internal sealed unsafe class MeshManager : IDisposable
         {
             mesh.Indices = CreateBuffer(indicesSize, BufferUsageFlags.IndexBufferBit, mesh.Persistent);
             mesh.IndexCount = indicesSize / sizeof(int);
+            if (ssbo) FillQuadIndices(mesh.Indices);
         }
 
         mesh.Layout = builder.Build();
         mesh.LayoutId = _layouts.Intern(mesh.Layout);
 
         return Register(mesh);
+    }
+
+    /// <summary>
+    /// The custom-int part as the SSBO path sees it. GL prunes it there: the
+    /// first interleaved member is the colormap data, which the face record now
+    /// carries, so it is dropped, the rest tighten onto half the stride and the
+    /// buffer halves with them. A part that only ever had that one member is
+    /// dropped entirely. Off the SSBO path the part passes through unchanged.
+    /// </summary>
+    private static (int Bytes, int[]? Sizes, int[]? Offsets, int Stride) PruneCustomInts(
+        CustomMeshDataPartInt? customInts, bool ssbo)
+    {
+        if (customInts == null) return (0, null, null, 0);
+
+        int bytes = customInts.AllocationSize * 4;
+        int[]? sizes = customInts.InterleaveSizes;
+        int[]? offsets = customInts.InterleaveOffsets;
+        int stride = customInts.InterleaveStride;
+
+        if (!ssbo) return (bytes, sizes, offsets, stride);
+
+        if (stride <= 4 || sizes == null || sizes.Length < 2) return (0, null, null, 0);
+
+        // Member k reads what member k - 1 used to, because dropping the first
+        // one shifts every remaining offset down a slot.
+        return (bytes / 2, sizes[1..], offsets?[..^1], stride / 2);
     }
 
     private void AddDedicated(
@@ -281,6 +329,47 @@ internal sealed unsafe class MeshManager : IDisposable
     }
 
     /// <summary>The persistently mapped pointer for a part, or zero.</summary>
+    /// <summary>
+    /// One of a mesh's buffers, for binding it as something other than a vertex
+    /// source - the SSBO chunk path reads the xyz slot as a storage buffer.
+    /// </summary>
+    /// <summary>Whether the mesh fetches its vertices through a storage buffer.</summary>
+    public bool IsSsbo(int meshId) => Get(meshId)?.Ssbo ?? false;
+
+    /// <summary>
+    /// Fills an SSBO mesh's index buffer with the fixed quad pattern.
+    ///
+    /// GL keeps one shared static index buffer for every SSBO mesh, written once
+    /// with this pattern: each four consecutive vertices are a quad, drawn as the
+    /// triangles (0,1,2) and (0,2,3). Its chunk update path never uploads indices
+    /// on that route, so this fill is the only source of them here, as it is
+    /// there.
+    /// </summary>
+    private static void FillQuadIndices(VulkanBuffer indices)
+    {
+        if (indices.Mapped == IntPtr.Zero) return;
+
+        int count = (int)(indices.Size / sizeof(int));
+        int* destination = (int*)indices.Mapped;
+        for (int i = 0; i + 5 < count; i += 6)
+        {
+            int quad = i / 6 * 4;
+            destination[i] = quad;
+            destination[i + 1] = quad + 1;
+            destination[i + 2] = quad + 2;
+            destination[i + 3] = quad;
+            destination[i + 4] = quad + 2;
+            destination[i + 5] = quad + 3;
+        }
+    }
+
+    public VulkanBuffer? BufferOf(int meshId, int slot)
+    {
+        VulkanMesh? mesh = Get(meshId);
+        if (mesh == null) return null;
+        return slot < 0 ? mesh.Indices : mesh.Buffers[slot];
+    }
+
     public IntPtr MappedPointer(int meshId, int slot)
     {
         VulkanMesh? mesh = Get(meshId);
@@ -291,17 +380,44 @@ internal sealed unsafe class MeshManager : IDisposable
     }
 
     /// <summary>Writes bytes into a mesh buffer through its mapping.</summary>
+    /// <summary>
+    /// Copies data into one of a mesh's buffers at a byte offset.
+    ///
+    /// A write that cannot land - no such buffer, not mapped, or past the end -
+    /// is counted and traced rather than dropped in silence. GL would raise
+    /// GL_INVALID_VALUE for the same glBufferSubData; a quiet return here turned
+    /// a sizing mistake into "the terrain is simply not there", with nothing in
+    /// any log to say why.
+    /// </summary>
     public void Write(int meshId, int slot, int byteOffset, IntPtr source, int byteCount)
     {
-        VulkanMesh? mesh = Get(meshId);
-        if (mesh == null || source == IntPtr.Zero || byteCount <= 0) return;
+        if (source == IntPtr.Zero || byteCount <= 0) return;
 
-        VulkanBuffer? buffer = slot < 0 ? mesh.Indices : mesh.Buffers[slot];
-        if (buffer?.Mapped is null or 0) return;
-        if ((ulong)(byteOffset + byteCount) > buffer.Size) return;
+        VulkanMesh? mesh = Get(meshId);
+        VulkanBuffer? buffer = mesh == null ? null : slot < 0 ? mesh.Indices : mesh.Buffers[slot];
+
+        string? problem =
+            mesh == null ? "no such mesh" :
+            buffer == null ? "mesh has no buffer in that slot" :
+            buffer.Mapped == IntPtr.Zero ? "buffer is not host mapped" :
+            byteOffset < 0 ? "negative offset" :
+            (ulong)byteOffset + (ulong)byteCount > buffer.Size
+                ? "write ends past the buffer (" + buffer.Size + " bytes)"
+                : null;
+
+        if (problem != null)
+        {
+            VulkanStats.NoteDroppedMeshWrite();
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write("mesh write dropped: mesh " + meshId + " slot " + slot +
+                    " offset " + byteOffset + " bytes " + byteCount + ": " + problem);
+            }
+            return;
+        }
 
         System.Buffer.MemoryCopy(
-            (void*)source, (void*)(buffer.Mapped + byteOffset), byteCount, byteCount);
+            (void*)source, (void*)(buffer!.Mapped + byteOffset), byteCount, byteCount);
     }
 
     public void Delete(int meshId, FrameRing? ring = null)
@@ -361,34 +477,44 @@ internal sealed unsafe class MeshManager : IDisposable
     /// </summary>
     public void DrawMulti(
         CommandBuffer commandBuffer, int meshId,
-        int[] indicesStarts, int[] indicesSizes, int groupCount, VulkanBuffer indirectScratch)
+        int[] indicesStarts, int[] indicesSizes, int groupCount, VulkanBuffer indirectScratch,
+        ulong indirectOffset)
     {
         VulkanMesh? mesh = Get(meshId);
         if (mesh == null || groupCount <= 0) return;
 
         Bind(commandBuffer, mesh);
 
-        var commands = (DrawIndexedIndirectCommand*)indirectScratch.Mapped;
-        if (commands == null) return;
+        if (indirectScratch.Mapped == IntPtr.Zero || indirectOffset >= indirectScratch.Size) return;
+        var commands = (DrawIndexedIndirectCommand*)(indirectScratch.Mapped + (nint)indirectOffset);
 
-        int capacity = (int)(indirectScratch.Size / (ulong)sizeof(DrawIndexedIndirectCommand));
+        int capacity = (int)((indirectScratch.Size - indirectOffset) / (ulong)sizeof(DrawIndexedIndirectCommand));
         int count = Math.Min(groupCount, capacity);
 
-        for (int i = 0; i < count; i++)
+        WriteIndirectCommands(new Span<DrawIndexedIndirectCommand>(commands, count), indicesStarts, indicesSizes);
+
+        _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirectScratch.Handle, indirectOffset, (uint)count,
+            (uint)sizeof(DrawIndexedIndirectCommand));
+    }
+
+    internal static void WriteIndirectCommands(
+        Span<DrawIndexedIndirectCommand> commands, ReadOnlySpan<int> indicesStarts, ReadOnlySpan<int> indicesSizes)
+    {
+        for (int i = 0; i < commands.Length; i++)
         {
+            // MeshDataPool passes GL's 64-bit pointer array in an int[]. Each
+            // offset occupies two words, unlike the tightly packed counts.
+            ulong byteOffset = (uint)indicesStarts[i * 2] | ((ulong)(uint)indicesStarts[i * 2 + 1] << 32);
             commands[i] = new DrawIndexedIndirectCommand
             {
                 IndexCount = (uint)indicesSizes[i],
                 InstanceCount = 1,
                 // GL takes a byte offset; Vulkan takes an index count.
-                FirstIndex = (uint)(indicesStarts[i] / sizeof(int)),
+                FirstIndex = checked((uint)(byteOffset / sizeof(int))),
                 VertexOffset = 0,
                 FirstInstance = 0,
             };
         }
-
-        _context.Api.CmdDrawIndexedIndirect(commandBuffer, indirectScratch.Handle, 0, (uint)count,
-            (uint)sizeof(DrawIndexedIndirectCommand));
     }
 
     public int LayoutIdOf(int meshId) => Get(meshId)?.LayoutId ?? -1;

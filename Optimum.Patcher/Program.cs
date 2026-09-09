@@ -121,6 +121,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "SetupOptimumFrameBuffers",
         "CreateOptimumColorTarget",
         "CreateOptimumDepthTarget",
+        "CreateOptimumPlaceholderTarget",
         "CreateOptimumFramebuffer",
         // Vulkan backend: GL state the device takes as call arguments instead,
         // so the routed bodies need somewhere to remember it.
@@ -129,6 +130,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumClearB",
         "optimumClearA",
         "optimumBoundTexture2d",
+        "optimumScissorEnabled",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -481,6 +483,9 @@ var targets = new List<MethodTarget>
         new[] { "System.Int32[]", "System.Int32", "System.Int32", "Vintagestory.Client.NoObf.VAO", "System.Boolean" }),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
+    // The shared index buffer is freed at shutdown, after the GL binding is gone
+    // on the device path; the raw call throws there instead of freeing it.
+    new("Vintagestory.Client.NoObf.ClientPlatformAbstract", "DisposeIndexBuffer", 0),
     // FSR: allocate the native intermediate and replace the final bilinear blit.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BlitPrimaryToDefault", 0),
@@ -587,6 +592,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBuffer", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBufferKeepVw", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_GlDebugMode", 1),
+    // The scissor flag is read back by the runtime atlas upload; the device
+    // keeps no queryable state, so the routed setter remembers it.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "get_GlScissorFlagEnabled", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlScissorFlag", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateFramebuffer", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffer", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),

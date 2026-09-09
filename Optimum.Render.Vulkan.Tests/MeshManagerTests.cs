@@ -41,6 +41,63 @@ public class MeshManagerTests
         return created;
     }
 
+    [SkippableTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PooledTopsoilUsesUnsignedNormalizedShortUvs(bool ssbo)
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+        using (context)
+        {
+            using var meshes = new MeshManager(context!, new GlStateTracker());
+            var uv2 = new CustomMeshDataPartShort(8)
+            {
+                InterleaveSizes = new[] { 2 },
+                InterleaveOffsets = new[] { 0 },
+                InterleaveStride = 4,
+                Conversion = DataConversion.NormalizedFloat,
+            };
+            int mesh = meshes.CreateEmpty(48, 0, 32, 16, 16, 24,
+                null, uv2, null, null, EnumDrawMode.Triangles, staticDraw: false, ssbo: ssbo);
+
+            VertexLayoutDescription layout = meshes.Get(mesh)!.Layout;
+            Assert.Equal(Format.R16G16Unorm, layout.Attributes[^1].Format);
+            Assert.Equal(4u, layout.Bindings[^1].Stride);
+        }
+    }
+
+    [SkippableTheory]
+    [InlineData(DataConversion.NormalizedFloat, false, Format.R16G16Unorm)]
+    [InlineData(DataConversion.Float, false, Format.R16G16Uscaled)]
+    [InlineData(DataConversion.Integer, false, Format.R16G16Sint)]
+    [InlineData(DataConversion.NormalizedFloat, true, Format.R16G16SNorm)]
+    [InlineData(DataConversion.Float, true, Format.R16G16Sscaled)]
+    [InlineData(DataConversion.Integer, true, Format.R16G16Sint)]
+    public void ShortSignednessMatchesTheTwoGlAllocationPaths(DataConversion conversion, bool uploaded, Format expected)
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+        using (context)
+        {
+            using var meshes = new MeshManager(context!, new GlStateTracker());
+            var shorts = new CustomMeshDataPartShort(8)
+            {
+                InterleaveSizes = new[] { 2 },
+                InterleaveOffsets = new[] { 0 },
+                InterleaveStride = 4,
+                Conversion = conversion,
+                Instanced = true,
+            };
+            int mesh = meshes.CreateEmpty(48, 0, 0, 0, 0, 24,
+                null, shorts, null, null, EnumDrawMode.Triangles, staticDraw: false,
+                ssbo: false, signedCustomShorts: uploaded);
+            VertexLayoutDescription layout = meshes.Get(mesh)!.Layout;
+            Assert.Equal(expected, layout.Attributes[^1].Format);
+            Assert.True(layout.Bindings[^1].PerInstance);
+        }
+    }
+
     [SkippableFact]
     public void AbsentPartsDoNotConsumeAttributeLocations()
     {
@@ -123,9 +180,15 @@ public class MeshManagerTests
     /// With SSBO vertex fetch the chunk shaders read positions from a storage
     /// buffer keyed on gl_VertexIndex, so the position buffer must leave the
     /// vertex input entirely rather than being bound twice.
+    ///
+    /// The same goes for normals, UVs and flags: the face record carries all
+    /// three, and GL's SSBO allocator creates neither a buffer nor an attribute
+    /// pointer for them. Binding one anyway pushes rgba off location 0, and the
+    /// chunk shaders declare rgbaLightIn there - so the block light would be
+    /// read from the UV stream, tinting terrain by its atlas coordinates.
     /// </summary>
     [SkippableFact]
-    public void TheSsboPathTakesPositionsOutOfTheVertexInput()
+    public void TheSsboPathBindsOnlyTheColoursTheChunkShadersDeclare()
     {
         var messages = new List<string>();
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
@@ -135,21 +198,115 @@ public class MeshManagerTests
             var state = new GlStateTracker();
             using var meshes = new MeshManager(context!, state);
 
+            // The pool passes its configured sizes whichever path it is on, so
+            // normals, UVs and flags all arrive non-zero here.
             int mesh = meshes.CreateEmpty(
-                xyzSize: 4 * 3 * sizeof(float), normalsSize: 0, uvSize: 4 * 2 * sizeof(float),
-                rgbaSize: 4 * 4, flagsSize: 0, indicesSize: 6 * sizeof(int),
+                xyzSize: 4 * 3 * sizeof(float), normalsSize: 4 * sizeof(int),
+                uvSize: 4 * 2 * sizeof(float), rgbaSize: 4 * 4, flagsSize: 4 * sizeof(int),
+                indicesSize: 6 * sizeof(int),
                 null, null, null, null, EnumDrawMode.Triangles, staticDraw: true, ssbo: true);
 
             VulkanMesh created = meshes.Get(mesh)!;
             VertexLayoutDescription layout = meshes.LayoutOf(created.LayoutId);
 
-            // The buffer still exists, and still carries the positions.
+            // The position buffer still exists, and still carries the records.
             Assert.NotNull(created.Buffers[MeshManager.BufferXyz]);
             Assert.DoesNotContain(MeshManager.BufferXyz, created.BindingOrder);
 
-            // UVs now take location 0, since positions are no longer an input.
-            Assert.Equal(2, layout.Attributes.Length);
-            Assert.Equal(Format.R32G32Sfloat, layout.Attributes[0].Format);
+            // The other three do not exist at all, as in GL.
+            Assert.Null(created.Buffers[MeshManager.BufferNormals]);
+            Assert.Null(created.Buffers[MeshManager.BufferUv]);
+            Assert.Null(created.Buffers[MeshManager.BufferFlags]);
+
+            // Leaving colours alone at location 0.
+            Assert.Single(layout.Attributes);
+            Assert.Equal(0u, layout.Attributes[0].Location);
+            Assert.Equal(Format.R8G8B8A8Unorm, layout.Attributes[0].Format);
+        }
+    }
+
+    /// <summary>
+    /// The chunk meshes carry two custom ints per vertex: the colormap data and
+    /// one more. On the SSBO path the record already holds the colormap data, so
+    /// GL drops that member, halves the stride and halves the buffer - and the
+    /// remaining member reads from the offset its predecessor used.
+    /// </summary>
+    [SkippableFact]
+    public void TheSsboPathDropsTheCustomIntTheFaceRecordAlreadyCarries()
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        using (context)
+        {
+            var state = new GlStateTracker();
+            using var meshes = new MeshManager(context!, state);
+
+            CustomMeshDataPartInt TwoPerVertex() => new(8)
+            {
+                InterleaveSizes = new[] { 1, 1 },
+                InterleaveOffsets = new[] { 0, 4 },
+                InterleaveStride = 8,
+                Conversion = DataConversion.Integer,
+            };
+
+            int ssboMesh = meshes.CreateEmpty(
+                xyzSize: 4 * 3 * sizeof(float), normalsSize: 0, uvSize: 0,
+                rgbaSize: 4 * 4, flagsSize: 0, indicesSize: 6 * sizeof(int),
+                null, null, null, TwoPerVertex(), EnumDrawMode.Triangles, staticDraw: true, ssbo: true);
+
+            VertexLayoutDescription ssbo = meshes.LayoutOf(meshes.LayoutIdOf(ssboMesh));
+
+            // Colours at 0, then the one surviving int at 1 - reading offset 0
+            // on a four-byte stride, which is where the dropped member sat.
+            Assert.Equal(2, ssbo.Attributes.Length);
+            Assert.Equal(Format.R32Sint, ssbo.Attributes[1].Format);
+            Assert.Equal(0u, ssbo.Attributes[1].Offset);
+            Assert.Equal(4u, ssbo.Bindings[1].Stride);
+
+            // Off the SSBO path the same part keeps both members and its stride.
+            int plainMesh = meshes.CreateEmpty(
+                xyzSize: 4 * 3 * sizeof(float), normalsSize: 0, uvSize: 0,
+                rgbaSize: 4 * 4, flagsSize: 0, indicesSize: 6 * sizeof(int),
+                null, null, null, TwoPerVertex(), EnumDrawMode.Triangles, staticDraw: true, ssbo: false);
+
+            VertexLayoutDescription plain = meshes.LayoutOf(meshes.LayoutIdOf(plainMesh));
+            Assert.Equal(4, plain.Attributes.Length);
+            Assert.Equal(8u, plain.Bindings[^1].Stride);
+        }
+    }
+
+    /// <summary>
+    /// A part that only ever had the colormap int has nothing left once it is
+    /// dropped, so GL binds it nowhere at all on the SSBO path.
+    /// </summary>
+    [SkippableFact]
+    public void TheSsboPathDropsASingleCustomIntPartEntirely()
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        using (context)
+        {
+            var state = new GlStateTracker();
+            using var meshes = new MeshManager(context!, state);
+
+            var customInts = new CustomMeshDataPartInt(4)
+            {
+                InterleaveSizes = new[] { 1 },
+                InterleaveOffsets = new[] { 0 },
+                InterleaveStride = 4,
+                Conversion = DataConversion.Integer,
+            };
+
+            int mesh = meshes.CreateEmpty(
+                xyzSize: 4 * 3 * sizeof(float), normalsSize: 0, uvSize: 0,
+                rgbaSize: 4 * 4, flagsSize: 0, indicesSize: 6 * sizeof(int),
+                null, null, null, customInts, EnumDrawMode.Triangles, staticDraw: true, ssbo: true);
+
+            VulkanMesh created = meshes.Get(mesh)!;
+            Assert.Null(created.Buffers[MeshManager.BufferCustomInt]);
+            Assert.Single(meshes.LayoutOf(created.LayoutId).Attributes);
         }
     }
 

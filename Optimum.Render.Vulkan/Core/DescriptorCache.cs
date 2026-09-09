@@ -14,7 +14,8 @@ namespace Optimum.Render.Vulkan.Core;
 /// handle. Zero means the resource is permanent and needs no tracking.
 /// </summary>
 internal readonly record struct SamplerBindingValue(
-    uint Binding, ImageView View, Sampler Sampler, ulong Resource = 0);
+    uint Binding, ImageView View, Sampler Sampler, ulong Resource = 0,
+    ImageLayout Layout = ImageLayout.ShaderReadOnlyOptimal);
 
 /// <summary>One buffer binding. <paramref name="Resource" /> as for samplers.</summary>
 internal readonly record struct BufferBindingValue(
@@ -53,6 +54,7 @@ internal sealed class DescriptorSetContents : IEquatable<DescriptorSetContents>
             hash.Add(sampler.View.Handle);
             hash.Add(sampler.Sampler.Handle);
             hash.Add(sampler.Resource);
+            hash.Add((int)sampler.Layout);
         }
         foreach (BufferBindingValue buffer in buffers)
         {
@@ -378,7 +380,10 @@ internal sealed unsafe class DescriptorCache : IDisposable
                 {
                     ImageView = sampler.View,
                     Sampler = sampler.Sampler,
-                    ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+                    // Normally shader-read-only; a depth attachment sampled by
+                    // the pass that has it bound is read through the read-only
+                    // depth layout instead.
+                    ImageLayout = sampler.Layout,
                 };
                 writes[index++] = new WriteDescriptorSet
                 {
