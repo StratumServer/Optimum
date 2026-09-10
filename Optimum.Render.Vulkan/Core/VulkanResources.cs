@@ -385,12 +385,15 @@ internal sealed unsafe class VulkanCommands : IDisposable
                 SType = StructureType.CommandBufferBeginInfo,
                 Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
             };
-            api.BeginCommandBuffer(commandBuffer, &begin);
+            VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
+                "vkBeginCommandBuffer for a setup command buffer");
             record(commandBuffer);
-            api.EndCommandBuffer(commandBuffer);
+            VulkanResult.Check(api.EndCommandBuffer(commandBuffer),
+                "vkEndCommandBuffer for a setup command buffer");
 
             var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
-            api.CreateFence(_context.Device, &fenceInfo, null, out fence);
+            VulkanResult.Check(api.CreateFence(_context.Device, &fenceInfo, null, out fence),
+                "vkCreateFence for a setup command buffer");
             fenceCreated = true;
 
             var submit = new SubmitInfo

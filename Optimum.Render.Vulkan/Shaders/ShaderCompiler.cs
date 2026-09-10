@@ -134,10 +134,12 @@ internal sealed unsafe class ShaderCompiler : IDisposable
         int versionIndex = code.IndexOf("#version", StringComparison.Ordinal);
         if (versionIndex < 0) return prefixCode + code;
 
-        int insertAt = code.IndexOf('\n', versionIndex) + 1;
-        if (insertAt <= 0) return prefixCode + code;
+        // A #version with nothing after it is a complete first line; the
+        // prefix follows it rather than displacing it.
+        int lineEnd = code.IndexOf('\n', versionIndex);
+        if (lineEnd < 0) return code + "\n" + prefixCode;
 
-        return code.Insert(insertAt, prefixCode);
+        return code.Insert(lineEnd + 1, prefixCode);
     }
 
     /// <summary>

@@ -60,7 +60,7 @@ internal static class ShaderRewriter
         string source = parsed.Source;
         var edits = new List<Edit>();
 
-        AddHeaderEdits(parsed, layout, stage, edits);
+        AddHeaderEdits(parsed, layout, stage, emitDepthRemap, edits);
 
         foreach (GlslDeclaration declaration in parsed.Declarations)
         {
@@ -113,7 +113,8 @@ internal static class ShaderRewriter
     // -------------------------------------------------------------------- header
 
     private static void AddHeaderEdits(
-        ParsedShader parsed, ProgramInterfaceLayout layout, EnumShaderType stage, List<Edit> edits)
+        ParsedShader parsed, ProgramInterfaceLayout layout, EnumShaderType stage, bool emitDepthRemap,
+        List<Edit> edits)
     {
         string block = BuildUniformBlock(layout, stage);
 
@@ -124,6 +125,13 @@ internal static class ShaderRewriter
             header.Append("#extension GL_EXT_scalar_block_layout : require\n");
         }
         header.Append(block);
+
+        // The geometry stage's EmitVertex() replacement lives in the header so
+        // it precedes every function that may call it.
+        if (emitDepthRemap && stage == EnumShaderType.GeometryShader)
+        {
+            header.Append("void " + EmitVertexReplacementName + "() { " + DepthRemapStatement + " EmitVertex(); }\n");
+        }
 
         if (parsed.VersionStart >= 0)
         {
@@ -294,10 +302,15 @@ internal static class ShaderRewriter
             "}\n"));
     }
 
+    private const string EmitVertexReplacementName = "_optimum_emit_vertex";
+
     /// <summary>
     /// A geometry stage snapshots <c>gl_Position</c> at every <c>EmitVertex()</c>,
     /// so a wrapper around <c>main</c> would run after every vertex has already
-    /// left. The remap goes immediately before each emit instead.
+    /// left. Each call is redirected to a helper that remaps and then emits,
+    /// which keeps the call a single statement: an unbraced <c>if</c> or loop
+    /// body around it keeps its scope, where an inserted extra statement would
+    /// not.
     /// </summary>
     private static void AddGeometryDepthRemapEdits(ParsedShader parsed, List<Edit> edits, RewrittenShader result)
     {
@@ -314,7 +327,7 @@ internal static class ShaderRewriter
             bool isCall = after < source.Length && source[after] == '(';
             if (!startsWord || !isCall) continue;
 
-            edits.Add(new Edit(at, 0, DepthRemapStatement + " "));
+            edits.Add(new Edit(at, call.Length, EmitVertexReplacementName));
             found++;
         }
 

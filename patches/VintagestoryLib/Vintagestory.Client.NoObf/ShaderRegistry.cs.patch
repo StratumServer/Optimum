@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..e278e46 100644
+index 4a24e75..a45ac57 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -185,7 +185,7 @@ index 4a24e75..e278e46 100644
  	{
  		Shader fragmentShader = program.FragmentShader;
 -		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA ? 1 : 0) + "\r\n";
-+		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && ClientSettings.OptimumRenderScale >= 1.0f ? 1 : 0) + "\r\n";
++		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f ? 1 : 0) + "\r\n";
  		Shader fragmentShader2 = program.FragmentShader;
  		fragmentShader2.PrefixCode = fragmentShader2.PrefixCode + "#define SSAOLEVEL " + ClientSettings.SSAOQuality + "\r\n";
  		Shader fragmentShader3 = program.FragmentShader;

@@ -207,13 +207,11 @@ public class ShaderTranslationUnitTests
         const string source = """
             #version 330 core
             layout(triangles) in;
-            layout(triangle_strip, max_vertices = 3) out;
+            layout(triangle_strip, max_vertices = 4) out;
+            uniform bool visible;
             void main() {
-                for (int i = 0; i < 3; i++) {
-                    gl_Position = gl_in[i].gl_Position;
-                    EmitVertex();
-                }
-                EmitVertex ();
+                for (int i = 0; i < 3; i++) gl_Position = gl_in[i].gl_Position, EmitVertex();
+                if (visible) EmitVertex (); else EndPrimitive();
                 EndPrimitive();
             }
             """;
@@ -225,7 +223,28 @@ public class ShaderTranslationUnitTests
 
         Assert.Empty(rewritten.Errors);
         Assert.DoesNotContain("_optimum_main", code);
-        Assert.Equal(2, CountOf(code, "gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5; EmitVertex"));
+
+        // One helper, defined before any user code, that remaps then emits.
+        Assert.Contains("void _optimum_emit_vertex() { gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5; EmitVertex(); }", code);
+        Assert.True(code.IndexOf("_optimum_emit_vertex()", StringComparison.Ordinal)
+            < code.IndexOf("void main()", StringComparison.Ordinal));
+
+        // Every call site is redirected as a single statement, so the unbraced
+        // loop body and the if/else keep their shape.
+        Assert.Equal(1, CountOf(code, "EmitVertex();"));   // only inside the helper
+        Assert.Contains("gl_Position = gl_in[i].gl_Position, _optimum_emit_vertex();", code);
+        Assert.Contains("if (visible) _optimum_emit_vertex (); else EndPrimitive();", code);
+    }
+
+    [Fact]
+    public void ThePrefixFollowsAVersionLineThatHasNoNewline()
+    {
+        string spliced = ShaderCompiler.SplicePrefix("#version 330 core", "#define A 1\n");
+        Assert.StartsWith("#version 330 core\n#define A 1\n", spliced);
+
+        Assert.Equal("#define A 1\nvoid main() {}", ShaderCompiler.SplicePrefix("void main() {}", "#define A 1\n"));
+        Assert.Equal("#version 330\n#define A 1\nvoid main() {}",
+            ShaderCompiler.SplicePrefix("#version 330\nvoid main() {}", "#define A 1\n"));
     }
 
     private static int CountOf(string text, string needle)
