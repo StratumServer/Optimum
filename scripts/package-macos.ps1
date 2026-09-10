@@ -126,6 +126,14 @@ try {
         Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
     }
 
+    # 5b-2. Overlay optimized shader includes (TAA P3). Same asset-name override
+    # mechanism as shaders, separate directory.
+    $shaderIncSrc = Join-Path $repoRoot 'sources/shaderincludes'
+    $shaderIncDst = Join-Path $appDir 'assets/game/shaderincludes'
+    if (Test-Path $shaderIncSrc) {
+        Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
+    }
+
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
     # Read/write explicitly as UTF-8 via .NET, not Get-Content/Set-Content:
     # on Windows PowerShell 5.1 those cmdlets default to the system codepage

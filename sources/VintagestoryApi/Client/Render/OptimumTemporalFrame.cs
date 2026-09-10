@@ -280,11 +280,17 @@ namespace Vintagestory.API.Client
         /// once per frame, immediately after DefaultShaderUniforms.Update and before
         /// the Before render stage, so every pass in the frame sees one consistent
         /// snapshot.
+        ///
+        /// The camera position and <c>playerpos</c> are deliberately NOT captured
+        /// here: PlayerCamera.OnBeforeRenderFrame3D writes both from inside the
+        /// Before render stage, which runs after this call, so reading them here
+        /// would snapshot the previous frame's values and hand every writer a
+        /// camera delta and a previous playerpos one frame out of step with the
+        /// camera matrices frozen later in the frame. <see cref="CaptureCameraPosition" />
+        /// does that half, next to <see cref="CaptureCamera" />.
         /// </summary>
         /// <param name="renderScale">Optimum's render scale (1 = native). The jitter
         /// sequence gets more phases the more the image is upscaled.</param>
-        /// <param name="cameraPosIn">EntityPlayer.CameraPos, differenced in double
-        /// precision. May be null before a world is loaded.</param>
         public void Advance(
             float deltaTimeMs,
             int renderWidth,
@@ -293,7 +299,6 @@ namespace Vintagestory.API.Client
             float zNear,
             float zFar,
             float fov,
-            Vec3d cameraPosIn,
             DefaultShaderUniforms uniforms)
         {
             // --- rotate current -> previous -------------------------------------
@@ -309,6 +314,11 @@ namespace Vintagestory.API.Client
             Array.Copy(cameraMatrix, cameraMatrixPrev, 16);
             Array.Copy(cameraMatrixOrigin, cameraMatrixOriginPrev, 16);
             PrevPlayerpos.Set(Playerpos.X, Playerpos.Y, Playerpos.Z);
+            // The camera position rolls here even though it is captured later in
+            // the frame, so CaptureCameraPosition can be called more than once
+            // and still difference against the previous frame rather than
+            // against its own earlier call.
+            cameraPosPrev.Set(cameraPos);
             PrevWarp = Warp;
 
             FrameIndex++;
@@ -319,10 +329,10 @@ namespace Vintagestory.API.Client
             ZFar = zFar;
             Fov = fov;
             Warp = OptimumWarpState.FromUniforms(uniforms);
-            if (uniforms != null && uniforms.PlayerPos != null)
-            {
-                Playerpos.Set(uniforms.PlayerPos.X, uniforms.PlayerPos.Y, uniforms.PlayerPos.Z);
-            }
+            // Zeroed here and filled by CaptureCameraPosition, so a frame that
+            // never reaches the capture reports no camera movement rather than
+            // repeating the previous frame's.
+            CameraPosDelta.Set(0f, 0f, 0f);
 
             EnumTemporalResetReason reason = pendingReset;
             pendingReset = EnumTemporalResetReason.None;
@@ -337,12 +347,59 @@ namespace Vintagestory.API.Client
                 reason = EnumTemporalResetReason.Resize;
             }
 
-            // --- camera position delta, teleport detection -----------------------
+            ResetReason = reason;
+            Reset = reason != EnumTemporalResetReason.None;
+
+            // --- jitter ----------------------------------------------------------
+            int phaseCount = Math.Max(1, OptimumTemporalMath.JitterPhaseCount(renderScale > 0f ? 1f / renderScale : 1f));
+            int phase = (int)(FrameIndex % phaseCount);
+            double jx = OptimumTemporalMath.Halton(phase + 1, 2) - 0.5;
+            double jy = OptimumTemporalMath.Halton(phase + 1, 3) - 0.5;
+            // Halton(2,3) never lands on (0.5, 0.5), but a zero offset would make a
+            // frame contribute no new sub-pixel sample at all, so it is excluded by
+            // construction rather than by luck.
+            if (jx == 0.0 && jy == 0.0) jx = 0.25;
+            JitterSequencePx.X = (float)jx;
+            JitterSequencePx.Y = (float)jy;
+            JitterPx.X = jitterActive ? JitterSequencePx.X : 0f;
+            JitterPx.Y = jitterActive ? JitterSequencePx.Y : 0f;
+        }
+
+        /// <summary>
+        /// Captures the camera position and <c>playerpos</c> for the frame, and
+        /// with them the camera delta every motion-vector writer reprojects a
+        /// static surface by, plus the two reset causes that only these values
+        /// can reveal: a teleport and a reference-position rebase.
+        ///
+        /// Called after the Before render stage has run, because that is where
+        /// PlayerCamera writes both - together with <see cref="CaptureCamera" />,
+        /// so the translation and the rotation of the previous camera belong to
+        /// the same frame. Calling it from <see cref="Advance" /> would pair a
+        /// one-frame-stale delta with an up-to-date previous view matrix, and the
+        /// difference between the two shows up as motion on every static surface
+        /// whenever the camera's speed changes.
+        ///
+        /// Safe to call more than once per frame: the roll happened in Advance,
+        /// so a second call recomputes the same delta from the same previous
+        /// position.
+        /// </summary>
+        /// <param name="cameraPosIn">EntityPlayer.CameraPos, differenced in double
+        /// precision. May be null before a world is loaded.</param>
+        /// <param name="uniforms">The shader uniforms, for playerpos and the
+        /// reference position the warp noise is sampled against.</param>
+        public void CaptureCameraPosition(Vec3d cameraPosIn, DefaultShaderUniforms uniforms)
+        {
+            EnumTemporalResetReason reason = ResetReason;
+
+            if (uniforms != null && uniforms.PlayerPos != null)
+            {
+                Playerpos.Set(uniforms.PlayerPos.X, uniforms.PlayerPos.Y, uniforms.PlayerPos.Z);
+            }
+
             if (cameraPosIn != null)
             {
                 if (hasCameraPos)
                 {
-                    cameraPosPrev.Set(cameraPos);
                     double dx = cameraPosIn.X - cameraPosPrev.X;
                     double dy = cameraPosIn.Y - cameraPosPrev.Y;
                     double dz = cameraPosIn.Z - cameraPosPrev.Z;
@@ -354,7 +411,6 @@ namespace Vintagestory.API.Client
                 }
                 else
                 {
-                    cameraPosPrev.Set(cameraPosIn);
                     CameraPosDelta.Set(0f, 0f, 0f);
                     hasCameraPos = true;
                 }
@@ -366,7 +422,6 @@ namespace Vintagestory.API.Client
                 hasCameraPos = false;
             }
 
-            // --- reference-position rebase ---------------------------------------
             Vec3d reference = uniforms?.playerReferencePos;
             if (reference != null)
             {
@@ -385,20 +440,6 @@ namespace Vintagestory.API.Client
             ResetReason = reason;
             Reset = reason != EnumTemporalResetReason.None;
             if (Reset) CameraPosDelta.Set(0f, 0f, 0f);
-
-            // --- jitter ----------------------------------------------------------
-            int phaseCount = Math.Max(1, OptimumTemporalMath.JitterPhaseCount(renderScale > 0f ? 1f / renderScale : 1f));
-            int phase = (int)(FrameIndex % phaseCount);
-            double jx = OptimumTemporalMath.Halton(phase + 1, 2) - 0.5;
-            double jy = OptimumTemporalMath.Halton(phase + 1, 3) - 0.5;
-            // Halton(2,3) never lands on (0.5, 0.5), but a zero offset would make a
-            // frame contribute no new sub-pixel sample at all, so it is excluded by
-            // construction rather than by luck.
-            if (jx == 0.0 && jy == 0.0) jx = 0.25;
-            JitterSequencePx.X = (float)jx;
-            JitterSequencePx.Y = (float)jy;
-            JitterPx.X = jitterActive ? JitterSequencePx.X : 0f;
-            JitterPx.Y = jitterActive ? JitterSequencePx.Y : 0f;
         }
 
         /// <summary>

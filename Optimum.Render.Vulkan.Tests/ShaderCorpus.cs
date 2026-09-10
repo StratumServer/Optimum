@@ -194,6 +194,15 @@ internal static class ShaderCorpus
         /// <summary>Primary colour attachment the motion texture occupies: 4 with the SSAO G-buffer, 2 without.</summary>
         public int TaaMotionLocation = 2;
 
+        /// <summary>
+        /// Defines a caller put on the program itself before the engine's block,
+        /// the way ModSystemFpHands stamps ALLOWDEPTHOFFSET on its two private
+        /// copies of standard and entityanimated. Those copies are the only place
+        /// the gl_FragDepth writer exists, so without this the corpus never
+        /// translates it.
+        /// </summary>
+        public string ExtraPrefix = "";
+
         public override string ToString() => Name;
     }
 
@@ -288,7 +297,13 @@ internal static class ShaderCorpus
             lines.Add($"#define TAAMOTIONLOCATION {variant.TaaMotionLocation}");
         }
 
-        return string.Join("\r\n", lines) + "\r\n";
+        string prefix = string.Join("\r\n", lines) + "\r\n";
+        // The client puts the program's own PrefixCode first and appends the
+        // engine block to it (ShaderRegistry.registerDefaultShaderCodePrefixes
+        // does `PrefixCode = PrefixCode + ...`), so a caller's defines lead.
+        return variant.ExtraPrefix.Length > 0
+            ? variant.ExtraPrefix + "\r\n" + prefix
+            : prefix;
     }
 
     /// <summary>Builds the two stages of one program, ready for translation.</summary>

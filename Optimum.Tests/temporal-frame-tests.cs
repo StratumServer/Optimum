@@ -42,9 +42,16 @@ public class TemporalFrameTests
         };
     }
 
+    /// <summary>
+    /// One whole frame's worth of contract updates in the order ClientMain does
+    /// them: Advance rotates and computes the jitter, then - once the Before
+    /// render stage has written the camera position and playerpos -
+    /// CaptureCameraPosition takes those.
+    /// </summary>
     private static void Advance(OptimumTemporalFrame frame, Vec3d cameraPos, DefaultShaderUniforms uniforms, float renderScale = 1f)
     {
-        frame.Advance(16.6f, Width, Height, renderScale, 0.1f, 3000f, 1.2f, cameraPos, uniforms);
+        frame.Advance(16.6f, Width, Height, renderScale, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(cameraPos, uniforms);
     }
 
     // --- rotation ------------------------------------------------------------
@@ -277,11 +284,127 @@ public class TemporalFrameTests
         var pos = new Vec3d(0, 0, 0);
 
         Advance(frame, pos, uniforms);
-        frame.Advance(16.6f, 1280, 720, 1f, 0.1f, 3000f, 1.2f, pos, uniforms);
+        frame.Advance(16.6f, 1280, 720, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(pos, uniforms);
 
         Assert.True(frame.Reset);
         Assert.Equal(EnumTemporalResetReason.Resize, frame.ResetReason);
         Assert.Equal(1280, frame.RenderWidth);
+    }
+
+    // --- camera position capture ordering --------------------------------------
+
+    /// <summary>
+    /// The camera position is written by PlayerCamera from inside the Before
+    /// render stage, which runs AFTER Advance and BEFORE the camera matrices are
+    /// frozen. Capturing it in Advance therefore read the previous frame's
+    /// position, and every terrain, entity and instanced writer reprojected a
+    /// static surface by cam(N-1) - cam(N-2) while its previous view matrix was
+    /// the genuine cam(N-1) rotation. The two agree only while the camera moves
+    /// at a constant speed; every acceleration showed up as motion on ground
+    /// that never moved.
+    ///
+    /// This drives the contract in the order ClientMain does it, with the camera
+    /// moving in between, and demands the delta of the frame being drawn.
+    /// </summary>
+    [Fact]
+    public void CameraDeltaIsTheMovementOfTheFrameBeingDrawnNotThePreviousOne()
+    {
+        var frame = NewFrame();
+        var uniforms = Uniforms();
+
+        // Frame 1: camera at the origin.
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(0, 64, 0), uniforms);
+
+        // Frame 2: the camera moved one block since frame 1.
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(1, 64, 0), uniforms);
+        Assert.Equal(1f, frame.CameraPosDelta.X, 5);
+
+        // Frame 3: the camera accelerated to four blocks per frame. A capture
+        // taken before the Before stage would still report the one block of
+        // frame 2 here, which is exactly the failure this guards.
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(5, 64, 0), uniforms);
+        Assert.Equal(4f, frame.CameraPosDelta.X, 5);
+
+        // Frame 4: the camera stopped. Still exact, not the previous four.
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(5, 64, 0), uniforms);
+        Assert.Equal(0f, frame.CameraPosDelta.X, 5);
+    }
+
+    /// <summary>
+    /// The warp noise is sampled at worldPos + playerpos, so the previous frame's
+    /// playerpos has to be the one the previous frame's draws actually used.
+    /// PlayerCamera writes it in the same Before stage as the camera position.
+    /// </summary>
+    [Fact]
+    public void PreviousPlayerposIsThePositionTheFrameBeforeReallyDrewWith()
+    {
+        var frame = NewFrame();
+
+        var first = Uniforms();
+        first.PlayerPos.Set(1, 2, 3);
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, first);
+        frame.CaptureCameraPosition(new Vec3d(0, 0, 0), first);
+        Assert.Equal(1f, frame.Playerpos.X, 5);
+
+        var second = Uniforms();
+        second.PlayerPos.Set(4, 5, 6);
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, second);
+        frame.CaptureCameraPosition(new Vec3d(0, 0, 0), second);
+
+        Assert.Equal(4f, frame.Playerpos.X, 5);
+        Assert.Equal(1f, frame.PrevPlayerpos.X, 5);
+        Assert.Equal(2f, frame.PrevPlayerpos.Y, 5);
+        Assert.Equal(3f, frame.PrevPlayerpos.Z, 5);
+    }
+
+    /// <summary>
+    /// Capturing twice in one frame - a second render pass, a debug capture - must
+    /// difference against the previous frame both times, never against the first
+    /// call's own value, or the second call reports a zero delta.
+    /// </summary>
+    [Fact]
+    public void CapturingTheCameraPositionTwiceInOneFrameKeepsTheSameDelta()
+    {
+        var frame = NewFrame();
+        var uniforms = Uniforms();
+
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(0, 0, 0), uniforms);
+
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(2, 0, 0), uniforms);
+        Assert.Equal(2f, frame.CameraPosDelta.X, 5);
+
+        frame.CaptureCameraPosition(new Vec3d(2, 0, 0), uniforms);
+        Assert.Equal(2f, frame.CameraPosDelta.X, 5);
+    }
+
+    /// <summary>
+    /// A frame that never reaches the capture (no world, no player) must report no
+    /// camera movement rather than repeating the previous frame's delta, which a
+    /// writer would apply to geometry that did not move.
+    /// </summary>
+    [Fact]
+    public void AdvanceWithoutACaptureLeavesNoCameraMovement()
+    {
+        var frame = NewFrame();
+        var uniforms = Uniforms();
+
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(0, 0, 0), uniforms);
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(3, 0, 0), uniforms);
+        Assert.Equal(3f, frame.CameraPosDelta.X, 5);
+
+        frame.Advance(16.6f, Width, Height, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        Assert.Equal(0f, frame.CameraPosDelta.X, 5);
+        Assert.Equal(0f, frame.CameraPosDelta.Y, 5);
+        Assert.Equal(0f, frame.CameraPosDelta.Z, 5);
     }
 
     // --- reset flag lifetime ---------------------------------------------------

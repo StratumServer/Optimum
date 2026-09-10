@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Xunit;
 
@@ -227,9 +228,57 @@ public class TaaTerrainMotionCoverageTests
             "optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);",
             platform);
 
-        // GL path: the same two sets, built as DrawBuffers arrays.
-        Assert.Contains("DrawBuffersEnum[] optimumMotionDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex + 1];", platform);
-        Assert.Contains("DrawBuffersEnum[] optimumRestoreDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex];", platform);
+        // GL path: the same two sets, as DrawBuffers arrays - built once and
+        // kept, not allocated per window. The narrow windows open per draw (every
+        // held item, dropped item and block-entity model), so allocating them
+        // inside would be two garbage arrays per instrumented draw per frame.
+        Assert.Contains("private DrawBuffersEnum[] optimumMotionDrawBuffersOn;", platform);
+        Assert.Contains("private DrawBuffersEnum[] optimumMotionDrawBuffersOff;", platform);
+        Assert.Contains("GL.DrawBuffers(optimumMotionDrawBuffersOn.Length, optimumMotionDrawBuffersOn);", platform);
+        Assert.Contains("GL.DrawBuffers(optimumMotionDrawBuffersOff.Length, optimumMotionDrawBuffersOff);", platform);
+
+        // Both cached fields have to be transplanted, or the Cecil'd build has
+        // BeginMotionWrite referring to members the shipped type does not carry.
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"optimumMotionDrawBuffersOn\"", patcher);
+        Assert.Contains("\"optimumMotionDrawBuffersOff\"", patcher);
+
+        // And nothing inside the window allocates.
+        int begin = platform.IndexOf("public bool BeginMotionWrite()", StringComparison.Ordinal);
+        int end = platform.IndexOf("private void ApplyOptimumMotionBlendState()", begin, StringComparison.Ordinal);
+        Assert.True(begin >= 0 && end > begin);
+        string window = platform.Substring(begin, end - begin);
+        Assert.Equal(2, Count(window, "new DrawBuffersEnum["));
+        foreach (string allocation in new[] { "new float[", "new int[", "new List<" })
+        {
+            Assert.False(window.Contains(allocation, StringComparison.Ordinal),
+                "the per-draw motion window must not allocate: " + allocation);
+        }
+    }
+
+    /// <summary>
+    /// The two backends must not disagree about WHICH framebuffer the window
+    /// changes. The device call names Primary; GL.DrawBuffers applies to whatever
+    /// is bound, so a caller that reached BeginMotionWrite under the shadow map or
+    /// the Transparent target would rewrite that target's draw-buffer set on GL
+    /// and Primary's on Vulkan. Refusing the window unless Primary is the bound
+    /// target makes both paths behave the same and costs the caller only the
+    /// camera fallback it would have to use anyway.
+    /// </summary>
+    [Fact]
+    public void TheMotionWindowOnlyOpensWhilePrimaryIsTheBoundTarget()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        int begin = platform.IndexOf("public bool BeginMotionWrite()", StringComparison.Ordinal);
+        Assert.True(begin >= 0);
+        int drawBuffers = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", begin, StringComparison.Ordinal);
+        Assert.True(drawBuffers > begin);
+
+        string guards = platform.Substring(begin, drawBuffers - begin);
+        Assert.Contains("if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;", guards);
     }
 
     /// <summary>
@@ -308,6 +357,45 @@ public class TaaTerrainMotionCoverageTests
     /// contract sets have to be the same strings; a typo on either side is a
     /// silent zero, which looks exactly like "the surface did not move".
     /// </summary>
+    /// <summary>
+    /// Where the frame contract takes the camera position decides whether the
+    /// terrain writer's cameraPosDelta belongs to the frame being drawn.
+    /// PlayerCamera.OnBeforeRenderFrame3D writes EntityPlayer.CameraPos and
+    /// shUniforms.PlayerPos from inside the Before render stage, which runs after
+    /// Advance; taking them in Advance read the previous frame's values and paired
+    /// a stale translation with a fresh previous rotation. Both halves belong next
+    /// to CaptureCamera, after the Before stage and before the Opaque one.
+    /// </summary>
+    [Fact]
+    public void TheCameraPositionIsCapturedAfterTheBeforeStageWroteIt()
+    {
+        string main = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
+
+        int advance = main.IndexOf("OptimumTemporal.Frame.Advance(", StringComparison.Ordinal);
+        int beforeStage = main.IndexOf("TriggerRenderStage(EnumRenderStage.Before, dt);", StringComparison.Ordinal);
+        int captureCamera = main.IndexOf("OptimumTemporal.Frame.CaptureCamera(", StringComparison.Ordinal);
+        int capturePos = main.IndexOf("OptimumTemporal.Frame.CaptureCameraPosition(", StringComparison.Ordinal);
+
+        Assert.True(advance >= 0, "the frame contract is never advanced");
+        Assert.True(beforeStage >= 0, "the Before render stage is not in the patched body");
+        Assert.True(captureCamera >= 0, "the camera matrices are never frozen");
+        Assert.True(capturePos >= 0, "the camera position is never captured");
+        Assert.True(advance < beforeStage, "Advance has to run before the Before stage so the prepass sees the jitter");
+        Assert.True(beforeStage < capturePos, "the camera position must be read after PlayerCamera wrote it");
+
+        // The rotation and the translation of the frame's camera are taken
+        // together, so the previous view matrix and the previous position always
+        // belong to the same frame.
+        Assert.True(Math.Abs(captureCamera - capturePos) < 700,
+            "the camera matrices and the camera position have to be captured together");
+
+        // And Advance must no longer be able to read it: the parameter is gone.
+        int advanceEnd = main.IndexOf(';', advance);
+        Assert.DoesNotContain("CameraPos", main.Substring(advance, advanceEnd - advance));
+    }
+
     [Fact]
     public void TheFrameContractSetsExactlyTheUniformNamesTheWritersDeclare()
     {
@@ -375,14 +463,37 @@ public class TaaTerrainMotionCoverageTests
         Assert.Contains("sources/shaderincludes", Read("Makefile"));
         Assert.Equal(2, Count(Read("Makefile"), "assets/game/shaderincludes"));
 
-        foreach (string script in new[]
+        // Derived, never a hand-kept list: any script that overlays
+        // sources/shaders is a packaging path a user can install from, so it has
+        // to overlay sources/shaderincludes too. Enumerating them by hand is how
+        // scripts/package.ps1 (the Windows packager) and scripts/package-macos.ps1
+        // were left behind in the first place, which would have shipped every
+        // TAA writer calling WarpState overloads the vanilla include never
+        // declares - a compile failure on every terrain, entity, item and
+        // instanced program the moment TAA is switched on.
+        string scriptsDirectory = Path.GetDirectoryName(PatchReader.FindRepositoryFile("scripts/package-linux.sh"))!;
+        var packagers = new List<string>();
+        foreach (string path in Directory.EnumerateFiles(scriptsDirectory, "package*"))
         {
-            "scripts/package-linux.sh", "scripts/package-macos.sh", "scripts/package-linux.ps1",
+            string text = File.ReadAllText(path);
+            if (!text.Contains("sources/shaders", StringComparison.Ordinal)) continue;
+            packagers.Add(Path.GetFileName(path));
+
+            Assert.True(text.Contains("sources/shaderincludes", StringComparison.Ordinal),
+                Path.GetFileName(path) + " overlays sources/shaders but not sources/shaderincludes");
+            Assert.True(text.Contains("assets/game/shaderincludes", StringComparison.Ordinal),
+                Path.GetFileName(path) + " has no assets/game/shaderincludes destination");
+        }
+
+        // A guard on the guard: if the enumeration ever finds nothing, the loop
+        // above passes vacuously.
+        foreach (string expected in new[]
+        {
+            "package-linux.sh", "package-macos.sh", "package-linux.ps1",
+            "package-macos.ps1", "package.ps1",
         })
         {
-            string text = Read(script);
-            Assert.Contains("sources/shaderincludes", text);
-            Assert.Contains("assets/game/shaderincludes", text);
+            Assert.Contains(expected, packagers);
         }
     }
 

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..9253b0f 100644
+index 67feafa..fa55f21 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -294,14 +294,14 @@ index 67feafa..9253b0f 100644
 +		// pass - including the LiquidDepth prepass in the Before stage - sees one
 +		// consistent snapshot and the same jitter.
 +		FrameBufferRef primaryFb = ((Platform.FrameBuffers != null && Platform.FrameBuffers.Count > 0) ? Platform.FrameBuffers[0] : null);
-+		OptimumTemporal.Frame.Advance(dt * 1000f, (primaryFb != null) ? primaryFb.Width : Width, (primaryFb != null) ? primaryFb.Height : Height, OptimumConfig.EffectiveRenderScale, MainCamera.ZNear, MainCamera.ZFar, MainCamera.Fov, EntityPlayer?.CameraPos, shUniforms);
++		OptimumTemporal.Frame.Advance(dt * 1000f, (primaryFb != null) ? primaryFb.Width : Width, (primaryFb != null) ? primaryFb.Height : Height, OptimumConfig.EffectiveRenderScale, MainCamera.ZNear, MainCamera.ZFar, MainCamera.Fov, shUniforms);
 +		OptimumTemporal.Frame.JitterActive = OptimumConfig.EffectiveTaa || OptimumConfig.TaaJitterDev;
  		TriggerRenderStage(EnumRenderStage.Before, dt);
  		Platform.GlEnableDepthTest();
  		Platform.GlDepthMask(flag: true);
  		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
  		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
-@@ -1140,10 +1252,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1140,10 +1252,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
  		GlMatrixModeModelView();
@@ -313,13 +313,20 @@ index 67feafa..9253b0f 100644
 +		// culls and draws with. Recorded here rather than relying on Set3DProjection
 +		// alone, which vanilla happens to call once per frame from the sky renderer.
 +		OptimumTemporal.Frame.CaptureCamera(MainCamera.CameraMatrix, MainCamera.CameraMatrixOrigin);
++		// The camera position and playerpos belong here, not to Advance: PlayerCamera
++		// writes both from inside the Before render stage, which has already run by
++		// now but had not when Advance was called. Capturing them there gave every
++		// writer a camera delta and a previous playerpos one frame behind the camera
++		// matrices frozen on the line above, and the difference between the two is
++		// the camera's acceleration - visible as motion on surfaces that never moved.
++		OptimumTemporal.Frame.CaptureCameraPosition(EntityPlayer?.CameraPos, shUniforms);
 +		OptimumTemporal.Frame.RecordProjection(EnumTemporalView.World, top);
  		double[] top2 = api.Render.MvMatrix.Top;
  		for (int i = 0; i < 16; i++)
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1180,10 +1299,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1180,10 +1306,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		TriggerRenderStage(EnumRenderStage.AfterOIT, dt);
  	}
  
@@ -335,7 +342,7 @@ index 67feafa..9253b0f 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1544,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1420,10 +1551,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -350,7 +357,7 @@ index 67feafa..9253b0f 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1693,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1700,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -383,7 +390,7 @@ index 67feafa..9253b0f 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2261,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2268,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -408,7 +415,7 @@ index 67feafa..9253b0f 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2690,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2697,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -422,7 +429,7 @@ index 67feafa..9253b0f 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3681,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3688,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

@@ -71,6 +71,116 @@ public class ShaderTranslationTests
         }
     }
 
+    /// <summary>
+    /// The corpus rows above all carry USEOIT 1 and no ALLOWDEPTHOFFSET, because
+    /// those are the settings every program shares. The TAA motion writers live
+    /// in exactly the configurations they leave out:
+    ///
+    /// - entityanimated's writer is inside `#if USEOIT == 0`, which only the
+    ///   opaque Entityanimated registration and ModSystemFpHands' hand shader
+    ///   produce, so the corpus has never translated the entity writer at all -
+    ///   including its second AnimationPrev uniform block, the only place the
+    ///   backend meets two named blocks in one program;
+    /// - the two-argument writer that stamps `gl_FragCoord.z + depthOffset` into
+    ///   the motion alpha only exists when ALLOWDEPTHOFFSET is stamped, which
+    ///   ModSystemFpHands does for its private copies of entityanimated and
+    ///   standard - the first-person hands and the first-person item.
+    ///
+    /// Those are shipped configurations, so they belong in the translation gate.
+    /// </summary>
+    [SkippableFact]
+    public void MotionWritersTranslateInTheConfigurationsTheClientReallyBuilds()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+
+        var files = ShaderCorpus.LoadShaderFiles();
+        var includes = ShaderCorpus.LoadIncludes();
+
+        // (program, variant) pairs the client produces with TAA on.
+        var cases = new List<(string Program, ShaderCorpus.ShaderVariant Variant)>();
+        foreach (int ssao in new[] { 0, 2 })
+        {
+            int location = ssao > 0 ? 4 : 2;
+
+            cases.Add(("entityanimated", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"entity-opaque-ssao{ssao}",
+                UseOit = 0, SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+            }));
+            cases.Add(("entityanimated", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"entity-fphands-ssao{ssao}",
+                UseOit = 0, SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+                ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
+            }));
+            cases.Add(("standard", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"standard-fpitem-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+                ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
+            }));
+        }
+
+        using var compiler = new ShaderCompiler();
+        var failures = new List<string>();
+
+        foreach ((string program, ShaderCorpus.ShaderVariant variant) in cases)
+        {
+            var stages = ShaderCorpus.BuildProgram(program, files, includes, variant);
+            Assert.NotEmpty(stages);
+
+            TranslatedProgram result = ShaderTranslator.Translate(stages, compiler);
+            if (!result.Success)
+            {
+                failures.Add($"[{variant.Name}] {program}: {string.Join("; ", result.Errors)}");
+                continue;
+            }
+
+            foreach (KeyValuePair<EnumShaderType, byte[]> stage in result.Spirv)
+            {
+                Assert.True(stage.Value.Length >= 20 && stage.Value.Length % 4 == 0,
+                    $"{variant.Name} {program} {stage.Key}: malformed SPIR-V");
+                Assert.Equal(0x07230203u, BitConverter.ToUInt32(stage.Value, 0));
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
+    }
+
+    /// <summary>
+    /// The writer only means anything if it is actually in the translated source.
+    /// A define typo or a stray guard would leave every assertion above passing
+    /// on a shader that emits no motion at all.
+    /// </summary>
+    [SkippableFact]
+    public void TheEntityMotionWriterSurvivesThePreprocessorInTheOpaqueConfiguration()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+
+        var files = ShaderCorpus.LoadShaderFiles();
+        var includes = ShaderCorpus.LoadIncludes();
+        var variant = new ShaderCorpus.ShaderVariant
+        {
+            Name = "entity-opaque", UseOit = 0, SsaoLevel = 2, DynLights = 4,
+            TaaMotion = 1, TaaMotionLocation = 4,
+            ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
+        };
+
+        var stages = ShaderCorpus.BuildProgram("entityanimated", files, includes, variant);
+
+        string vertex = stages.Single(s => s.Stage == EnumShaderType.VertexShader).Code;
+        Assert.Contains("PrevElementTransforms", vertex);
+        Assert.Contains("previousWarpState()", vertex);
+        Assert.Contains("applyVertexWarpingState", vertex);
+
+        string fragment = stages.Single(s => s.Stage == EnumShaderType.FragmentShader).Code;
+        Assert.Contains("outMotion", fragment);
+        Assert.Contains("gl_FragCoord.z + depthOffset", fragment);
+    }
+
     [SkippableFact]
     public void TranslatedProgramsProduceValidSpirvForEveryStage()
     {

@@ -341,6 +341,17 @@ try {
         Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
     }
 
+    # Apply optimized shader includes (TAA P3). Same asset-name override
+    # mechanism as shaders, separate directory - without it the shipped
+    # chunkopaque/chunktopsoil/entityanimated/standard/instanced overrides call
+    # WarpState overloads the vanilla vertexwarp.vsh does not declare, and every
+    # one of those programs fails to compile with TAA on.
+    $shaderIncSrc = Join-Path $repoRoot 'sources/shaderincludes'
+    $shaderIncDst = Join-Path $stageDir 'assets/game/shaderincludes'
+    if (Test-Path $shaderIncSrc) {
+        Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
+    }
+
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
     # Read/write explicitly as UTF-8 via .NET, not Get-Content/Set-Content:
     # Windows PowerShell 5.1 (what the Windows installer launches) defaults

@@ -43,7 +43,9 @@ public class TaaInstancedMotionHistoryTests
     private static void AdvanceFrame()
     {
         OptimumTemporalFrame frame = OptimumTemporal.Frame;
-        frame.Advance(16.6f, 1920, 1080, 1f, 0.1f, 3000f, 1.2f, new Vec3d(0, 0, 0), new DefaultShaderUniforms());
+        var uniforms = new DefaultShaderUniforms();
+        frame.Advance(16.6f, 1920, 1080, 1f, 0.1f, 3000f, 1.2f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(0, 0, 0), uniforms);
         // A view is only usable as "previous" once it has been captured, which is
         // what Set3DProjection does in the client.
         frame.RecordProjection(EnumTemporalView.World, IdentityProjection);
