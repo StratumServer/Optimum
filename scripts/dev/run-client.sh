@@ -13,10 +13,18 @@ REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 CLIENT="$REPO/.vanilla/win-x64/vintagestory"
 LOG="${CLIENT_LOG:-/tmp/optimum-client.log}"
 if [[ -n "${RENDERER:-}" ]]; then
-  python3 - "$DATA_PATH/ModConfig/optimum.json" "$RENDERER" <<'PY'
+  # Check the status explicitly - set -e would not help here anyway, and a failed
+  # rewrite (missing, invalid or unwritable optimum.json) must abort the launch:
+  # starting the client regardless silently runs it on the old renderer, which is
+  # exactly the false verification this script exists to prevent.
+  if ! python3 - "$DATA_PATH/ModConfig/optimum.json" "$RENDERER" <<'PY'
 import json,sys
 p,r=sys.argv[1],sys.argv[2]; d=json.load(open(p)); d['Renderer']=r; json.dump(d,open(p,'w'),indent=2)
 PY
+  then
+    echo "failed to set Renderer=$RENDERER in $DATA_PATH/ModConfig/optimum.json; not launching" >&2
+    exit 1
+  fi
 fi
 cd "$CLIENT" || exit 1
 setsid prime-run dotnet Vintagestory.dll --dataPath "$DATA_PATH" -o "$WORLD" > "$LOG" 2>&1 < /dev/null &

@@ -349,6 +349,9 @@ try {
     $shaderIncSrc = Join-Path $repoRoot 'sources/shaderincludes'
     $shaderIncDst = Join-Path $stageDir 'assets/game/shaderincludes'
     if (Test-Path $shaderIncSrc) {
+        # The vanilla tree may not have this directory - Copy-Item into a missing
+        # destination writes a file named after it instead of the includes.
+        New-Item -ItemType Directory -Force -Path $shaderIncDst | Out-Null
         Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
     }
 
@@ -418,7 +421,8 @@ try {
         '.optimum/donors/VSSurvivalMod.Donor.dll',
         '.optimum/vanilla/Mods/VSEssentials.dll',
         '.optimum/vanilla/Mods/VSSurvivalMod.dll',
-        '.optimum/standalone-install'
+        '.optimum/standalone-install',
+        'assets/game/shaderincludes/vertexwarp.vsh'
     )) {
         if (-not (Test-Path (Join-Path $stageDir $requiredStageFile))) {
             throw "Required package file not found: $requiredStageFile"

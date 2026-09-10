@@ -207,6 +207,9 @@ fi
 SHADER_INC_SRC="$REPO_ROOT/sources/shaderincludes"
 SHADER_INC_DST="$APP_DIR/assets/game/shaderincludes"
 if [[ -d "$SHADER_INC_SRC" ]]; then
+    # The vanilla tree may not have this directory at all - cp into a missing
+    # destination would drop the includes silently.
+    mkdir -p "$SHADER_INC_DST"
     find "$SHADER_INC_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_INC_DST/" \;
 fi
 

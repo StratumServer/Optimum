@@ -126,6 +126,9 @@ try {
     $shaderIncSrc = Join-Path $repoRoot 'sources/shaderincludes'
     $shaderIncDst = Join-Path $stageDir 'assets/game/shaderincludes'
     if (Test-Path $shaderIncSrc) {
+        # The vanilla tree may not have this directory - Copy-Item into a missing
+        # destination writes a file named after it instead of the includes.
+        New-Item -ItemType Directory -Force -Path $shaderIncDst | Out-Null
         Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
     }
 

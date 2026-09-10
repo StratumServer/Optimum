@@ -485,6 +485,16 @@ public class TaaTerrainMotionCoverageTests
                 Path.GetFileName(path) + " overlays sources/shaders but not sources/shaderincludes");
             Assert.True(text.Contains("assets/game/shaderincludes", StringComparison.Ordinal),
                 Path.GetFileName(path) + " has no assets/game/shaderincludes destination");
+
+            // The vanilla client tree has no shaderincludes directory of its own,
+            // so the destination has to be created before the copy: cp into a
+            // missing directory fails and Copy-Item writes a single file named
+            // after the directory instead - either way the includes never ship.
+            bool createsDestination = Path.GetExtension(path) == ".ps1"
+                ? text.Contains("New-Item -ItemType Directory -Force -Path $shaderIncDst", StringComparison.Ordinal)
+                : text.Contains("mkdir -p \"$SHADER_INC_DST\"", StringComparison.Ordinal);
+            Assert.True(createsDestination,
+                Path.GetFileName(path) + " copies shader includes without creating the destination directory");
         }
 
         // A guard on the guard: if the enumeration ever finds nothing, the loop
@@ -497,6 +507,12 @@ public class TaaTerrainMotionCoverageTests
         {
             Assert.Contains(expected, packagers);
         }
+
+        // The Windows packager asserts its staged tree before sealing it; the
+        // include belongs in that list, so a silently skipped overlay fails the
+        // package instead of shipping.
+        Assert.Contains("'assets/game/shaderincludes/vertexwarp.vsh'",
+            File.ReadAllText(PatchReader.FindRepositoryFile("scripts/package.ps1")));
     }
 
     /// <summary>
