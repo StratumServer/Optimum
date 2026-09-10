@@ -8,11 +8,13 @@
 //
 // Conventions (see TAA-PLAN.md): motion = previousPixel - currentUnjitteredPixel
 // in render pixels; a raster pixel centre sits at unjittered position
-// centre - jitterPx; history is stored at unjittered pixel centres.
+// centre - jitterPx; history is stored at unjittered pixel centres; the
+// motion attachment's alpha is the writer's WINDOW depth in [0,1] (the same
+// space as the depth attachment), not NDC depth.
 
 uniform sampler2D sceneTex;      // Primary colour 0, jittered
 uniform sampler2D glowTex;       // Primary colour 1, jittered
-uniform sampler2D motionTex;     // rg mv px, b reactive, a writerDepth (0 = unwritten)
+uniform sampler2D motionTex;     // rg mv px, b reactive, a writerDepth [0,1] (0 = unwritten)
 uniform sampler2D depthTex;      // Primary depth, [0,1], 0 = near
 uniform sampler2D historyColor;  // previous resolve colour
 uniform sampler2D historyGlow;   // previous resolve glow
@@ -45,12 +47,17 @@ vec3 yCoCgToRgb(vec3 c) {
 }
 
 // Intersects the history colour with the neighbourhood box (clip, not clamp).
-vec3 clipToBox(vec3 boxMin, vec3 boxMax, vec3 history) {
+// `keep` reports how much of the history survived the clip: 1 when it was
+// already inside the box, 1/maxUnit when it had to be pulled in. The alpha
+// channel has no neighbourhood box of its own, so it is rectified toward the
+// current alpha by this same factor instead of drifting unchecked.
+vec3 clipToBox(vec3 boxMin, vec3 boxMax, vec3 history, out float keep) {
 	vec3 centre = 0.5 * (boxMax + boxMin);
 	vec3 extent = 0.5 * (boxMax - boxMin) + 1e-5;
 	vec3 offset = history - centre;
 	vec3 unit = abs(offset / extent);
 	float maxUnit = max(unit.x, max(unit.y, unit.z));
+	keep = maxUnit > 1.0 ? 1.0 / maxUnit : 1.0;
 	return maxUnit > 1.0 ? centre + offset / maxUnit : history;
 }
 
@@ -104,9 +111,11 @@ void main(void)
 		vec3 ycc = rgbToYCoCg(c.rgb);
 		m1 += ycc; m2 += ycc * ycc;
 		boxMin = min(boxMin, ycc); boxMax = max(boxMax, ycc);
-		// Reconstruct at the unjittered pixel centre: this tap sits at
-		// (x, y) + jitter relative to it. Blackman-Harris over radius ~1.
-		vec2 d = vec2(x, y) + jitterPx;
+		// Reconstruct at this pixel's unjittered centre. The tap's raster
+		// centre (pixel + (x,y) + 0.5) sits at unjittered position
+		// pixelCentre + (x,y) - jitterPx, so its offset from the
+		// reconstruction point is (x, y) - jitterPx. Blackman-Harris, radius ~1.
+		vec2 d = vec2(x, y) - jitterPx;
 		float r = length(d);
 		float w = r < 1.0 ? (0.35875 + 0.48829 * cos(3.14159265 * r) + 0.14128 * cos(2.0 * 3.14159265 * r) + 0.01168 * cos(3.0 * 3.14159265 * r)) : 0.0;
 		filtered += c * w; filteredWeight += w;
@@ -125,12 +134,18 @@ void main(void)
 	vec3 world = worldH.xyz / max(abs(worldH.w), 1e-6) * sign(worldH.w);
 	float linearDepth = -(viewMatrix * vec4(world, 1.0)).z;
 
+	vec4 glow = texelFetch(glowTex, pixel, 0);
+
 	// ---- motion: written vector when its depth matches, else camera reprojection
 	vec4 motion = texelFetch(motionTex, pixel, 0);
 	float reactive = clamp(motion.b, 0.0, 1.0);
 	vec2 currentUnjittered = pixelCentre - jitterPx;
 	vec2 mv;
-	bool written = motion.a > 0.0 && abs(motion.a - depth) < 1e-4;
+	// motion.a is the writer's window depth in [0,1], stored in an RGBA16F
+	// attachment: half precision alone costs ~5e-4 near 1.0, so the tolerance
+	// has to scale with the value and keep a floor for depths near the near
+	// plane. A fixed 1e-4 rejected every legitimate writer past mid-range.
+	bool written = motion.a > 0.0 && abs(motion.a - depth) <= max(2e-4, 8e-4 * depth);
 	if (written)
 	{
 		mv = motion.rg;
@@ -138,11 +153,16 @@ void main(void)
 	else
 	{
 		vec4 prevClip = prevViewProj * vec4(world + cameraDelta, 1.0);
-		if (prevClip.w <= 1e-6) { outColor = current; outGlow = texelFetch(glowTex, pixel, 0); outDepth = vec4(linearDepth); return; }
+		if (prevClip.w <= 1e-6) { outColor = current; outGlow = glow; outDepth = vec4(linearDepth); return; }
 		vec2 prevPixel = (prevClip.xy / prevClip.w * 0.5 + 0.5) * renderSize;
 		mv = prevPixel - currentUnjittered;
 	}
-	vec2 historyUv = (currentUnjittered + mv) * invSize;
+	// The history grid is the unjittered pixel-centre grid (see the
+	// reconstruction kernel above), so the lookup anchor is pixelCentre; mv is
+	// a displacement field, and subtracting the jitter here would re-sample the
+	// converged history at a different sub-pixel offset every frame - exactly
+	// the wobble jitter is supposed to remove.
+	vec2 historyUv = (pixelCentre + mv) * invSize;
 
 	// ---- history sample and rejection
 	float alpha = blendAlpha;
@@ -152,24 +172,46 @@ void main(void)
 	vec4 history = sampleCatmullRom(historyColor, historyUv);
 	vec4 historyGlowSample = texture(historyGlow, historyUv);
 	float historyLinear = texture(historyDepth, historyUv).r;
+	// A history slot that was never written (freshly allocated after a
+	// framebuffer rebuild) or that caught a division blow-up holds NaN/Inf,
+	// and NaN survives any weighted blend, poisoning the pixel forever. Treat
+	// it exactly like a reset: this frame's own values, full current weight.
+	if (any(isnan(history)) || any(isinf(history))
+		|| any(isnan(historyGlowSample)) || any(isinf(historyGlowSample))
+		|| isnan(historyLinear) || isinf(historyLinear))
+	{
+		history = current;
+		historyGlowSample = glow;
+		historyLinear = linearDepth;
+		alpha = 1.0;
+	}
 	// Disocclusion: the surface seen last frame at that location must be at a
 	// comparable distance. Tolerance grows with distance; camera translation
-	// along the view axis is covered by the relative term.
+	// along the view axis is covered by the relative term. A disoccluded pixel
+	// has no valid history at all, so it is rejected outright - half-rejecting
+	// it just blends in whatever surface used to be in front.
 	float depthTolerance = 0.5 + 0.08 * linearDepth;
-	if (abs(historyLinear - linearDepth) > depthTolerance) alpha = max(alpha, 0.5);
+	if (abs(historyLinear - linearDepth) > depthTolerance) alpha = 1.0;
 	alpha = max(alpha, reactive);
 
 	// ---- rectify and blend in YCoCg with luminance weighting
-	vec3 histYcc = clipToBox(clipMin, clipMax, rgbToYCoCg(history.rgb));
+	float clipKeep = 1.0;
+	vec3 histYcc = clipToBox(clipMin, clipMax, rgbToYCoCg(history.rgb), clipKeep);
 	vec3 curYcc = rgbToYCoCg(current.rgb);
 	float wCur = alpha / (1.0 + curYcc.x);
 	float wHist = (1.0 - alpha) / (1.0 + histYcc.x);
 	vec3 resolvedYcc = (curYcc * wCur + histYcc * wHist) / max(wCur + wHist, 1e-5);
 	vec3 resolved = max(yCoCgToRgb(resolvedYcc), vec3(0.0));
-	float resolvedAlpha = mix(history.a, current.a, alpha);
+	// Rectify the history alpha by the same factor the colour clip applied,
+	// then blend it with the same weight, so scene alpha cannot drift away
+	// from the colour it belongs to.
+	float histAlpha = mix(current.a, history.a, clipKeep);
+	float resolvedAlpha = mix(histAlpha, current.a, alpha);
 
-	vec4 glow = texelFetch(glowTex, pixel, 0);
-	vec4 resolvedGlow = mix(historyGlowSample, glow, max(alpha, 0.2));
+	// Glow blends with the same alpha as colour: a separate 0.2 floor made the
+	// two signals converge at different rates, so bloom lagged or led the image
+	// it is derived from.
+	vec4 resolvedGlow = mix(historyGlowSample, glow, alpha);
 
 	outColor = vec4(resolved, resolvedAlpha);
 	outGlow = resolvedGlow;

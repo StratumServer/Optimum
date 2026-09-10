@@ -328,6 +328,238 @@ public class TaaResolveTests
         }
     }
 
+    /// <summary>
+    /// With non-zero jitter, the per-pixel Blackman-Harris reconstruction in
+    /// taa-resolve.fsh (the <c>filtered</c>/<c>filteredWeight</c> loop) is
+    /// supposed to undo the raster displacement: a scene that was rendered
+    /// with jitterPx=(+0.5,0) - meaning its texel at raster column x holds
+    /// the unjittered scene's value at (x + 0.5) - jitterPx, per the file's
+    /// own convention comment - should reconstruct to the same edge position
+    /// as a scene rendered with zero jitter that already holds the unjittered
+    /// values directly. Both runs use resetHistory=1 so the output is exactly
+    /// <c>current</c>, isolating the reconstruction step from history/blend.
+    ///
+    /// The edge is encoded as one-pixel-wide linear coverage ramp (not a hard
+    /// step) so a subpixel shift is representable in a texel grid at all;
+    /// the crossing point is then recovered from the *output* by a linear
+    /// interpolation against the 0.5 threshold - a "column-average centroid"
+    /// since the scene is flat in y.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void JitteredReconstructionMatchesTheUnjitteredStaticEdge()
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        using (context)
+        using (var commands = new VulkanCommands(context!))
+        using (var textures = new TextureManager(context!, commands))
+        {
+            var state = new GlStateTracker();
+            using var targets = new RenderTargetManager(context!, textures, state);
+            using var pipelines = new GraphicsPipelineCache(context!);
+            using var compiler = new ShaderCompiler();
+            using var descriptors = new DescriptorCache(context!);
+            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+
+            const float edgeCentre = 16f;
+            // One-pixel-wide linear coverage ramp around `pos`, standing in
+            // for a hard edge at edgeCentre that a discrete texel grid can
+            // still represent a subpixel shift of.
+            float EdgeAt(float pos) => Math.Clamp(pos - edgeCentre + 0.5f, 0f, 1f);
+
+            float centroidJitterZero = ResolveEdgeCentroid(
+                context!, commands, textures, state, targets, pipelines, program, descriptors,
+                jitterPx: (0f, 0f),
+                // Baseline: texel at column x already holds the unjittered
+                // value at its own pixel centre.
+                sceneAt: x => EdgeAt(x + 0.5f));
+
+            float centroidJitteredHalfPx = ResolveEdgeCentroid(
+                context!, commands, textures, state, targets, pipelines, program, descriptors,
+                jitterPx: (0.5f, 0f),
+                // Jittered render: texel at column x holds the unjittered
+                // value at (x + 0.5) - jitterPx, per the file's convention.
+                sceneAt: x => EdgeAt(x + 0.5f - 0.5f));
+
+            _output.WriteLine($"centroid jitter=0: {centroidJitterZero}, centroid jitter=+0.5px: {centroidJitteredHalfPx}");
+            Assert.True(Math.Abs(centroidJitteredHalfPx - centroidJitterZero) < 0.25f,
+                $"reconstructed edge moved by {Math.Abs(centroidJitteredHalfPx - centroidJitterZero)}px " +
+                "with the jitter; it should not move at all");
+
+            ValidationAssert.NoErrors(messages);
+        }
+    }
+
+    /// <summary>
+    /// One resolve, reading back the reconstructed edge's crossing column
+    /// (0.5-threshold linear interpolation across the column averages) for
+    /// <see cref="JitteredReconstructionMatchesTheUnjitteredStaticEdge" />.
+    /// </summary>
+    private static unsafe float ResolveEdgeCentroid(
+        VulkanContext context, VulkanCommands commands, TextureManager textures, GlStateTracker state,
+        RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
+        DescriptorCache descriptors, (float x, float y) jitterPx, Func<float, float> sceneAt)
+    {
+        var inputs = CreateInputSet(textures);
+        UploadRgba16F(textures, inputs.SceneTex,
+            (x, _) => sceneAt(x), (x, _) => sceneAt(x), (x, _) => sceneAt(x), (_, _) => 1f);
+        UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+        UploadFlatR32F(textures, inputs.DepthTex, 0.5f);
+        UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, 0.5f);
+        UploadFlatRgba16F(textures, inputs.HistoryColor, 0f, 0f, 0f, 1f);
+        UploadFlatRgba8(textures, inputs.HistoryGlow, 0, 0, 0, 255);
+        UploadFlatR32F(textures, inputs.HistoryDepth, 0.5f);
+
+        TaaAttachmentSet output = CreateAttachmentSet(textures, targets);
+        var uniforms = new TaaUniforms { ResetHistory = 1, JitterPx = { [0] = jitterPx.x, [1] = jitterPx.y } };
+
+        ResolveOnce(context, commands, textures, state, targets, pipelines, program, descriptors,
+            inputs, uniforms, output);
+
+        byte[] colorBytes = ReadTextureBytes(context, commands, textures, output.Color, 8);
+        var columnAverage = new float[Size];
+        for (int x = 0; x < Size; x++)
+        {
+            float sum = 0f;
+            for (int y = 0; y < Size; y++) sum += ReadHalf(colorBytes, x, y, 0, 8);
+            columnAverage[x] = sum / Size;
+        }
+        return FindThresholdCrossing(columnAverage, 0.5f);
+    }
+
+    /// <summary>
+    /// With LINEAR history sampling and a uniform +0.5px motion, a
+    /// one-texel-wide bright column in <c>historyGlow</c> lands, in texel
+    /// space, exactly on the boundary between two texels for two adjacent
+    /// output columns: raster column x0 samples 50% texel x0 / 50% texel
+    /// x0+1, and column x0-1 samples 50% texel x0-1 / 50% texel x0. Both
+    /// should read half the bright value if - and only if - the device is
+    /// actually doing bilinear filtering on that sampler, not point
+    /// sampling. <c>glowTex</c>'s resolve path (<c>mix(historyGlowSample,
+    /// glow, alpha)</c>) has no neighbourhood clip of its own, unlike colour,
+    /// so it isolates the sampler behaviour cleanly.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void LinearHistorySamplingSpreadsAOnePixelLineOverTwoColumns()
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        using (context)
+        using (var commands = new VulkanCommands(context!))
+        using (var textures = new TextureManager(context!, commands))
+        {
+            var state = new GlStateTracker();
+            using var targets = new RenderTargetManager(context!, textures, state);
+            using var pipelines = new GraphicsPipelineCache(context!);
+            using var compiler = new ShaderCompiler();
+            using var descriptors = new DescriptorCache(context!);
+            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+
+            const int brightColumn = 16;
+            var inputs = CreateInputSet(textures);
+            UploadFlatRgba16F(textures, inputs.SceneTex, 0f, 0f, 0f, 1f);
+            UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+            UploadFlatR32F(textures, inputs.DepthTex, 0.5f);
+            // Written +0.5px motion (matches depth), so historyUv reads
+            // (pixelCentre + 0.5) * invSize - a half-texel shift.
+            UploadFlatRgba16F(textures, inputs.MotionTex, 0.5f, 0f, 0f, 0.5f);
+            UploadFlatRgba16F(textures, inputs.HistoryColor, 0f, 0f, 0f, 1f);
+            UploadRgba8(textures, inputs.HistoryGlow,
+                (x, _) => x == brightColumn ? (byte)255 : (byte)0,
+                (x, _) => x == brightColumn ? (byte)255 : (byte)0,
+                (x, _) => x == brightColumn ? (byte)255 : (byte)0,
+                (_, _) => (byte)255);
+            UploadFlatR32F(textures, inputs.HistoryDepth, 0.5f);
+
+            TaaAttachmentSet output = CreateAttachmentSet(textures, targets);
+            // Heavy history weight so resolvedGlow ~= historyGlowSample.
+            var uniforms = new TaaUniforms { ResetHistory = 0, BlendAlpha = 0.02f };
+
+            ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
+                inputs, uniforms, output);
+
+            byte[] glowBytes = ReadTextureBytes(context!, commands, textures, output.Glow, 4);
+            float below = ReadByteChannel(glowBytes, brightColumn - 1, (int)Size / 2, 0);
+            float at = ReadByteChannel(glowBytes, brightColumn, (int)Size / 2, 0);
+            float farBackground = ReadByteChannel(glowBytes, brightColumn - 8, (int)Size / 2, 0);
+
+            _output.WriteLine($"column {brightColumn - 1}={below}, column {brightColumn}={at}, background={farBackground}");
+
+            // Both straddling columns should read roughly half the bright
+            // value - not one at full brightness and the other at zero,
+            // which is what point/nearest sampling would produce.
+            Assert.InRange(below, 0.30f, 0.70f);
+            Assert.InRange(at, 0.30f, 0.70f);
+            Assert.True(Math.Abs(below - at) < 0.15f,
+                $"the two straddling columns should read close to equal (bilinear midpoint), got {below} vs {at}");
+            Assert.True(farBackground < 0.1f, "a column away from the line should stay near background");
+
+            ValidationAssert.NoErrors(messages);
+        }
+    }
+
+    /// <summary>
+    /// A NaN anywhere in the history colour sample must be treated exactly
+    /// like resetHistory=1: the shader's own comment says NaN "survives any
+    /// weighted blend, poisoning the pixel forever", so it is detected and
+    /// swapped for the current frame's values with full current weight. Here
+    /// resetHistory stays 0 and blendAlpha is a normal 0.1 - only the NaN
+    /// planted in the history colour texture should force the reset.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void NanInHistoryIsTreatedAsAReset()
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        using (context)
+        using (var commands = new VulkanCommands(context!))
+        using (var textures = new TextureManager(context!, commands))
+        {
+            var state = new GlStateTracker();
+            using var targets = new RenderTargetManager(context!, textures, state);
+            using var pipelines = new GraphicsPipelineCache(context!);
+            using var compiler = new ShaderCompiler();
+            using var descriptors = new DescriptorCache(context!);
+            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+
+            const float currentR = 0.65f, currentG = 0.4f, currentB = 0.25f;
+            var inputs = CreateInputSet(textures);
+            UploadFlatRgba16F(textures, inputs.SceneTex, currentR, currentG, currentB, 1f);
+            UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+            UploadFlatR32F(textures, inputs.DepthTex, 0.5f);
+            UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, 0.5f);
+            // NaN in history colour - nothing else in the history is broken.
+            UploadFlatRgba16F(textures, inputs.HistoryColor, float.NaN, float.NaN, float.NaN, 1f);
+            UploadFlatRgba8(textures, inputs.HistoryGlow, 0, 0, 0, 255);
+            UploadFlatR32F(textures, inputs.HistoryDepth, 0.5f);
+
+            TaaAttachmentSet output = CreateAttachmentSet(textures, targets);
+            var uniforms = new TaaUniforms { ResetHistory = 0, BlendAlpha = 0.1f };
+
+            ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
+                inputs, uniforms, output);
+
+            byte[] colorBytes = ReadTextureBytes(context!, commands, textures, output.Color, 8);
+            for (int y = 0; y < Size; y++)
+            for (int x = 0; x < Size; x++)
+            {
+                float r = ReadHalf(colorBytes, x, y, 0, 8);
+                float g = ReadHalf(colorBytes, x, y, 1, 8);
+                float b = ReadHalf(colorBytes, x, y, 2, 8);
+                Assert.False(float.IsNaN(r) || float.IsNaN(g) || float.IsNaN(b),
+                    $"NaN leaked into the output at ({x},{y})");
+                Assert.InRange(r, currentR - 0.02f, currentR + 0.02f);
+                Assert.InRange(g, currentG - 0.02f, currentG + 0.02f);
+                Assert.InRange(b, currentB - 0.02f, currentB + 0.02f);
+            }
+
+            ValidationAssert.NoErrors(messages);
+        }
+    }
+
     // ------------------------------------------------------------------ setup
 
     private static ShaderProgramResources LoadProgram(
@@ -621,6 +853,26 @@ public class TaaResolveTests
         }
     }
 
+    private static unsafe void UploadRgba8(
+        TextureManager textures, int textureId,
+        Func<int, int, byte> r, Func<int, int, byte> g, Func<int, int, byte> b, Func<int, int, byte> a)
+    {
+        var data = new byte[Size * Size * 4];
+        for (int y = 0; y < Size; y++)
+        for (int x = 0; x < Size; x++)
+        {
+            int i = (y * (int)Size + x) * 4;
+            data[i] = r(x, y);
+            data[i + 1] = g(x, y);
+            data[i + 2] = b(x, y);
+            data[i + 3] = a(x, y);
+        }
+        fixed (byte* pixels = data)
+        {
+            textures.Upload(textureId, 0, 0, 0, Size, Size, (IntPtr)pixels, 4);
+        }
+    }
+
     private static unsafe void UploadFlatR32F(TextureManager textures, int textureId, float value)
     {
         var data = new float[Size * Size];
@@ -664,6 +916,30 @@ public class TaaResolveTests
     {
         int offset = (y * (int)Size + x) * bytesPerPixel + channel * 2;
         return (float)BitConverter.ToHalf(data, offset);
+    }
+
+    private static float ReadByteChannel(byte[] data, int x, int y, int channel) =>
+        data[(y * (int)Size + x) * 4 + channel] / 255f;
+
+    /// <summary>
+    /// Linear interpolation between the two samples of a monotonic-ish
+    /// array that straddle <paramref name="threshold" />, returning the
+    /// fractional index where the crossing happens.
+    /// </summary>
+    private static float FindThresholdCrossing(float[] values, float threshold)
+    {
+        for (int i = 1; i < values.Length; i++)
+        {
+            bool crosses = (values[i - 1] < threshold && values[i] >= threshold)
+                || (values[i - 1] > threshold && values[i] <= threshold);
+            if (crosses)
+            {
+                float denom = values[i] - values[i - 1];
+                float t = Math.Abs(denom) > 1e-6f ? (threshold - values[i - 1]) / denom : 0.5f;
+                return (i - 1) + t;
+            }
+        }
+        throw new InvalidOperationException("no threshold crossing found");
     }
 
     /// <summary>Average red channel over columns [startX, endX) across every row.</summary>

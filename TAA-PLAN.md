@@ -94,10 +94,16 @@ never jittered.
   contract records format and "0 = near" convention. Previous linear depth is an R32F resolve output.
 - Motion attachment: RGBA16F on Primary at `MV_LOCATION` (2 without SSAO, 4 with; the OIT layer pass
   uses six outputs on Transparent, which is untouched). `rg = mv`, `b = reactive`, `a = writerDepth`
-  (NDC depth at write time). The resolve treats a pixel as validly written only when `a` matches the
-  final depth buffer within tolerance; otherwise it uses the camera-motion fallback (static-surface
-  reprojection from depth, infinite-direction reprojection where depth == 1). This defines behaviour
-  for unknown writers, mod geometry and sky without relying on undefined unwritten-output contents.
+  = **window depth in [0,1]** at write time - the same space as the depth attachment the resolve
+  compares it against (`gl_FragCoord.z`), never NDC depth. The resolve treats a pixel as validly
+  written only when `a` matches the final depth buffer within
+  `abs(motion.a - depth) <= max(2e-4, 8e-4 * depth)`. The tolerance is half-float aware: the
+  attachment is RGBA16F, whose ULP near 1.0 is already ~5e-4, so a fixed absolute epsilon rejects
+  every legitimate distant writer; the relative term covers precision and the floor covers depths
+  near the near plane. Where the test fails the resolve uses the camera-motion fallback
+  (static-surface reprojection from depth, infinite-direction reprojection where depth == 1). This
+  defines behaviour for unknown writers, mod geometry and sky without relying on undefined
+  unwritten-output contents.
 - Blend state: passes that blend colour (particle cubes, `SystemRenderParticles.cs:132`) set the
   motion attachment to replace blending via `SetBlendFuncSeparate(MV_LOCATION, 1, 0, 1, 0)` (the
   seam already exposes per-attachment blend; OIT uses it). Fullscreen resolve/sharpen passes set
@@ -239,6 +245,20 @@ finalizer thread by `DeleteUniformBuffer` while the render thread reads it; pre-
   colour and nearest for depth/validity; explicit blend/depth/viewport state. Luma aliases the resolved
   colour; bloom/god rays/Final rebound to resolved textures. This makes every later producer's
   failure visible instead of being confused with raw jitter differences.
+- Ordering in P2 only: the resolve runs at the top of `RenderPostprocessingEffects`, which is
+  *before* the SSAO pass, not after it as Decision 1 requires. SSAO therefore stays exactly where it
+  is - computed from the jittered G-buffer and consumed by Final from `frameBuffers[14]` - and the
+  aux target's `b` (SSAO) channel is allocated but written as zero and read by nobody. Resolving
+  SSAO temporally, and with it moving the SSAO pass in front of the resolve so Final reads a
+  resolved occlusion term, is deferred: it needs the SSAO output routed through the resolve's MRT
+  and Final rebound, which is a separate change from getting colour and glow stable. P2 rebinds only
+  colour and glow (bloom, god rays, Final's `PrimaryScene2D`/`GlowParts2D`); Final's `SsaoScene2D`
+  is untouched.
+- History targets are LINEAR-filtered on colour and glow (the reprojected read is fractional) and
+  NEAREST on linear depth (interpolating across a silhouette invents a depth on neither surface),
+  on both the GL and the device path. A framebuffer rebuild invalidates the history and raises
+  `EnumTemporalResetReason.Resize`; the resolve additionally treats a NaN/Inf history sample as a
+  reset, because freshly allocated slots hold undefined contents and NaN survives any blend.
 - Tests: GPU harness on `WorldRenderPathTests` with synthetic inputs (static convergence, known
   offset reprojection, outlier clip, reset); coverage test for ordering and FXAA-off; in-game the
   whole scene converges with camera-only motion vectors.

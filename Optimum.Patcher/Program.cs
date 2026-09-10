@@ -534,6 +534,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformAbstract", "DisposeIndexBuffer", 0),
     // FSR: allocate the native intermediate and replace the final bilinear blit.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
+    // TAA P2: a framebuffer rebuild throws the history away - the flag and the
+    // temporal contract's reset reason are both set where the swap completes.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RebuildFrameBuffers", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BlitPrimaryToDefault", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
     // R4: pass the configured god-rays sample limit to the post-process shader.
