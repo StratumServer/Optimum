@@ -399,6 +399,11 @@ public class TaaPipelineCoverageTests
         string patcher = Read("Optimum.Patcher/Program.cs");
         Assert.Contains("\"OptimumIsMotionWriter\"", patcher);
         Assert.Contains("\"optimumMotionWriterTypes\"", patcher);
+        // Injected static fields get no initializer (vanilla's static ctor
+        // runs), so the cache must be created lazily; a field initializer
+        // crashed the first entity frame with a NullReferenceException.
+        Assert.DoesNotContain("optimumMotionWriterTypes = new Dictionary", entities);
+        Assert.Contains("optimumMotionWriterTypes ??= new Dictionary<Type, bool>()", entities);
     }
 
     [Fact]

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..4c56324 100644
+index 374f827..4b3b3d3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 @@ -1,15 +1,36 @@
@@ -382,14 +382,16 @@ index 374f827..4c56324 100644
  				entity.IsShadowRendered = true;
  				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
  			}
-@@ -182,6 +474,27 @@ public class SystemRenderEntities : ClientSystem
+@@ -182,6 +474,30 @@ public class SystemRenderEntities : ClientSystem
  
  	public override EnumClientSystemType GetSystemType()
  	{
  		return EnumClientSystemType.Render;
  	}
 +
-+	private static readonly Dictionary<Type, bool> optimumMotionWriterTypes = new Dictionary<Type, bool>();
++	// No field initializer: injected static fields are not initialised by the
++	// transplant (the static constructor is vanilla's), so it is created lazily.
++	private static Dictionary<Type, bool> optimumMotionWriterTypes;
 +
 +	/// <summary>
 +	/// Optimum TAA: whether a renderer's batched opaque draw goes through the
@@ -401,11 +403,12 @@ index 374f827..4c56324 100644
 +	internal static bool OptimumIsMotionWriter(EntityRenderer renderer)
 +	{
 +		Type type = renderer.GetType();
-+		if (!optimumMotionWriterTypes.TryGetValue(type, out bool writes))
++		Dictionary<Type, bool> cache = optimumMotionWriterTypes ??= new Dictionary<Type, bool>();
++		if (!cache.TryGetValue(type, out bool writes))
 +		{
 +			writes = type.Namespace != null && type.Namespace.StartsWith("Vintagestory.GameContent", StringComparison.Ordinal)
 +				&& type.Assembly.GetName().Name == "VSEssentials";
-+			optimumMotionWriterTypes[type] = writes;
++			cache[type] = writes;
 +		}
 +		return writes;
 +	}
