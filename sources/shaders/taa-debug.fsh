@@ -45,7 +45,10 @@ void main(void)
 		{
 			outColor = vec4(0.0, 0.0, 0.0, 1.0);
 		}
-		else if (abs(motion.a - sceneDepth) < 1e-4)
+		// Same tolerance as taa-resolve.fsh's `written` test: half precision on
+		// the RGBA16F alpha costs ~5e-4 near 1.0, so a fixed 1e-4 here reported
+		// mismatches for writers the resolve pass happily accepts.
+		else if (abs(motion.a - sceneDepth) <= max(2e-4, 8e-4 * sceneDepth))
 		{
 			outColor = vec4(0.0, 1.0, 0.0, 1.0);
 		}

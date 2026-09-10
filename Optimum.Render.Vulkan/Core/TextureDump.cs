@@ -155,7 +155,8 @@ internal static class TextureDump
     /// normalisation:
     /// - Colour-shaped float data (R16G16B16A16Sfloat) is clamped to [0,1] and
     ///   scaled to a byte, same as any other colour channel.
-    /// - Single-channel float data (R32Sfloat) is treated as motion-like and
+    /// - Single-channel float data (R32Sfloat and R16Sfloat, the latter read as
+    ///   System.Half) is treated as motion-like and
     ///   mapped from [-64,64] pixels to [0,255], with 128 standing for zero
     ///   displacement - there is no separate "depth" convention to distinguish
     ///   it from motion at this format, so callers dumping true depth should
@@ -167,13 +168,7 @@ internal static class TextureDump
     {
         if (width <= 0 || height <= 0) return false;
 
-        int bytesPerPixel = format switch
-        {
-            Format.R16G16B16A16Sfloat => 8,
-            Format.R32Sfloat => 4,
-            Format.R8Unorm or Format.R8Uint or Format.R8Srgb => 1,
-            _ => 4,
-        };
+        int bytesPerPixel = BytesPerTexel(format);
         if (data.Length < width * height * bytesPerPixel) return false;
 
         try
@@ -206,6 +201,23 @@ internal static class TextureDump
                             row[x * 3] = ColorByte((float)source[x * 4]);
                             row[x * 3 + 1] = ColorByte((float)source[x * 4 + 1]);
                             row[x * 3 + 2] = ColorByte((float)source[x * 4 + 2]);
+                        }
+                        writer.Write(row);
+                    }
+                    break;
+                }
+                case Format.R16Sfloat:
+                {
+                    var halves = MemoryMarshal.Cast<byte, Half>(data);
+                    for (int y = 0; y < height; y++)
+                    {
+                        var source = halves.Slice(y * width, width);
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte value = MotionByte((float)source[x]);
+                            row[x * 3] = value;
+                            row[x * 3 + 1] = value;
+                            row[x * 3 + 2] = value;
                         }
                         writer.Write(row);
                     }
@@ -274,6 +286,23 @@ internal static class TextureDump
             return false;
         }
     }
+
+    /// <summary>
+    /// Bytes per texel for the formats the dump path is expected to see. One
+    /// table serves both the size check and the decode switch, so a format can
+    /// never be sized one way and read another; R16Sfloat sized as 4 bytes made
+    /// every row of an R16f readback start on the wrong texel. Anything
+    /// unrecognised falls back to 4 (8-bit RGBA), the blanket assumption the
+    /// default decode branch makes.
+    /// </summary>
+    public static int BytesPerTexel(Format format) => format switch
+    {
+        Format.R16G16B16A16Sfloat => 8,
+        Format.R32Sfloat => 4,
+        Format.R16Sfloat => 2,
+        Format.R8Unorm or Format.R8Uint or Format.R8Srgb => 1,
+        _ => 4,
+    };
 
     /// <summary>Clamps [0,1] colour data to a byte.</summary>
     private static byte ColorByte(float value) => (byte)(Math.Clamp(value, 0f, 1f) * 255f);
