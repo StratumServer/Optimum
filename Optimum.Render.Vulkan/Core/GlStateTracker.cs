@@ -189,6 +189,7 @@ internal sealed class GlStateTracker
     private readonly Interner<RenderTargetFormats> _targetFormats = new();
 
     private int _cachedBlendId = -1;
+    private int _cachedBlendCount = -1;
     private ColorComponentFlags _colorWriteMask =
         ColorComponentFlags.RBit | ColorComponentFlags.GBit
         | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
@@ -309,6 +310,7 @@ internal sealed class GlStateTracker
 
         for (int i = 0; i < _blend.Length; i++) _blend[i].WriteMask = mask;
         _cachedBlendId = -1;
+        _cachedBlendCount = -1;
     }
 
     /// <summary>
@@ -344,6 +346,7 @@ internal sealed class GlStateTracker
             _blend[i].AlphaOp = BlendOp.Add;
         }
         _cachedBlendId = -1;
+        _cachedBlendCount = -1;
     }
 
     /// <summary>
@@ -359,6 +362,7 @@ internal sealed class GlStateTracker
         _blend[attachment].SrcAlpha = GlEnums.BlendFactorFrom(srcAlpha);
         _blend[attachment].DstAlpha = GlEnums.BlendFactorFrom(dstAlpha);
         _cachedBlendId = -1;
+        _cachedBlendCount = -1;
     }
 
     public void SetAttachmentBlendEquation(int attachment, int equation)
@@ -369,6 +373,7 @@ internal sealed class GlStateTracker
         _blend[attachment].ColorOp = op;
         _blend[attachment].AlphaOp = op;
         _cachedBlendId = -1;
+        _cachedBlendCount = -1;
     }
 
     // ---------------------------------------------------------------------- keys
@@ -379,9 +384,10 @@ internal sealed class GlStateTracker
     /// </summary>
     public int BlendId(int attachmentCount)
     {
-        if (_cachedBlendId >= 0) return _cachedBlendId;
-
         int count = Math.Clamp(attachmentCount, 0, MaxColorAttachments);
+        if (_cachedBlendId >= 0 && _cachedBlendCount == count) return _cachedBlendId;
+
+        _cachedBlendCount = count;
         _cachedBlendId = _blendSignatures.Intern(new BlendSignature(_blend.AsSpan(0, count)));
         return _cachedBlendId;
     }
@@ -408,6 +414,7 @@ internal sealed class GlStateTracker
     {
         for (int i = 0; i < _blend.Length; i++) _blend[i] = AttachmentBlend.Default;
         _cachedBlendId = -1;
+        _cachedBlendCount = -1;
         _colorWriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit
             | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
 

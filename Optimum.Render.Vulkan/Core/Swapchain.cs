@@ -47,6 +47,11 @@ internal sealed unsafe class Swapchain : IDisposable
         _surface = surface;
     }
 
+    /// <remarks>
+    /// Takes ownership of <paramref name="surface"/> on entry: on every failure
+    /// return the surface is destroyed here, and on success the swapchain
+    /// destroys it in <see cref="Dispose"/>. The caller never destroys it.
+    /// </remarks>
     public static bool TryCreate(
         VulkanContext context, SurfaceKHR surface, uint width, uint height, bool vsync,
         out Swapchain? swapchain, out string? failureReason)
@@ -57,11 +62,14 @@ internal sealed unsafe class Swapchain : IDisposable
         if (!context.Api.TryGetInstanceExtension(context.Instance, out KhrSurface surfaceApi))
         {
             failureReason = "VK_KHR_surface unavailable";
+            WindowSurface.Destroy(context, surface);
             return false;
         }
         if (!context.Api.TryGetDeviceExtension(context.Instance, context.Device, out KhrSwapchain swapchainApi))
         {
             failureReason = "VK_KHR_swapchain unavailable";
+            surfaceApi.DestroySurface(context.Instance, surface, null);
+            surfaceApi.Dispose();
             return false;
         }
 
@@ -74,6 +82,9 @@ internal sealed unsafe class Swapchain : IDisposable
         if (!supported)
         {
             failureReason = "the graphics queue family cannot present to this surface";
+            surfaceApi.DestroySurface(context.Instance, surface, null);
+            surfaceApi.Dispose();
+            swapchainApi.Dispose();
             return false;
         }
 

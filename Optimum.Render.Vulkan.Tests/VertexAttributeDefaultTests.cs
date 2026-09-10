@@ -94,7 +94,7 @@ public class VertexAttributeDefaultTests
     [InlineData("vec4", Format.R32G32B32A32Sfloat, 0u)]
     [InlineData("int", Format.R32Sint, 16u)]
     [InlineData("ivec4", Format.R32G32B32A32Sint, 16u)]
-    [InlineData("uint", Format.R32Sint, 16u)]
+    [InlineData("uint", Format.R32Uint, 16u)]
     public void DefaultsUseTheFormatAndHalfMatchingTheDeclaredType(
         string type, Format expectedFormat, uint expectedOffset)
     {
@@ -105,6 +105,16 @@ public class VertexAttributeDefaultTests
         Assert.Equal(7u, attribute.Location);
         Assert.Equal(expectedFormat, attribute.Format);
         Assert.Equal(expectedOffset, attribute.Offset);
+    }
+
+    [Fact]
+    public void UnsignedVectorTypesUseUnsignedFormats()
+    {
+        VertexLayoutDescription merged =
+            VertexLayoutDescription.Empty.WithDefaultsFor(new[] { Slot("x", 7, "uvec3") });
+
+        VertexAttribute attribute = Assert.Single(merged.Attributes);
+        Assert.Equal(Format.R32G32B32Uint, attribute.Format);
     }
 
     /// <summary>

@@ -1,8 +1,8 @@
 diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
-index ce8dd81..7a0905b 100644
+index ce8dd81..18d41f0 100644
 --- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
 +++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
-@@ -73,10 +73,25 @@ namespace FluffyClouds {
+@@ -73,10 +73,26 @@ namespace FluffyClouds {
              program.Uniform("PerceptionEffectIntensity", capi.Render.ShaderUniforms.PerceptionEffectIntensity);
              program.BindTexture2D("depthTex", capi.Render.FrameBuffers[(int)EnumFrameBuffer.Primary].DepthTextureId, 0);
              program.BindTexture2D("cloudMap", map.TextureMap, 8);
@@ -19,6 +19,7 @@ index ce8dd81..7a0905b 100644
 +                capi.Render.RenderMesh(quad);
 +
 +                optimumDevice.SetDepthTest(true);
++                optimumDevice.SetBlend(false, EnumBlendMode.Standard);
 +                program.Stop();
 +                return;
 +            }

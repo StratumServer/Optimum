@@ -122,7 +122,7 @@ internal static class GlEnums
         0x805B => Format.R16G16B16A16Unorm,    // GL_RGBA16, the cloud map's tile data
         0x8051 => Format.R8G8B8A8Unorm,        // GL_RGB8, promoted: RGB is not a
         0x1907 => Format.R8G8B8A8Unorm,        // GL_RGB     guaranteed attachment format
-        0x8DAB => Format.D32Sfloat,            // GL_DEPTH_COMPONENT32F
+        0x8CAC => Format.D32Sfloat,            // GL_DEPTH_COMPONENT32F
         0x81A5 => Format.D16Unorm,             // GL_DEPTH_COMPONENT16
         // GL_BGRA. The GL bodies use it as a source pixel format against an
         // RGBA8 internal format; here it names a BGRA-ordered image, so Cairo

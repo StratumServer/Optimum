@@ -769,12 +769,11 @@ public static class OptimumConfig
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
             // An unrecognised value means OpenGL rather than a parse failure, so
             // a hand-edited config cannot leave the client unable to start.
-            Renderer = data.Renderer switch
-            {
-                "vulkan" => "vulkan",
-                "auto" => "auto",
-                _ => "opengl",
-            };
+            string requestedRenderer = data.Renderer?.Trim() ?? "";
+            Renderer =
+                string.Equals(requestedRenderer, "vulkan", StringComparison.OrdinalIgnoreCase) ? "vulkan" :
+                string.Equals(requestedRenderer, "auto", StringComparison.OrdinalIgnoreCase) ? "auto" :
+                "opengl";
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);

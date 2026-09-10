@@ -113,6 +113,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         }
 
         framebuffer.FormatsId = -1;
+
+        // GL attaches to the bound framebuffer, so an open scope no longer
+        // describes the target: the next draw must reopen on the new views.
+        if (_bound == framebuffer) _needsRestart = true;
     }
 
     public void SetDrawBuffers(int framebufferId, uint mask)

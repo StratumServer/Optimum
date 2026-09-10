@@ -50,6 +50,20 @@ internal static unsafe class WindowSurface
     /// Creates the surface. The window pointer is the GLFW handle the client
     /// already holds.
     /// </summary>
+    /// <summary>
+    /// Destroys a surface that never reached a <see cref="Swapchain"/>. The
+    /// swapchain owns the surface once it exists, so this is only for the
+    /// failure paths between creation and hand-over; the instance must not be
+    /// destroyed with a surface still alive under it.
+    /// </summary>
+    public static void Destroy(VulkanContext context, SurfaceKHR surface)
+    {
+        if (surface.Handle == 0) return;
+        if (!context.Api.TryGetInstanceExtension(context.Instance, out KhrSurface surfaceApi)) return;
+        surfaceApi.DestroySurface(context.Instance, surface, null);
+        surfaceApi.Dispose();
+    }
+
     public static bool TryCreate(
         VulkanContext context, IntPtr windowHandle, out SurfaceKHR surface, out string? failureReason)
     {

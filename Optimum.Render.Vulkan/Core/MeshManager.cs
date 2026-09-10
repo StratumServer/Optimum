@@ -328,11 +328,6 @@ internal sealed unsafe class MeshManager : IDisposable
         return _meshes.Count - 1;
     }
 
-    /// <summary>The persistently mapped pointer for a part, or zero.</summary>
-    /// <summary>
-    /// One of a mesh's buffers, for binding it as something other than a vertex
-    /// source - the SSBO chunk path reads the xyz slot as a storage buffer.
-    /// </summary>
     /// <summary>Whether the mesh fetches its vertices through a storage buffer.</summary>
     public bool IsSsbo(int meshId) => Get(meshId)?.Ssbo ?? false;
 
@@ -490,6 +485,12 @@ internal sealed unsafe class MeshManager : IDisposable
 
         int capacity = (int)((indirectScratch.Size - indirectOffset) / (ulong)sizeof(DrawIndexedIndirectCommand));
         int count = Math.Min(groupCount, capacity);
+
+        if (count < groupCount && RenderTrace.Enabled)
+        {
+            RenderTrace.Write("mesh indirect draw clamped: mesh " + meshId + " groupCount " + groupCount +
+                " capacity " + capacity);
+        }
 
         WriteIndirectCommands(new Span<DrawIndexedIndirectCommand>(commands, count), indicesStarts, indicesSizes);
 

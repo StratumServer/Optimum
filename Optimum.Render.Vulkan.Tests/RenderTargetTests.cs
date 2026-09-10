@@ -104,7 +104,7 @@ public class RenderTargetTests
             // Attachment 1 kept every byte it started with.
             Assert.All(glow, b => Assert.Equal(0x77, b));
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -163,7 +163,7 @@ public class RenderTargetTests
             Assert.Equal(0, glow[0]);
             Assert.Equal(255, glow[1]);    // green
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -210,7 +210,7 @@ public class RenderTargetTests
                 targets.EndRendering(commandBuffer);
             });
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -357,16 +357,4 @@ public class RenderTargetTests
         return result;
     }
 
-    private static void AssertNoValidationErrors(List<string> messages)
-    {
-        // Only what the layers reported at error severity. Advisories - a
-        // fragment output with no attachment, say - are prefixed as warnings and
-        // are not failures; treating every message as one made these assertions
-        // fire on notes about correct frames.
-        var errors = messages
-            .Where(m => m.StartsWith(Optimum.Render.Vulkan.Core.VulkanContext.ErrorPrefix,
-                                     StringComparison.Ordinal))
-            .ToList();
-        Assert.True(errors.Count == 0, "validation errors:\n" + string.Join("\n", errors));
-    }
 }

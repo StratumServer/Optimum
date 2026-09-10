@@ -86,6 +86,12 @@ internal static class ShaderTranslator
 
         if (program.Errors.Count > 0) return program;
 
+        if (parsed.Count == 0)
+        {
+            program.Errors.Add("no shader stage survived translation");
+            return program;
+        }
+
         program.Layout = ProgramInterfaceLayout.Build(parsed, declaredAttributes);
         foreach (string error in program.Layout.Errors)
         {

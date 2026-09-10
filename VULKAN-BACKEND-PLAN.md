@@ -60,7 +60,13 @@ device — `ChunkRenderer` (atlas LOD bias, sampler unbinding), `SystemRenderOIT
 (the layered accumulation target, six-attachment blending, its own textures),
 `SystemRenderSunMoon` (occlusion queries, colour mask), `SystemRenderFrameBufferDebug`
 (shadow-map compare mode), `SvgLoader`, `ShaderRegistry` (terrain sampler bias),
-`ClientMain`, `InventoryItemRenderer`, `ClientSystemStartup` and `Screenshot`.
+`ClientMain`, `InventoryItemRenderer`, `ClientSystemStartup`, `Screenshot` and
+`EntityBehaviorHideWaterSurface` (the boat's depth-only `DrawBuffers(0)` scope
+and its six-attachment restore).
+Optimum's own world-map page cache (`OptimumMapTextureArray`,
+`OptimumMapPageRenderer`, `OptimumBc7Support`) now goes through the device too:
+the page array is created and uploaded per layer through the seam, the instanced
+quad travels through the engine's mesh API, and BC7 reports unsupported on Vulkan.
 242/242 Cecil methods, 192 members injected, 126 patches, 0 conflicts.
 
 Two more defects came out of it, both silent:

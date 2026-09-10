@@ -197,11 +197,6 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
     // ------------------------------------------------------------------ uniforms
 
     /// <summary>
-    /// Resolves a uniform name to its byte offset in the block, or -1 when the
-    /// program does not use it. Callers treat this as opaque, exactly as they
-    /// treat a GL uniform location.
-    /// </summary>
-    /// <summary>
     /// The first sampler location. Sampler locations run downwards from here so
     /// they can never collide with a uniform block offset, which is always zero
     /// or positive, nor with GL's "not found" answer of -1.

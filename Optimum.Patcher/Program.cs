@@ -595,7 +595,6 @@ var targets = new List<MethodTarget>
     // The scissor flag is read back by the runtime atlas upload; the device
     // keeps no queryable state, so the routed setter remembers it.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "get_GlScissorFlagEnabled", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlScissorFlag", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateFramebuffer", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffer", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),
@@ -628,7 +627,6 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateTextureFromPixels", 6),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Load3DTextureCube", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGenerateTex2DMipmaps", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BindTexture2d", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnBindTextureCubeMap", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlClearColorRgbaf", 4),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SmoothLines", 1),

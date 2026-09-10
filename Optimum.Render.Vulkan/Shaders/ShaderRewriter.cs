@@ -103,7 +103,7 @@ internal static class ShaderRewriter
 
         if (emitDepthRemap)
         {
-            AddDepthRemapEdits(parsed, edits, result);
+            AddDepthRemapEdits(parsed, stage, edits, result);
         }
 
         result.Code = ApplyEdits(source, edits);
@@ -268,8 +268,17 @@ internal static class ShaderRewriter
     /// shadow orthographic projections and any matrix a mod builds all keep
     /// working, and the CPU-side code never has to know which backend is running.
     /// </summary>
-    private static void AddDepthRemapEdits(ParsedShader parsed, List<Edit> edits, RewrittenShader result)
+    private const string DepthRemapStatement = "gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;";
+
+    private static void AddDepthRemapEdits(
+        ParsedShader parsed, EnumShaderType stage, List<Edit> edits, RewrittenShader result)
     {
+        if (stage == EnumShaderType.GeometryShader)
+        {
+            AddGeometryDepthRemapEdits(parsed, edits, result);
+            return;
+        }
+
         if (!parsed.HasMain)
         {
             result.Errors.Add("stage has no main() to wrap for the Vulkan depth range");
@@ -281,8 +290,38 @@ internal static class ShaderRewriter
         edits.Add(new Edit(parsed.Source.Length, 0,
             "\n\nvoid main()\n{\n" +
             "    " + MainReplacementName + "();\n" +
-            "    gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;\n" +
+            "    " + DepthRemapStatement + "\n" +
             "}\n"));
+    }
+
+    /// <summary>
+    /// A geometry stage snapshots <c>gl_Position</c> at every <c>EmitVertex()</c>,
+    /// so a wrapper around <c>main</c> would run after every vertex has already
+    /// left. The remap goes immediately before each emit instead.
+    /// </summary>
+    private static void AddGeometryDepthRemapEdits(ParsedShader parsed, List<Edit> edits, RewrittenShader result)
+    {
+        string source = parsed.Source;
+        const string call = "EmitVertex";
+        int found = 0;
+
+        for (int at = source.IndexOf(call, StringComparison.Ordinal); at >= 0;
+             at = source.IndexOf(call, at + call.Length, StringComparison.Ordinal))
+        {
+            bool startsWord = at == 0 || !(char.IsLetterOrDigit(source[at - 1]) || source[at - 1] == '_');
+            int after = at + call.Length;
+            while (after < source.Length && char.IsWhiteSpace(source[after])) after++;
+            bool isCall = after < source.Length && source[after] == '(';
+            if (!startsWord || !isCall) continue;
+
+            edits.Add(new Edit(at, 0, DepthRemapStatement + " "));
+            found++;
+        }
+
+        if (found == 0)
+        {
+            result.Errors.Add("geometry stage never calls EmitVertex(), so no vertex gets the Vulkan depth range");
+        }
     }
 
     // --------------------------------------------------------------------- edits

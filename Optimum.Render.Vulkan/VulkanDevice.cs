@@ -937,6 +937,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         Write(programId, location, new ReadOnlySpan<byte>(&value, sizeof(int)));
     }
 
+    public void SetUniform(int programId, int location, int x, int y, int z)
+    {
+        // Scalar block layout stores an ivec3 as three consecutive 32-bit ints.
+        int* values = stackalloc int[3] { x, y, z };
+        Write(programId, location, new ReadOnlySpan<byte>(values, 3 * sizeof(int)));
+    }
+
     public void SetUniform(int programId, int location, float x, float y)
     {
         float* values = stackalloc float[2] { x, y };
@@ -1228,6 +1235,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _boundTextures[unit] = textureId;
         if (RenderTrace.Enabled) RenderTrace.Write("bind unit=" + unit + " texture=" + textureId);
     }
+
+    public void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y,
+        int width, int height, IntPtr pixels) =>
+        _textures.Upload(textureId, 0, x, y, (uint)width, (uint)height, pixels, 4, (uint)layer);
 
     public void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
         int width, int height, short[] pixels) =>
@@ -2333,11 +2344,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             });
 
             bool bgra = texture.Format is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb;
-            string? written = TextureDump.Write(textureId, width, height, bgra,
+            bool written = TextureDump.Write(textureId, width, height, bgra,
                 new ReadOnlySpan<byte>((void*)readback.Mapped, (int)bytes));
+            if (written) TextureDump.Complete(textureId);
 
             RenderTrace.Write("texture dump: " + textureId + " " + width + "x" + height +
-                " " + texture.Format + " mips=" + texture.MipLevels + " -> " + (written ?? "failed"));
+                " " + texture.Format + " mips=" + texture.MipLevels + " -> " + (written ? "ok" : "failed"));
 
             if (restore != ImageLayout.Undefined)
             {

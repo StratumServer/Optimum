@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..1810589 100644
+index f437458..db565ba 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 @@ -738,11 +738,14 @@ public class ClientSystemStartup : ClientSystem
@@ -48,11 +48,11 @@ index f437458..1810589 100644
  		logger.VerboseDebug("Done level finalize");
  		game.AmbientManager.LateInit();
 -		if (GL.GetString((StringName)7937).Contains("Arc(TM)") && ClientSettings.AllowSSBOs)
-+		// The advisory is about an Intel Arc OpenGL driver bug, so it reads the
-+		// renderer name from whichever backend is live rather than from GL.
++		// The advisory is about an Intel Arc OpenGL driver bug, so it only applies
++		// when the OpenGL backend is actually live; a non-OpenGL device skips it.
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		string optimumRendererName = optimumDevice != null
-+			? optimumDevice.RendererString
++			? null
 +			: GL.GetString((StringName)7937);
 +		if (optimumRendererName != null && optimumRendererName.Contains("Arc(TM)") && ClientSettings.AllowSSBOs)
  		{

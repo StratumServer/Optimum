@@ -268,9 +268,7 @@ public class TextureManagerTests
             textures.GenerateMipmaps(id);
             Assert.Equal(ImageLayout.ShaderReadOnlyOptimal, texture.Layout);
 
-            var errors = messages.FindAll(m =>
-                m.Contains("Error", StringComparison.OrdinalIgnoreCase) || m.Contains("VUID", StringComparison.Ordinal));
-            Assert.True(errors.Count == 0, "validation errors:\n" + string.Join("\n", errors));
+            ValidationAssert.NoErrors(messages);
         }
     }
 

@@ -385,7 +385,6 @@ public class ChunkTerrainRenderTests
 
     // ------------------------------------------------------------------ helpers
 
-    /// <summary>The magenta the target was cleared to, within 8-bit rounding.</summary>
     /// <summary>
     /// The path the world actually renders through: an SSBO pool, one packed
     /// face record in its storage slot, the fixed quad index pattern, the storage

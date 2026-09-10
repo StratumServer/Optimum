@@ -66,14 +66,21 @@ internal static class TextureDump
         return ids;
     }
 
-    /// <summary>The ids still to write, as a snapshot safe to iterate while removing.</summary>
+    /// <summary>
+    /// The ids still to write, as a snapshot safe to iterate while removing.
+    /// Ids stay pending until <see cref="Complete" /> reports a successful write,
+    /// so a texture that does not exist yet or whose write fails is retried on a
+    /// later frame instead of being silently dropped.
+    /// </summary>
     public static int[] Take()
     {
         var ids = new int[Pending.Count];
         Pending.CopyTo(ids);
-        Pending.Clear();
         return ids;
     }
+
+    /// <summary>Removes an id from the pending set once it has been written successfully.</summary>
+    public static void Complete(int textureId) => Pending.Remove(textureId);
 
     private static string Directory()
     {
@@ -91,10 +98,10 @@ internal static class TextureDump
     /// <summary>
     /// Writes RGBA or BGRA bytes as a binary PPM.
     /// </summary>
-    /// <returns>The file written, or null if it could not be.</returns>
-    public static string? Write(int textureId, int width, int height, bool bgra, ReadOnlySpan<byte> rgba)
+    /// <returns>True if the file was written.</returns>
+    public static bool Write(int textureId, int width, int height, bool bgra, ReadOnlySpan<byte> rgba)
     {
-        if (width <= 0 || height <= 0 || rgba.Length < width * height * 4) return null;
+        if (width <= 0 || height <= 0 || rgba.Length < width * height * 4) return false;
 
         try
         {
@@ -123,15 +130,15 @@ internal static class TextureDump
                 writer.Write(row);
             }
 
-            return path;
+            return true;
         }
         catch (IOException)
         {
-            return null;
+            return false;
         }
         catch (UnauthorizedAccessException)
         {
-            return null;
+            return false;
         }
     }
 }

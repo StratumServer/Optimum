@@ -88,7 +88,7 @@ public class PipelineCacheTests
             Assert.True(translated.Layout.Samplers.Count >= 4);
             Assert.True(translated.Layout.BlockSize > 0);
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -117,7 +117,7 @@ public class PipelineCacheTests
             using var program = new ShaderProgramResources(context!, programId: 2, translated);
             Assert.NotEqual(0ul, program.PipelineLayout.Handle);
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -182,7 +182,7 @@ public class PipelineCacheTests
             Assert.Equal(2, cache.Count);
 
             _output.WriteLine($"pipelines: {cache.Count}, hits: {cache.Hits}, misses: {cache.Misses}");
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -241,7 +241,7 @@ public class PipelineCacheTests
                 byte[] blob = cache.SerializeDriverCache();
                 _output.WriteLine($"{cache.Count} pipelines, driver cache blob {blob.Length} bytes");
 
-                AssertNoValidationErrors(messages);
+                ValidationAssert.NoErrors(messages);
             }
             finally
             {
@@ -250,17 +250,4 @@ public class PipelineCacheTests
         }
     }
 
-    private static void AssertNoValidationErrors(List<string> messages)
-    {
-        // Only what the layers reported at error severity. Advisories - a
-        // fragment output with no attachment, say - are prefixed as warnings and
-        // are not failures; treating every message as one made these assertions
-        // fire on notes about correct frames.
-        var errors = messages
-            .Where(m => m.StartsWith(Optimum.Render.Vulkan.Core.VulkanContext.ErrorPrefix,
-                                     StringComparison.Ordinal))
-            .ToList();
-
-        Assert.True(errors.Count == 0, "validation errors:\n" + string.Join("\n", errors));
-    }
 }

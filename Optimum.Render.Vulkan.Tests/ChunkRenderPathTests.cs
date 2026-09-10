@@ -158,7 +158,7 @@ public class ChunkRenderPathTests
             }
 
             Assert.Equal(4, built);
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -256,7 +256,7 @@ public class ChunkRenderPathTests
                 });
 
             Assert.NotEqual((ulong)0, pipeline.Handle);
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -300,7 +300,9 @@ public class ChunkRenderPathTests
 
             // The record the client writes: an origin and two edge offsets, in
             // the same layout FaceData uses.
-            float[] face = { -1f, -1f, 0f, 2f };
+            // Quad from (-1,-1) to (0,0): covers the lower-left quadrant only,
+            // so the upper-right quadrant stays the clear colour.
+            float[] face = { -1f, -1f, 0f, 1f };
             int[] indices = { 0, 1, 2, 0, 2, 3 };
 
             fixed (float* f = face)
@@ -369,7 +371,56 @@ public class ChunkRenderPathTests
                 });
             Assert.NotEqual((ulong)0, pipeline.Handle);
 
-            AssertNoValidationErrors(messages);
+            using var descriptors = new DescriptorCache(context!);
+            VulkanBuffer faceBuffer = meshes.BufferOf(mesh, MeshManager.BufferXyz)!;
+            BlockBinding storageBlock = Assert.Single(program.Interface.StorageBlocks);
+            DescriptorSet storageSet = descriptors.Get(
+                new DescriptorSetContents(1, ProgramInterfaceLayout.StorageSet,
+                    Array.Empty<SamplerBindingValue>(),
+                    new[]
+                    {
+                        new BufferBindingValue(
+                            (uint)storageBlock.Binding, faceBuffer.Handle, 0, faceBuffer.Size, faceBuffer.Id),
+                    }),
+                program.SetLayouts[ProgramInterfaceLayout.StorageSet]);
+
+            commands.SubmitAndWait(commandBuffer =>
+            {
+                targets.Bind(commandBuffer, framebuffer);
+                targets.ClearColor(commandBuffer, 0, 0f, 0f, 0f, 1f);
+                targets.EnsureRendering(commandBuffer);
+
+                Vk api = context!.Api;
+                api.CmdBindPipeline(commandBuffer, PipelineBindPoint.Graphics, pipeline);
+                DescriptorSet boundStorageSet = storageSet;
+                api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
+                    ProgramInterfaceLayout.StorageSet, 1, &boundStorageSet, 0, null);
+
+                var viewport = new Viewport(0, 0, size, size, 0, 1);
+                api.CmdSetViewport(commandBuffer, 0, 1, &viewport);
+                var scissor = new Rect2D(new Offset2D(0, 0), new Extent2D(size, size));
+                api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
+                SetDynamicDefaults(api, commandBuffer);
+
+                meshes.Draw(commandBuffer, mesh);
+                targets.EndRendering(commandBuffer);
+            });
+
+            byte[] pixels = ReadTexture(context!, commands, textures, target, size);
+
+            // Covered by the quad, drawn green; the opposite corner is not, and
+            // must still show the black clear colour untouched.
+            byte[] covered = PixelAt(pixels, size, 2, 2);
+            Assert.Equal(0, covered[0]);
+            Assert.Equal(255, covered[1]);
+            Assert.Equal(0, covered[2]);
+
+            byte[] uncovered = PixelAt(pixels, size, size - 3, size - 3);
+            Assert.Equal(0, uncovered[0]);
+            Assert.Equal(0, uncovered[1]);
+            Assert.Equal(0, uncovered[2]);
+
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -500,7 +551,7 @@ public class ChunkRenderPathTests
             Assert.Equal(255, PixelAt(pixels, size, 9, 9)[0]);
             Assert.Equal(255, PixelAt(pixels, size, 9, 9)[2]);
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -553,16 +604,4 @@ public class ChunkRenderPathTests
         return result;
     }
 
-    private static void AssertNoValidationErrors(List<string> messages)
-    {
-        // Only what the layers reported at error severity. Advisories - a
-        // fragment output with no attachment, say - are prefixed as warnings and
-        // are not failures; treating every message as one made these assertions
-        // fire on notes about correct frames.
-        var errors = messages
-            .Where(m => m.StartsWith(Optimum.Render.Vulkan.Core.VulkanContext.ErrorPrefix,
-                                     StringComparison.Ordinal))
-            .ToList();
-        Assert.True(errors.Count == 0, "validation errors:\n" + string.Join("\n", errors));
-    }
 }

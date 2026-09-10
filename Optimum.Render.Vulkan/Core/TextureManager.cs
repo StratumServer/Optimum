@@ -335,7 +335,12 @@ internal sealed unsafe class TextureManager : IDisposable
         MemoryAllocation allocation = _context.Allocator.Allocate(
             requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
             $"a {width}x{height} {format} image");
-        api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset);
+        if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
+        {
+            api.DestroyImage(_context.Device, image, null);
+            _context.Allocator.Free(allocation);
+            throw new InvalidOperationException("vkBindImageMemory failed");
+        }
 
         uint viewLayers = cube ? 6 : layers;
         var viewInfo = new ImageViewCreateInfo
@@ -348,7 +353,12 @@ internal sealed unsafe class TextureManager : IDisposable
             Format = format,
             SubresourceRange = new ImageSubresourceRange(aspect, 0, mipLevels, 0, viewLayers),
         };
-        api.CreateImageView(_context.Device, &viewInfo, null, out ImageView view);
+        if (api.CreateImageView(_context.Device, &viewInfo, null, out ImageView view) != Result.Success)
+        {
+            api.DestroyImage(_context.Device, image, null);
+            _context.Allocator.Free(allocation);
+            throw new InvalidOperationException("vkCreateImageView failed");
+        }
 
         var texture = new VulkanTexture(_context)
         {

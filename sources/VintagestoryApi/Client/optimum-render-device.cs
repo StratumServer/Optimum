@@ -160,6 +160,11 @@ public interface IOptimumGraphicsDevice : IDisposable
 
     void SetUniform(int programId, int location, float value);
     void SetUniform(int programId, int location, int value);
+    /// <summary>
+    /// Writes an <c>ivec3</c>. The location is opaque, so the implementation,
+    /// not the caller, knows where the second and third components land.
+    /// </summary>
+    void SetUniform(int programId, int location, int x, int y, int z);
     void SetUniform(int programId, int location, float x, float y);
     void SetUniform(int programId, int location, float x, float y, float z);
     void SetUniform(int programId, int location, float x, float y, float z, float w);
@@ -210,7 +215,6 @@ public interface IOptimumGraphicsDevice : IDisposable
     int CreateTexture2DRaw(int width, int height, int glInternalFormat, IntPtr pixels, int bytesPerPixel,
         bool generateMipmaps = false);
 
-    /// <summary>Six-layer cube map, faces in GL's +X -X +Y -Y +Z -Z order.</summary>
     /// <summary>
     /// Creates a cubemap from a raw GL internal format, the cube counterpart of
     /// <see cref="CreateTexture2DRaw" />. The skybox faces arrive as BGRA bytes,
@@ -227,6 +231,19 @@ public interface IOptimumGraphicsDevice : IDisposable
 
     void UploadTexture2D(int textureId, int level, int x, int y, int width, int height,
         EnumTexturePixelFormat pixelFormat, IntPtr pixels);
+    /// <summary>
+    /// Uploads signed 16-bit normalised pixels (GL_SHORT into a normalised
+    /// format), as the cloud map's tile data does.
+    /// </summary>
+    void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
+        int width, int height, short[] pixels);
+
+    /// <summary>
+    /// Uploads one layer of a <see cref="CreateTexture2DArray"/> texture, as
+    /// <c>glTexSubImage3D</c> with depth 1 does. Pixels are RGBA8.
+    /// </summary>
+    void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y,
+        int width, int height, IntPtr pixels);
 
     void GenerateMipmaps(int textureId);
     void DeleteTexture(int textureId);
@@ -348,6 +365,7 @@ public static class OptimumGlConstants
     public const int TextureWrapT = 0x2803;
     public const int TextureCompareMode = 0x884C;
     public const int TextureLodBias = 0x8501;
+    public const int TextureMaxLevel = 0x813D;
 
     public const int Nearest = 0x2600;
     public const int Linear = 0x2601;

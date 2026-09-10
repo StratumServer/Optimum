@@ -340,15 +340,6 @@ internal sealed unsafe class VulkanCommands : IDisposable
     }
 
     /// <summary>
-    /// Records, submits and waits. For setup and readback, not frames.
-    ///
-    /// The whole body is serialised, not just the submit: the command pool is
-    /// shared, and Vulkan requires external synchronisation for allocating from
-    /// and freeing to a pool as much as for submitting to a queue. Texture
-    /// uploads reach this from asset-loading worker threads while the render
-    /// thread is submitting frames.
-    /// </summary>
-    /// <summary>
     /// Runs before every synchronous submit, outside the queue lock. The device
     /// uses it to flush a frame it is in the middle of recording: a synchronous
     /// submit executes before that frame does, so any layout transition the
@@ -357,6 +348,15 @@ internal sealed unsafe class VulkanCommands : IDisposable
     /// </summary>
     public Action? BeforeSynchronousSubmit;
 
+    /// <summary>
+    /// Records, submits and waits. For setup and readback, not frames.
+    ///
+    /// The whole body is serialised, not just the submit: the command pool is
+    /// shared, and Vulkan requires external synchronisation for allocating from
+    /// and freeing to a pool as much as for submitting to a queue. Texture
+    /// uploads reach this from asset-loading worker threads while the render
+    /// thread is submitting frames.
+    /// </summary>
     public void SubmitAndWait(Action<CommandBuffer> record)
     {
         BeforeSynchronousSubmit?.Invoke();
@@ -376,31 +376,39 @@ internal sealed unsafe class VulkanCommands : IDisposable
         Vk api = _context.Api;
         CommandBuffer commandBuffer = Allocate();
 
-        var begin = new CommandBufferBeginInfo
+        Fence fence = default;
+        bool fenceCreated = false;
+        try
         {
-            SType = StructureType.CommandBufferBeginInfo,
-            Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
-        };
-        api.BeginCommandBuffer(commandBuffer, &begin);
-        record(commandBuffer);
-        api.EndCommandBuffer(commandBuffer);
+            var begin = new CommandBufferBeginInfo
+            {
+                SType = StructureType.CommandBufferBeginInfo,
+                Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
+            };
+            api.BeginCommandBuffer(commandBuffer, &begin);
+            record(commandBuffer);
+            api.EndCommandBuffer(commandBuffer);
 
-        var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
-        api.CreateFence(_context.Device, &fenceInfo, null, out Fence fence);
+            var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
+            api.CreateFence(_context.Device, &fenceInfo, null, out fence);
+            fenceCreated = true;
 
-        var submit = new SubmitInfo
+            var submit = new SubmitInfo
+            {
+                SType = StructureType.SubmitInfo,
+                CommandBufferCount = 1,
+                PCommandBuffers = &commandBuffer,
+            };
+            VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, fence),
+                "vkQueueSubmit for a setup command buffer");
+            VulkanResult.Check(api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue),
+                "vkWaitForFences for a setup command buffer");
+        }
+        finally
         {
-            SType = StructureType.SubmitInfo,
-            CommandBufferCount = 1,
-            PCommandBuffers = &commandBuffer,
-        };
-        VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, fence),
-            "vkQueueSubmit for a setup command buffer");
-        VulkanResult.Check(api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue),
-            "vkWaitForFences for a setup command buffer");
-
-        api.DestroyFence(_context.Device, fence, null);
-        api.FreeCommandBuffers(_context.Device, Pool, 1, &commandBuffer);
+            if (fenceCreated) api.DestroyFence(_context.Device, fence, null);
+            api.FreeCommandBuffers(_context.Device, Pool, 1, &commandBuffer);
+        }
     }
 
     /// <summary>

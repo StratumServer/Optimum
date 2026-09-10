@@ -157,6 +157,35 @@ public class GlStateTrackerTests
     }
 
     /// <summary>
+    /// The signature covers only the first <c>attachmentCount</c> attachments,
+    /// so the cache must key on the count too. Otherwise a one-attachment pass
+    /// followed by a six-attachment OIT pass hands the OIT draw the id of the
+    /// one-element signature, and two OIT blend sets that agree on attachment 0
+    /// share a pipeline baked with the wrong factors.
+    /// </summary>
+    [Fact]
+    public void TheCachedBlendIdIsKeyedOnTheAttachmentCount()
+    {
+        var tracker = new GlStateTracker();
+        tracker.SetBlend(true, EnumBlendMode.Standard);
+        tracker.SetAttachmentBlendFunc(1, 1, 1, 1, 1);
+
+        int one = tracker.BlendId(1);
+        int six = tracker.BlendId(6);
+        Assert.NotEqual(one, six);
+
+        // Attachment 1 changes; attachment 0 does not. The one-attachment id is
+        // re-cached first, and the six-attachment request must not inherit it.
+        tracker.SetAttachmentBlendFunc(1, 0, 0, 0, 0);
+        int oneAgain = tracker.BlendId(1);
+        int sixAgain = tracker.BlendId(6);
+
+        Assert.Equal(one, oneAgain);
+        Assert.NotEqual(oneAgain, sixAgain);
+        Assert.NotEqual(six, sixAgain);
+    }
+
+    /// <summary>
     /// The packing squeezes eight fields into 32 bits. A collision there would
     /// silently merge two different blend states onto one pipeline.
     /// </summary>
@@ -349,7 +378,7 @@ public class GlStateTrackerTests
     [Fact]
     public void DepthAndFloatFormatsMapExactly()
     {
-        Assert.Equal(Format.D32Sfloat, GlEnums.TextureFormatFromGl(0x8DAB));
+        Assert.Equal(Format.D32Sfloat, GlEnums.TextureFormatFromGl(0x8CAC));
         Assert.Equal(Format.R16G16B16A16Sfloat, GlEnums.TextureFormatFromGl(0x881A));
         Assert.Equal(Format.R16Sfloat, GlEnums.TextureFormatFromGl(0x822D));
         Assert.Equal(Format.R32G32B32A32Sfloat, GlEnums.TextureFormatFromGl(0x8814));

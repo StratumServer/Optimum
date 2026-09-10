@@ -1,0 +1,48 @@
+diff --git a/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs b/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs
+index 1c83a88..a33ef42 100644
+--- a/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs
++++ b/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs
+@@ -109,11 +109,22 @@ namespace Vintagestory.GameContent
+             if (esr == null) return;
+ 
+             // Slightly fugly hack, needs clean up
+             // This clears the drawbuffers set up by RenderOITLayers and then restores them after the render
+             // Otherwise we render a big black surface inside the boat
+-            OpenTK.Graphics.OpenGL.GL.DrawBuffers(0, new OpenTK.Graphics.OpenGL.DrawBuffersEnum[0]);
++            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++            int oitFboId = capi.Render.FrameBuffers[(int)EnumFrameBuffer.Transparent].FboId;
++            if (optimumDevice != null)
++            {
++                // Vulkan path: the window has no GL context, so the draw-buffer
++                // mask has to change through the device.
++                optimumDevice.SetDrawBuffers(oitFboId, 0);
++            }
++            else
++            {
++                OpenTK.Graphics.OpenGL.GL.DrawBuffers(0, new OpenTK.Graphics.OpenGL.DrawBuffersEnum[0]);
++            }
+ 
+             capi.Render.GLDepthMask(true);
+ 
+             // We only render into the depth texture
+             // We can abuse the shadow map shader for this
+@@ -143,11 +154,18 @@ namespace Vintagestory.GameContent
+                     OpenTK.Graphics.OpenGL.DrawBuffersEnum.ColorAttachment3, // accumulation bin 1 (rgba16)
+                     OpenTK.Graphics.OpenGL.DrawBuffersEnum.ColorAttachment4, // accumulation bin 2 (rgba16)
+                     OpenTK.Graphics.OpenGL.DrawBuffersEnum.ColorAttachment5  // accumulation bin 3 (rgba16)
+                 };
+ 
+-            OpenTK.Graphics.OpenGL.GL.DrawBuffers(buffers.Length, buffers);
++            if (optimumDevice != null)
++            {
++                optimumDevice.SetDrawBuffers(oitFboId, (1 << buffers.Length) - 1);
++            }
++            else
++            {
++                OpenTK.Graphics.OpenGL.GL.DrawBuffers(buffers.Length, buffers);
++            }
+         }
+ 
+         public override string PropertyName() => "hidewatersurface";
+     }
+ 

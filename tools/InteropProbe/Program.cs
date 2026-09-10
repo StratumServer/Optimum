@@ -105,6 +105,7 @@ internal static class Program
         Report("WGL_NV_DX_interop", interop, "D3D9 sharing");
         Report("WGL_NV_DX_interop2", interop2, "D3D10/11 sharing - the one that matters");
 
+        bool wglInteropEntryPointsOk = true;
         foreach (string name in new[]
         {
             "wglDXOpenDeviceNV",
@@ -113,7 +114,9 @@ internal static class Program
             "wglDXUnlockObjectsNV",
         })
         {
-            Report(name + " (entry point)", WglGetProcAddress(name) != IntPtr.Zero, null);
+            bool valid = IsValidProc(WglGetProcAddress(name));
+            wglInteropEntryPointsOk &= valid;
+            Report(name + " (entry point)", valid, null);
         }
 
         // D3D12 resources can also be imported straight into GL, skipping the
@@ -125,7 +128,7 @@ internal static class Program
             "D3D12 fence import");
 
         Console.WriteLine();
-        if (interop2)
+        if (interop2 && wglInteropEntryPointsOk)
         {
             Console.WriteLine("  => Viable. Share via WGL_NV_DX_interop2 into D3D11, then reuse the");
             Console.WriteLine("     existing D3D11/D3D12 proxy design unchanged.");
@@ -219,10 +222,10 @@ internal static class Program
         }
 
         IntPtr address = WglGetProcAddress("wglGetExtensionsStringARB");
-        if (address == IntPtr.Zero)
+        if (!IsValidProc(address))
         {
             address = WglGetProcAddress("wglGetExtensionsStringEXT");
-            if (address == IntPtr.Zero)
+            if (!IsValidProc(address))
             {
                 return extensions;
             }
@@ -261,4 +264,15 @@ internal static class Program
 
     [DllImport("opengl32.dll", EntryPoint = "wglGetCurrentDC")]
     private static extern IntPtr WglGetCurrentDC();
+
+    /// <summary>
+    /// wglGetProcAddress can return NULL, but also 1, 2, 3 or -1 for an
+    /// unsupported entry point - those small sentinel values must not be
+    /// treated as valid function pointers.
+    /// </summary>
+    private static bool IsValidProc(IntPtr p)
+    {
+        long value = p.ToInt64();
+        return value != 0 && value != 1 && value != 2 && value != 3 && value != -1;
+    }
 }

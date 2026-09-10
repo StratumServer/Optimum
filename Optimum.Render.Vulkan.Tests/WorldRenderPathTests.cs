@@ -111,7 +111,7 @@ public class WorldRenderPathTests
             Assert.Equal(new byte[] { 0, 255, 0 }, FirstPixel(context!, commands, textures, accumulation, size, 1));
             Assert.Equal(new byte[] { 0, 0, 255 }, FirstPixel(context!, commands, textures, accumulation, size, 2));
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -182,7 +182,7 @@ public class WorldRenderPathTests
             // 0 + 0.25 = 0.25, so accumulation added rather than multiplying.
             Assert.InRange(accumPixels[0], 56, 72);
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -254,7 +254,7 @@ public class WorldRenderPathTests
             // rather than assumed.
             Assert.InRange(stored, 0.74f, 0.76f);
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -322,7 +322,7 @@ public class WorldRenderPathTests
             // The triangle covers the whole 8x8 target.
             Assert.Equal((ulong)(size * size), passed);
 
-            AssertNoValidationErrors(messages);
+            ValidationAssert.NoErrors(messages);
         }
     }
 
@@ -479,16 +479,4 @@ public class WorldRenderPathTests
         return result[0];
     }
 
-    private static void AssertNoValidationErrors(List<string> messages)
-    {
-        // Only what the layers reported at error severity. Advisories - a
-        // fragment output with no attachment, say - are prefixed as warnings and
-        // are not failures; treating every message as one made these assertions
-        // fire on notes about correct frames.
-        var errors = messages
-            .Where(m => m.StartsWith(Optimum.Render.Vulkan.Core.VulkanContext.ErrorPrefix,
-                                     StringComparison.Ordinal))
-            .ToList();
-        Assert.True(errors.Count == 0, "validation errors:\n" + string.Join("\n", errors));
-    }
 }

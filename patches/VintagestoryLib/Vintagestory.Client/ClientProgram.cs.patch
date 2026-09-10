@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..56cf7b7 100644
+index afa4d5f..2d8144a 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -48,7 +48,7 @@ index afa4d5f..56cf7b7 100644
  		new ClientProgram(rawArgs);
  	}
  
-@@ -295,12 +330,76 @@ public class ClientProgram
+@@ -295,12 +330,77 @@ public class ClientProgram
  		};
  		if (RuntimeEnv.OS == OS.Mac)
  		{
@@ -116,6 +116,7 @@ index afa4d5f..56cf7b7 100644
 +				OptimumRender.FallBackToOpenGL(optimumInstallReason);
 +				Console.WriteLine("[Optimum] Vulkan unavailable, reopening for OpenGL: " + optimumInstallReason);
 +				((NativeWindow)gameWindowNative).Close();
++				OptimumRender.NoGraphicsApiWindow = false;
 +				val2.API = ContextAPI.OpenGL;
 +				gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
 +			}

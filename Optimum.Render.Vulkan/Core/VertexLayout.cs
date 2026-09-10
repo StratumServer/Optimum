@@ -105,14 +105,18 @@ internal sealed class VertexLayoutDescription : IEquatable<VertexLayoutDescripti
     private static Format DefaultFormatFor(GlslType type)
     {
         bool integer = IsIntegerType(type);
+        bool unsigned = IsUnsignedType(type);
         return type.ComponentCount switch
         {
-            1 => integer ? Format.R32Sint : Format.R32Sfloat,
-            2 => integer ? Format.R32G32Sint : Format.R32G32Sfloat,
-            3 => integer ? Format.R32G32B32Sint : Format.R32G32B32Sfloat,
-            _ => integer ? Format.R32G32B32A32Sint : Format.R32G32B32A32Sfloat,
+            1 => integer ? (unsigned ? Format.R32Uint : Format.R32Sint) : Format.R32Sfloat,
+            2 => integer ? (unsigned ? Format.R32G32Uint : Format.R32G32Sint) : Format.R32G32Sfloat,
+            3 => integer ? (unsigned ? Format.R32G32B32Uint : Format.R32G32B32Sint) : Format.R32G32B32Sfloat,
+            _ => integer ? (unsigned ? Format.R32G32B32A32Uint : Format.R32G32B32A32Sint) : Format.R32G32B32A32Sfloat,
         };
     }
+
+    private static bool IsUnsignedType(GlslType type) =>
+        type.Name.StartsWith("u", StringComparison.Ordinal) || type.Name == "uint";
 
     private static bool IsIntegerType(GlslType type) =>
         type.Name.StartsWith("i", StringComparison.Ordinal) ||

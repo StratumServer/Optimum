@@ -132,7 +132,9 @@ internal sealed unsafe class ShaderCompiler : IDisposable
         if (string.IsNullOrEmpty(prefixCode)) return code;
 
         int versionIndex = code.IndexOf("#version", StringComparison.Ordinal);
-        int insertAt = code.IndexOf('\n', Math.Max(0, versionIndex)) + 1;
+        if (versionIndex < 0) return prefixCode + code;
+
+        int insertAt = code.IndexOf('\n', versionIndex) + 1;
         if (insertAt <= 0) return prefixCode + code;
 
         return code.Insert(insertAt, prefixCode);

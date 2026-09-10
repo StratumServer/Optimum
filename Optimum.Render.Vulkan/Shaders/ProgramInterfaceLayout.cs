@@ -300,6 +300,13 @@ internal sealed class ProgramInterfaceLayout
         // "layout(binding = 3, std430) readonly buffer faceDataBuf", and the mesh
         // path binds the vertex buffer to that exact index.
         int declared = ReadQualifierInt(declaration.LayoutQualifiers, "binding");
+
+        // Set 0, binding 0 is where the generated OptimumUniforms block lives.
+        // A shader that names that binding itself would register two blocks at
+        // one descriptor binding, so it is treated as unnumbered and moves to
+        // the next free binding; the rewriter re-emits the qualifier from here.
+        if (set == DefaultBlockSet && declared == DefaultBlockBinding) declared = -1;
+
         blocks.Add(new BlockBinding
         {
             BlockName = declaration.Name,

@@ -116,13 +116,6 @@ internal static class GlslReservedWords
             int start = position;
             while (position < length && IsIdentifierPart(source[position])) position++;
 
-            // A word preceded by '.' is a struct field or a swizzle, never a
-            // declaration, and renaming it would break the member it names.
-            if (IsMemberAccess(source, start))
-            {
-                continue;
-            }
-
             int wordLength = position - start;
             if (wordLength > LongestRename) continue;
 
@@ -139,13 +132,6 @@ internal static class GlslReservedWords
 
         builder.Append(source, copiedTo, length - copiedTo);
         return builder.ToString();
-    }
-
-    private static bool IsMemberAccess(string source, int identifierStart)
-    {
-        int i = identifierStart - 1;
-        while (i >= 0 && (source[i] == ' ' || source[i] == '\t')) i--;
-        return i >= 0 && source[i] == '.';
     }
 
     private static bool IsIdentifierStart(char c) => char.IsLetter(c) || c == '_';

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..f57b7b1 100644
+index 4a24e75..e278e46 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..f57b7b1 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,160 @@ public class ShaderRegistry
+@@ -181,39 +183,154 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -83,20 +83,7 @@ index 4a24e75..f57b7b1 100644
 +				ShaderProgram shaderProgram = shaderPrograms[i];
 +				if (shaderProgram != null)
 +				{
-+					bool compiled = shaderProgram.Compile();
-+					if (shaderProgram == ShaderPrograms.Chunkopaque)
-+					{
-+						bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
-+						OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
-+					}
-+					if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
-+					{
-+						shaderProgram.LoadError |= !compiled;
-+					}
-+					else
-+					{
-+						flag = compiled && flag;
-+					}
++					CompileAndTrackShaderProgram(shaderProgram, ref flag);
 +				}
 +			}
  		}
@@ -121,20 +108,7 @@ index 4a24e75..f57b7b1 100644
 +				if (shaderProgram != null)
 +				{
 +					LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
-+					bool compiled = shaderProgram.Compile();
-+					if (shaderProgram == ShaderPrograms.Chunkopaque)
-+					{
-+						bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
-+						OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
-+					}
-+					if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
-+					{
-+						shaderProgram.LoadError |= !compiled;
-+					}
-+					else
-+					{
-+						flag = compiled && flag;
-+					}
++					CompileAndTrackShaderProgram(shaderProgram, ref flag);
 +				}
  			}
  		}
@@ -166,6 +140,26 @@ index 4a24e75..f57b7b1 100644
  		return flag;
  	}
  
++	// Optimum: shared per-program post-compile handling used by both the
++	// parallel-preprocess and vanilla single-threaded load paths.
++	private static void CompileAndTrackShaderProgram(ShaderProgram shaderProgram, ref bool flag)
++	{
++		bool compiled = shaderProgram.Compile();
++		if (shaderProgram == ShaderPrograms.Chunkopaque)
++		{
++			bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
++			OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
++		}
++		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
++		{
++			shaderProgram.LoadError |= !compiled;
++		}
++		else
++		{
++			flag = compiled && flag;
++		}
++	}
++
 +	private static bool HasOptimumGreedyMeshContract(ShaderProgram program)
 +	{
 +		return HasOptimumGreedyMeshContract(program.VertexShader) && HasOptimumGreedyMeshContract(program.FragmentShader);
@@ -184,7 +178,7 @@ index 4a24e75..f57b7b1 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +419,11 @@ public class ShaderRegistry
+@@ -296,11 +413,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -197,7 +191,7 @@ index 4a24e75..f57b7b1 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +456,27 @@ public class ShaderRegistry
+@@ -333,10 +450,27 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";

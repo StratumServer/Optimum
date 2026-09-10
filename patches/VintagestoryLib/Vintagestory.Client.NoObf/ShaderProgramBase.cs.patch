@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs
-index 815363d..b06f2fd 100644
+index 815363d..0b21d87 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs
-@@ -109,102 +109,224 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -109,102 +109,220 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  	{
  		int value = ScreenManager.Platform.GenSampler(isLinear);
  		customSamplers.Add(uniformName, value);
@@ -130,13 +130,9 @@ index 815363d..b06f2fd 100644
 +		if (optimumDevice != null)
 +		{
 +			// Unlike the Vec2i overload this one keeps integers, so the shader
-+			// declares an ivec3. Scalar block layout stores that as three
-+			// consecutive 32-bit ints, so writing each component at its own
-+			// offset lands them exactly where the shader reads them.
-+			int optimumOffset = uniformLocations[uniformName];
-+			optimumDevice.SetUniform(ProgramId, optimumOffset, value.X);
-+			optimumDevice.SetUniform(ProgramId, optimumOffset + 4, value.Y);
-+			optimumDevice.SetUniform(ProgramId, optimumOffset + 8, value.Z);
++			// declares an ivec3. The location is opaque to this side, so the
++			// device lays the three components out itself.
++			optimumDevice.SetUniform(ProgramId, uniformLocations[uniformName], value.X, value.Y, value.Z);
 +			return;
 +		}
  		GL.Uniform3(uniformLocations[uniformName], value.X, value.Y, value.Z);
@@ -227,7 +223,7 @@ index 815363d..b06f2fd 100644
  
  	[MethodImpl(MethodImplOptions.AggressiveInlining)]
  	protected void CheckShaderIsActive()
-@@ -220,10 +342,37 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -220,10 +338,37 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  		return uniformLocations.ContainsKey(uniformName);
  	}
  
@@ -265,7 +261,7 @@ index 815363d..b06f2fd 100644
  		GL.BindTexture((TextureTarget)3553, textureId);
  		if (customSamplers.TryGetValue(samplerName, out var value))
  		{
-@@ -240,10 +389,23 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -240,10 +385,23 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  		BindTexture2D(samplerName, textureId, textureLocations[samplerName]);
  	}
  
@@ -289,7 +285,7 @@ index 815363d..b06f2fd 100644
  		GL.BindTexture((TextureTarget)34067, textureId);
  		if (clampTToEdge)
  		{
-@@ -251,15 +413,27 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -251,15 +409,27 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  		}
  	}
  
@@ -317,7 +313,7 @@ index 815363d..b06f2fd 100644
  
  	public void Use()
  	{
-@@ -269,11 +443,23 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -269,11 +439,23 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  		}
  		if (disposed)
  		{
@@ -342,7 +338,7 @@ index 815363d..b06f2fd 100644
  		if (includes.Contains("fogandlight.fsh"))
  		{
  			Uniform("zNear", shaderUniforms.ZNear);
-@@ -369,14 +555,27 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -369,14 +551,27 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  		}
  	}
  
@@ -373,7 +369,7 @@ index 815363d..b06f2fd 100644
  		{
  			ubo.Value.Unbind();
  		}
-@@ -388,10 +587,24 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+@@ -388,10 +583,24 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
  		if (disposed)
  		{
  			return;

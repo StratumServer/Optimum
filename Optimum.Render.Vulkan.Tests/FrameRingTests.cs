@@ -162,6 +162,35 @@ public class FrameRingTests
     }
 
     /// <summary>
+    /// Slot 0 starts at offset 0 and is aligned for free. Later slots start at
+    /// a multiple of the region size, so the region itself has to be rounded to
+    /// the uniform alignment or every dynamic offset from those slots is off.
+    /// Three frames in flight with a ring size that 3 * alignment does not
+    /// divide is exactly the case the third slot introduces.
+    /// </summary>
+    [SkippableFact]
+    public void LaterSlotsHandOutAlignedOffsetsWhenTheRingDoesNotDivideEvenly()
+    {
+        Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
+        using (context)
+        {
+            ulong alignment = context!.Capabilities.MinUniformBufferOffsetAlignment;
+            using var ring = new FrameRing(context, framesInFlight: 3, uniformRingSize: 64 * 1024 + 1);
+
+            for (int frame = 0; frame < 3; frame++)
+            {
+                FrameSlot slot = ring.BeginFrame();
+                Assert.True(slot.TryAllocateUniforms(100, out RingAllocation allocation));
+                Assert.True(allocation.Offset % alignment == 0,
+                    $"frame {frame}: offset {allocation.Offset} is not aligned to {alignment}");
+                ring.EndFrame();
+            }
+
+            context.Api.DeviceWaitIdle(context.Device);
+        }
+    }
+
+    /// <summary>
     /// Each slot bump-allocates inside its own slice of one shared buffer. The
     /// shared buffer is what lets descriptor sets be written once and reused,
     /// since the set names the buffer and the offset travels dynamically.

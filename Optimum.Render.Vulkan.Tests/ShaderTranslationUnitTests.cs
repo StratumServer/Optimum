@@ -197,6 +197,65 @@ public class ShaderTranslationUnitTests
     private static string RewriteVertex(string source, ProgramInterfaceLayout layout) =>
         ShaderRewriter.Rewrite(Parse(source), layout, EnumShaderType.VertexShader, emitDepthRemap: true).Code;
 
+    /// <summary>
+    /// EmitVertex() snapshots gl_Position, so a geometry stage cannot be fixed
+    /// up by a wrapper after main returns: the remap has to precede every emit.
+    /// </summary>
+    [Fact]
+    public void RewritingAGeometryStageRemapsDepthBeforeEveryEmitVertex()
+    {
+        const string source = """
+            #version 330 core
+            layout(triangles) in;
+            layout(triangle_strip, max_vertices = 3) out;
+            void main() {
+                for (int i = 0; i < 3; i++) {
+                    gl_Position = gl_in[i].gl_Position;
+                    EmitVertex();
+                }
+                EmitVertex ();
+                EndPrimitive();
+            }
+            """;
+
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.GeometryShader, source));
+        RewrittenShader rewritten = ShaderRewriter.Rewrite(
+            Parse(source), layout, EnumShaderType.GeometryShader, emitDepthRemap: true);
+        string code = rewritten.Code;
+
+        Assert.Empty(rewritten.Errors);
+        Assert.DoesNotContain("_optimum_main", code);
+        Assert.Equal(2, CountOf(code, "gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5; EmitVertex"));
+    }
+
+    private static int CountOf(string text, string needle)
+    {
+        int count = 0;
+        for (int at = text.IndexOf(needle, StringComparison.Ordinal); at >= 0;
+             at = text.IndexOf(needle, at + needle.Length, StringComparison.Ordinal)) count++;
+        return count;
+    }
+
+    /// <summary>
+    /// Set 0, binding 0 belongs to the generated OptimumUniforms block. A shader
+    /// that claims it for its own block would double-register that descriptor.
+    /// </summary>
+    [Fact]
+    public void AUserBlockAtBindingZeroMovesOffTheOptimumUniformsBinding()
+    {
+        ProgramInterfaceLayout layout = LayoutOf((EnumShaderType.VertexShader, """
+            #version 330 core
+            layout(std140, binding = 0) uniform Lights { vec4 pos; };
+            layout(std140, binding = 2) uniform Fog { vec4 colour; };
+            void main() {}
+            """));
+
+        Assert.Equal(2, layout.UniformBlocks.Count);
+        Assert.NotEqual(ProgramInterfaceLayout.DefaultBlockBinding, layout.UniformBlocks[0].Binding);
+        Assert.NotEqual(layout.UniformBlocks[1].Binding, layout.UniformBlocks[0].Binding);
+        Assert.Equal(2, layout.UniformBlocks[1].Binding);
+    }
+
     [Fact]
     public void RewritingBumpsTheVersionAndWrapsMainForTheVulkanDepthRange()
     {
@@ -366,14 +425,31 @@ public class ShaderTranslationUnitTests
     }
 
     /// <summary>
-    /// A word after a dot is a field or a swizzle, never a declaration. Renaming
-    /// it would rewrite a member of somebody else's struct.
+    /// A word after a dot can be a struct member declared elsewhere in this
+    /// class with a reserved name (see
+    /// <see cref="MemberAccessOfAReservedNameMatchesItsDeclaration"/>), so it is
+    /// renamed exactly like a declaration would be - leaving it alone would
+    /// desync the access from the member it is meant to reach.
     /// </summary>
     [Fact]
-    public void FieldsAndSwizzlesKeepTheirNames()
+    public void FieldsAndSwizzlesAreRenamedLikeDeclarations()
     {
-        Assert.Equal("value.sample = 1.0;", GlslReservedWords.Rename("value.sample = 1.0;"));
-        Assert.Equal("a.filter", GlslReservedWords.Rename("a.filter"));
+        Assert.Equal("value._optimum_kw_sample = 1.0;", GlslReservedWords.Rename("value.sample = 1.0;"));
+        Assert.Equal("a._optimum_kw_filter", GlslReservedWords.Rename("a.filter"));
+    }
+
+    /// <summary>
+    /// A struct member declared with a reserved name and an access to that
+    /// member must end up with the same renamed identifier, or the access no
+    /// longer resolves to the declaration.
+    /// </summary>
+    [Fact]
+    public void MemberAccessOfAReservedNameMatchesItsDeclaration()
+    {
+        string renamed = GlslReservedWords.Rename("struct S { float filter; }; void main() { S t; t.filter = 1.0; }");
+
+        Assert.Contains("float _optimum_kw_filter;", renamed);
+        Assert.Contains("t._optimum_kw_filter = 1.0;", renamed);
     }
 
     /// <summary>

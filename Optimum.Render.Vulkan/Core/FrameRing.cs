@@ -222,7 +222,10 @@ internal sealed class FrameRing : IDisposable
             BufferUsageFlags.UniformBufferBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
 
-        ulong regionSize = uniformRingSize / (ulong)framesInFlight;
+        // Each region must start on a uniform-offset boundary, otherwise every
+        // dynamic offset handed out from slot 1 onwards inherits the misalignment.
+        ulong alignment = Math.Max(1UL, context.Capabilities.MinUniformBufferOffsetAlignment);
+        ulong regionSize = uniformRingSize / (ulong)framesInFlight / alignment * alignment;
         _slots = new FrameSlot[framesInFlight];
         for (int i = 0; i < framesInFlight; i++)
         {
