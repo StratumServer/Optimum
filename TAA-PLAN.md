@@ -340,3 +340,11 @@ must be anchored at the pixel centre plus mv, not at the unjittered current posi
 - https://ogldev.org/www/tutorial41/tutorial41.html
 - https://github.com/godotengine/godot/pull/61319
 - https://mods.vintagestory.at/show/mod/35005
+
+## Follow-up (not part of this plan): shader patch system
+Shaders ship as whole-file overrides (`sources/shaders/*` copied over vanilla by name, since v0.1.0;
+P3 adds chunktopsoil, entityanimated and the vertexwarp include). A game update that changes a vanilla
+shader is silently shadowed. Needed later: emit `patches/shaders/*.patch` against the vanilla archive
+(`.vanilla/archives/vs_client_*.tar.gz`) from `scripts/extract-patches.sh`, verify in
+`scripts/check-patches.sh`, and keep overrides additive (vanilla functions untouched, Optimum twins
+beside them) so patches stay small. Raised by the user on 2026-09-10 during P3.
