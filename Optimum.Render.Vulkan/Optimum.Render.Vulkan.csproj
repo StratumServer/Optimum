@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Vulkan renderer backend. Referenced by nothing in the game: the
+       launcher loads it reflectively and hands the device to the client through
+       OptimumRender.Device, so no vanilla assembly ever gains an assembly
+       reference to a renderer implementation. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Optimum.Render.Vulkan</AssemblyName>
+    <RootNamespace>Optimum.Render.Vulkan</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <OutputPath>..\bin\$(Configuration)</OutputPath>
+    <Nullable>annotations</Nullable>
+    <!-- The packaging scripts copy this project's output beside the game, and
+         nothing else in the tree references it, so its NuGet dependencies have
+         to land in the output directory rather than being resolved from the
+         referencing project's graph. Without this the backend loads and then
+         fails on the first Silk.NET type. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The client already creates its window through OpenTK's GLFW bindings, so
+         the surface is created the same way rather than through a second
+         windowing stack. -->
+    <PackageReference Include="OpenTK.Windowing.GraphicsLibraryFramework" Version="4.9.4" />
+    <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.EXT" Version="2.23.0" />
+    <!-- Runtime GLSL to SPIR-V. Mod shaders are authored as GLSL and only exist
+         at runtime, so an offline compile step could never cover them. -->
+    <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI">
+      <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Optimum.Render.Vulkan.Tests" />
+  </ItemGroup>
+
+</Project>

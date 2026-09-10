@@ -1,0 +1,28 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs b/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
+index 6e4f262..2e7101a 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
+@@ -70,10 +70,23 @@ public class VAO : MeshRef
+ 		}
+ 	}
+ 
+ 	public override void Dispose()
+ 	{
++		// Optimum: on the device path VaoId is a device handle, not a GL vertex
++		// array, and the per-attribute vbo fields are all zero - the device owns
++		// those buffers and frees them through its own deferred deletion. Falling
++		// through to the GL body would hand an unrelated integer to
++		// glDeleteVertexArray.
++		//
++		// This also runs from the finalizer thread, which is exactly why the
++		// device defers rather than destroying inline.
++		if (Vintagestory.API.Config.OptimumRender.Device != null)
++		{
++			base.Dispose();
++			return;
++		}
+ 		if (!base.Disposed)
+ 		{
+ 			if (xyzVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(xyzVboId);

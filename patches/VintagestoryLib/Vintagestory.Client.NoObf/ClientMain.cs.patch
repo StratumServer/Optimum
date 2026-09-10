@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..9edd21d 100644
+index 67feafa..14ebeb0 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -210,7 +210,40 @@ index 67feafa..9edd21d 100644
  		{
  			if (SuspendMainThreadTasks)
  			{
-@@ -2124,12 +2182,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1623,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
+ 		}
+ 		GlMatrixModeModelView();
+ 		GlPushMatrix();
+ 		GlLoadIdentity();
+-		GL.DepthRange(0f, 20000f);
++		// glDepthRange clamps both bounds to [0, 1], so 20000 means 1 and this is
++		// the default range restated. The device has no equivalent call and needs
++		// none; PerspectiveMode's restore to (0, 1) is the same no-op.
++		if (Vintagestory.API.Config.OptimumRender.Device == null)
++		{
++			GL.DepthRange(0f, 20000f);
++		}
+ 		GlTranslate(0.0, 0.0, -19849.0);
+ 	}
+ 
+ 	public void PerspectiveMode()
+ 	{
+ 		GlMatrixModeProjection();
+ 		GlPopMatrix();
+ 		GlMatrixModeModelView();
+ 		GlPopMatrix();
+-		GL.DepthRange(0f, 1f);
++		if (Vintagestory.API.Config.OptimumRender.Device == null)
++		{
++			GL.DepthRange(0f, 1f);
++		}
+ 	}
+ 
+ 	public void Connect()
+ 	{
+ 		Compression.Reset();
+@@ -2124,12 +2191,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -235,7 +268,7 @@ index 67feafa..9edd21d 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -3531,6 +3599,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3608,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

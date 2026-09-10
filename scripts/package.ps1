@@ -267,6 +267,22 @@ try {
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Api.Contracts.dll') $stageDir
     Copy-Item -Force (Join-Path $apiOut 'Optimum.GameContent.dll') $stageDir
 
+    # The Vulkan renderer and its dependencies. Loaded by name at startup and
+    # only when the renderer setting asks for it, so its absence costs nothing on
+    # the OpenGL path - but a missing dependency would make the backend
+    # unselectable with a load error rather than a clear reason.
+    Copy-Item -Force (Join-Path $apiOut 'Optimum.Render.Vulkan.dll') $stageDir
+    Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
+        ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
+
+    # shaderc is a native library; the game loads natives out of Lib\.
+    $shadercNative = Join-Path $apiOut (Join-Path 'runtimes' (Join-Path 'win-x64' (Join-Path 'native' 'shaderc_shared.dll')))
+    if (Test-Path $shadercNative) {
+        Copy-Item -Force $shadercNative (Join-Path $stageDir 'Lib')
+    } else {
+        Write-Warning "No native shaderc at $shadercNative; the Vulkan renderer will not load"
+    }
+
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }

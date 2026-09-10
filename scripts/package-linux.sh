@@ -209,6 +209,14 @@ fi
 if [[ "$EXTRACTED_FRESH" == "1" ]]; then
     cp -f "$VANILLA_DIR/VintagestoryLib.dll" "$VANILLA_DIR/VintagestoryLib.vanilla.dll"
 fi
+# The patcher reads symbols from <input>.pdb and only rewrites them if it found
+# them. The pristine copy is renamed, so without this its symbols are invisible,
+# the patched library ships with the untouched vanilla .pdb beside it, and every
+# stack trace from a patched method comes out with no line numbers - or worse,
+# lines belonging to different code.
+if [[ -f "$VANILLA_DIR/VintagestoryLib.pdb" && ! -f "$VANILLA_DIR/VintagestoryLib.vanilla.pdb" ]]; then
+    cp -f "$VANILLA_DIR/VintagestoryLib.pdb" "$VANILLA_DIR/VintagestoryLib.vanilla.pdb"
+fi
 VANILLA_LIB="$VANILLA_DIR/VintagestoryLib.vanilla.dll"
 if [[ ! -f "$VANILLA_LIB" ]]; then
     echo "Error: pristine vanilla VintagestoryLib.vanilla.dll not found in $VANILLA_DIR. Delete the matching .vanilla cache and re-run packaging." >&2
@@ -259,10 +267,42 @@ cp -f "$BUILD_OUT/Vintagestory.dll" "$STAGE_DIR/"
 cp -f "$BUILD_OUT/Vintagestory.runtimeconfig.json" "$STAGE_DIR/Vintagestory.runtimeconfig.json"
 cp -f "$PATCHED_LIB" "$STAGE_DIR/VintagestoryLib.dll"
 cp -f "$PATCHED_API" "$STAGE_DIR/VintagestoryAPI.dll"
+
+# Symbols have to match the assembly they sit beside. The staged tree came from
+# the vanilla install and still holds its .pdb files, which describe different
+# IL; replacing them is what puts line numbers back into crash reports, and
+# removing them is better than leaving ones that lie.
+for symbols in "VintagestoryLib:$LIB_OUT/VintagestoryLib-patched.pdb" \
+               "VintagestoryAPI:$LIB_OUT/VintagestoryAPI-patched.pdb"; do
+    name="${symbols%%:*}"
+    built="${symbols#*:}"
+    if [[ -f "$built" ]]; then
+        cp -f "$built" "$STAGE_DIR/$name.pdb"
+    else
+        rm -f "$STAGE_DIR/$name.pdb"
+    fi
+done
 cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
+
+# The Vulkan renderer and its dependencies. Loaded by name at startup from
+# beside the executable, and only when the renderer setting asks for it, so its
+# absence costs nothing on the OpenGL path - but a missing dependency would make
+# the backend unselectable with a load error rather than a clear reason.
+cp -f "$MOD_OUT/Optimum.Render.Vulkan.dll" "$STAGE_DIR/"
+for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
+    [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$STAGE_DIR/"
+done
+
+# shaderc is a native library; the game loads natives out of Lib/.
+SHADERC_NATIVE="$MOD_OUT/runtimes/linux-x64/native/libshaderc_shared.so"
+if [[ -f "$SHADERC_NATIVE" ]]; then
+    cp -f "$SHADERC_NATIVE" "$STAGE_DIR/Lib/"
+else
+    echo "warning: no native shaderc at $SHADERC_NATIVE; the Vulkan renderer will not load" >&2
+fi
 
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.

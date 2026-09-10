@@ -1,0 +1,27 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
+index d6eb844..1482393 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
+@@ -331,10 +331,21 @@ public abstract class ClientPlatformAbstract
+ 
+ 	public static void DisposeIndexBuffer()
+ 	{
+ 		if (singleIndexBufferId != 0)
+ 		{
+-			GL.DeleteBuffer(singleIndexBufferId);
++			// Mono.Cecil transplant.
++			// Shutdown runs this after the GL binding is gone on the device path,
++			// where the raw call throws rather than freeing anything.
++			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++			if (optimumDevice != null)
++			{
++				optimumDevice.DeleteMesh(singleIndexBufferId);
++			}
++			else
++			{
++				GL.DeleteBuffer(singleIndexBufferId);
++			}
+ 			singleIndexBufferId = 0;
+ 		}
+ 	}
+ }

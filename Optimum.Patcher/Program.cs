@@ -117,6 +117,20 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumFocusLostStopwatch",
         "optimumFsrDisabled",
         "DisableOptimumFsr",
+        // Vulkan backend: the device-path framebuffer setup and its helpers.
+        "SetupOptimumFrameBuffers",
+        "CreateOptimumColorTarget",
+        "CreateOptimumDepthTarget",
+        "CreateOptimumPlaceholderTarget",
+        "CreateOptimumFramebuffer",
+        // Vulkan backend: GL state the device takes as call arguments instead,
+        // so the routed bodies need somewhere to remember it.
+        "optimumClearR",
+        "optimumClearG",
+        "optimumClearB",
+        "optimumClearA",
+        "optimumBoundTexture2d",
+        "optimumScissorEnabled",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -133,6 +147,17 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumOitFailureLogged",
         "RestoreVanillaTransparentState",
         "DisableOptimumOit",
+    },
+    // Vulkan backend: the shared sampling setup for the two OIT targets.
+    ["Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT"] = new()
+    {
+        "SetOptimumOitSampling",
+    },
+    // Vulkan backend: shadow maps are sampled as plain depth by the debug
+    // overlay, which means toggling the compare mode off and back on.
+    ["Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug"] = new()
+    {
+        "SetOptimumDepthCompare",
     },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
@@ -204,6 +229,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "edgePoolLocationsScratch",
         "optimumTextureLodBias",
         "ApplyOptimumTextureLodBias",
+        "SetOptimumTextureLodBias",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
     // (_lastSortPlayerPos/_lastSortYaw), plus the multi-tesselator worker pool and
@@ -457,12 +483,187 @@ var targets = new List<MethodTarget>
         new[] { "System.Int32[]", "System.Int32", "System.Int32", "Vintagestory.Client.NoObf.VAO", "System.Boolean" }),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
+    // The shared index buffer is freed at shutdown, after the GL binding is gone
+    // on the device path; the raw call throws there instead of freeing it.
+    new("Vintagestory.Client.NoObf.ClientPlatformAbstract", "DisposeIndexBuffer", 0),
     // FSR: allocate the native intermediate and replace the final bilinear blit.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BlitPrimaryToDefault", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
     // R4: pass the configured god-rays sample limit to the post-process shader.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderPostprocessingEffects", 1),
+    // Vulkan backend: fixed-function state routes to OptimumRender.Device when a
+    // device is installed, and runs the untouched vanilla GL body when it is not.
+    // See VULKAN-BACKEND-PLAN.md section 3.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLWireframes", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlViewport", 4),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlScissor", 4),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlScissorFlag", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlEnableDepthTest", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDisableDepthTest", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlToggleBlend", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDisableCullFace", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlEnableCullFace", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLLineWidth", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDepthMask", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDepthFunc", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlCullFaceBack", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlCullFaceFront", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlEnableStencilTest", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDisableStencilTest", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlStencilMask", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlStencilFunc", 3),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlStencilOp", 3),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlColorMask", 4),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlClearStencil", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGLShaderVersionString", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GenSampler", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BindTexture2d", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BindTextureCubeMap", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLDeleteTexture", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGetMaxTextureSize", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGraphicsCardRenderer", 0),
+    // Vulkan backend: shader staging and linking. CompileShader only stages a
+    // stage on the device path, because GL resolves uniforms and varyings by name
+    // across the whole program and nothing is final until link time.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetUniformLocation", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CompileShader", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateShaderProgram", 1),
+    // Vulkan backend: the mod-facing uniform and texture-binding surface. A
+    // uniform location here is a byte offset into the generated block rather than
+    // a GL location, which callers never see.
+    // Uniform has seven two-parameter overloads, so each needs its signature.
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "System.Single" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "System.Int32" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "Vintagestory.API.MathTools.Vec2f" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "Vintagestory.API.MathTools.Vec2i" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "Vintagestory.API.MathTools.Vec3f" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "Vintagestory.API.MathTools.Vec3i" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 2,
+        new[] { "System.String", "Vintagestory.API.MathTools.Vec4f" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 3,
+        new[] { "System.String", "System.Int32", "System.Single[]" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 3,
+        new[] { "System.String", "System.Single", "System.Single" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 4,
+        new[] { "System.String", "System.Single", "System.Single", "System.Single" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniform", 5,
+        new[] { "System.String", "System.Single", "System.Single", "System.Single", "System.Single" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniforms2", 3),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniforms3", 3),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Uniforms4", 3),
+    // UniformMatrix has a float[] and a by-ref Matrix4 overload.
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "UniformMatrix", 2,
+        new[] { "System.String", "System.Single[]" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "UniformMatrix", 2,
+        new[] { "System.String", "OpenTK.Mathematics.Matrix4&" }),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "UniformMatrices", 3),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "UniformMatrices4x3", 3),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "BindTexture2D", 3),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "BindTextureCube", 3),
+    // Vulkan backend: program lifecycle. ProgramId is the device's handle.
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Use", 0),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Stop", 0),
+    new("Vintagestory.Client.NoObf.ShaderProgramBase", "Dispose", 0),
+    // Vulkan backend: mesh allocation, upload and draw. VAO.VaoId carries the
+    // device's mesh handle so MeshRef, which mods hold, stays unchanged.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFullscreenTriangle", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMeshInstanced", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UploadMesh", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UpdateMesh", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DeleteMesh", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptyMesh", 12),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptySSBOMesh", 12),
+    new("Vintagestory.Client.NoObf.VAO", "Dispose", 0),
+    // Vulkan backend: the window's own clear-and-swap has no GL binding to call
+    // when the window was opened with no graphics API.
+    new("Vintagestory.Client.NoObf.GameWindowNative", ".ctor", 2),
+    // Vulkan backend: framebuffer binding, lifecycle and per-pass state. The
+    // two CurrentFrameBuffer properties bind on assignment, so their setters
+    // are the seam for every render target the client selects.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBuffer", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBufferKeepVw", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_GlDebugMode", 1),
+    // The scissor flag is read back by the runtime atlas upload; the device
+    // keeps no queryable state, so the routed setter remembers it.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "get_GlScissorFlagEnabled", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateFramebuffer", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffer", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 4),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadFrameBuffer", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadFrameBuffer", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnloadFrameBuffer", 1,
+        new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
+    // Vulkan backend: startup capability reporting, which cannot ask GL.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LogAndTestHardwareInfosStage2", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGraphicCardInfos", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
+    // Vulkan backend: error reporting comes from the validation layer.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CheckGlError", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CheckGlErrorAlways", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGetError", 0),
+    // Vulkan backend: texture creation, upload and mipmapping.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadCairoTexture", 2),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateCairoTexture", 3),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GenTexture", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadIntoTexture", 5),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadTexture", 4,
+        new[] { "Vintagestory.API.Common.IBitmap", "System.Boolean", "System.Int32", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BuildMipMaps", 1),
+    // The texture atlas upload path. Private, so it only reaches the shipped
+    // assembly as an explicit target - its three public wrappers delegate here
+    // and carry no GL of their own, which is how it was missed: nothing on the
+    // menu reaches it, and TextureAtlas.Upload only runs once a world loads.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateTextureFromPixels", 6),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Load3DTextureCube", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGenerateTex2DMipmaps", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnBindTextureCubeMap", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlClearColorRgbaf", 4),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SmoothLines", 1),
+    // Vulkan backend: uniform buffers, whose handles UBO carries across.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
+    new("Vintagestory.Client.NoObf.UBO", "Bind", 0),
+    new("Vintagestory.Client.NoObf.UBO", "Unbind", 0),
+    new("Vintagestory.Client.NoObf.UBO", "Dispose", 0),
+    new("Vintagestory.Client.NoObf.UBO", "Update", 3,
+        new[] { "System.Object", "System.Int32", "System.Int32" }),
+    // Vulkan backend: the packed-face storage buffer the SSBO chunk path uses.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UpdateSSBOMesh", 2),
+    // Vulkan backend, world rendering: the render systems that reach past
+    // ClientPlatformWindows to GL directly. Each keeps its GL body behind a
+    // device check, the same shape as the platform routing.
+    new("Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT", "rebuild", 0),
+    new("Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT", "freeResources", 0),
+    new("Vintagestory.Client.NoObf.SystemRenderSunMoon", ".ctor", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderSunMoon", "OnRenderFrame3DPost", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderSunMoon", "Dispose", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug", "OnRenderFrame2DOverlay", 1),
+    new("Vintagestory.Client.NoObf.SvgLoader", "LoadSvg", 6),
+    new("Vintagestory.Client.NoObf.ClientMain", "OrthoMode", 3),
+    new("Vintagestory.Client.NoObf.ClientMain", "PerspectiveMode", 0),
+    new("Vintagestory.Client.NoObf.InventoryItemRenderer", "RenderItemStackToFrameBuffer", 3),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "HandleLevelFinalize", 1),
+    new("Vintagestory.ClientNative.Screenshot", "GrabScreenshot", 4),
+    // Vulkan backend: the GUI depth clear between the world and the interface,
+    // the only raw GL left in the screen loop.
+    new("Vintagestory.Client.ScreenManager", "Render", 1),
+    // Vulkan backend: the post-process chain's remaining direct GL - viewport,
+    // draw-buffer selection, depth toggle and the SSAO clear.
+    // Vulkan backend: the device's default target and swapchain follow the
+    // window only if something tells them to.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Window_Resize", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "MergeTransparentRenderPass", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop

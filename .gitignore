@@ -6,6 +6,9 @@ baseline/
 build/
 .baseline/
 
+# Decompiled vanilla reference tree (proprietary; local read-only aid, never committed)
+/_ref/
+
 # Anchored to repo root: reconstructed fork trees (patches stay tracked)
 /VintagestoryApi/
 /Cairo/

@@ -78,9 +78,15 @@ public class FsrPipelineCoverageTests
         // TexParameter/SamplerParameter calls at all.
         Assert.Contains("if (ClientSettings.OptimumRenderScale >= 1.0f)", chunkRenderer);
         Assert.Contains("MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f))", chunkRenderer);
-        Assert.Contains("(TextureParameterName)34049, textureLodBias", chunkRenderer);
+        // The bias reaches every block atlas through SetOptimumTextureLodBias,
+        // which routes to the device and keeps the GL call as its fallback. The
+        // caller still computes the value; only the application moved.
+        Assert.Contains("SetOptimumTextureLodBias(textureLodBias)", chunkRenderer);
+        Assert.Contains("(TextureParameterName)34049, bias", chunkRenderer);
+        Assert.Contains("OptimumGlConstants.TextureLodBias, bias", chunkRenderer);
         Assert.Contains("if (OptimumConfig.EffectiveRenderScale < 1.0f)", shaderRegistry);
         Assert.Contains("(SamplerParameterName)34049, terrainLodBias", shaderRegistry);
+        Assert.Contains("OptimumGlConstants.TextureLodBias, terrainLodBias", shaderRegistry);
         Assert.Contains("terrainTexLinear", shaderRegistry);
     }
 

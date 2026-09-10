@@ -33,7 +33,8 @@ public static class ShaderCompatibilityScanner
         ("harmony", "Harmony"),
         ("registerrenderer", "RenderHook"),
         ("onrenderframe", "RenderHook"),
-        ("enumrenderstage", "RenderHook")
+        ("enumrenderstage", "RenderHook"),
+        ("opentk.graphics", "RawOpenGL")
     ];
 
     private static readonly string[] OptimumBuiltInMods =
@@ -308,6 +309,15 @@ public static class ShaderCompatibilityScanner
             "external render or cloud shader owns the OIT integration point");
         AddFeatureDecision(report, "MapPageCache", externalShaderAssets || externalShaderHooks,
             "external shader assets or shader hooks can dispose registered programs during reload");
+
+        // "Vulkan" is a backend decision, not a shader feature, and is deliberately
+        // absent from ShaderFeatures: a scanner failure must not silently veto a
+        // backend the user explicitly asked for. GLSL that mods ship is fine - the
+        // translator compiles arbitrary sources - but a mod issuing GL calls itself
+        // has no path through a Vulkan device.
+        bool rawOpenGl = report.Sources.Any(x => x.Indicators.Contains("RawOpenGL"));
+        AddFeatureDecision(report, "Vulkan", rawOpenGl,
+            "a mod calls OpenGL directly, which the Vulkan backend cannot serve");
 
         if (report.ScanFailed)
         {
