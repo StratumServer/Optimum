@@ -203,14 +203,31 @@ public class ShaderTranslationTests
 
         var stages = ShaderCorpus.BuildProgram("entityanimated", files, includes, variant);
 
-        string vertex = stages.Single(s => s.Stage == EnumShaderType.VertexShader).Code;
+        using var compiler = new ShaderCompiler();
+
+        // The raw Code still carries every #if branch, so asserting on it would
+        // pass even when TAAMOTION or USEOIT compile the writer out. Only the
+        // preprocessed text says what the compiler actually sees.
+        string vertex = Preprocess(compiler, stages, EnumShaderType.VertexShader);
         Assert.Contains("PrevElementTransforms", vertex);
         Assert.Contains("previousWarpState()", vertex);
         Assert.Contains("applyVertexWarpingState", vertex);
 
-        string fragment = stages.Single(s => s.Stage == EnumShaderType.FragmentShader).Code;
+        string fragment = Preprocess(compiler, stages, EnumShaderType.FragmentShader);
         Assert.Contains("outMotion", fragment);
         Assert.Contains("gl_FragCoord.z + depthOffset", fragment);
+    }
+
+    /// <summary>Runs one stage through the real preprocessor and returns its text.</summary>
+    private static string Preprocess(
+        ShaderCompiler compiler, IReadOnlyList<ShaderStageSource> stages, EnumShaderType stage)
+    {
+        ShaderStageSource source = stages.Single(s => s.Stage == stage);
+        ShaderCompileResult result =
+            compiler.Preprocess(source.Code, source.PrefixCode, source.Filename, source.Stage);
+
+        Assert.True(result.Success, $"{stage}: {result.Error}");
+        return result.PreprocessedText;
     }
 
     [SkippableFact]

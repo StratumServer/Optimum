@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Optimum.Render.Vulkan.Core;
 using Optimum.Render.Vulkan.Shaders;
@@ -125,12 +126,12 @@ public class AttachmentSemanticsTests
     /// shader statically writes only location 0. The Vulkan spec leaves the
     /// unwritten locations' contents undefined rather than promising they are
     /// preserved, so this documents what this driver actually does rather than
-    /// asserting a guarantee the TAA design may not lean on: measured on this
-    /// device, an attachment the shader never writes keeps its prior contents,
-    /// the same as if it had been masked out of glDrawBuffers.
+    /// asserting a guarantee the TAA design may not lean on. The unwritten
+    /// attachments are still read back, but only to log whether they were
+    /// preserved; the run fails only on validation errors.
     /// </summary>
     [SkippableFact]
-    public unsafe void UnwrittenButEnabledAttachmentsKeepTheirContentsOnThisDriver()
+    public unsafe void UnwrittenButEnabledAttachmentContentsAreObservedNotAsserted()
     {
         var messages = new List<string>();
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
@@ -173,16 +174,26 @@ public class AttachmentSemanticsTests
             Assert.Equal(255, color[0]);
             Assert.Equal(0, color[2]);
 
-            // Observed reality on this driver, not a Vulkan guarantee: locations
-            // the shader never wrote came through unchanged, exactly like the
-            // masked-out case above. The TAA resolve pass must not be written to
-            // depend on this - it has to name every attachment it touches in
-            // both the shader and the draw-buffer mask, as the tests above do.
+            // Locations that are enabled in the draw-buffer mask but never
+            // written by the fragment shader hold undefined contents per the
+            // Vulkan spec, so this is an observation and not an assertion: a
+            // conforming driver is free to leave anything there. It is recorded
+            // so the behaviour of the machine the suite runs on is visible in
+            // the log. The TAA resolve pass must not depend on it either way -
+            // it has to name every attachment it touches in both the shader and
+            // the draw-buffer mask, as the tests above do.
+            bool preserved = true;
             for (int i = 1; i <= 4; i++)
             {
                 byte[] untouched = ReadTexture(context!, commands, textures, attachment[i], size);
-                Assert.All(untouched, b => Assert.Equal(seeds[i], b));
+                bool attachmentPreserved = untouched.All(b => b == seeds[i]);
+                preserved &= attachmentPreserved;
+                _output.WriteLine(
+                    $"attachment {i}: seed 0x{seeds[i]:X2}, first byte 0x{untouched[0]:X2}, " +
+                    $"preserved={attachmentPreserved}");
             }
+
+            _output.WriteLine($"unwritten-but-enabled attachments preserved on this driver: {preserved}");
 
             ValidationAssert.NoErrors(messages);
         }

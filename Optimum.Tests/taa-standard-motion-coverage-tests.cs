@@ -94,7 +94,7 @@ public class TaaStandardMotionCoverageTests
     [Fact]
     public void TheFrameContractKeepsPerObjectHistoryForStandardShaderDraws()
     {
-        string frame = Read("VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
+        string frame = Read("sources/VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
         string vertex = Read("sources/shaders/standard.vsh");
         string fragment = Read("sources/shaders/standard.fsh");
 

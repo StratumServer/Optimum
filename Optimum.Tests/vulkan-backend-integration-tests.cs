@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -125,9 +126,14 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("public static string Renderer = \"opengl\";", config);
         Assert.Contains("public string Renderer { get; set; } = \"opengl\";", config);
-        // Anything the normaliser does not recognise falls back to opengl.
-        Assert.Contains("StringComparison.OrdinalIgnoreCase) ? \"auto\" :", config);
-        Assert.Contains("\"opengl\";", config);
+        // Anything the normaliser does not recognise falls back to opengl. The
+        // assertion is anchored to the tail of the normaliser's ternary chain -
+        // a bare "opengl" would already be satisfied by the field declarations
+        // above and could not detect the fallback branch being dropped.
+        string normalised = Regex.Replace(config, @"\s+", " ");
+        Assert.Contains(
+            "string.Equals(requestedRenderer, \"auto\", StringComparison.OrdinalIgnoreCase) ? \"auto\" : \"opengl\";",
+            normalised);
     }
 
     /// <summary>
