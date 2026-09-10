@@ -822,9 +822,28 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// and varyings by name across the whole program, so nothing about a stage is
     /// final until its siblings are known.
     /// </summary>
+    /// <summary>
+    /// Largest shader source accepted per stage. Vanilla's biggest stage is
+    /// well under 100 KiB; the cap keeps a broken or hostile mod shader from
+    /// handing the native compiler an unbounded input.
+    /// </summary>
+    internal const int MaxShaderSourceBytes = 2 * 1024 * 1024;
+
     public bool CompileShader(IShader shader)
     {
         if (shader?.Code == null) return false;
+
+        string stageName = shader.Type.ToString();
+        if (shader.Code.Length + (shader.PrefixCode?.Length ?? 0) > MaxShaderSourceBytes)
+        {
+            _diagnostics.Add($"{stageName}: shader source exceeds {MaxShaderSourceBytes} bytes and was rejected");
+            return false;
+        }
+        if (shader.Code.IndexOf('\0') >= 0 || (shader.PrefixCode?.IndexOf('\0') ?? -1) >= 0)
+        {
+            _diagnostics.Add($"{stageName}: shader source contains a NUL byte and was rejected");
+            return false;
+        }
 
         _stagedStages[shader] = new StagedStage
         {

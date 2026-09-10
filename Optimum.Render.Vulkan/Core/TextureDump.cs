@@ -14,8 +14,9 @@ namespace Optimum.Render.Vulkan.Core;
 /// texture saw, with no inference in between.
 ///
 /// Off unless OPTIMUM_DUMP_TEXTURES lists texture ids, comma separated. The
-/// files land beside the render trace, or in OPTIMUM_DUMP_DIR when that is set,
-/// as binary PPM - a five-line header and raw RGB, which needs no encoder here
+/// files land in OPTIMUM_DUMP_DIR when that names an absolute path, else beside
+/// the render trace, else under the temp directory - never the working
+/// directory - as binary PPM - a five-line header and raw RGB, which needs no encoder here
 /// and which every image tool reads.
 /// </summary>
 internal static class TextureDump
@@ -82,18 +83,37 @@ internal static class TextureDump
     /// <summary>Removes an id from the pending set once it has been written successfully.</summary>
     public static void Complete(int textureId) => Pending.Remove(textureId);
 
-    private static string Directory()
+    /// <summary>
+    /// Where the files go. An explicit OPTIMUM_DUMP_DIR must be absolute so
+    /// the launching environment names the location outright rather than
+    /// relative to whatever the working directory happens to be; otherwise
+    /// the files sit beside the render trace, and failing both, under a
+    /// dedicated folder in the temp directory. Never the working directory.
+    /// </summary>
+    private static string? Directory()
     {
         string? explicitDir = Environment.GetEnvironmentVariable("OPTIMUM_DUMP_DIR");
-        if (!string.IsNullOrWhiteSpace(explicitDir)) return explicitDir;
+        if (!string.IsNullOrWhiteSpace(explicitDir))
+        {
+            return Path.IsPathRooted(explicitDir) ? Path.GetFullPath(explicitDir) : null;
+        }
 
         string? tracePath = Environment.GetEnvironmentVariable("OPTIMUM_RENDER_TRACE");
-        string? beside = string.IsNullOrWhiteSpace(tracePath)
-            ? null
-            : Path.GetDirectoryName(Path.GetFullPath(tracePath));
+        if (!string.IsNullOrWhiteSpace(tracePath) && Path.IsPathRooted(tracePath))
+        {
+            string? beside = Path.GetDirectoryName(Path.GetFullPath(tracePath));
+            if (!string.IsNullOrWhiteSpace(beside)) return beside;
+        }
 
-        return string.IsNullOrWhiteSpace(beside) ? "." : beside;
+        return Path.Combine(Path.GetTempPath(), "optimum-texture-dumps");
     }
+
+    /// <summary>
+    /// One prefix per process, so two runs into the same directory never
+    /// overwrite each other's files and a run never overwrites its own.
+    /// </summary>
+    private static readonly string RunPrefix =
+        DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + Environment.ProcessId;
 
     /// <summary>
     /// Writes RGBA or BGRA bytes as a binary PPM.
@@ -105,11 +125,13 @@ internal static class TextureDump
 
         try
         {
-            string directory = Directory();
+            string? directory = Directory();
+            if (directory == null) return false;
             System.IO.Directory.CreateDirectory(directory);
-            string path = Path.Combine(directory, $"texture-{textureId}-{width}x{height}.ppm");
+            string path = Path.Combine(directory, $"{RunPrefix}-texture-{textureId}-{width}x{height}.ppm");
 
-            using var file = new FileStream(path, FileMode.Create, FileAccess.Write);
+            // CreateNew: an existing file is never truncated, whatever named it.
+            using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
             using var writer = new BinaryWriter(file);
 
             foreach (char c in $"P6\n{width} {height}\n255\n") writer.Write((byte)c);

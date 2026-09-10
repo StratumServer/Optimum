@@ -109,6 +109,14 @@ public static class OptimumRenderBootstrap
     {
         reason = null;
 
+        // Installing is a single transition: a device that is already published
+        // stays, so a second call cannot displace and leak the one the client
+        // is drawing with.
+        if (OptimumRender.Device != null)
+        {
+            return true;
+        }
+
         try
         {
             if (!TryLoadBackend(out reason)) return false;
@@ -128,27 +136,37 @@ public static class OptimumRenderBootstrap
                 return false;
             }
 
+            // The marker goes down before the driver is touched: a crash inside
+            // device creation is exactly the kind the next start must see. A
+            // clean failure clears it again, since the caller falls back to
+            // OpenGL on its own.
+            WriteCrashMarker(dataPath);
+
             string failureReason;
             if (!device.Initialize(windowHandle, width, height, out failureReason))
             {
                 device.Dispose();
+                ClearCrashMarker();
                 reason = failureReason;
                 return false;
             }
 
             OptimumRender.Device = device;
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
-            WriteCrashMarker(dataPath);
             return true;
         }
         catch (Exception error)
         {
+            ClearCrashMarker();
             reason = error.Message;
             return false;
         }
     }
 
-    /// <summary>Shuts the device down and clears the crash marker.</summary>
+    /// <summary>
+    /// Shuts the device down, returns the backend state to OpenGL and clears the
+    /// crash marker. Safe to call more than once and on the OpenGL path.
+    /// </summary>
     public static void Shutdown()
     {
         try
@@ -164,6 +182,8 @@ public static class OptimumRenderBootstrap
         }
 
         OptimumRender.Device = null;
+        OptimumRender.ActiveBackend = EnumRenderBackend.OpenGL;
+        OptimumRender.NoGraphicsApiWindow = false;
         ClearCrashMarker();
     }
 

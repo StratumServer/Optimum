@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..2d8144a 100644
+index afa4d5f..8adc77a 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -126,3 +126,17 @@ index afa4d5f..2d8144a 100644
  			try
  			{
  				((NativeWindow)gameWindowNative).CenterWindow();
+@@ -337,10 +437,13 @@ public class ClientProgram
+ 			}
+ 			Thread.CurrentThread.Priority = ThreadPriority.Normal;
+ 			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");
+ 			clientPlatformWindows.DisposeFrameBuffers(clientPlatformWindows.FrameBuffers);
+ 			clientPlatformWindows.StopAudio();
++			// Tear the Vulkan device down before its window goes, and clear the
++			// crash marker so the next start does not read this exit as a crash.
++			OptimumRenderBootstrap.Shutdown();
+ 			((NativeWindow)gameWindowNative).Dispose();
+ 		}
+ 	}
+ 
+ 	private GameWindowNative AttemptToOpenWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings, int openGlMajor, int openGlMinor, int tries)
