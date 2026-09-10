@@ -55,6 +55,129 @@ public class VulkanDeviceIntegrationTests
     public void TaaAccumulatesAfterClearingDirtyMaskedMotion(int motionAttachmentIndex) =>
         RunTaaResolve(12f, false, motionAttachmentIndex, true);
 
+    [SkippableFact]
+    public unsafe void TemporalHistorySurvivesFramesInFlightWithoutIntermediateReadbacks()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 64, frames = 16;
+            string vertex = ShaderCorpus.LoadShaderFiles()["taa-resolve.vsh"];
+            int accumulate = LinkProgram(seam, vertex, """
+                #version 330 core
+                uniform sampler2D historyColor;
+                uniform sampler2D historyAux;
+                uniform sampler2D historyDepth;
+                uniform float increment;
+                layout(location = 0) out vec4 color;
+                layout(location = 1) out vec4 aux;
+                layout(location = 2) out vec4 depth;
+                void main() {
+                    ivec2 p = ivec2(gl_FragCoord.xy);
+                    color = texelFetch(historyColor, p, 0) + vec4(increment);
+                    aux = texelFetch(historyAux, p, 0) + vec4(8.0 / 255.0);
+                    depth = vec4(texelFetch(historyDepth, p, 0).r + increment);
+                    // Keep work in flight while the CPU submits the next frame.
+                    // The bound is deliberately data dependent, preventing the
+                    // compiler from precomputing the loop for the whole draw.
+                    float busy = 0;
+                    for (int i = 0; i < 4096 + int(gl_FragCoord.y); ++i)
+                        busy += sin(float(i) + gl_FragCoord.x);
+                    if (busy > 1e30) color = vec4(busy);
+                }
+                """);
+            int inspect = LinkProgram(seam, vertex, """
+                #version 330 core
+                uniform sampler2D historyColor;
+                uniform sampler2D historyAux;
+                uniform sampler2D historyDepth;
+                out vec4 color;
+                void main() {
+                    ivec2 p = ivec2(gl_FragCoord.xy);
+                    color = vec4(texelFetch(historyColor, p, 0).r / 8.0,
+                                 texelFetch(historyDepth, p, 0).r / 8.0,
+                                 texelFetch(historyAux, p, 0).r, 1.0);
+                }
+                """);
+
+            int Texture(EnumTextureInternalFormat format) => seam.CreateTexture2D(
+                size, size, format, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int Target(int[] colors)
+            {
+                int target = seam.CreateFramebuffer(size, size);
+                for (int i = 0; i < colors.Length; ++i)
+                    seam.AttachTexture(target, (EnumFramebufferAttachment)(36064 + i), colors[i], 0);
+                seam.SetDrawBuffers(target, (1 << colors.Length) - 1);
+                return target;
+            }
+            void BindHistory(int program, int[] textures)
+            {
+                string[] names = { "historyColor", "historyAux", "historyDepth" };
+                for (int i = 0; i < names.Length; ++i)
+                {
+                    seam.SetSamplerUnit(program, names[i], i + 4);
+                    seam.BindTexture(i + 4, textures[i]);
+                }
+            }
+
+            var histories = new int[2][];
+            var targets = new int[2];
+            for (int i = 0; i < 2; ++i)
+            {
+                histories[i] = new[] { Texture(EnumTextureInternalFormat.Rgba16f),
+                    Texture(EnumTextureInternalFormat.Rgba8),
+                    seam.CreateTexture2DRaw(size, size, 0x822E, IntPtr.Zero, 4) };
+                targets[i] = Target(histories[i]);
+            }
+            int readbackTarget = Target(new[] { Texture(EnumTextureInternalFormat.Rgba8) });
+            seam.SetViewport(0, 0, size, size);
+            seam.SetDepthTest(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+
+            for (int frame = 0; frame < frames; ++frame)
+            {
+                seam.BeginFrame();
+                if (frame == 0)
+                {
+                    seam.BindFramebuffer(targets[0]);
+                    for (int attachment = 0; attachment < 3; ++attachment)
+                        seam.ClearColor(attachment, 0, 0, 0, 0);
+                }
+                seam.BindFramebuffer(targets[(frame + 1) & 1]);
+                seam.UseProgram(accumulate);
+                BindHistory(accumulate, histories[frame & 1]);
+                seam.SetUniform(accumulate, seam.GetUniformLocation(accumulate, "increment"), (frame + 1) / 32f);
+                seam.DrawFullscreenTriangle();
+                seam.Present();
+                // No readback, upload or explicit wait here: these would flush
+                // the graphics queue and mask broken history synchronization.
+            }
+
+            seam.BeginFrame();
+            seam.BindFramebuffer(readbackTarget);
+            seam.UseProgram(inspect);
+            BindHistory(inspect, histories[frames & 1]);
+            seam.DrawFullscreenTriangle();
+            byte[] pixels = new byte[size * size * 4];
+            fixed (byte* data = pixels)
+                seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)data);
+            seam.Present();
+            // Sum(1..16)/32 = 4.25 in both float histories; the RGBA8 aux
+            // accumulates exactly eight byte values per frame. A stale cached
+            // descriptor, missing frame, or overwritten uniform changes these.
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                Assert.InRange(pixels[i], 135, 136);
+                Assert.InRange(pixels[i + 1], 135, 136);
+                Assert.Equal(128, pixels[i + 2]);
+                Assert.Equal(255, pixels[i + 3]);
+            }
+            AssertClean(seam);
+        }
+    }
+
     private unsafe void RunTaaResolve(float distance, bool disoccluded,
         int motionAttachmentIndex, bool poisonMotion)
     {
