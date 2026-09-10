@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/FruitpressContentsRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/FruitpressContentsRenderer.cs
+index 5f7f7f8..bf1739a 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/FruitpressContentsRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/FruitpressContentsRenderer.cs
+@@ -181,11 +181,23 @@ namespace Vintagestory.GameContent
+             ;
+ 
+             prog.ViewMatrix = rpi.CameraMatrixOriginf;
+             prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+ 
+-            rpi.RenderMultiTextureMesh(mashMeshref, "tex");
++            // Optimum TAA (P4): the mash is squeezed - the model matrix's Y scale
++            // follows squeezeRel while the press is worked - so its previous model
++            // matrix is worth keeping. No-op when TAA is off.
++            OptimumStandardMotion.Apply(prog, this, mashMeshref, ModelMat.Values);
++            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            try
++            {
++                rpi.RenderMultiTextureMesh(mashMeshref, "tex");
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+ 
+             prog.Stop();
+         }
+ 
+         public void Dispose()

@@ -422,6 +422,44 @@ correct until you measure it.
 GPU harness; the sky pass's GL branch is the shared `GlDepthFunc`/`GlToggleBlend` helpers plus
 `BeginMotionOnlyWrite`'s existing GL branch, all of which are still unproven on OpenGL.
 
+P4 status, movers (the P3 carry-over) (2026-09-10): landed on `feat/taa`.
+**Not verified in game on either backend** - no phase of P4 ran `make deploy` or the client.
+Every standard-shader user in the mod forks now either writes motion or is on an explicit
+exemption list with a reason, enumerated by scan in
+`Optimum.Tests/taa-mover-motion-coverage-tests.cs` rather than listed by hand.
+
+| Class | Status | Why |
+|---|---|---|
+| Helve hammer, resonator disc, fruitpress mash, pot lid | exact | continuous per-frame animation; `OptimumStandardMotion.Apply` keyed on the renderer (the pot lid on `lidRef`, because the pot body already holds the renderer's key) plus a narrow `Begin`/`End` window |
+| Bloomery, forge and firepit contents | exact | their model matrices track fuel level, voxel height and the cooking transform, all of which move between frames |
+| Falling blocks | exact | history keyed on the `EntityBlockFalling` entity, not on the renderer, which is shared by every falling block in view; one window around the whole loop |
+| Anvil parts, molds, signs, chest labels, knapping, clay forming, ground storage, crucible, support-beam preview | fallback, and exact | static in the world, so the resolve's camera reprojection is the right answer; each carries a written reason on the exemption list |
+| Forge work item, anvil work item | fallback | drawn on the mod's own `smithingWorkItemShader`, which declares no motion output at all; a writer there is a separate shader override |
+
+Findings to carry:
+
+(q) **One renderer can be two drawn things.** `PotInFirepitRenderer` draws a static pot body and a
+rattling lid from one `OnRenderFrame`, through one `Matrixf`. Keying both on `this` would have
+handed the lid the body's previous matrix - a zero vector on the only part of the pot that moves -
+and the `ConditionalWeakTable` would have silently accepted it. The identity has to mean "this
+drawn thing", not "this renderer": the lid keys on `lidRef`.
+
+(r) **A shared renderer must key on the drawn object.** `ModSystemRenderFallingBlocksFast` is one
+`IRenderer` for every falling block in view, so its identity is the entity. The window, by
+contrast, is per target and not per draw, so it opens once around the loop.
+
+(s) **The jittered case is now covered, and it needed a perspective-shaped projection.**
+`Optimum.Render.Vulkan.Tests/TaaMoverMotionTests` drives the standard writer with
+`taaJitterPx != 0`, which every P3 GPU test left at zero. With the identity projection those tests
+use, the NDC shear `P[8] -= 2*jx/W` is a no-op on a quad at z = 0, so a jittered case there would
+have asserted nothing. Zeroing `taaJitterPx` while leaving the projection sheared fails 7 of the 8
+new cases, which is what makes them evidence.
+
+(t) **P3 finding (f) is unchanged and now covers eight more methods.** `mod-patcher` `Methods`
+entries were added for every mover, but `patches/runtime/**` still has no donor for any of them,
+so the installed runtime keeps the vanilla bodies and every one of these renderers ghosts there
+while the build tree is correct. `check-patches.sh` reports 0 problems either way.
+
 **P5. Integration, sharpen, settings, fallback, acceptance.**
 - RCAS variant with a sharpness uniform and true bypass; no double sharpening with FSR1 render
   scale; `TaaMipBias` optional and measured; settings rows in `GuiCompositeSettings.cs.patch`;

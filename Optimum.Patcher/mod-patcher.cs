@@ -168,6 +168,10 @@ public static class ModPatcher
                 // RenderItem; dropped items in EntityItemRenderer.DoRender3DOpaque
                 // above. Both also open the motion-attachment window around their draw.
                 new("Vintagestory.GameContent.EntityShapeRenderer", "RenderItem", 5),
+                // TAA P4: the falling-block renderer is shared by every falling
+                // block in view, so each block keys its own previous model matrix
+                // on its entity and the window is opened once around the loop.
+                new("Vintagestory.GameContent.ModSystemRenderFallingBlocksFast", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.WeatherSimulationSound", "updateSounds", 1),
@@ -262,6 +266,18 @@ public static class ModPatcher
                 // TAA P3: the quern top is the block-entity model that actually
                 // moves, so it keeps a previous model matrix and writes motion.
                 new("Vintagestory.GameContent.QuernTopRenderer", "OnRenderFrame", 2),
+                // TAA P4: the remaining moving standard-shader block-entity
+                // renderers. Each keeps a previous model matrix through
+                // OptimumStandardMotion and opens the motion-attachment window
+                // around its own draw; without these entries the installed runtime
+                // keeps the vanilla bodies and they ghost on the camera fallback.
+                new("Vintagestory.GameContent.HelveHammerRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.FruitpressContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.ResonatorRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.BloomeryContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.ForgeContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.FirepitContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.PotInFirepitRenderer", "OnRenderFrame", 2),
                 // TAA P3, the instanced writer: every mechanical-power renderer now
                 // fills OptimumInstanceMotion's instance layout (light, transform,
                 // previous transform, metadata) instead of vanilla's light+transform,

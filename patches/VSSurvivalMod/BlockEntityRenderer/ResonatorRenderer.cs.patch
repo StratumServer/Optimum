@@ -1,0 +1,31 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs
+index 8d5b972..256c7e1 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs
+@@ -91,11 +91,25 @@ namespace Vintagestory.GameContent
+                 .Rotate(discRotRad)
+                 .Scale(0.9f, 0.9f, 0.9f)
+                 .Translate(origx, origy, origz)
+                 .Values
+             ;
+-            rpi.RenderMesh(cylinderMeshRef);
++            // Optimum TAA (P4): the disc spins - discRotRad.Y is driven by elapsed
++            // time - so the camera fallback would ghost it. This renderer also
++            // registers on AfterFinalComposition and runs the same body there; the
++            // window refuses outside the temporal jitter window, so that draw writes
++            // nothing. No-op when TAA is off.
++            OptimumStandardMotion.Apply(prog, this, cylinderMeshRef, ModelMat.Values);
++            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            try
++            {
++                rpi.RenderMesh(cylinderMeshRef);
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+ 
+             prog.Stop();
+         }
+ 
+         internal void UpdateMeshes(MeshData cylinderMesh)
