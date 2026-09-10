@@ -131,6 +131,68 @@ public class TemporalRenderInventoryTests
         Assert.Contains("api.Event.UnregisterRenderer(this, EnumRenderStage.AfterFinalComposition);", anvil);
     }
 
+    /// <summary>
+    /// TAA P4 statuses for the classes the plan's inventory table calls out for
+    /// this phase, pinned to the code that implements them.
+    /// </summary>
+    [Fact]
+    public void TheSkyAndCloudRowIsTheSkyMotionPassAndNoCelestialWriter()
+    {
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string clientMain = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
+
+        // The pass exists, is registered, and is called last in the scene phase.
+        Assert.Contains("internal bool RenderOptimumSkyMotion()", platform);
+        Assert.Contains("optimumSkyMotionPlatform.RenderOptimumSkyMotion();", clientMain);
+        Assert.Contains(
+            "RegisterOptimumShaderProgram(\"taa-skymotion\", ShaderPrograms.TaaSkyMotion = new ShaderProgram());",
+            Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs"));
+
+        // Night sky and sky colour draw with the depth test off, so their pixels
+        // keep depth 1 and the resolve's infinite-direction fallback owns them;
+        // the sun and moon test depth but never write it. That is the whole
+        // reason none of the three has a writer.
+        Assert.Contains("GlDisableDepthTest();",
+            Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs"));
+        Assert.Contains("GlDisableDepthTest();",
+            Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs"));
+        Assert.Contains("GlDepthMask(flag: false);",
+            Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs"));
+
+        // The aurora and the volumetric clouds are OIT content: their coverage
+        // reaches the sky pass through the Transparent target's revealage.
+        Assert.Contains("capi.Event.RegisterRenderer(this, EnumRenderStage.OIT, \"aurora\");",
+            Read("VSEssentials/Systems/Weather/AuroraRenderer.cs"));
+        // The aurora goes through oit.fsh, so its coverage lands in the very
+        // revealage attachment the sky pass reads. The vanilla shaders are
+        // proprietary and never committed, so an un-bootstrapped checkout skips.
+        string? aurora = VanillaShaderArchive.TryRead("shaders/aurora.fsh");
+        if (aurora != null) Assert.Contains("#include oit.fsh", aurora);
+    }
+
+    [Fact]
+    public void TheDecalRowIsAWriterOfItsOwn()
+    {
+        string decals = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs");
+
+        // Drawn on Primary in the AfterOIT stage, and instrumented there.
+        Assert.Contains("EnumRenderStage.AfterOIT, \"decals\", 0.5", decals);
+        Assert.Contains("optimumPlatform.BeginMotionWrite()", decals);
+        Assert.Contains("SetOptimumMotionUniforms(shaderProgramDecals);", decals);
+        Assert.Contains("layout(location = TAAMOTIONLOCATION) out vec4 outMotion;",
+            Read("sources/shaders/decals.fsh"));
+    }
+
+    [Fact]
+    public void TheLateStageRowsAreRefusedTheMotionWindow()
+    {
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string clientMain = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
+
+        Assert.Contains("if (!OptimumTemporal.Frame.JitterActive) return false;", platform);
+        Assert.Contains("OptimumTemporal.Frame.JitterActive = false;", clientMain);
+    }
+
     [Fact]
     public void VulkanPresentBlitIsTheOnlyYFlip()
     {

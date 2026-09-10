@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..7bdb390 100644
+index 67feafa..f5dd1c6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -326,7 +326,7 @@ index 67feafa..7bdb390 100644
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1176,14 +1302,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1176,14 +1302,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Platform.GlDepthMask(flag: true);
  		Platform.GlEnableDepthTest();
  		Platform.GlCullFaceBack();
@@ -345,6 +345,17 @@ index 67feafa..7bdb390 100644
 +		{
 +			chunkRenderer.RenderLiquidMotion(dt);
 +		}
++		// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
++		// Last of the scene phase, because it reads the Transparent target's
++		// revealage (which the OIT merge has just consumed) and because it must
++		// see the final depth buffer: it draws only where nothing wrote depth,
++		// so every writer that could claim a pixel has to have run first. Still
++		// inside the temporal window; a no-op with TAA off, and skipped when the
++		// transparent pass that produced the revealage did not run.
++		if (doTransparentRenderPass && Platform is ClientPlatformWindows optimumSkyMotionPlatform)
++		{
++			optimumSkyMotionPlatform.RenderOptimumSkyMotion();
++		}
  	}
  
  	public void RenderAfterPostProcessing(float dt)
@@ -359,7 +370,7 @@ index 67feafa..7bdb390 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1564,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1420,10 +1575,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -374,7 +385,7 @@ index 67feafa..7bdb390 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1713,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1724,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -407,7 +418,7 @@ index 67feafa..7bdb390 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2281,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2292,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -432,7 +443,7 @@ index 67feafa..7bdb390 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2710,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2721,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -446,7 +457,7 @@ index 67feafa..7bdb390 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3701,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3712,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

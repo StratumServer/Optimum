@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..5ec03b8 100644
+index 4a24e75..f8965d2 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..5ec03b8 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,158 @@ public class ShaderRegistry
+@@ -181,39 +183,160 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -25,6 +25,8 @@ index 4a24e75..5ec03b8 100644
 +		RegisterOptimumShaderProgram("taa-resolve", ShaderPrograms.TaaResolve = new ShaderProgram());
 +		// Optimum TAA (P4): the liquid velocity pass.
 +		RegisterOptimumShaderProgram("chunkliquidmotion", ShaderPrograms.ChunkLiquidMotion = new ShaderProgram());
++		// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
++		RegisterOptimumShaderProgram("taa-skymotion", ShaderPrograms.TaaSkyMotion = new ShaderProgram());
 +	}
 +
 +	private static void RegisterOptimumShaderProgram(string name, ShaderProgram program)
@@ -154,7 +156,7 @@ index 4a24e75..5ec03b8 100644
 +			bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
 +			OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
 +		}
-+		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas || shaderProgram == ShaderPrograms.TaaDebug || shaderProgram == ShaderPrograms.TaaResolve || shaderProgram == ShaderPrograms.ChunkLiquidMotion)
++		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas || shaderProgram == ShaderPrograms.TaaDebug || shaderProgram == ShaderPrograms.TaaResolve || shaderProgram == ShaderPrograms.ChunkLiquidMotion || shaderProgram == ShaderPrograms.TaaSkyMotion)
 +		{
 +			shaderProgram.LoadError |= !compiled;
 +		}
@@ -182,7 +184,7 @@ index 4a24e75..5ec03b8 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +417,11 @@ public class ShaderRegistry
+@@ -296,11 +419,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -195,7 +197,7 @@ index 4a24e75..5ec03b8 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +454,48 @@ public class ShaderRegistry
+@@ -333,10 +456,48 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";

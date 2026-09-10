@@ -349,6 +349,12 @@ public static class ShaderCompatibilityScanner
             // exactly the fast-moving, alpha-blended pixels TAA is worst at.
             HasExternalShader(report, "particlescube.vsh") || HasExternalShader(report, "particlescube.fsh") ||
             HasExternalShader(report, "transparentcompose.fsh") ||
+            // A decal that no longer writes the attachment leaves the block's
+            // vector behind a depth the decal itself moved, which the resolve
+            // rejects; and an external sky-motion pass would decide the reactive
+            // policy for every cloud pixel in the frame.
+            HasExternalShader(report, "decals.vsh") || HasExternalShader(report, "decals.fsh") ||
+            HasExternalShader(report, "taa-skymotion.vsh") || HasExternalShader(report, "taa-skymotion.fsh") ||
             HasExternalShader(report, "vertexwarp.vsh");
         AddFeatureDecision(report, "Taa", externalMotionShader,
             "external shader owns a motion-vector writer contract");

@@ -37,6 +37,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs.patch

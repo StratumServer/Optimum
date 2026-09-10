@@ -166,10 +166,11 @@ never jittered.
 | Instanced mechanical power | Opaque / Primary | instanced | exact with previous instance transforms (P3) |
 | Particles cube | Opaque / Primary, blend on | particlescube | reactive 1, replace-blend on motion (P4) |
 | Particles quad | OIT / Transparent | particlesquad | reactive via revealage (P4) |
-| Clouds (volumetric, map), aurora, night sky, sun/moon, sky colour | OIT/Opaque | dedicated | fallback + reactive; sky uses infinite-direction reprojection (P4) |
-| Decals | AfterOIT / Primary | decal shader | inherits surface motion; crack progress rejected by colour clipping (P4) |
-| Work-item guides, selection boxes, wireframes | AfterFinalComposition / Primary | various | outside window, unjittered (P1) |
-| Rifts | AfterBlit / Default | rift | outside window; noted as FG gap |
+| Night sky, sun/moon, sky colour | Opaque / Primary, no depth write | nightsky, sky, celestialobject, standard | no writer needed: depth stays 1, the resolve's infinite-direction fallback is exact (P4, verified) |
+| Clouds (volumetric), aurora | OIT / Transparent | cloudvolumetric, aurora | rotation-only vector + coverage-gated reactive from the `taa-skymotion` pass on the sky pixels (P4) |
+| Decals | AfterOIT / Primary | decals | exact: writes the terrain previous path itself, with its own depth, because the z-offset moves the depth buffer out from under the block's writer depth; crack progress rejected by colour clipping (P4) |
+| Work-item guides, selection boxes, wireframes | AfterFinalComposition / Primary | various | outside window, unjittered (P1); the motion window is refused there on `JitterActive` (P4) |
+| Rifts | AfterBlit / Default | rift | outside window, default framebuffer, motion window refused; noted as FG gap (P4) |
 | Mod geometry via `IRenderAPI` | any | any | fallback via writerDepth mismatch; opt-in writer API later |
 
 ## Frame-generation and ray-reconstruction readiness (constraints, not built here)
@@ -369,6 +370,57 @@ foliage, no gear-network numbers. Still owed before P5's performance matrix.
 - Liquid velocity pass; OIT revealage reactive; particle writers; cloud/aurora/sky policies with the
   infinite-direction reprojection; decals inherit motion; AfterFinalComposition/AfterBlit content
   verified outside the window. State per class exact vs fallback in the inventory test.
+
+P4 status, sky / volumetrics / decals / late overlays (2026-09-10): landed on `feat/taa`.
+**Not verified in game on either backend** - no phase of P4 ran `make deploy` or the client, so
+by rule 3 none of it is done. GPU proof is Vulkan-only.
+
+| Class | Status | Why |
+|---|---|---|
+| Sky colour, night sky | fallback, and exact | depth test off for the whole pass, so depth stays 1 and the resolve's infinite-direction reprojection is the right answer; no writer, by design |
+| Sun, moon, celestial objects | fallback, bounded | depth tested but never written (`GlDepthMask(false)`), so the same fallback applies; it ignores the celestial rotation itself, which is ~0.004 deg per frame |
+| Volumetric clouds, aurora | vector exact for the camera, reactive by coverage | drawn into Transparent, so they cannot write Primary's attachment; the new `taa-skymotion` pass claims the sky pixels (depth 1, GL_LEQUAL, depth writes off), writes the rotation-only vector and `mix(coverage, taaCloudReactive, coverage)` from the Transparent revealage. Their own scrolling is not in the vector - the reactive value is what stops the smear |
+| Clear sky under a cloudless view | exact, full history | coverage 0 means reactive 0, so the dithered gradient keeps converging |
+| Decals | exact | own writer: terrain previous path + `previousWarpState()` + both z-offsets, with `a = gl_FragCoord.z`, which is what the decal itself puts in the depth buffer |
+| AfterFinalComposition overlays | outside the window | jitter closed in `RenderAfterPostProcessing`; `BeginMotionWrite` now refuses on `JitterActive` |
+| Rifts (AfterBlit) | outside the window | default framebuffer; the Primary-is-bound guard refuses on its own. Still the FG gap the plan records |
+
+Findings to carry:
+
+(k) **Clouds were already getting a reactive value, from the merge.** The particle stage recorded
+that they were not, because `SystemRenderOITLayers` rebinds Transparent's attachment **0** to its
+private revealage texture. Attachment **1** - `oit.fsh`'s `outReveal`, the one
+`transparentcompose.Revealage2D` reads - is untouched by that rebind, and `cloudvolumetric.fsh`
+writes `outReveal = vec4(1.0 - k.a)` into it under the multiplicative blend factors `BeforeOIT`
+sets. So cloud coverage does reach `anet`. What the sky pass adds is a reactive value at the
+sky's own strength rather than the cloud's alpha, plus an explicit vector and writer depth.
+
+(l) **`BeginMotionWrite` had no window guard, only a target guard.** `RenderFinalComposition`
+leaves Primary bound, so an `AfterFinalComposition` renderer could have opened a motion window
+after the resolve had already read the attachment. It is now refused on
+`OptimumTemporal.Frame.JitterActive`, which is the temporal window itself.
+
+(m) **The sky pass needs GL_LEQUAL and the client runs GL_LESS.** A fullscreen triangle at the far
+plane draws nothing at all under the default. The pass sets and restores the depth func through
+`GlDepthFunc`; anything else that ever wants to draw at exactly the far plane has the same problem.
+
+(n) **The cloud vector is camera-only.** `taa-skymotion` reprojects the view direction, not the
+cloud: a cloud scrolling across a still camera has mv 0 and is carried entirely by the reactive
+value. That is correct for the resolve (reactive 1 discards the history) but it is wrong data for
+the later consumers the plan is built for - FSR/XeSS reactive+mv, and frame generation especially.
+A real cloud vector needs `cloudOffset`'s previous value and the ray-marched hit position, i.e. a
+motion output from `cloudvolumetric.fsh` itself, which cannot reach Primary's attachment without a
+second pass over the cloud volume.
+
+(o) **Decals near the camera were the actual bug.** With the block's vector left in place, the
+decal's z-offset moves the depth buffer by ~1.3e-3 in window depth at one block's distance against
+a tolerance of ~7.2e-4, so every close decal silently demoted its pixel to the camera fallback.
+Mid- and far-range decals stayed inside the tolerance, which is why "leave it untouched" looks
+correct until you measure it.
+
+(p) **The GL path of the new pass has never executed.** `Optimum.Render.Vulkan.Tests` is the only
+GPU harness; the sky pass's GL branch is the shared `GlDepthFunc`/`GlToggleBlend` helpers plus
+`BeginMotionOnlyWrite`'s existing GL branch, all of which are still unproven on OpenGL.
 
 **P5. Integration, sharpen, settings, fallback, acceptance.**
 - RCAS variant with a sharpness uniform and true bypass; no double sharpening with FSR1 render

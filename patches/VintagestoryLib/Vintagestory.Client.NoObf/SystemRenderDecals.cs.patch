@@ -1,0 +1,91 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
+index f52d0f6..e0a7d3c 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
+@@ -387,10 +387,34 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
+ 		{
+ 			UpdateDecal(item);
+ 		}
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P4): the previous-frame uniforms the decal motion writer
++	/// reads. The same set ChunkRenderer hands its terrain writers - decals sit
++	/// on terrain and follow accuracy rule 4's previous path exactly - kept here
++	/// rather than shared because the patcher transplants per type.
++	///
++	/// The projection and the view are set by name because the decal program
++	/// declares them only while TAA is on; everything else goes through the frame
++	/// contract's guarded setter.
++	/// </summary>
++	private void SetOptimumMotionUniforms(IShaderProgram program)
++	{
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		if (program.HasUniform("prevProjectionMatrix"))
++		{
++			program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(EnumTemporalView.World));
++		}
++		if (program.HasUniform("prevModelViewMatrix"))
++		{
++			program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);
++		}
++		frame.ApplyMotionUniforms(program);
++	}
++
+ 	public void OnRenderFrame3D(float deltaTime)
+ 	{
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+ 		if (decalOrigin.SquareDistanceTo(cameraPos) > 1000000f)
+ 		{
+@@ -399,10 +423,24 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
+ 		}
+ 		if (decals.Count > 0)
+ 		{
+ 			game.GlPushMatrix();
+ 			game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
++			// Optimum TAA (P4): a decal overwrites the depth buffer with a value
++			// slightly nearer than the block it sits on (decals.vsh's zOffset
++			// w-offset), so the block's own motion vector - whose writer depth is
++			// the block's - stops matching and the resolve demotes the pixel to
++			// its camera fallback. The decal therefore writes the surface's
++			// motion itself, with its own depth, and the motion attachment joins
++			// Primary's draw-buffer mask for this one pass.
++			//
++			// The window is opened BEFORE GlToggleBlend, because that call is
++			// what forces replace blending onto the motion attachment: this pass
++			// blends colour, and a blended motion vector belongs to neither
++			// surface. A no-op when TAA is off.
++			ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
++			bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
+ 			game.Platform.GlToggleBlend(on: true);
+ 			game.Platform.GlDisableCullFace();
+ 			ShaderProgramDecals shaderProgramDecals = ShaderPrograms.Decals;
+ 			shaderProgramDecals.Use();
+ 			shaderProgramDecals.WindWaveCounter = game.shUniforms.WindWaveCounter;
+@@ -414,11 +452,25 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
+ 			shaderProgramDecals.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+ 			shaderProgramDecals.FogMinIn = game.AmbientManager.BlendedFogMin;
+ 			shaderProgramDecals.Origin = new Vec3f((float)(decalOrigin.X - cameraPos.X), (float)(decalOrigin.Y - cameraPos.Y), (float)(decalOrigin.Z - cameraPos.Z));
+ 			shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;
+ 			shaderProgramDecals.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(shaderProgramDecals);
++			}
++			try
++			{
++				decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					optimumPlatform.EndMotionWrite();
++				}
++			}
+ 			shaderProgramDecals.Stop();
+ 			game.Platform.GlToggleBlend(on: true);
+ 			game.Platform.GlEnableCullFace();
+ 			game.GlPopMatrix();
+ 		}
