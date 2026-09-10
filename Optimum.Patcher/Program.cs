@@ -156,6 +156,16 @@ var membersToInject = new Dictionary<string, List<string>>
         "BeginMotionWrite",
         "EndMotionWrite",
         "ApplyOptimumMotionBlendState",
+        "InstallOptimumMotionWriteHooks",
+    },
+    // TAA P3: the uniform block a buffer feeds and the point it is bound to.
+    // Vanilla had one block per program and Bind() hard-coded binding point 0;
+    // the entity motion writer adds a second ("AnimationPrev") beside it, and
+    // Update routes the bone upload through OptimumEntityMotion by block name.
+    ["Vintagestory.Client.NoObf.UBO"] = new()
+    {
+        "BlockName",
+        "BindingPoint",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -699,6 +709,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.UBO", "Dispose", 0),
     new("Vintagestory.Client.NoObf.UBO", "Update", 3,
         new[] { "System.Object", "System.Int32", "System.Int32" }),
+    // TAA P3: the second "AnimationPrev" uniform block for the skinned-entity
+    // motion writer, created beside "Animation" while TAA is on.
+    new("Vintagestory.Client.NoObf.ShaderProgramEntityanimated", "initUbos", 0),
     // Vulkan backend: the packed-face storage buffer the SSBO chunk path uses.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UpdateSSBOMesh", 2),
     // Vulkan backend, world rendering: the render systems that reach past

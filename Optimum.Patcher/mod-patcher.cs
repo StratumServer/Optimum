@@ -157,6 +157,12 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityShapeRenderer", ".ctor", 2),
                 new("Vintagestory.GameContent.EntityShapeRenderer", "BeforeRender", 1),
                 new("Vintagestory.GameContent.EntityShapeRenderer", "DoRender3DOpaqueBatched", 2),
+                // TAA P3: the first-person hands draw entity geometry outside the
+                // shared entity pass, with their own program, their own FOV and
+                // their own copy of the animation blocks, so both methods carry
+                // motion-writer changes.
+                new("Vintagestory.GameContent.EntityPlayerShapeRenderer", "DoRender3DOpaque", 2),
+                new("Vintagestory.GameContent.ModSystemFpHands", "LoadShaders", 0),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.WeatherSimulationSound", "updateSounds", 1),
@@ -244,6 +250,10 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.GearRenderer", "LoadShader", 0),
                 new("Vintagestory.GameContent.GearRenderer", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.GearRenderer", "updateSuperMechState", 2),
+                // TAA P3: the echo chamber draws three meshes on the shared
+                // entityanimated program from DoRender3DOpaque, so it opens the
+                // motion-attachment window itself.
+                new("Vintagestory.GameContent.EchoChamberRenderer", "DoRender3DOpaque", 2),
             ]);
     }
 

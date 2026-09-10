@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..324fffa 100644
+index 374f827..9d3cbfe 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 @@ -1,15 +1,36 @@
@@ -281,23 +281,30 @@ index 374f827..324fffa 100644
  	public void OnRenderOpaque3D(float deltaTime)
  	{
  		RuntimeStats.renderedEntities = 0;
-@@ -82,15 +303,44 @@ public class SystemRenderEntities : ClientSystem
+@@ -82,15 +303,57 @@ public class SystemRenderEntities : ClientSystem
  		game.Platform.GlDisableCullFace();
  		game.GlMatrixModeModelView();
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
  		game.Platform.GlToggleBlend(on: true);
 -		foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
++		// Optimum TAA (P3): every draw in the batched loop below goes through
++		// entityanimated, which writes motion vectors, so the motion attachment
++		// joins Primary's draw-buffer mask for the whole loop. The held-item and
++		// first-person passes above open their own window where they need one; a
++		// pass whose shader has no motion output must stay outside it, or the
++		// attachment keeps whatever was there and the resolve reprojects a pixel
++		// by a vector that belongs to another surface. A no-op when TAA is off.
++		ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
 +		OptimumEntityShaderState.End();
 +		bool shaderStateCacheEnabled = OptimumConfig.EffectiveEntityShaderStateCache && !optimumEntityShaderCacheDisabled;
 +		bool shaderSegmentActive = false;
 +		bool shaderSegmentUnavailable = false;
 +		try
- 		{
--			if (entityRenderer2.Value.entity.IsRendered)
++		{
 +			foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
- 			{
--				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
++			{
 +				if (entityRenderer2.Value.entity.IsRendered)
 +				{
 +					bool supportsShaderStateCache = shaderStateCacheEnabled && !shaderSegmentUnavailable && entityRenderer2.Value is IOptimumEntityShaderRenderer shaderRenderer && shaderRenderer.OptimumShaderStateCompatible;
@@ -316,20 +323,26 @@ index 374f827..324fffa 100644
 +			}
 +		}
 +		finally
-+		{
+ 		{
+-			if (entityRenderer2.Value.entity.IsRendered)
 +			if (shaderSegmentActive)
 +			{
 +				EndOptimumEntityShaderSegment();
 +			}
 +			else
-+			{
+ 			{
+-				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
 +				OptimumEntityShaderState.End();
++			}
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
  			}
  		}
  		game.GlPopMatrix();
  		entityanimated.Stop();
  		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -127,10 +377,25 @@ public class SystemRenderEntities : ClientSystem
+@@ -127,10 +390,25 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)

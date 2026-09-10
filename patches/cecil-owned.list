@@ -32,6 +32,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/RenderAPIGame.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch

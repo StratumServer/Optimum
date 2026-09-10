@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using Vintagestory.API.MathTools;
 
 #nullable disable
@@ -121,6 +122,16 @@ namespace Vintagestory.API.Client
         /// <summary>Whether the view was actually set up this frame (the hand view is absent in third person).</summary>
         bool IsViewCaptured(EnumTemporalView view);
 
+        /// <summary>
+        /// The view the projection matrix currently loaded belongs to: whatever
+        /// <c>Set3DProjection</c> last recorded. A draw issued now is under this
+        /// FOV, so its previous position has to go through the same view's
+        /// previous projection - which is how the first-person hands, drawn under
+        /// their own FOV between two <c>Set3DProjection</c> calls, are told apart
+        /// from the world without every call site having to opt in.
+        /// </summary>
+        EnumTemporalView ActiveView { get; }
+
         float[] CameraMatrix { get; }
         float[] PrevCameraMatrix { get; }
         float[] CameraMatrixOrigin { get; }
@@ -239,6 +250,9 @@ namespace Vintagestory.API.Client
         public bool Reset { get; private set; }
         public EnumTemporalResetReason ResetReason { get; private set; }
 
+        /// <summary>See <see cref="IOptimumTemporalContext.ActiveView" />.</summary>
+        public EnumTemporalView ActiveView { get; private set; }
+
         public float ZNear { get; private set; }
         public float ZFar { get; private set; }
         public float Fov { get; private set; }
@@ -291,6 +305,7 @@ namespace Vintagestory.API.Client
                 viewCapturedPrev[i] = viewCaptured[i];
                 viewCaptured[i] = false;
             }
+            ActiveView = EnumTemporalView.World;
             Array.Copy(cameraMatrix, cameraMatrixPrev, 16);
             Array.Copy(cameraMatrixOrigin, cameraMatrixOriginPrev, 16);
             PrevPlayerpos.Set(Playerpos.X, Playerpos.Y, Playerpos.Z);
@@ -396,6 +411,7 @@ namespace Vintagestory.API.Client
             float[] dest = projection[(int)view];
             for (int i = 0; i < 16; i++) dest[i] = (float)matrix[i];
             viewCaptured[(int)view] = true;
+            ActiveView = view;
         }
 
         /// <summary>
@@ -465,6 +481,226 @@ namespace Vintagestory.API.Client
             if (program.HasUniform("prevPerceptionEffectId")) program.Uniform("prevPerceptionEffectId", previous.PerceptionEffectId);
             if (program.HasUniform("prevPerceptionEffectIntensity")) program.Uniform("prevPerceptionEffectIntensity", previous.PerceptionEffectIntensity);
             if (program.HasUniform("prevPlayerpos")) program.Uniform("prevPlayerpos", PrevPlayerpos.X, PrevPlayerpos.Y, PrevPlayerpos.Z);
+        }
+    }
+
+    /// <summary>
+    /// The switch that lets a motion-writing pass into Primary's motion
+    /// attachment, reachable from code that cannot see ClientPlatformWindows.
+    ///
+    /// The draw-buffer window itself lives in the platform layer (BeginMotionWrite /
+    /// EndMotionWrite); the mod-side renderers that draw entity geometry of their
+    /// own - the first-person hands and the echo chamber - are in assemblies that
+    /// only see the API, so the platform installs its two delegates here once and
+    /// they call through. A null hook (no platform, TAA off, headless tests) makes
+    /// Begin report false, which is exactly what a caller does when the window
+    /// could not be opened.
+    /// </summary>
+    public static class OptimumMotionWrite
+    {
+        /// <summary>Installed by ClientPlatformWindows. Render thread only.</summary>
+        public static Func<bool> BeginHook;
+
+        /// <summary>Installed by ClientPlatformWindows. Render thread only.</summary>
+        public static Action EndHook;
+
+        public static bool Begin()
+        {
+            Func<bool> hook = BeginHook;
+            return hook != null && hook();
+        }
+
+        public static void End()
+        {
+            Action hook = EndHook;
+            if (hook != null) hook();
+        }
+    }
+
+    /// <summary>
+    /// Per-entity previous transforms for the skinned-entity motion writer (TAA P3).
+    ///
+    /// Every draw that feeds entityanimated goes through one narrow gate: it sets
+    /// <c>modelMatrix</c> and then uploads the animator's bone matrices into the
+    /// "Animation" uniform block, immediately before the draw. The lib routes that
+    /// upload here, which is why the first-person hands (their own program and FOV),
+    /// the echo chamber (the shared program, three meshes, one pose) and any mod
+    /// entity renderer all get motion vectors without each one growing its own
+    /// history bookkeeping.
+    ///
+    /// History is keyed on the animator's own <c>Matrices</c> array, so identity is
+    /// the thing that actually decides whether last frame's pose belongs to this
+    /// entity: a respawned entity, a re-tesselated shape or a changed animator hands
+    /// over a different array and gets no history, which is precisely when it must
+    /// not have one. Entries die with the animator - the table holds no strong
+    /// reference to it.
+    ///
+    /// Render thread only.
+    /// </summary>
+    public static class OptimumEntityMotion
+    {
+        /// <summary>
+        /// Whether the motion writers are compiled into the shaders at all. Set by
+        /// ShaderRegistry from the same value it stamps TAAMOTION with, so the
+        /// per-uniform hooks below cost one static bool read when TAA is off.
+        /// </summary>
+        public static bool Enabled;
+
+        private sealed class History
+        {
+            public float[] PrevBones = new float[0];
+            public float[] CurBones = new float[0];
+            public int PrevFloatCount = -1;
+            public int CurFloatCount = -1;
+
+            public readonly float[] PrevModelMatrix = new float[16];
+            public readonly float[] CurModelMatrix = new float[16];
+
+            public float PrevWindWaveIntensity = 1f;
+            public float CurWindWaveIntensity = 1f;
+            public float PrevWaterWaveCounter;
+            public float CurWaterWaveCounter;
+
+            public EnumTemporalView PrevView;
+            public EnumTemporalView CurView;
+
+            /// <summary>The frame CurBones et al. were captured in; -1 = never.</summary>
+            public long CapturedFrame = -1;
+            /// <summary>The frame PrevBones et al. were captured in; -1 = never.</summary>
+            public long PreviousFrame = -1;
+        }
+
+        private static readonly ConditionalWeakTable<object, History> histories = new ConditionalWeakTable<object, History>();
+
+        private static readonly float[] modelMatrixScratch = new float[16];
+        private static float windWaveIntensityScratch = 1f;
+        private static float waterWaveCounterScratch;
+
+        private static IShaderProgram sharedUniformProgram;
+        private static long sharedUniformFrame = -1;
+        private static EnumTemporalView sharedUniformView;
+
+        /// <summary>
+        /// Remembers the model matrix a draw just set, so the upload that follows can
+        /// store it as next frame's previous one. Called from ShaderProgramBase for
+        /// the uniform named "modelMatrix" only.
+        /// </summary>
+        public static void NoteModelMatrix(float[] matrix)
+        {
+            if (matrix == null || matrix.Length < 16) return;
+            Array.Copy(matrix, modelMatrixScratch, 16);
+        }
+
+        /// <summary>
+        /// Remembers a warp uniform that varies per draw rather than per frame.
+        /// EntityShapeRenderer overrides windWaveIntensity per entity and the echo
+        /// chamber pins both to zero, so the previous frame's values for these two
+        /// have to be stored per entity - the global PrevWarp would replay a warp the
+        /// entity never had.
+        /// </summary>
+        public static void NoteWarpUniform(string uniformName, float value)
+        {
+            if (uniformName == "windWaveIntensity") windWaveIntensityScratch = value;
+            else if (uniformName == "waterWaveCounter") waterWaveCounterScratch = value;
+        }
+
+        /// <summary>
+        /// Called by the lib just before an entity's bone matrices reach the GPU.
+        /// Uploads the same entity's previous pose into <paramref name="previousBones" />
+        /// and sets the writer's per-draw uniforms, then records this draw's state
+        /// as next frame's previous one.
+        /// </summary>
+        /// <param name="program">The program in use; must be an entityanimated motion writer.</param>
+        /// <param name="previousBones">Its "AnimationPrev" uniform block.</param>
+        /// <param name="boneMatrices">The array being uploaded into "Animation".</param>
+        /// <param name="byteCount">How many bytes of it the draw uses.</param>
+        public static void OnAnimationUpload(IShaderProgram program, UBORef previousBones, object boneMatrices, int byteCount)
+        {
+            if (!Enabled || program == null || previousBones == null || previousBones.Disposed) return;
+            if (!program.HasUniform("taaHistoryValid")) return;
+
+            float[] bones = boneMatrices as float[];
+            if (bones == null || byteCount <= 0) return;
+
+            int floats = byteCount / 4;
+            if (floats <= 0 || floats > bones.Length) return;
+
+            OptimumTemporalFrame frame = OptimumTemporal.Frame;
+            EnumTemporalView view = frame.ActiveView;
+            History history = histories.GetValue(bones, _ => new History());
+
+            // One roll per frame, not per draw: an entity drawn twice in a frame
+            // (opaque then after-OIT) must both times compare against the frame
+            // before, not against its own first draw.
+            if (history.CapturedFrame != frame.FrameIndex)
+            {
+                float[] swap = history.PrevBones;
+                history.PrevBones = history.CurBones;
+                history.CurBones = swap;
+                history.PrevFloatCount = history.CurFloatCount;
+                Array.Copy(history.CurModelMatrix, history.PrevModelMatrix, 16);
+                history.PrevWindWaveIntensity = history.CurWindWaveIntensity;
+                history.PrevWaterWaveCounter = history.CurWaterWaveCounter;
+                history.PrevView = history.CurView;
+                history.PreviousFrame = history.CapturedFrame;
+                history.CapturedFrame = frame.FrameIndex;
+            }
+
+            if (history.CurBones.Length < floats) history.CurBones = new float[floats];
+            Array.Copy(bones, history.CurBones, floats);
+            history.CurFloatCount = floats;
+            Array.Copy(modelMatrixScratch, history.CurModelMatrix, 16);
+            history.CurWindWaveIntensity = windWaveIntensityScratch;
+            history.CurWaterWaveCounter = waterWaveCounterScratch;
+            history.CurView = view;
+
+            // Valid only if the very same entity was drawn last frame, under the same
+            // view (a first/third person switch changes both the FOV and the mesh),
+            // with the same joint count, and the frame itself did not reset.
+            bool valid =
+                !frame.Reset &&
+                history.PreviousFrame == frame.FrameIndex - 1 &&
+                history.PrevFloatCount == floats &&
+                history.PrevView == view &&
+                frame.WasViewCaptured(view);
+
+            previousBones.Update(valid ? history.PrevBones : history.CurBones, 0, byteCount);
+
+            // Per-frame, per-program half: the previous camera and the previous warp
+            // state are the same for every entity in the pass.
+            if (!ReferenceEquals(sharedUniformProgram, program) ||
+                sharedUniformFrame != frame.FrameIndex ||
+                sharedUniformView != view)
+            {
+                sharedUniformProgram = program;
+                sharedUniformFrame = frame.FrameIndex;
+                sharedUniformView = view;
+                if (program.HasUniform("prevProjectionMatrix"))
+                {
+                    program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(view));
+                }
+                if (program.HasUniform("prevViewMatrix"))
+                {
+                    program.UniformMatrix("prevViewMatrix", frame.PrevCameraMatrixOrigin);
+                }
+                frame.ApplyMotionUniforms(program);
+            }
+
+            // Per-draw half.
+            if (program.HasUniform("prevModelMatrix"))
+            {
+                program.UniformMatrix("prevModelMatrix", valid ? history.PrevModelMatrix : history.CurModelMatrix);
+            }
+            program.Uniform("taaHistoryValid", valid ? 1 : 0);
+            if (program.HasUniform("taaReactive")) program.Uniform("taaReactive", valid ? 0f : 1f);
+            if (program.HasUniform("prevWindWaveIntensity"))
+            {
+                program.Uniform("prevWindWaveIntensity", valid ? history.PrevWindWaveIntensity : history.CurWindWaveIntensity);
+            }
+            if (program.HasUniform("prevWaterWaveCounter"))
+            {
+                program.Uniform("prevWaterWaveCounter", valid ? history.PrevWaterWaveCounter : history.CurWaterWaveCounter);
+            }
         }
     }
 

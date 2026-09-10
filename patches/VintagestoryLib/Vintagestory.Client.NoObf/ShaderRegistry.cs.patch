@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..ad4177e 100644
+index 4a24e75..6177166 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -193,7 +193,7 @@ index 4a24e75..ad4177e 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +452,44 @@ public class ShaderRegistry
+@@ -333,10 +452,48 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -227,6 +227,10 @@ index 4a24e75..ad4177e 100644
 +		// - the same condition SSAOLEVEL above is stamped from, so the two can
 +		// never disagree.
 +		bool taaMotion = OptimumConfig.EffectiveTaa;
++		// The per-uniform hooks in ShaderProgramBase and the bone-upload hook in
++		// UBO exist for the entity writer only; this is the single flag that tells
++		// them whether any shader in the process was built with it.
++		OptimumEntityMotion.Enabled = taaMotion;
 +		int taaMotionLocation = ((ClientSettings.SSAOQuality > 0) ? 4 : 2);
 +		string taaDefines = "#define TAAMOTION " + (taaMotion ? 1 : 0) + "\r\n#define TAAMOTIONLOCATION " + taaMotionLocation + "\r\n";
 +		Shader taaFrag = program.FragmentShader;
