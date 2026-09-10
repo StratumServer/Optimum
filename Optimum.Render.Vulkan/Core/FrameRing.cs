@@ -145,7 +145,11 @@ internal sealed unsafe class FrameSlot : IDisposable
     public void EndFrameAndSubmit(
         Semaphore waitSemaphore = default,
         Semaphore signalSemaphore = default,
-        PipelineStageFlags waitStage = PipelineStageFlags.ColorAttachmentOutputBit)
+        // The swapchain image's first use in the frame is the present blit, a
+        // transfer, which a COLOR_ATTACHMENT_OUTPUT wait does not order: the
+        // blit could overwrite an image the presentation engine still owns and
+        // the display would show a stale or torn frame. Wait at every stage.
+        PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;

@@ -113,6 +113,17 @@ internal sealed class ProgramInterfaceLayout
     /// <summary>Fragment output locations for outputs that declared none.</summary>
     public Dictionary<string, int> FragmentOutputLocations { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Colour locations the fragment shader actually assigns somewhere in its
+    /// body. GL leaves an enabled attachment alone when the shader never writes
+    /// its output (undefined by the spec, preserved by every driver we ship on);
+    /// Vulkan writes undefined values into it. The device zeroes the colour
+    /// write mask of every attachment outside this set so both backends keep
+    /// the attachment's previous contents - the SSAO G-buffer under a
+    /// fullscreen compose pass, for one.
+    /// </summary>
+    public HashSet<int> WrittenFragmentOutputs { get; } = new();
+
     /// <summary>Size of the generated block in bytes; 0 when it has no members.</summary>
     public int BlockSize { get; private set; }
 
@@ -335,6 +346,11 @@ internal sealed class ProgramInterfaceLayout
         var usedVertexInputs = new HashSet<int>();
         var usedVaryings = new HashSet<int>();
         var usedFragmentOutputs = new HashSet<int>();
+        // Declared outputs that the body never assigns (a G-buffer output kept
+        // under an #if that compiled out its store) are still declared; only
+        // outputs with a store count as written.
+        var fragmentOutputDeclarations = new List<GlslDeclaration>();
+        string fragmentSource = "";
 
         // Pass one: record every location the shaders stated outright.
         foreach ((EnumShaderType stage, ParsedShader parsed) in stages)
@@ -351,6 +367,8 @@ internal sealed class ProgramInterfaceLayout
                 else if (stage == EnumShaderType.FragmentShader && declaration.Kind == GlslDeclarationKind.Output)
                 {
                     Occupy(usedFragmentOutputs, declaration.Location, LocationSpan(declaration));
+                    fragmentOutputDeclarations.Add(declaration);
+                    fragmentSource = parsed.Source;
                 }
                 else
                 {
@@ -397,6 +415,8 @@ internal sealed class ProgramInterfaceLayout
                 {
                     if (layout.FragmentOutputLocations.ContainsKey(declaration.Name)) continue;
                     layout.FragmentOutputLocations[declaration.Name] = Reserve(usedFragmentOutputs, span);
+                    fragmentOutputDeclarations.Add(declaration);
+                    fragmentSource = parsed.Source;
                 }
                 else if (declaration.Kind is GlslDeclarationKind.Input or GlslDeclarationKind.Output)
                 {
@@ -408,7 +428,39 @@ internal sealed class ProgramInterfaceLayout
                 }
             }
         }
+
+        foreach (GlslDeclaration declaration in fragmentOutputDeclarations)
+        {
+            int location = declaration.Location >= 0
+                ? declaration.Location
+                : layout.FragmentOutputLocations.TryGetValue(declaration.Name, out int assignedLocation) ? assignedLocation : -1;
+            if (location < 0) continue;
+            if (!FragmentOutputIsAssigned(fragmentSource, declaration.Name)) continue;
+            for (int i = 0; i < LocationSpan(declaration); i++) layout.WrittenFragmentOutputs.Add(location + i);
+        }
     }
+
+    /// <summary>
+    /// Whether the fragment body stores to <paramref name="name" />: a plain,
+    /// swizzled or indexed assignment, or a compound one. Declarations are
+    /// excluded by requiring the identifier not to be preceded by a type or
+    /// the "out" keyword on the same statement.
+    /// </summary>
+    internal static bool FragmentOutputIsAssigned(string source, string name)
+    {
+        var store = new System.Text.RegularExpressions.Regex(
+            @"(?<![\w.])" + System.Text.RegularExpressions.Regex.Escape(name) +
+            @"\s*(\.[xyzwrgbastpq]+|\[[^\]]*\])?\s*(=(?!=)|\+=|-=|\*=|/=)");
+        foreach (System.Text.RegularExpressions.Match match in store.Matches(source))
+        {
+            int lineStart = source.LastIndexOf('\n', Math.Max(match.Index - 1, 0)) + 1;
+            string before = source.Substring(lineStart, match.Index - lineStart);
+            if (System.Text.RegularExpressions.Regex.IsMatch(before, @"\bout\b|\bin\b|\buniform\b")) continue;
+            return true;
+        }
+        return false;
+    }
+
 
     /// <summary>
     /// How many consecutive locations a variable consumes. A vector of any width

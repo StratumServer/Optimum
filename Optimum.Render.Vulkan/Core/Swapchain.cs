@@ -281,10 +281,16 @@ internal sealed unsafe class Swapchain : IDisposable
     {
         imageIndex = 0;
         waitSemaphore = _imageAvailable[_semaphoreIndex];
-        signalSemaphore = _renderFinished[_semaphoreIndex];
 
         Result result = _swapchainApi.AcquireNextImage(
             _context.Device, _handle, ulong.MaxValue, waitSemaphore, default, ref imageIndex);
+
+        // The render-finished semaphore belongs to the acquired IMAGE, not to a
+        // rolling counter: vkQueuePresentKHR keeps waiting on it until that image
+        // is presented, and the only moment it is provably free again is when
+        // the same image is re-acquired. A counter-indexed semaphore could be
+        // re-signalled while an earlier present still waits on it.
+        signalSemaphore = _renderFinished[(int)imageIndex % Math.Max(_renderFinished.Length, 1)];
 
         if (result is Result.ErrorOutOfDateKhr)
         {

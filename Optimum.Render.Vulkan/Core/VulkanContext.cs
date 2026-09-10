@@ -17,6 +17,9 @@ internal sealed class VulkanContextOptions
     /// <summary>Turns on the validation layers and the debug messenger.</summary>
     public bool EnableValidation;
 
+    /// <summary>Comma list of extra layer features: sync, best, gpu.</summary>
+    public string ValidationFeatures = "";
+
     /// <summary>Pins a physical device by index; -1 picks automatically.</summary>
     public int PreferredDeviceIndex = -1;
 
@@ -210,9 +213,32 @@ internal sealed unsafe class VulkanContext : IDisposable
                 ApiVersion = MinimumApiVersion,
             };
 
+            // Extra layer features (sync validation, best practices, GPU
+            // assisted) through VK_EXT_validation_features, chained only when
+            // the layer is on and something was asked for.
+            var enables = new List<ValidationFeatureEnableEXT>();
+            foreach (string feature in (options.ValidationFeatures ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                switch (feature.ToLowerInvariant())
+                {
+                    case "sync": enables.Add(ValidationFeatureEnableEXT.SynchronizationValidationExt); break;
+                    case "best": enables.Add(ValidationFeatureEnableEXT.BestPracticesExt); break;
+                    case "gpu": enables.Add(ValidationFeatureEnableEXT.GpuAssistedExt); break;
+                }
+            }
+            ValidationFeatureEnableEXT* enablesPtr = stackalloc ValidationFeatureEnableEXT[Math.Max(enables.Count, 1)];
+            for (int i = 0; i < enables.Count; i++) enablesPtr[i] = enables[i];
+            var validationFeatures = new ValidationFeaturesEXT
+            {
+                SType = StructureType.ValidationFeaturesExt,
+                EnabledValidationFeatureCount = (uint)enables.Count,
+                PEnabledValidationFeatures = enablesPtr,
+            };
+
             var createInfo = new InstanceCreateInfo
             {
                 SType = StructureType.InstanceCreateInfo,
+                PNext = validation && enables.Count > 0 ? &validationFeatures : null,
                 PApplicationInfo = &applicationInfo,
                 EnabledExtensionCount = (uint)extensions.Count,
                 PpEnabledExtensionNames = (byte**)extensionsPtr,

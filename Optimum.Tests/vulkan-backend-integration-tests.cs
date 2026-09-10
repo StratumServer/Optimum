@@ -432,4 +432,43 @@ public class VulkanBackendIntegrationTests
 
     private static string Read(string relativePath) =>
         File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));
+
+    [Fact]
+    public void ThePresentPathWaitsForTheSwapchainImageAtEveryStageAndOwnsSemaphoresPerImage()
+    {
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        // The first use of the acquired image is the present blit (transfer);
+        // a COLOR_ATTACHMENT_OUTPUT wait would not order it.
+        Assert.Contains("PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)", ring);
+
+        string swapchain = Read("Optimum.Render.Vulkan/Core/Swapchain.cs");
+        Assert.Contains("signalSemaphore = _renderFinished[(int)imageIndex %", swapchain);
+        Assert.DoesNotContain("signalSemaphore = _renderFinished[_semaphoreIndex];", swapchain);
+    }
+
+    [Fact]
+    public void ValidationMessagesAlwaysReachAFileAndExtraFeaturesCanBeRequested()
+    {
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.Contains("DefaultValidationLogPath", device);
+        Assert.Contains("OPTIMUM_VULKAN_VALIDATION_FEATURES", device);
+        string context = Read("Optimum.Render.Vulkan/Core/VulkanContext.cs");
+        Assert.Contains("ValidationFeatureEnableEXT.SynchronizationValidationExt", context);
+        Assert.Contains("ValidationFeatureEnableEXT.BestPracticesExt", context);
+        Assert.Contains("StructureType.ValidationFeaturesExt", context);
+    }
+
+    [Fact]
+    public void UnwrittenFragmentOutputsAreMaskedOffInThePipeline()
+    {
+        string cache = Read("Optimum.Render.Vulkan/Core/PipelineCache.cs");
+        Assert.Contains("request.Program.Interface.WrittenFragmentOutputs.Contains(i)", cache);
+        Assert.Contains("ColorWriteMask = writeMask,", cache);
+        string layout = Read("Optimum.Render.Vulkan/Shaders/ProgramInterfaceLayout.cs");
+        Assert.Contains("internal static bool FragmentOutputIsAssigned(string source, string name)", layout);
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.Contains("if (instanceCount <= 0) return;", device);
+        string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
+        Assert.Contains("internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer)", textures);
+    }
 }

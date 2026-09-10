@@ -131,7 +131,7 @@ public class AttachmentSemanticsTests
     /// preserved; the run fails only on validation errors.
     /// </summary>
     [SkippableFact]
-    public unsafe void UnwrittenButEnabledAttachmentContentsAreObservedNotAsserted()
+    public unsafe void UnwrittenButEnabledAttachmentsKeepTheirContents()
     {
         var messages = new List<string>();
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
@@ -193,7 +193,11 @@ public class AttachmentSemanticsTests
                     $"preserved={attachmentPreserved}");
             }
 
-            _output.WriteLine($"unwritten-but-enabled attachments preserved on this driver: {preserved}");
+            _output.WriteLine($"unwritten-but-enabled attachments preserved: {preserved}");
+            // No longer an observation: the pipeline zeroes the colour write
+            // mask of every attachment the fragment shader does not store to,
+            // so the driver cannot write undefined values into them.
+            Assert.True(preserved, "an enabled attachment the shader never writes must keep its contents");
 
             ValidationAssert.NoErrors(messages);
         }

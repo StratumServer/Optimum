@@ -131,7 +131,35 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// the message that preceded the loss.
     /// </summary>
     private static readonly string? ValidationLogPath =
-        ValidationSetting != null && ValidationSetting.Contains('/') ? ValidationSetting : null;
+        ValidationSetting == null ? null
+        : ValidationSetting.Contains('/') ? ValidationSetting
+        : DefaultValidationLogPath;
+
+    /// <summary>
+    /// Where a bare OPTIMUM_VULKAN_VALIDATION=1 mirrors the layer's messages.
+    /// Before this default the messages only surfaced when the client happened
+    /// to poll the error channel, and a whole class of hazards went unlogged.
+    /// </summary>
+    private static readonly string DefaultValidationLogPath =
+        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-vulkan-validation.log");
+
+    /// <summary>
+    /// OPTIMUM_VULKAN_VALIDATION_FEATURES: comma list of "sync" (synchronization
+    /// validation), "best" (best practices, vendor checks included) and "gpu"
+    /// (GPU-assisted). Requested through VK_EXT_validation_features so it does
+    /// not depend on the layer's environment variable names, which changed.
+    /// </summary>
+    private static readonly string ValidationFeatureSetting =
+        Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_VALIDATION_FEATURES") ?? "";
+
+    /// <summary>
+    /// The client logs diagnostics through string.Format, and a layer message
+    /// that prints a struct ("pImageMemoryBarriers[0]: { ... }") throws a
+    /// FormatException there and is lost. Braces become brackets before the
+    /// message reaches either channel.
+    /// </summary>
+    private static string SanitiseForClientLog(string message) =>
+        message.Replace('{', '[').Replace('}', ']');
 
     private static void MirrorValidationMessage(string message)
     {
@@ -235,9 +263,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             // is the way to get them for a real client session, which is the
             // only place the world-loading paths actually run.
             EnableValidation = DebugMode || ValidationRequestedByEnvironment,
+            ValidationFeatures = ValidationFeatureSetting,
             DebugCallback = message =>
             {
-                _diagnostics.Add(message);
+                _diagnostics.Add(SanitiseForClientLog(message));
                 MirrorValidationMessage(message);
                 if (RenderTrace.Enabled)
                     RenderTrace.Write("validation: program=" + (_state?.CurrentProgram ?? 0) +
@@ -735,9 +764,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             SType = StructureType.ImageMemoryBarrier2,
             SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = AccessFlags2.MemoryWriteBit,
+            SrcAccessMask = TextureManager.AccessForLayout(from, writer: true),
             DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+            DstAccessMask = TextureManager.AccessForLayout(to, writer: false),
             OldLayout = from,
             NewLayout = to,
             Image = image,
@@ -1662,6 +1691,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void DrawMeshInstanced(int meshId, int instanceCount)
     {
+        if (instanceCount <= 0) return;
         if (!PrepareDraw(_meshes.LayoutIdOf(meshId), meshId, out CommandBuffer commandBuffer)) return;
         Checkpoint(commandBuffer,
             CheckpointMarker.Draw(CheckpointKind.Draw, _state.CurrentProgram, _targets.Bound?.Id ?? 0, meshId));
@@ -2010,7 +2040,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             " (" + _frames.Current.UniformBytesUsed + " of " + _frames.Current.UniformCapacity +
             " bytes used) at a draw with program " + program.ProgramId +
             " '" + ProgramNameOf(program.ProgramId) + "' for " + what;
-        _diagnostics.Add(message);
+        _diagnostics.Add(SanitiseForClientLog(message));
         MirrorValidationMessage(message);
     }
 
@@ -2467,7 +2497,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             {
                 string message = VulkanContext.ErrorPrefix + "occlusion query " + queryId +
                     " produced no result within two seconds of being flushed; reporting it as visible";
-                _diagnostics.Add(message);
+                _diagnostics.Add(SanitiseForClientLog(message));
                 MirrorValidationMessage(message);
                 return int.MaxValue;
             }
