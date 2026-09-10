@@ -17,7 +17,7 @@ description: Build, deploy, launch, stop and screenshot the Optimum Vintage Stor
    classic one) and fix that before judging pixels.
 6. Screenshot: `scripts/dev/screenshot.sh /tmp/vulkan.png`, then Read the PNG and describe what you see.
    For a backend comparison take both shots from the same save and camera.
-7. Stop: `scripts/dev/kill-client.sh`. Restore `ModConfig/optimum.json` `Renderer` to what the user had.
+7. Stop: `scripts/dev/kill-client.sh` immediately after the check; the user does not want it left running. Restore `ModConfig/optimum.json` `Renderer` to what the user had.
 
 Gotchas: `ssaa` 0.5 in clientsettings halves the render resolution on both backends; the random
 `--rndWorld -p creativebuilding` world is superflat and has no animals; passing `world.vcdbs` to `-o`

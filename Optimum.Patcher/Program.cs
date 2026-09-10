@@ -144,12 +144,19 @@ var membersToInject = new Dictionary<string, List<string>>
         "CreateOptimumHistoryTarget",
         "CreateOptimumHistoryTargetGl",
         "DisableOptimumTaa",
+        "_taaFrameParity",
+        "_taaHistoryValid",
+        "taaResolvedColorTexture",
+        "taaResolvedGlowTexture",
+        "TaaResolvedThisFrame",
+        "RenderOptimumTaaResolve",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
         "FsrEasu",
         "FsrRcas",
         "TaaDebug",
+        "TaaResolve",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {

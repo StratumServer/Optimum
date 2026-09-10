@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..52f76d4 100644
+index 6edf0c9..777af61 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,99 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -102,7 +102,7 @@ index 6edf0c9..52f76d4 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -93,10 +182,57 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +182,71 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<string> drawCallStacks = new List<string>();
  
@@ -134,6 +134,20 @@ index 6edf0c9..52f76d4 100644
 +
 +	private bool TaaTargetsReady;
 +
++	// Optimum TAA resolve state (P2): which history slot is written this frame,
++	// whether the other slot holds a frame worth reading, and the textures the
++	// rest of the post chain reads instead of the jittered Primary attachments.
++	private int _taaFrameParity;
++
++	private bool _taaHistoryValid;
++
++	private int taaResolvedColorTexture;
++
++	private int taaResolvedGlowTexture;
++
++	/// <summary>True once this frame's TAA resolve ran; the post chain then reads the resolved textures.</summary>
++	public bool TaaResolvedThisFrame { get; private set; }
++
 +	private bool optimumTaaDisabled;
 +
 +	// Optimum: GL keeps the clear colour in driver state and applies it at
@@ -160,7 +174,7 @@ index 6edf0c9..52f76d4 100644
  	private bool serverRunning;
  
  	private bool gamepause;
-@@ -256,10 +392,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -256,10 +406,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -184,7 +198,7 @@ index 6edf0c9..52f76d4 100644
  		get
  		{
  			return serverRunning;
-@@ -278,11 +427,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -278,11 +441,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -212,7 +226,7 @@ index 6edf0c9..52f76d4 100644
  				GL.BindFramebuffer((FramebufferTarget)36160, 0);
  				return;
  			}
-@@ -297,11 +462,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -297,11 +476,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -236,7 +250,7 @@ index 6edf0c9..52f76d4 100644
  	}
  
  	public override bool GlErrorChecking { get; set; }
-@@ -314,10 +491,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -314,10 +505,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		set
  		{
@@ -257,7 +271,7 @@ index 6edf0c9..52f76d4 100644
  				if (!supportsGlDebugMode)
  				{
  					throw new NotSupportedException("Your graphics card does not seem to support gl debug mode (neither GL_ARB_debug_output nor GL_KHR_debug was found)");
-@@ -335,11 +522,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -335,11 +536,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			}
  			glDebugMode = value;
  		}
@@ -286,7 +300,7 @@ index 6edf0c9..52f76d4 100644
  
  	public override bool MouseGrabbed
  	{
-@@ -478,41 +681,142 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,41 +695,142 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -433,7 +447,7 @@ index 6edf0c9..52f76d4 100644
  
  	public void LogAndTestHardwareInfosStage1()
  	{
-@@ -533,10 +837,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -533,10 +851,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
  	}
  
@@ -471,7 +485,7 @@ index 6edf0c9..52f76d4 100644
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
  		logger.Notification("GL.MaxVertexUniformComponents: " + GL.GetInteger((GetPName)35658));
-@@ -576,10 +907,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -576,10 +921,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CheckGlError("testhwinfo");
  	}
  
@@ -490,7 +504,7 @@ index 6edf0c9..52f76d4 100644
  
  	public override string GetFrameworkInfos()
  	{
-@@ -702,10 +1041,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,10 +1055,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
@@ -512,7 +526,7 @@ index 6edf0c9..52f76d4 100644
  		SupportsThickLines = (int)error != 1281;
  		cpuCoreCount = Environment.ProcessorCount;
  	}
-@@ -796,10 +1146,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1160,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
@@ -536,7 +550,7 @@ index 6edf0c9..52f76d4 100644
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1016,20 +1379,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1016,20 +1393,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			{
  				throw new ArgumentException("Fatal: Trying to render an uninitialized mesh");
  			}
@@ -574,7 +588,7 @@ index 6edf0c9..52f76d4 100644
  		GL.BindVertexArray(0);
  	}
  
-@@ -1042,10 +1422,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1042,10 +1436,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
@@ -594,7 +608,7 @@ index 6edf0c9..52f76d4 100644
  		{
  			GL.BindBuffer((BufferTarget)34963, ClientPlatformAbstract.singleIndexBufferId);
  			GL.BindBufferBase((BufferRangeTarget)37074, 3, vAO.xyzVboId);
-@@ -1064,10 +1453,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1064,10 +1467,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override void RenderMeshInstanced(MeshRef modelRef, int quantity = 1)
  	{
  		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
@@ -611,7 +625,7 @@ index 6edf0c9..52f76d4 100644
  		GL.DrawElementsInstanced(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, (IntPtr)IntPtr.Zero, quantity);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
-@@ -1103,15 +1498,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1103,15 +1512,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			if (frameBuffer.DepthTextureId > 0)
  			{
  				GLDeleteTexture(frameBuffer.DepthTextureId);
@@ -644,7 +658,7 @@ index 6edf0c9..52f76d4 100644
  			FboId = GL.GenFramebuffer(),
  			Width = fbAttrs.Width,
  			Height = fbAttrs.Height
-@@ -1150,12 +1562,440 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,12 +1576,440 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -1085,7 +1099,7 @@ index 6edf0c9..52f76d4 100644
  		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
  		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0211: Unknown result type (might be due to invalid IL or missing references)
-@@ -1187,10 +2027,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1187,10 +2041,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
  		if (num == 0 || num2 == 0)
  		{
@@ -1100,7 +1114,7 @@ index 6edf0c9..52f76d4 100644
  		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
-@@ -1210,11 +2054,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1210,11 +2068,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -1117,7 +1131,7 @@ index 6edf0c9..52f76d4 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1251,10 +2099,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1251,10 +2113,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
@@ -1156,7 +1170,7 @@ index 6edf0c9..52f76d4 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1436,10 +2312,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +2326,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
@@ -1209,7 +1223,7 @@ index 6edf0c9..52f76d4 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1567,12 +2485,83 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,12 +2499,83 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1293,7 +1307,7 @@ index 6edf0c9..52f76d4 100644
  			if (buffers[i] != null)
  			{
  				GL.DeleteFramebuffer(buffers[i].FboId);
-@@ -1591,11 +2580,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +2594,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1322,7 +1336,7 @@ index 6edf0c9..52f76d4 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1608,21 +2614,78 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1608,21 +2628,78 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -1401,7 +1415,7 @@ index 6edf0c9..52f76d4 100644
  		case EnumFrameBuffer.Default:
  			CurrentFrameBufferKeepVw = null;
  			GL.DrawBuffer((DrawBufferMode)1029);
-@@ -1636,10 +2699,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1636,10 +2713,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			if (RenderSSAO)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, 2, new float[4] { 0f, 0f, 0f, 1f });
@@ -1416,7 +1430,7 @@ index 6edf0c9..52f76d4 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,20 +2737,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,20 +2751,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1457,7 +1471,7 @@ index 6edf0c9..52f76d4 100644
  			GL.Enable((EnableCap)3042);
  			GL.BlendEquation(0, (BlendEquationMode)32774);
  			GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-@@ -1693,48 +2780,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1693,48 +2794,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
  			break;
  		}
@@ -1524,7 +1538,7 @@ index 6edf0c9..52f76d4 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,16 +2850,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1753,16 +2864,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
@@ -1546,7 +1560,7 @@ index 6edf0c9..52f76d4 100644
  		case (EnumFrameBuffer)6:
  			break;
  		}
-@@ -1774,18 +2874,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1774,18 +2888,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
  		if (framebuffer == EnumFrameBuffer.Transparent)
  		{
@@ -1573,7 +1587,7 @@ index 6edf0c9..52f76d4 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,15 +2899,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,24 +2913,127 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -1612,7 +1626,100 @@ index 6edf0c9..52f76d4 100644
  		transparentcompose.Revealage2D = frameBuffers[1].ColorTextureIds[1];
  		transparentcompose.Accumulation2D = frameBuffers[1].ColorTextureIds[0];
  		transparentcompose.InGlow2D = frameBuffers[1].ColorTextureIds[2];
-@@ -1823,10 +2948,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		RenderFullscreenTriangle(screenQuad);
+ 		transparentcompose.Stop();
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P2): reprojects and blends the history into this frame's
++	/// history slot from the jittered Primary colour/glow, the motion attachment
++	/// and depth. Returns false when TAA is off or not ready, in which case the
++	/// post chain runs exactly as it does today.
++	/// </summary>
++	private bool RenderOptimumTaaResolve()
++	{
++		TaaResolvedThisFrame = false;
++		if (!TaaTargetsReady || !Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
++		ShaderProgram resolve = ShaderPrograms.TaaResolve;
++		if (resolve == null || resolve.LoadError)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
++		FrameBufferRef write = TaaHistory(_taaFrameParity);
++		FrameBufferRef read = TaaHistory(_taaFrameParity + 1);
++		if (write == null || read == null)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
++
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		float[] projection = frame.GetProjection(EnumTemporalView.World);
++		double[] jittered = new double[16];
++		for (int i = 0; i < 16; i++)
++		{
++			jittered[i] = projection[i];
++		}
++		OptimumTemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, write.Width, write.Height);
++		float[] projectionJittered = new float[16];
++		for (int i = 0; i < 16; i++)
++		{
++			projectionJittered[i] = (float)jittered[i];
++		}
++		float[] viewProj = Mat4f.Mul(new float[16], projectionJittered, frame.CameraMatrixOrigin);
++		float[] invViewProj = Mat4f.Invert(new float[16], viewProj);
++		float[] prevViewProj = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
++		bool reset = frame.Reset || !_taaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || invViewProj == null;
++		if (invViewProj == null)
++		{
++			invViewProj = Mat4f.Identity(new float[16]);
++		}
++
++		GlToggleBlend(on: false);
++		GlDisableDepthTest();
++		LoadFrameBuffer(write, write.ColorTextureIds[0]);
++		GlViewport(0, 0, write.Width, write.Height);
++
++		resolve.Use();
++		resolve.BindTexture2D("sceneTex", frameBuffers[0].ColorTextureIds[0], 0);
++		resolve.BindTexture2D("glowTex", frameBuffers[0].ColorTextureIds[1], 1);
++		resolve.BindTexture2D("motionTex", frameBuffers[0].ColorTextureIds[MotionAttachmentIndex], 2);
++		resolve.BindTexture2D("depthTex", frameBuffers[0].DepthTextureId, 3);
++		resolve.BindTexture2D("historyColor", read.ColorTextureIds[0], 4);
++		resolve.BindTexture2D("historyGlow", read.ColorTextureIds[1], 5);
++		resolve.BindTexture2D("historyDepth", read.ColorTextureIds[2], 6);
++		resolve.Uniform("renderSize", (float)write.Width, (float)write.Height);
++		resolve.Uniform("jitterPx", frame.JitterPx.X, frame.JitterPx.Y);
++		resolve.UniformMatrix("invViewProjJittered", invViewProj);
++		resolve.UniformMatrix("prevViewProj", prevViewProj);
++		resolve.UniformMatrix("viewMatrix", frame.CameraMatrixOrigin);
++		resolve.Uniform("cameraDelta", frame.CameraPosDelta);
++		resolve.Uniform("resetHistory", reset ? 1 : 0);
++		resolve.Uniform("blendAlpha", 0.1f);
++		resolve.Uniform("varianceGamma", 1.25f);
++		RenderFullscreenTriangle(screenQuad);
++		resolve.Stop();
++
++		taaResolvedColorTexture = write.ColorTextureIds[0];
++		taaResolvedGlowTexture = write.ColorTextureIds[1];
++		_taaHistoryValid = true;
++		_taaFrameParity ^= 1;
++		TaaResolvedThisFrame = true;
++		GlToggleBlend(on: true);
++		return true;
++	}
++
+ 	public override void RenderPostprocessingEffects(float[] projectMatrix)
+ 	{
+ 		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0020: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0189: Unknown result type (might be due to invalid IL or missing references)
+@@ -1823,20 +3046,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -1625,10 +1732,27 @@ index 6edf0c9..52f76d4 100644
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumPostDevice = Vintagestory.API.Config.OptimumRender.Device;
  		int x = ((NativeWindow)window).ClientSize.X;
  		int y = ((NativeWindow)window).ClientSize.Y;
++		// Optimum TAA: resolve first, so bloom, god rays and the final input read
++		// the temporally stable image instead of the jittered one.
++		RenderOptimumTaaResolve();
++		int postSceneTexture = TaaResolvedThisFrame ? taaResolvedColorTexture : frameBuffers[0].ColorTextureIds[0];
++		int postGlowTexture = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];
  		if (RenderBloom)
  		{
  			GlToggleBlend(on: false);
-@@ -1848,45 +2978,55 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			LoadFrameBuffer(EnumFrameBuffer.FindBright);
+ 			ShaderProgramFindbright findbright = ShaderPrograms.Findbright;
+ 			findbright.Use();
+-			findbright.ColorTex2D = frameBuffers[0].ColorTextureIds[0];
+-			findbright.GlowTex2D = frameBuffers[0].ColorTextureIds[1];
++			findbright.ColorTex2D = postSceneTexture;
++			findbright.GlowTex2D = postGlowTexture;
+ 			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
+ 			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
+ 			RenderFullscreenTriangle(screenQuad);
+ 			findbright.Stop();
+ 			ShaderProgramBlur blur = ShaderPrograms.Blur;
+@@ -1848,45 +3081,55 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			RenderFullscreenTriangle(screenQuad);
  			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
  			blur.IsVertical = 1;
@@ -1663,8 +1787,10 @@ index 6edf0c9..52f76d4 100644
  			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
  			godrays.Dusk = ShaderUniforms.Dusk;
  			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
- 			godrays.InputTexture2D = frameBuffers[0].ColorTextureIds[0];
- 			godrays.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
+-			godrays.InputTexture2D = frameBuffers[0].ColorTextureIds[0];
+-			godrays.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
++			godrays.InputTexture2D = postSceneTexture;
++			godrays.GlowParts2D = postGlowTexture;
  			RenderFullscreenTriangle(screenQuad);
  			godrays.Stop();
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
@@ -1688,7 +1814,7 @@ index 6edf0c9..52f76d4 100644
  			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
  			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
  			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-@@ -1915,11 +3055,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,31 +3158,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -1697,13 +1823,25 @@ index 6edf0c9..52f76d4 100644
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
 +			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
  		}
- 		if (RenderFXAA)
+-		if (RenderFXAA)
++		if (RenderFXAA && !TaaResolvedThisFrame)
  		{
  			LoadFrameBuffer(EnumFrameBuffer.Luma);
  			ShaderProgramLuma luma = ShaderPrograms.Luma;
-@@ -1935,11 +3075,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			luma.Use();
+ 			luma.Scene2D = frameBuffers[0].ColorTextureIds[0];
+ 			RenderFullscreenTriangle(screenQuad);
+ 			luma.Stop();
+ 		}
+ 		else
+ 		{
++			// With TAA the FXAA define is off and Final reads the resolved image
++			// through the Luma target; the copy goes away once P5 sharpens here.
+ 			LoadFrameBuffer(EnumFrameBuffer.Luma);
+ 			ShaderProgramBlit blit = ShaderPrograms.Blit;
  			blit.Use();
- 			blit.Scene2D = frameBuffers[0].ColorTextureIds[0];
+-			blit.Scene2D = frameBuffers[0].ColorTextureIds[0];
++			blit.Scene2D = postSceneTexture;
  			RenderFullscreenTriangle(screenQuad);
  			blit.Stop();
  		}
@@ -1723,7 +1861,7 @@ index 6edf0c9..52f76d4 100644
  	}
  
  	public override void RenderFinalComposition()
-@@ -1953,13 +3102,26 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,19 +3207,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -1752,7 +1890,14 @@ index 6edf0c9..52f76d4 100644
  			final.Use();
  			final.PrimaryScene2D = primaryScene2D;
  			final.BloomParts2D = bloomParts2D;
-@@ -1987,23 +3149,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+-			final.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
++			final.GlowParts2D = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];
+ 			final.GodrayParts2D = godrayParts2D;
+ 			final.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
+ 			if (RenderSSAO)
+ 			{
+ 				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
+@@ -1987,23 +3254,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -1793,7 +1938,7 @@ index 6edf0c9..52f76d4 100644
  	}
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
-@@ -2023,19 +3200,119 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,19 +3305,119 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -1914,7 +2059,7 @@ index 6edf0c9..52f76d4 100644
  			blit.Scene2D = scene2D;
  			RenderFullscreenTriangle(screenQuad);
  			blit.Stop();
-@@ -2083,10 +3360,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2083,10 +3465,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
@@ -1940,7 +2085,7 @@ index 6edf0c9..52f76d4 100644
  			OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
  			if ((int)error != 0)
  			{
-@@ -2101,10 +3393,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2101,10 +3498,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
@@ -1962,7 +2107,7 @@ index 6edf0c9..52f76d4 100644
  		{
  			string arg = (ClientSettings.GlDebugMode ? "" : ". Enable Gl Debug Mode in the settings or clientsettings.json to track this error");
  			string message = string.Format("{0} - OpenGL threw an error: {1}{2}", (errmsg == null) ? "" : (errmsg + " "), error, arg);
-@@ -2119,48 +3422,97 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2119,48 +3527,97 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public unsafe override string GlGetError()
  	{
  		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
@@ -2060,7 +2205,7 @@ index 6edf0c9..52f76d4 100644
  			GL.Enable((EnableCap)3089);
  		}
  		else
-@@ -2169,36 +3521,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2169,36 +3626,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2149,7 +2294,7 @@ index 6edf0c9..52f76d4 100644
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
-@@ -2233,33 +3637,71 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2233,33 +3742,71 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2221,7 +2366,7 @@ index 6edf0c9..52f76d4 100644
  			if (on)
  			{
  				GL.Enable((EnableCap)2848);
-@@ -2273,74 +3715,166 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2273,74 +3820,166 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2388,7 +2533,7 @@ index 6edf0c9..52f76d4 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, linearMag ? 9729 : 9728);
  		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, surface.Width, surface.Height, 0, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
-@@ -2351,10 +3885,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2351,10 +3990,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2412,7 +2557,7 @@ index 6edf0c9..52f76d4 100644
  		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)tex.PixelInternalFormat, tex.Width, tex.Height, 0, (PixelFormat)tex.PixelFormat, (PixelType)5126, (IntPtr)IntPtr.Zero);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (int)tex.MinFilter);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (int)tex.MagFilter);
-@@ -2367,10 +3914,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2367,10 +4019,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2450,7 +2595,7 @@ index 6edf0c9..52f76d4 100644
  			if (intoTexture.TextureId != 0)
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
-@@ -2400,10 +3974,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2400,10 +4079,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return LoadTexture((IBitmap)new BitmapExternal(bmp), linearMag, clampMode, generateMipmaps);
  	}
  
@@ -2493,7 +2638,7 @@ index 6edf0c9..52f76d4 100644
  		{
  			GL.TexSubImage2D((TextureTarget)3553, 0, destX, destY, srcBmp.Width, srcBmp.Height, (PixelFormat)32993, (PixelType)5121, (IntPtr)bitmapExternal.PixelsPtrAndLock);
  		}
-@@ -2421,10 +4027,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2421,10 +4132,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2552,7 +2697,7 @@ index 6edf0c9..52f76d4 100644
  		if (ENABLE_ANISOTROPICFILTERING)
  		{
  			float num2 = GL.GetFloat((GetPName)34047);
-@@ -2488,10 +4142,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2488,10 +4247,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2626,7 +2771,7 @@ index 6edf0c9..52f76d4 100644
  			if (intoTexture.TextureId != 0)
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
-@@ -2523,10 +4240,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2523,10 +4345,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2657,7 +2802,7 @@ index 6edf0c9..52f76d4 100644
  			GL.BindTexture((TextureTarget)3553, textureId);
  			int num = default(int);
  			GL.GetTexParameter((TextureTarget)3553, (GetTextureParameter)33085, out num);
-@@ -2540,10 +4277,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2540,10 +4382,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2692,7 +2837,7 @@ index 6edf0c9..52f76d4 100644
  		GL.BindTexture((TextureTarget)34067, num);
  		for (int i = 0; i < 6; i++)
  		{
-@@ -2563,15 +4324,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2563,15 +4429,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexImage2D(target, 0, (PixelInternalFormat)6408, bmp.Width, bmp.Height, 0, (PixelFormat)32993, (PixelType)5121, (IntPtr)bmp.PixelsPtrAndLock);
  	}
  
@@ -2721,7 +2866,7 @@ index 6edf0c9..52f76d4 100644
  		{
  			GL.GetInteger((GetPName)3379, out result);
  		}
-@@ -2581,10 +4355,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2581,10 +4460,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return result;
  	}
  
@@ -2745,7 +2890,7 @@ index 6edf0c9..52f76d4 100644
  		GL.BufferData((BufferTarget)35345, size, (IntPtr)IntPtr.Zero, (BufferUsageHint)35048);
  		ScreenManager.Platform.CheckGlError();
  		int uniformBlockIndex = GL.GetUniformBlockIndex(shaderProgramId, blockName);
-@@ -2605,10 +4392,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2605,10 +4497,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
@@ -2762,7 +2907,7 @@ index 6edf0c9..52f76d4 100644
  		{
  			val = (BufferAccessMask)((int)val | 0x50);
  		}
-@@ -2651,29 +4444,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +4549,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2807,7 +2952,7 @@ index 6edf0c9..52f76d4 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4481,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +4586,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2828,7 +2973,7 @@ index 6edf0c9..52f76d4 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4500,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +4605,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2849,7 +2994,7 @@ index 6edf0c9..52f76d4 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4519,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +4624,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2870,7 +3015,7 @@ index 6edf0c9..52f76d4 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4538,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +4643,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2891,7 +3036,7 @@ index 6edf0c9..52f76d4 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4561,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +4666,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -2912,7 +3057,7 @@ index 6edf0c9..52f76d4 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -2801,10 +4604,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2801,10 +4709,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0199: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01ad: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0255: Unknown result type (might be due to invalid IL or missing references)
@@ -2938,7 +3083,7 @@ index 6edf0c9..52f76d4 100644
  		GL.BindVertexArray(num);
  		int xyzVboId = 0;
  		int normalsVboId = 0;
-@@ -3028,10 +4846,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3028,10 +4951,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0471: Unknown result type (might be due to invalid IL or missing references)
  		//IL_04f9: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0529: Unknown result type (might be due to invalid IL or missing references)
@@ -2960,7 +3105,7 @@ index 6edf0c9..52f76d4 100644
  		GL.BindVertexArray(num);
  		int num3 = 0;
  		int num4 = 0;
-@@ -3215,10 +5044,22 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3215,10 +5149,22 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		};
  	}
  
@@ -2983,7 +3128,7 @@ index 6edf0c9..52f76d4 100644
  			((VAO)modelref).Dispose();
  		}
  	}
-@@ -3277,14 +5118,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3277,14 +5223,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  					rotateUV = false;
  				}
  			}
@@ -3032,7 +3177,7 @@ index 6edf0c9..52f76d4 100644
  			updateVAO(data.Rgba, data.RgbaOffset, data.RgbaCount, vAO.rgbaVboId, vAO.rgbaPtr, persistent);
  		}
  		if (data.CustomFloats != null && data.CustomFloats.Count > 0)
-@@ -3316,20 +5188,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3316,20 +5293,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		if (data.CustomBytes != null && data.CustomBytes.Count > 0)
  		{
@@ -3064,7 +3209,7 @@ index 6edf0c9..52f76d4 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3342,10 +5218,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3342,10 +5323,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01fc: Unknown result type (might be due to invalid IL or missing references)
@@ -3090,7 +3235,7 @@ index 6edf0c9..52f76d4 100644
  		GL.BindVertexArray(num);
  		int num2 = 0;
  		int rgbaVboId = 0;
-@@ -3675,15 +5566,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3675,15 +5671,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return new MouseEvent((int)mouseX, (int)mouseY, button, 0);
  	}
  
@@ -3120,7 +3265,7 @@ index 6edf0c9..52f76d4 100644
  		if (text != null)
  		{
  			if (text.IndexOfOrdinal("#version") == -1)
-@@ -3715,10 +5620,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3715,10 +5725,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return true;
  	}
  

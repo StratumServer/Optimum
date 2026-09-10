@@ -144,6 +144,129 @@ public class TaaPipelineCoverageTests
         Assert.Contains("OptimumConfig.TaaDebugView != 0 && MotionAttachmentIndex >= 0", platform);
     }
 
+    [Fact]
+    public void RenderPostprocessingEffectsResolvesTaaBeforeBloomAndReadsTheResolvedTextures()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        int postEffectsStart = platform.IndexOf(
+            "public override void RenderPostprocessingEffects(float[] projectMatrix)",
+            StringComparison.Ordinal);
+        Assert.True(postEffectsStart >= 0);
+        int resolveCall = platform.IndexOf("RenderOptimumTaaResolve();", postEffectsStart, StringComparison.Ordinal);
+        Assert.True(resolveCall > postEffectsStart);
+
+        // postSceneTexture/postGlowTexture are derived from the resolve result
+        // right after the call, before the bloom block reads them.
+        int postSceneDecl = platform.IndexOf(
+            "int postSceneTexture = TaaResolvedThisFrame ? taaResolvedColorTexture : frameBuffers[0].ColorTextureIds[0];",
+            resolveCall,
+            StringComparison.Ordinal);
+        int postGlowDecl = platform.IndexOf(
+            "int postGlowTexture = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];",
+            resolveCall,
+            StringComparison.Ordinal);
+        Assert.True(postSceneDecl > resolveCall);
+        Assert.True(postGlowDecl > postSceneDecl);
+
+        int bloomBlock = platform.IndexOf("if (RenderBloom)", postGlowDecl, StringComparison.Ordinal);
+        Assert.True(bloomBlock > postGlowDecl);
+
+        // Bloom's findbright pass reads the resolved colour+glow, not the raw
+        // primary attachments.
+        int findbrightColor = platform.IndexOf("findbright.ColorTex2D = postSceneTexture;", bloomBlock, StringComparison.Ordinal);
+        int findbrightGlow = platform.IndexOf("findbright.GlowTex2D = postGlowTexture;", bloomBlock, StringComparison.Ordinal);
+        Assert.True(findbrightColor > bloomBlock);
+        Assert.True(findbrightGlow > findbrightColor);
+
+        // God rays read the same resolved pair.
+        int godRaysBlock = platform.IndexOf("if (RenderGodRays)", findbrightGlow, StringComparison.Ordinal);
+        Assert.True(godRaysBlock > findbrightGlow);
+        int godraysInput = platform.IndexOf("godrays.InputTexture2D = postSceneTexture;", godRaysBlock, StringComparison.Ordinal);
+        int godraysGlow = platform.IndexOf("godrays.GlowParts2D = postGlowTexture;", godRaysBlock, StringComparison.Ordinal);
+        Assert.True(godraysInput > godRaysBlock);
+        Assert.True(godraysGlow > godraysInput);
+
+        // The Luma blit target reads postSceneTexture through Blit.Scene2D on
+        // the TAA-resolved path (the FXAA branch instead reads the raw primary
+        // colour attachment, since FXAA and TAA are mutually exclusive).
+        Assert.Contains("if (RenderFXAA && !TaaResolvedThisFrame)", platform);
+        Assert.Contains("blit.Scene2D = postSceneTexture;", platform);
+    }
+
+    [Fact]
+    public void FinalReadsTheResolvedGlowTextureOnlyWhenTaaResolvedThisFrame()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        Assert.Contains(
+            "final.GlowParts2D = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];",
+            platform);
+    }
+
+    [Fact]
+    public void FxaaDefineIsOffWhenEffectiveTaaIsOn()
+    {
+        string shaderRegistry = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
+
+        Assert.Contains(
+            "#define FXAA \" + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTaa ? 1 : 0)",
+            shaderRegistry);
+    }
+
+    [Fact]
+    public void TaaResolveIsRegisteredAndOptional()
+    {
+        string shaderRegistry = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
+
+        Assert.Contains(
+            "RegisterOptimumShaderProgram(\"taa-resolve\", ShaderPrograms.TaaResolve = new ShaderProgram());",
+            shaderRegistry);
+
+        // taa-resolve is optional: a failed compile only marks LoadError on the
+        // program itself, it never flips the global shader-load-succeeded flag
+        // (same treatment as FsrEasu/FsrRcas/TaaDebug).
+        int compileHelperStart = shaderRegistry.IndexOf(
+            "private static void CompileAndTrackShaderProgram",
+            StringComparison.Ordinal);
+        Assert.True(compileHelperStart >= 0);
+        Assert.Contains(
+            "shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas || shaderProgram == ShaderPrograms.TaaDebug || shaderProgram == ShaderPrograms.TaaResolve",
+            shaderRegistry.Substring(compileHelperStart));
+    }
+
+    [Fact]
+    public void CecilPatcherShipsEveryTaaResolveMethodAndMember()
+    {
+        string patcher = Read("Optimum.Patcher/Program.cs");
+
+        Assert.Contains("\"TaaResolve\"", patcher);
+        Assert.Contains("\"RenderOptimumTaaResolve\"", patcher);
+        Assert.Contains("\"_taaFrameParity\"", patcher);
+        Assert.Contains("\"_taaHistoryValid\"", patcher);
+        Assert.Contains("\"taaResolvedColorTexture\"", patcher);
+        Assert.Contains("\"taaResolvedGlowTexture\"", patcher);
+        Assert.Contains("\"TaaResolvedThisFrame\"", patcher);
+    }
+
+    [Fact]
+    public void TaaResolveShaderPairExistsAndReadsHistoryAndCurrentColour()
+    {
+        string vsh = Read("sources/shaders/taa-resolve.vsh");
+        string fsh = Read("sources/shaders/taa-resolve.fsh");
+
+        Assert.NotEmpty(vsh);
+        Assert.NotEmpty(fsh);
+    }
+
     private static int Count(string source, string value)
     {
         int count = 0;

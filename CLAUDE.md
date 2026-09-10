@@ -62,7 +62,7 @@ trace: `program N 'name'`, `fullscreen program= tex0= target=`, `bind unit= text
 5. **Process hygiene.** Launch through `scripts/dev/*.sh` (setsid wrappers). Never put `pkill -f` or
    `pgrep -f` in a command that also contains the process name in a heredoc or string: it matches the
    calling shell and the tool dies with exit 144. Close the game with the kill script (window close
-   first) to avoid shutdown-race crash reports.
+   first) to avoid shutdown-race crash reports. Close the game as soon as a check is done; never leave it running.
 6. **Git.** Never `git stash`. Commit WIP on the branch with a `wip:` prefix instead. Branch from
    `main` (tracks `origin/main` = NightHammer1000/VulkanStory; `upstream` = StratumServer/Optimum).
    Commit only when asked or when a phase is verified; say what was verified in the message.
