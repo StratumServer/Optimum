@@ -473,4 +473,51 @@ public class TemporalFrameTests
         m[15] = value;
         return m;
     }
+
+    [Fact]
+    public void PreviousJitterIsTheJitterTheLastFrameRenderedWith()
+    {
+        var frame = NewFrame();
+        frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, Uniforms());
+        frame.JitterActive = true;
+        float jx = frame.JitterPx.X, jy = frame.JitterPx.Y;
+        Assert.False(jx == 0f && jy == 0f);
+        // The window closes at the end of the frame, zeroing JitterPx.
+        frame.JitterActive = false;
+        Assert.Equal(0f, frame.JitterPx.X);
+        frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, Uniforms());
+        Assert.Equal(jx, frame.PrevJitterPx.X);
+        Assert.Equal(jy, frame.PrevJitterPx.Y);
+    }
+
+    [Fact]
+    public void AFrameWithoutACameraCaptureDropsTheHistoryOnTheNextAdvance()
+    {
+        var frame = NewFrame();
+        var uniforms = Uniforms();
+        frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(1, 2, 3), uniforms);
+        frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, uniforms);
+        frame.CaptureCameraPosition(new Vec3d(1, 2, 3.5), uniforms);
+        Assert.False(frame.Reset);
+        // This frame never captures.
+        frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, uniforms);
+        Assert.False(frame.Reset);
+        frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, uniforms);
+        Assert.True(frame.Reset);
+        Assert.Equal(EnumTemporalResetReason.CameraHistoryLost, frame.ResetReason);
+    }
+
+    [Fact]
+    public void CapturingEveryFrameNeverDropsTheHistory()
+    {
+        var frame = NewFrame();
+        var uniforms = Uniforms();
+        for (int i = 0; i < 5; i++)
+        {
+            frame.Advance(16f, Width, Height, 1f, 0.1f, 1000f, 70f, uniforms);
+            frame.CaptureCameraPosition(new Vec3d(i * 0.1, 0, 0), uniforms);
+            Assert.False(frame.Reset && frame.ResetReason == EnumTemporalResetReason.CameraHistoryLost);
+        }
+    }
 }

@@ -25,7 +25,10 @@ namespace Vintagestory.API.Client
         FovChange,
         RenderScale,
         Toggle,
-        Screenshot
+        Screenshot,
+        /// <summary>A frame advanced without <see cref="OptimumTemporalFrame.CaptureCameraPosition" />:
+        /// the next capture would span two frames, so the history is dropped instead.</summary>
+        CameraHistoryLost
     }
 
     /// <summary>
@@ -198,6 +201,8 @@ namespace Vintagestory.API.Client
 
         private EnumTemporalResetReason pendingReset;
         private bool jitterActive;
+        private readonly Vec2f appliedJitterPx = new Vec2f();
+        private bool cameraCapturedThisFrame;
 
         public OptimumTemporalFrame()
         {
@@ -228,6 +233,7 @@ namespace Vintagestory.API.Client
                 jitterActive = value;
                 JitterPx.X = value ? JitterSequencePx.X : 0f;
                 JitterPx.Y = value ? JitterSequencePx.Y : 0f;
+                if (value) { appliedJitterPx.X = JitterPx.X; appliedJitterPx.Y = JitterPx.Y; }
             }
         }
 
@@ -302,8 +308,20 @@ namespace Vintagestory.API.Client
             DefaultShaderUniforms uniforms)
         {
             // --- rotate current -> previous -------------------------------------
-            PrevJitterPx.X = JitterPx.X;
-            PrevJitterPx.Y = JitterPx.Y;
+            // The jitter the previous frame really rendered with. JitterPx is
+            // zeroed when the jitter window closes, so it cannot be used here.
+            PrevJitterPx.X = appliedJitterPx.X;
+            PrevJitterPx.Y = appliedJitterPx.Y;
+            appliedJitterPx.X = 0f;
+            appliedJitterPx.Y = 0f;
+            // A frame that advanced without a camera capture leaves cameraPos
+            // one frame stale: the next capture would difference across two
+            // frames while the history was rendered with a zero delta.
+            if (FrameIndex > 0 && hasCameraPos && !cameraCapturedThisFrame)
+            {
+                RequestReset(EnumTemporalResetReason.CameraHistoryLost);
+            }
+            cameraCapturedThisFrame = false;
             for (int i = 0; i < ViewCount; i++)
             {
                 Array.Copy(projection[i], projectionPrev[i], 16);
@@ -363,6 +381,7 @@ namespace Vintagestory.API.Client
             JitterSequencePx.Y = (float)jy;
             JitterPx.X = jitterActive ? JitterSequencePx.X : 0f;
             JitterPx.Y = jitterActive ? JitterSequencePx.Y : 0f;
+            if (jitterActive) { appliedJitterPx.X = JitterPx.X; appliedJitterPx.Y = JitterPx.Y; }
         }
 
         /// <summary>
@@ -390,6 +409,7 @@ namespace Vintagestory.API.Client
         public void CaptureCameraPosition(Vec3d cameraPosIn, DefaultShaderUniforms uniforms)
         {
             EnumTemporalResetReason reason = ResetReason;
+            cameraCapturedThisFrame = true;
 
             if (uniforms != null && uniforms.PlayerPos != null)
             {

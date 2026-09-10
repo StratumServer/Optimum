@@ -110,6 +110,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "PrepareOptimumEntityLights",
         "BeginOptimumEntityShaderSegment",
         "EndOptimumEntityShaderSegment",
+        // TAA review fix: per-renderer motion-window gate.
+        "optimumMotionWriterTypes",
+        "OptimumIsMotionWriter",
     },
     ["Vintagestory.Client.NoObf.ClientChunk"] = new()
     {
@@ -154,6 +157,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "CreateOptimumHistoryTarget",
         "CreateOptimumHistoryTargetGl",
         "DisableOptimumTaa",
+        "optimumTaaShaderReloadPending",
+        "OptimumRunPendingTaaShaderReload",
         "_taaFrameParity",
         "_taaHistoryValid",
         "taaResolvedColorTexture",

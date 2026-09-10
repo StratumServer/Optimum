@@ -502,7 +502,23 @@ public static class OptimumConfig
     // missing launcher scan must not disable it (IsShaderFeatureDisabled reports
     // everything disabled without a scan), only an explicit scan verdict does.
     public static bool EffectiveTaa => Taa &&
+        !TaaRuntimeDisabled &&
         !IsFeatureExplicitlyDisabled("Taa");
+
+    /// <summary>
+    /// Set by the platform when TAA's frame buffers or resolve shader could not
+    /// be created; TAA stays off for the rest of the session and the shaders
+    /// that compile against <see cref="EffectiveTaa" /> (final.fsh's FXAA branch)
+    /// are rebuilt so the FXAA fallback really runs.
+    /// </summary>
+    public static bool TaaRuntimeDisabled { get; private set; }
+
+    public static bool DisableTaaAtRuntime()
+    {
+        if (TaaRuntimeDisabled) return false;
+        TaaRuntimeDisabled = true;
+        return true;
+    }
 
     public static bool EffectiveEntityLightBatch => EntityLightBatchEnabled &&
         !IsShaderFeatureDisabled("EntityLightBatch");

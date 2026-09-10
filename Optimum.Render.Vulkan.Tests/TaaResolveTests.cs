@@ -329,6 +329,79 @@ public class TaaResolveTests
     }
 
     /// <summary>
+    /// Sky (depth == 1, nothing wrote the motion attachment) is a direction: a
+    /// camera translation must not move it. With a previous view-projection
+    /// whose clip w equals z (so directions project like points), a finite
+    /// reprojection would shift the history band by cameraDelta.x * Size / 2 =
+    /// 4 columns; the infinite-direction path keeps it where it is.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void SkyDoesNotMoveUnderCameraTranslation()
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        using (context)
+        using (var commands = new VulkanCommands(context!))
+        using (var textures = new TextureManager(context!, commands))
+        {
+            var state = new GlStateTracker();
+            using var targets = new RenderTargetManager(context!, textures, state);
+            using var pipelines = new GraphicsPipelineCache(context!);
+            using var compiler = new ShaderCompiler();
+            using var descriptors = new DescriptorCache(context!);
+            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+
+            var inputs = CreateInputSet(textures);
+            UploadRgba16F(textures, inputs.SceneTex, (x, _) => (x % 2 == 0) ? 0.3f : 0.7f,
+                (x, _) => (x % 2 == 0) ? 0.3f : 0.7f, (x, _) => (x % 2 == 0) ? 0.3f : 0.7f, (_, _) => 1f);
+            UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+            // Sky everywhere, nothing wrote motion (a = 0).
+            UploadFlatR32F(textures, inputs.DepthTex, 1.0f);
+            UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, 0f);
+
+            const int stripeStart = 14, stripeWidth = 4;
+            const float background = 0.5f, stripe = 1.0f;
+            UploadRgba16F(textures, inputs.HistoryColor,
+                (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (_, _) => 1f);
+            UploadFlatRgba8(textures, inputs.HistoryGlow, 0, 0, 0, 255);
+            // linearDepth = -(viewMatrix * world).z = -1 for depth 1 under identity.
+            UploadFlatR32F(textures, inputs.HistoryDepth, -1.0f);
+
+            // Identity, except clip.w = z so a w = 0 direction still divides.
+            float[] prevViewProj = (float[])Identity4.Clone();
+            prevViewProj[11] = 1f;
+            prevViewProj[15] = 0f;
+
+            TaaAttachmentSet output = CreateAttachmentSet(textures, targets);
+            var uniforms = new TaaUniforms
+            {
+                ResetHistory = 0,
+                BlendAlpha = 0.05f,
+                PrevViewProj = prevViewProj,
+                CameraDelta = new[] { 0.25f, 0f, 0f },
+            };
+
+            ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
+                inputs, uniforms, output);
+
+            byte[] colorBytes = ReadTextureBytes(context!, commands, textures, output.Color, 8);
+            float stayed = AverageRed(colorBytes, stripeStart, stripeStart + stripeWidth);
+            float shifted = AverageRed(colorBytes, stripeStart - 4, stripeStart);
+            float control = AverageRed(colorBytes, 24, 28);
+            _output.WriteLine($"band in place={stayed}, band shifted by translation={shifted}, control={control}");
+
+            Assert.True(stayed > control + 0.1f, $"sky history should stay in place (avg {stayed} vs control {control})");
+            Assert.True(shifted < control + 0.05f, $"camera translation must not move the sky (shifted window avg {shifted} vs control {control})");
+
+            ValidationAssert.NoErrors(messages);
+        }
+    }
+
+    /// <summary>
     /// With non-zero jitter, the per-pixel Blackman-Harris reconstruction in
     /// taa-resolve.fsh (the <c>filtered</c>/<c>filteredWeight</c> loop) is
     /// supposed to undo the raster displacement: a scene that was rendered

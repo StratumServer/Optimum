@@ -308,4 +308,51 @@ public class TaaPipelineCoverageTests
             return null;
         }
     }
+
+    [Fact]
+    public void ARuntimeTaaFailureFallsBackToFxaa()
+    {
+        string config = Read("sources/VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("!TaaRuntimeDisabled &&", config);
+        Assert.Contains("public static bool DisableTaaAtRuntime()", config);
+
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        int disable = platform.IndexOf("public void DisableOptimumTaa(string reason)", StringComparison.Ordinal);
+        Assert.True(disable > 0);
+        Assert.Contains("OptimumConfig.DisableTaaAtRuntime()", platform.Substring(disable, 1200));
+        // The reload happens outside frame buffer setup, at the resolve decision.
+        int resolve = platform.IndexOf("private bool RenderOptimumTaaResolve()", StringComparison.Ordinal);
+        Assert.Contains("OptimumRunPendingTaaShaderReload();", platform.Substring(resolve, 400));
+        Assert.Contains("ShaderRegistry.ReloadShaders();", platform);
+
+        // Later rebuilds read EffectiveTaa, which now honours the runtime flag.
+        string registry = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
+        Assert.Contains("!OptimumConfig.EffectiveTaa ? 1 : 0", registry);
+
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"optimumTaaShaderReloadPending\"", patcher);
+        Assert.Contains("\"OptimumRunPendingTaaShaderReload\"", patcher);
+    }
+
+    [Fact]
+    public void TheEntityMotionWindowOnlyWrapsTheGamesOwnEntityRenderers()
+    {
+        string entities = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs");
+        Assert.Contains("OptimumIsMotionWriter(entityRenderer2.Value)", entities);
+        Assert.Contains("StartsWith(\"Vintagestory.GameContent\"", entities);
+        // No whole-loop window any more.
+        Assert.DoesNotContain("optimumPlatform != null && optimumPlatform.BeginMotionWrite();", entities);
+
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"OptimumIsMotionWriter\"", patcher);
+        Assert.Contains("\"optimumMotionWriterTypes\"", patcher);
+    }
+
+    [Fact]
+    public void SkyPixelsReprojectAsDirections()
+    {
+        string resolve = Read("sources/shaders/taa-resolve.fsh");
+        Assert.Contains("bool sky = depth >= 0.999999;", resolve);
+        Assert.Contains("prevViewProj * vec4(world, 0.0)", resolve);
+    }
 }

@@ -152,7 +152,13 @@ void main(void)
 	}
 	else
 	{
-		vec4 prevClip = prevViewProj * vec4(world + cameraDelta, 1.0);
+		// Sky (depth == 1, nothing wrote depth) is a direction, not a point:
+		// reproject it with w = 0 so camera translation cannot move it (plan:
+		// "infinite-direction reprojection where depth == 1"). Finite surfaces
+		// translate by cameraDelta into the previous camera's frame.
+		bool sky = depth >= 0.999999;
+		vec4 prevClip = sky ? prevViewProj * vec4(world, 0.0)
+		                    : prevViewProj * vec4(world + cameraDelta, 1.0);
 		if (prevClip.w <= 1e-6) { outColor = current; outGlow = glow; outDepth = vec4(linearDepth); return; }
 		vec2 prevPixel = (prevClip.xy / prevClip.w * 0.5 + 0.5) * renderSize;
 		mv = prevPixel - currentUnjittered;

@@ -264,9 +264,10 @@ public class TaaEntityMotionCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs");
 
         // Reuses the terrain stage's window rather than adding a second pair.
-        Assert.Contains(
-            "bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();",
-            entities);
+        // Per-renderer window (review fix): opened only around the game's own
+        // EntityShapeRenderer family, closed before any foreign renderer draws.
+        Assert.Contains("OptimumIsMotionWriter(entityRenderer2.Value)", entities);
+        Assert.Contains("optimumMotionWrite = optimumPlatform.BeginMotionWrite();", entities);
         Assert.Contains("optimumPlatform.EndMotionWrite();", entities);
 
         // The mod-side renderers reach the same window through the API.
