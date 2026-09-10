@@ -100,6 +100,27 @@ public class GlStateTrackerTests
         Assert.Equal(BlendFactor.OneMinusSrcAlpha, tracker.BlendFor(0).DstColor);
     }
 
+    [Fact]
+    public void BlendEnableTogglePreservesOitFactorsAndEquations()
+    {
+        var tracker = new GlStateTracker();
+        tracker.SetBlend(true, EnumBlendMode.Standard);
+        tracker.SetAttachmentBlendFunc(0, 774, 0, 774, 0);
+        tracker.SetAttachmentBlendFunc(3, 1, 1, 1, 1);
+        tracker.SetAttachmentBlendEquation(3, 32779); // GL_FUNC_REVERSE_SUBTRACT
+        var reveal = tracker.BlendFor(0);
+        var accumulation = tracker.BlendFor(3);
+        int enabledId = tracker.BlendId(6);
+        tracker.SetBlendEnabled(false);
+        Assert.False(tracker.BlendFor(0).Enabled);
+        Assert.False(tracker.BlendFor(3).Enabled);
+        Assert.NotEqual(enabledId, tracker.BlendId(6));
+        tracker.SetBlendEnabled(true);
+        Assert.Equal(reveal, tracker.BlendFor(0));
+        Assert.Equal(accumulation, tracker.BlendFor(3));
+        Assert.Equal(enabledId, tracker.BlendId(6));
+    }
+
     // -------------------------------------------------------------- interning
 
     [Fact]

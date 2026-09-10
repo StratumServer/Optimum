@@ -77,7 +77,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     /// <summary>Texture bound to each unit, and any sampler overriding the texture's own state.</summary>
     private readonly int[] _boundTextures = new int[GlStateTracker.MaxTextureUnits];
-    private readonly Sampler[] _unitSamplerOverrides = new Sampler[GlStateTracker.MaxTextureUnits];
+    private readonly int[] _unitSamplerOverrides = new int[GlStateTracker.MaxTextureUnits];
 
     // Atlas composition reads one tile while writing another in the same image.
     // Reuse a snapshot image, but refresh its contents before each such draw.
@@ -800,6 +800,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void SetBlend(bool enabled, EnumBlendMode mode) => _state.SetBlend(enabled, mode);
 
+    public void SetBlendEnabled(bool enabled) => _state.SetBlendEnabled(enabled);
+
     public void SetBlendFuncSeparate(int attachment, int srcColor, int dstColor, int srcAlpha, int dstAlpha) =>
         _state.SetAttachmentBlendFunc(attachment, srcColor, dstColor, srcAlpha, dstAlpha);
 
@@ -1311,6 +1313,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void SetTextureParameter(int textureId, int parameterName, float value) =>
         _textures.SetParameter(textureId, parameterName, value);
 
+    public void SetTextureBorderColor(int textureId, float r, float g, float b, float a) =>
+        _textures.SetBorderColor(textureId, r, g, b, a);
+
     public int GetTextureParameter(int textureId, int parameterName)
     {
         VulkanTexture? texture = _textures.Get(textureId);
@@ -1347,8 +1352,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _standaloneSamplers[id] = SamplerState.Default with
         {
             MagFilter = linear ? Filter.Linear : Filter.Nearest,
-            MinFilter = linear ? Filter.Linear : Filter.Nearest,
-            MipmapMode = linear ? SamplerMipmapMode.Linear : SamplerMipmapMode.Nearest,
+            // GenSampler uses GL_NEAREST_MIPMAP_LINEAR for both variants;
+            // the flag changes magnification only. Terrain relies on this
+            // override retaining the atlas mip chain at a distance.
+            MinFilter = Filter.Nearest,
+            MipmapMode = SamplerMipmapMode.Linear,
+            Mipmapped = true,
         };
         return id;
     }
@@ -1366,9 +1375,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         if ((uint)unit >= GlStateTracker.MaxTextureUnits) return;
 
-        _unitSamplerOverrides[unit] = samplerId > 0 && _standaloneSamplers.TryGetValue(samplerId, out SamplerState state)
-            ? _textures.Samplers.Get(state)
-            : default;
+        _unitSamplerOverrides[unit] = _standaloneSamplers.ContainsKey(samplerId) ? samplerId : 0;
     }
 
     public void DeleteSampler(int samplerId) => _standaloneSamplers.Remove(samplerId);
@@ -2191,9 +2198,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                         resource = texture.Id;
                         // A sampler bound to the unit overrides the texture's own
                         // state, which is what glBindSampler means.
-                        sampler = _unitSamplerOverrides[unit].Handle != 0
-                            ? _unitSamplerOverrides[unit]
-                            : _textures.Samplers.Get(texture.State);
+                        // MAX_LEVEL belongs to the texture, even when a sampler
+                        // overrides its filters. Resolve at draw time so changes
+                        // to either object also affect an already-bound unit.
+                        SamplerState sampling = _standaloneSamplers.TryGetValue(_unitSamplerOverrides[unit], out SamplerState custom)
+                            ? custom with { MaxLevel = texture.State.MaxLevel }
+                            : texture.State;
+                        sampler = _textures.Samplers.Get(sampling);
                     }
                 }
 

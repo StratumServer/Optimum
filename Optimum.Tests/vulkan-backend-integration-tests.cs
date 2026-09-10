@@ -415,6 +415,7 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("\"SetupOptimumFrameBuffers\"", patcher);
         Assert.Contains("\"CreateOptimumColorTarget\"", patcher);
+        Assert.Contains("\"SetupOptimumTextureSampler\"", patcher);
         Assert.Contains("\"CreateOptimumDepthTarget\"", patcher);
     }
 

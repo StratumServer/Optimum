@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
-index 4252128..b43c07b 100644
+index 4252128..120824f 100644
 --- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
 +++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
 @@ -219,10 +219,22 @@ namespace FluffyClouds {
@@ -79,13 +79,13 @@ index 4252128..b43c07b 100644
 +            {
 +                optimumDevice.BindFramebuffer(Framebuffer);
 +                optimumDevice.SetViewport(0, 0, CloudTileLength, CloudTileLength);
-+                optimumDevice.SetBlend(false, EnumBlendMode.Standard);
++                optimumDevice.SetBlendEnabled(false);
 +                optimumDevice.SetDepthTest(false);
 +
 +                capi.Render.RenderMesh(quad);
 +
 +                optimumDevice.SetDepthTest(true);
-+                optimumDevice.SetBlend(true, EnumBlendMode.Standard);
++                optimumDevice.SetBlendEnabled(true);
 +                if (optimumSavedTarget != null)
 +                {
 +                    optimumDevice.BindFramebuffer(optimumSavedTarget.FboId);

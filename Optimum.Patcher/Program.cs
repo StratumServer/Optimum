@@ -120,6 +120,7 @@ var membersToInject = new Dictionary<string, List<string>>
         // Vulkan backend: the device-path framebuffer setup and its helpers.
         "SetupOptimumFrameBuffers",
         "CreateOptimumColorTarget",
+        "SetupOptimumTextureSampler",
         "CreateOptimumDepthTarget",
         "CreateOptimumPlaceholderTarget",
         "CreateOptimumFramebuffer",

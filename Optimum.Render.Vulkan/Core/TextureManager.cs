@@ -50,7 +50,7 @@ internal readonly record struct SamplerState(
     /// which is what a non-mipmapping GL filter means.
     /// </summary>
     public float LodCeiling => !Mipmapped ? 0.25f
-        : MaxLevel >= 0 ? MaxLevel + 1f
+        : MaxLevel >= 0 ? MaxLevel
         : Vk.LodClampNone;
 }
 

@@ -39,6 +39,94 @@ public class VulkanDeviceIntegrationTests
     }
 
     [SkippableTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public unsafe void TerrainSamplerUsesNearestTexelsAndBlendsMipLevels(bool linear)
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            int program = LinkProgram(seam, """
+                #version 330 core
+                void main() {
+                    gl_Position = vec4(-1 + ((gl_VertexID & 1) << 2),
+                                       -1 + ((gl_VertexID & 2) << 1), 0, 1);
+                }
+                """, """
+                #version 330 core
+                uniform sampler2D source;
+                out vec4 color;
+                void main() {
+                    float lod = gl_FragCoord.x < 1.0 ? 1.0 : 1.5;
+                    color = textureLod(source, vec2(0.625, 0.25), lod);
+                }
+                """);
+            int source = seam.CreateTexture2D(4, 4, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, true);
+            // Base level red; mip 1 alternates green/blue, mip 2 is white.
+            // Sampling base level, filtering within mip 1, or rounding the LOD
+            // produces a different colour from the GL_NEAREST_MIPMAP_LINEAR result.
+            byte[] basePixels = new byte[64];
+            for (int i = 0; i < basePixels.Length; i += 4)
+            {
+                basePixels[i] = 255;
+                basePixels[i + 3] = 255;
+            }
+            byte[] mip1 = { 0,255,0,255, 0,0,255,255, 0,255,0,255, 0,0,255,255 };
+            byte[] mip2 = { 255,255,255,255 };
+            fixed (byte* data = basePixels)
+                seam.UploadTexture2D(source, 0, 0, 0, 4, 4, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+            fixed (byte* data = mip1)
+                seam.UploadTexture2D(source, 1, 0, 0, 2, 2, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+            fixed (byte* data = mip2)
+                seam.UploadTexture2D(source, 2, 0, 0, 1, 1, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+            int target = seam.CreateTexture2D(2, 1, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(2, 1);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
+            seam.SetDrawBuffers(framebuffer, 1);
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.SetViewport(0, 0, 2, 1);
+            seam.SetDepthTest(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.UseProgram(program);
+            seam.SetSamplerUnit(program, "source", 0);
+            seam.BindTexture(0, source);
+            seam.BindSampler(0, seam.CreateSampler(linear));
+            seam.DrawFullscreenTriangle();
+            seam.Present();
+            byte[] pixels = new byte[8];
+            fixed (byte* data = pixels)
+                seam.ReadDefaultFramebuffer(0, 0, 2, 1, (IntPtr)data);
+            Assert.Equal(new byte[] { 0, 0, 255, 255 }, pixels[..4]);
+            Assert.InRange(pixels[4], 127, 128);
+            Assert.InRange(pixels[5], 127, 128);
+            Assert.Equal(255, pixels[6]);
+            Assert.Equal(255, pixels[7]);
+
+            // GL_TEXTURE_MAX_LEVEL is a texture property, not sampler state.
+            // It must still clamp an override, and must not blend in level 2.
+            seam.SetTextureParameter(source, OptimumGlConstants.TextureMaxLevel, 1);
+            seam.SetTextureParameter(source, OptimumGlConstants.TextureMinFilter, 0x2702);
+            for (int pass = 0; pass < 2; pass++)
+            {
+                if (pass == 1) seam.BindSampler(0, 0);
+                seam.BeginFrame();
+                seam.BindFramebuffer(framebuffer);
+                seam.DrawFullscreenTriangle();
+                seam.Present();
+                fixed (byte* data = pixels)
+                    seam.ReadDefaultFramebuffer(0, 0, 2, 1, (IntPtr)data);
+                Assert.Equal(new byte[] { 0, 0, 255, 255, 0, 0, 255, 255 }, pixels);
+            }
+            AssertClean(seam);
+        }
+    }
+
+    [SkippableTheory]
     [InlineData(EnumDrawMode.Lines)]
     [InlineData(EnumDrawMode.LineStrip)]
     public unsafe void IndexedLineMeshesDrawOnlyEdgesAndRestoreTriangleTopology(EnumDrawMode mode)
