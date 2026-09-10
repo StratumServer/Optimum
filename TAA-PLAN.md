@@ -263,6 +263,13 @@ finalizer thread by `DeleteUniformBuffer` while the render thread reads it; pre-
   offset reprojection, outlier clip, reset); coverage test for ordering and FXAA-off; in-game the
   whole scene converges with camera-only motion vectors.
 
+P2 status (2026-09-10): done and accepted in game by the user on both backends ("TAA is CHEFSKISS now").
+Commits 1257117..9c32acb on `feat/taa`. Findings to carry: (a) Vulkan `GlEnums` lacked GL_R32F, so the
+history depth target silently became RGBA8 (b4d58a2); (b) `ClearColor` on a masked-out attachment is a
+no-op on Vulkan, so the motion clear must enable the attachment first (8e4a970); (c) the history lookup
+must be anchored at the pixel centre plus mv, not at the unjittered current position (7e1b9bd);
+(d) matched-camera luminance-diff measurements (Codex) are the acceptance tool for "jitter" reports.
+
 **P3. Opaque coverage.**
 - `sources/shaderincludes/vertexwarp.vsh` with `WarpState`; `chunkopaque`, `chunktopsoil` writers;
   `standard.vsh/.fsh` writer (items, block entities, dropped items, quern) with previous transforms
