@@ -833,6 +833,243 @@ public class VulkanDeviceIntegrationTests
     }
 
     /// <summary>
+    /// The per-entity uniform bug. The client keeps one UBO per named block and
+    /// re-uploads it immediately before each draw - EntityShapeRenderer does this
+    /// with the "Animation" block, once per entity - but a draw is only recorded
+    /// when it is issued, not executed. A backend that wrote the client's buffer
+    /// in place and bound that buffer would give every entity in the frame the
+    /// last entity's transforms, because all of those draws execute after the
+    /// last upload.
+    ///
+    /// Two quads, two uploads, one frame: each quad has to come out the colour
+    /// that was in the block when it was drawn.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void TwoDrawsInOneFrameEachSeeTheBlockContentsTheyWereGiven()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 16;
+
+            int program = LinkProgram(seam, """
+                #version 330 core
+                layout(location = 0) in vec3 position;
+                void main(void) { gl_Position = vec4(position, 1.0); }
+                """, """
+                #version 330 core
+                layout(std140) uniform Tint { vec4 tint; };
+                out vec4 outColor;
+                void main(void) { outColor = tint; }
+                """);
+
+            int left = HalfScreenQuad(seam, -1f, 0f);
+            int right = HalfScreenQuad(seam, 0f, 1f);
+
+            int target = seam.CreateTexture2D(size, size,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(size, size);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
+            seam.SetDrawBuffers(framebuffer, 0b1);
+
+            int ubo = seam.CreateUniformBuffer(program, 0, "Tint", sizeof(float) * 4);
+            Assert.True(ubo > 0);
+            seam.BindUniformBuffer(ubo);
+
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.UseProgram(program);
+            seam.SetViewport(0, 0, size, size);
+            seam.SetDepthTest(false);
+            seam.SetCullFace(false);
+            seam.SetBlend(false, EnumBlendMode.Standard);
+            seam.ClearColor(0, 0, 0, 0, 1);
+
+            SetTint(seam, ubo, 60, 120, 180);
+            seam.DrawMesh(left);
+
+            // The same block, rewritten between two draws of the same frame.
+            SetTint(seam, ubo, 200, 40, 90);
+            seam.DrawMesh(right);
+            seam.Present();
+
+            var pixels = new byte[size * size * 4];
+            fixed (byte* destination = pixels)
+            {
+                seam.BindFramebuffer(framebuffer);
+                seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)destination);
+            }
+
+            int leftPixel = (size / 2 * size + size / 4) * 4;
+            int rightPixel = (size / 2 * size + size * 3 / 4) * 4;
+
+            Assert.Equal(60, pixels[leftPixel + 0]);
+            Assert.Equal(120, pixels[leftPixel + 1]);
+            Assert.Equal(180, pixels[leftPixel + 2]);
+
+            Assert.Equal(200, pixels[rightPixel + 0]);
+            Assert.Equal(40, pixels[rightPixel + 1]);
+            Assert.Equal(90, pixels[rightPixel + 2]);
+
+            AssertNoValidationErrors(seam);
+        }
+    }
+
+    /// <summary>
+    /// The same hazard across the frames-in-flight boundary. The frame the GPU is
+    /// still executing must not see the block the frame being recorded uploaded,
+    /// and the descriptor set has to stay the same set: a per-frame snapshot that
+    /// changed the set contents would grow the cache without bound.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void ConsecutiveFramesEachSeeTheirOwnBlockContents()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            // Big enough, with a long enough fragment loop, that the first frame
+            // is still running on the GPU while the second is recorded: that is
+            // the window the buffer-per-block design got wrong.
+            const int size = 512;
+
+            int program = LinkProgram(seam, """
+                #version 330 core
+                void main(void)
+                {
+                    float x = -1.0 + float((gl_VertexID & 1) << 2);
+                    float y = -1.0 + float((gl_VertexID & 2) << 1);
+                    gl_Position = vec4(x, y, 0.0, 1.0);
+                }
+                """, """
+                #version 330 core
+                layout(std140) uniform Tint { vec4 tint; };
+                out vec4 outColor;
+                void main(void)
+                {
+                    // Busywork whose result is never actually reached, but which
+                    // the compiler cannot drop: the trip count and the branch both
+                    // depend on the fragment. The colour written is the tint,
+                    // untouched, so the assertion stays exact.
+                    float busy = 0.0;
+                    int n = 8192 + int(gl_FragCoord.x);
+                    for (int i = 0; i < n; i++) busy += sin(float(i) + gl_FragCoord.y);
+                    outColor = busy > 1e30 ? vec4(0.0) : tint;
+                }
+                """);
+
+            var framebuffers = new int[2];
+            for (int i = 0; i < framebuffers.Length; i++)
+            {
+                int texture = seam.CreateTexture2D(size, size,
+                    EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+                framebuffers[i] = seam.CreateFramebuffer(size, size);
+                seam.AttachTexture(framebuffers[i], EnumFramebufferAttachment.ColorAttachment0, texture, 0);
+                seam.SetDrawBuffers(framebuffers[i], 0b1);
+            }
+
+            int ubo = seam.CreateUniformBuffer(program, 0, "Tint", sizeof(float) * 4);
+            seam.BindUniformBuffer(ubo);
+
+            var colours = new[]
+            {
+                new byte[] { 25, 75, 125 },
+                new byte[] { 210, 15, 45 },
+            };
+
+            // Neither frame is read back between the two, so the first is still
+            // submitted - and with two frames in flight, possibly still running -
+            // when the second overwrites the block.
+            for (int frame = 0; frame < framebuffers.Length; frame++)
+            {
+                SetTint(seam, ubo, colours[frame][0], colours[frame][1], colours[frame][2]);
+
+                seam.BeginFrame();
+                seam.BindFramebuffer(framebuffers[frame]);
+                seam.UseProgram(program);
+                seam.SetViewport(0, 0, size, size);
+                seam.SetDepthTest(false);
+                for (int i = 0; i < 8; i++) seam.DrawFullscreenTriangle();
+                seam.Present();
+            }
+
+            int cachedAfterTwoFrames = device!.CachedDescriptorSets;
+
+            var pixels = new byte[size * size * 4];
+            for (int frame = 0; frame < framebuffers.Length; frame++)
+            {
+                // Inside a frame: binding a target is what a frame records, so a
+                // read between frames would report whatever was bound last.
+                seam.BeginFrame();
+                seam.BindFramebuffer(framebuffers[frame]);
+                fixed (byte* destination = pixels)
+                {
+                    seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)destination);
+                }
+                seam.Present();
+
+                int centre = (size / 2 * size + size / 2) * 4;
+                Assert.Equal(colours[frame][0], pixels[centre + 0]);
+                Assert.Equal(colours[frame][1], pixels[centre + 1]);
+                Assert.Equal(colours[frame][2], pixels[centre + 2]);
+            }
+
+            // The snapshot travels as a dynamic offset, so the set naming the
+            // ring is written once and reused; a set per frame would mean the
+            // cache grew with every one of these.
+            for (int i = 0; i < 4; i++)
+            {
+                SetTint(seam, ubo, (byte)(10 + i), 20, 30);
+                seam.BeginFrame();
+                seam.BindFramebuffer(framebuffers[0]);
+                seam.UseProgram(program);
+                seam.SetViewport(0, 0, size, size);
+                seam.DrawFullscreenTriangle();
+                seam.Present();
+            }
+            Assert.Equal(cachedAfterTwoFrames, device.CachedDescriptorSets);
+
+            AssertNoValidationErrors(seam);
+        }
+    }
+
+    /// <summary>A quad spanning the full height between two x coordinates.</summary>
+    private static int HalfScreenQuad(IOptimumGraphicsDevice device, float x0, float x1)
+    {
+        var data = new MeshData(4, 6)
+        {
+            xyz = new[] { x0, -1f, 0f, x1, -1f, 0f, x1, 1f, 0f, x0, 1f, 0f },
+            VerticesCount = 4,
+            Indices = new[] { 0, 1, 2, 0, 2, 3 },
+            IndicesCount = 6,
+            mode = EnumDrawMode.Triangles,
+        };
+        return device.CreateMesh(data, true);
+    }
+
+    private static unsafe void SetTint(IOptimumGraphicsDevice device, int ubo, byte r, byte g, byte b)
+    {
+        var tint = new[] { r / 255f, g / 255f, b / 255f, 1f };
+        fixed (float* values = tint)
+        {
+            device.UpdateUniformBuffer(ubo, (IntPtr)values, 0, sizeof(float) * 4);
+        }
+    }
+
+    /// <summary>
+    /// Drains the device's diagnostics and fails on anything the layers reported
+    /// at error severity.
+    /// </summary>
+    private static void AssertNoValidationErrors(IOptimumGraphicsDevice device)
+    {
+        string? diagnostics = device.GetError();
+        ValidationAssert.NoErrors(diagnostics == null
+            ? Array.Empty<string>()
+            : diagnostics.Split('\n'));
+    }
+
+    /// <summary>
     /// The loading-screen crash. A texture is deleted and a new one takes its
     /// place; the driver may give the new image view the very handle value the
     /// old one had. A set cache keyed by handle then serves the stale set and the

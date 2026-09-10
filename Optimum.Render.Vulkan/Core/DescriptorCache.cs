@@ -323,16 +323,19 @@ internal sealed unsafe class DescriptorCache : IDisposable
 
     private PoolSlot GrowPool()
     {
-        // A pool can only satisfy the descriptor types it was sized for. The
-        // generated block is a dynamic uniform buffer, but the game also declares
-        // uniform blocks of its own - entityanimated's ElementTransforms is one -
-        // and those are plain uniform buffers. Without a size for that type the
-        // allocation fails, the set is never written, and the first draw that
-        // uses it takes the device down.
-        var sizes = stackalloc DescriptorPoolSize[4]
+        // A pool can only satisfy the descriptor types it was sized for. Set 0
+        // holds the generated block plus every block the shader declares for
+        // itself - entityanimated's ElementTransforms is one - and all of them
+        // are dynamic uniform buffers, so that budget covers several per set.
+        // Without a size for a type the allocation fails, the set is never
+        // written, and the first draw that uses it takes the device down.
+        var sizes = stackalloc DescriptorPoolSize[3]
         {
-            new DescriptorPoolSize(DescriptorType.UniformBufferDynamic, SetsPerPool),
-            new DescriptorPoolSize(DescriptorType.UniformBuffer, SetsPerPool * 2),
+            // Set 0 holds the generated block plus every named block, all dynamic.
+            // Eight per set is Vulkan's guaranteed minimum for
+            // maxDescriptorSetUniformBuffersDynamic, so a set that fits the
+            // device limit always fits the pool.
+            new DescriptorPoolSize(DescriptorType.UniformBufferDynamic, SetsPerPool * 8),
             new DescriptorPoolSize(DescriptorType.CombinedImageSampler, SetsPerPool * 8),
             new DescriptorPoolSize(DescriptorType.StorageBuffer, SetsPerPool * 2),
         };
@@ -342,7 +345,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
             SType = StructureType.DescriptorPoolCreateInfo,
             // Evicted sets are freed individually, which a pool has to allow.
             Flags = DescriptorPoolCreateFlags.FreeDescriptorSetBit,
-            PoolSizeCount = 4,
+            PoolSizeCount = 3,
             PPoolSizes = sizes,
             MaxSets = SetsPerPool,
         };
@@ -406,13 +409,10 @@ internal sealed unsafe class DescriptorCache : IDisposable
                     Range = buffer.Range,
                 };
 
-                // Set 0 binding 0 is the generated uniform block, bound as a
-                // dynamic descriptor so the per-draw ring offset travels
-                // separately and the set itself never has to change.
-                bool isDynamicUniform =
-                    contents.SetIndex == ProgramInterfaceLayoutBindings.DefaultBlockSet
-                    && buffer.Binding == ProgramInterfaceLayoutBindings.DefaultBlockBinding;
-
+                // Every buffer in set 0 is a uniform block - the generated one at
+                // binding 0 and the shader's own after it - and every one of them
+                // is dynamic, so the per-draw ring offset travels separately and
+                // the set itself never has to change.
                 writes[index++] = new WriteDescriptorSet
                 {
                     SType = StructureType.WriteDescriptorSet,
@@ -421,9 +421,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
                     DescriptorCount = 1,
                     DescriptorType = contents.SetIndex == ProgramInterfaceLayoutBindings.StorageSet
                         ? DescriptorType.StorageBuffer
-                        : isDynamicUniform
-                            ? DescriptorType.UniformBufferDynamic
-                            : DescriptorType.UniformBuffer,
+                        : DescriptorType.UniformBufferDynamic,
                     PBufferInfo = bufferPtr + i,
                 };
             }

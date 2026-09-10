@@ -216,7 +216,7 @@ internal sealed class FrameRing : IDisposable
     private int _index = -1;
     private bool _disposed;
 
-    public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 16 * 1024 * 1024)
+    public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 32 * 1024 * 1024)
     {
         _uniformRing = new VulkanBuffer(context, uniformRingSize,
             BufferUsageFlags.UniformBufferBit,

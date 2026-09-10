@@ -125,8 +125,9 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("public static string Renderer = \"opengl\";", config);
         Assert.Contains("public string Renderer { get; set; } = \"opengl\";", config);
-        // The switch falls through to opengl for anything it does not recognise.
-        Assert.Contains("_ => \"opengl\",", config);
+        // Anything the normaliser does not recognise falls back to opengl.
+        Assert.Contains("StringComparison.OrdinalIgnoreCase) ? \"auto\" :", config);
+        Assert.Contains("\"opengl\";", config);
     }
 
     /// <summary>
@@ -275,8 +276,8 @@ public class VulkanBackendIntegrationTests
     {
         string added = AddedLines(Read(ShaderProgramBasePatch));
 
-        Assert.Contains("optimumOffset + 4", added);
-        Assert.Contains("optimumOffset + 8", added);
+        // The device lays the three components out itself; the location is opaque here.
+        Assert.Contains("value.X, value.Y, value.Z)", added);
         // The Vec2i overload keeps the cast the GL body performs.
         Assert.Contains("(float)value.X, (float)value.Y", added);
     }

@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Runtime.InteropServices;
+using Silk.NET.Vulkan;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -116,12 +118,35 @@ internal static class TextureDump
         DateTime.UtcNow.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture) + "-" + Environment.ProcessId;
 
     /// <summary>
-    /// Writes RGBA or BGRA bytes as a binary PPM.
+    /// Writes a texture's raw GPU bytes as a binary PPM, converting whatever
+    /// format the texture actually carries into 8-bit RGB.
+    ///
+    /// R16G16B16A16Sfloat and R32Sfloat are readback formats an attachment can
+    /// legitimately be dumped in (TAA motion, a depth-like target) rather than
+    /// the 8-bit RGBA/BGRA every other texture uses, so each gets its own
+    /// normalisation:
+    /// - Colour-shaped float data (R16G16B16A16Sfloat) is clamped to [0,1] and
+    ///   scaled to a byte, same as any other colour channel.
+    /// - Single-channel float data (R32Sfloat) is treated as motion-like and
+    ///   mapped from [-64,64] pixels to [0,255], with 128 standing for zero
+    ///   displacement - there is no separate "depth" convention to distinguish
+    ///   it from motion at this format, so callers dumping true depth should
+    ///   expect the same [-64,64]-centred-at-128 mapping.
     /// </summary>
     /// <returns>True if the file was written.</returns>
-    public static bool Write(int textureId, int width, int height, bool bgra, ReadOnlySpan<byte> rgba)
+    public static bool Write(int textureId, int width, int height, bool bgra, Format format,
+        ReadOnlySpan<byte> data)
     {
-        if (width <= 0 || height <= 0 || rgba.Length < width * height * 4) return false;
+        if (width <= 0 || height <= 0) return false;
+
+        int bytesPerPixel = format switch
+        {
+            Format.R16G16B16A16Sfloat => 8,
+            Format.R32Sfloat => 4,
+            Format.R8Unorm or Format.R8Uint or Format.R8Srgb => 1,
+            _ => 4,
+        };
+        if (data.Length < width * height * bytesPerPixel) return false;
 
         try
         {
@@ -136,20 +161,78 @@ internal static class TextureDump
 
             foreach (char c in $"P6\n{width} {height}\n255\n") writer.Write((byte)c);
 
-            int red = bgra ? 2 : 0;
-            int blue = bgra ? 0 : 2;
-
             var row = new byte[width * 3];
-            for (int y = 0; y < height; y++)
+            int stride = width * bytesPerPixel;
+
+            switch (format)
             {
-                int source = y * width * 4;
-                for (int x = 0; x < width; x++)
+                case Format.R16G16B16A16Sfloat:
                 {
-                    row[x * 3] = rgba[source + x * 4 + red];
-                    row[x * 3 + 1] = rgba[source + x * 4 + 1];
-                    row[x * 3 + 2] = rgba[source + x * 4 + blue];
+                    var floats = MemoryMarshal.Cast<byte, Half>(data);
+                    int floatsPerRow = width * 4;
+                    for (int y = 0; y < height; y++)
+                    {
+                        var source = floats.Slice(y * floatsPerRow, floatsPerRow);
+                        for (int x = 0; x < width; x++)
+                        {
+                            row[x * 3] = ColorByte((float)source[x * 4]);
+                            row[x * 3 + 1] = ColorByte((float)source[x * 4 + 1]);
+                            row[x * 3 + 2] = ColorByte((float)source[x * 4 + 2]);
+                        }
+                        writer.Write(row);
+                    }
+                    break;
                 }
-                writer.Write(row);
+                case Format.R32Sfloat:
+                {
+                    var floats = MemoryMarshal.Cast<byte, float>(data);
+                    for (int y = 0; y < height; y++)
+                    {
+                        var source = floats.Slice(y * width, width);
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte value = MotionByte(source[x]);
+                            row[x * 3] = value;
+                            row[x * 3 + 1] = value;
+                            row[x * 3 + 2] = value;
+                        }
+                        writer.Write(row);
+                    }
+                    break;
+                }
+                case Format.R8Unorm or Format.R8Uint or Format.R8Srgb:
+                {
+                    for (int y = 0; y < height; y++)
+                    {
+                        var source = data.Slice(y * stride, width);
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte value = source[x];
+                            row[x * 3] = value;
+                            row[x * 3 + 1] = value;
+                            row[x * 3 + 2] = value;
+                        }
+                        writer.Write(row);
+                    }
+                    break;
+                }
+                default:
+                {
+                    int red = bgra ? 2 : 0;
+                    int blue = bgra ? 0 : 2;
+                    for (int y = 0; y < height; y++)
+                    {
+                        int source = y * stride;
+                        for (int x = 0; x < width; x++)
+                        {
+                            row[x * 3] = data[source + x * 4 + red];
+                            row[x * 3 + 1] = data[source + x * 4 + 1];
+                            row[x * 3 + 2] = data[source + x * 4 + blue];
+                        }
+                        writer.Write(row);
+                    }
+                    break;
+                }
             }
 
             return true;
@@ -163,4 +246,11 @@ internal static class TextureDump
             return false;
         }
     }
+
+    /// <summary>Clamps [0,1] colour data to a byte.</summary>
+    private static byte ColorByte(float value) => (byte)(Math.Clamp(value, 0f, 1f) * 255f);
+
+    /// <summary>Maps [-64,64] px of motion-like data to [0,255], 128 = zero.</summary>
+    private static byte MotionByte(float value) =>
+        (byte)Math.Clamp((value / 64f) * 127f + 128f, 0f, 255f);
 }

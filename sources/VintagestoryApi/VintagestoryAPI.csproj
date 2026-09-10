@@ -51,6 +51,7 @@
     <Compile Remove="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Remove="Config\optimum-api-bridge.cs" />
+    <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
   </ItemGroup>
 
   <ItemGroup>

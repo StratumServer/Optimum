@@ -1044,10 +1044,82 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     // ------------------------------------------------------------ uniform buffers
 
-    private readonly Dictionary<int, VulkanBuffer> _uniformBuffers = new();
+    /// <summary>
+    /// One uniform buffer object the client created for a named block.
+    ///
+    /// The CPU shadow is the source of truth, not the GPU buffer. The client
+    /// updates one UBO per block and re-updates it between draws - the entity
+    /// renderer uploads the "Animation" block once per entity, immediately before
+    /// that entity's draw - but a draw is only recorded here, not executed, so a
+    /// buffer written in place would give every entity in the frame the last
+    /// entity's transforms. Writes therefore land in ordinary memory and a draw
+    /// snapshots them into the frame's uniform ring, exactly as the generated
+    /// block does.
+    ///
+    /// <see cref="Buffer" /> is only reached when the ring has no room left, and
+    /// carries the shadow's contents from that moment on.
+    /// </summary>
+    private sealed class ClientUniformBuffer : IDisposable
+    {
+        public ClientUniformBuffer(VulkanBuffer buffer, byte[] shadow, string blockName)
+        {
+            Buffer = buffer;
+            Shadow = shadow;
+            BlockName = blockName;
+        }
 
-    /// <summary>Block name each uniform buffer was created for.</summary>
-    private readonly Dictionary<int, string> _uniformBufferBlocks = new();
+        public VulkanBuffer Buffer { get; }
+        public byte[] Shadow { get; }
+        public string BlockName { get; }
+
+        /// <summary>Bumped by every write, so an unchanged block reuses its snapshot.</summary>
+        public uint Version { get; private set; } = 1;
+
+        /// <summary>The version <see cref="Buffer" /> holds, for the fallback path.</summary>
+        private uint _uploadedVersion;
+
+        /// <summary>Which frame's ring the snapshot below lives in, and what it holds.</summary>
+        public uint SnapshotFrame { get; private set; }
+        public uint SnapshotVersion { get; private set; }
+        public uint SnapshotOffset { get; private set; }
+
+        public void Write(IntPtr data, int offset, int size)
+        {
+            // A client that re-uploads identical bytes before every draw would
+            // otherwise cost a fresh ring slice per draw; comparing is cheaper.
+            var incoming = new ReadOnlySpan<byte>((void*)data, size);
+            Span<byte> target = Shadow.AsSpan(offset, size);
+            if (incoming.SequenceEqual(target)) return;
+            incoming.CopyTo(target);
+            Version++;
+        }
+
+        public void NoteSnapshot(uint frame, uint offset)
+        {
+            SnapshotFrame = frame;
+            SnapshotVersion = Version;
+            SnapshotOffset = offset;
+        }
+
+        public bool HasSnapshotFor(uint frame) => SnapshotFrame == frame && SnapshotVersion == Version;
+
+        /// <summary>
+        /// Brings the persistent buffer up to date for the ring-exhausted path.
+        /// Deliberately lazy: in a healthy frame it never runs, so the common
+        /// path writes host memory once and never touches the GPU.
+        /// </summary>
+        public void SyncBuffer()
+        {
+            if (_uploadedVersion == Version || Buffer.Mapped == IntPtr.Zero) return;
+
+            Shadow.AsSpan().CopyTo(new Span<byte>((void*)Buffer.Mapped, Shadow.Length));
+            _uploadedVersion = Version;
+        }
+
+        public void Dispose() => Buffer.Dispose();
+    }
+
+    private readonly Dictionary<int, ClientUniformBuffer> _uniformBuffers = new();
 
     /// <summary>
     /// The buffer currently supplying each named block.
@@ -1064,13 +1136,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size)
     {
-        var buffer = new VulkanBuffer(_context, (ulong)Math.Max(size, 4),
+        int bytes = Math.Max(size, 4);
+        var buffer = new VulkanBuffer(_context, (ulong)bytes,
             BufferUsageFlags.UniformBufferBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
 
         int id = _nextUniformBufferId++;
-        _uniformBuffers[id] = buffer;
-        _uniformBufferBlocks[id] = blockName ?? "";
+        _uniformBuffers[id] = new ClientUniformBuffer(buffer, new byte[bytes], blockName ?? "");
 
         // GL's glBindBufferBase in the client's constructor takes effect at once,
         // and a buffer is only ever created to be used.
@@ -1080,18 +1152,18 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void UpdateUniformBuffer(int handle, IntPtr data, int offset, int size)
     {
-        if (!_uniformBuffers.TryGetValue(handle, out VulkanBuffer? buffer)) return;
-        if (buffer.Mapped == IntPtr.Zero || data == IntPtr.Zero) return;
-        if ((ulong)(offset + size) > buffer.Size) return;
+        if (!_uniformBuffers.TryGetValue(handle, out ClientUniformBuffer? ubo)) return;
+        if (data == IntPtr.Zero || offset < 0 || size < 0) return;
+        if ((long)offset + size > ubo.Shadow.Length) return;
 
-        System.Buffer.MemoryCopy((void*)data, (void*)(buffer.Mapped + offset), size, size);
+        ubo.Write(data, offset, size);
     }
 
     public void BindUniformBuffer(int handle)
     {
-        if (_uniformBufferBlocks.TryGetValue(handle, out string? blockName) && blockName.Length > 0)
+        if (_uniformBuffers.TryGetValue(handle, out ClientUniformBuffer? ubo) && ubo.BlockName.Length > 0)
         {
-            _boundUniformBuffers[blockName] = handle;
+            _boundUniformBuffers[ubo.BlockName] = handle;
         }
     }
 
@@ -1107,19 +1179,19 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void DeleteUniformBuffer(int handle)
     {
-        if (_uniformBufferBlocks.Remove(handle, out string? blockName) &&
-            _boundUniformBuffers.TryGetValue(blockName, out int bound) && bound == handle)
+        if (!_uniformBuffers.Remove(handle, out ClientUniformBuffer? ubo)) return;
+
+        if (ubo.BlockName.Length > 0 &&
+            _boundUniformBuffers.TryGetValue(ubo.BlockName, out int bound) && bound == handle)
         {
-            _boundUniformBuffers.Remove(blockName);
+            _boundUniformBuffers.Remove(ubo.BlockName);
         }
 
-        if (_uniformBuffers.Remove(handle, out VulkanBuffer? buffer))
-        {
-            // Same hazard as a texture: a set naming this buffer must not
-            // survive to be served for a successor with the same handle.
-            _descriptors.Release(buffer.Id);
-            _frames.DeferDeletion(buffer);
-        }
+        // Same hazard as a texture: a set naming this buffer must not survive to
+        // be served for a successor with the same handle. Only the ring-exhausted
+        // fallback ever names it, but that set is cached like any other.
+        _descriptors.Release(ubo.Buffer.Id);
+        _frames.DeferDeletion(ubo);
     }
 
     // -------------------------------------------------------------------- textures
@@ -1877,52 +1949,111 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         // EnsureRendering transitions the source back to its attachment layout.
     }
 
+    /// <summary>
+    /// Copies a client UBO's shadow into this frame's uniform ring, so the draw
+    /// about to be recorded reads the contents the client uploaded for it rather
+    /// than whatever the last upload of the frame left behind.
+    ///
+    /// One snapshot serves every draw that follows with the block unchanged: the
+    /// pairing of frame and version is what makes a thousand chunk draws sharing
+    /// one block cost one copy rather than a thousand. A new frame invalidates it
+    /// because the ring's cursor is reset, and so does a mid-frame flush, which
+    /// bumps the frame counter for exactly that reason.
+    /// </summary>
+    private bool TrySnapshotClientBlock(
+        ClientUniformBuffer ubo, ShaderProgramResources program, out uint offset)
+    {
+        if (ubo.HasSnapshotFor(_frameCounter))
+        {
+            offset = ubo.SnapshotOffset;
+            return true;
+        }
+
+        if (!_frames.Current.TryAllocateUniforms(ubo.Shadow.Length, out RingAllocation allocation))
+        {
+            ReportUniformExhaustion(program, "block '" + ubo.BlockName + "'");
+            offset = 0;
+            return false;
+        }
+
+        fixed (byte* source = ubo.Shadow)
+        {
+            System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
+                ubo.Shadow.Length, ubo.Shadow.Length);
+        }
+        ubo.NoteSnapshot(_frameCounter, allocation.Offset);
+        offset = allocation.Offset;
+        return true;
+    }
+
+    /// <summary>
+    /// Reports that the frame's uniform ring ran out. Said once per frame so a
+    /// long frame does not flood the log.
+    /// </summary>
+    private void ReportUniformExhaustion(ShaderProgramResources program, string what)
+    {
+        if (_uniformExhaustionReportedFrame == _frameCounter) return;
+
+        _uniformExhaustionReportedFrame = _frameCounter;
+        string message = VulkanContext.ErrorPrefix + "uniform ring exhausted in frame " + _frameCounter +
+            " (" + _frames.Current.UniformBytesUsed + " of " + _frames.Current.UniformCapacity +
+            " bytes used) at a draw with program " + program.ProgramId +
+            " '" + ProgramNameOf(program.ProgramId) + "' for " + what;
+        _diagnostics.Add(message);
+        MirrorValidationMessage(message);
+    }
+
     private void BindDescriptors(CommandBuffer commandBuffer, ShaderProgramResources program, int meshId)
     {
         Vk api = _context.Api;
 
-        // Set 0: the generated uniform block, uploaded into this frame's ring and
-        // reached through a dynamic offset so the set itself never changes, plus
-        // one entry for every block the shader declared for itself.
-        uint dynamicOffset = 0;
+        // Set 0: the generated uniform block plus one entry for every block the
+        // shader declared for itself. Every one of them is a dynamic descriptor
+        // pointing at this frame's uniform ring, so the set itself never changes
+        // - the per-draw offset travels alongside it instead.
         bool hasGeneratedBlock = program.Interface.HasUniformBlock;
+        int dynamicCount = (hasGeneratedBlock ? 1 : 0) + program.Interface.UniformBlocks.Count;
 
-        if (hasGeneratedBlock || program.Interface.UniformBlocks.Count > 0)
+        if (dynamicCount > 0)
         {
-            var buffers = new List<BufferBindingValue>(1 + program.Interface.UniformBlocks.Count);
+            var buffers = new List<BufferBindingValue>(dynamicCount);
+
+            // Dynamic offsets are consumed in increasing order of binding number,
+            // not in the order the bindings were written, so each one is carried
+            // with its binding and sorted below.
+            uint* offsetBindings = stackalloc uint[dynamicCount];
+            uint* offsetValues = stackalloc uint[dynamicCount];
+            int offsetCount = 0;
+            bool allocationOk = true;
 
             if (hasGeneratedBlock)
             {
-                _lastUniformAllocationOk =
-                    _frames.Current.TryAllocateUniforms(program.UniformShadow.Length, out RingAllocation allocation);
-                if (_lastUniformAllocationOk)
+                uint generatedOffset = 0;
+                if (_frames.Current.TryAllocateUniforms(
+                        program.UniformShadow.Length, out RingAllocation allocation))
                 {
                     fixed (byte* source = program.UniformShadow)
                     {
                         System.Buffer.MemoryCopy(source, (void*)allocation.Pointer,
                             program.UniformShadow.Length, program.UniformShadow.Length);
                     }
-                    dynamicOffset = allocation.Offset;
+                    generatedOffset = allocation.Offset;
                     program.MarkUniformsClean();
                 }
-                else if (_uniformExhaustionReportedFrame != _frameCounter)
+                else
                 {
                     // The draw goes ahead reading offset zero of the ring, which
                     // is some other draw's block: wrong, and for a shader that
-                    // loops on a uniform count, possibly fatal. Said once per
-                    // frame so a long frame does not flood the log.
-                    _uniformExhaustionReportedFrame = _frameCounter;
-                    string message = VulkanContext.ErrorPrefix + "uniform ring exhausted in frame " + _frameCounter +
-                        " (" + _frames.Current.UniformBytesUsed + " of " + _frames.Current.UniformCapacity +
-                        " bytes used) at a draw with program " + program.ProgramId +
-                        " '" + ProgramNameOf(program.ProgramId) + "'";
-                    _diagnostics.Add(message);
-                    MirrorValidationMessage(message);
+                    // loops on a uniform count, possibly fatal.
+                    allocationOk = false;
+                    ReportUniformExhaustion(program, "its generated uniform block");
                 }
 
                 buffers.Add(new BufferBindingValue(
                     ProgramInterfaceLayout.DefaultBlockBinding,
                     _frames.UniformBuffer, 0, (ulong)program.UniformShadow.Length));
+                offsetBindings[offsetCount] = ProgramInterfaceLayout.DefaultBlockBinding;
+                offsetValues[offsetCount++] = generatedOffset;
             }
 
             // A block the shader declares is fed by whichever UBO the client
@@ -1930,16 +2061,82 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             // rather than leaving the descriptor undefined.
             foreach (BlockBinding block in program.Interface.UniformBlocks)
             {
-                VulkanBuffer? blockBuffer = null;
+                ClientUniformBuffer? ubo = null;
                 if (_boundUniformBuffers.TryGetValue(block.BlockName, out int handle))
                 {
-                    _uniformBuffers.TryGetValue(handle, out blockBuffer);
+                    _uniformBuffers.TryGetValue(handle, out ubo);
                 }
-                blockBuffer ??= _placeholderUniforms;
-                if (blockBuffer == null) continue;
 
-                buffers.Add(new BufferBindingValue(
-                    (uint)block.Binding, blockBuffer.Handle, 0, blockBuffer.Size, blockBuffer.Id));
+                if (ubo == null)
+                {
+                    // Zeroes, at dynamic offset zero. The placeholder has existed
+                    // since the device came up; should it somehow not, the ring
+                    // stands in, because a set with a hole in it - or a dynamic
+                    // offset count that disagrees with the layout - is an invalid
+                    // draw rather than merely a wrong colour.
+                    buffers.Add(_placeholderUniforms != null
+                        ? new BufferBindingValue((uint)block.Binding, _placeholderUniforms.Handle,
+                            0, _placeholderUniforms.Size, _placeholderUniforms.Id)
+                        : new BufferBindingValue((uint)block.Binding, _frames.UniformBuffer,
+                            0, Math.Min(16384UL, _context.Capabilities.MaxUniformBufferRange)));
+                    offsetBindings[offsetCount] = (uint)block.Binding;
+                    offsetValues[offsetCount++] = 0;
+                    continue;
+                }
+
+                if (TrySnapshotClientBlock(ubo, program, out uint blockOffset))
+                {
+                    buffers.Add(new BufferBindingValue((uint)block.Binding,
+                        _frames.UniformBuffer, 0, (ulong)ubo.Shadow.Length));
+                    offsetBindings[offsetCount] = (uint)block.Binding;
+                    offsetValues[offsetCount++] = blockOffset;
+                }
+                else
+                {
+                    // No room left in the ring. Rather than aliasing the block's
+                    // persistent buffer - which would hand every remaining draw
+                    // in the frame the last upload, the exact bug the ring
+                    // exists to fix - this draw gets its own transient copy.
+                    // Slower, but still correct; the overflow is counted so a
+                    // scene that lives in this path shows up in the stats.
+                    allocationOk = false;
+                    VulkanStats.NoteUniformOverflow();
+                    var overflow = new VulkanBuffer(_context, (ulong)ubo.Shadow.Length,
+                        BufferUsageFlags.UniformBufferBit,
+                        MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+                    fixed (byte* shadow = ubo.Shadow)
+                    {
+                        System.Buffer.MemoryCopy(shadow, (void*)overflow.Mapped,
+                            ubo.Shadow.Length, ubo.Shadow.Length);
+                    }
+                    buffers.Add(new BufferBindingValue((uint)block.Binding,
+                        overflow.Handle, 0, overflow.Size, overflow.Id));
+                    offsetBindings[offsetCount] = (uint)block.Binding;
+                    offsetValues[offsetCount++] = 0;
+                    // Same order as DeleteUniformBuffer: the set naming this
+                    // buffer must not outlive it under a reused handle.
+                    _descriptors.Release(overflow.Id);
+                    _frames.DeferDeletion(overflow);
+                }
+            }
+
+            _lastUniformAllocationOk = allocationOk;
+
+            // Insertion sort by binding: at most a handful of entries, and the
+            // generated block is already the lowest of them.
+            for (int i = 1; i < offsetCount; i++)
+            {
+                uint binding = offsetBindings[i];
+                uint value = offsetValues[i];
+                int j = i - 1;
+                while (j >= 0 && offsetBindings[j] > binding)
+                {
+                    offsetBindings[j + 1] = offsetBindings[j];
+                    offsetValues[j + 1] = offsetValues[j];
+                    j--;
+                }
+                offsetBindings[j + 1] = binding;
+                offsetValues[j + 1] = value;
             }
 
             var uniformContents = new DescriptorSetContents(
@@ -1949,10 +2146,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             DescriptorSet uniformSet = _descriptors.Get(
                 uniformContents, program.SetLayouts[ProgramInterfaceLayout.DefaultBlockSet]);
 
-            uint offset = dynamicOffset;
             api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
                 ProgramInterfaceLayout.DefaultBlockSet, 1, &uniformSet,
-                hasGeneratedBlock ? 1u : 0u, hasGeneratedBlock ? &offset : null);
+                (uint)offsetCount, offsetCount == 0 ? null : offsetValues);
         }
 
         // Set 1: one combined image sampler per declared sampler, resolved through
@@ -2338,7 +2534,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
             int width = (int)texture.Width;
             int height = (int)texture.Height;
-            ulong bytes = (ulong)width * (ulong)height * 4;
+            int bytesPerPixel = BytesPerPixel(texture.Format);
+            ulong bytes = (ulong)width * (ulong)height * (ulong)bytesPerPixel;
 
             FlushFrame();
             _context.Api.DeviceWaitIdle(_context.Device);
@@ -2363,7 +2560,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             });
 
             bool bgra = texture.Format is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb;
-            bool written = TextureDump.Write(textureId, width, height, bgra,
+            bool written = TextureDump.Write(textureId, width, height, bgra, texture.Format,
                 new ReadOnlySpan<byte>((void*)readback.Mapped, (int)bytes));
             if (written) TextureDump.Complete(textureId);
 
@@ -2377,6 +2574,19 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             }
         }
     }
+
+    /// <summary>
+    /// Bytes per texel for the formats the dump path is expected to see.
+    /// Anything unrecognised falls back to 4 (8-bit RGBA), the previous
+    /// blanket assumption, rather than guessing wrong in either direction.
+    /// </summary>
+    private static int BytesPerPixel(Format format) => format switch
+    {
+        Format.R16G16B16A16Sfloat => 8,
+        Format.R32Sfloat => 4,
+        Format.R8Unorm or Format.R8Uint or Format.R8Srgb => 1,
+        _ => 4,
+    };
 
     public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
@@ -2439,7 +2649,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
 
-        foreach (VulkanBuffer buffer in _uniformBuffers.Values) buffer.Dispose();
+        foreach (ClientUniformBuffer ubo in _uniformBuffers.Values) ubo.Dispose();
         _uniformBuffers.Clear();
 
         foreach (QueryPool pool in _queries.Values)
