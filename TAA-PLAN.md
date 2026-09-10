@@ -282,6 +282,89 @@ must be anchored at the pixel centre plus mv, not at the unjittered current posi
 - Verify per class with the debug views and directional tests; measure vertex-warp cost on dense
   foliage and the UBO snapshot cost with crowds.
 
+P3 status (2026-09-10): writers landed for all five opaque classes on `feat/taa`
+(ce3cc1f terrain, abba239 skinned entities, c6da92f standard shader, 3126098 instanced,
+58bc11d review fixes). **Not verified in game on either backend** - no phase of P3 ran
+`make deploy` or the client, so by rule 3 none of this is done until someone deploys, runs
+on Vulkan and OpenGL, confirms the renderer from the log and compares the debug views.
+GPU proof is Vulkan-only (`Optimum.Render.Vulkan.Tests` is the only GPU harness), and every
+GPU test so far runs with `taaJitterPx = 0`, so the jittered case is untested everywhere.
+
+Exact vs fallback, per class:
+
+| Class | Status | Why |
+|---|---|---|
+| chunkopaque (passes 0, 1, 2, 8) and chunktopsoil | exact | prevRel = truePos + cameraPosDelta, warp replayed with `previousWarpState()`, z-offset applied to both clips |
+| chunkopaque pass 7 (AfterOIT overlay) | exact | own window in `RenderAfterOIT` |
+| LiquidDepth prepass | no motion, by design | own target, no writer, attachment never in its mask |
+| Skinned entities, batched opaque pass | exact | previous model matrix + `AnimationPrev` bones, hooked on the one bone upload every entity draw makes |
+| First-person hands, echo chamber | exact | own programs/windows; hands reproject through `GetPrevProjection(Hand)` |
+| Skinned entities, OIT | no motion | six OIT outputs on Transparent; reactive policy is P4 |
+| Skinned entities, AfterOIT (`DoRender3DAfterOIT`) | fallback | that loop draws arbitrary per-renderer shaders, so it must stay outside a window |
+| Held items (both hands + FP item), dropped items, quern top | exact | `OptimumStandardMotion.Apply` + a narrow window per draw |
+| Every other standard-shader user | fallback | uninstrumented and outside the window, so nothing is written and the resolve camera-reprojects. Exact for the static ones (signs, molds, knapping, ground storage, support beams); **wrong-but-bounded for the moving ones**: HelveHammer, FruitpressContents, Resonator, EntityBlockFalling, Bloomery/Forge/Firepit contents will ghost until instrumented (one `Apply` call plus a `Begin`/`End` pair each) |
+| Instanced mechanical power | exact | per-instance previous transform + metadata in the instance stream, history keyed on the device object |
+| ClothManager (shares the instanced program) | fallback | 20-float instance mesh, draws outside the window; its missing attributes read (0,0,0,1), i.e. no history |
+| Mod geometry | fallback | writer-depth mismatch, as designed |
+
+Findings to carry:
+
+(a) **Where the frame contract reads the camera decides whether the delta is this frame's.**
+`PlayerCamera.OnBeforeRenderFrame3D` is the only writer of `EntityPlayer.CameraPos` and
+`shUniforms.PlayerPos`, and it runs inside the Before render stage - after `Advance`, before
+`CaptureCamera`. Reading them in `Advance` paired a one-frame-stale translation with a fresh
+previous rotation; the difference is the camera's acceleration, and it painted motion onto
+static ground. `CaptureCameraPosition` now takes both next to `CaptureCamera` (58bc11d). Any
+future value the contract snapshots has to be placed against the stage that writes it, not
+against the top of the loop.
+
+(b) **A draw-buffer window is per target, and the two backends disagree about that for free.**
+`SetDrawBuffers` names the framebuffer, `GL.DrawBuffers` uses the bound one. `BeginMotionWrite`
+now refuses unless Primary is bound.
+
+(c) **A new asset directory needs every packager, and the list must be derived.** Two of the five
+packaging scripts were missed; with TAA on those builds fail to compile every writer program,
+because the shipped overrides call `WarpState` overloads the vanilla `vertexwarp.vsh` does not
+declare. The coverage test now enumerates `scripts/package*` instead of listing three by name.
+
+(d) **The shader corpus only covers configurations its variant rows produce.** `USEOIT 0` and
+`ALLOWDEPTHOFFSET` are stamped per program by the client, not globally, so the entity writer and
+the `gl_FragCoord.z + depthOffset` writer depth were outside the translation gate entirely.
+`ShaderVariant.ExtraPrefix` plus explicit per-program cases now cover them.
+
+(e) **Instance buffers doubled in stride unconditionally** (20 -> 40 floats), TAA on or off,
+because shaders recompile on a TAA toggle and instance buffers do not. Roughly 1.6 MB per mech
+buffer. Deliberate; revisit only together with a buffer-rebuild-on-toggle.
+
+(f) **Installed-runtime gap, all three mod-fork stages.** `mod-patcher` transplants from the
+runtime donor assemblies patched by `patches/runtime/**`, not from the `VSEssentials`/
+`VSSurvivalMod` forks. `Methods` entries were added, but until the matching
+`patches/runtime/**` patches exist the installed runtime keeps the vanilla bodies, so first-person
+hands, the echo chamber, held/dropped items, the quern and every mech renderer get no motion
+there (camera fallback; for the mech renderers also the 20-float layout under a 40-float shader,
+whose unbacked attributes read (0,0,0,1) = no history - believed safe, untested).
+`Optimum.Tests/mod-patcher-manifest-consistency-tests.cs` only cross-checks `Members`/`Types`/
+`Interfaces`, which is why the additions pass today.
+
+(g) **`Entityanimated_Oit` compiles the `AnimationPrev` block with no buffer behind it.**
+`USEOIT` is a fragment-only define, so the vertex shader cannot gate on it. On GL the block keeps
+the default binding point 0 and aliases `Animation`; on Vulkan `_boundUniformBuffers` is keyed by
+block name and `Use()` re-binds, so it resolves to the last-bound buffer of that name. Never read,
+because `taaHistoryValid` is never set for that program and defaults to 0. Harmless, but it is a
+declared-and-unfed block.
+
+(h) **`reactive` is read by the resolve whether or not the pixel was written.** A rejected pixel
+still contributes `motion.b` from whatever surface last wrote there this frame. Bounded (the
+attachment is cleared to zero each frame), worth a look when P4 starts writing reactive in anger.
+
+(i) **Per-instance CWT churn.** `OptimumInstanceMotion.WriteInstance` does two
+`ConditionalWeakTable` lookups per instance per frame (buffer, then device). Fine at realistic
+gear counts, measurable at the 10100-instance capacity. Not optimised, because a single-slot memo
+would hold a strong reference to a ~1.6 MB buffer.
+
+(j) **The vertex-warp and UBO cost measurements P3 asks for were not taken** - no crowd, no dense
+foliage, no gear-network numbers. Still owed before P5's performance matrix.
+
 **P4. Transparency, particles, volumetrics, sky, decals, late overlays.**
 - Liquid velocity pass; OIT revealage reactive; particle writers; cloud/aurora/sky policies with the
   infinite-direction reprojection; decals inherit motion; AfterFinalComposition/AfterBlit content
