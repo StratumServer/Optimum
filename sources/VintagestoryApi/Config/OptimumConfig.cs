@@ -498,8 +498,11 @@ public static class OptimumConfig
     public static bool EffectiveGodRaysSampleCap => GodRaysSampleCapEnabled &&
         !IsShaderFeatureDisabled("GodRaysSampleCap");
 
+    // Like the Vulkan renderer selection, TAA is a renderer-level feature: a
+    // missing launcher scan must not disable it (IsShaderFeatureDisabled reports
+    // everything disabled without a scan), only an explicit scan verdict does.
     public static bool EffectiveTaa => Taa &&
-        !IsShaderFeatureDisabled("Taa");
+        !IsFeatureExplicitlyDisabled("Taa");
 
     public static bool EffectiveEntityLightBatch => EntityLightBatchEnabled &&
         !IsShaderFeatureDisabled("EntityLightBatch");
