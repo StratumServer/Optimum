@@ -335,6 +335,13 @@ public static class ShaderCompatibilityScanner
             HasExternalShader(report, "entityanimated.vsh") || HasExternalShader(report, "entityanimated.fsh") ||
             HasExternalShader(report, "standard.vsh") || HasExternalShader(report, "standard.fsh") ||
             HasExternalShader(report, "instanced.vsh") || HasExternalShader(report, "instanced.fsh") ||
+            // The liquid velocity pass re-draws the liquid pools through its own
+            // program and has to land on exactly the surface chunkliquid.vsh
+            // shaded; an external copy of either file breaks that agreement, and
+            // its vectors would then be rejected or - worse - accepted for a
+            // surface half a pixel away.
+            HasExternalShader(report, "chunkliquid.vsh") ||
+            HasExternalShader(report, "chunkliquidmotion.vsh") || HasExternalShader(report, "chunkliquidmotion.fsh") ||
             HasExternalShader(report, "vertexwarp.vsh");
         AddFeatureDecision(report, "Taa", externalMotionShader,
             "external shader owns a motion-vector writer contract");

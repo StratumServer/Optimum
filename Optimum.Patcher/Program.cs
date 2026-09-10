@@ -159,6 +159,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "InstallOptimumMotionWriteHooks",
         "optimumMotionDrawBuffersOn",
         "optimumMotionDrawBuffersOff",
+        // TAA P4: the motion-only window the liquid velocity pass opens - the
+        // motion attachment alone, every other colour attachment masked out.
+        "BeginMotionOnlyWrite",
+        "EndMotionOnlyWrite",
+        "optimumMotionOnlyDrawBuffers",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
@@ -175,6 +180,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "FsrRcas",
         "TaaDebug",
         "TaaResolve",
+        // TAA P4: the liquid velocity pass program.
+        "ChunkLiquidMotion",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
@@ -276,6 +283,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "SetOptimumTextureLodBias",
         // TAA P3: previous-frame transforms for the terrain motion writers.
         "SetOptimumMotionUniforms",
+        // TAA P4: the liquid velocity pass and its reactive constant.
+        "RenderLiquidMotion",
+        "OptimumLiquidReactive",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
     // (_lastSortPlayerPos/_lastSortYaw), plus the multi-tesselator worker pool and

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-index f19d524..5fad806 100644
+index f19d524..41b023f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-@@ -40,10 +40,18 @@ public static class ShaderPrograms
+@@ -40,10 +40,23 @@ public static class ShaderPrograms
  
  	public static ShaderProgramEntityanimated Entityanimated;
  
@@ -15,6 +15,11 @@ index f19d524..5fad806 100644
 +	public static ShaderProgram TaaDebug;
 +
 +	public static ShaderProgram TaaResolve;
++
++	// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	// Registered like the other Optimum-only programs, so a failed compile marks
++	// LoadError instead of failing the whole shader load.
++	public static ShaderProgram ChunkLiquidMotion;
 +
  	public static ShaderProgramFindbright Findbright;
  

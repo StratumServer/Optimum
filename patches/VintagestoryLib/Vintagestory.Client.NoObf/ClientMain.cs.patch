@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..fa55f21 100644
+index 67feafa..7bdb390 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -326,8 +326,25 @@ index 67feafa..fa55f21 100644
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1180,10 +1306,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1176,14 +1302,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		Platform.GlDepthMask(flag: true);
+ 		Platform.GlEnableDepthTest();
+ 		Platform.GlCullFaceBack();
+ 		Platform.GlEnableCullFace();
  		TriggerRenderStage(EnumRenderStage.AfterOIT, dt);
++		// Optimum TAA (P4): the liquid velocity pass, accuracy rule 7. It has to
++		// sit after the OIT merge (the liquid it re-draws was shaded into the
++		// Transparent target, which cannot reach Primary's motion attachment) and
++		// after every AfterOIT renderer, because it writes depth for the water
++		// surface and anything drawn later that depth-tests would be occluded by
++		// water it should be visible through. It is still inside the temporal
++		// window: the resolve does not run until RenderPostprocessingEffects.
++		// A no-op with TAA off, and skipped entirely when the transparent pass
++		// that shaded the liquid did not run.
++		if (doTransparentRenderPass && chunkRenderer != null)
++		{
++			chunkRenderer.RenderLiquidMotion(dt);
++		}
  	}
  
  	public void RenderAfterPostProcessing(float dt)
@@ -342,7 +359,7 @@ index 67feafa..fa55f21 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1551,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1420,10 +1564,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -357,7 +374,7 @@ index 67feafa..fa55f21 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1700,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1713,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -390,7 +407,7 @@ index 67feafa..fa55f21 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2268,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2281,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -415,7 +432,7 @@ index 67feafa..fa55f21 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2697,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2710,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -429,7 +446,7 @@ index 67feafa..fa55f21 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3688,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3701,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);
