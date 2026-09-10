@@ -81,7 +81,7 @@ public class TaaInstancedMotionCoverageTests
     [Fact]
     public void TheFrameContractKeepsPerInstanceHistoryKeyedOnTheDevice()
     {
-        string frame = Read("VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
+        string frame = Read("sources/VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
         string vertex = Read("sources/shaders/instanced.vsh");
 
         Assert.Contains("public static class OptimumInstanceMotion", frame);

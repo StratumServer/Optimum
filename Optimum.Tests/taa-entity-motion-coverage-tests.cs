@@ -166,7 +166,7 @@ public class TaaEntityMotionCoverageTests
     [Fact]
     public void TheFrameContractKeepsPerEntityHistoryKeyedOnTheAnimator()
     {
-        string frame = Read("VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
+        string frame = Read("sources/VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
         string vertex = Read("sources/shaders/entityanimated.vsh");
         string fragment = Read("sources/shaders/entityanimated.fsh");
 
@@ -218,7 +218,7 @@ public class TaaEntityMotionCoverageTests
     [Fact]
     public void TheFrameContractTracksWhichViewTheLoadedProjectionBelongsTo()
     {
-        string frame = Read("VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
+        string frame = Read("sources/VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
 
         Assert.Contains("EnumTemporalView ActiveView { get; }", frame);
         Assert.Contains("public EnumTemporalView ActiveView { get; private set; }", frame);
@@ -270,7 +270,7 @@ public class TaaEntityMotionCoverageTests
         Assert.Contains("optimumPlatform.EndMotionWrite();", entities);
 
         // The mod-side renderers reach the same window through the API.
-        string frame = Read("VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
+        string frame = Read("sources/VintagestoryApi/Client/Render/OptimumTemporalFrame.cs");
         Assert.Contains("public static class OptimumMotionWrite", frame);
         Assert.Contains("public static Func<bool> BeginHook;", frame);
         Assert.Contains("public static Action EndHook;", frame);
