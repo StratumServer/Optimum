@@ -53,8 +53,16 @@ void main()
 	// zero alpha routes the pixel to the resolve's camera fallback, exactly as
 	// in chunkopaque.fsh. Depth is still written for it, because the fragment
 	// is genuinely the visible surface either way.
+	//
+	// The reactive value is delivered anyway: taa-resolve.fsh reads motion.b
+	// whether or not the writer-depth test accepted the pixel (P3 finding (h)),
+	// and the foam and flow-UV animation that 0.3 stands for is happening on
+	// this fragment regardless of where it was last frame. Zeroing b here would
+	// hand a water pixel FULL history weight in exactly the frames the camera
+	// swung hardest - the worst case, not the safe one. taa-skymotion.fsh keeps
+	// its reactive value on the same branch for the same reason.
 	if (taaPrevClip.w <= 1e-6) {
-		outMotion = vec4(0.0);
+		outMotion = vec4(0.0, 0.0, clamp(taaLiquidReactive, 0.0, 1.0), 0.0);
 		return;
 	}
 

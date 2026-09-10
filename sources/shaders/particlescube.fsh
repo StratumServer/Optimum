@@ -79,9 +79,14 @@ void main()
 	//
 	// A previous position behind the previous camera is not a motion vector; a
 	// zero alpha routes the pixel to the resolve's camera fallback, exactly as
-	// in chunkopaque.fsh.
+	// in chunkopaque.fsh - but b stays 1. taa-resolve.fsh reads motion.b whether
+	// or not the writer-depth test accepted the pixel (P3 finding (h)), and this
+	// is a particle either way: dropping the reactive value here would give the
+	// pixel full history weight precisely when the camera swung hard enough to
+	// put the particle behind last frame's camera, which is the frame the
+	// history is least like it.
 	if (taaPrevClip.w <= 1e-6) {
-		outMotion = vec4(0.0);
+		outMotion = vec4(0.0, 0.0, 1.0, 0.0);
 	} else {
 		vec2 prevPixel = (taaPrevClip.xy / taaPrevClip.w * 0.5 + 0.5) * taaRenderSize;
 		vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;

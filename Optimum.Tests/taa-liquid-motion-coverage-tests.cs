@@ -55,6 +55,15 @@ public class TaaLiquidMotionCoverageTests
             "outMotion = vec4(prevPixel - currentPixel, clamp(taaLiquidReactive, 0.0, 1.0), gl_FragCoord.z);",
             fragment);
         Assert.Contains("if (taaPrevClip.w <= 1e-6) {", fragment);
+        // ... and the reactive value crosses that branch. taa-resolve.fsh reads
+        // motion.b whether or not the writer-depth test accepted the pixel
+        // (TAA-PLAN.md finding (h)), and the foam and flow-UV animation 0.3
+        // stands for is happening on this fragment either way. P4 review fix -
+        // the GPU proof is TaaLiquidMotionTests
+        // .APreviousPositionBehindThePreviousCameraStillCarriesTheReactiveValue.
+        string behindCamera = Between(fragment, "if (taaPrevClip.w <= 1e-6) {", "}", 0);
+        Assert.Contains("clamp(taaLiquidReactive, 0.0, 1.0)", behindCamera);
+        Assert.DoesNotContain("outMotion = vec4(0.0);", behindCamera);
 
         // Foam and the flow-UV scroll animate in place, so the surface is
         // reactive even where it reprojects perfectly.

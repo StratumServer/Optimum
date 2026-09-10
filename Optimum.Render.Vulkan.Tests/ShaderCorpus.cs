@@ -252,6 +252,17 @@ internal static class ShaderCorpus
             Name = "taa-with-ssao",
             SsaoLevel = 2, DynLights = 4, TaaMotion = 1, TaaMotionLocation = 4,
         };
+        // TAA on with the waving-stuff, foam and shiny settings off. Those are
+        // ordinary client settings, and WAVINGSTUFF in particular is what gates
+        // the bodies of every vertexwarp function the motion writers replay for
+        // the previous frame - so with TAA on it is a shipped combination that
+        // no other row produced (the "everything-off" row carries TAAMOTION 0).
+        yield return new ShaderVariant
+        {
+            Name = "taa-no-waving",
+            TaaMotion = 1, TaaMotionLocation = 2,
+            WavingStuff = 0, FoamEffect = 0, ShinyEffect = 0,
+        };
     }
 
     /// <summary>

@@ -374,6 +374,29 @@ public class TaaSkyDecalMotionCoverageTests
         Assert.Equal(Squash(StripComments(vanilla)), Squash(StripComments(StripTaaRegions(ours))));
     }
 
+    /// <summary>
+    /// The decal writer has two shapes, because decals.vsh has two: with
+    /// USESSBO the vertex position and the render flags are locals unpacked from
+    /// the face buffer, without it they are vertex attributes. USESSBO tracks
+    /// ScreenManager.Platform.UseSSBOs and is on by default, so the SSBO shape is
+    /// what the game really runs - and the ShaderCorpus rows that carry USESSBO 1
+    /// all carry TAAMOTION 0, which left the combination outside the translation
+    /// gate entirely. Explicit cases cover it; this test keeps them there.
+    /// </summary>
+    [Fact]
+    public void BothDecalVertexShapesAreInTheTranslationGate()
+    {
+        string vertex = Read("sources/shaders/decals.vsh");
+        // The TAA block reads symbols the SSBO branch declares as locals.
+        Assert.Contains("#if USESSBO > 0", vertex);
+        Assert.Contains("int renderFlagsIn = vdata.flags[vIndex];", vertex);
+        Assert.Contains("vec4 taaPrevPos = vec4(vertexPos + origin + cameraPosDelta, 1.0);", vertex);
+
+        string gate = Read("Optimum.Render.Vulkan.Tests/ShaderTranslationTests.cs");
+        Assert.Contains("decals-ssbo-ssao", gate);
+        Assert.Contains("decals-nossbo-ssao", gate);
+    }
+
     // ---------------------------------------------------------------- helpers
 
     private static string StripTaaRegions(string source)

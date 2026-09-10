@@ -122,6 +122,38 @@ public class ShaderTranslationTests
                 TaaMotion = 1, TaaMotionLocation = location,
                 ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
             }));
+            // TAA P4 review: the decal writer's SSBO branch. USESSBO tracks
+            // ScreenManager.Platform.UseSSBOs, which is on by default, and it is
+            // the branch where vertexPos and renderFlagsIn are locals unpacked
+            // from the face buffer rather than vertex attributes - so the
+            // previous-position block reads different symbols there. The corpus
+            // rows that carry USESSBO 1 all carry TAAMOTION 0, so the
+            // combination the client really ships was outside the gate.
+            cases.Add(("decals", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"decals-ssbo-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2, UseSsbo = 1,
+                TaaMotion = 1, TaaMotionLocation = location,
+            }));
+            cases.Add(("decals", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"decals-nossbo-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2, UseSsbo = 0,
+                TaaMotion = 1, TaaMotionLocation = location,
+            }));
+            // TAA P4 review: the cube-particle writer's VEC3SCALE branch.
+            // VSEssentials' EntityParticleSystem stamps `#define VEC3SCALE 1` on
+            // its private copy of particlescube (EntityParticleSystem.cs:190),
+            // which is the per-axis-scale position path - a second place the
+            // twin previous-position function has to agree with vanilla's own
+            // lines. No corpus row produces it.
+            cases.Add(("particlescube", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"particlescube-vec3scale-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+                ExtraPrefix = "#define VEC3SCALE 1",
+            }));
         }
 
         using var compiler = new ShaderCompiler();

@@ -301,6 +301,53 @@ public class TaaLiquidMotionTests
         }
     }
 
+    /// <summary>
+    /// A fragment whose previous position ends up BEHIND the previous camera has
+    /// no motion vector - the perspective divide would flip it - so the writer
+    /// bails out with a zero alpha and lets taa-resolve.fsh camera-reproject the
+    /// pixel. What it must NOT drop on that path is the reactive value:
+    /// taa-resolve.fsh reads motion.b whether or not the writer-depth test
+    /// accepted the pixel (TAA-PLAN.md finding (h)), so a zero there would hand
+    /// an animating water surface full history weight in exactly the frames the
+    /// camera swung hardest.
+    ///
+    /// The previous view here mirrors z, so the quad at view z = -1 lands at
+    /// z = +1 in the previous frame's view and the previous clip w (= -z) is
+    /// negative. Before the P4 review fix this test failed on the reactive
+    /// channel alone, with the vector and the depth already correct.
+    /// </summary>
+    [SkippableFact]
+    public void APreviousPositionBehindThePreviousCameraStillCarriesTheReactiveValue()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+
+        using (device)
+        {
+            float[] mirrorZ =
+            {
+                1, 0,  0, 0,
+                0, 1,  0, 0,
+                0, 0, -1, 0,
+                0, 0,  0, 1,
+            };
+
+            Result result = RenderLiquidMotion(device!, 0f, 0f, previousView: mirrorZ);
+            Decoded centre = result.At(Size / 2, Size / 2);
+
+            _output.WriteLine($"behind: mv = ({centre.MotionX}, {centre.MotionY}), " +
+                              $"reactive = {centre.Reactive}, writerDepth = {centre.WriterDepth}");
+
+            // No vector, and the zero alpha that routes the pixel to the camera
+            // fallback rather than pretending the writer owns it.
+            Assert.InRange(centre.MotionX, -0.3f, 0.3f);
+            Assert.InRange(centre.MotionY, -0.3f, 0.3f);
+            Assert.InRange(centre.WriterDepth, 0f, 0.01f);
+            // ... but the reactive value is still delivered.
+            Assert.InRange(centre.Reactive, LiquidReactive - 0.01f, LiquidReactive + 0.01f);
+        }
+    }
+
     // ---------------------------------------------------------------- harness
 
     private readonly struct Decoded
@@ -349,7 +396,8 @@ public class TaaLiquidMotionTests
         float jitterX = 0f,
         float jitterY = 0f,
         int waterFlags = 0,
-        float previousWaterWaveIntensity = 0f)
+        float previousWaterWaveIntensity = 0f,
+        float[]? previousView = null)
     {
         IOptimumGraphicsDevice seam = device;
 
@@ -418,7 +466,7 @@ public class TaaLiquidMotionTests
         // hands it out: a previous position through a jittered matrix would carry
         // two frames' jitter difference instead of the surface's movement.
         SetMatrix(seam, program, "prevProjectionMatrix", Projection);
-        SetMatrix(seam, program, "prevModelViewMatrix", Identity);
+        SetMatrix(seam, program, "prevModelViewMatrix", previousView ?? Identity);
         SetFloat3(seam, program, "cameraPosDelta", cameraDeltaX, cameraDeltaY, 0f);
         SetFloat2(seam, program, "taaRenderSize", Size, Size);
         SetFloat2(seam, program, "taaJitterPx", jitterX, jitterY);

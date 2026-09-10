@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..d77cdb4 100644
+index 431e51a..96ac74a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -303,7 +303,7 @@ index 431e51a..d77cdb4 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,15 +556,119 @@ public class ChunkRenderer
+@@ -402,15 +556,124 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -327,18 +327,23 @@ index 431e51a..d77cdb4 100644
 +	/// RenderPostprocessingEffects. Drawing it earlier would let the depth this
 +	/// pass writes occlude geometry that is legitimately visible through water.
 +	///
-+	/// Depth: the test is on (LEQUAL against Primary's depth, which is where the
-+	/// opaque scene is, so a water surface in front of the terrain passes and one
-+	/// behind it does not), and the WRITE is on. The OIT liquid draw writes no
-+	/// depth at all - LoadFrameBuffer(Transparent) disables the depth mask - so
-+	/// without this the motion attachment would carry the water surface's window
-+	/// depth while the depth buffer carried the terrain behind it, the resolve's
-+	/// writer-depth test would reject every liquid pixel, and the whole pass
-+	/// would buy nothing. Writing it also hands the resolve the water surface's
-+	/// own linear depth, which is the depth the vector belongs to. The cost is
-+	/// that passes after this one which depth-test against Primary - the
-+	/// AfterFinalComposition overlays - now see the water surface; that is
-+	/// outside the temporal window and only happens with TAA on.
++	/// Depth: the test is on - GL_LESS, the client's default and what the OIT
++	/// liquid draw itself ran under, deliberately not changed here so this pass
++	/// keeps exactly the same water fragments that pass looked at - and the WRITE
++	/// is on. The OIT liquid draw writes no depth at all -
++	/// LoadFrameBuffer(Transparent) disables the depth mask - so without this the
++	/// motion attachment would carry the water surface's window depth while the
++	/// depth buffer carried the terrain behind it, the resolve's writer-depth
++	/// test would reject every liquid pixel, and the whole pass would buy
++	/// nothing. Writing it also hands the resolve the water surface's own linear
++	/// depth, which is the depth the vector belongs to.
++	///
++	/// The cost is that everything after this pass which reads or tests Primary's
++	/// depth now sees the water surface: the SSAO bilateral blur's depth-guided
++	/// weights (RenderPostprocessingEffects), the AfterFinalComposition overlays
++	/// (selection boxes, work-item guides), and the AfterBlit rift renderer,
++	/// which samples that depth texture directly. All of that is outside the
++	/// temporal window and only happens with TAA on.
 +	///
 +	/// Depth writes make draw order irrelevant: the buffer only ever decreases,
 +	/// so the last fragment that passes the test is the nearest one, and the
@@ -423,7 +428,7 @@ index 431e51a..d77cdb4 100644
  		platform.GlToggleBlend(on: false);
  		platform.GlEnableDepthTest();
  		chunkopaque.Use();
-@@ -425,28 +683,36 @@ public class ChunkRenderer
+@@ -425,28 +688,36 @@ public class ChunkRenderer
  		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
  		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
  		chunkopaque.HaxyFade = 1;

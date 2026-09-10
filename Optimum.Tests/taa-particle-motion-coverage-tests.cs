@@ -64,6 +64,16 @@ public class TaaParticleMotionCoverageTests
             "outMotion = vec4(prevPixel - currentPixel, 1.0, gl_FragCoord.z);",
             fragment);
         Assert.Contains("if (taaPrevClip.w <= 1e-6) {", fragment);
+        // ... and on that branch the reactive value survives. taa-resolve.fsh
+        // reads motion.b whether or not the writer-depth test accepted the pixel
+        // (TAA-PLAN.md finding (h)), so writing a plain vec4(0.0) here would give
+        // the particle FULL history weight in exactly the frames the camera swung
+        // hard enough to put it behind last frame's camera. P4 review fix; the
+        // liquid pass carries its 0.3 across the same branch and taa-skymotion
+        // its cloud reactive.
+        string behindCamera = Between(fragment, "if (taaPrevClip.w <= 1e-6) {", "}", 0);
+        Assert.Contains("outMotion = vec4(0.0, 0.0, 1.0, 0.0);", behindCamera);
+        Assert.DoesNotContain("outMotion = vec4(0.0);", behindCamera);
 
         // Unlike the liquid velocity pass, this writer is an ADDITION to a
         // shading pass: the vanilla outputs have to still be there, or the
@@ -113,6 +123,29 @@ public class TaaParticleMotionCoverageTests
             .Replace("applyGlobalWarpingState(st, ", "applyGlobalWarping(");
 
         Assert.Equal(Squash(vanillaBranch), Squash(ourBranch));
+    }
+
+    /// <summary>
+    /// VEC3SCALE is a shipped configuration, not a dead branch: VSEssentials'
+    /// EntityParticleSystem stamps it on its own copy of particlescube, and that
+    /// copy takes the per-axis-scale position path - a second place the twin
+    /// previous-position function has to agree with vanilla's own lines.
+    ///
+    /// No ShaderCorpus variant row produces it (the rows move the engine's own
+    /// defines, and VEC3SCALE is a caller's), so the translation gate needs an
+    /// explicit case. This test is what stops that case from being deleted as
+    /// redundant: the branch is compiled by nobody else in the suite.
+    /// </summary>
+    [Fact]
+    public void TheVec3ScaleParticleVariantIsAShippedConfigurationAndIsInTheTranslationGate()
+    {
+        Assert.Contains(
+            "prog.VertexShader.PrefixCode += \"#define VEC3SCALE 1\\n\";",
+            Read("VSEssentials/Systems/ParticleEntity/EntityParticleSystem.cs"));
+
+        string gate = Read("Optimum.Render.Vulkan.Tests/ShaderTranslationTests.cs");
+        Assert.Contains("particlescube-vec3scale-ssao", gate);
+        Assert.Contains("ExtraPrefix = \"#define VEC3SCALE 1\"", gate);
     }
 
     // ------------------------------------------- (b) the OIT merge reactive
