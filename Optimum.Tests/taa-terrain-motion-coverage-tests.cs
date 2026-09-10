@@ -78,12 +78,14 @@ public class TaaTerrainMotionCoverageTests
     [Fact]
     public void TheStateOverloadsAreVanillaMathsWithTheUniformsReadFromTheStruct()
     {
-        string? vanillaPath = TryFind(".vanilla/win-x64/vintagestory/assets/game/shaderincludes/vertexwarp.vsh");
-        // The vanilla shaders are proprietary and never committed; a checkout
-        // that has not bootstrapped has nothing to compare against.
-        if (vanillaPath == null) return;
-
-        string vanilla = File.ReadAllText(vanillaPath!);
+        // From the release archive, never from .vanilla/win-x64/...: `make deploy`
+        // copies sources/shaderincludes straight into that tree, so this
+        // comparison was reading Optimum's own include as the vanilla reference
+        // (and failing) after the first deploy. The vanilla shaders are
+        // proprietary and never committed, so a checkout that has not
+        // bootstrapped has nothing to compare against and skips.
+        string? vanilla = VanillaShaderArchive.TryRead("shaderincludes/vertexwarp.vsh");
+        if (vanilla == null) return;
         string ours = Read("sources/shaderincludes/vertexwarp.vsh");
 
         foreach ((string vanillaSignature, string ourSignature) in new[]

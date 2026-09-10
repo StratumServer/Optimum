@@ -342,6 +342,13 @@ public static class ShaderCompatibilityScanner
             // surface half a pixel away.
             HasExternalShader(report, "chunkliquid.vsh") ||
             HasExternalShader(report, "chunkliquidmotion.vsh") || HasExternalShader(report, "chunkliquidmotion.fsh") ||
+            // Cube particles write the motion attachment themselves, and the
+            // OIT merge is where every transparent that cannot write it gets its
+            // reactive value. An external copy of either drops that content back
+            // to camera reprojection with no reactive flag at all, which ghosts
+            // exactly the fast-moving, alpha-blended pixels TAA is worst at.
+            HasExternalShader(report, "particlescube.vsh") || HasExternalShader(report, "particlescube.fsh") ||
+            HasExternalShader(report, "transparentcompose.fsh") ||
             HasExternalShader(report, "vertexwarp.vsh");
         AddFeatureDecision(report, "Taa", externalMotionShader,
             "external shader owns a motion-vector writer contract");

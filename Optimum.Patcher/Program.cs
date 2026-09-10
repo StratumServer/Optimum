@@ -81,6 +81,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumDynamicLightCache",
         "OptimumRenderScale",
     },
+    // TAA P4: the cube-particle motion writer's previous-frame uniforms.
+    ["Vintagestory.Client.NoObf.SystemRenderParticles"] = new()
+    {
+        "SetOptimumMotionUniforms",
+    },
     ["Vintagestory.Client.NoObf.SystemRenderPlayerEffects"] = new()
     {
         "GetOptimumLightRadius",
@@ -164,6 +169,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "BeginMotionOnlyWrite",
         "EndMotionOnlyWrite",
         "optimumMotionOnlyDrawBuffers",
+        // TAA P4: additive blending on the motion attachment for the OIT merge,
+        // which contributes the transparent layer's coverage to the reactive
+        // channel without touching the vector or the writer depth under it.
+        "ApplyOptimumMotionAccumulateBlendState",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
@@ -750,6 +759,8 @@ var targets = new List<MethodTarget>
     // window only if something tells them to.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Window_Resize", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "MergeTransparentRenderPass", 0),
+    // TAA P4: the cube-particle motion window and its uniforms.
+    new("Vintagestory.Client.NoObf.SystemRenderParticles", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
