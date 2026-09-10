@@ -274,6 +274,59 @@ public class TaaPipelineCoverageTests
         Assert.NotEmpty(fsh);
     }
 
+    [Fact]
+    public void DisposeFrameBuffersDeletesTheSharedDepthTextureOnlyOnce()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        // Transparent shares Primary's depth texture, so the same handle sits
+        // in two FrameBufferRefs and a naive loop deletes it twice - a double
+        // free on the device path and a double count in VulkanStats.
+        Assert.Contains("transparent.DepthTextureId = primary.DepthTextureId;", platform);
+
+        int dispose = platform.IndexOf("public void DisposeFrameBuffers(", StringComparison.Ordinal);
+        Assert.True(dispose >= 0);
+        int end = platform.IndexOf("public override void ClearFrameBuffer(", dispose, StringComparison.Ordinal);
+        string body = end > dispose ? platform.Substring(dispose, end - dispose) : platform.Substring(dispose);
+
+        Assert.Contains("HashSet<int> deletedTextures = new HashSet<int>();", body);
+        // Device path and GL path both gate every texture delete on the set.
+        Assert.Contains("if (deletedTextures.Add(buffers[k].DepthTextureId))", body);
+        Assert.Contains("if (deletedTextures.Add(buffers[i].DepthTextureId))", body);
+        Assert.Contains("if (deletedTextures.Add(buffers[k].ColorTextureIds[n]))", body);
+        Assert.Contains("if (deletedTextures.Add(buffers[i].ColorTextureIds[j]))", body);
+        // No unguarded delete is left behind on either path.
+        Assert.Equal(4, Count(body, "deletedTextures.Add("));
+        Assert.Equal(1, Count(body, "optimumDevice.DeleteTexture(buffers[k].DepthTextureId);"));
+        Assert.Equal(1, Count(body, "GL.DeleteTexture(buffers[i].DepthTextureId);"));
+    }
+
+    [Fact]
+    public void TaaDebugValidityUsesTheResolvePassDepthTolerance()
+    {
+        string resolve = Read("sources/shaders/taa-resolve.fsh");
+        string debug = Read("sources/shaders/taa-debug.fsh");
+
+        // The resolve pass accepts a writer whose recorded depth is within a
+        // value-scaled tolerance; the debug validity view has to use the same
+        // expression or it paints red where the resolve reprojects happily.
+        Assert.Contains("abs(motion.a - depth) <= max(2e-4, 8e-4 * depth)", resolve);
+        Assert.Contains("abs(motion.a - sceneDepth) <= max(2e-4, 8e-4 * sceneDepth)", debug);
+        Assert.Equal(Tolerance(resolve, "depth"), Tolerance(debug, "sceneDepth"));
+        Assert.DoesNotContain("abs(motion.a - sceneDepth) < 1e-4", debug);
+    }
+
+    /// <summary>The depth-match tolerance expression, with the depth variable normalised.</summary>
+    private static string Tolerance(string shader, string depthName)
+    {
+        int start = shader.IndexOf("abs(motion.a - " + depthName + ")", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        int end = shader.IndexOf(')', shader.IndexOf("max(", start, StringComparison.Ordinal) + 4);
+        return shader.Substring(start, end - start + 1).Replace(depthName, "DEPTH");
+    }
+
     private static int Count(string source, string value)
     {
         int count = 0;

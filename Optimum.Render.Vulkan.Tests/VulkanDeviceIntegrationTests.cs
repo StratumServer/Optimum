@@ -1644,6 +1644,40 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
+    /// <summary>
+    /// Primary and Transparent share one depth texture, so DisposeFrameBuffers
+    /// used to hand the same id to DeleteTexture twice. The second delete must
+    /// be a no-op: no validation error, and no second tick of the deleted
+    /// counter, which otherwise reported more textures freed than ever existed.
+    /// </summary>
+    [SkippableFact]
+    public void DeletingTheSameTextureTwiceCountsAndFreesItOnce()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 8;
+
+            int texture = seam.CreateTexture2D(size, size,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+
+            long before = Optimum.Render.Vulkan.Core.VulkanStats.TexturesDeleted;
+            seam.DeleteTexture(texture);
+            long afterFirst = Optimum.Render.Vulkan.Core.VulkanStats.TexturesDeleted;
+            seam.DeleteTexture(texture);
+            long afterSecond = Optimum.Render.Vulkan.Core.VulkanStats.TexturesDeleted;
+
+            Assert.Equal(before + 1, afterFirst);
+            Assert.Equal(afterFirst, afterSecond);
+
+            // The device stays usable, and the layers saw nothing wrong.
+            seam.BeginFrame();
+            seam.Present();
+            AssertClean(seam);
+        }
+    }
+
     private static void AssertClean(IOptimumGraphicsDevice device)
     {
         string? diagnostics = device.GetError();

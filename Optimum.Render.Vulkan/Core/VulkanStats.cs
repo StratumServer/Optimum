@@ -43,6 +43,9 @@ internal static class VulkanStats
     public static void NoteTextureDeleted() => Interlocked.Increment(ref _texturesDeleted);
     public static void NoteFrame() => Interlocked.Increment(ref _frames);
 
+    /// <summary>Textures deleted since the last <see cref="SampleIfDue" />.</summary>
+    public static long TexturesDeleted => Interlocked.Read(ref _texturesDeleted);
+
     public static void NoteUpload(long elapsedTicks)
     {
         Interlocked.Increment(ref _uploads);

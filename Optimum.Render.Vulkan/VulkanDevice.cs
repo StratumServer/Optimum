@@ -1304,7 +1304,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         VulkanTexture? texture = _textures.Get(textureId);
         if (texture != null) _descriptors.Release(texture.Id);
         _textures.Delete(textureId, _frames);
-        VulkanStats.NoteTextureDeleted();
+        // Only a delete that found something is a delete. Deleting an id twice
+        // (framebuffers share a depth texture) otherwise inflated the counter
+        // past the number of textures that ever existed.
+        if (texture != null) VulkanStats.NoteTextureDeleted();
     }
 
     public void SetTextureParameter(int textureId, int parameterName, int value) =>
@@ -2589,16 +2592,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     /// <summary>
     /// Bytes per texel for the formats the dump path is expected to see.
-    /// Anything unrecognised falls back to 4 (8-bit RGBA), the previous
-    /// blanket assumption, rather than guessing wrong in either direction.
+    /// Shared with <see cref="TextureDump.Write" />'s decode switch so the
+    /// readback size and the reader always agree on the stride.
     /// </summary>
-    private static int BytesPerPixel(Format format) => format switch
-    {
-        Format.R16G16B16A16Sfloat => 8,
-        Format.R32Sfloat => 4,
-        Format.R8Unorm or Format.R8Uint or Format.R8Srgb => 1,
-        _ => 4,
-    };
+    private static int BytesPerPixel(Format format) => TextureDump.BytesPerTexel(format);
 
     public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
