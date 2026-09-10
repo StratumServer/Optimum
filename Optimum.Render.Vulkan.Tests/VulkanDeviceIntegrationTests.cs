@@ -38,6 +38,156 @@ public class VulkanDeviceIntegrationTests
         return false;
     }
 
+    // Unlike the lower-level TaaResolveTests, allocate through the same raw GL
+    // format API as ClientPlatformWindows.CreateOptimumHistoryTarget. A missing
+    // GL_R32F mapping used to clamp linear history depth to 1 in an RGBA8 target,
+    // so every world surface rejected history even though the shader tests passed.
+    [SkippableTheory]
+    [InlineData(12f, false)]
+    [InlineData(128f, false)]
+    [InlineData(12f, true)]
+    public unsafe void TaaRetainsDistantHistoryAndRejectsDisocclusionThroughTheSeam(
+        float distance, bool disoccluded)
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 8;
+            var files = ShaderCorpus.LoadShaderFiles();
+            int resolve = LinkProgram(seam, files["taa-resolve.vsh"], files["taa-resolve.fsh"], "taa-resolve");
+            int inspect = LinkProgram(seam, files["taa-resolve.vsh"], """
+                #version 330 core
+                uniform sampler2D colorTex;
+                uniform sampler2D linearDepthTex;
+                out vec4 color;
+                void main() {
+                    ivec2 p = ivec2(gl_FragCoord.xy);
+                    color = vec4(texelFetch(linearDepthTex, p, 0).r / 256.0,
+                                 texelFetch(colorTex, p, 0).r, 0.0, 1.0);
+                }
+                """);
+
+            int Texture(EnumTextureInternalFormat format) => seam.CreateTexture2D(
+                size, size, format, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            void Filter(int texture, int filter)
+            {
+                seam.SetTextureParameter(texture, OptimumGlConstants.TextureMinFilter, filter);
+                seam.SetTextureParameter(texture, OptimumGlConstants.TextureMagFilter, filter);
+                seam.SetTextureParameter(texture, OptimumGlConstants.TextureWrapS, 33071);
+                seam.SetTextureParameter(texture, OptimumGlConstants.TextureWrapT, 33071);
+            }
+            int Target(params int[] colors)
+            {
+                int fbo = seam.CreateFramebuffer(size, size);
+                for (int i = 0; i < colors.Length; i++)
+                    seam.AttachTexture(fbo, (EnumFramebufferAttachment)(36064 + i), colors[i], 0);
+                seam.SetDrawBuffers(fbo, (1 << colors.Length) - 1);
+                Assert.True(seam.CheckFramebufferComplete(fbo, out string status), status);
+                return fbo;
+            }
+            void Bind(int program, string name, int texture, int unit)
+            {
+                seam.SetSamplerUnit(program, name, unit);
+                seam.BindTexture(unit, texture);
+            }
+            int Loc(string name) => seam.GetUniformLocation(resolve, name);
+            float[] Identity() => new float[] { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+
+            int scene = Texture(EnumTextureInternalFormat.Rgba8);
+            int glow = Texture(EnumTextureInternalFormat.Rgba8);
+            int motion = Texture(EnumTextureInternalFormat.Rgba16f);
+            int depth = Texture(EnumTextureInternalFormat.DepthComponent32);
+            int primary = Target(scene, glow, motion);
+            seam.AttachTexture(primary, EnumFramebufferAttachment.DepthAttachment, depth, 0);
+            Filter(depth, 9728);
+            var history = new int[2][];
+            var framebuffers = new int[2];
+            for (int i = 0; i < 2; i++)
+            {
+                history[i] = new[] { Texture(EnumTextureInternalFormat.Rgba16f),
+                    Texture(EnumTextureInternalFormat.Rgba8),
+                    seam.CreateTexture2DRaw(size, size, 0x822E, IntPtr.Zero, 4) };
+                for (int j = 0; j < 3; j++) Filter(history[i][j], j == 2 ? 9728 : 9729);
+                framebuffers[i] = Target(history[i]);
+            }
+            int readback = Target(Texture(EnumTextureInternalFormat.Rgba8));
+            var pixels = new byte[size * size * 4];
+
+            // First frame seeds history. Later frames invert the checkerboard;
+            // both colours remain in the neighbourhood clipping box. Retention
+            // must blend across the two slots, not simply return current colour.
+            for (int frame = 0; frame < 3; frame++)
+            {
+                for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    byte value = (byte)(((x + y + frame) % 2 == 0) ? 64 : 192);
+                    int at = (y * size + x) * 4;
+                    pixels[at] = pixels[at + 1] = pixels[at + 2] = value;
+                    pixels[at + 3] = 255;
+                }
+                fixed (byte* data = pixels)
+                    seam.UploadTexture2D(scene, 0, 0, 0, size, size, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+
+                seam.BeginFrame();
+                seam.BindFramebuffer(primary);
+                seam.SetViewport(0, 0, size, size);
+                seam.SetDepthMask(true);
+                seam.ClearDepth(0.5f);
+                seam.ClearColor(1, 0, 0, 0, 0);
+                seam.ClearColor(2, 0, 0, 0, 0); // no motion writer: camera fallback
+                seam.SetDepthTest(false);
+                seam.SetCullFace(false);
+                seam.SetBlend(false, EnumBlendMode.Standard);
+                seam.BindFramebuffer(framebuffers[frame & 1]);
+                seam.UseProgram(resolve);
+                Bind(resolve, "sceneTex", scene, 0);
+                Bind(resolve, "glowTex", glow, 1);
+                Bind(resolve, "motionTex", motion, 2);
+                Bind(resolve, "depthTex", depth, 3);
+                int[] previous = history[(frame + 1) & 1];
+                Bind(resolve, "historyColor", previous[0], 4);
+                Bind(resolve, "historyGlow", previous[1], 5);
+                Bind(resolve, "historyDepth", previous[2], 6);
+                seam.SetUniform(resolve, Loc("renderSize"), (float)size, (float)size);
+                // Orthographic reprojection with a known linear depth, and a
+                // changing subpixel jitter that cancels in static camera motion.
+                float jitter = frame % 2 == 0 ? 0.25f : -0.25f;
+                seam.SetUniform(resolve, Loc("jitterPx"), jitter, 0f);
+                float currentDistance = disoccluded ? distance * (frame + 1) : distance;
+                float[] inverse = Identity();
+                inverse[12] = -2 * jitter / size;
+                inverse[14] = -currentDistance;
+                seam.SetUniformMatrix(resolve, Loc("invViewProjJittered"), inverse);
+                seam.SetUniformMatrix(resolve, Loc("prevViewProj"), Identity());
+                seam.SetUniformMatrix(resolve, Loc("viewMatrix"), Identity());
+                seam.SetUniform(resolve, Loc("cameraDelta"), 0f, 0f, 0f);
+                seam.SetUniform(resolve, Loc("resetHistory"), frame == 0 ? 1 : 0);
+                seam.SetUniform(resolve, Loc("blendAlpha"), 0.1f);
+                seam.SetUniform(resolve, Loc("varianceGamma"), 1.25f);
+                seam.DrawFullscreenTriangle();
+
+                seam.BindFramebuffer(readback);
+                seam.UseProgram(inspect);
+                Bind(inspect, "colorTex", history[frame & 1][0], 0);
+                Bind(inspect, "linearDepthTex", history[frame & 1][2], 1);
+                seam.DrawFullscreenTriangle();
+                fixed (byte* data = pixels)
+                    seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)data);
+                seam.Present();
+                int centre = (4 * size + 4) * 4; // raw RGBA8 attachment readback
+                Assert.InRange(pixels[centre], (int)(currentDistance * 255 / 256) - 1,
+                    (int)(currentDistance * 255 / 256) + 1);
+                if (frame == 1)
+                    Assert.InRange(pixels[centre + 1], disoccluded ? 175 : 60, disoccluded ? 195 : 100);
+                if (frame == 2)
+                    Assert.InRange(pixels[centre + 1], 60, 100);
+            }
+            AssertClean(seam);
+        }
+    }
+
     [SkippableTheory]
     [InlineData(false)]
     [InlineData(true)]
