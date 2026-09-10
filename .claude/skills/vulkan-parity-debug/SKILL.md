@@ -32,6 +32,24 @@ item in this list on both sides:
 - attachment indices and texture-id bookkeeping (`FrameBufferRef.ColorTextureIds`)
 Write the list of mismatches first; then fix them all, not the first one.
 
+## 2b. Instrument the shader instead of guessing (Codex's method, 2026-09-10)
+When a pass "does nothing" or "wobbles" and the inputs are hard to inspect, temporarily rewrite the
+pass's fragment shader to OUTPUT ITS INTERNAL SIGNALS AS COLOUR and look at the screen:
+- Save the original: `cp sources/shaders/<pass>.fsh /tmp/<pass>-original.fsh`.
+- Patch the deployed copy directly (no rebuild needed): edit `sources/shaders/<pass>.fsh` and copy it to
+  `.vanilla/win-x64/vintagestory/assets/game/shaders/<pass>.fsh`; the game loads it at start.
+  Example for the TAA resolve: `outColor = vec4(alpha, clamp(length(mv)/4.0, 0, 1), resetHistory != 0 ? 1 : 0, 1)`
+  shows blend weight, motion magnitude and reset per pixel; early-out branches get a fixed colour
+  (`vec4(0,0,1,1)`) so you can see which path ran.
+- Replace real inputs with CONTROLLED ones to split the chain: a checkerboard or diagonal pattern as
+  "current" proves the resolve+display copy are identical on both backends; a static pattern under the
+  live jitter proves accumulation on its own, independent of wind, lighting and foliage.
+- Freeze the world for comparisons: `/time set 12:00`, `/weather set clearsky`, `/weather setprecip -1`,
+  still camera, screenshot pairs 1 s apart, numeric diff of a crop.
+- Test allocator luck explicitly: fill a suspect texture with deliberately non-zero data before the pass
+  (cold-start dumps that happen to read zero hide a missing clear).
+- Restore the original shader afterwards and re-deploy; never commit the instrumented version.
+
 ## 3. Fix, test, verify
 - Backend changes in `Optimum.Render.Vulkan/`, seam additions in `VintagestoryApi/Client/optimum-render-device.cs`
   (then contracts csproj), lib changes in `build/` + Cecil list (see patch-workflow skill).
