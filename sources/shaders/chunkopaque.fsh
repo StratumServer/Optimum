@@ -44,6 +44,31 @@ layout(location = 2) out vec4 outGNormal;
 layout(location = 3) out vec4 outGPosition;
 #endif
 
+// TAA motion vectors (Optimum P3). TAAMOTION and TAAMOTIONLOCATION are stamped
+// by ShaderRegistry.registerDefaultShaderCodePrefixes; the location is the
+// Primary colour attachment the motion texture occupies (2 without the SSAO
+// G-buffer, 4 with it), which is the same index ClientPlatformWindows appends
+// it at. With TAA off this preprocesses back to vanilla.
+#if TAAMOTION > 0
+in vec4 taaPrevClip;
+uniform vec2 taaRenderSize;   // render-target size in pixels
+uniform vec2 taaJitterPx;     // this frame's sub-pixel shear, in pixels
+layout(location = TAAMOTIONLOCATION) out vec4 outMotion;
+
+// rg = previousPixel - currentUnjitteredPixel in render pixels, b = reactive,
+// a = this fragment's window depth. The resolve accepts the vector only when
+// a matches the depth buffer, so a zero alpha means "nobody wrote here" and
+// sends the pixel to the camera-motion fallback - which is exactly what a
+// previous position behind the previous camera deserves.
+vec4 taaMotionVector(float reactive)
+{
+	if (taaPrevClip.w <= 1e-6) return vec4(0.0);
+	vec2 prevPixel = (taaPrevClip.xy / taaPrevClip.w * 0.5 + 0.5) * taaRenderSize;
+	vec2 currentPixel = gl_FragCoord.xy - taaJitterPx;
+	return vec4(prevPixel - currentPixel, reactive, gl_FragCoord.z);
+}
+#endif
+
 #include vertexflagbits.ash
 #include fogandlight.fsh
 #include dither.fsh
@@ -129,6 +154,10 @@ void main()
 		outColor = vec4((normal.x + 1) / 2, (normal.y + 1)/2, (normal.z+1)/2, 1);
 #endif
 		outGlow = vec4(glowLevel + glow, godrayLevel, 0, min(1, fogAmount + outColor.a));
+#if TAAMOTION > 0
+		// Opaque terrain is not reactive.
+		outMotion = taaMotionVector(0.0);
+#endif
 		return;
 	}
 #endif
@@ -189,4 +218,7 @@ void main()
 #endif
 	
 	outGlow = vec4(glowLevel + glow, godrayLevel, 0, min(1, fogAmount + outColor.a));
+#if TAAMOTION > 0
+	outMotion = taaMotionVector(0.0);
+#endif
 }

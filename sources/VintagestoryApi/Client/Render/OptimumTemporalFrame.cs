@@ -426,6 +426,46 @@ namespace Vintagestory.API.Client
             jitteredScratch[9] -= (float)(2.0 * JitterPx.Y / RenderHeight);
             return jitteredScratch;
         }
+
+        /// <summary>
+        /// Sets the uniforms every motion-vector writer shares (TAA P3): the render
+        /// size and this frame's jitter, which turn a clip position into the pixel
+        /// grid the resolve works in; the camera's own movement in double-differenced
+        /// form; and the previous frame's complete warp state, so the writer can
+        /// evaluate the vertex warp twice through the same code.
+        ///
+        /// The previous view and projection matrices are deliberately not set here:
+        /// their uniform names differ per program (terrain has one modelViewMatrix,
+        /// entities a separate view and model matrix) and so does the view they
+        /// belong to (world FOV vs hand FOV). Each writer sets those two itself and
+        /// calls this for the rest.
+        ///
+        /// Every uniform is guarded by <see cref="IShaderProgram.HasUniform" />:
+        /// with TAA off the writers preprocess away, the names are not active, and
+        /// setting one by name would throw.
+        /// </summary>
+        public void ApplyMotionUniforms(IShaderProgram program)
+        {
+            if (program == null) return;
+
+            if (program.HasUniform("taaRenderSize")) program.Uniform("taaRenderSize", RenderWidth, RenderHeight);
+            if (program.HasUniform("taaJitterPx")) program.Uniform("taaJitterPx", JitterPx.X, JitterPx.Y);
+            if (program.HasUniform("cameraPosDelta")) program.Uniform("cameraPosDelta", CameraPosDelta.X, CameraPosDelta.Y, CameraPosDelta.Z);
+
+            OptimumWarpState previous = PrevWarp;
+            if (program.HasUniform("prevTimeCounter")) program.Uniform("prevTimeCounter", previous.TimeCounter);
+            if (program.HasUniform("prevWindWaveCounter")) program.Uniform("prevWindWaveCounter", previous.WindWaveCounter);
+            if (program.HasUniform("prevWindWaveCounterHighFreq")) program.Uniform("prevWindWaveCounterHighFreq", previous.WindWaveCounterHighFreq);
+            if (program.HasUniform("prevWaterWaveCounter")) program.Uniform("prevWaterWaveCounter", previous.WaterWaveCounter);
+            if (program.HasUniform("prevWindSpeed")) program.Uniform("prevWindSpeed", previous.WindSpeed);
+            if (program.HasUniform("prevGlobalWarpIntensity")) program.Uniform("prevGlobalWarpIntensity", previous.GlobalWarpIntensity);
+            if (program.HasUniform("prevGlitchWaviness")) program.Uniform("prevGlitchWaviness", previous.GlitchWaviness);
+            if (program.HasUniform("prevWindWaveIntensity")) program.Uniform("prevWindWaveIntensity", previous.WindWaveIntensity);
+            if (program.HasUniform("prevWaterWaveIntensity")) program.Uniform("prevWaterWaveIntensity", previous.WaterWaveIntensity);
+            if (program.HasUniform("prevPerceptionEffectId")) program.Uniform("prevPerceptionEffectId", previous.PerceptionEffectId);
+            if (program.HasUniform("prevPerceptionEffectIntensity")) program.Uniform("prevPerceptionEffectIntensity", previous.PerceptionEffectIntensity);
+            if (program.HasUniform("prevPlayerpos")) program.Uniform("prevPlayerpos", PrevPlayerpos.X, PrevPlayerpos.Y, PrevPlayerpos.Z);
+        }
     }
 
     /// <summary>

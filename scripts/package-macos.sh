@@ -202,6 +202,14 @@ if [[ -d "$SHADER_SRC" ]]; then
     find "$SHADER_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_DST/" \;
 fi
 
+# 5b-2. Overlay optimized shader includes (TAA P3). Same asset-name override
+# mechanism as shaders, separate directory.
+SHADER_INC_SRC="$REPO_ROOT/sources/shaderincludes"
+SHADER_INC_DST="$APP_DIR/assets/game/shaderincludes"
+if [[ -d "$SHADER_INC_SRC" ]]; then
+    find "$SHADER_INC_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_INC_DST/" \;
+fi
+
 # 5c. Merge translation strings.
 LANG_SRC="$REPO_ROOT/sources/lang"
 LANG_DST="$APP_DIR/assets/game/lang"

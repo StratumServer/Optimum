@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..46d578c 100644
+index 431e51a..dfb4654 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -103,7 +103,24 @@ index 431e51a..46d578c 100644
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -170,10 +239,11 @@ public class ChunkRenderer
+@@ -142,10 +211,16 @@ public class ChunkRenderer
+ 		culler.CullInvisibleChunks();
+ 	}
+ 
+ 	public void OnRenderBefore(float dt)
+ 	{
++		// Optimum TAA (P3): the LiquidDepth prepass keeps drawing with the same
++		// jittered projection as the main pass (game.CurrentProjectionMatrix), so
++		// its quarter-resolution depth stays consistent with the jittered scene it
++		// is compared against. It deliberately writes no motion: it renders into
++		// its own framebuffer, chunkliquiddepth declares no motion output, and the
++		// motion attachment is never in this target's draw-buffer mask.
+ 		game.Platform.LoadFrameBuffer(EnumFrameBuffer.LiquidDepth);
+ 		game.Platform.ClearFrameBuffer(EnumFrameBuffer.LiquidDepth);
+ 		subPixelPaddingX = game.BlockAtlasManager.SubPixelPaddingX;
+ 		subPixelPaddingY = game.BlockAtlasManager.SubPixelPaddingY;
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+@@ -170,10 +245,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -115,7 +132,7 @@ index 431e51a..46d578c 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,14 +278,25 @@ public class ChunkRenderer
+@@ -208,23 +284,59 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -144,8 +161,98 @@ index 431e51a..46d578c 100644
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -318,19 +399,32 @@ public class ChunkRenderer
+ 		}
+ 		platform.GlToggleBlend(on: true);
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P3): the previous-frame state the terrain motion-vector
++	/// writers need. The projection is the previous frame's UNJITTERED world
++	/// projection - a motion vector computed through a jittered matrix carries
++	/// two frames' jitter difference instead of the surface's own movement - and
++	/// the view is the previous CameraMatrixOrigin, because terrain draws
++	/// relative to the rebased chunk origin, not the camera-at-player matrix.
++	///
++	/// Everything else (render size, jitter, camera delta, previous warp state)
++	/// comes from the shared contract helper, which every later writer reuses.
++	/// </summary>
++	private void SetOptimumMotionUniforms(ShaderProgram program)
++	{
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		if (program.HasUniform("prevProjectionMatrix"))
++		{
++			program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(EnumTemporalView.World));
++		}
++		if (program.HasUniform("prevModelViewMatrix"))
++		{
++			program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);
++		}
++		frame.ApplyMotionUniforms(program);
++	}
++
+ 	public void RenderOpaque(float dt)
+ 	{
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+ 		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
+ 		platform.GlDepthMask(flag: true);
+@@ -232,10 +344,15 @@ public class ChunkRenderer
+ 		platform.GlToggleBlend(on: true);
+ 		platform.GlEnableCullFace();
+ 		game.GlMatrixModeModelView();
+ 		game.GlPushMatrix();
+ 		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
++		// Optimum TAA (P3): every chunk draw in this method writes motion
++		// vectors, so the motion attachment joins Primary's draw-buffer mask for
++		// the whole pass and leaves it again below. A no-op when TAA is off.
++		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
+ 		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
+ 		chunkopaque.Use();
+ 		chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
+ 		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+ 		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+@@ -249,10 +366,14 @@ public class ChunkRenderer
+ 		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+ 		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
+ 		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
+ 		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+ 		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
++		if (optimumMotionWrite)
++		{
++			SetOptimumMotionUniforms(chunkopaque);
++		}
+ 		for (int i = 0; i < textureIds.Length; i++)
+ 		{
+ 			chunkopaque.TerrainTex2D = textureIds[i];
+ 			chunkopaque.TerrainTexLinear2D = textureIds[i];
+ 			poolsByRenderPass[0][i].Render(cameraPos, "origin");
+@@ -268,10 +389,14 @@ public class ChunkRenderer
+ 		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
+ 		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
+ 		chunktopsoil.BlockTextureSize = blockTextureSize;
+ 		chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
+ 		chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
++		if (optimumMotionWrite)
++		{
++			SetOptimumMotionUniforms(chunktopsoil);
++		}
+ 		for (int j = 0; j < textureIds.Length; j++)
+ 		{
+ 			chunktopsoil.TerrainTex2D = textureIds[j];
+ 			chunktopsoil.TerrainTexLinear2D = textureIds[j];
+ 			poolsByRenderPass[5][j].Render(cameraPos, "origin");
+@@ -314,23 +439,42 @@ public class ChunkRenderer
+ 			chunkopaque.TerrainTexLinear2D = textureIds[m];
+ 			poolsByRenderPass[8][m].Render(cameraPos, "origin");
+ 		}
+ 		platform.GlToggleBlend(on: false);
  		chunkopaque.Stop();
++		// Optimum TAA (P3): the motion attachment leaves the draw-buffer mask
++		// again, so no later pass can write it by accident.
++		if (optimumMotionWrite)
++		{
++			optimumPlatform.EndMotionWrite();
++		}
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-opnc");
  		game.GlPopMatrix();
  		if (game.unbindSamplers)
@@ -186,7 +293,49 @@ index 431e51a..46d578c 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -442,11 +536,11 @@ public class ChunkRenderer
+@@ -407,10 +551,16 @@ public class ChunkRenderer
+ 	internal void RenderAfterOIT(float deltaTime)
+ 	{
+ 		game.GlPushMatrix();
+ 		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
++		// Optimum TAA (P3): the terrain overlay pass (render pass 7) is inside the
++		// temporal window and draws the same chunk geometry, so it writes motion
++		// vectors too - otherwise every decal-covered surface would fall back to
++		// the camera-only reprojection.
++		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
+ 		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
+ 		platform.GlDisableCullFace();
+ 		platform.GlToggleBlend(on: false);
+ 		platform.GlEnableDepthTest();
+ 		chunkopaque.Use();
+@@ -425,28 +575,36 @@ public class ChunkRenderer
+ 		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+ 		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
+ 		chunkopaque.HaxyFade = 1;
+ 		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+ 		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
++		if (optimumMotionWrite)
++		{
++			SetOptimumMotionUniforms(chunkopaque);
++		}
+ 		for (int i = 0; i < textureIds.Length; i++)
+ 		{
+ 			chunkopaque.TerrainTex2D = textureIds[i];
+ 			chunkopaque.TerrainTexLinear2D = textureIds[i];
+ 			poolsByRenderPass[7][i].Render(cameraPos, "origin");
+ 		}
+ 		chunkopaque.Stop();
++		if (optimumMotionWrite)
++		{
++			optimumPlatform.EndMotionWrite();
++		}
+ 		game.GlPopMatrix();
+ 	}
+ 
+ 	public void Dispose()
+ 	{
  		masterPool.DisposeAllPools(game.api);
  	}
  

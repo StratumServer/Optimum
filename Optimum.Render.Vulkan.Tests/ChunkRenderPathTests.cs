@@ -157,7 +157,10 @@ public class ChunkRenderPathTests
                 textures.Delete(target);
             }
 
-            Assert.Equal(4, built);
+            // One pipeline per corpus variant; the count follows the variant table
+            // rather than a literal, so adding a define row (TAA on/off) does not
+            // silently turn this into a weaker assertion.
+            Assert.Equal(ShaderCorpus.Variants().Count(), built);
             ValidationAssert.NoErrors(messages);
         }
     }

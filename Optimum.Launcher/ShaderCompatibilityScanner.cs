@@ -319,6 +319,26 @@ public static class ShaderCompatibilityScanner
         AddFeatureDecision(report, "Vulkan", rawOpenGl,
             "a mod calls OpenGL directly, which the Vulkan backend cannot serve");
 
+        // "Taa" is deliberately absent from ShaderFeatures for the same reason as
+        // "Vulkan": OptimumConfig.EffectiveTaa consults IsFeatureExplicitlyDisabled,
+        // so a missing scan must not silently veto a renderer feature the user
+        // asked for - only an explicit verdict does.
+        //
+        // An external copy of any shader Optimum's motion-vector writers live in,
+        // or of the vertexwarp include they evaluate twice, replaces the writer
+        // with one that emits nothing to the motion attachment. The resolve would
+        // then reproject those pixels by camera motion alone while everything
+        // around them used real vectors, which is worse than not running TAA.
+        bool externalMotionShader =
+            HasExternalShader(report, "chunkopaque.vsh") || HasExternalShader(report, "chunkopaque.fsh") ||
+            HasExternalShader(report, "chunktopsoil.vsh") || HasExternalShader(report, "chunktopsoil.fsh") ||
+            HasExternalShader(report, "entityanimated.vsh") || HasExternalShader(report, "entityanimated.fsh") ||
+            HasExternalShader(report, "standard.vsh") || HasExternalShader(report, "standard.fsh") ||
+            HasExternalShader(report, "instanced.vsh") || HasExternalShader(report, "instanced.fsh") ||
+            HasExternalShader(report, "vertexwarp.vsh");
+        AddFeatureDecision(report, "Taa", externalMotionShader,
+            "external shader owns a motion-vector writer contract");
+
         if (report.ScanFailed)
         {
             foreach (string feature in ShaderFeatures)
@@ -402,7 +422,24 @@ public static class ShaderCompatibilityScanner
             }
             else
             {
-                return null;
+                // Optimum: shaderincludes is a first-class asset category that
+                // ShaderRegistry merges into the same include dictionary as
+                // shaders, so an external vertexwarp.vsh replaces Optimum's copy
+                // exactly the way an external chunkopaque.vsh would - and with it
+                // the WarpState overloads the motion-vector writers evaluate.
+                marker = normalized.IndexOf("/shaderincludes/", StringComparison.OrdinalIgnoreCase);
+                if (marker >= 0)
+                {
+                    shader = normalized[(marker + 1)..];
+                }
+                else if (normalized.StartsWith("shaderincludes/", StringComparison.OrdinalIgnoreCase))
+                {
+                    shader = normalized;
+                }
+                else
+                {
+                    return null;
+                }
             }
         }
 

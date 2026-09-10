@@ -150,6 +150,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "taaResolvedGlowTexture",
         "TaaResolvedThisFrame",
         "RenderOptimumTaaResolve",
+        // TAA P3: the motion-attachment draw-buffer window the terrain (and
+        // later entity/standard/instanced) writers open around their draws.
+        "OptimumMotionWriteActive",
+        "BeginMotionWrite",
+        "EndMotionWrite",
+        "ApplyOptimumMotionBlendState",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -256,6 +262,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumTextureLodBias",
         "ApplyOptimumTextureLodBias",
         "SetOptimumTextureLodBias",
+        // TAA P3: previous-frame transforms for the terrain motion writers.
+        "SetOptimumMotionUniforms",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
     // (_lastSortPlayerPos/_lastSortYaw), plus the multi-tesselator worker pool and
@@ -480,6 +488,11 @@ var targets = new List<MethodTarget>
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
     new("Vintagestory.Client.NoObf.ChunkRenderer", "OnBeforeRenderOpaque", 1),
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RuntimeAddBlockTextureAtlas", 1),
+    // TAA P3: terrain motion-vector writers - the opaque pass, the AfterOIT
+    // terrain overlay (pass 7) and the LiquidDepth prepass comment that records
+    // why it stays jittered but writes no motion.
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderAfterOIT", 1),
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "OnRenderBefore", 1),
     // TAA P1: temporal frame contract - Advance()/JitterActive wiring in the
     // render loop, the jittered projection getter, its capture at both
     // Set3DProjection call sites, and the resets (FOV change, resize, world

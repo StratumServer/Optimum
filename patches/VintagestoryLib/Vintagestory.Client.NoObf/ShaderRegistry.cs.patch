@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..ff92e49 100644
+index 4a24e75..ad4177e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -193,7 +193,7 @@ index 4a24e75..ff92e49 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +452,27 @@ public class ShaderRegistry
+@@ -333,10 +452,44 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -216,6 +216,23 @@ index 4a24e75..ff92e49 100644
 +		optimumFrag.PrefixCode = optimumFrag.PrefixCode + "#define GREEDYMESH_GRAD " + (OptimumConfig.GreedyMeshTextureGrad ? 1 : 0) + "\r\n";
 +		Shader optimumVert = program.VertexShader;
 +		optimumVert.PrefixCode = optimumVert.PrefixCode + "#define GREEDYMESH " + (greedy ? 1 : 0) + "\r\n";
++		// Optimum TAA (P3): the motion-vector writers compile in only while TAA
++		// is on, so with TAA off chunkopaque/chunktopsoil preprocess back to
++		// vanilla and the vertexwarp include's WarpState overloads collapse to
++		// the vanilla entry points.
++		//
++		// TAAMOTIONLOCATION is the Primary colour attachment the motion texture
++		// occupies. SetupDefaultFrameBuffers appends it after the existing set,
++		// whose size is (SetupSSAO ? 4 : 2) with SetupSSAO = ClientSettings.SSAOQuality > 0
++		// - the same condition SSAOLEVEL above is stamped from, so the two can
++		// never disagree.
++		bool taaMotion = OptimumConfig.EffectiveTaa;
++		int taaMotionLocation = ((ClientSettings.SSAOQuality > 0) ? 4 : 2);
++		string taaDefines = "#define TAAMOTION " + (taaMotion ? 1 : 0) + "\r\n#define TAAMOTIONLOCATION " + taaMotionLocation + "\r\n";
++		Shader taaFrag = program.FragmentShader;
++		taaFrag.PrefixCode = taaFrag.PrefixCode + taaDefines;
++		Shader taaVert = program.VertexShader;
++		taaVert.PrefixCode = taaVert.PrefixCode + taaDefines;
  	}
  
  	private static string HandleIncludes(ShaderProgram program, string shaderCode, HashSet<string> filenames = null)
