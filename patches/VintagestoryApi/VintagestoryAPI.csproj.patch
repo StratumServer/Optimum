@@ -1,0 +1,16 @@
+diff --git a/VintagestoryApi/VintagestoryAPI.csproj b/VintagestoryApi/VintagestoryAPI.csproj
+index e25adce..6aa3751 100644
+--- a/VintagestoryApi/VintagestoryAPI.csproj
++++ b/VintagestoryApi/VintagestoryAPI.csproj
+@@ -50,11 +50,10 @@
+     <Compile Remove="Config\OptimumTesselationSafetyGate.cs" />
+     <Compile Remove="Config\OptimumWorldgenSafetyGate.cs" />
+     <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
+     <Compile Remove="Config\optimum-api-bridge.cs" />
+     <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
+-    <Compile Remove="Client\Render\OptimumTemporalFrame.cs" />
+   </ItemGroup>
+ 
+   <ItemGroup>
+     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+     <PackageReference Include="protobuf-net" Version="2.4.9" />

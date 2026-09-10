@@ -1,0 +1,20 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
+index 5e61808..a7b3f2f 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
+@@ -483,10 +483,15 @@ public class ClientEventManager : EventManager
+ 	{
+ 		if (ShaderRegistry.SupressShaderAndBufferReloads)
+ 		{
+ 			return true;
+ 		}
++		// Optimum TAA: every shader reload path funnels through here (escape menu,
++		// hotkey, .debug commands, ShaderAPI, the ssaoQuality/minbrightness watchers).
++		// Programs and often the framebuffers are rebuilt, so the temporal history no
++		// longer matches what the next frame writes.
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.ShaderReload);
+ 		bool flag = true;
+ 		foreach (ActionBoolReturn onReloadShader in OnReloadShaders)
+ 		{
+ 			try
+ 			{

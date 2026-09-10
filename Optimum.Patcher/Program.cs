@@ -131,15 +131,33 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumClearA",
         "optimumBoundTexture2d",
         "optimumScissorEnabled",
+        // TAA: motion attachment, history/aux/prev-depth targets, and the
+        // debug-view blit path (P1).
+        "OptimumTaaHistoryIndexA",
+        "OptimumTaaHistoryIndexB",
+        "OptimumGlR32f",
+        "MotionAttachmentIndex",
+        "TaaTargetsReady",
+        "optimumTaaDisabled",
+        "TaaHistory",
+        "CreateOptimumHistoryTarget",
+        "CreateOptimumHistoryTargetGl",
+        "DisableOptimumTaa",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
         "FsrEasu",
         "FsrRcas",
+        "TaaDebug",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
         "RegisterOptimumShaderProgram",
+        // TAA: shared per-program post-compile handling extracted out of
+        // loadRegisteredShaderPrograms (both the parallel-preprocess and
+        // vanilla single-threaded paths call it); treats taa-debug as
+        // optional exactly like the two FSR programs.
+        "CompileAndTrackShaderProgram",
     },
     ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
     {
@@ -281,6 +299,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "RegisterTesselationThread",
         "GetTesselationWorkerSlot",
         "ChunkTesselatorManager",
+        // TAA P1: unjittered projection companion to CurrentProjectionMatrix
+        // (new property; the jittered getter itself is an existing transplant
+        // target below).
+        "CurrentProjectionMatrixUnjittered",
+    },
+    ["Vintagestory.Client.NoObf.RenderAPIGame"] = new()
+    {
+        "CurrentProjectionMatrixUnjittered",
+        "TemporalContext",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
@@ -445,6 +472,17 @@ var targets = new List<MethodTarget>
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
     new("Vintagestory.Client.NoObf.ChunkRenderer", "OnBeforeRenderOpaque", 1),
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RuntimeAddBlockTextureAtlas", 1),
+    // TAA P1: temporal frame contract - Advance()/JitterActive wiring in the
+    // render loop, the jittered projection getter, its capture at both
+    // Set3DProjection call sites, and the resets (FOV change, resize, world
+    // load already listed below as Start, shader reload).
+    new("Vintagestory.Client.NoObf.ClientMain", "MainRenderLoop", 1),
+    new("Vintagestory.Client.NoObf.ClientMain", "Set3DProjection", 2),
+    new("Vintagestory.Client.NoObf.ClientMain", "get_CurrentProjectionMatrix", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "OnFowChanged", 1),
+    new("Vintagestory.Client.NoObf.ClientMain", "OnResize", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderAfterPostProcessing", 1),
+    new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerReloadShaders", 0),
     // ClientMain: mouse wheel fix (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)

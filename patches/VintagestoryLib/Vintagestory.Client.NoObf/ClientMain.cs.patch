@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..14ebeb0 100644
+index 67feafa..9253b0f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -129,7 +129,80 @@ index 67feafa..14ebeb0 100644
  
  	internal ServerInformation ServerInfo;
  
-@@ -874,14 +902,19 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -511,10 +539,52 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 	public long[] LoadedChunkIndices => WorldMap.chunks.Keys.ToArray();
+ 
+ 	public long[] LoadedMapChunkIndices => WorldMap.MapChunks.Keys.ToArray();
+ 
+ 	public float[] CurrentProjectionMatrix
++	{
++		get
++		{
++			// Optimum TAA: inside the temporal window every perspective draw gets the
++			// sub-pixel shear, and nothing else does. The guard is an exact comparison
++			// against the matrix Set3DProjection last loaded, so an ortho stack, a
++			// shadow ortho matrix or any matrix a caller pushed itself is handed out
++			// unchanged - that is what keeps the HUD and the shadow passes unjittered
++			// without a per-call-site opt-in. With TAA off JitterActive is never true
++			// and this reduces to the vanilla body.
++			double[] top = PMatrix.Top;
++			if (OptimumTemporal.Frame.JitterActive && set3DProjectionTempMat4 != null)
++			{
++				bool matches = true;
++				for (int j = 0; j < 16; j++)
++				{
++					if (top[j] != set3DProjectionTempMat4[j])
++					{
++						matches = false;
++						break;
++					}
++				}
++				if (matches)
++				{
++					return OptimumTemporal.Frame.ApplyJitterCopy(top);
++				}
++			}
++			for (int i = 0; i < 16; i++)
++			{
++				tmpMatrix[i] = (float)top[i];
++			}
++			return tmpMatrix;
++		}
++	}
++
++	/// <summary>
++	/// Optimum TAA: the projection as loaded, never sheared. Motion-vector writers
++	/// and any consumer that reprojects a position must use this - a motion vector
++	/// computed through the jittered matrix carries the jitter difference of two
++	/// frames instead of the surface's own movement.
++	/// </summary>
++	public float[] CurrentProjectionMatrixUnjittered
+ 	{
+ 		get
+ 		{
+ 			for (int i = 0; i < 16; i++)
+ 			{
+@@ -859,29 +929,39 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		}
+ 	}
+ 
+ 	private void OnFowChanged(int newValue)
+ 	{
++		// Optimum TAA: the projection changes, so every reprojection into the history
++		// is wrong for one frame.
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.FovChange);
+ 		MainCamera.Fov = (float)ClientSettings.FieldOfView * ((float)Math.PI / 180f);
+ 		MainCamera.ZNear = GameMath.Clamp(0.1f - (float)ClientSettings.FieldOfView / 90f / 25f, 0.025f, 0.1f);
+ 		Reset3DProjection();
+ 	}
+ 
+ 	public void Start()
+ 	{
++		// Optimum TAA: a fresh world session has no history worth keeping.
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.WorldLoad);
+ 		Compression.Reset();
+ 		Platform.ResetGamePauseAndUptimeState();
+ 		disconnectAction = null;
  		disconnectMissingMods = null;
  		quadModel = Platform.UploadMesh(QuadMeshUtilExt.GetQuadModelData());
  		FrustumCulling frustumCulling = new FrustumCulling();
@@ -152,7 +225,7 @@ index 67feafa..14ebeb0 100644
  		_clientThreadsCts = new CancellationTokenSource();
  		ClientSystem clientSystem = new SystemCompressChunks(this);
  		Thread thread = new Thread(new ClientThread(this, "compresschunks", new ClientSystem[1] { clientSystem }, _clientThreadsCts.Token).Process);
-@@ -899,17 +932,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -899,17 +979,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Thread thread3 = new Thread(new ClientThread(this, "relight", new ClientSystem[1] { clientSystem3 }, _clientThreadsCts.Token).Process);
  		thread3.IsBackground = true;
  		thread3.Start();
@@ -176,7 +249,7 @@ index 67feafa..14ebeb0 100644
  		thread5.IsBackground = true;
  		thread5.Start();
  		thread5.Name = "chunkvis";
-@@ -1032,11 +1069,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1032,11 +1116,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public void ExecuteMainThreadTasks(float deltaTime)
  	{
  		ScreenManager.FrameProfiler.Mark("beginMTT");
@@ -210,7 +283,74 @@ index 67feafa..14ebeb0 100644
  		{
  			if (SuspendMainThreadTasks)
  			{
-@@ -1565,21 +1623,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1122,10 +1227,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			Platform.ThreadSpinWait(10000000);
+ 		}
+ 		shUniforms.Update(dt, api);
+ 		shUniforms.ZNear = MainCamera.ZNear;
+ 		shUniforms.ZFar = MainCamera.ZFar;
++		// Optimum TAA: rotate the temporal frame contract here, after the shader
++		// uniforms are final for the frame and before any render stage runs, so every
++		// pass - including the LiquidDepth prepass in the Before stage - sees one
++		// consistent snapshot and the same jitter.
++		FrameBufferRef primaryFb = ((Platform.FrameBuffers != null && Platform.FrameBuffers.Count > 0) ? Platform.FrameBuffers[0] : null);
++		OptimumTemporal.Frame.Advance(dt * 1000f, (primaryFb != null) ? primaryFb.Width : Width, (primaryFb != null) ? primaryFb.Height : Height, OptimumConfig.EffectiveRenderScale, MainCamera.ZNear, MainCamera.ZFar, MainCamera.Fov, EntityPlayer?.CameraPos, shUniforms);
++		OptimumTemporal.Frame.JitterActive = OptimumConfig.EffectiveTaa || OptimumConfig.TaaJitterDev;
+ 		TriggerRenderStage(EnumRenderStage.Before, dt);
+ 		Platform.GlEnableDepthTest();
+ 		Platform.GlDepthMask(flag: true);
+ 		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
+ 		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
+@@ -1140,10 +1252,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		}
+ 		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
+ 		GlMatrixModeModelView();
+ 		GlLoadMatrix(MainCamera.CameraMatrix);
+ 		double[] top = api.Render.PMatrix.Top;
++		// Optimum TAA: freeze the world view for the frame - CameraMatrix is the entity
++		// view, CameraMatrixOrigin the terrain view drawn relative to the rebased
++		// origin, and PMatrix.Top here is the unjittered world perspective the frame
++		// culls and draws with. Recorded here rather than relying on Set3DProjection
++		// alone, which vanilla happens to call once per frame from the sky renderer.
++		OptimumTemporal.Frame.CaptureCamera(MainCamera.CameraMatrix, MainCamera.CameraMatrixOrigin);
++		OptimumTemporal.Frame.RecordProjection(EnumTemporalView.World, top);
+ 		double[] top2 = api.Render.MvMatrix.Top;
+ 		for (int i = 0; i < 16; i++)
+ 		{
+ 			PerspectiveProjectionMat[i] = top[i];
+ 			PerspectiveViewMat[i] = top2[i];
+@@ -1180,10 +1299,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		TriggerRenderStage(EnumRenderStage.AfterOIT, dt);
+ 	}
+ 
+ 	public void RenderAfterPostProcessing(float dt)
+ 	{
++		// Optimum TAA: closes the jitter window. The resolve will eventually run at the
++		// end of post-processing and close it there instead; until it exists this is the
++		// first point after every jittered pass (scene geometry and SSAO), so late
++		// overlays, the HUD and the blit stay unjittered.
++		OptimumTemporal.Frame.JitterActive = false;
+ 		if (DeltaTimeLimiter > 0f)
+ 		{
+ 			dt = DeltaTimeLimiter;
+ 		}
+ 		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
+@@ -1420,10 +1544,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 	{
+ 		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
+ 		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
+ 		GlMatrixModeProjection();
+ 		GlLoadMatrix(set3DProjectionTempMat4);
++		// Optimum TAA: record the unjittered matrix for the view it belongs to. A fov
++		// that is not the main camera's is the first-person hand pass (HandRenderFov in
++		// EntityPlayerShapeRenderer), which reprojects through its own previous matrix.
++		OptimumTemporal.Frame.RecordProjection((fov != MainCamera.Fov) ? EnumTemporalView.Hand : EnumTemporalView.World, set3DProjectionTempMat4);
+ 		shUniforms.ZNear = MainCamera.ZNear;
+ 		shUniforms.ZFar = MainCamera.ZFar;
+ 		GlMatrixModeModelView();
+ 	}
+ 
+@@ -1565,21 +1693,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -243,7 +383,7 @@ index 67feafa..14ebeb0 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2191,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2261,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -268,7 +408,21 @@ index 67feafa..14ebeb0 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -3531,6 +3608,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2690,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		ShouldRedrawAllBlocks = true;
+ 	}
+ 
+ 	public void OnResize()
+ 	{
++		// Optimum TAA: the history targets are reallocated at the new size, so nothing
++		// in them reprojects.
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
+ 		Platform.GlViewport(0, 0, Platform.WindowSize.Width, Platform.WindowSize.Height);
+ 		Reset3DProjection();
+ 	}
+ 
+ 	public void DoReconnect()
+@@ -3531,6 +3681,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

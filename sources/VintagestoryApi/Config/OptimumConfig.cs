@@ -404,6 +404,40 @@ public static class OptimumConfig
     public static float RenderScale = 1.0f;
 
     /// <summary>
+    /// Temporal anti-aliasing. Off by default: with Taa false the render chain
+    /// must stay byte-identical to the pre-TAA one, so nothing here may change a
+    /// matrix, a target or a shader define unless it is on.
+    /// </summary>
+    public static bool Taa = false;
+
+    /// <summary>
+    /// Post-resolve sharpening strength, 0 (none) to 1. TAA trades sharpness for
+    /// stability; the sharpen pass buys some of it back. Kept separate from the
+    /// FSR1 RCAS strength so the two are never applied at full force together.
+    /// </summary>
+    public static float TaaSharpness = 0.2f;
+
+    /// <summary>
+    /// LOD bias applied to sampled textures while TAA is on. Jitter gives the
+    /// resolve sub-pixel samples, so mip selection can afford to be sharper than
+    /// the unjittered frame would allow. Negative sharpens.
+    /// </summary>
+    public static float TaaMipBias = -0.5f;
+
+    /// <summary>
+    /// Debug visualisation of the temporal pipeline: 0 off, higher values select
+    /// motion, reactive, validity and rejection views.
+    /// </summary>
+    public static int TaaDebugView = 0;
+
+    /// <summary>
+    /// Applies the jitter window without running a resolve. A developer switch for
+    /// isolating "is the shear correct" from "is the resolve correct": with it on,
+    /// a static scene must visibly shimmer by exactly one pixel. Not in the GUI.
+    /// </summary>
+    public static bool TaaJitterDev = false;
+
+    /// <summary>
     /// Which renderer the client runs: "opengl", "vulkan", or "auto".
     ///
     /// OpenGL is the default and stays so until the Vulkan backend reaches
@@ -463,6 +497,9 @@ public static class OptimumConfig
 
     public static bool EffectiveGodRaysSampleCap => GodRaysSampleCapEnabled &&
         !IsShaderFeatureDisabled("GodRaysSampleCap");
+
+    public static bool EffectiveTaa => Taa &&
+        !IsShaderFeatureDisabled("Taa");
 
     public static bool EffectiveEntityLightBatch => EntityLightBatchEnabled &&
         !IsShaderFeatureDisabled("EntityLightBatch");
@@ -677,6 +714,11 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
         (nameof(OptimumConfigData.Renderer), Renderer),
         (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
+        (nameof(OptimumConfigData.Taa), Taa.ToString()),
+        (nameof(OptimumConfigData.TaaSharpness), TaaSharpness.ToString("F2")),
+        (nameof(OptimumConfigData.TaaMipBias), TaaMipBias.ToString("F2")),
+        (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
+        (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -775,6 +817,11 @@ public static class OptimumConfig
                 string.Equals(requestedRenderer, "auto", StringComparison.OrdinalIgnoreCase) ? "auto" :
                 "opengl";
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
+            Taa = data.Taa;
+            TaaSharpness = Math.Clamp(data.TaaSharpness, 0f, 1f);
+            TaaMipBias = Math.Clamp(data.TaaMipBias, -2f, 1f);
+            TaaDebugView = Math.Max(0, data.TaaDebugView);
+            TaaJitterDev = data.TaaJitterDev;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -844,6 +891,11 @@ public static class OptimumConfig
             RenderScale = RenderScale,
             Renderer = Renderer,
             GodRaysSampleCap = GodRaysSampleCapEnabled,
+            Taa = Taa,
+            TaaSharpness = TaaSharpness,
+            TaaMipBias = TaaMipBias,
+            TaaDebugView = TaaDebugView,
+            TaaJitterDev = TaaJitterDev,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -921,6 +973,11 @@ internal sealed class OptimumConfigData
     public float RenderScale { get; set; } = 1.0f;
     public string Renderer { get; set; } = "opengl";
     public bool GodRaysSampleCap { get; set; } = false;
+    public bool Taa { get; set; } = false;
+    public float TaaSharpness { get; set; } = 0.2f;
+    public float TaaMipBias { get; set; } = -0.5f;
+    public int TaaDebugView { get; set; } = 0;
+    public bool TaaJitterDev { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

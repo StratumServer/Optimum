@@ -27,6 +27,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorldgenSafetyGate.cs" Link="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\optimum-worldgen-footprint-lease.cs" Link="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalMath.cs" Link="Client\Render\OptimumTemporalMath.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalFrame.cs" Link="Client\Render\OptimumTemporalFrame.cs" />
     <Compile Include="optimum-api-bridge.cs" />
   </ItemGroup>
   <ItemGroup>
