@@ -84,6 +84,13 @@ public class TaaPipelineCoverageTests
 
         // Device path.
         Assert.Contains("optimumDevice.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", platform);
+        // An excluded attachment is not cleared on either backend. Checking
+        // only that ClearColor exists missed Vulkan's silent masked-out no-op.
+        int enable = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", StringComparison.Ordinal);
+        int clear = platform.IndexOf("optimumDevice.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
+        int restore = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
+        Assert.True(enable >= 0 && enable < clear && restore > clear);
+        Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1", Read("Optimum.Patcher/Program.cs"));
         // GL path.
         Assert.Contains("GL.ClearBuffer((ClearBuffer)6144, MotionAttachmentIndex, new float[4]);", platform);
         // Both are guarded so a failed/absent motion attachment leaves the

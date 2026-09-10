@@ -47,7 +47,16 @@ public class VulkanDeviceIntegrationTests
     [InlineData(128f, false)]
     [InlineData(12f, true)]
     public unsafe void TaaRetainsDistantHistoryAndRejectsDisocclusionThroughTheSeam(
-        float distance, bool disoccluded)
+        float distance, bool disoccluded) => RunTaaResolve(distance, disoccluded, 2, false);
+
+    [SkippableTheory]
+    [InlineData(2)]
+    [InlineData(4)]
+    public void TaaAccumulatesAfterClearingDirtyMaskedMotion(int motionAttachmentIndex) =>
+        RunTaaResolve(12f, false, motionAttachmentIndex, true);
+
+    private unsafe void RunTaaResolve(float distance, bool disoccluded,
+        int motionAttachmentIndex, bool poisonMotion)
     {
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
@@ -60,11 +69,13 @@ public class VulkanDeviceIntegrationTests
                 #version 330 core
                 uniform sampler2D colorTex;
                 uniform sampler2D linearDepthTex;
+                uniform sampler2D motionTex;
                 out vec4 color;
                 void main() {
                     ivec2 p = ivec2(gl_FragCoord.xy);
                     color = vec4(texelFetch(linearDepthTex, p, 0).r / 256.0,
-                                 texelFetch(colorTex, p, 0).r, 0.0, 1.0);
+                                 texelFetch(colorTex, p, 0).r,
+                                 any(notEqual(texelFetch(motionTex, p, 0), vec4(0))) ? 1.0 : 0.0, 1.0);
                 }
                 """);
 
@@ -98,7 +109,13 @@ public class VulkanDeviceIntegrationTests
             int glow = Texture(EnumTextureInternalFormat.Rgba8);
             int motion = Texture(EnumTextureInternalFormat.Rgba16f);
             int depth = Texture(EnumTextureInternalFormat.DepthComponent32);
-            int primary = Target(scene, glow, motion);
+            var primaryColors = new int[motionAttachmentIndex + 1];
+            primaryColors[0] = scene;
+            primaryColors[1] = glow;
+            for (int i = 2; i < motionAttachmentIndex; i++)
+                primaryColors[i] = Texture(EnumTextureInternalFormat.Rgba16f);
+            primaryColors[motionAttachmentIndex] = motion;
+            int primary = Target(primaryColors);
             seam.AttachTexture(primary, EnumFramebufferAttachment.DepthAttachment, depth, 0);
             Filter(depth, 9728);
             var history = new int[2][];
@@ -136,7 +153,20 @@ public class VulkanDeviceIntegrationTests
                 seam.SetDepthMask(true);
                 seam.ClearDepth(0.5f);
                 seam.ClearColor(1, 0, 0, 0, 0);
-                seam.ClearColor(2, 0, 0, 0, 0); // no motion writer: camera fallback
+                if (poisonMotion)
+                {
+                    // Recycled GPU memory may contain plausible motion/depth and
+                    // full reactivity. Never let zero-filled fresh allocations
+                    // hide a skipped clear. P2 keeps this attachment masked out.
+                    seam.SetDrawBuffers(primary, (1 << (motionAttachmentIndex + 1)) - 1);
+                    seam.ClearColor(motionAttachmentIndex, 16, 8, 1, 1);
+                    seam.SetDrawBuffers(primary, (1 << motionAttachmentIndex) - 1);
+                }
+                // Match ClearFrameBuffer(Primary): the clear obeys the mask,
+                // then world draws must again exclude unwritten motion output.
+                seam.SetDrawBuffers(primary, (1 << (motionAttachmentIndex + 1)) - 1);
+                seam.ClearColor(motionAttachmentIndex, 0, 0, 0, 0);
+                seam.SetDrawBuffers(primary, (1 << motionAttachmentIndex) - 1);
                 seam.SetDepthTest(false);
                 seam.SetCullFace(false);
                 seam.SetBlend(false, EnumBlendMode.Standard);
@@ -172,11 +202,13 @@ public class VulkanDeviceIntegrationTests
                 seam.UseProgram(inspect);
                 Bind(inspect, "colorTex", history[frame & 1][0], 0);
                 Bind(inspect, "linearDepthTex", history[frame & 1][2], 1);
+                Bind(inspect, "motionTex", motion, 2);
                 seam.DrawFullscreenTriangle();
                 fixed (byte* data = pixels)
                     seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)data);
                 seam.Present();
                 int centre = (4 * size + 4) * 4; // raw RGBA8 attachment readback
+                Assert.Equal(0, pixels[centre + 2]); // all four motion channels cleared
                 Assert.InRange(pixels[centre], (int)(currentDistance * 255 / 256) - 1,
                     (int)(currentDistance * 255 / 256) + 1);
                 if (frame == 1)
