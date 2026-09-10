@@ -158,16 +158,16 @@ never jittered.
 | Class | Stage / target | Shader | Motion policy |
 |---|---|---|---|
 | Chunk opaque / topsoil / pass-7 overlay | Opaque, AfterOIT / Primary | chunkopaque, chunktopsoil | exact (P3) |
-| Liquid | OIT / Transparent | chunkliquid | exact via liquid velocity pass (P4) + reactive foam |
+| Liquid | OIT / Transparent, motion via a second Primary pass | chunkliquid, chunkliquidmotion | exact (P4): dedicated velocity pass, depth test AND write on, reactive 0.3 |
 | LiquidDepth prepass | Before / LiquidDepth quarter res | chunkliquiddepth | jittered NDC shear, no motion |
-| Entities (skinned) | Opaque, OIT, AfterOIT / Primary, Transparent | entityanimated(_oit) | exact opaque (P3); OIT reactive |
+| Entities (skinned) | Opaque, OIT, AfterOIT / Primary, Transparent | entityanimated(_oit) | exact opaque (P3); OIT gets the merge's `1 - revealage` reactive only (P4) |
 | Held items, dropped items, block-entity models | Opaque / Primary | standard | exact (P3, standard writer) |
 | First-person hands | Opaque / Primary, hand FOV, depthOffset | fp hands program | exact with hand-FOV previous (P3) |
 | Instanced mechanical power | Opaque / Primary | instanced | exact with previous instance transforms (P3) |
-| Particles cube | Opaque / Primary, blend on | particlescube | reactive 1, replace-blend on motion (P4) |
-| Particles quad | OIT / Transparent | particlesquad | reactive via revealage (P4) |
+| Particles cube | Opaque / Primary, blend on | particlescube | camera-only vector, reactive 1, replace-blend on motion (P4) |
+| Particles quad | OIT / Transparent | particlesquad | no vector; reactive `1 - revealage` added by the merge (P4) |
 | Night sky, sun/moon, sky colour | Opaque / Primary, no depth write | nightsky, sky, celestialobject, standard | no writer needed: depth stays 1, the resolve's infinite-direction fallback is exact (P4, verified) |
-| Clouds (volumetric), aurora | OIT / Transparent | cloudvolumetric, aurora | rotation-only vector + coverage-gated reactive from the `taa-skymotion` pass on the sky pixels (P4) |
+| Clouds (volumetric), aurora | OIT / Transparent | cloudvolumetric, aurora, taa-skymotion | camera-rotation-only vector + coverage-gated reactive from `taa-skymotion` on the sky pixels; no reactive of their own where they sit in front of terrain (P4) |
 | Decals | AfterOIT / Primary | decals | exact: writes the terrain previous path itself, with its own depth, because the z-offset moves the depth buffer out from under the block's writer depth; crack progress rejected by colour clipping (P4) |
 | Work-item guides, selection boxes, wireframes | AfterFinalComposition / Primary | various | outside window, unjittered (P1); the motion window is refused there on `JitterActive` (P4) |
 | Rifts | AfterBlit / Default | rift | outside window, default framebuffer, motion window refused; noted as FG gap (P4) |
@@ -459,6 +459,103 @@ new cases, which is what makes them evidence.
 entries were added for every mover, but `patches/runtime/**` still has no donor for any of them,
 so the installed runtime keeps the vanilla bodies and every one of these renderers ghosts there
 while the build tree is correct. `check-patches.sh` reports 0 problems either way.
+
+P4 status, whole phase, after the adversarial review (2026-09-10): landed on `feat/taa`
+(8f64e11 liquid, 13d9eb3 particles, 957f4e0 sky/clouds/decals/late overlays, 8d09ef1 movers,
+b1c293f review fixes). **Not verified in game on either backend** - no phase of P4 ran
+`make deploy` or the client, so by rule 3 none of it is done. GPU proof is Vulkan-only
+(`Optimum.Render.Vulkan.Tests` is the only GPU harness), and every GL branch added in this phase
+has never executed.
+
+Exact vs fallback vs reactive, per class (the inventory table above is the ships-with-it form):
+
+| Class | Vector | Reactive | Why |
+|---|---|---|---|
+| Liquid surfaces | exact (P4) | 0.3, constant | `chunkliquidmotion` re-draws the liquid pools into Primary through the motion-only window, replaying `chunkliquid.vsh`'s position path verbatim - same liquid warp through `applyLiquidWarpingState`, same `w += 0.0008/max(0.1, z)` offset on both clips. Depth test GL_LESS and depth **write on**, so `a` matches the buffer and the resolve accepts the pixel |
+| Cube particles | fallback, camera-only | 1 | the instance stream carries position and scale only (stride 16, sized by MaxCubeParticles for four pools), so there is no previous per-particle position; reactive 1 makes the resolve ignore the history anyway. Wrong data for FSR/XeSS mv and for frame generation |
+| Quad particles, OIT entities, liquid shading, aurora | none | `1 - revealage`, additive | six oit.fsh outputs already fill Transparent; the merge adds `anet` into `b` alone under FUNC_ADD (ONE, ONE) with rg and a written as zero, so the opaque vector underneath survives bit-for-bit |
+| Sky colour, night sky | none, by design | 0 | depth test off for the whole pass, so depth stays 1 and the resolve's infinite-direction fallback is the exact answer |
+| Sun, moon, celestial objects | none, by design | 0 | depth tested, never written (`GlDepthMask(false)`); the fallback ignores only the celestial rotation, ~0.004 deg per frame |
+| Volumetric clouds | camera-rotation-only | `mix(coverage, 1, coverage)` on sky pixels | `taa-skymotion` claims depth-1 pixels under GL_LEQUAL and writes rg, b and `a = 1.0`. A cloud in front of terrain keeps the terrain's vector and gets only the merge's `anet` |
+| Clear sky | exact | 0 | coverage 0, so the dithered gradient keeps full history weight |
+| Decals | exact (P4) | 0 | own writer: chunk previous path + `previousWarpState()` + both z-offsets, `a = gl_FragCoord.z`. Crack progress is left to the resolve's colour clipping |
+| Helve hammer, resonator, fruitpress, pot lid, bloomery/forge/firepit contents, falling blocks | exact (P4) | 0 | `OptimumStandardMotion.Apply` keyed on the drawn thing plus a narrow window |
+| Static standard-shader users (anvil parts, molds, signs, knapping, clay forming, ground storage, ...) | fallback | 0 | camera reprojection is the right answer; each on the scanned exemption list with a reason |
+| Forge/anvil work items | fallback | 0 | the mod's own `smithingWorkItemShader` declares no motion output |
+| AfterFinalComposition overlays, AfterBlit rifts | none | none | outside the temporal window; `BeginMotionWrite`/`BeginMotionOnlyWrite` refuse on `JitterActive` |
+
+Findings to carry:
+
+(u) **A writer that bails out must still deliver its reactive value.** The liquid and cube-particle
+writers wrote a flat `vec4(0.0)` whenever the previous clip position landed behind the previous
+camera. `taa-resolve.fsh` reads `motion.b` whether or not the writer-depth test accepted the pixel
+(finding (h)), so that gave an animating water surface or a particle FULL history weight in exactly
+the frames the camera swung hardest. Both now keep `b` and zero only the vector and the alpha, as
+`taa-skymotion.fsh` already did. GPU regression:
+`TaaLiquidMotionTests.APreviousPositionBehindThePreviousCameraStillCarriesTheReactiveValue`.
+
+(v) **The translation gate only covers combinations some corpus row produces, and P4 added three
+it did not.** `decals` with `USESSBO 1` (the branch where `vertexPos` and `renderFlagsIn` are
+locals unpacked from the face buffer - the one the client actually runs, `UseSSBOs` defaults on),
+`particlescube` with `VEC3SCALE 1` (stamped by `VSEssentials`' `EntityParticleSystem`, so **not**
+the dead branch the particle stage recorded), and any writer at `WAVINGSTUFF 0`, which gates the
+body of every `vertexwarp` function the writers replay. All three are now in
+`ShaderTranslationTests`, the third as a `taa-no-waving` corpus row that applies to every program,
+and coverage tests pin the two explicit cases so they cannot be dropped as redundant.
+
+(w) **The liquid velocity pass writes depth into Primary, and more things read that than the
+liquid stage recorded.** Besides the AfterFinalComposition overlays (a block outline on a submerged
+block is now occluded by the water surface), the SSAO **bilateral blur** takes its depth-guided
+weights from `frameBuffers[0].DepthTextureId`, and the AfterBlit **rift renderer** samples it
+directly. All three change with TAA on and are unmeasured. The alternative - keep depth writes off
+and output `a` = the depth sampled from Primary's own depth texture - was not taken because rule 7
+prescribes writing the surface's depth; it stays the fallback if the overlays look wrong in game.
+
+(x) **Replace blending on the motion attachment is set but never restored, and that is correct only
+because the attachment leaves the draw-buffer mask.** Per-attachment blend state is global pipeline
+state, not per-framebuffer, on both backends. The discipline everything relies on is: set the
+global blend mode first, then the per-attachment overrides. `SetBlend` on the Vulkan device resets
+every attachment exactly as GL's non-indexed `glBlendFunc` does (`GlStateTracker.SetBlend`), so a
+`GlToggleBlend` inside an open window re-applies the motion override at the end and the two
+backends agree. A caller that sets a per-attachment factor and then a global mode has it silently
+undone.
+
+(y) **The merge's reactive is written first and overwritten by everything after it.** The OIT merge
+adds `anet` over the whole screen, and then the AfterOIT terrain overlay, the AfterOIT entities,
+the decals, the liquid velocity pass and the sky pass all write the attachment with **replace**
+blending. So a transparent thing in front of a decal, of pass-7 terrain or of water contributes no
+reactive at those pixels. Bounded and deliberate (each of those writers owns a better answer for
+its own pixel), but it means the merge's value only survives where nothing later claimed the pixel.
+
+(z) **`RenderOptimumSkyMotion` allocates five small arrays per frame** (one `double[16]`, four
+`float[16]`) to build its two matrices, exactly as `RenderOptimumTaaResolve` already does. Per
+frame, not per draw, so it is inside the rule - but the phase doubled that churn and neither is
+cached. Fold both into fields when P5 measures.
+
+(aa) **The revealage the reactive policy rests on has two different blend meanings.** With Optimum's
+`SystemRenderOITLayers` active, `BeforeOIT` puts Transparent's attachment 1 on `(GL_DST_COLOR,
+GL_ZERO)`, which composes `oit.fsh`'s `outReveal = 1 - alpha` multiplicatively - the correct
+revealage. The vanilla factors that `LoadFrameBuffer` and `RestoreVanillaTransparentState` set,
+`(GL_ZERO, GL_ONE_MINUS_SRC_COLOR)`, compose it as a product of alphas instead. Both
+`transparentcompose.fsh` and `taa-skymotion.fsh` read that one texture, so they always agree with
+each other - but if the OIT layer system ever falls back, the reactive value flips meaning along
+with the composite alpha. Pre-existing, unmeasured, and now load-bearing for TAA.
+
+Still owed for P4 (rule 3), in the game, on both backends, with the renderer confirmed from the log:
+- whether the liquid velocity pass removes the water ghosting it was built for, and what its depth
+  write does to block outlines on submerged blocks, to SSAO near water, and to rifts;
+- whether reactive 1 on cloud-covered sky visibly costs the sky's own anti-aliasing, and whether
+  `mix(coverage, 1, coverage)` is the right curve (it is a chosen shape, not a measured one);
+- whether the decal writer removed the near-decal ghosting finding (o) identified;
+- whether the movers (helve hammer head, resonator disc, pot lid, a falling block through its
+  tumble) are clean;
+- whether reactive 1 on faint cube particles costs the temporal AA of the geometry behind them;
+- the vertex-warp cost of evaluating the warp twice on liquid, particles and decals - finding (j)
+  is still unpaid;
+- the GL path of everything P4 added: `BeginMotionOnlyWrite`'s `GL_NONE` draw-buffer array,
+  `ApplyOptimumMotionAccumulateBlendState`'s `glBlendFunci`, and the sky pass's depth-func dance.
+- `taaLiquidReactive` (0.3) and `taaCloudReactive` (1.0) are hard-coded constants, not settings;
+  wiring them to `OptimumConfig` is P5 work.
 
 **P5. Integration, sharpen, settings, fallback, acceptance.**
 - RCAS variant with a sharpness uniform and true bypass; no double sharpening with FSR1 render
