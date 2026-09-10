@@ -576,6 +576,19 @@ namespace Vintagestory.API.Client
         private static float windWaveIntensityScratch = 1f;
         private static float waterWaveCounterScratch;
 
+        /// <summary>
+        /// The two per-draw warp uniforms as the draw in progress last set them.
+        /// Shared with <see cref="OptimumStandardMotion" />: the standard shader's
+        /// users override the very same two names (a swimming dropped item sets
+        /// waterWaveCounter, an entity sets windWaveIntensity), and both writers
+        /// read them through the one recorder in ShaderProgramBase rather than
+        /// growing a second hook.
+        /// </summary>
+        internal static float ScratchWindWaveIntensity => windWaveIntensityScratch;
+
+        /// <summary>See <see cref="ScratchWindWaveIntensity" />.</summary>
+        internal static float ScratchWaterWaveCounter => waterWaveCounterScratch;
+
         private static IShaderProgram sharedUniformProgram;
         private static long sharedUniformFrame = -1;
         private static EnumTemporalView sharedUniformView;
@@ -701,6 +714,137 @@ namespace Vintagestory.API.Client
             {
                 program.Uniform("prevWaterWaveCounter", valid ? history.PrevWaterWaveCounter : history.CurWaterWaveCounter);
             }
+        }
+    }
+
+    /// <summary>
+    /// Per-object previous transforms for the standard-shader motion writer (TAA P3).
+    ///
+    /// The standard shader has no bone upload to hang the history off, so its users
+    /// name themselves: a renderer calls <see cref="Apply" /> after it has set this
+    /// draw's <c>modelMatrix</c> and before it draws, passing a stable identity
+    /// object and the mesh it is about to render. Held items key on the attachment
+    /// point pose (one per hand, replaced when the animator changes), dropped items
+    /// and block-entity renderers on the renderer instance itself, which is exactly
+    /// as long-lived as the thing it draws. Nothing is stored on the mod-fork types,
+    /// so no new fields have to be transplanted into the installed runtime.
+    ///
+    /// A draw that never calls this is not instrumented at all - and, because the
+    /// motion attachment is only in the draw-buffer mask while a writer holds the
+    /// window open, it also writes nothing, so the resolve falls back to camera
+    /// reprojection for it rather than reprojecting it by a stale vector.
+    ///
+    /// Render thread only.
+    /// </summary>
+    public static class OptimumStandardMotion
+    {
+        private sealed class History
+        {
+            public readonly float[] PrevModelMatrix = new float[16];
+            public readonly float[] CurModelMatrix = new float[16];
+
+            /// <summary>The mesh drawn last frame; a different one means a different shape.</summary>
+            public object PrevShape;
+            public object CurShape;
+
+            public float PrevWindWaveIntensity = 1f;
+            public float CurWindWaveIntensity = 1f;
+            public float PrevWaterWaveCounter;
+            public float CurWaterWaveCounter;
+
+            public EnumTemporalView PrevView;
+            public EnumTemporalView CurView;
+
+            public long CapturedFrame = -1;
+            public long PreviousFrame = -1;
+        }
+
+        private static readonly ConditionalWeakTable<object, History> histories = new ConditionalWeakTable<object, History>();
+
+        private static IShaderProgram sharedUniformProgram;
+        private static long sharedUniformFrame = -1;
+        private static EnumTemporalView sharedUniformView;
+
+        /// <summary>
+        /// Feeds one standard-shader draw's previous transform to the writer.
+        /// </summary>
+        /// <param name="program">The standard-shader program in use, already active.</param>
+        /// <param name="identity">A stable object that means "this drawn thing".</param>
+        /// <param name="shape">The mesh about to be drawn; history is void when it changed.</param>
+        /// <param name="modelMatrix">The model matrix this draw set, 16 floats.</param>
+        /// <returns>Whether the writer got a usable previous transform.</returns>
+        public static bool Apply(IShaderProgram program, object identity, object shape, float[] modelMatrix)
+        {
+            if (!OptimumEntityMotion.Enabled || program == null || identity == null) return false;
+            if (modelMatrix == null || modelMatrix.Length < 16) return false;
+            if (!program.HasUniform("taaHistoryValid")) return false;
+
+            OptimumTemporalFrame frame = OptimumTemporal.Frame;
+            EnumTemporalView view = frame.ActiveView;
+            History history = histories.GetValue(identity, _ => new History());
+
+            // One roll per frame, not per draw: something drawn twice in a frame must
+            // both times compare against the frame before, not against its own first draw.
+            if (history.CapturedFrame != frame.FrameIndex)
+            {
+                Array.Copy(history.CurModelMatrix, history.PrevModelMatrix, 16);
+                history.PrevShape = history.CurShape;
+                history.PrevWindWaveIntensity = history.CurWindWaveIntensity;
+                history.PrevWaterWaveCounter = history.CurWaterWaveCounter;
+                history.PrevView = history.CurView;
+                history.PreviousFrame = history.CapturedFrame;
+                history.CapturedFrame = frame.FrameIndex;
+            }
+
+            Array.Copy(modelMatrix, history.CurModelMatrix, 16);
+            history.CurShape = shape;
+            history.CurWindWaveIntensity = OptimumEntityMotion.ScratchWindWaveIntensity;
+            history.CurWaterWaveCounter = OptimumEntityMotion.ScratchWaterWaveCounter;
+            history.CurView = view;
+
+            bool valid =
+                !frame.Reset &&
+                history.PreviousFrame == frame.FrameIndex - 1 &&
+                ReferenceEquals(history.PrevShape, shape) &&
+                history.PrevView == view &&
+                frame.WasViewCaptured(view);
+
+            // Per-frame, per-program half: the previous camera and the previous global
+            // warp state are the same for every draw the pass makes.
+            if (!ReferenceEquals(sharedUniformProgram, program) ||
+                sharedUniformFrame != frame.FrameIndex ||
+                sharedUniformView != view)
+            {
+                sharedUniformProgram = program;
+                sharedUniformFrame = frame.FrameIndex;
+                sharedUniformView = view;
+                if (program.HasUniform("prevProjectionMatrix"))
+                {
+                    program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(view));
+                }
+                if (program.HasUniform("prevViewMatrix"))
+                {
+                    program.UniformMatrix("prevViewMatrix", frame.PrevCameraMatrixOrigin);
+                }
+                frame.ApplyMotionUniforms(program);
+            }
+
+            if (program.HasUniform("prevModelMatrix"))
+            {
+                program.UniformMatrix("prevModelMatrix", valid ? history.PrevModelMatrix : history.CurModelMatrix);
+            }
+            program.Uniform("taaHistoryValid", valid ? 1 : 0);
+            if (program.HasUniform("taaReactive")) program.Uniform("taaReactive", valid ? 0f : 1f);
+            if (program.HasUniform("prevWindWaveIntensity"))
+            {
+                program.Uniform("prevWindWaveIntensity", valid ? history.PrevWindWaveIntensity : history.CurWindWaveIntensity);
+            }
+            if (program.HasUniform("prevWaterWaveCounter"))
+            {
+                program.Uniform("prevWaterWaveCounter", valid ? history.PrevWaterWaveCounter : history.CurWaterWaveCounter);
+            }
+
+            return valid;
         }
     }
 

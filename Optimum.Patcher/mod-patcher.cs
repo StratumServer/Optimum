@@ -163,6 +163,11 @@ public static class ModPatcher
                 // motion-writer changes.
                 new("Vintagestory.GameContent.EntityPlayerShapeRenderer", "DoRender3DOpaque", 2),
                 new("Vintagestory.GameContent.ModSystemFpHands", "LoadShaders", 0),
+                // TAA P3: the standard-shader motion writer. Held items (both hands,
+                // and the first-person item program) get their previous transform in
+                // RenderItem; dropped items in EntityItemRenderer.DoRender3DOpaque
+                // above. Both also open the motion-attachment window around their draw.
+                new("Vintagestory.GameContent.EntityShapeRenderer", "RenderItem", 5),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.WeatherSimulationSound", "updateSounds", 1),
@@ -254,6 +259,9 @@ public static class ModPatcher
                 // entityanimated program from DoRender3DOpaque, so it opens the
                 // motion-attachment window itself.
                 new("Vintagestory.GameContent.EchoChamberRenderer", "DoRender3DOpaque", 2),
+                // TAA P3: the quern top is the block-entity model that actually
+                // moves, so it keeps a previous model matrix and writes motion.
+                new("Vintagestory.GameContent.QuernTopRenderer", "OnRenderFrame", 2),
             ]);
     }
 
