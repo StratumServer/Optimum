@@ -651,6 +651,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         if (!_frameActive) return;
 
+        TextureDump.NoteFrame();
         if (TextureDump.Wanted) DumpRequestedTextures();
 
         CommandBuffer commandBuffer = _frames.Current.CommandBuffer;

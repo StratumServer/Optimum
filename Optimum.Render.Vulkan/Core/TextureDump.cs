@@ -52,7 +52,35 @@ internal static class TextureDump
     }
 
     /// <summary>True while any requested texture has not been written yet.</summary>
-    public static bool Wanted => Pending.Count > 0;
+    /// <summary>
+    /// Frames to let pass before writing anything. OPTIMUM_DUMP_AFTER_FRAMES
+    /// (default 0) lets a dump of a frame target wait until a world is on
+    /// screen instead of capturing the menu's black first frame.
+    /// </summary>
+    private static readonly long StartAfterFrames =
+        long.TryParse(Environment.GetEnvironmentVariable("OPTIMUM_DUMP_AFTER_FRAMES"), NumberStyles.Integer,
+            CultureInfo.InvariantCulture, out long frames) ? frames : 0;
+
+    /// <summary>
+    /// Seconds to wait before writing, OPTIMUM_DUMP_AFTER_SECONDS (default 0).
+    /// The menu runs uncapped, so a frame count alone can expire before a world
+    /// is on screen; wall time is what a person setting this reasons in.
+    /// </summary>
+    private static readonly double StartAfterSeconds =
+        double.TryParse(Environment.GetEnvironmentVariable("OPTIMUM_DUMP_AFTER_SECONDS"), NumberStyles.Float,
+            CultureInfo.InvariantCulture, out double seconds) ? seconds : 0;
+
+    private static long _framesSeen;
+    private static readonly long StartedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+    /// <summary>Counts a presented frame; the dump waits out the configured delays.</summary>
+    public static void NoteFrame() => _framesSeen++;
+
+    private static double SecondsSinceStart =>
+        (System.Diagnostics.Stopwatch.GetTimestamp() - StartedAt) / (double)System.Diagnostics.Stopwatch.Frequency;
+
+    public static bool Wanted =>
+        Pending.Count > 0 && _framesSeen >= StartAfterFrames && SecondsSinceStart >= StartAfterSeconds;
 
     private static HashSet<int> Parse(string? value)
     {
