@@ -1,0 +1,78 @@
+diff --git a/VSSurvivalMod/Systems/MechanicalPower/Renderer/ClutchBlockRenderer.cs b/VSSurvivalMod/Systems/MechanicalPower/Renderer/ClutchBlockRenderer.cs
+index 1403c82..a3a30e3 100644
+--- a/VSSurvivalMod/Systems/MechanicalPower/Renderer/ClutchBlockRenderer.cs
++++ b/VSSurvivalMod/Systems/MechanicalPower/Renderer/ClutchBlockRenderer.cs
+@@ -28,29 +28,14 @@ namespace Vintagestory.GameContent.Mechanics
+             capi.Tesselator.TesselateShape(textureSoureBlock, ovshape, out MeshData blockMesh2, rot);
+ 
+             //blockMesh1.Rgba2 = null;
+             //blockMesh2.Rgba2 = null;
+ 
+-            // 16 floats matrix, 4 floats light rgbs
+-            blockMesh1.CustomFloats = matrixAndLightFloats1 = new CustomMeshDataPartFloat((16 + 4) * 10100)
+-            {
+-                Instanced = true,
+-                InterleaveOffsets = new int[] { 0, 16, 32, 48, 64 },
+-                InterleaveSizes = new int[] { 4, 4, 4, 4, 4 },
+-                InterleaveStride = 16 + 4 * 16,
+-                StaticDraw = false,
+-            };
+-            blockMesh1.CustomFloats.SetAllocationSize((16 + 4) * 10100);
+-            blockMesh2.CustomFloats = matrixAndLightFloats2 = new CustomMeshDataPartFloat((16 + 4) * 10100)
+-            {
+-                Instanced = true,
+-                InterleaveOffsets = new int[] { 0, 16, 32, 48, 64 },
+-                InterleaveSizes = new int[] { 4, 4, 4, 4, 4 },
+-                InterleaveStride = 16 + 4 * 16,
+-                StaticDraw = false,
+-            };
+-            blockMesh2.CustomFloats.SetAllocationSize((16 + 4) * 10100);
++            // 16 floats matrix, 4 floats light rgbs, and the TAA writer's previous
++            // transform and metadata beside them (Optimum P3, OptimumInstanceMotion).
++            blockMesh1.CustomFloats = matrixAndLightFloats1 = OptimumInstanceMotion.CreateInstanceFloats(10100);
++            blockMesh2.CustomFloats = matrixAndLightFloats2 = OptimumInstanceMotion.CreateInstanceFloats(10100);
+ 
+             this.blockMeshRef1 = capi.Render.UploadMesh(blockMesh1);
+             this.blockMeshRef2 = capi.Render.UploadMesh(blockMesh2);
+         }
+ 
+@@ -95,34 +80,27 @@ namespace Vintagestory.GameContent.Mechanics
+             Mat4f.MulQuat(tmpMat, quat);
+ 
+             Mat4f.Translate(tmpMat, tmpMat, -axis.X, -axis.Y, -axis.Z);
+             //if (xtraTransform != null) Mat4f.Mul(tmpMat, tmpMat, xtraTransform);
+ 
+-            int j = index * 20;
+-            values[j] = lightRgba.R;
+-            values[++j] = lightRgba.G;
+-            values[++j] = lightRgba.B;
+-            values[++j] = lightRgba.A;
+-
+-            for (int i = 0; i < 16; i++)
+-            {
+-                values[++j] = tmpMat[i];
+-            }
++            // Optimum TAA (P3): light and this frame's transform as vanilla wrote them,
++            // plus the same device's previous transform for the motion writer.
++            OptimumInstanceMotion.WriteInstance(values, index, lightRgba, tmpMat);
+             return tmpMat;
+         }
+ 
+         public override void OnRenderFrame(float deltaTime, IShaderProgram prog)
+         {
+             UpdateCustomFloatBuffer();
+ 
+             if (quantityBlocks > 0)
+             {
+-                matrixAndLightFloats1.Count = quantityBlocks * 20;
++                matrixAndLightFloats1.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats1;
+                 capi.Render.UpdateMesh(blockMeshRef1, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef1, quantityBlocks);
+-                matrixAndLightFloats2.Count = quantityBlocks * 20;
++                matrixAndLightFloats2.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats2;
+                 capi.Render.UpdateMesh(blockMeshRef2, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef2, quantityBlocks);
+             }
+         }

@@ -262,6 +262,34 @@ public static class ModPatcher
                 // TAA P3: the quern top is the block-entity model that actually
                 // moves, so it keeps a previous model matrix and writes motion.
                 new("Vintagestory.GameContent.QuernTopRenderer", "OnRenderFrame", 2),
+                // TAA P3, the instanced writer: every mechanical-power renderer now
+                // fills OptimumInstanceMotion's instance layout (light, transform,
+                // previous transform, metadata) instead of vanilla's light+transform,
+                // so the buffer allocations, the transform writers and the instance
+                // counts all move together. MechNetworkRenderer sets the pass uniforms
+                // and opens the draw-buffer window around the whole loop.
+                new("Vintagestory.GameContent.Mechanics.MechNetworkRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.MechBlockRenderer", "UpdateCustomFloatBuffer", 0),
+                new("Vintagestory.GameContent.Mechanics.MechBlockRenderer", "UpdateLightAndTransformMatrix", 7),
+                new("Vintagestory.GameContent.Mechanics.GenericMechBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.GenericMechBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.AngledCageGearRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.AngledCageGearRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.AngledGearsBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.AngledGearsBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.TransmissionBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.TransmissionBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.ClutchBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.ClutchBlockRenderer", "UpdateLightAndTransformMatrix", 9),
+                new("Vintagestory.GameContent.Mechanics.ClutchBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", "createCustomFloats", 1),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", "UpdateLightAndTransformMatrix", 8),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", "createCustomFloats", 1),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", "UpdateLightAndTransformMatrix", 8),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", "OnRenderFrame", 2),
             ]);
     }
 

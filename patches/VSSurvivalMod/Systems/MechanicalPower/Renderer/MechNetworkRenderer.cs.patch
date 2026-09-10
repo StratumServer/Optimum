@@ -1,0 +1,30 @@
+diff --git a/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechNetworkRenderer.cs b/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechNetworkRenderer.cs
+index 0056eb6..954ea99 100644
+--- a/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechNetworkRenderer.cs
++++ b/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechNetworkRenderer.cs
+@@ -98,15 +98,25 @@ namespace Vintagestory.GameContent.Mechanics
+                 prog.Uniform("fogMinIn", capi.Render.FogMin);
+                 prog.Uniform("fogDensityIn", capi.Render.FogDensity);
+                 prog.UniformMatrix("projectionMatrix", capi.Render.CurrentProjectionMatrix);
+                 prog.UniformMatrix("modelViewMatrix", capi.Render.CameraMatrixOriginf);
+ 
++                // Optimum TAA (P3): the previous camera for the motion writer, then the
++                // draw-buffer window that lets these draws into Primary's motion
++                // attachment. The window stays around this loop only - every draw inside
++                // it is the instanced program, which writes the attachment; a draw that
++                // does not write it would leave the previous surface's vector standing.
++                OptimumInstanceMotion.ApplyPassUniforms(prog);
++                bool optimumMotionWrite = OptimumMotionWrite.Begin();
++
+                 for (int i = 0; i < MechBlockRenderer.Count; i++)
+                 {
+                     MechBlockRenderer[i].OnRenderFrame(deltaTime, prog);
+                 }
+ 
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++
+                 prog.Stop();
+             }
+             else
+             {
+                 // TODO: Needs a custom shadow map shader

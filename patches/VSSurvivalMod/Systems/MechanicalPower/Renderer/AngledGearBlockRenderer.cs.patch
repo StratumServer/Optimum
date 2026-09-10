@@ -1,0 +1,43 @@
+diff --git a/VSSurvivalMod/Systems/MechanicalPower/Renderer/AngledGearBlockRenderer.cs b/VSSurvivalMod/Systems/MechanicalPower/Renderer/AngledGearBlockRenderer.cs
+index f6b801e..723f9a4 100644
+--- a/VSSurvivalMod/Systems/MechanicalPower/Renderer/AngledGearBlockRenderer.cs
++++ b/VSSurvivalMod/Systems/MechanicalPower/Renderer/AngledGearBlockRenderer.cs
+@@ -21,20 +21,13 @@ namespace Vintagestory.GameContent.Mechanics
+ 
+             capi.Tesselator.TesselateShape(textureSoureBlock, API.Common.Shape.TryGet(capi, "shapes/block/wood/mechanics/angledgearbox-cage.json"), out MeshData gearboxCageMesh, rot);
+             capi.Tesselator.TesselateShape(textureSoureBlock, API.Common.Shape.TryGet(capi, "shapes/block/wood/mechanics/angledgearbox-peg.json"), out MeshData gearboxPegMesh, rot);
+ 
+             
+-            // 16 floats matrix, 4 floats light rgbs
+-            gearboxPegMesh.CustomFloats = floatsPeg = new CustomMeshDataPartFloat((16 + 4) * 10100)
+-            {
+-                Instanced = true,
+-                InterleaveOffsets = new int[] { 0, 16, 32, 48, 64 },
+-                InterleaveSizes = new int[] { 4, 4, 4, 4, 4 },
+-                InterleaveStride = 16 + 4 * 16,
+-                StaticDraw = false,
+-            };
+-            gearboxPegMesh.CustomFloats.SetAllocationSize((16 + 4) * 10100);
++            // 16 floats matrix, 4 floats light rgbs, and the TAA writer's previous
++            // transform and metadata beside them (Optimum P3, OptimumInstanceMotion).
++            gearboxPegMesh.CustomFloats = floatsPeg = OptimumInstanceMotion.CreateInstanceFloats(10100);
+ 
+             gearboxCageMesh.CustomFloats = floatsCage = floatsPeg.Clone();
+ 
+             this.gearboxPeg = capi.Render.UploadMesh(gearboxPegMesh);
+             this.gearboxCage = capi.Render.UploadMesh(gearboxCageMesh);
+@@ -71,12 +64,12 @@ namespace Vintagestory.GameContent.Mechanics
+         {
+             UpdateCustomFloatBuffer();
+ 
+             if (quantityBlocks > 0)
+             {
+-                floatsPeg.Count = quantityBlocks * 20;
+-                floatsCage.Count = quantityBlocks * 20;
++                floatsPeg.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
++                floatsCage.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 
+                 updateMesh.CustomFloats = floatsPeg;
+                 capi.Render.UpdateMesh(gearboxPeg, updateMesh);
+ 
+                 updateMesh.CustomFloats = floatsCage;
