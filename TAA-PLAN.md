@@ -815,6 +815,35 @@ and this section, in that order.
 - https://github.com/godotengine/godot/pull/61319
 - https://mods.vintagestory.at/show/mod/35005
 
+## Follow-up 2026-09-11: distant foliage jitter was the resolve
+- **Symptom:** distant foliage shimmered with TAA on, on both backends.
+- **Root cause** (parity dumps, both backends): `taa-resolve.fsh`'s single-sample disocclusion test
+  (this pixel's linear depth against the one history depth under `historyUv`) rejected history on
+  **3.7%** of distant leaf pixels per frame. A sub-pixel leaf hits the leaf in one jitter phase and
+  the far background in the next, so the two depths disagree by tens of blocks and the pixel resets
+  to the raw aliased sample. On top of that the fixed current weight (`blendAlpha` for every kept
+  pixel) let the neighbourhood clip box, moved every frame by the same leaf, drag the history.
+- **Fix** (`sources/shaders/taa-resolve.fsh`, taken from `diag/taa-trace` b0a473f without its
+  instrumentation): the 3x3 loop tracks the nearest window depth; the motion vector, the sky test and
+  the camera fallback use that tap; the disocclusion test compares its linear depth against the
+  nearest finite history depth in a 3x3 around `historyUv`, tolerance `0.5 + 0.08 * closestLinearDepth`;
+  kept pixels take `mix(1.2, 0.3, w * w) * blendAlpha` of the current frame with
+  `w = 1 - |lumCur - lumHist| / max(lumCur, max(lumHist, 0.2))` (Playdead INSIDE TAA), then reactive.
+  Contract unchanged (v1); note under section 4 of `docs/temporal-frame-contract.md`.
+- **Numbers:** leaf-far rejection **3.7% -> 1.1%** per frame. The user confirmed on Vulkan that the
+  distant-foliage flicker is gone.
+- **Tests:** `TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifference` (0.3 x / 1.2 x
+  blendAlpha step responses), `FlippingSubPixelLeafKeepsItsHistory` (the old per-sample line resets
+  a leaf flipping between two pixels, the shipped one keeps it),
+  `DisocclusionLargerThanTheNeighbourhoodStillResets`, `MotionComesFromTheNearestDepthTapAtAnEdge`;
+  `Optimum.Tests/taa-antiflicker-coverage-tests.cs` pins the shader lines, this entry, the contract
+  note, the acceptance rows and the script's self-test.
+- **Script:** `python3 scripts/dev/taa-rejection.py <parity dump dir> [--max-leaf-far 1.5]` prints
+  single-sample and 3x3 rejection rates per region (near/mid/far by linear-depth p50/p90, leaf-mid,
+  leaf-far) and fails when the 3x3 leaf-far rate is above 1.5 percent. Required by
+  `docs/taa-acceptance.md` row A19 and `docs/vulkan-acceptance.md` M1.7.
+- **Do not revert** to a single-sample depth test or a fixed blend weight.
+
 ## Follow-up (not part of this plan): shader patch system
 Shaders ship as whole-file overrides (`sources/shaders/*` copied over vanilla by name, since v0.1.0;
 P3 adds chunktopsoil, entityanimated and the vertexwarp include). A game update that changes a vanilla

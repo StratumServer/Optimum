@@ -226,10 +226,13 @@ All numbers first, then eyes. Each row names the plan's definition of done verba
 
 #### M1.7 TAA still-frame stability
 - Commands: `Taa: true`; `docs/taa-acceptance.md` section 1 (seven screenshot pairs per backend,
-  `scripts/dev/luma-diff.py --median`).
+  `scripts/dev/luma-diff.py --median`); **required**: one parity dump per backend with distant
+  foliage in frame (`scripts/dev/parity-capture.sh`) and `python3 scripts/dev/taa-rejection.py
+  <dump dir>` on each (`docs/taa-acceptance.md` row A19; guards the 2026-09-11 distant-foliage fix).
 - Pass: the Vulkan median is within 0.3 of the OpenGL median (reference VK 1.84 / GL 1.87,
-  `docs/taa-acceptance.md` section 1).
-- Record: both renderer lines, the fourteen diffs, both medians.
+  `docs/taa-acceptance.md` section 1), and `taa-rejection.py` exits 0 on both dumps (3x3 nearest-depth
+  leaf-far rejection <= 1.5 percent).
+- Record: both renderer lines, the fourteen diffs, both medians, both rejection tables.
 
 #### M1.8 TAA acceptance rows re-pass
 - Commands: `docs/taa-acceptance.md` rows A11, A13, A14, A15, A17, A18.

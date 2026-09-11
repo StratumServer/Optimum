@@ -15,6 +15,8 @@ Tooling used by this document:
 | `scripts/dev/perf-capture.sh` | launch, warm up, record 30 s of frame times, close, print mean, 1% low and stddev |
 | `scripts/dev/pacing-gate.sh` | pass/fail on a captured run's pacing logs (section 3, P3) |
 | `scripts/dev/luma-diff.py` | still-frame luminance diff (parity skill section 2c) |
+| `scripts/dev/parity-capture.sh` | one parity dump of every attachment on one backend (config restored on exit) |
+| `scripts/dev/taa-rejection.py` | history rejection rates per region from a parity dump; fails above 1.5 percent 3x3 leaf-far rejection (row A19) |
 
 ## 0. Preconditions for every row
 
@@ -177,6 +179,15 @@ measurement to record. "TAA off byte-identical" is checked once, in row A18, not
 - Commands: run once with `Taa: false` on the current build and once with `Taa: false` on the pre-TAA commit, same save, same settings, same window size; compare the screenshots byte for byte (`cmp`) and with `scripts/dev/luma-diff.py`.
 - Pass: `cmp` reports identical files, or the luminance diff is exactly 0.000.
 - Record: the `cmp` result and the diff value, per backend.
+
+### A19. distant foliage stability (resolve rejection rate)
+Added 2026-09-11 (TAA-PLAN.md "Follow-up 2026-09-11: distant foliage jitter was the resolve"): a
+single-sample disocclusion test rejected history on ~3.7% of distant leaf pixels per frame; the 3x3
+nearest-depth test measures ~1.1%. This row keeps it that way.
+- Scene: a tree line or forest edge 60 or more blocks away, camera parked, section 0 applied (wind stilled), `Taa: true`, the default two frames in flight.
+- Commands: per backend `scripts/dev/parity-capture.sh --renderer vulkan --world "<world>" --frame 600 --out /tmp/taa-rej-vulkan` (and `--renderer opengl ... --out /tmp/taa-rej-opengl`), then `python3 scripts/dev/taa-rejection.py /tmp/taa-rej-<backend>`; then `RENDERER=<backend> scripts/dev/run-client.sh "<world>"`, `scripts/dev/client-renderer.sh`, and look at the same distant foliage.
+- Pass: `taa-rejection.py` exits 0 on both dumps (3x3 nearest-depth leaf-far rejection <= 1.5 percent), and the user's eyes on distant foliage see no shimmer on either backend at the default two frames in flight.
+- Record: both renderer lines, both rejection tables (single-sample and 3x3, per region), the user's verdict and date.
 
 ## 3. Performance
 

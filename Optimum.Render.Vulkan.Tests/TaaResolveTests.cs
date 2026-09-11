@@ -642,12 +642,436 @@ public class TaaResolveTests
         }
     }
 
+    // ------------------------------- 2026-09-11: distant foliage jitter was the resolve
+    //
+    // The four tests below pin the fix for the distant-foliage flicker (TAA-PLAN.md
+    // "Follow-up 2026-09-11"): a single-sample disocclusion test rejected history on
+    // ~3.7% of distant leaf pixels per frame and a fixed blend weight let the clip box
+    // drag the history; the 3x3 nearest-depth test and the anti-flicker weight took it
+    // to ~1.1%. Do not revert either half. The temporal ones run several resolves
+    // ping-ponged between two history sets with no readback inside the loop (this
+    // harness has no swapchain; each resolve is its own submitted frame).
+
+    /// <summary>
+    /// Anti-flicker current weight: a pixel that survived rejection takes
+    /// mix(1.2, 0.3, w * w) * blendAlpha of the current frame, with
+    /// w = 1 - |lumCur - lumHist| / max(lumCur, max(lumHist, 0.2)) on the rectified
+    /// luminance. Columns cycle 0.5 / 1.0 / 0.0, so every 3x3 box spans [0, 1] and no
+    /// history value in play is clipped. Class 0.5 starts converged (history equals
+    /// current: w = 1, weight 0.3 x blendAlpha); class 1.0 starts from a history of 0
+    /// (w = 0, weight 1.2 x blendAlpha). Glow blends as mix(historyGlow, glow, alpha)
+    /// with no clip and no luminance weighting, so a glow step from 0 to 1 reads the
+    /// weight itself; the colour step response is checked against the same
+    /// recurrence. One frame and four frames, each also required to sit clearly apart
+    /// from what the old fixed blendAlpha weight produces.
+    /// </summary>
+    [SkippableFact]
+    public void AntiFlickerWeightsFollowTheLuminanceDifference()
+    {
+        const float blendAlpha = 0.1f;
+        // The model rounds the UNORM8 glow per frame exactly as the target does, so it
+        // matches to the LSB; 1.5 LSB leaves room for rounding at .5 only. The fixed
+        // weight is 5 LSB away in the closest case (large change, one frame).
+        const double glowTolerance = 1.5 / 255.0, colourTolerance = 0.004;
+        static float Scene(int x) => (x % 3) switch { 0 => 0.5f, 1 => 1.0f, _ => 0.0f };
+        static float Seed(int x) => x % 3 == 0 ? 0.5f : 0.0f;
+
+        foreach (int frames in new[] { 1, 4 })
+        {
+            TemporalRun? run = RunTemporal(frames, new TaaUniforms { BlendAlpha = blendAlpha },
+                (textures, history) =>
+                {
+                    UploadRgba16F(textures, history.Color, (x, _) => Seed(x), (x, _) => Seed(x), (x, _) => Seed(x), (_, _) => 1f);
+                    UploadFlatRgba8(textures, history.Glow, 0, 0, 0, 255);
+                    // Identity camera: window depth 0.5 is linear depth 0, what the resolve writes back.
+                    UploadFlatR32F(textures, history.Depth, 0f);
+                },
+                (frame, textures, inputs) =>
+                {
+                    if (frame > 0) return;
+                    UploadRgba16F(textures, inputs.SceneTex, (x, _) => Scene(x), (x, _) => Scene(x), (x, _) => Scene(x), (_, _) => 1f);
+                    UploadFlatRgba8(textures, inputs.GlowTex, 255, 255, 255, 255);
+                    UploadFlatR32F(textures, inputs.DepthTex, 0.5f);
+                    UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, 0.5f);
+                });
+            Skip.If(run == null, "No usable Vulkan device.");
+
+            foreach ((string name, int column, float current, float seed) in new[]
+                     {
+                         ("converged", 0, 0.5f, 0.5f),
+                         ("large change", 1, 1.0f, 0.0f),
+                     })
+            {
+                (double colour, double glow) expected = AntiFlickerModel(current, seed, frames, blendAlpha, antiFlicker: true);
+                (double colour, double glow) fixedWeight = AntiFlickerModel(current, seed, frames, blendAlpha, antiFlicker: false);
+                double worstGlow = 0, worstColour = 0, glowAtCentre = 0;
+                for (int y = 2; y < Size - 2; y++)
+                for (int x = 3; x < Size - 3; x++)
+                {
+                    if (x % 3 != column) continue;
+                    double glow = ReadByteChannel(run!.Glow, x, y, 0);
+                    if (y == Size / 2) glowAtCentre = glow;
+                    worstGlow = Math.Max(worstGlow, Math.Abs(glow - expected.glow));
+                    worstColour = Math.Max(worstColour, Math.Abs(ReadHalf(run.Color, x, y, 0, 8) - expected.colour));
+                }
+                _output.WriteLine($"{frames} frame(s), {name}: glow {glowAtCentre:F4} (anti-flicker model {expected.glow:F4}, fixed-weight model {fixedWeight.glow:F4}), " +
+                    $"colour model {expected.colour:F4}; worst glow error {worstGlow:F4}, worst colour error {worstColour:F4}");
+
+                Assert.True(Math.Abs(expected.glow - fixedWeight.glow) > 2 * glowTolerance,
+                    $"{name}: the case cannot tell the anti-flicker weight from a fixed one");
+                Assert.True(worstGlow <= glowTolerance,
+                    $"{name}, {frames} frame(s): glow is {worstGlow:F4} off the anti-flicker step response");
+                Assert.True(worstColour <= colourTolerance,
+                    $"{name}, {frames} frame(s): colour is {worstColour:F4} off the anti-flicker step response");
+
+                if (frames == 1)
+                {
+                    double weight = column == 0 ? 0.3 * blendAlpha : 1.2 * blendAlpha;
+                    Assert.InRange(glowAtCentre, weight - glowTolerance, weight + glowTolerance);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A sub-pixel leaf in front of a far background lands in pixel P in one jitter
+    /// phase and in P + (1, 0) in the next, so the depth of both pixels flips between
+    /// 8 and 120 blocks every frame. The old single-sample test reset both pixels
+    /// every frame; the 3x3 nearest-depth test sees the leaf in both windows and keeps
+    /// the history. Glow marks the last three frames (R = last, G = the one before,
+    /// B = the one before that, each 1 only in its frame): a reset in frame k leaves
+    /// that channel at 1 - (weights after k), a kept pixel at weight * (1 - ...).
+    /// The same scenario runs on the shipped shader and on a copy with only the
+    /// disocclusion line put back to the old per-sample comparison.
+    /// </summary>
+    [SkippableFact]
+    public void FlippingSubPixelLeafKeepsItsHistory()
+    {
+        TemporalRun? nearest = RunLeafFlip(null);
+        Skip.If(nearest == null, "No usable Vulkan device.");
+        TemporalRun perSample = RunLeafFlip(WithPerSampleDisocclusion)!;
+
+        foreach (int x in new[] { LeafX, LeafX + 1 })
+        {
+            float r = ReadByteChannel(nearest!.Glow, x, LeafY, 0);
+            float g = ReadByteChannel(nearest.Glow, x, LeafY, 1);
+            float b = ReadByteChannel(nearest.Glow, x, LeafY, 2);
+            float pr = ReadByteChannel(perSample.Glow, x, LeafY, 0);
+            float pg = ReadByteChannel(perSample.Glow, x, LeafY, 1);
+            float pb = ReadByteChannel(perSample.Glow, x, LeafY, 2);
+            _output.WriteLine($"pixel ({x},{LeafY}): 3x3 nearest glow=({r:F3},{g:F3},{b:F3}), per-sample glow=({pr:F3},{pg:F3},{pb:F3})");
+
+            // The old test: reset in the last frame (every channel equals that frame's glow).
+            Assert.True(pr >= 0.99f && pg <= 0.01f && pb <= 0.01f,
+                $"the per-sample reference no longer resets the flipping pixel ({x},{LeafY}); the scenario does not reproduce the bug");
+            // The shipped test: kept in each of the last three frames.
+            Assert.InRange(r, 0.015f, 0.25f);
+            Assert.InRange(g, 0.015f, 0.25f);
+            Assert.InRange(b, 0.015f, 0.25f);
+        }
+
+        // Not asserted, printed for the record: the background pixels just outside the
+        // leaf's two positions see it enter their current 3x3 while their history
+        // window never held it, so the nearest-depth test resets them instead.
+        foreach (int x in new[] { LeafX - 1, LeafX + 2 })
+        {
+            _output.WriteLine($"fringe pixel ({x},{LeafY}): 3x3 nearest R={ReadByteChannel(nearest!.Glow, x, LeafY, 0):F3}, per-sample R={ReadByteChannel(perSample.Glow, x, LeafY, 0):F3}");
+        }
+    }
+
+    /// <summary>
+    /// The 3x3 test must not hide a real disocclusion: an 8x8 block at 8 blocks in
+    /// front of a background at 120 is present for three frames and gone in the
+    /// fourth. Every pixel of the block's interior has only background in its current
+    /// 3x3 and only the block in its history 3x3, so it resets (glow marks the last
+    /// frame: 1 after a reset) and shows the background colour at once. A pixel far
+    /// from the block keeps its history with the converged weight 0.3 x blendAlpha.
+    /// </summary>
+    [SkippableFact]
+    public void DisocclusionLargerThanTheNeighbourhoodStillResets()
+    {
+        const int frames = 4;
+        const float blendAlpha = 0.1f, blockColour = 0.9f, backgroundColour = 0.4f;
+        PerspectiveCamera camera = CreatePerspective();
+        float nearDepth = camera.WindowDepth(LeafLinearDepth), farDepth = camera.WindowDepth(BackgroundLinearDepth);
+        static bool InBlock(int x, int y) => x >= 12 && x < 20 && y >= 12 && y < 20;
+
+        TemporalRun? run = RunTemporal(frames, camera.Uniforms(blendAlpha),
+            (textures, history) =>
+            {
+                UploadRgba16F(textures, history.Color, (x, y) => InBlock(x, y) ? blockColour : backgroundColour,
+                    (x, y) => InBlock(x, y) ? blockColour : backgroundColour,
+                    (x, y) => InBlock(x, y) ? blockColour : backgroundColour, (_, _) => 1f);
+                UploadFlatRgba8(textures, history.Glow, 0, 0, 0, 255);
+                UploadR32F(textures, history.Depth, (x, y) => InBlock(x, y) ? LeafLinearDepth : BackgroundLinearDepth);
+            },
+            (frame, textures, inputs) =>
+            {
+                bool present = frame < frames - 1;
+                bool Block(int x, int y) => present && InBlock(x, y);
+                UploadRgba16F(textures, inputs.SceneTex, (x, y) => Block(x, y) ? blockColour : backgroundColour,
+                    (x, y) => Block(x, y) ? blockColour : backgroundColour,
+                    (x, y) => Block(x, y) ? blockColour : backgroundColour, (_, _) => 1f);
+                UploadR32F(textures, inputs.DepthTex, (x, y) => Block(x, y) ? nearDepth : farDepth);
+                UploadRgba16F(textures, inputs.MotionTex, (_, _) => 0f, (_, _) => 0f, (_, _) => 0f,
+                    (x, y) => Block(x, y) ? nearDepth : farDepth);
+                byte mark = frame == frames - 1 ? (byte)255 : (byte)0;
+                UploadFlatRgba8(textures, inputs.GlowTex, mark, mark, mark, 255);
+            });
+        Skip.If(run == null, "No usable Vulkan device.");
+
+        for (int y = 13; y < 19; y++)
+        for (int x = 13; x < 19; x++)
+        {
+            float glow = ReadByteChannel(run!.Glow, x, y, 0);
+            float colour = ReadHalf(run.Color, x, y, 0, 8);
+            Assert.True(glow >= 254f / 255f, $"disoccluded pixel ({x},{y}) kept its history: glow {glow:F3}");
+            Assert.InRange(colour, backgroundColour - 0.01f, backgroundColour + 0.01f);
+        }
+
+        foreach ((int x, int y) in new[] { (4, 4), (27, 27) })
+        {
+            float glow = ReadByteChannel(run!.Glow, x, y, 0);
+            _output.WriteLine($"control pixel ({x},{y}): glow {glow:F4}, converged weight {0.3 * blendAlpha:F4}");
+            Assert.InRange(glow, 0.3f * blendAlpha - 2.5f / 255f, 0.3f * blendAlpha + 2.5f / 255f);
+        }
+    }
+
+    /// <summary>
+    /// At a depth edge the motion vector comes from the nearest-depth tap of the 3x3.
+    /// Foreground (8 blocks, columns >= 16) moved left by 4 px, so it writes
+    /// mv = (+4, 0); the background (120 blocks) is static. Column 15 is background,
+    /// but its 3x3 holds foreground taps, so it reprojects with +4 and reads history
+    /// column 19, the only bright column of the history glow. Column 14 (no foreground
+    /// in its 3x3) reads its own column, column 16 (foreground) reads column 20: both
+    /// dark. A resolve that used the pixel's own vector would leave column 15 dark.
+    /// </summary>
+    [SkippableFact]
+    public void MotionComesFromTheNearestDepthTapAtAnEdge()
+    {
+        const int edge = 16, shift = 4;
+        PerspectiveCamera camera = CreatePerspective();
+        float nearDepth = camera.WindowDepth(LeafLinearDepth), farDepth = camera.WindowDepth(BackgroundLinearDepth);
+
+        TemporalRun? run = RunTemporal(1, camera.Uniforms(0.05f),
+            (textures, history) =>
+            {
+                UploadFlatRgba16F(textures, history.Color, 0.5f, 0.5f, 0.5f, 1f);
+                UploadRgba8(textures, history.Glow, (x, _) => x == edge - 1 + shift ? (byte)255 : (byte)0,
+                    (_, _) => 0, (_, _) => 0, (_, _) => 255);
+                // Last frame the foreground started at column edge + shift.
+                UploadR32F(textures, history.Depth, (x, _) => x >= edge + shift ? LeafLinearDepth : BackgroundLinearDepth);
+            },
+            (_, textures, inputs) =>
+            {
+                UploadFlatRgba16F(textures, inputs.SceneTex, 0.5f, 0.5f, 0.5f, 1f);
+                UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+                UploadR32F(textures, inputs.DepthTex, (x, _) => x >= edge ? nearDepth : farDepth);
+                UploadRgba16F(textures, inputs.MotionTex, (x, _) => x >= edge ? shift : 0f, (_, _) => 0f, (_, _) => 0f,
+                    (x, _) => x >= edge ? nearDepth : farDepth);
+            });
+        Skip.If(run == null, "No usable Vulkan device.");
+
+        for (int y = 4; y < Size - 4; y++)
+        {
+            float edgePixel = ReadByteChannel(run!.Glow, edge - 1, y, 0);
+            float background = ReadByteChannel(run.Glow, edge - 2, y, 0);
+            float foreground = ReadByteChannel(run.Glow, edge, y, 0);
+            if (y == Size / 2)
+                _output.WriteLine($"row {y}: column {edge - 2} glow {background:F3}, column {edge - 1} glow {edgePixel:F3}, column {edge} glow {foreground:F3}");
+            Assert.True(edgePixel >= 0.9f, $"column {edge - 1} row {y} did not reproject with the nearest tap's vector (glow {edgePixel:F3})");
+            Assert.True(background <= 0.05f, $"column {edge - 2} row {y} moved although its 3x3 holds no foreground (glow {background:F3})");
+            Assert.True(foreground <= 0.05f, $"column {edge} row {y} did not use its own vector (glow {foreground:F3})");
+        }
+    }
+
+    private const int LeafX = 16, LeafY = 16;
+    private const float LeafLinearDepth = 8f, BackgroundLinearDepth = 120f;
+
+    /// <summary>The disocclusion line the shipped resolve carries, and the per-sample line it replaced.</summary>
+    private const string NearestDepthRejection =
+        "if (abs(historyNearest - closestLinearDepth) > depthTolerance) { alpha = 1.0; rejected = true; }";
+    private const string PerSampleRejection =
+        "if (abs(historyLinear - linearDepth) > 0.5 + 0.08 * linearDepth) { alpha = 1.0; rejected = true; }";
+
+    private static string WithPerSampleDisocclusion(string fragment)
+    {
+        Assert.Contains(NearestDepthRejection, fragment);
+        return fragment.Replace(NearestDepthRejection, PerSampleRejection, StringComparison.Ordinal);
+    }
+
+    private TemporalRun? RunLeafFlip(Func<string, string>? fragmentTransform)
+    {
+        const int frames = 6;
+        const float leafColour = 0.9f, backgroundColour = 0.4f;
+        PerspectiveCamera camera = CreatePerspective();
+        float nearDepth = camera.WindowDepth(LeafLinearDepth), farDepth = camera.WindowDepth(BackgroundLinearDepth);
+
+        return RunTemporal(frames, camera.Uniforms(0.1f),
+            (textures, history) =>
+            {
+                // The phase before frame 0: the leaf sat in the right-hand pixel.
+                bool Leaf(int x, int y) => x == LeafX + 1 && y == LeafY;
+                UploadRgba16F(textures, history.Color, (x, y) => Leaf(x, y) ? leafColour : backgroundColour,
+                    (x, y) => Leaf(x, y) ? leafColour : backgroundColour,
+                    (x, y) => Leaf(x, y) ? leafColour : backgroundColour, (_, _) => 1f);
+                UploadFlatRgba8(textures, history.Glow, 0, 0, 0, 255);
+                UploadR32F(textures, history.Depth, (x, y) => Leaf(x, y) ? LeafLinearDepth : BackgroundLinearDepth);
+            },
+            (frame, textures, inputs) =>
+            {
+                int leafX = frame % 2 == 0 ? LeafX : LeafX + 1;
+                bool Leaf(int x, int y) => x == leafX && y == LeafY;
+                UploadRgba16F(textures, inputs.SceneTex, (x, y) => Leaf(x, y) ? leafColour : backgroundColour,
+                    (x, y) => Leaf(x, y) ? leafColour : backgroundColour,
+                    (x, y) => Leaf(x, y) ? leafColour : backgroundColour, (_, _) => 1f);
+                UploadR32F(textures, inputs.DepthTex, (x, y) => Leaf(x, y) ? nearDepth : farDepth);
+                UploadRgba16F(textures, inputs.MotionTex, (_, _) => 0f, (_, _) => 0f, (_, _) => 0f,
+                    (x, y) => Leaf(x, y) ? nearDepth : farDepth);
+                UploadFlatRgba8(textures, inputs.GlowTex,
+                    frame == frames - 1 ? (byte)255 : (byte)0,
+                    frame == frames - 2 ? (byte)255 : (byte)0,
+                    frame == frames - 3 ? (byte)255 : (byte)0, 255);
+            },
+            fragmentTransform);
+    }
+
+    /// <summary>
+    /// The resolve's colour and glow recurrence for a grey pixel whose history stays
+    /// inside the neighbourhood box, with the glow stored as UNORM8 every frame.
+    /// </summary>
+    private static (double colour, double glow) AntiFlickerModel(
+        double current, double history, int frames, double blendAlpha, bool antiFlicker)
+    {
+        double glow = 0;
+        for (int i = 0; i < frames; i++)
+        {
+            double alpha = blendAlpha;
+            if (antiFlicker)
+            {
+                double w = 1.0 - Math.Abs(current - history) / Math.Max(current, Math.Max(history, 0.2));
+                alpha = blendAlpha * 1.2 + (blendAlpha * 0.3 - blendAlpha * 1.2) * w * w;
+            }
+            double wCur = alpha / (1.0 + current), wHist = (1.0 - alpha) / (1.0 + history);
+            history = (current * wCur + history * wHist) / Math.Max(wCur + wHist, 1e-5);
+            glow = Math.Round((glow * (1.0 - alpha) + alpha) * 255.0) / 255.0;
+        }
+        return (history, glow);
+    }
+
+    private sealed class TemporalRun
+    {
+        public byte[] Color = Array.Empty<byte>();
+        public byte[] Glow = Array.Empty<byte>();
+    }
+
+    /// <summary>
+    /// A fresh context, <paramref name="frames" /> resolves ping-ponged between two
+    /// history sets (the first seeded by <paramref name="seedHistory" />, inputs
+    /// uploaded per frame by <paramref name="uploadFrame" />), and one readback of the
+    /// last write after the loop. Null when there is no usable device.
+    /// </summary>
+    private TemporalRun? RunTemporal(int frames, TaaUniforms uniforms,
+        Action<TextureManager, TaaAttachmentSet> seedHistory,
+        Action<int, TextureManager, TaaInputSet> uploadFrame,
+        Func<string, string>? fragmentTransform = null)
+    {
+        var messages = new List<string>();
+        if (!TryCreateContext(_output, messages, out VulkanContext? context)) return null;
+
+        using (context)
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
+        {
+            var state = new GlStateTracker();
+            using var targets = new RenderTargetManager(context!, textures, state);
+            using var pipelines = new GraphicsPipelineCache(context!);
+            using var compiler = new ShaderCompiler();
+            using var descriptors = new DescriptorCache(context!);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state, fragmentTransform);
+
+            var inputs = CreateInputSet(textures);
+            TaaAttachmentSet history = CreateAttachmentSet(textures, targets);
+            TaaAttachmentSet current = CreateAttachmentSet(textures, targets);
+            seedHistory(textures, history);
+
+            for (int frame = 0; frame < frames; frame++)
+            {
+                uploadFrame(frame, textures, inputs);
+                inputs.HistoryColor = history.Color;
+                inputs.HistoryGlow = history.Glow;
+                inputs.HistoryDepth = history.Depth;
+                ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
+                    inputs, uniforms, current);
+                (history, current) = (current, history);
+            }
+
+            var run = new TemporalRun
+            {
+                Color = ReadTextureBytes(context!, commands, textures, history.Color, 8),
+                Glow = ReadTextureBytes(context!, commands, textures, history.Glow, 4),
+            };
+
+            ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
+            return run;
+        }
+    }
+
+    /// <summary>
+    /// A real perspective (fov 70, near 0.1, far 200) with an identity view, so the
+    /// resolve's linear depth is the distance the test names and nearer window depth
+    /// means nearer linear depth, as in the game. Motion is always written in these
+    /// tests, so the matrices only feed the depth reconstruction.
+    /// </summary>
+    private sealed class PerspectiveCamera
+    {
+        private readonly double[] _projection;
+        public readonly float[] Projection;
+        public readonly float[] InverseProjection;
+
+        public PerspectiveCamera(double[] projection, double[] inverse)
+        {
+            _projection = projection;
+            Projection = Array.ConvertAll(projection, v => (float)v);
+            InverseProjection = Array.ConvertAll(inverse, v => (float)v);
+        }
+
+        public float WindowDepth(double linear)
+        {
+            double clipZ = _projection[10] * -linear + _projection[14];
+            double clipW = _projection[11] * -linear + _projection[15];
+            return (float)(clipZ / clipW * 0.5 + 0.5);
+        }
+
+        public TaaUniforms Uniforms(float blendAlpha) => new()
+        {
+            BlendAlpha = blendAlpha,
+            InvViewProjJittered = InverseProjection,
+            PrevViewProj = Projection,
+            ViewMatrix = Identity4,
+        };
+    }
+
+    private static PerspectiveCamera CreatePerspective()
+    {
+        const double near = 0.1, far = 200.0, fov = 70.0 * Math.PI / 180.0;
+        double[] projection = Vintagestory.API.MathTools.Mat4d.Perspective(Vintagestory.API.MathTools.Mat4d.Create(), fov, 1.0, near, far);
+        double[] inverse = Vintagestory.API.MathTools.Mat4d.Invert(Vintagestory.API.MathTools.Mat4d.Create(), projection)!;
+        return new PerspectiveCamera(projection, inverse);
+    }
+
     // ------------------------------------------------------------------ setup
 
     private static ShaderProgramResources LoadProgram(
-        VulkanContext context, ShaderCompiler compiler, GlStateTracker state)
+        VulkanContext context, ShaderCompiler compiler, GlStateTracker state,
+        Func<string, string>? fragmentTransform = null)
     {
         Dictionary<string, string> files = ShaderCorpus.LoadShaderFiles();
+        if (fragmentTransform != null)
+        {
+            files["taa-resolve.fsh"] = fragmentTransform(files["taa-resolve.fsh"]);
+        }
         Dictionary<string, string> includes = ShaderCorpus.LoadIncludes();
         List<ShaderStageSource> stages = ShaderCorpus.BuildProgram(
             "taa-resolve", files, includes, ShaderCorpus.Variants().First());
@@ -1082,6 +1506,20 @@ public class TaaResolveTests
     {
         var data = new float[Size * Size];
         Array.Fill(data, value);
+        fixed (float* pixels = data)
+        {
+            textures.Upload(textureId, 0, 0, 0, Size, Size, (IntPtr)pixels, 4);
+        }
+    }
+
+    private static unsafe void UploadR32F(TextureManager textures, int textureId, Func<int, int, float> value)
+    {
+        var data = new float[Size * Size];
+        for (int y = 0; y < Size; y++)
+        for (int x = 0; x < Size; x++)
+        {
+            data[y * (int)Size + x] = value(x, y);
+        }
         fixed (float* pixels = data)
         {
             textures.Upload(textureId, 0, 0, 0, Size, Size, (IntPtr)pixels, 4);
