@@ -7,15 +7,21 @@
 #   scripts/dev/worktree-bootstrap.sh [main-checkout-path]
 #       inside a secondary worktree: link the shared trees from the main checkout, then materialise.
 #   scripts/dev/worktree-bootstrap.sh --in-place
-#       inside the main checkout after a merge or checkout changed patches/ or sources/: refuses
-#       when build/ or a fork holds edits that extract-patches.sh has not written out yet.
+#       inside the main checkout: refuses when build/ or a fork holds edits that
+#       extract-patches.sh has not written out yet (proves the tree is clean).
+#   scripts/dev/worktree-bootstrap.sh --in-place --discard-build-edits
+#       after a merge or checkout changed patches/ or sources/: patches/ is authoritative and
+#       build/ and the forks are rebuilt from it. Only safe when a plain --in-place run passed
+#       before the merge.
 set -euo pipefail
 
 wt="$(git rev-parse --show-toplevel)"
 main_default="$(git worktree list --porcelain | awk 'NR==1 && $1=="worktree"{print $2}')"
 in_place=0
+discard=0
 if [[ "${1:-}" == "--in-place" ]]; then
   in_place=1
+  [[ "${2:-}" == "--discard-build-edits" ]] && discard=1
   main="$wt"
   if [[ "$wt" != "$main_default" ]]; then
     echo "worktree-bootstrap: --in-place is for the main checkout ($main_default)" >&2
@@ -25,8 +31,8 @@ if [[ "${1:-}" == "--in-place" ]]; then
     echo "worktree-bootstrap: patches/ or sources/ has uncommitted changes; commit them first" >&2
     exit 1
   fi
-  bash "$wt/scripts/extract-patches.sh" >/dev/null
-  if [[ -n "$(git status --porcelain -- patches sources)" ]]; then
+  if (( !discard )); then bash "$wt/scripts/extract-patches.sh" >/dev/null; fi
+  if (( !discard )) && [[ -n "$(git status --porcelain -- patches sources)" ]]; then
     git status --short -- patches sources >&2
     git checkout -- patches sources
     git clean -fdq -- patches sources
