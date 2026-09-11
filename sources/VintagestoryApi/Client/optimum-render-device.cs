@@ -113,6 +113,8 @@ public interface IOptimumGraphicsDevice : IDisposable
     void SetCullFaceMode(bool back);
 
     void SetBlend(bool enabled, EnumBlendMode mode);
+    /// <summary>Toggle blending without replacing per-attachment factors or equations.</summary>
+    void SetBlendEnabled(bool enabled);
     /// <summary>Per-attachment blend, as used by the OIT and SSAO passes.</summary>
     void SetBlendFuncSeparate(int attachment, int srcColor, int dstColor, int srcAlpha, int dstAlpha);
     void SetBlendEquation(int attachment, int mode);
@@ -255,6 +257,8 @@ public interface IOptimumGraphicsDevice : IDisposable
     /// </summary>
     void SetTextureParameter(int textureId, int parameterName, int value);
     void SetTextureParameter(int textureId, int parameterName, float value);
+    /// <summary>Texture border colour for clamped G-buffers and shadow maps.</summary>
+    void SetTextureBorderColor(int textureId, float r, float g, float b, float a);
     int GetTextureParameter(int textureId, int parameterName);
 
     void BindTexture(int unit, int textureId);

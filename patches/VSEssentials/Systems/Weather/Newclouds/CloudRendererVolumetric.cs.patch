@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
-index ce8dd81..18d41f0 100644
+index ce8dd81..8ab1d9c 100644
 --- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
 +++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
 @@ -73,10 +73,26 @@ namespace FluffyClouds {
@@ -14,12 +14,12 @@ index ce8dd81..18d41f0 100644
 +            if (optimumDevice != null)
 +            {
 +                optimumDevice.SetDepthTest(false);
-+                optimumDevice.SetBlend(true, EnumBlendMode.Standard);
++                optimumDevice.SetBlendEnabled(true);
 +
 +                capi.Render.RenderMesh(quad);
 +
++                // GL leaves blending enabled for the remaining OIT draws.
 +                optimumDevice.SetDepthTest(true);
-+                optimumDevice.SetBlend(false, EnumBlendMode.Standard);
 +                program.Stop();
 +                return;
 +            }

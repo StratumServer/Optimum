@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..a45ac57 100644
+index 4a24e75..a16bc58 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..a45ac57 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,154 @@ public class ShaderRegistry
+@@ -181,39 +183,200 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -21,6 +21,14 @@ index 4a24e75..a45ac57 100644
  		});
 +		RegisterOptimumShaderProgram("fsr-easu", ShaderPrograms.FsrEasu = new ShaderProgram());
 +		RegisterOptimumShaderProgram("fsr-rcas", ShaderPrograms.FsrRcas = new ShaderProgram());
++		RegisterOptimumShaderProgram("taa-debug", ShaderPrograms.TaaDebug = new ShaderProgram());
++		RegisterOptimumShaderProgram("taa-resolve", ShaderPrograms.TaaResolve = new ShaderProgram());
++		// Optimum TAA (P5): the post-resolve sharpen pass.
++		RegisterOptimumShaderProgram("taa-sharpen", ShaderPrograms.TaaSharpen = new ShaderProgram());
++		// Optimum TAA (P4): the liquid velocity pass.
++		RegisterOptimumShaderProgram("chunkliquidmotion", ShaderPrograms.ChunkLiquidMotion = new ShaderProgram());
++		// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
++		RegisterOptimumShaderProgram("taa-skymotion", ShaderPrograms.TaaSkyMotion = new ShaderProgram());
 +	}
 +
 +	private static void RegisterOptimumShaderProgram(string name, ShaderProgram program)
@@ -116,30 +124,68 @@ index 4a24e75..a45ac57 100644
  		ShaderPrograms.Chunkopaque.SetCustomSampler("terrainTexLinear", isLinear: true);
  		ShaderPrograms.Chunktopsoil.SetCustomSampler("terrainTex", isLinear: false);
  		ShaderPrograms.Chunktopsoil.SetCustomSampler("terrainTexLinear", isLinear: true);
-+		// Only apply LOD bias when FSR is active (RenderScale < 1.0).
-+		// At 1.0, skip SamplerParameter calls entirely to match vanilla behavior.
-+		if (OptimumConfig.EffectiveRenderScale < 1.0f)
++		// Only apply a LOD bias when something asks for one: FSR (render scale
++		// below 1) or TAA (OptimumConfig.TaaMipBias). At a total of 0 - TAA off
++		// and native render scale - no SamplerParameter call is made at all,
++		// which is what keeps that configuration identical to vanilla. Both
++		// terms come from OptimumConfig so the sampler objects here and the
++		// atlas texture parameters ChunkRenderer sets always agree.
++		float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;
++		if (terrainLodBias != 0f)
 +		{
-+			float terrainLodBias = MathF.Log2(OptimumConfig.EffectiveRenderScale);
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+			}
-+			else
-+			{
-+				GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
-+				GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
-+				GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
-+				GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
-+			}
++			ApplyOptimumTerrainSamplerLodBias(terrainLodBias);
 +		}
  		return flag;
  	}
  
++	/// <summary>
++	/// Optimum: writes a texture LOD bias into the chunkopaque/chunktopsoil
++	/// terrain sampler objects.
++	///
++	/// This is the only place those two programs' mip selection can be changed.
++	/// A sampler object bound to a unit overrides the texture object's own
++	/// parameters on that unit for every state it carries, LOD bias included, so
++	/// the atlas TexParameter that ChunkRenderer.SetOptimumTextureLodBias sets is
++	/// invisible to them - it only reaches the terrain passes that sample the
++	/// atlas without a custom sampler (liquid, transparent, shadow map).
++	///
++	/// Called once from the shader load above and again from
++	/// ChunkRenderer.SetOptimumTextureLodBias whenever
++	/// OptimumConfig.EffectiveTerrainLodBias moves. Without that second caller the
++	/// TAA mip-bias row would need a shader reload to do anything, while the atlas
++	/// parameter moved immediately - opaque terrain and liquid would then select
++	/// different mips of the same atlas until the next reload.
++	/// </summary>
++	public static void ApplyOptimumTerrainSamplerLodBias(float bias)
++	{
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunkopaque, "terrainTex", optimumDevice, bias);
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunkopaque, "terrainTexLinear", optimumDevice, bias);
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunktopsoil, "terrainTex", optimumDevice, bias);
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunktopsoil, "terrainTexLinear", optimumDevice, bias);
++	}
++
++	/// <summary>
++	/// Optimum: one terrain sampler object's LOD bias, or nothing when it does
++	/// not exist yet. Both misses are reachable - ChunkRenderer runs its
++	/// per-frame check before the first shader load has created the samplers, and
++	/// a failed program load leaves the dictionary empty - and neither is an
++	/// error: the next load applies the bias from OptimumConfig anyway.
++	/// </summary>
++	private static void ApplyOptimumSamplerLodBias(ShaderProgramBase program, string samplerName, Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice, float bias)
++	{
++		if (program == null || !program.customSamplers.TryGetValue(samplerName, out var sampler))
++		{
++			return;
++		}
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, bias);
++			return;
++		}
++		GL.SamplerParameter(sampler, (SamplerParameterName)34049, bias);
++	}
++
 +	// Optimum: shared per-program post-compile handling used by both the
 +	// parallel-preprocess and vanilla single-threaded load paths.
 +	private static void CompileAndTrackShaderProgram(ShaderProgram shaderProgram, ref bool flag)
@@ -150,7 +196,7 @@ index 4a24e75..a45ac57 100644
 +			bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
 +			OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
 +		}
-+		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas)
++		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas || shaderProgram == ShaderPrograms.TaaDebug || shaderProgram == ShaderPrograms.TaaResolve || shaderProgram == ShaderPrograms.TaaSharpen || shaderProgram == ShaderPrograms.ChunkLiquidMotion || shaderProgram == ShaderPrograms.TaaSkyMotion)
 +		{
 +			shaderProgram.LoadError |= !compiled;
 +		}
@@ -178,20 +224,20 @@ index 4a24e75..a45ac57 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +413,11 @@ public class ShaderRegistry
+@@ -296,11 +459,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
  	{
  		Shader fragmentShader = program.FragmentShader;
 -		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA ? 1 : 0) + "\r\n";
-+		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f ? 1 : 0) + "\r\n";
++		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTaa ? 1 : 0) + "\r\n";
  		Shader fragmentShader2 = program.FragmentShader;
  		fragmentShader2.PrefixCode = fragmentShader2.PrefixCode + "#define SSAOLEVEL " + ClientSettings.SSAOQuality + "\r\n";
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +450,27 @@ public class ShaderRegistry
+@@ -333,10 +496,48 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -214,6 +260,27 @@ index 4a24e75..a45ac57 100644
 +		optimumFrag.PrefixCode = optimumFrag.PrefixCode + "#define GREEDYMESH_GRAD " + (OptimumConfig.GreedyMeshTextureGrad ? 1 : 0) + "\r\n";
 +		Shader optimumVert = program.VertexShader;
 +		optimumVert.PrefixCode = optimumVert.PrefixCode + "#define GREEDYMESH " + (greedy ? 1 : 0) + "\r\n";
++		// Optimum TAA (P3): the motion-vector writers compile in only while TAA
++		// is on, so with TAA off chunkopaque/chunktopsoil preprocess back to
++		// vanilla and the vertexwarp include's WarpState overloads collapse to
++		// the vanilla entry points.
++		//
++		// TAAMOTIONLOCATION is the Primary colour attachment the motion texture
++		// occupies. SetupDefaultFrameBuffers appends it after the existing set,
++		// whose size is (SetupSSAO ? 4 : 2) with SetupSSAO = ClientSettings.SSAOQuality > 0
++		// - the same condition SSAOLEVEL above is stamped from, so the two can
++		// never disagree.
++		bool taaMotion = OptimumConfig.EffectiveTaa;
++		// The per-uniform hooks in ShaderProgramBase and the bone-upload hook in
++		// UBO exist for the entity writer only; this is the single flag that tells
++		// them whether any shader in the process was built with it.
++		OptimumEntityMotion.Enabled = taaMotion;
++		int taaMotionLocation = ((ClientSettings.SSAOQuality > 0) ? 4 : 2);
++		string taaDefines = "#define TAAMOTION " + (taaMotion ? 1 : 0) + "\r\n#define TAAMOTIONLOCATION " + taaMotionLocation + "\r\n";
++		Shader taaFrag = program.FragmentShader;
++		taaFrag.PrefixCode = taaFrag.PrefixCode + taaDefines;
++		Shader taaVert = program.VertexShader;
++		taaVert.PrefixCode = taaVert.PrefixCode + taaDefines;
  	}
  
  	private static string HandleIncludes(ShaderProgram program, string shaderCode, HashSet<string> filenames = null)

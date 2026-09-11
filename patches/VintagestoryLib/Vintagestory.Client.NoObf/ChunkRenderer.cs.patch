@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..46d578c 100644
+index 431e51a..39b7de3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -14,7 +14,7 @@ index 431e51a..46d578c 100644
  namespace Vintagestory.Client.NoObf;
  
  public class ChunkRenderer
-@@ -40,10 +42,26 @@ public class ChunkRenderer
+@@ -40,10 +42,40 @@ public class ChunkRenderer
  
  	private float lastSetRainFall;
  
@@ -34,14 +34,28 @@ index 431e51a..46d578c 100644
 +	internal List<ModelDataPoolLocation> centerPoolLocationsScratch;
 +	internal List<ModelDataPoolLocation> edgePoolLocationsScratch;
 +
-+	private float optimumTextureLodBias;
++	// NaN means "Optimum has never touched the atlas LOD bias", which is what
++	// keeps the TAA-off, native-scale configuration from making a single
++	// TexParameter/SamplerParameter call: a 0f initialiser would make the first
++	// frame write an explicit bias of 0 over the driver default.
++	private float optimumTextureLodBias = float.NaN;
++
++	/// <summary>
++	/// Optimum TAA (P4): the reactive value the liquid velocity pass stamps into
++	/// the motion attachment's blue channel. Foam, the flow-UV scroll and the
++	/// specular sparkle animate in place - the surface reprojects perfectly while
++	/// its shading does not - so the resolve is told to keep at least this much
++	/// of the current frame. TAA-PLAN.md's Conventions call 0.3 the starting
++	/// value, to be tuned by measurement.
++	/// </summary>
++	internal const float OptimumLiquidReactive = 0.3f;
 +
  	public ChunkRenderer(int[] textureIds, ClientMain game)
  	{
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +123,61 @@ public class ChunkRenderer
+@@ -105,10 +137,74 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -52,9 +66,17 @@ index 431e51a..46d578c 100644
 +
 +	private void ApplyOptimumTextureLodBias()
 +	{
-+		// Only apply LOD bias when FSR is active (RenderScale < 1.0).
-+		// At 1.0, skip TexParameter calls entirely to match vanilla behavior.
-+		if (ClientSettings.OptimumRenderScale >= 1.0f)
++		// Only apply a LOD bias when something asks for one: FSR (render scale
++		// below 1) or TAA (OptimumConfig.TaaMipBias, since the jitter supplies
++		// the sub-pixel samples a sharper mip needs). The two add, and both
++		// terms live in OptimumConfig.EffectiveTerrainLodBias so this and the
++		// sampler objects ShaderRegistry sets cannot drift apart.
++		//
++		// At a total of 0 - TAA off and render scale 1.0 - no TexParameter call
++		// is made at all, which is what keeps that configuration identical to
++		// vanilla.
++		float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;
++		if (textureLodBias == 0f)
 +		{
 +			if (!float.IsNaN(optimumTextureLodBias))
 +			{
@@ -63,7 +85,6 @@ index 431e51a..46d578c 100644
 +			}
 +			return;
 +		}
-+		float textureLodBias = MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f));
 +		if (Math.Abs(textureLodBias - optimumTextureLodBias) < 0.0001f)
 +		{
 +			return;
@@ -82,6 +103,12 @@ index 431e51a..46d578c 100644
 +	private void SetOptimumTextureLodBias(float bias)
 +	{
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		// The chunkopaque/chunktopsoil sampler objects override the texture
++		// parameter on the units they are bound to, so setting it here alone
++		// would move the mip selection of every OTHER terrain pass and leave the
++		// two that carry the bias in their name untouched until the next shader
++		// reload. Both halves move together or neither does.
++		ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);
 +		if (optimumDevice != null)
 +		{
 +			for (int k = 0; k < textureIds.Length; k++)
@@ -103,7 +130,24 @@ index 431e51a..46d578c 100644
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -170,10 +239,11 @@ public class ChunkRenderer
+@@ -142,10 +238,16 @@ public class ChunkRenderer
+ 		culler.CullInvisibleChunks();
+ 	}
+ 
+ 	public void OnRenderBefore(float dt)
+ 	{
++		// Optimum TAA (P3): the LiquidDepth prepass keeps drawing with the same
++		// jittered projection as the main pass (game.CurrentProjectionMatrix), so
++		// its quarter-resolution depth stays consistent with the jittered scene it
++		// is compared against. It deliberately writes no motion: it renders into
++		// its own framebuffer, chunkliquiddepth declares no motion output, and the
++		// motion attachment is never in this target's draw-buffer mask.
+ 		game.Platform.LoadFrameBuffer(EnumFrameBuffer.LiquidDepth);
+ 		game.Platform.ClearFrameBuffer(EnumFrameBuffer.LiquidDepth);
+ 		subPixelPaddingX = game.BlockAtlasManager.SubPixelPaddingX;
+ 		subPixelPaddingY = game.BlockAtlasManager.SubPixelPaddingY;
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+@@ -170,10 +272,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -115,7 +159,7 @@ index 431e51a..46d578c 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,14 +278,25 @@ public class ChunkRenderer
+@@ -208,23 +311,59 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -126,9 +170,7 @@ index 431e51a..46d578c 100644
 +		// At 60-270 blocks a chunk subtends 1-3 texels in the 1024² shadow map;
 +		// thin foliage casts no resolvable shadow at that distance.
 +		if (!ClientSettings.OptimumShadowFarVegetation || game.currentRenderStage != EnumRenderStage.ShadowFar)
- 		{
--			chunkshadowmap.Tex2d2D = textureIds[k];
--			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++		{
 +			OptimumDiagnostics.ShadowFarVegetation.Hit();
 +			for (int k = 0; k < textureIds.Length; k++)
 +			{
@@ -137,15 +179,242 @@ index 431e51a..46d578c 100644
 +			}
 +		}
 +		else
-+		{
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
 +			OptimumDiagnostics.ShadowFarVegetation.Skip();
  		}
  		for (int l = 0; l < textureIds.Length; l++)
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -318,19 +399,32 @@ public class ChunkRenderer
- 		chunkopaque.Stop();
+ 		}
+ 		platform.GlToggleBlend(on: true);
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P3): the previous-frame state the terrain motion-vector
++	/// writers need. The projection is the previous frame's UNJITTERED world
++	/// projection - a motion vector computed through a jittered matrix carries
++	/// two frames' jitter difference instead of the surface's own movement - and
++	/// the view is the previous CameraMatrixOrigin, because terrain draws
++	/// relative to the rebased chunk origin, not the camera-at-player matrix.
++	///
++	/// Everything else (render size, jitter, camera delta, previous warp state)
++	/// comes from the shared contract helper, which every later writer reuses.
++	/// </summary>
++	private void SetOptimumMotionUniforms(ShaderProgram program)
++	{
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		if (program.HasUniform("prevProjectionMatrix"))
++		{
++			program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(EnumTemporalView.World));
++		}
++		if (program.HasUniform("prevModelViewMatrix"))
++		{
++			program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);
++		}
++		frame.ApplyMotionUniforms(program);
++	}
++
+ 	public void RenderOpaque(float dt)
+ 	{
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+ 		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
+ 		platform.GlDepthMask(flag: true);
+@@ -232,105 +371,145 @@ public class ChunkRenderer
+ 		platform.GlToggleBlend(on: true);
+ 		platform.GlEnableCullFace();
+ 		game.GlMatrixModeModelView();
+ 		game.GlPushMatrix();
+ 		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+-		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
+-		chunkopaque.Use();
+-		chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.AlphaTest = 0.001f;
+-		chunkopaque.HaxyFade = 0;
+-		chunkopaque.LiquidDepth2D = game.Platform.FrameBuffers[5].DepthTextureId;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
+-		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+-		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
+-		for (int i = 0; i < textureIds.Length; i++)
+-		{
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[0][i].Render(cameraPos, "origin");
+-		}
+-		ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
+-		chunkopaque.Stop();
+-		ShaderProgramChunktopsoil chunktopsoil = ShaderPrograms.Chunktopsoil;
+-		chunktopsoil.Use();
+-		chunktopsoil.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunktopsoil.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunktopsoil.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunktopsoil.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunktopsoil.BlockTextureSize = blockTextureSize;
+-		chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		for (int j = 0; j < textureIds.Length; j++)
+-		{
+-			chunktopsoil.TerrainTex2D = textureIds[j];
+-			chunktopsoil.TerrainTexLinear2D = textureIds[j];
+-			poolsByRenderPass[5][j].Render(cameraPos, "origin");
+-		}
+-		ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
+-		chunktopsoil.Stop();
+-		platform.GlDisableCullFace();
+-		chunkopaque.Use();
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.AlphaTest = 0.25f;
+-		chunkopaque.HaxyFade = 0;
+-		platform.GlToggleBlend(on: true);
+-		for (int k = 0; k < textureIds.Length; k++)
++		// Optimum TAA (P3): every chunk draw in this method writes motion
++		// vectors, so the motion attachment joins Primary's draw-buffer mask for
++		// the whole pass and leaves it again below. A no-op when TAA is off.
++		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
++		try
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[k];
+-			chunkopaque.TerrainTexLinear2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin");
+-		}
+-		platform.GlToggleBlend(on: false);
+-		chunkopaque.AlphaTest = 0.42f;
+-		chunkopaque.HaxyFade = 1;
+-		for (int l = 0; l < textureIds.Length; l++)
+-		{
+-			chunkopaque.TerrainTex2D = textureIds[l];
+-			chunkopaque.TerrainTexLinear2D = textureIds[l];
+-			poolsByRenderPass[1][l].Render(cameraPos, "origin");
++			ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
++			chunkopaque.Use();
++			chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.AlphaTest = 0.001f;
++			chunkopaque.HaxyFade = 0;
++			chunkopaque.LiquidDepth2D = game.Platform.FrameBuffers[5].DepthTextureId;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
++			chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
++			chunkopaque.DayLight = game.shUniforms.SkyDaylight;
++			chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(chunkopaque);
++			}
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[i];
++				chunkopaque.TerrainTexLinear2D = textureIds[i];
++				poolsByRenderPass[0][i].Render(cameraPos, "origin");
++			}
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
++			chunkopaque.Stop();
++			ShaderProgramChunktopsoil chunktopsoil = ShaderPrograms.Chunktopsoil;
++			chunktopsoil.Use();
++			chunktopsoil.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunktopsoil.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunktopsoil.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunktopsoil.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunktopsoil.BlockTextureSize = blockTextureSize;
++			chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(chunktopsoil);
++			}
++			for (int j = 0; j < textureIds.Length; j++)
++			{
++				chunktopsoil.TerrainTex2D = textureIds[j];
++				chunktopsoil.TerrainTexLinear2D = textureIds[j];
++				poolsByRenderPass[5][j].Render(cameraPos, "origin");
++			}
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
++			chunktopsoil.Stop();
++			platform.GlDisableCullFace();
++			chunkopaque.Use();
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.AlphaTest = 0.25f;
++			chunkopaque.HaxyFade = 0;
++			platform.GlToggleBlend(on: true);
++			for (int k = 0; k < textureIds.Length; k++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[k];
++				chunkopaque.TerrainTexLinear2D = textureIds[k];
++				poolsByRenderPass[2][k].Render(cameraPos, "origin");
++			}
++			platform.GlToggleBlend(on: false);
++			chunkopaque.AlphaTest = 0.42f;
++			chunkopaque.HaxyFade = 1;
++			for (int l = 0; l < textureIds.Length; l++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[l];
++				chunkopaque.TerrainTexLinear2D = textureIds[l];
++				poolsByRenderPass[1][l].Render(cameraPos, "origin");
++			}
++			platform.GlEnableCullFace();
++			platform.GlToggleBlend(on: true);
++			chunkopaque.AlphaTest = 0.2f;
++			chunkopaque.HaxyFade = 0;
++			for (int m = 0; m < textureIds.Length; m++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[m];
++				chunkopaque.TerrainTexLinear2D = textureIds[m];
++				poolsByRenderPass[8][m].Render(cameraPos, "origin");
++			}
++			platform.GlToggleBlend(on: false);
++			chunkopaque.Stop();
+ 		}
+-		platform.GlEnableCullFace();
+-		platform.GlToggleBlend(on: true);
+-		chunkopaque.AlphaTest = 0.2f;
+-		chunkopaque.HaxyFade = 0;
+-		for (int m = 0; m < textureIds.Length; m++)
++		finally
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[m];
+-			chunkopaque.TerrainTexLinear2D = textureIds[m];
+-			poolsByRenderPass[8][m].Render(cameraPos, "origin");
++			// Optimum TAA (P3): the motion attachment leaves the draw-buffer mask
++			// again, so no later pass can write it by accident - including when a
++			// shader setup or a pool draw above throws, which would otherwise leak
++			// the expanded mask into every later draw for the rest of the session.
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
++			}
+ 		}
+-		platform.GlToggleBlend(on: false);
+-		chunkopaque.Stop();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-opnc");
  		game.GlPopMatrix();
  		if (game.unbindSamplers)
@@ -186,7 +455,206 @@ index 431e51a..46d578c 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -442,11 +536,11 @@ public class ChunkRenderer
+@@ -402,51 +581,187 @@ public class ChunkRenderer
+ 		chunktransparent.Stop();
+ 		game.GlPopMatrix();
+ 		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	///
++	/// The OIT liquid draw in <see cref="RenderOIT" /> renders into the
++	/// Transparent target with six oit.fsh outputs, so it cannot also write
++	/// Primary's motion attachment. Instead the same liquid pools are drawn once
++	/// more here, into Primary, with a program that writes NOTHING but the motion
++	/// attachment - every other colour attachment is masked out of the
++	/// draw-buffer set for the duration of the pass, so the image the OIT merge
++	/// produced is untouched.
++	///
++	/// Placement: called from ClientMain.MainRenderLoop straight after the
++	/// AfterOIT stage, which is after the merge and after every AfterOIT
++	/// renderer (decals, the terrain overlay, AfterOIT entities), and still
++	/// inside the temporal window - the resolve does not run until
++	/// RenderPostprocessingEffects. Drawing it earlier would let the depth this
++	/// pass writes occlude geometry that is legitimately visible through water.
++	///
++	/// Depth: the test is on - GL_LESS, the client's default and what the OIT
++	/// liquid draw itself ran under, deliberately not changed here so this pass
++	/// keeps exactly the same water fragments that pass looked at - and the WRITE
++	/// is on. The OIT liquid draw writes no depth at all -
++	/// LoadFrameBuffer(Transparent) disables the depth mask - so without this the
++	/// motion attachment would carry the water surface's window depth while the
++	/// depth buffer carried the terrain behind it, the resolve's writer-depth
++	/// test would reject every liquid pixel, and the whole pass would buy
++	/// nothing. Writing it also hands the resolve the water surface's own linear
++	/// depth, which is the depth the vector belongs to.
++	///
++	/// The cost is that everything after this pass which reads or tests Primary's
++	/// depth now sees the water surface: the SSAO bilateral blur's depth-guided
++	/// weights (RenderPostprocessingEffects), the AfterFinalComposition overlays
++	/// (selection boxes, work-item guides), and the AfterBlit rift renderer,
++	/// which samples that depth texture directly. All of that is outside the
++	/// temporal window and only happens with TAA on.
++	///
++	/// Depth writes make draw order irrelevant: the buffer only ever decreases,
++	/// so the last fragment that passes the test is the nearest one, and the
++	/// motion attachment ends up holding the front-most liquid surface's vector -
++	/// the same surface the OIT pass shaded.
++	/// </summary>
++	internal void RenderLiquidMotion(float deltaTime)
++	{
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
++		{
++			return;
++		}
++		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		if (optimumPlatform == null)
++		{
++			return;
++		}
++		ShaderProgram liquidMotion = ShaderPrograms.ChunkLiquidMotion;
++		if (liquidMotion == null || liquidMotion.LoadError || liquidMotion.Disposed)
++		{
++			return;
++		}
++		if (!optimumPlatform.BeginMotionOnlyWrite())
++		{
++			return;
++		}
++		// The liquid pool has no SSBO layout (RenderOIT and the LiquidDepth
++		// prepass both turn it off for exactly this pass's geometry). Captured
++		// before the try so the finally can always hand it back.
++		bool useSSBOs = game.api.renderapi.useSSBOs;
++		bool pushedMatrix = false;
++		try
++		{
++			Vec3d cameraPos = game.EntityPlayer.CameraPos;
++			game.GlMatrixModeModelView();
++			game.GlPushMatrix();
++			pushedMatrix = true;
++			game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
++			platform.GlToggleBlend(on: false);
++			platform.GlEnableDepthTest();
++			platform.GlDepthMask(flag: true);
++			// The OIT liquid draw runs with culling off (LoadFrameBuffer for the
++			// Transparent target disables it), so both faces of every liquid quad
++			// are candidates there and have to be here too.
++			platform.GlDisableCullFace();
++			liquidMotion.Use();
++			liquidMotion.UniformMatrix("projectionMatrix", game.CurrentProjectionMatrix);
++			liquidMotion.UniformMatrix("modelViewMatrix", game.CurrentModelViewMatrix);
++			liquidMotion.Uniform("taaLiquidReactive", OptimumLiquidReactive);
++			SetOptimumMotionUniforms(liquidMotion);
++			game.api.renderapi.useSSBOs = false;
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				poolsByRenderPass[4][i].Render(cameraPos, "origin");
++			}
++			liquidMotion.Stop();
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-lqmv");
++		}
++		finally
++		{
++			// Every restore lives here: a throwing pool draw must not leave the
++			// renderer with SSBOs off, an unbalanced matrix stack, blending off
++			// or the motion window still open for the rest of the frame.
++			game.api.renderapi.useSSBOs = useSSBOs;
++			if (pushedMatrix)
++			{
++				game.GlMatrixModeModelView();
++				game.GlPopMatrix();
++			}
++			// Hand back the state the AfterOIT stage left, since this pass runs
++			// after it: the last AfterOIT renderer (SystemRenderEntities) leaves
++			// culling disabled and blending on, and the post chain that follows
++			// has always started from that.
++			platform.GlToggleBlend(on: true);
++			optimumPlatform.EndMotionOnlyWrite();
++		}
++	}
++
+ 	internal void RenderAfterOIT(float deltaTime)
+ 	{
+ 		game.GlPushMatrix();
+ 		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+-		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
+-		platform.GlDisableCullFace();
+-		platform.GlToggleBlend(on: false);
+-		platform.GlEnableDepthTest();
+-		chunkopaque.Use();
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.AlphaTest = 0.42f;
+-		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
+-		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+-		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
+-		chunkopaque.HaxyFade = 1;
+-		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		for (int i = 0; i < textureIds.Length; i++)
++		// Optimum TAA (P3): the terrain overlay pass (render pass 7) is inside the
++		// temporal window and draws the same chunk geometry, so it writes motion
++		// vectors too - otherwise every decal-covered surface would fall back to
++		// the camera-only reprojection.
++		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
++		try
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[7][i].Render(cameraPos, "origin");
++			ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
++			platform.GlDisableCullFace();
++			platform.GlToggleBlend(on: false);
++			platform.GlEnableDepthTest();
++			chunkopaque.Use();
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.AlphaTest = 0.42f;
++			chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
++			chunkopaque.DayLight = game.shUniforms.SkyDaylight;
++			chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
++			chunkopaque.HaxyFade = 1;
++			chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(chunkopaque);
++			}
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[i];
++				chunkopaque.TerrainTexLinear2D = textureIds[i];
++				poolsByRenderPass[7][i].Render(cameraPos, "origin");
++			}
++			chunkopaque.Stop();
++		}
++		finally
++		{
++			// Same contract as RenderOpaque: the window closes even if a shader
++			// setup or a pool draw throws, so a failed overlay pass cannot leave
++			// the motion attachment in the draw-buffer mask.
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
++			}
+ 		}
+-		chunkopaque.Stop();
+ 		game.GlPopMatrix();
+ 	}
+ 
+ 	public void Dispose()
+ 	{
  		masterPool.DisposeAllPools(game.api);
  	}
  

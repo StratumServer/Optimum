@@ -26,16 +26,25 @@ internal static class VulkanStats
     private static long _texturesDeleted;
     private static long _frames;
     private static long _droppedMeshWrites;
+    private static long _uniformOverflows;
 
     /// <summary>A mesh write that could not land; see MeshManager.Write.</summary>
     public static void NoteDroppedMeshWrite() => Interlocked.Increment(ref _droppedMeshWrites);
 
     public static long DroppedMeshWrites => Interlocked.Read(ref _droppedMeshWrites);
 
+    /// <summary>A named uniform block that did not fit the frame ring and took a transient buffer instead.</summary>
+    public static void NoteUniformOverflow() => Interlocked.Increment(ref _uniformOverflows);
+
+    public static long UniformOverflows => Interlocked.Read(ref _uniformOverflows);
+
     public static void NoteAllocation() => Interlocked.Increment(ref _allocations);
     public static void NoteTextureCreated() => Interlocked.Increment(ref _texturesCreated);
     public static void NoteTextureDeleted() => Interlocked.Increment(ref _texturesDeleted);
     public static void NoteFrame() => Interlocked.Increment(ref _frames);
+
+    /// <summary>Textures deleted since the last <see cref="SampleIfDue" />.</summary>
+    public static long TexturesDeleted => Interlocked.Read(ref _texturesDeleted);
 
     public static void NoteUpload(long elapsedTicks)
     {
@@ -68,6 +77,7 @@ internal static class VulkanStats
         long created = Interlocked.Exchange(ref _texturesCreated, 0);
         long deleted = Interlocked.Exchange(ref _texturesDeleted, 0);
         long dropped = Interlocked.Exchange(ref _droppedMeshWrites, 0);
+        long overflows = Interlocked.Exchange(ref _uniformOverflows, 0);
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
         double frameMs = frames > 0 ? elapsed * 1000.0 / frames : 0;
@@ -76,9 +86,9 @@ internal static class VulkanStats
             System.Globalization.CultureInfo.InvariantCulture,
             "stats {0:F1}s: {1} frames ({2:F1} ms/frame), {3} allocations ({4} live), " +
             "{5} blocking uploads costing {6:F0} ms ({7:F0}% of the interval), " +
-            "textures +{8}/-{9}, mesh writes dropped {10}",
+            "textures +{8}/-{9}, mesh writes dropped {10}, uniform overflows {11}",
             elapsed, frames, frameMs, allocations, VulkanMemory.LiveAllocations,
-            uploads, uploadMs, uploadMs / (elapsed * 1000.0) * 100.0, created, deleted, dropped);
+            uploads, uploadMs, uploadMs / (elapsed * 1000.0) * 100.0, created, deleted, dropped, overflows);
     }
 
     private static long _lastSample;

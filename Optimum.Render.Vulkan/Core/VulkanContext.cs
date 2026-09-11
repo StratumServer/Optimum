@@ -17,6 +17,9 @@ internal sealed class VulkanContextOptions
     /// <summary>Turns on the validation layers and the debug messenger.</summary>
     public bool EnableValidation;
 
+    /// <summary>Comma list of extra layer features: sync, best, gpu.</summary>
+    public string ValidationFeatures = "";
+
     /// <summary>Pins a physical device by index; -1 picks automatically.</summary>
     public int PreferredDeviceIndex = -1;
 
@@ -188,9 +191,26 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         var extensions = new List<string>(options.RequiredInstanceExtensions);
         bool validation = options.EnableValidation && HasValidationLayer();
+
+        // Extra layer features (sync validation, best practices, GPU assisted)
+        // ride on VK_EXT_validation_features. Parse them before the extension
+        // list is marshalled, because the extension has to be enabled under
+        // exactly the same condition as the pNext chain below - a chained
+        // struct whose extension was never enabled is ignored at best.
+        // Only when the layer actually advertises it: the extension is deprecated
+        // in favour of VK_EXT_layer_settings, and naming one the layer does not
+        // have fails vkCreateInstance outright - which would turn a diagnostic
+        // environment variable into a silent fall back to OpenGL (rule 1).
+        List<ValidationFeatureEnableEXT> enables = ParseValidationFeatures(options.ValidationFeatures);
+        bool chainValidationFeatures = validation && enables.Count > 0
+            && LayerAdvertisesExtension(Api, ValidationLayer, ValidationFeaturesExtensionName);
         if (validation)
         {
             extensions.Add(ExtDebugUtils.ExtensionName);
+        }
+        if (chainValidationFeatures)
+        {
+            extensions.Add(ValidationFeaturesExtensionName);
         }
 
         byte* applicationName = (byte*)SilkMarshal.StringToPtr("Optimum");
@@ -210,9 +230,19 @@ internal sealed unsafe class VulkanContext : IDisposable
                 ApiVersion = MinimumApiVersion,
             };
 
+            ValidationFeatureEnableEXT* enablesPtr = stackalloc ValidationFeatureEnableEXT[Math.Max(enables.Count, 1)];
+            for (int i = 0; i < enables.Count; i++) enablesPtr[i] = enables[i];
+            var validationFeatures = new ValidationFeaturesEXT
+            {
+                SType = StructureType.ValidationFeaturesExt,
+                EnabledValidationFeatureCount = (uint)enables.Count,
+                PEnabledValidationFeatures = enablesPtr,
+            };
+
             var createInfo = new InstanceCreateInfo
             {
                 SType = StructureType.InstanceCreateInfo,
+                PNext = chainValidationFeatures ? &validationFeatures : null,
                 PApplicationInfo = &applicationInfo,
                 EnabledExtensionCount = (uint)extensions.Count,
                 PpEnabledExtensionNames = (byte**)extensionsPtr,
@@ -242,6 +272,66 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>Name of VK_EXT_validation_features; Silk.NET has no wrapper class for it.</summary>
+    internal const string ValidationFeaturesExtensionName = "VK_EXT_validation_features";
+
+    /// <summary>
+    /// Whether <paramref name="layerName" /> advertises <paramref name="extensionName" />
+    /// as an instance extension. A layer's extensions are invisible to the
+    /// loader-level enumeration, so the layer has to be named explicitly.
+    /// </summary>
+    internal static bool LayerAdvertisesExtension(Vk api, string layerName, string extensionName)
+    {
+        nint layer = SilkMarshal.StringToPtr(layerName);
+        try
+        {
+            uint count = 0;
+            if (api.EnumerateInstanceExtensionProperties((byte*)layer, &count, null) != Result.Success
+                || count == 0)
+            {
+                return false;
+            }
+
+            var properties = new ExtensionProperties[count];
+            fixed (ExtensionProperties* propertiesPtr = properties)
+            {
+                if (api.EnumerateInstanceExtensionProperties((byte*)layer, &count, propertiesPtr) != Result.Success)
+                {
+                    return false;
+                }
+                for (int i = 0; i < count; i++)
+                {
+                    // The name is a fixed-size buffer, readable only through a pointer.
+                    if (SilkMarshal.PtrToString((nint)propertiesPtr[i].ExtensionName) == extensionName)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            SilkMarshal.Free(layer);
+        }
+    }
+
+    /// <summary>Maps the comma list from OPTIMUM_VULKAN_VALIDATION_FEATURES onto layer feature flags.</summary>
+    internal static List<ValidationFeatureEnableEXT> ParseValidationFeatures(string? features)
+    {
+        var enables = new List<ValidationFeatureEnableEXT>();
+        foreach (string feature in (features ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            switch (feature.ToLowerInvariant())
+            {
+                case "sync": enables.Add(ValidationFeatureEnableEXT.SynchronizationValidationExt); break;
+                case "best": enables.Add(ValidationFeatureEnableEXT.BestPracticesExt); break;
+                case "gpu": enables.Add(ValidationFeatureEnableEXT.GpuAssistedExt); break;
+            }
+        }
+        return enables;
     }
 
     private bool HasValidationLayer()

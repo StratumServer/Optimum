@@ -134,6 +134,12 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
         for (int i = 0; i < blendAttachments.Length; i++)
         {
             AttachmentBlend blend = i < request.Blend.Length ? request.Blend[i] : AttachmentBlend.Default;
+            // An enabled attachment the fragment shader never stores to keeps
+            // its contents, as it does on GL; Vulkan would write undefined
+            // values (validation: "Output variable was never written to").
+            ColorComponentFlags writeMask = request.Program.Interface.WrittenFragmentOutputs.Contains(i)
+                ? blend.WriteMask
+                : 0;
             blendAttachments[i] = new PipelineColorBlendAttachmentState
             {
                 BlendEnable = blend.Enabled,
@@ -143,7 +149,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
                 SrcAlphaBlendFactor = blend.SrcAlpha,
                 DstAlphaBlendFactor = blend.DstAlpha,
                 AlphaBlendOp = blend.AlphaOp,
-                ColorWriteMask = blend.WriteMask,
+                ColorWriteMask = writeMask,
             };
         }
 

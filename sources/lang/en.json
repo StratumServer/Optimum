@@ -51,5 +51,11 @@
 	"optimum-renderscale-balanced": "Balanced (0.77x)",
 	"optimum-renderscale-performance": "Performance (0.67x)",
 	"optimum-godrayscap": "Cap God-Rays Samples",
+	"optimum-taa": "Temporal Anti-Aliasing (TAA)",
+	"optimum-taa-tooltip": "Smooths edges by blending several jittered frames together. Removes the crawling and shimmering that FXAA leaves on fences, leaves and distant blocks, at the cost of a little softness in motion; the sharpness slider buys that back. Costs a few extra frame buffers of video memory. Off keeps the vanilla FXAA chain exactly as it is.",
+	"optimum-taasharpness": "TAA Sharpness",
+	"optimum-taasharpness-tooltip": "How strongly the resolved image is sharpened after TAA, in percent. 0 turns the sharpen pass off entirely. Kept separate from the render-scale (FSR) sharpening so the two never apply at full strength together. Applies immediately.",
+	"optimum-taamipbias": "TAA Texture Sharpness",
+	"optimum-taamipbias-tooltip": "Mip-map bias, in hundredths of a mip level, applied while TAA is on: jitter gives the resolve sub-pixel samples, so textures can be selected sharper than an unjittered frame would allow. -50 is the default; 0 keeps vanilla mip selection; more negative is sharper but can reintroduce texture shimmer. Applies immediately.",
 	"optimum-godrayscap-tooltip": "Limits the god-rays post-process to 100 texture samples. Off keeps the vanilla 180-sample path."
 }

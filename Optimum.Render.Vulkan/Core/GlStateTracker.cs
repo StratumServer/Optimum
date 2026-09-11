@@ -349,6 +349,14 @@ internal sealed class GlStateTracker
         _cachedBlendCount = -1;
     }
 
+    /// <summary>glEnable/glDisable(GL_BLEND) preserve the indexed blend functions.</summary>
+    public void SetBlendEnabled(bool enabled)
+    {
+        for (int i = 0; i < _blend.Length; i++) _blend[i].Enabled = enabled;
+        _cachedBlendId = -1;
+        _cachedBlendCount = -1;
+    }
+
     /// <summary>
     /// Per-attachment blend, which the OIT and SSAO passes use through
     /// <c>glBlendFunci</c> and <c>glBlendEquationi</c>.

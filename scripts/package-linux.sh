@@ -332,6 +332,40 @@ if [[ -d "$SHADER_SRC" ]]; then
     find "$SHADER_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_DST/" \;
 fi
 
+# 5b-2. Overlay optimized shader includes (TAA P3). Same asset-name override
+# mechanism as shaders, separate directory.
+SHADER_INC_SRC="$REPO_ROOT/sources/shaderincludes"
+SHADER_INC_DST="$STAGE_DIR/assets/game/shaderincludes"
+if [[ -d "$SHADER_INC_SRC" ]]; then
+    # The vanilla tree may not have this directory at all - cp into a missing
+    # destination would drop the includes silently.
+    mkdir -p "$SHADER_INC_DST"
+    find "$SHADER_INC_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_INC_DST/" \;
+fi
+
+# 5b-3. Verify the overlay actually landed. Both copies above are wildcards, so
+# what fails is never "a file is missing from a list" but a source path that
+# moved or a destination directory that does not exist - and the symptom in
+# game is silent: vanilla's shader runs instead of Optimum's. TAA is the worst
+# case, because its own stages (taa-resolve, taa-debug, taa-skymotion,
+# taa-sharpen), the liquid velocity pass (chunkliquidmotion), the FSR pair the
+# sharpen shares its maths with and every shaderinclude the motion writers
+# compile against all have to ship together or the resolve reads vectors nobody
+# wrote. Fail the package instead.
+MISSING_SHADERS=""
+for pair in "$SHADER_SRC|$SHADER_DST" "$SHADER_INC_SRC|$SHADER_INC_DST"; do
+    src="${pair%%|*}"
+    dst="${pair##*|}"
+    [[ -d "$src" ]] || continue
+    while IFS= read -r -d '' f; do
+        [[ -f "$dst/$(basename "$f")" ]] || MISSING_SHADERS="$MISSING_SHADERS $f"
+    done < <(find "$src" -maxdepth 1 -type f -print0)
+done
+if [[ -n "$MISSING_SHADERS" ]]; then
+    echo "Error: shader source file(s) never reached the staged assets:$MISSING_SHADERS" >&2
+    exit 1
+fi
+
 # 5c. Merge translation strings.
 LANG_SRC="$REPO_ROOT/sources/lang"
 LANG_DST="$STAGE_DIR/assets/game/lang"

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..8824d24 100644
+index 6edf0c9..d786909 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,99 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -102,7 +102,7 @@ index 6edf0c9..8824d24 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -93,10 +182,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +182,102 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<string> drawCallStacks = new List<string>();
  
@@ -111,6 +111,75 @@ index 6edf0c9..8824d24 100644
 +	private const int OptimumFsrFramebufferIndex = 18;
 +
 +	private bool optimumFsrDisabled;
++
++	// Optimum: TAA history targets. Two full-resolution slots (current/previous
++	// parity), each colour (RGBA16F) + aux (RGBA8: glow.rg, ssao.b) + linear
++	// depth (R32F). R32F has no EnumTextureInternalFormat entry, so it is
++	// created via CreateTexture2DRaw / a raw GL token like the other raw-GL
++	// spots in this file.
++	private const int OptimumTaaHistoryIndexA = 19;
++
++	private const int OptimumTaaHistoryIndexB = 20;
++
++	// Optimum TAA (P5): the sharpen pass's own render-resolution RGBA16F target.
++	// Allocated and released with the two history slots (it only ever holds the
++	// sharpened copy of the slot the resolve just wrote), null when TAA is off
++	// or when its allocation failed - in which case the post chain simply reads
++	// the unsharpened resolve.
++	private const int OptimumTaaSharpenIndex = 21;
++
++	private const int OptimumGlR32f = 0x822E;
++
++	/// <summary>
++	/// Optimum: the Primary colour-attachment index that holds per-pixel motion
++	/// (rg), reactive (b) and writer depth (a) once TAA is enabled - 2 without
++	/// the SSAO G-buffer, 4 with it. -1 when TAA is off or its targets failed
++	/// to allocate. Never part of the default draw-buffer mask: only a writer
++	/// that has been ported to emit it (P3+) enables it explicitly.
++	/// </summary>
++	public int MotionAttachmentIndex { get; private set; } = -1;
++
++	/// <summary>
++	/// Optimum TAA (P3): whether a pass currently has the motion attachment in
++	/// Primary's draw-buffer mask. See <see cref="BeginMotionWrite" />.
++	/// </summary>
++	public bool OptimumMotionWriteActive { get; private set; }
++
++	/// <summary>
++	/// Optimum TAA (P3): the two draw-buffer sets the motion window switches
++	/// between, built once. The narrow windows are opened per draw - every held
++	/// item, every dropped item, every quern - so allocating both arrays inside
++	/// BeginMotionWrite/EndMotionWrite put two allocations per instrumented draw
++	/// per frame on the render thread's hot path.
++	/// </summary>
++	private DrawBuffersEnum[] optimumMotionDrawBuffersOn;
++
++	private DrawBuffersEnum[] optimumMotionDrawBuffersOff;
++
++	/// <summary>
++	/// Optimum TAA (P4): the draw-buffer set of the liquid velocity pass - the
++	/// motion attachment alone, every other colour attachment GL_NONE. Built
++	/// once for the same reason as the two above.
++	/// </summary>
++	private DrawBuffersEnum[] optimumMotionOnlyDrawBuffers;
++
++	private bool TaaTargetsReady;
++
++	// Optimum TAA resolve state (P2): which history slot is written this frame,
++	// whether the other slot holds a frame worth reading, and the textures the
++	// rest of the post chain reads instead of the jittered Primary attachments.
++	private int _taaFrameParity;
++
++	private bool _taaHistoryValid;
++
++	private int taaResolvedColorTexture;
++
++	private int taaResolvedGlowTexture;
++
++	/// <summary>True once this frame's TAA resolve ran; the post chain then reads the resolved textures.</summary>
++	public bool TaaResolvedThisFrame { get; private set; }
++
++	private bool optimumTaaDisabled;
 +
 +	// Optimum: GL keeps the clear colour in driver state and applies it at
 +	// glClear; the device takes it as an argument, so GlClearColorRgbaf records
@@ -136,7 +205,31 @@ index 6edf0c9..8824d24 100644
  	private bool serverRunning;
  
  	private bool gamepause;
-@@ -278,11 +390,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -256,10 +437,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		}
+ 	}
+ 
+ 	public override List<FrameBufferRef> FrameBuffers => frameBuffers;
+ 
++	/// <summary>
++	/// Optimum: one of the two TAA history slots, selected by frame parity
++	/// (typically <c>frameIndex &amp; 1</c>). Null when TAA is off or its targets
++	/// failed to allocate - callers should check <see cref="TaaTargetsReady" />
++	/// (via the setup/disable paths) before writing or reading through it.
++	/// Binding for writing uses the existing <c>LoadFrameBuffer(FrameBufferRef, int)</c>
++	/// overload; this method never binds anything itself.
++	/// </summary>
++	public FrameBufferRef TaaHistory(int parity)
++	{
++		return frameBuffers[(parity & 1) == 0 ? OptimumTaaHistoryIndexA : OptimumTaaHistoryIndexB];
++	}
++
+ 	public override bool IsServerRunning
+ 	{
+ 		get
+ 		{
+ 			return serverRunning;
+@@ -278,11 +472,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -164,7 +257,7 @@ index 6edf0c9..8824d24 100644
  				GL.BindFramebuffer((FramebufferTarget)36160, 0);
  				return;
  			}
-@@ -297,11 +425,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -297,11 +507,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -188,7 +281,7 @@ index 6edf0c9..8824d24 100644
  	}
  
  	public override bool GlErrorChecking { get; set; }
-@@ -314,10 +454,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -314,10 +536,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		set
  		{
@@ -209,7 +302,7 @@ index 6edf0c9..8824d24 100644
  				if (!supportsGlDebugMode)
  				{
  					throw new NotSupportedException("Your graphics card does not seem to support gl debug mode (neither GL_ARB_debug_output nor GL_KHR_debug was found)");
-@@ -335,11 +485,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -335,11 +567,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			}
  			glDebugMode = value;
  		}
@@ -238,7 +331,7 @@ index 6edf0c9..8824d24 100644
  
  	public override bool MouseGrabbed
  	{
-@@ -478,41 +644,142 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,41 +726,142 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -385,7 +478,7 @@ index 6edf0c9..8824d24 100644
  
  	public void LogAndTestHardwareInfosStage1()
  	{
-@@ -533,10 +800,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -533,10 +882,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
  	}
  
@@ -423,7 +516,7 @@ index 6edf0c9..8824d24 100644
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
  		logger.Notification("GL.MaxVertexUniformComponents: " + GL.GetInteger((GetPName)35658));
-@@ -576,10 +870,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -576,10 +952,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CheckGlError("testhwinfo");
  	}
  
@@ -442,7 +535,7 @@ index 6edf0c9..8824d24 100644
  
  	public override string GetFrameworkInfos()
  	{
-@@ -702,10 +1004,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1086,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
@@ -464,7 +557,28 @@ index 6edf0c9..8824d24 100644
  		SupportsThickLines = (int)error != 1281;
  		cpuCoreCount = Environment.ProcessorCount;
  	}
-@@ -796,10 +1109,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	public override void RebuildFrameBuffers()
+ 	{
++		// Mono.Cecil transplant.
+ 		if (!ShaderRegistry.SupressShaderAndBufferReloads)
+ 		{
+ 			List<FrameBufferRef> buffers = frameBuffers;
+ 			List<FrameBufferRef> list = SetupDefaultFrameBuffers();
+ 			frameBuffers = list;
+ 			DisposeFrameBuffers(buffers);
++			// Optimum TAA: the setup bodies already do this, but the textures the
++			// old history slots owned are only released here - state this at the
++			// point the swap completes so no path can reach a resolve holding a
++			// disposed read slot.
++			_taaHistoryValid = false;
++			OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
+ 		}
+ 	}
+ 
+ 	private void Window_FileDrop(FileDropEventArgs e)
+ 	{
+@@ -796,10 +1198,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
@@ -488,7 +602,7 @@ index 6edf0c9..8824d24 100644
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1016,20 +1342,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1016,20 +1431,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			{
  				throw new ArgumentException("Fatal: Trying to render an uninitialized mesh");
  			}
@@ -526,7 +640,7 @@ index 6edf0c9..8824d24 100644
  		GL.BindVertexArray(0);
  	}
  
-@@ -1042,10 +1385,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1042,10 +1474,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
@@ -546,7 +660,7 @@ index 6edf0c9..8824d24 100644
  		{
  			GL.BindBuffer((BufferTarget)34963, ClientPlatformAbstract.singleIndexBufferId);
  			GL.BindBufferBase((BufferRangeTarget)37074, 3, vAO.xyzVboId);
-@@ -1064,10 +1416,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1064,10 +1505,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override void RenderMeshInstanced(MeshRef modelRef, int quantity = 1)
  	{
  		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
@@ -563,7 +677,7 @@ index 6edf0c9..8824d24 100644
  		GL.DrawElementsInstanced(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, (IntPtr)IntPtr.Zero, quantity);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
-@@ -1103,15 +1461,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1103,15 +1550,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			if (frameBuffer.DepthTextureId > 0)
  			{
  				GLDeleteTexture(frameBuffer.DepthTextureId);
@@ -596,7 +710,7 @@ index 6edf0c9..8824d24 100644
  			FboId = GL.GenFramebuffer(),
  			Width = fbAttrs.Width,
  			Height = fbAttrs.Height
-@@ -1150,12 +1525,324 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,12 +1614,474 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -630,6 +744,14 @@ index 6edf0c9..8824d24 100644
 +			return list;
 +		}
 +
++		// Optimum: TAA. Read once per (re-)build; a mid-session config change
++		// only takes effect on the next RebuildFrameBuffers. optimumTaaDisabled
++		// is checked as well as EffectiveTaa: DisableOptimumTaa sets both, and
++		// the local flag keeps this platform from retrying a failed allocation
++		// even if the process-wide config flag is ever reset.
++		bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
++		int motionAttachmentIndex = -1;
++
 +		// Primary: depth, colour, glow, and the SSAO position/normal G-buffer.
 +		FrameBufferRef primary = new FrameBufferRef();
 +		primary.Width = width;
@@ -637,6 +759,7 @@ index 6edf0c9..8824d24 100644
 +		primary.FboId = device.CreateFramebuffer(width, height);
 +		primary.DepthTextureId = device.CreateTexture2D(width, height,
 +			EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
++		SetupOptimumTextureSampler(device, primary.DepthTextureId, 9728, 33071);
 +		device.AttachTexture(primary.FboId, EnumFramebufferAttachment.DepthAttachment, primary.DepthTextureId, 0);
 +
 +		int primaryAttachments = (SetupSSAO ? 4 : 2);
@@ -652,7 +775,38 @@ index 6edf0c9..8824d24 100644
 +			primary.ColorTextureIds[3] = device.CreateTexture2D(width, height,
 +				EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
 +		}
++		// Match the GL Primary filters, including linear G-buffer sampling and
++		// the white border used when SSAO projects a sample off screen.
 +		for (int attachment = 0; attachment < primaryAttachments; attachment++)
++		{
++			int textureId = primary.ColorTextureIds[attachment];
++			SetupOptimumTextureSampler(device, textureId,
++				attachment >= 2 || ssaaLevel > 1f ? 9729 : 9728, attachment >= 2 ? 33069 : 10497);
++			if (attachment >= 2) device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
++		}
++		if (taaRequested)
++		{
++			// Optimum: TAA motion attachment, appended after the SSAO G-buffer
++			// so every existing attachment index is unchanged. Deliberately not
++			// folded into the draw-buffer mask below - it stays out of every
++			// pass's output set until a writer opts in (P3+).
++			try
++			{
++				int motionTextureId = device.CreateTexture2D(width, height,
++					EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
++				int[] extendedColorIds = new int[primary.ColorTextureIds.Length + 1];
++				Array.Copy(primary.ColorTextureIds, extendedColorIds, primary.ColorTextureIds.Length);
++				motionAttachmentIndex = primary.ColorTextureIds.Length;
++				extendedColorIds[motionAttachmentIndex] = motionTextureId;
++				primary.ColorTextureIds = extendedColorIds;
++			}
++			catch (Exception error)
++			{
++				DisableOptimumTaa("Primary motion attachment (device): " + error.Message);
++				motionAttachmentIndex = -1;
++			}
++		}
++		for (int attachment = 0; attachment < primary.ColorTextureIds.Length; attachment++)
 +		{
 +			device.AttachTexture(primary.FboId,
 +				(EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
@@ -660,6 +814,7 @@ index 6edf0c9..8824d24 100644
 +		}
 +		device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);
 +		list[0] = primary;
++		MotionAttachmentIndex = motionAttachmentIndex;
 +
 +		// Transparent: OIT accumulation, revealage, glow. Shares Primary's depth.
 +		FrameBufferRef transparent = new FrameBufferRef();
@@ -675,6 +830,7 @@ index 6edf0c9..8824d24 100644
 +			EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
 +		for (int attachment = 0; attachment < 3; attachment++)
 +		{
++			SetupOptimumTextureSampler(device, transparent.ColorTextureIds[attachment], 9729, 10497);
 +			device.AttachTexture(transparent.FboId,
 +				(EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
 +				transparent.ColorTextureIds[attachment], 0);
@@ -753,6 +909,40 @@ index 6edf0c9..8824d24 100644
 +		list[7] = CreateOptimumColorTarget(device, width / 2, height / 2, EnumTextureInternalFormat.Rgba16f);
 +		list[10] = CreateOptimumColorTarget(device, width, height, EnumTextureInternalFormat.Rgba16f);
 +
++		// Optimum: TAA history, render-resolution like Primary. Two slots so the
++		// resolve reads last frame's parity while writing this frame's; never
++		// cleared per frame (ClearFrameBuffer(Primary) only touches Primary).
++		if (taaRequested)
++		{
++			try
++			{
++				list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTarget(device, width, height);
++				list[OptimumTaaHistoryIndexB] = CreateOptimumHistoryTarget(device, width, height);
++			}
++			catch (Exception error)
++			{
++				DisableOptimumTaa("history targets (device): " + error.Message);
++				list[OptimumTaaHistoryIndexA] = null;
++				list[OptimumTaaHistoryIndexB] = null;
++			}
++			// Optimum TAA (P5): the sharpen target. Its own try - a sharpen
++			// target that cannot be allocated costs the sharpening, not TAA,
++			// so it nulls the slot instead of calling DisableOptimumTaa.
++			try
++			{
++				list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(device, width, height,
++					EnumTextureInternalFormat.Rgba16f);
++			}
++			catch (Exception error)
++			{
++				logger.Error("Optimum disabled the TAA sharpen pass: {0}", error.Message);
++				list[OptimumTaaSharpenIndex] = null;
++			}
++		}
++		TaaTargetsReady = taaRequested && MotionAttachmentIndex >= 0
++			&& list[OptimumTaaHistoryIndexA] != null && list[OptimumTaaHistoryIndexB] != null;
++		InstallOptimumMotionWriteHooks();
++
 +		// FSR renders at a reduced scale and resolves into a native-sized target.
 +		if (ClientSettings.OptimumRenderScale < 1.0f)
 +		{
@@ -780,6 +970,15 @@ index 6edf0c9..8824d24 100644
 +			? CreateOptimumDepthTarget(device, shadowSize, shadowSize)
 +			: CreateOptimumPlaceholderTarget(shadowSize, shadowSize);
 +
++		for (int shadow = 11; shadow <= 12; shadow++)
++		{
++			int textureId = list[shadow].DepthTextureId;
++			if (textureId == 0) continue;
++			SetupOptimumTextureSampler(device, textureId, 9729, 33069);
++			device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
++			device.SetTextureParameter(textureId, OptimumGlConstants.TextureCompareMode, OptimumGlConstants.CompareRefToTexture);
++		}
++
 +		// The fullscreen quad. The device generates its three vertices in the
 +		// shader and binds nothing, but the field is public enough that other
 +		// code holds it, so it is kept in step with the GL path.
@@ -794,6 +993,13 @@ index 6edf0c9..8824d24 100644
 +		screenQuad = UploadMesh(quadData);
 +
 +		CurrentFrameBufferKeepVw = (OffscreenBuffer ? list[0] : null);
++		// Optimum TAA: the history slots this build just allocated hold
++		// undefined contents, and the old ones are about to be disposed. Both
++		// the local flag and the temporal contract have to know, because the
++		// flag only guards our own resolve while the reset reason is what every
++		// other temporal consumer (vendor upscalers later) reads.
++		_taaHistoryValid = false;
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
 +		logger.Notification("(Re-)loaded frame buffers on the Optimum device");
 +		return list;
 +	}
@@ -859,6 +1065,16 @@ index 6edf0c9..8824d24 100644
 +		return target;
 +	}
 +
++	/// <summary>Mirror the GL framebuffer texture's filtering and edge policy.</summary>
++	private void SetupOptimumTextureSampler(
++		Vintagestory.API.Config.IOptimumGraphicsDevice device, int textureId, int filter, int wrap)
++	{
++		device.SetTextureParameter(textureId, OptimumGlConstants.TextureMinFilter, filter);
++		device.SetTextureParameter(textureId, OptimumGlConstants.TextureMagFilter, filter);
++		device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapS, wrap);
++		device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapT, wrap);
++	}
++
 +	private FrameBufferRef CreateOptimumColorTarget(
 +		Vintagestory.API.Config.IOptimumGraphicsDevice device, int width, int height,
 +		EnumTextureInternalFormat format)
@@ -870,6 +1086,9 @@ index 6edf0c9..8824d24 100644
 +		target.ColorTextureIds = new int[1];
 +		target.ColorTextureIds[0] = device.CreateTexture2D(width, height, format,
 +			EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
++		// setupAttachment uses linear filtering and edge clamping. FXAA and
++		// the reduced-resolution blur passes require fractional texel samples.
++		SetupOptimumTextureSampler(device, target.ColorTextureIds[0], 9729, 33071);
 +		device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
 +		device.SetDrawBuffers(target.FboId, 1);
 +		return target;
@@ -886,8 +1105,53 @@ index 6edf0c9..8824d24 100644
 +		target.ColorTextureIds = new int[0];
 +		target.DepthTextureId = device.CreateTexture2D(width, height,
 +			EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
++		SetupOptimumTextureSampler(device, target.DepthTextureId, 9729, 33071);
 +		device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
 +		device.SetDrawBuffers(target.FboId, 0);
++		return target;
++	}
++
++	/// <summary>
++	/// Optimum: a TAA history slot - colour (RGBA16F), aux (RGBA8: glow.rg,
++	/// ssao.b) and linear depth (R32F), MRT-written by the resolve pass and
++	/// read back next frame. R32F has no <see cref="EnumTextureInternalFormat" />
++	/// entry, so it goes through <c>CreateTexture2DRaw</c> with the raw GL token,
++	/// the same way the SSAO noise texture does above.
++	/// </summary>
++	private FrameBufferRef CreateOptimumHistoryTarget(
++		Vintagestory.API.Config.IOptimumGraphicsDevice device, int width, int height)
++	{
++		FrameBufferRef target = new FrameBufferRef();
++		target.Width = width;
++		target.Height = height;
++		target.FboId = device.CreateFramebuffer(width, height);
++		target.ColorTextureIds = new int[3];
++		target.ColorTextureIds[0] = device.CreateTexture2D(width, height,
++			EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
++		target.ColorTextureIds[1] = device.CreateTexture2D(width, height,
++			EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
++		target.ColorTextureIds[2] = device.CreateTexture2DRaw(width, height, OptimumGlR32f, IntPtr.Zero, 4);
++		// Optimum TAA: the resolve reprojects the history by a fractional pixel
++		// offset, so colour (Catmull-Rom taps) and glow (a plain bilinear fetch)
++		// must filter LINEAR; sampling them NEAREST snaps the reprojection to
++		// whole pixels and the history never converges. Linear depth stays
++		// NEAREST - interpolating across a silhouette invents a depth that is on
++		// neither surface and defeats the disocclusion test. Clamp to edge on
++		// all three, matching CreateOptimumHistoryTargetGl.
++		SetupOptimumTextureSampler(device, target.ColorTextureIds[0], 9729, 33071);
++		SetupOptimumTextureSampler(device, target.ColorTextureIds[1], 9729, 33071);
++		SetupOptimumTextureSampler(device, target.ColorTextureIds[2], 9728, 33071);
++		for (int attachment = 0; attachment < 3; attachment++)
++		{
++			device.AttachTexture(target.FboId,
++				(EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
++				target.ColorTextureIds[attachment], 0);
++		}
++		device.SetDrawBuffers(target.FboId, 7);
++		if (!device.CheckFramebufferComplete(target.FboId, out string status))
++		{
++			throw new Exception("Optimum TAA history FBO: " + status);
++		}
 +		return target;
 +	}
 +
@@ -921,7 +1185,25 @@ index 6edf0c9..8824d24 100644
  		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
  		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0211: Unknown result type (might be due to invalid IL or missing references)
-@@ -1210,11 +1897,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1187,10 +2113,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
+ 		if (num == 0 || num2 == 0)
+ 		{
+ 			return list;
+ 		}
++		// Optimum: TAA. Read once per (re-)build; a mid-session config change
++		// only takes effect on the next RebuildFrameBuffers. optimumTaaDisabled
++		// is checked as well as EffectiveTaa: DisableOptimumTaa sets both, and
++		// the local flag keeps this platform from retrying a failed allocation
++		// even if the process-wide config flag is ever reset.
++		bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
++		int motionAttachmentIndex = -1;
+ 		PixelFormat val = (PixelFormat)6408;
+ 		CheckGlError("sdfb-begin");
+ 		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+@@ -1210,11 +2143,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -938,12 +1220,93 @@ index 6edf0c9..8824d24 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1436,10 +2127,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1251,10 +2188,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 				(DrawBuffersEnum)36064,
+ 				(DrawBuffersEnum)36065
+ 			};
+ 			GL.DrawBuffers(2, array3);
+ 		}
++		if (taaRequested)
++		{
++			// Optimum: TAA motion attachment, appended after the SSAO G-buffer
++			// so every existing attachment index is unchanged. Deliberately not
++			// folded into the DrawBuffers calls above - it stays out of every
++			// pass's output set until a writer opts in (P3+).
++			try
++			{
++				int motionTextureId = GL.GenTexture();
++				GL.BindTexture((TextureTarget)3553, motionTextureId);
++				GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);
++				GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
++				GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
++				motionAttachmentIndex = frameBufferRef3.ColorTextureIds.Length;
++				int motionAttachmentEnum = 36064 + motionAttachmentIndex;
++				GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)motionAttachmentEnum, (TextureTarget)3553, motionTextureId, 0);
++				int[] extendedColorIds = new int[frameBufferRef3.ColorTextureIds.Length + 1];
++				Array.Copy(frameBufferRef3.ColorTextureIds, extendedColorIds, frameBufferRef3.ColorTextureIds.Length);
++				extendedColorIds[motionAttachmentIndex] = motionTextureId;
++				frameBufferRef3.ColorTextureIds = extendedColorIds;
++			}
++			catch (Exception error)
++			{
++				DisableOptimumTaa("Primary motion attachment (GL): " + error.Message);
++				motionAttachmentIndex = -1;
++			}
++		}
++		MotionAttachmentIndex = motionAttachmentIndex;
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Primary);
+ 		frameBufferRef = (list[1] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+ 			Width = num,
+@@ -1436,10 +2401,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
  		GL.DrawBuffer((DrawBufferMode)36064);
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
++		// Optimum: TAA history, render-resolution like Primary. Two slots so the
++		// resolve reads last frame's parity while writing this frame's; never
++		// cleared per frame (ClearFrameBuffer(Primary) only touches Primary).
++		if (taaRequested)
++		{
++			try
++			{
++				list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTargetGl(num, num2);
++				list[OptimumTaaHistoryIndexB] = CreateOptimumHistoryTargetGl(num, num2);
++			}
++			catch (Exception error)
++			{
++				DisableOptimumTaa("history targets (GL): " + error.Message);
++				list[OptimumTaaHistoryIndexA] = null;
++				list[OptimumTaaHistoryIndexB] = null;
++			}
++			// Optimum TAA (P5): the sharpen target, RGBA16F at render
++			// resolution like Primary's colour attachment. Built inline with
++			// setupAttachment, as the FSR intermediate below is, and a failure
++			// here costs only the sharpening.
++			FrameBufferRef optimumSharpen = (list[OptimumTaaSharpenIndex] = new FrameBufferRef
++			{
++				FboId = GL.GenFramebuffer(),
++				Width = num,
++				Height = num2
++			});
++			CurrentFrameBufferKeepVw = optimumSharpen;
++			optimumSharpen.ColorTextureIds = new int[1] { GL.GenTexture() };
++			setupAttachment(optimumSharpen, num, num2, 0, val, (PixelInternalFormat)34842);
++			GL.DrawBuffer((DrawBufferMode)36064);
++			FramebufferErrorCode optimumSharpenStatus = GL.CheckFramebufferStatus((FramebufferTarget)36160);
++			if ((int)optimumSharpenStatus != 36053)
++			{
++				logger.Error("Optimum disabled the TAA sharpen pass: framebuffer returned {0}.", optimumSharpenStatus);
++				GL.DeleteTexture(optimumSharpen.ColorTextureIds[0]);
++				GL.DeleteFramebuffer(optimumSharpen.FboId);
++				list[OptimumTaaSharpenIndex] = null;
++			}
++		}
++		TaaTargetsReady = taaRequested && MotionAttachmentIndex >= 0
++			&& list[OptimumTaaHistoryIndexA] != null && list[OptimumTaaHistoryIndexB] != null;
++		InstallOptimumMotionWriteHooks();
 +		if (ClientSettings.OptimumRenderScale < 1.0f)
 +		{
 +			int nativeWidth = ((NativeWindow)window).ClientSize.X;
@@ -972,13 +1335,93 @@ index 6edf0c9..8824d24 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1569,10 +2283,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +2578,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		else
+ 		{
+ 			CurrentFrameBufferKeepVw = null;
+ 			GL.DrawBuffer((DrawBufferMode)1029);
+ 		}
++		// Optimum TAA: freshly allocated history slots hold undefined contents.
++		// See the same pair in SetupOptimumFrameBuffers.
++		_taaHistoryValid = false;
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
+ 		logger.Notification("(Re-)loaded frame buffers");
+ 		return list;
+ 	}
+ 
+ 	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
+@@ -1567,21 +2601,115 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
  	}
  
++	/// <summary>
++	/// Optimum: the GL-path body of <see cref="CreateOptimumHistoryTarget" /> -
++	/// a TAA history slot with colour (RGBA16F), aux (RGBA8: glow.rg, ssao.b)
++	/// and linear depth (R32F, raw GL token - no <c>PixelInternalFormat</c>
++	/// member for it) attachments.
++	/// </summary>
++	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
++	{
++		FrameBufferRef target = new FrameBufferRef
++		{
++			FboId = GL.GenFramebuffer(),
++			Width = width,
++			Height = height
++		};
++		CurrentFrameBufferKeepVw = target;
++		target.ColorTextureIds = new int[3] { GL.GenTexture(), GL.GenTexture(), GL.GenTexture() };
++
++		GL.BindTexture((TextureTarget)3553, target.ColorTextureIds[0]);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, width, height, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)IntPtr.Zero);
++		// LINEAR: the resolve reads this history at a fractional reprojected
++		// offset (Catmull-Rom over a bilinear sampler). See the device path.
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, target.ColorTextureIds[0], 0);
++
++		GL.BindTexture((TextureTarget)3553, target.ColorTextureIds[1]);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, width, height, 0, (PixelFormat)6408, (PixelType)5121, (IntPtr)IntPtr.Zero);
++		// LINEAR for the same reason as attachment 0; the glow history is read
++		// with a plain bilinear texture() at the reprojected uv.
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36065, (TextureTarget)3553, target.ColorTextureIds[1], 0);
++
++		GL.BindTexture((TextureTarget)3553, target.ColorTextureIds[2]);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)OptimumGlR32f, width, height, 0, (PixelFormat)6403, (PixelType)5126, (IntPtr)IntPtr.Zero);
++		// NEAREST: an interpolated linear depth across a silhouette belongs to
++		// neither surface and would defeat the disocclusion test.
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36066, (TextureTarget)3553, target.ColorTextureIds[2], 0);
++
++		DrawBuffersEnum[] drawBuffers = new DrawBuffersEnum[3]
++		{
++			DrawBuffersEnum.ColorAttachment0,
++			DrawBuffersEnum.ColorAttachment1,
++			DrawBuffersEnum.ColorAttachment2
++		};
++		GL.DrawBuffers(3, drawBuffers);
++		CheckFboStatus((FramebufferTarget)36160, "OptimumTaaHistory");
++		return target;
++	}
++
  	public void DisposeFrameBuffers(List<FrameBufferRef> buffers)
  	{
 +		// Mono.Cecil transplant.
++		// SetupOptimumFrameBuffers shares one depth texture between Primary and
++		// Transparent, so the same handle appears in more than one FrameBufferRef.
++		// Deleting it twice double-frees on the device path and makes
++		// VulkanStats.NoteTextureDeleted over-count, so every handle is deleted once.
++		HashSet<int> deletedTextures = new HashSet<int>();
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		if (optimumDevice != null)
 +		{
@@ -987,10 +1430,16 @@ index 6edf0c9..8824d24 100644
 +				if (buffers[k] != null)
 +				{
 +					optimumDevice.DeleteFramebuffer(buffers[k].FboId);
-+					optimumDevice.DeleteTexture(buffers[k].DepthTextureId);
++					if (deletedTextures.Add(buffers[k].DepthTextureId))
++					{
++						optimumDevice.DeleteTexture(buffers[k].DepthTextureId);
++					}
 +					for (int n = 0; n < buffers[k].ColorTextureIds.Length; n++)
 +					{
-+						optimumDevice.DeleteTexture(buffers[k].ColorTextureIds[n]);
++						if (deletedTextures.Add(buffers[k].ColorTextureIds[n]))
++						{
++							optimumDevice.DeleteTexture(buffers[k].ColorTextureIds[n]);
++						}
 +					}
 +					buffers[k].Disposed = true;
 +				}
@@ -1002,7 +1451,24 @@ index 6edf0c9..8824d24 100644
  			if (buffers[i] != null)
  			{
  				GL.DeleteFramebuffer(buffers[i].FboId);
-@@ -1591,11 +2324,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+-				GL.DeleteTexture(buffers[i].DepthTextureId);
++				if (deletedTextures.Add(buffers[i].DepthTextureId))
++				{
++					GL.DeleteTexture(buffers[i].DepthTextureId);
++				}
+ 				for (int j = 0; j < buffers[i].ColorTextureIds.Length; j++)
+ 				{
+-					GL.DeleteTexture(buffers[i].ColorTextureIds[j]);
++					if (deletedTextures.Add(buffers[i].ColorTextureIds[j]))
++					{
++						GL.DeleteTexture(buffers[i].ColorTextureIds[j]);
++					}
+ 				}
+ 				buffers[i].Disposed = true;
+ 			}
+ 		}
+ 	}
+@@ -1591,11 +2719,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1031,7 +1497,7 @@ index 6edf0c9..8824d24 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1608,21 +2358,74 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1608,38 +2753,135 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -1073,12 +1539,28 @@ index 6edf0c9..8824d24 100644
 +				CurrentFrameBufferKeepVw = frameBuffers[0];
 +				break;
 +			case EnumFrameBuffer.Primary:
++				// Optimum TAA (P3): the frame starts with no motion window open.
++				// Primary is cleared exactly once per frame (ScreenManager), and
++				// the draw-buffer set is restored below, so this makes a pass that
++				// failed to reach EndMotionWrite heal at the next frame instead of
++				// leaving the attachment enabled for every later pass.
++				OptimumMotionWriteActive = false;
 +				optimumDevice.ClearColor(0, 0f, 0f, 0f, 1f);
 +				optimumDevice.ClearColor(1, 0f, 0f, 0f, 1f);
 +				if (RenderSSAO)
 +				{
 +					optimumDevice.ClearColor(2, 0f, 0f, 0f, 1f);
 +					optimumDevice.ClearColor(3, 0f, 0f, 0f, 1f);
++				}
++				if (MotionAttachmentIndex >= 0)
++				{
++					// ClearColor honours the draw-buffer mask on the device too.
++					// Motion is excluded until a writer opts in, so temporarily
++					// enable it just as the GL branch does below. Otherwise stale
++					// motion/reactivity survives and can reject all TAA history.
++					optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
++					optimumDevice.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);
++					optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
 +				}
 +				optimumDevice.ClearDepth(1f);
 +				break;
@@ -1106,7 +1588,52 @@ index 6edf0c9..8824d24 100644
  		case EnumFrameBuffer.Default:
  			CurrentFrameBufferKeepVw = null;
  			GL.DrawBuffer((DrawBufferMode)1029);
-@@ -1670,20 +2473,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			GL.Clear((ClearBufferMask)16640);
+ 			CurrentFrameBufferKeepVw = frameBuffers[0];
+ 			break;
+ 		case EnumFrameBuffer.Primary:
+ 		{
++			// Optimum TAA (P3): see the device branch above.
++			OptimumMotionWriteActive = false;
+ 			GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 0f, 0f, 0f, 1f });
+ 			GL.ClearBuffer((ClearBuffer)6144, 1, new float[4] { 0f, 0f, 0f, 1f });
+ 			if (RenderSSAO)
+ 			{
+ 				GL.ClearBuffer((ClearBuffer)6144, 2, new float[4] { 0f, 0f, 0f, 1f });
+ 				GL.ClearBuffer((ClearBuffer)6144, 3, new float[4] { 0f, 0f, 0f, 1f });
+ 			}
++			if (MotionAttachmentIndex >= 0)
++			{
++				// Optimum TAA: glClearBufferfv's second argument is a DRAW BUFFER
++				// index, not an attachment index, and the motion attachment is
++				// deliberately outside Primary's default draw-buffer set (only a
++				// writer that opts in enables it - see SetupDefaultFrameBuffers).
++				// Clearing it therefore needs a draw-buffer set that contains it,
++				// otherwise the call is an INVALID_VALUE no-op and the motion
++				// attachment keeps last frame's vectors while the device path
++				// clears it to 0. MotionAttachmentIndex is also the size of the
++				// default set (2 without the SSAO G-buffer, 4 with it), so the
++				// set restored below is exactly the one the setup left bound.
++				DrawBuffersEnum[] optimumMotionDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex + 1];
++				for (int optimumDb = 0; optimumDb <= MotionAttachmentIndex; optimumDb++)
++				{
++					optimumMotionDrawBuffers[optimumDb] = (DrawBuffersEnum)(36064 + optimumDb);
++				}
++				GL.DrawBuffers(optimumMotionDrawBuffers.Length, optimumMotionDrawBuffers);
++				GL.ClearBuffer((ClearBuffer)6144, MotionAttachmentIndex, new float[4]);
++				DrawBuffersEnum[] optimumRestoreDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex];
++				for (int optimumDb = 0; optimumDb < MotionAttachmentIndex; optimumDb++)
++				{
++					optimumRestoreDrawBuffers[optimumDb] = (DrawBuffersEnum)(36064 + optimumDb);
++				}
++				GL.DrawBuffers(optimumRestoreDrawBuffers.Length, optimumRestoreDrawBuffers);
++			}
+ 			float num2 = 1f;
+ 			GL.ClearBuffer((ClearBuffer)6145, 0, ref num2);
+ 			break;
+ 		}
+ 		case EnumFrameBuffer.LiquidDepth:
+@@ -1670,20 +2912,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1147,7 +1674,7 @@ index 6edf0c9..8824d24 100644
  			GL.Enable((EnableCap)3042);
  			GL.BlendEquation(0, (BlendEquationMode)32774);
  			GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-@@ -1693,48 +2516,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1693,48 +2955,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
  			break;
  		}
@@ -1196,7 +1723,7 @@ index 6edf0c9..8824d24 100644
 -			GL.Disable((EnableCap)3042);
 +			if (optimumDevice != null)
 +			{
-+				optimumDevice.SetBlend(false, EnumBlendMode.Standard);
++				optimumDevice.SetBlendEnabled(false);
 +			}
 +			else
 +			{
@@ -1214,7 +1741,7 @@ index 6edf0c9..8824d24 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,16 +2586,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1753,16 +3025,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
@@ -1236,7 +1763,7 @@ index 6edf0c9..8824d24 100644
  		case (EnumFrameBuffer)6:
  			break;
  		}
-@@ -1774,18 +2610,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1774,18 +3049,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
  		if (framebuffer == EnumFrameBuffer.Transparent)
  		{
@@ -1263,7 +1790,7 @@ index 6edf0c9..8824d24 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,15 +2635,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +3074,269 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -1293,6 +1820,25 @@ index 6edf0c9..8824d24 100644
 +			GL.Disable((EnableCap)2929);
 +			GL.Enable((EnableCap)3042);
 +			GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
++		}
++		// Optimum TAA (P4): everything drawn into the Transparent target - quad
++		// particles, OIT entities, liquid shading, the cloud layers - writes six
++		// oit.fsh outputs and cannot reach Primary's motion attachment. The plan
++		// gives that content its reactive value here instead ("OIT transparents
++		// 1 - revealage from the merge"), which is exactly the coverage this
++		// pass already computes for its own blend.
++		//
++		// The vector and the writer depth of the opaque surface underneath must
++		// survive, so the motion attachment is put on FUNC_ADD with (ONE, ONE)
++		// and the shader writes zero into rg and a: those channels add zero,
++		// only b accumulates, and a pixel with no transparent content over it is
++		// left bit-for-bit as it was. The window is opened after the blend mode
++		// is set, because the global mode would otherwise overwrite the
++		// per-attachment factors.
++		bool optimumMotionWrite = BeginMotionWrite();
++		if (optimumMotionWrite)
++		{
++			ApplyOptimumMotionAccumulateBlendState();
  		}
 -		GL.Disable((EnableCap)2929);
 -		GL.Enable((EnableCap)3042);
@@ -1302,7 +1848,223 @@ index 6edf0c9..8824d24 100644
  		transparentcompose.Revealage2D = frameBuffers[1].ColorTextureIds[1];
  		transparentcompose.Accumulation2D = frameBuffers[1].ColorTextureIds[0];
  		transparentcompose.InGlow2D = frameBuffers[1].ColorTextureIds[2];
-@@ -1823,10 +2684,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		RenderFullscreenTriangle(screenQuad);
+ 		transparentcompose.Stop();
++		if (optimumMotionWrite)
++		{
++			// Back to replace before the window closes, so no later pass can
++			// inherit the accumulating factors on this attachment.
++			ApplyOptimumMotionBlendState();
++			EndMotionWrite();
++		}
++	}
++
++	/// <summary>
++	/// Optimum TAA (P4): additive blending on the motion attachment alone, for
++	/// the one pass that contributes to a channel of it rather than owning the
++	/// pixel - the OIT merge, which adds the transparent layer's coverage into
++	/// the reactive channel while leaving the motion vector and the writer depth
++	/// of the surface underneath alone.
++	///
++	/// (ONE, ONE) with FUNC_ADD on every channel: the merge's fragment shader
++	/// writes zero into r, g and a, so only b changes. A colour mask would say
++	/// the same thing, but the per-attachment blend seam already exists on both
++	/// backends and a per-attachment colour mask does not.
++	/// </summary>
++	private void ApplyOptimumMotionAccumulateBlendState()
++	{
++		if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetBlendEquation(MotionAttachmentIndex, 32774);
++			optimumDevice.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 1, 1, 1);
++			return;
++		}
++		GL.BlendEquation(MotionAttachmentIndex, (BlendEquationMode)32774);
++		GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++	}
++
++	/// <summary>
++	/// Optimum TAA (P2): reprojects and blends the history into this frame's
++	/// history slot from the jittered Primary colour/glow, the motion attachment
++	/// and depth. Returns false when TAA is off or not ready, in which case the
++	/// post chain runs exactly as it does today.
++	/// </summary>
++	private bool RenderOptimumTaaResolve()
++	{
++		OptimumRunPendingTaaShaderReload();
++		TaaResolvedThisFrame = false;
++		if (!TaaTargetsReady || !Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
++		ShaderProgram resolve = ShaderPrograms.TaaResolve;
++		if (resolve == null || resolve.LoadError)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
++		FrameBufferRef write = TaaHistory(_taaFrameParity);
++		FrameBufferRef read = TaaHistory(_taaFrameParity + 1);
++		if (write == null || read == null)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
++
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		float[] projection = frame.GetProjection(EnumTemporalView.World);
++		double[] jittered = new double[16];
++		for (int i = 0; i < 16; i++)
++		{
++			jittered[i] = projection[i];
++		}
++		OptimumTemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, write.Width, write.Height);
++		float[] projectionJittered = new float[16];
++		for (int i = 0; i < 16; i++)
++		{
++			projectionJittered[i] = (float)jittered[i];
++		}
++		float[] viewProj = Mat4f.Mul(new float[16], projectionJittered, frame.CameraMatrixOrigin);
++		float[] invViewProj = Mat4f.Invert(new float[16], viewProj);
++		float[] prevViewProj = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
++		bool reset = frame.Reset || !_taaHistoryValid || !frame.WasViewCaptured(EnumTemporalView.World) || invViewProj == null;
++		if (invViewProj == null)
++		{
++			invViewProj = Mat4f.Identity(new float[16]);
++		}
++
++		GlToggleBlend(on: false);
++		GlDisableDepthTest();
++		// The history slot already owns all three of its attachments, so bind it
++		// as it is: LoadFrameBuffer(write, texture) would re-attach colour 0 to
++		// the framebuffer every single frame, which is a pipeline/render-pass
++		// invalidation on the device path for no change at all. The
++		// CurrentFrameBuffer setter binds the target and sets the viewport.
++		CurrentFrameBuffer = write;
++
++		resolve.Use();
++		resolve.BindTexture2D("sceneTex", frameBuffers[0].ColorTextureIds[0], 0);
++		resolve.BindTexture2D("glowTex", frameBuffers[0].ColorTextureIds[1], 1);
++		resolve.BindTexture2D("motionTex", frameBuffers[0].ColorTextureIds[MotionAttachmentIndex], 2);
++		resolve.BindTexture2D("depthTex", frameBuffers[0].DepthTextureId, 3);
++		resolve.BindTexture2D("historyColor", read.ColorTextureIds[0], 4);
++		resolve.BindTexture2D("historyGlow", read.ColorTextureIds[1], 5);
++		resolve.BindTexture2D("historyDepth", read.ColorTextureIds[2], 6);
++		resolve.Uniform("renderSize", (float)write.Width, (float)write.Height);
++		resolve.Uniform("jitterPx", frame.JitterPx.X, frame.JitterPx.Y);
++		resolve.UniformMatrix("invViewProjJittered", invViewProj);
++		resolve.UniformMatrix("prevViewProj", prevViewProj);
++		resolve.UniformMatrix("viewMatrix", frame.CameraMatrixOrigin);
++		resolve.Uniform("cameraDelta", frame.CameraPosDelta);
++		resolve.Uniform("resetHistory", reset ? 1 : 0);
++		resolve.Uniform("blendAlpha", 0.1f);
++		resolve.Uniform("varianceGamma", 1.25f);
++		RenderFullscreenTriangle(screenQuad);
++		resolve.Stop();
++
++		taaResolvedColorTexture = write.ColorTextureIds[0];
++		taaResolvedGlowTexture = write.ColorTextureIds[1];
++		_taaHistoryValid = true;
++		_taaFrameParity ^= 1;
++		TaaResolvedThisFrame = true;
++		// Restore everything this pass changed, symmetrically: the rest of
++		// RenderPostprocessingEffects runs with blend on, the depth test on and
++		// Primary bound, and it is this pass's job to hand that back rather than
++		// leave the next pass to discover a history slot still bound.
++		GlToggleBlend(on: true);
++		GlEnableDepthTest();
++		LoadFrameBuffer(EnumFrameBuffer.Primary);
++		return true;
++	}
++
++	/// <summary>
++	/// Optimum TAA (P5): whether <see cref="BlitPrimaryToDefault" /> will finish
++	/// this frame with the FSR 1 EASU/RCAS pair instead of a plain blit.
++	///
++	/// Single-sourced here because two passes have to agree on it: the blit runs
++	/// RCAS, and <see cref="RenderOptimumTaaSharpen" /> must not sharpen an image
++	/// RCAS is about to sharpen again. One shared condition is the only way the
++	/// two cannot drift apart.
++	/// </summary>
++	private bool OptimumFsrBlitActive()
++	{
++		ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
++		ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
++		return !optimumFsrDisabled
++			&& ClientSettings.OptimumRenderScale < 1.0f
++			&& frameBuffers[OptimumFsrFramebufferIndex] != null
++			&& fsrEasu != null
++			&& fsrRcas != null
++			&& !fsrEasu.LoadError
++			&& !fsrRcas.LoadError;
++	}
++
++	/// <summary>
++	/// Optimum TAA (P5): sharpens the resolved colour into the dedicated
++	/// RGBA16F sharpen target and returns the texture the rest of the post chain
++	/// should read; returns <paramref name="resolvedScene" /> unchanged whenever
++	/// the pass does not run.
++	///
++	/// The pass is skipped when:
++	/// - the resolve did not run this frame (nothing temporal to sharpen);
++	/// - <c>OptimumConfig.TaaSharpness</c> is 0 or less - the shader's own
++	///   bypass returns the input untouched, but not running the pass at all is
++	///   cheaper and keeps the texture identity;
++	/// - the program is missing or failed to compile, or the target failed to
++	///   allocate;
++	/// - **FSR 1 is active** (render scale below 1), because BlitPrimaryToDefault
++	///   then finishes the frame with RCAS. Sharpening here as well would apply
++	///   two RCAS passes to the same pixels - the exact double-sharpening
++	///   TaaSharpness is documented to avoid. FSR's own RCAS wins, since it runs
++	///   at native resolution after the upscale, which is where a spatial
++	///   sharpener belongs.
++	/// </summary>
++	private int RenderOptimumTaaSharpen(int resolvedScene)
++	{
++		if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)
++		{
++			return resolvedScene;
++		}
++		if (OptimumFsrBlitActive())
++		{
++			return resolvedScene;
++		}
++		ShaderProgram sharpen = ShaderPrograms.TaaSharpen;
++		FrameBufferRef target = frameBuffers[OptimumTaaSharpenIndex];
++		if (sharpen == null || sharpen.LoadError || target == null)
++		{
++			return resolvedScene;
++		}
++
++		GlToggleBlend(on: false);
++		GlDisableDepthTest();
++		// The target owns its single attachment already; the setter binds it and
++		// sets the viewport, exactly as the resolve does with its history slot.
++		CurrentFrameBuffer = target;
++
++		sharpen.Use();
++		sharpen.BindTexture2D("inputScene", resolvedScene, 0);
++		sharpen.Uniform("inputTexelSize", 1f / (float)target.Width, 1f / (float)target.Height);
++		sharpen.Uniform("sharpness", GameMath.Clamp(OptimumConfig.TaaSharpness, 0f, 1f));
++		RenderFullscreenTriangle(screenQuad);
++		sharpen.Stop();
++
++		// Same set/restore discipline as RenderOptimumTaaResolve: the rest of
++		// RenderPostprocessingEffects expects blend on, the depth test on and
++		// Primary bound.
++		GlToggleBlend(on: true);
++		GlEnableDepthTest();
++		LoadFrameBuffer(EnumFrameBuffer.Primary);
++		return target.ColorTextureIds[0];
+ 	}
+ 
+ 	public override void RenderPostprocessingEffects(float[] projectMatrix)
+ 	{
+ 		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
+@@ -1823,20 +3351,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -1315,10 +2077,31 @@ index 6edf0c9..8824d24 100644
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumPostDevice = Vintagestory.API.Config.OptimumRender.Device;
  		int x = ((NativeWindow)window).ClientSize.X;
  		int y = ((NativeWindow)window).ClientSize.Y;
++		// Optimum TAA: resolve first, so bloom, god rays and the final input read
++		// the temporally stable image instead of the jittered one.
++		RenderOptimumTaaResolve();
++		int postSceneTexture = TaaResolvedThisFrame ? taaResolvedColorTexture : frameBuffers[0].ColorTextureIds[0];
++		int postGlowTexture = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];
++		// Optimum TAA (P5): sharpen the resolved colour once, before anything
++		// reads it, so bloom, god rays and the final composition all see the
++		// same image. Returns its input unchanged when the pass does not run.
++		postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);
  		if (RenderBloom)
  		{
  			GlToggleBlend(on: false);
-@@ -1848,45 +2714,55 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			LoadFrameBuffer(EnumFrameBuffer.FindBright);
+ 			ShaderProgramFindbright findbright = ShaderPrograms.Findbright;
+ 			findbright.Use();
+-			findbright.ColorTex2D = frameBuffers[0].ColorTextureIds[0];
+-			findbright.GlowTex2D = frameBuffers[0].ColorTextureIds[1];
++			findbright.ColorTex2D = postSceneTexture;
++			findbright.GlowTex2D = postGlowTexture;
+ 			findbright.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
+ 			findbright.ExtraBloom = ShaderUniforms.ExtraBloom;
+ 			RenderFullscreenTriangle(screenQuad);
+ 			findbright.Stop();
+ 			ShaderProgramBlur blur = ShaderPrograms.Blur;
+@@ -1848,45 +3390,55 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			RenderFullscreenTriangle(screenQuad);
  			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
  			blur.IsVertical = 1;
@@ -1353,8 +2136,10 @@ index 6edf0c9..8824d24 100644
  			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
  			godrays.Dusk = ShaderUniforms.Dusk;
  			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
- 			godrays.InputTexture2D = frameBuffers[0].ColorTextureIds[0];
- 			godrays.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
+-			godrays.InputTexture2D = frameBuffers[0].ColorTextureIds[0];
+-			godrays.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
++			godrays.InputTexture2D = postSceneTexture;
++			godrays.GlowParts2D = postGlowTexture;
  			RenderFullscreenTriangle(screenQuad);
  			godrays.Stop();
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
@@ -1378,7 +2163,7 @@ index 6edf0c9..8824d24 100644
  			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
  			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
  			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-@@ -1915,11 +2791,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,31 +3467,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -1387,13 +2172,26 @@ index 6edf0c9..8824d24 100644
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
 +			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
  		}
- 		if (RenderFXAA)
+-		if (RenderFXAA)
++		if (RenderFXAA && !TaaResolvedThisFrame)
  		{
  			LoadFrameBuffer(EnumFrameBuffer.Luma);
  			ShaderProgramLuma luma = ShaderPrograms.Luma;
-@@ -1935,11 +2811,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			luma.Use();
+ 			luma.Scene2D = frameBuffers[0].ColorTextureIds[0];
+ 			RenderFullscreenTriangle(screenQuad);
+ 			luma.Stop();
+ 		}
+ 		else
+ 		{
++			// With TAA the FXAA define is off and Final reads the resolved image
++			// through the Luma target - the resolved image, or the sharpened
++			// copy of it when RenderOptimumTaaSharpen ran.
+ 			LoadFrameBuffer(EnumFrameBuffer.Luma);
+ 			ShaderProgramBlit blit = ShaderPrograms.Blit;
  			blit.Use();
- 			blit.Scene2D = frameBuffers[0].ColorTextureIds[0];
+-			blit.Scene2D = frameBuffers[0].ColorTextureIds[0];
++			blit.Scene2D = postSceneTexture;
  			RenderFullscreenTriangle(screenQuad);
  			blit.Stop();
  		}
@@ -1402,7 +2200,7 @@ index 6edf0c9..8824d24 100644
 +		{
 +			// Re-enabling blend only; the mode is whatever the last GlToggleBlend
 +			// left, which is what glEnable(GL_BLEND) does here too.
-+			optimumPostDevice.SetBlend(true, EnumBlendMode.Standard);
++			optimumPostDevice.SetBlendEnabled(true);
 +		}
 +		else
 +		{
@@ -1413,7 +2211,7 @@ index 6edf0c9..8824d24 100644
  	}
  
  	public override void RenderFinalComposition()
-@@ -1953,13 +2838,26 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,19 +3517,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -1442,7 +2240,14 @@ index 6edf0c9..8824d24 100644
  			final.Use();
  			final.PrimaryScene2D = primaryScene2D;
  			final.BloomParts2D = bloomParts2D;
-@@ -1987,23 +2885,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+-			final.GlowParts2D = frameBuffers[0].ColorTextureIds[1];
++			final.GlowParts2D = TaaResolvedThisFrame ? taaResolvedGlowTexture : frameBuffers[0].ColorTextureIds[1];
+ 			final.GodrayParts2D = godrayParts2D;
+ 			final.AmbientBloomLevel = ClientSettings.AmbientBloomLevel / 100f + ShaderUniforms.AmbientBloomLevelAdd[0] + ShaderUniforms.AmbientBloomLevelAdd[1] + ShaderUniforms.AmbientBloomLevelAdd[2] + ShaderUniforms.AmbientBloomLevelAdd[3];
+ 			if (RenderSSAO)
+ 			{
+ 				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
+@@ -1987,23 +3564,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -1483,12 +2288,24 @@ index 6edf0c9..8824d24 100644
  	}
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
-@@ -2023,19 +2936,77 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 				throw new Exception(text);
- 			}
- 		}
- 	}
- 
+@@ -2014,28 +3606,485 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0046: Invalid comparison between Unknown and I4
+ 		if ((int)type != 33361)
+ 		{
+-			string text = Marshal.PtrToStringAnsi(message, length);
+-			Logger.Notification("{0} {1} | {2}", severity, type, text);
+-			if ((int)type == 33356)
++			string text = Marshal.PtrToStringAnsi(message, length);
++			Logger.Notification("{0} {1} | {2}", severity, type, text);
++			if ((int)type == 33356)
++			{
++				throw new Exception(text);
++			}
++		}
++	}
++
 +	private void DisableOptimumFsr(Exception error)
 +	{
 +		if (!optimumFsrDisabled)
@@ -1498,6 +2315,386 @@ index 6edf0c9..8824d24 100644
 +		optimumFsrDisabled = true;
 +	}
 +
++	/// <summary>
++	/// Optimum: marks TAA unavailable for the rest of the session after its
++	/// frame buffers failed to allocate. Modelled on <see cref="DisableOptimumFsr" />:
++	/// logs once, sets <c>optimumTaaDisabled</c> so every later (re-)build skips
++	/// the allocation outright, and drops the targets via
++	/// <see cref="TaaTargetsReady" /> and <see cref="MotionAttachmentIndex" />
++	/// (reset to -1 here too).
++	/// </summary>
++	public void DisableOptimumTaa(string reason)
++	{
++		if (!optimumTaaDisabled)
++		{
++			logger.Error("Optimum TAA disabled after frame buffer setup failure: {0}", reason);
++		}
++		optimumTaaDisabled = true;
++		TaaTargetsReady = false;
++		MotionAttachmentIndex = -1;
++		// final.fsh is compiled with FXAA 0 whenever EffectiveTaa is true, so
++		// without this the fallback path has no anti-aliasing at all. The
++		// runtime flag makes EffectiveTaa false for the rest of the session
++		// (later frame buffer rebuilds stop retrying the failed allocation too)
++		// and the reload recompiles the shaders that read it.
++		if (Vintagestory.API.Config.OptimumConfig.DisableTaaAtRuntime())
++		{
++			optimumTaaShaderReloadPending = true;
++		}
++	}
++
++	/// <summary>
++	/// Set by <see cref="DisableOptimumTaa" />; consumed at the top of the next
++	/// frame's post-processing, outside any frame buffer setup, because a shader
++	/// reload from inside SetupDefaultFrameBuffers would recurse into it.
++	/// </summary>
++	private bool optimumTaaShaderReloadPending;
++
++	private void OptimumRunPendingTaaShaderReload()
++	{
++		if (!optimumTaaShaderReloadPending) return;
++		optimumTaaShaderReloadPending = false;
++		ShaderRegistry.ReloadShaders();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++	}
++
++	/// <summary>
++	/// Optimum TAA (P3): publishes the draw-buffer window to code that cannot see
++	/// this type.
++	///
++	/// The first-person hands and the echo chamber draw entity geometry from the
++	/// mod assemblies, which only reference the API, so they reach
++	/// <see cref="BeginMotionWrite" /> through OptimumMotionWrite's two delegates.
++	/// Installed wherever the TAA targets are (re)evaluated, which is also the
++	/// only place that could have invalidated them.
++	/// </summary>
++	private void InstallOptimumMotionWriteHooks()
++	{
++		OptimumMotionWrite.BeginHook = BeginMotionWrite;
++		OptimumMotionWrite.EndHook = EndMotionWrite;
++	}
++
++	/// <summary>
++	/// Optimum TAA (P3): adds the motion attachment to Primary's draw-buffer mask
++	/// for the duration of one motion-writing pass, and <see cref="EndMotionWrite" />
++	/// takes it back out.
++	///
++	/// The attachment is deliberately outside Primary's default set (see
++	/// SetupDefaultFrameBuffers): a fragment shader that does not declare the
++	/// output would leave whatever the last writer put there, and the resolve
++	/// would happily reproject a pixel by another surface's vector. Enabling it
++	/// only around passes that really write it makes "nobody wrote here" the
++	/// default, which the resolve detects through the writer-depth mismatch and
++	/// answers with the camera-motion fallback.
++	///
++	/// A no-op that returns false when TAA is off, its targets failed to
++	/// allocate, or a pass already opened the window - so callers can wrap
++	/// unconditionally.
++	/// </summary>
++	/// <returns>Whether the motion attachment is now enabled.</returns>
++	public bool BeginMotionWrite()
++	{
++		if (OptimumMotionWriteActive) return false;
++		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		// Optimum TAA (P4): the motion attachment only means anything inside the
++		// temporal window. JitterActive is that window - ClientMain opens it in
++		// MainRenderLoop and closes it in RenderAfterPostProcessing, before the
++		// AfterFinalComposition overlays (selection boxes, work-item guides, the
++		// knapping/clay-form/anvil surfaces) and the AfterBlit rifts run. Those
++		// stages draw with the UNJITTERED projection into an image the resolve
++		// has already consumed, so a vector from them would describe a different
++		// sampling grid and be read by nobody this frame - and by next frame's
++		// resolve as a stale writer depth if the attachment were left holding it.
++		// Refusing costs them nothing: they are not in the history either way.
++		if (!OptimumTemporal.Frame.JitterActive) return false;
++		if (frameBuffers == null || frameBuffers.Count == 0 || frameBuffers[0] == null) return false;
++		// The mask only means anything while Primary is the target being drawn
++		// into. The device call below names the framebuffer, but GL.DrawBuffers
++		// applies to whatever is bound, so without this check a caller that
++		// reached here under the shadow map or the Transparent framebuffer would
++		// rewrite THAT target's draw-buffer set on the GL path and leave the two
++		// backends behaving differently. Refusing the window instead costs the
++		// caller nothing: it falls back to camera reprojection, which is what a
++		// pass outside Primary has to do anyway.
++		if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;
++
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
++		}
++		else
++		{
++			if (optimumMotionDrawBuffersOn == null || optimumMotionDrawBuffersOn.Length != MotionAttachmentIndex + 1)
++			{
++				optimumMotionDrawBuffersOn = new DrawBuffersEnum[MotionAttachmentIndex + 1];
++				for (int optimumDb = 0; optimumDb <= MotionAttachmentIndex; optimumDb++)
++				{
++					optimumMotionDrawBuffersOn[optimumDb] = (DrawBuffersEnum)(36064 + optimumDb);
++				}
++			}
++			GL.DrawBuffers(optimumMotionDrawBuffersOn.Length, optimumMotionDrawBuffersOn);
++		}
++		OptimumMotionWriteActive = true;
++		// Blending is per-attachment state that GlToggleBlend re-applies whenever
++		// a pass turns blending on; motion must never blend, so the mask change
++		// has to be paired with it right away for a pass that is already blending.
++		ApplyOptimumMotionBlendState();
++		return true;
++	}
++
++	/// <summary>
++	/// Optimum TAA (P3): restores Primary's default draw-buffer set (the 2 or 4
++	/// colour attachments the setup left bound), taking the motion attachment
++	/// back out. Safe to call when <see cref="BeginMotionWrite" /> returned false.
++	/// </summary>
++	public void EndMotionWrite()
++	{
++		if (!OptimumMotionWriteActive) return;
++		OptimumMotionWriteActive = false;
++		if (MotionAttachmentIndex < 0) return;
++		if (frameBuffers == null || frameBuffers.Count == 0 || frameBuffers[0] == null) return;
++
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			// MotionAttachmentIndex is also the size of the default set (2 without
++			// the SSAO G-buffer, 4 with it), because the attachment was appended
++			// after it.
++			optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
++			return;
++		}
++		if (optimumMotionDrawBuffersOff == null || optimumMotionDrawBuffersOff.Length != MotionAttachmentIndex)
++		{
++			optimumMotionDrawBuffersOff = new DrawBuffersEnum[MotionAttachmentIndex];
++			for (int optimumDb = 0; optimumDb < MotionAttachmentIndex; optimumDb++)
++			{
++				optimumMotionDrawBuffersOff[optimumDb] = (DrawBuffersEnum)(36064 + optimumDb);
++			}
++		}
++		GL.DrawBuffers(optimumMotionDrawBuffersOff.Length, optimumMotionDrawBuffersOff);
++	}
++
++	/// <summary>
++	/// Optimum TAA (P3): forces replace-blending on the motion attachment.
++	/// Terrain passes 2 and 8 draw with blending on, and a blended motion vector
++	/// is a weighted average of two surfaces' displacements, which belongs to
++	/// neither. Mirrors what the GL path already does for the SSAO G-buffer.
++	/// </summary>
++	private void ApplyOptimumMotionBlendState()
++	{
++		if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetBlendEquation(MotionAttachmentIndex, 32774);
++			optimumDevice.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 0, 1, 0);
++			return;
++		}
++		GL.BlendEquation(MotionAttachmentIndex, (BlendEquationMode)32774);
++		GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)0);
++	}
++
++	/// <summary>
++	/// Optimum TAA (P4): opens the motion window with every OTHER colour
++	/// attachment masked out, for a pass that re-draws geometry only to record
++	/// its motion - the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	///
++	/// <see cref="BeginMotionWrite" /> adds the motion attachment to the set a
++	/// shading pass already writes; this one replaces the set entirely, so the
++	/// colour, glow and SSAO G-buffer attachments Primary already holds - the
++	/// merged transparent image included - cannot be touched by a second draw of
++	/// the same geometry. The fragment shader declares no other output anyway;
++	/// the mask is what makes that true on the framebuffer as well, on both
++	/// backends (the device takes the mask directly, GL gets GL_NONE in every
++	/// other slot).
++	///
++	/// Closed by <see cref="EndMotionOnlyWrite" />, which restores Primary's
++	/// default set exactly as <see cref="EndMotionWrite" /> does. Same guards as
++	/// <see cref="BeginMotionWrite" />, including the Primary-is-bound one:
++	/// GL.DrawBuffers applies to the bound framebuffer while the device call
++	/// names one, and a caller under another target would make the two backends
++	/// disagree.
++	/// </summary>
++	/// <returns>Whether the motion attachment is now the only enabled one.</returns>
++	public bool BeginMotionOnlyWrite()
++	{
++		if (OptimumMotionWriteActive) return false;
++		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		// Optimum TAA (P4): the motion attachment only means anything inside the
++		// temporal window. JitterActive is that window - ClientMain opens it in
++		// MainRenderLoop and closes it in RenderAfterPostProcessing, before the
++		// AfterFinalComposition overlays (selection boxes, work-item guides, the
++		// knapping/clay-form/anvil surfaces) and the AfterBlit rifts run. Those
++		// stages draw with the UNJITTERED projection into an image the resolve
++		// has already consumed, so a vector from them would describe a different
++		// sampling grid and be read by nobody this frame - and by next frame's
++		// resolve as a stale writer depth if the attachment were left holding it.
++		// Refusing costs them nothing: they are not in the history either way.
++		if (!OptimumTemporal.Frame.JitterActive) return false;
++		if (frameBuffers == null || frameBuffers.Count == 0 || frameBuffers[0] == null) return false;
++		if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;
++
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, 1 << MotionAttachmentIndex);
++		}
++		else
++		{
++			if (optimumMotionOnlyDrawBuffers == null || optimumMotionOnlyDrawBuffers.Length != MotionAttachmentIndex + 1)
+ 			{
+-				throw new Exception(text);
++				optimumMotionOnlyDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex + 1];
++				for (int optimumDb = 0; optimumDb < MotionAttachmentIndex; optimumDb++)
++				{
++					// GL_NONE: a fragment output bound to this draw buffer is
++					// discarded, which is what keeps the shaded image intact.
++					optimumMotionOnlyDrawBuffers[optimumDb] = (DrawBuffersEnum)0;
++				}
++				optimumMotionOnlyDrawBuffers[MotionAttachmentIndex] = (DrawBuffersEnum)(36064 + MotionAttachmentIndex);
+ 			}
++			GL.DrawBuffers(optimumMotionOnlyDrawBuffers.Length, optimumMotionOnlyDrawBuffers);
++		}
++		OptimumMotionWriteActive = true;
++		ApplyOptimumMotionBlendState();
++		return true;
++	}
++
++	/// <summary>
++	/// Optimum TAA (P4): closes the window <see cref="BeginMotionOnlyWrite" />
++	/// opened. The restore is the same one <see cref="EndMotionWrite" /> does -
++	/// Primary's default colour set, motion back out - so this is that method
++	/// under the name that pairs with the Begin the caller used.
++	/// </summary>
++	public void EndMotionOnlyWrite()
++	{
++		EndMotionWrite();
++	}
++
++	/// <summary>
++	/// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
++	///
++	/// A fullscreen triangle at window depth 1.0, drawn with the depth test on
++	/// and GL_LEQUAL, so it survives only where nothing wrote depth - the sky.
++	/// It writes the motion attachment and nothing else (the motion-only window),
++	/// and it never writes depth.
++	///
++	/// Why it exists is spelled out in taa-skymotion.fsh: sky colour, the night
++	/// sky, the sun and the moon already reproject correctly through the
++	/// resolve's own infinite-direction fallback and need no writer, but the
++	/// volumetric clouds and the aurora move independently of the camera and are
++	/// drawn into the Transparent target, where Primary's motion attachment does
++	/// not exist. Their coverage is read back here from that target's revealage
++	/// attachment - the same texture <see cref="MergeTransparentRenderPass" />
++	/// hands the compose as Revealage2D - and turned into the reactive value that
++	/// stops a sweeping cloud edge from smearing.
++	///
++	/// Ordering: called from ClientMain.MainRenderLoop immediately after the
++	/// liquid velocity pass, which is after the OIT merge (so the revealage is
++	/// this frame's) and after every AfterOIT renderer, and still inside the
++	/// temporal window (the resolve does not run until
++	/// RenderPostprocessingEffects).
++	///
++	/// A no-op with TAA off, and it never runs unless Primary is the bound
++	/// target - <see cref="BeginMotionOnlyWrite" /> refuses otherwise.
++	/// </summary>
++	internal bool RenderOptimumSkyMotion()
++	{
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		if (!TaaTargetsReady || MotionAttachmentIndex < 0) return false;
++		ShaderProgram skyMotion = ShaderPrograms.TaaSkyMotion;
++		if (skyMotion == null || skyMotion.LoadError || skyMotion.Disposed) return false;
++		if (frameBuffers == null || frameBuffers.Count <= 1) return false;
++		FrameBufferRef primary = frameBuffers[0];
++		FrameBufferRef transparent = frameBuffers[1];
++		if (primary == null || primary.Disposed || transparent == null || transparent.Disposed) return false;
++		if (transparent.ColorTextureIds == null || transparent.ColorTextureIds.Length < 2) return false;
++
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		if (!frame.WasViewCaptured(EnumTemporalView.World)) return false;
++
++		// The same two matrices the resolve builds for its camera fallback: this
++		// frame's jittered view-projection inverted, and the previous frame's
++		// unjittered one. Building them here rather than reusing the resolve's
++		// keeps the pass independent of whether the resolve ran yet - it has not.
++		float[] projection = frame.GetProjection(EnumTemporalView.World);
++		double[] jittered = new double[16];
++		for (int i = 0; i < 16; i++)
++		{
++			jittered[i] = projection[i];
++		}
++		OptimumTemporalMath.ApplyProjectionJitter(jittered, frame.JitterPx.X, frame.JitterPx.Y, primary.Width, primary.Height);
++		float[] projectionJittered = new float[16];
++		for (int i = 0; i < 16; i++)
++		{
++			projectionJittered[i] = (float)jittered[i];
++		}
++		float[] viewProj = Mat4f.Mul(new float[16], projectionJittered, frame.CameraMatrixOrigin);
++		float[] invViewProj = Mat4f.Invert(new float[16], viewProj);
++		if (invViewProj == null) return false;
++		float[] prevViewProj = Mat4f.Mul(new float[16], frame.GetPrevProjection(EnumTemporalView.World), frame.PrevCameraMatrixOrigin);
++
++		// Blending off: this pass owns the pixels it survives on, and the
++		// reactive value it computes already accounts for the coverage that
++		// would otherwise be blended in.
++		GlToggleBlend(on: false);
++		GlEnableDepthTest();
++		GlDepthMask(flag: false);
++		// GL_LEQUAL, so a triangle at exactly the far plane passes where the
++		// depth buffer is still at the far plane. The default is GL_LESS, under
++		// which this pass would draw nothing at all.
++		GlDepthFunc(EnumDepthFunction.Lequal);
++		GlDisableCullFace();
++
++		if (!BeginMotionOnlyWrite())
++		{
++			GlDepthFunc(EnumDepthFunction.Less);
++			GlDepthMask(flag: true);
++			GlToggleBlend(on: true);
++			GlEnableCullFace();
++			return false;
++		}
++		try
++		{
++			skyMotion.Use();
++			skyMotion.BindTexture2D("transparentRevealTex", transparent.ColorTextureIds[1], 0);
++			skyMotion.Uniform("taaRenderSize", (float)primary.Width, (float)primary.Height);
++			skyMotion.Uniform("taaJitterPx", frame.JitterPx.X, frame.JitterPx.Y);
++			skyMotion.UniformMatrix("taaInvViewProjJittered", invViewProj);
++			skyMotion.UniformMatrix("taaPrevViewProj", prevViewProj);
++			skyMotion.Uniform("taaCloudReactive", OptimumCloudReactive);
++			RenderFullscreenTriangle(screenQuad);
++			skyMotion.Stop();
++		}
++		finally
++		{
++			EndMotionOnlyWrite();
++			// Everything this pass changed, back the way the AfterOIT stage and
++			// the liquid velocity pass left it: depth writes on, GL_LESS,
++			// blending on for the post chain that follows, and culling back on -
++			// GlDisableCullFace above runs before the window opens, so both this
++			// path and the early return have to undo it.
++			GlDepthFunc(EnumDepthFunction.Less);
++			GlDepthMask(flag: true);
++			GlToggleBlend(on: true);
++			GlEnableCullFace();
+ 		}
++		ScreenManager.FrameProfiler.Mark("rend3D-ret-skymv");
++		return true;
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P4): the reactive value a fully cloud-covered sky pixel gets
++	/// from <see cref="RenderOptimumSkyMotion" />. 1 = do not trust the history
++	/// there at all, which is what a cloud bank scrolling across a static sky
++	/// needs. Partial coverage interpolates towards it from the coverage itself
++	/// (see taa-skymotion.fsh), so a clear pixel still gets 0.
++	/// </summary>
++	internal const float OptimumCloudReactive = 1f;
++
  	public override void BlitPrimaryToDefault()
  	{
  		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
@@ -1505,16 +2702,36 @@ index 6edf0c9..8824d24 100644
  		if (OffscreenBuffer)
  		{
  			int scene2D = frameBuffers[0].ColorTextureIds[0];
++			// Optimum P1: TAA debug views. Bypasses the normal FSR/blit path
++			// entirely and draws a fullscreen triangle visualising the Primary
++			// motion attachment, depth buffer or scene colour. Only reached when
++			// a debug mode is selected and the motion attachment actually exists
++			// (i.e. the TAA render targets were requested this frame); falls
++			// through to the normal path otherwise so TAA-off stays unaffected.
++			if (OptimumConfig.TaaDebugView != 0 && MotionAttachmentIndex >= 0)
++			{
++				ShaderProgram taaDebug = ShaderPrograms.TaaDebug;
++				if (taaDebug != null && !taaDebug.LoadError)
++				{
++					LoadFrameBuffer(EnumFrameBuffer.Default);
++					GlViewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
++					taaDebug.Use();
++					taaDebug.BindTexture2D("motionTex", frameBuffers[0].ColorTextureIds[MotionAttachmentIndex], 0);
++					taaDebug.BindTexture2D("depthTex", frameBuffers[0].DepthTextureId, 1);
++					taaDebug.BindTexture2D("sceneTex", scene2D, 2);
++					taaDebug.Uniform("mode", OptimumConfig.TaaDebugView);
++					taaDebug.Uniform("renderSize", (float)frameBuffers[0].Width, (float)frameBuffers[0].Height);
++					RenderFullscreenTriangle(screenQuad);
++					taaDebug.Stop();
++					return;
++				}
++			}
 +			FrameBufferRef optimumFsrFramebuffer = frameBuffers[OptimumFsrFramebufferIndex];
 +			ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
 +			ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
-+			bool useFsr = !optimumFsrDisabled
-+				&& ClientSettings.OptimumRenderScale < 1.0f
-+				&& optimumFsrFramebuffer != null
-+				&& fsrEasu != null
-+				&& fsrRcas != null
-+				&& !fsrEasu.LoadError
-+				&& !fsrRcas.LoadError;
++			// Optimum TAA (P5): one shared condition with RenderOptimumTaaSharpen,
++			// which skips its own RCAS pass whenever this one is going to run.
++			bool useFsr = OptimumFsrBlitActive();
 +			if (useFsr)
 +			{
 +				try
@@ -1562,7 +2779,7 @@ index 6edf0c9..8824d24 100644
  			blit.Scene2D = scene2D;
  			RenderFullscreenTriangle(screenQuad);
  			blit.Stop();
-@@ -2083,10 +3054,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2083,10 +4132,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
@@ -1588,7 +2805,7 @@ index 6edf0c9..8824d24 100644
  			OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
  			if ((int)error != 0)
  			{
-@@ -2101,10 +3087,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2101,10 +4165,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
@@ -1610,7 +2827,7 @@ index 6edf0c9..8824d24 100644
  		{
  			string arg = (ClientSettings.GlDebugMode ? "" : ". Enable Gl Debug Mode in the settings or clientsettings.json to track this error");
  			string message = string.Format("{0} - OpenGL threw an error: {1}{2}", (errmsg == null) ? "" : (errmsg + " "), error, arg);
-@@ -2119,48 +3116,97 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2119,48 +4194,97 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public unsafe override string GlGetError()
  	{
  		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
@@ -1708,7 +2925,7 @@ index 6edf0c9..8824d24 100644
  			GL.Enable((EnableCap)3089);
  		}
  		else
-@@ -2169,36 +3215,88 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2169,97 +4293,202 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -1790,6 +3007,14 @@ index 6edf0c9..8824d24 100644
 +				optimumDevice.SetBlendEquation(3, 32774);
 +				optimumDevice.SetBlendFuncSeparate(3, 1, 0, 1, 0);
 +			}
++			// Optimum TAA (P3): the motion attachment never blends. A blended
++			// motion vector averages two surfaces' displacements and belongs to
++			// neither; the per-attachment override has to be re-applied after
++			// every global blend change, exactly like the SSAO one above.
++			if (on)
++			{
++				ApplyOptimumMotionBlendState();
++			}
 +			return;
 +		}
  		if (on)
@@ -1797,7 +3022,41 @@ index 6edf0c9..8824d24 100644
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
-@@ -2233,33 +3331,71 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			case EnumBlendMode.Brighten:
+ 				GL.BlendFunc((BlendingFactor)774, (BlendingFactor)1);
++				ApplyOptimumMotionBlendState();
+ 				return;
+ 			case EnumBlendMode.Multiply:
+ 				GL.BlendFuncSeparate((BlendingFactorSrc)0, (BlendingFactorDest)771, (BlendingFactorSrc)1, (BlendingFactorDest)771);
++				ApplyOptimumMotionBlendState();
+ 				return;
+ 			case EnumBlendMode.PremultipliedAlpha:
+ 				GL.BlendFunc((BlendingFactor)1, (BlendingFactor)771);
++				ApplyOptimumMotionBlendState();
+ 				return;
+ 			case EnumBlendMode.Glow:
+ 				GL.BlendFuncSeparate((BlendingFactorSrc)770, (BlendingFactorDest)1, (BlendingFactorSrc)1, (BlendingFactorDest)0);
++				ApplyOptimumMotionBlendState();
+ 				return;
+ 			case EnumBlendMode.Overlay:
+ 				GL.BlendFuncSeparate((BlendingFactorSrc)770, (BlendingFactorDest)771, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++				ApplyOptimumMotionBlendState();
+ 				return;
+ 			}
+ 			GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
+ 			if (RenderSSAO)
+ 			{
+ 				GL.BlendEquation(2, (BlendEquationMode)32774);
+ 				GL.BlendFunc(2, (BlendingFactorSrc)1, (BlendingFactorDest)0);
+ 				GL.BlendEquation(3, (BlendEquationMode)32774);
+ 				GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)0);
+ 			}
++			// Optimum TAA (P3): see the device branch above.
++			ApplyOptimumMotionBlendState();
+ 		}
+ 		else
+ 		{
+ 			GL.Disable((EnableCap)3042);
  		}
  	}
  
@@ -1869,7 +3128,7 @@ index 6edf0c9..8824d24 100644
  			if (on)
  			{
  				GL.Enable((EnableCap)2848);
-@@ -2273,74 +3409,166 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2273,74 +4502,166 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2036,7 +3295,7 @@ index 6edf0c9..8824d24 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, linearMag ? 9729 : 9728);
  		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, surface.Width, surface.Height, 0, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
-@@ -2351,10 +3579,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2351,10 +4672,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2060,7 +3319,7 @@ index 6edf0c9..8824d24 100644
  		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)tex.PixelInternalFormat, tex.Width, tex.Height, 0, (PixelFormat)tex.PixelFormat, (PixelType)5126, (IntPtr)IntPtr.Zero);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (int)tex.MinFilter);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (int)tex.MagFilter);
-@@ -2367,10 +3608,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2367,10 +4701,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2098,7 +3357,7 @@ index 6edf0c9..8824d24 100644
  			if (intoTexture.TextureId != 0)
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
-@@ -2400,10 +3668,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2400,10 +4761,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return LoadTexture((IBitmap)new BitmapExternal(bmp), linearMag, clampMode, generateMipmaps);
  	}
  
@@ -2141,7 +3400,7 @@ index 6edf0c9..8824d24 100644
  		{
  			GL.TexSubImage2D((TextureTarget)3553, 0, destX, destY, srcBmp.Width, srcBmp.Height, (PixelFormat)32993, (PixelType)5121, (IntPtr)bitmapExternal.PixelsPtrAndLock);
  		}
-@@ -2421,10 +3721,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2421,10 +4814,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2200,7 +3459,7 @@ index 6edf0c9..8824d24 100644
  		if (ENABLE_ANISOTROPICFILTERING)
  		{
  			float num2 = GL.GetFloat((GetPName)34047);
-@@ -2488,10 +3836,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2488,10 +4929,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -2274,7 +3533,7 @@ index 6edf0c9..8824d24 100644
  			if (intoTexture.TextureId != 0)
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
-@@ -2523,10 +3934,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2523,10 +5027,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2305,7 +3564,7 @@ index 6edf0c9..8824d24 100644
  			GL.BindTexture((TextureTarget)3553, textureId);
  			int num = default(int);
  			GL.GetTexParameter((TextureTarget)3553, (GetTextureParameter)33085, out num);
-@@ -2540,10 +3971,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2540,10 +5064,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -2340,7 +3599,7 @@ index 6edf0c9..8824d24 100644
  		GL.BindTexture((TextureTarget)34067, num);
  		for (int i = 0; i < 6; i++)
  		{
-@@ -2563,15 +4018,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2563,15 +5111,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexImage2D(target, 0, (PixelInternalFormat)6408, bmp.Width, bmp.Height, 0, (PixelFormat)32993, (PixelType)5121, (IntPtr)bmp.PixelsPtrAndLock);
  	}
  
@@ -2369,7 +3628,7 @@ index 6edf0c9..8824d24 100644
  		{
  			GL.GetInteger((GetPName)3379, out result);
  		}
-@@ -2581,10 +4049,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2581,10 +5142,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return result;
  	}
  
@@ -2386,6 +3645,8 @@ index 6edf0c9..8824d24 100644
 +			UBO optimumUbo = new UBO();
 +			optimumUbo.Handle = optimumDevice.CreateUniformBuffer(shaderProgramId, bindingPoint, blockName, size);
 +			optimumUbo.Size = size;
++			optimumUbo.BlockName = blockName;
++			optimumUbo.BindingPoint = bindingPoint;
 +			return optimumUbo;
 +		}
  		int num = GL.GenBuffer();
@@ -2393,7 +3654,20 @@ index 6edf0c9..8824d24 100644
  		GL.BufferData((BufferTarget)35345, size, (IntPtr)IntPtr.Zero, (BufferUsageHint)35048);
  		ScreenManager.Platform.CheckGlError();
  		int uniformBlockIndex = GL.GetUniformBlockIndex(shaderProgramId, blockName);
-@@ -2605,10 +4086,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,10 +5169,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
+ 		ScreenManager.Platform.CheckGlError();
+ 		UBO uBO = new UBO();
+ 		uBO.Handle = num;
+ 		uBO.Size = size;
++		uBO.BlockName = blockName;
++		uBO.BindingPoint = bindingPoint;
+ 		uBO.Unbind();
+ 		ScreenManager.Platform.CheckGlError();
+ 		return uBO;
+ 	}
+ 
+@@ -2605,10 +5183,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
@@ -2410,7 +3684,7 @@ index 6edf0c9..8824d24 100644
  		{
  			val = (BufferAccessMask)((int)val | 0x50);
  		}
-@@ -2651,29 +4138,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5235,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2455,7 +3729,7 @@ index 6edf0c9..8824d24 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4175,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5272,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2476,7 +3750,7 @@ index 6edf0c9..8824d24 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4194,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5291,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2497,7 +3771,7 @@ index 6edf0c9..8824d24 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4213,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5310,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2518,7 +3792,7 @@ index 6edf0c9..8824d24 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4232,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5329,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2539,7 +3813,7 @@ index 6edf0c9..8824d24 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4255,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5352,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -2560,7 +3834,7 @@ index 6edf0c9..8824d24 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -2801,10 +4298,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2801,10 +5395,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0199: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01ad: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0255: Unknown result type (might be due to invalid IL or missing references)
@@ -2586,7 +3860,7 @@ index 6edf0c9..8824d24 100644
  		GL.BindVertexArray(num);
  		int xyzVboId = 0;
  		int normalsVboId = 0;
-@@ -3028,10 +4540,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3028,10 +5637,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0471: Unknown result type (might be due to invalid IL or missing references)
  		//IL_04f9: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0529: Unknown result type (might be due to invalid IL or missing references)
@@ -2608,7 +3882,7 @@ index 6edf0c9..8824d24 100644
  		GL.BindVertexArray(num);
  		int num3 = 0;
  		int num4 = 0;
-@@ -3215,10 +4738,22 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3215,10 +5835,22 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		};
  	}
  
@@ -2631,7 +3905,7 @@ index 6edf0c9..8824d24 100644
  			((VAO)modelref).Dispose();
  		}
  	}
-@@ -3277,14 +4812,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3277,14 +5909,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  					rotateUV = false;
  				}
  			}
@@ -2680,7 +3954,7 @@ index 6edf0c9..8824d24 100644
  			updateVAO(data.Rgba, data.RgbaOffset, data.RgbaCount, vAO.rgbaVboId, vAO.rgbaPtr, persistent);
  		}
  		if (data.CustomFloats != null && data.CustomFloats.Count > 0)
-@@ -3316,20 +4882,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3316,20 +5979,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		if (data.CustomBytes != null && data.CustomBytes.Count > 0)
  		{
@@ -2712,7 +3986,7 @@ index 6edf0c9..8824d24 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3342,10 +4912,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3342,10 +6009,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01fc: Unknown result type (might be due to invalid IL or missing references)
@@ -2738,7 +4012,7 @@ index 6edf0c9..8824d24 100644
  		GL.BindVertexArray(num);
  		int num2 = 0;
  		int rgbaVboId = 0;
-@@ -3675,15 +5260,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3675,15 +6357,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return new MouseEvent((int)mouseX, (int)mouseY, button, 0);
  	}
  
@@ -2768,7 +4042,7 @@ index 6edf0c9..8824d24 100644
  		if (text != null)
  		{
  			if (text.IndexOfOrdinal("#version") == -1)
-@@ -3715,10 +5314,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3715,10 +6411,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		return true;
  	}
  

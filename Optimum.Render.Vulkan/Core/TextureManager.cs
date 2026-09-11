@@ -50,7 +50,7 @@ internal readonly record struct SamplerState(
     /// which is what a non-mipmapping GL filter means.
     /// </summary>
     public float LodCeiling => !Mipmapped ? 0.25f
-        : MaxLevel >= 0 ? MaxLevel + 1f
+        : MaxLevel >= 0 ? MaxLevel
         : Vk.LodClampNone;
 }
 
@@ -564,13 +564,18 @@ internal sealed unsafe class TextureManager : IDisposable
         CommandBuffer commandBuffer, VulkanTexture texture,
         uint baseMip, uint mipCount, ImageLayout from, ImageLayout to)
     {
+        // Execution dependency stays ALL_COMMANDS on both sides (a transition
+        // must order against every earlier use, and this backend does not
+        // track per-use stages); the access masks name what each layout is
+        // really used for, which is what makes the availability/visibility
+        // operations precise and keeps the layers quiet about them.
         var barrier = new ImageMemoryBarrier2
         {
             SType = StructureType.ImageMemoryBarrier2,
             SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = AccessFlags2.MemoryWriteBit,
+            SrcAccessMask = AccessForLayout(from, writer: true),
             DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+            DstAccessMask = AccessForLayout(to, writer: false),
             OldLayout = from,
             NewLayout = to,
             Image = texture.Image,
@@ -585,6 +590,36 @@ internal sealed unsafe class TextureManager : IDisposable
         };
         _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
     }
+
+    /// <summary>
+    /// The accesses a layout is used for: as the source side of a barrier the
+    /// writes that must be made available, as the destination side the reads
+    /// and writes that must see them.
+    /// </summary>
+    internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer) => layout switch
+    {
+        ImageLayout.TransferDstOptimal => AccessFlags2.TransferWriteBit,
+        ImageLayout.TransferSrcOptimal => writer ? AccessFlags2.None : AccessFlags2.TransferReadBit,
+        ImageLayout.ColorAttachmentOptimal => writer
+            ? AccessFlags2.ColorAttachmentWriteBit
+            : AccessFlags2.ColorAttachmentReadBit | AccessFlags2.ColorAttachmentWriteBit,
+        ImageLayout.DepthAttachmentOptimal or ImageLayout.DepthStencilAttachmentOptimal => writer
+            ? AccessFlags2.DepthStencilAttachmentWriteBit
+            : AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.DepthStencilAttachmentWriteBit,
+        // Read-only depth is still written by the pass's storeOp, so as a
+        // source it must make that write available or the next transition is
+        // a write-after-write hazard (synchronization validation, 2026-09-11).
+        ImageLayout.DepthReadOnlyOptimal or ImageLayout.DepthStencilReadOnlyOptimal => writer
+            ? AccessFlags2.DepthStencilAttachmentWriteBit
+            : AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderSampledReadBit,
+        ImageLayout.ShaderReadOnlyOptimal => writer ? AccessFlags2.None : AccessFlags2.ShaderSampledReadBit,
+        ImageLayout.General => writer
+            ? AccessFlags2.MemoryWriteBit
+            : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+        ImageLayout.PresentSrcKhr => AccessFlags2.None,
+        ImageLayout.Undefined or ImageLayout.Preinitialized => writer ? AccessFlags2.None : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+        _ => writer ? AccessFlags2.MemoryWriteBit : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+    };
 
     // -------------------------------------------------------------------- helpers
 

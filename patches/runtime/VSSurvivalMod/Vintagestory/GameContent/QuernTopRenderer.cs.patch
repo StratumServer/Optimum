@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/QuernTopRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/QuernTopRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/QuernTopRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/QuernTopRenderer.cs
+@@ -52,7 +52,24 @@ public class QuernTopRenderer : IRendere
+ 				.Values;
+ 			standardShaderProgram.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShaderProgram.ProjectionMatrix = render.CurrentProjectionMatrix;
+-			render.RenderMesh(meshref);
++			// Optimum TAA (P3): the quern top is the one block-entity model that
++			// really moves - it spins - so its previous model matrix is worth
++			// keeping. The renderer instance is the identity, the uploaded mesh the
++			// shape. The motion attachment joins Primary's draw-buffer mask for this
++			// one draw. Both are no-ops when TAA is off.
++			OptimumStandardMotion.Apply(standardShaderProgram, this, meshref, ModelMat.Values);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMesh(meshref);
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			standardShaderProgram.Stop();
+ 			if (ShouldRotateManual)
+ 			{

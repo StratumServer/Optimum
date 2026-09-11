@@ -71,6 +71,165 @@ public class ShaderTranslationTests
         }
     }
 
+    /// <summary>
+    /// The corpus rows above all carry USEOIT 1 and no ALLOWDEPTHOFFSET, because
+    /// those are the settings every program shares. The TAA motion writers live
+    /// in exactly the configurations they leave out:
+    ///
+    /// - entityanimated's writer is inside `#if USEOIT == 0`, which only the
+    ///   opaque Entityanimated registration and ModSystemFpHands' hand shader
+    ///   produce, so the corpus has never translated the entity writer at all -
+    ///   including its second AnimationPrev uniform block, the only place the
+    ///   backend meets two named blocks in one program;
+    /// - the two-argument writer that stamps `gl_FragCoord.z + depthOffset` into
+    ///   the motion alpha only exists when ALLOWDEPTHOFFSET is stamped, which
+    ///   ModSystemFpHands does for its private copies of entityanimated and
+    ///   standard - the first-person hands and the first-person item.
+    ///
+    /// Those are shipped configurations, so they belong in the translation gate.
+    /// </summary>
+    [SkippableFact]
+    public void MotionWritersTranslateInTheConfigurationsTheClientReallyBuilds()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+
+        var files = ShaderCorpus.LoadShaderFiles();
+        var includes = ShaderCorpus.LoadIncludes();
+
+        // (program, variant) pairs the client produces with TAA on.
+        var cases = new List<(string Program, ShaderCorpus.ShaderVariant Variant)>();
+        foreach (int ssao in new[] { 0, 2 })
+        {
+            int location = ssao > 0 ? 4 : 2;
+
+            cases.Add(("entityanimated", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"entity-opaque-ssao{ssao}",
+                UseOit = 0, SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+            }));
+            cases.Add(("entityanimated", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"entity-fphands-ssao{ssao}",
+                UseOit = 0, SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+                ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
+            }));
+            cases.Add(("standard", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"standard-fpitem-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+                ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
+            }));
+            // TAA P4 review: the decal writer's SSBO branch. USESSBO tracks
+            // ScreenManager.Platform.UseSSBOs, which is on by default, and it is
+            // the branch where vertexPos and renderFlagsIn are locals unpacked
+            // from the face buffer rather than vertex attributes - so the
+            // previous-position block reads different symbols there. The corpus
+            // rows that carry USESSBO 1 all carry TAAMOTION 0, so the
+            // combination the client really ships was outside the gate.
+            cases.Add(("decals", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"decals-ssbo-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2, UseSsbo = 1,
+                TaaMotion = 1, TaaMotionLocation = location,
+            }));
+            cases.Add(("decals", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"decals-nossbo-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2, UseSsbo = 0,
+                TaaMotion = 1, TaaMotionLocation = location,
+            }));
+            // TAA P4 review: the cube-particle writer's VEC3SCALE branch.
+            // VSEssentials' EntityParticleSystem stamps `#define VEC3SCALE 1` on
+            // its private copy of particlescube (EntityParticleSystem.cs:190),
+            // which is the per-axis-scale position path - a second place the
+            // twin previous-position function has to agree with vanilla's own
+            // lines. No corpus row produces it.
+            cases.Add(("particlescube", new ShaderCorpus.ShaderVariant
+            {
+                Name = $"particlescube-vec3scale-ssao{ssao}",
+                SsaoLevel = ssao, DynLights = 4, ShadowQuality = 2,
+                TaaMotion = 1, TaaMotionLocation = location,
+                ExtraPrefix = "#define VEC3SCALE 1",
+            }));
+        }
+
+        using var compiler = new ShaderCompiler();
+        var failures = new List<string>();
+
+        foreach ((string program, ShaderCorpus.ShaderVariant variant) in cases)
+        {
+            var stages = ShaderCorpus.BuildProgram(program, files, includes, variant);
+            Assert.NotEmpty(stages);
+
+            TranslatedProgram result = ShaderTranslator.Translate(stages, compiler);
+            if (!result.Success)
+            {
+                failures.Add($"[{variant.Name}] {program}: {string.Join("; ", result.Errors)}");
+                continue;
+            }
+
+            foreach (KeyValuePair<EnumShaderType, byte[]> stage in result.Spirv)
+            {
+                Assert.True(stage.Value.Length >= 20 && stage.Value.Length % 4 == 0,
+                    $"{variant.Name} {program} {stage.Key}: malformed SPIR-V");
+                Assert.Equal(0x07230203u, BitConverter.ToUInt32(stage.Value, 0));
+            }
+        }
+
+        Assert.True(failures.Count == 0, string.Join("\n", failures));
+    }
+
+    /// <summary>
+    /// The writer only means anything if it is actually in the translated source.
+    /// A define typo or a stray guard would leave every assertion above passing
+    /// on a shader that emits no motion at all.
+    /// </summary>
+    [SkippableFact]
+    public void TheEntityMotionWriterSurvivesThePreprocessorInTheOpaqueConfiguration()
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+
+        var files = ShaderCorpus.LoadShaderFiles();
+        var includes = ShaderCorpus.LoadIncludes();
+        var variant = new ShaderCorpus.ShaderVariant
+        {
+            Name = "entity-opaque", UseOit = 0, SsaoLevel = 2, DynLights = 4,
+            TaaMotion = 1, TaaMotionLocation = 4,
+            ExtraPrefix = "#define ALLOWDEPTHOFFSET 1",
+        };
+
+        var stages = ShaderCorpus.BuildProgram("entityanimated", files, includes, variant);
+
+        using var compiler = new ShaderCompiler();
+
+        // The raw Code still carries every #if branch, so asserting on it would
+        // pass even when TAAMOTION or USEOIT compile the writer out. Only the
+        // preprocessed text says what the compiler actually sees.
+        string vertex = Preprocess(compiler, stages, EnumShaderType.VertexShader);
+        Assert.Contains("PrevElementTransforms", vertex);
+        Assert.Contains("previousWarpState()", vertex);
+        Assert.Contains("applyVertexWarpingState", vertex);
+
+        string fragment = Preprocess(compiler, stages, EnumShaderType.FragmentShader);
+        Assert.Contains("outMotion", fragment);
+        Assert.Contains("gl_FragCoord.z + depthOffset", fragment);
+    }
+
+    /// <summary>Runs one stage through the real preprocessor and returns its text.</summary>
+    private static string Preprocess(
+        ShaderCompiler compiler, IReadOnlyList<ShaderStageSource> stages, EnumShaderType stage)
+    {
+        ShaderStageSource source = stages.Single(s => s.Stage == stage);
+        ShaderCompileResult result =
+            compiler.Preprocess(source.Code, source.PrefixCode, source.Filename, source.Stage);
+
+        Assert.True(result.Success, $"{stage}: {result.Error}");
+        return result.PreprocessedText;
+    }
+
     [SkippableFact]
     public void TranslatedProgramsProduceValidSpirvForEveryStage()
     {

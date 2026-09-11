@@ -20,6 +20,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientCoreAPI.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
@@ -29,13 +30,17 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/RenderAPIGame.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs.patch

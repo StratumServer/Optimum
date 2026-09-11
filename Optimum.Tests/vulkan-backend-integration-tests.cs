@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -125,8 +126,14 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("public static string Renderer = \"opengl\";", config);
         Assert.Contains("public string Renderer { get; set; } = \"opengl\";", config);
-        // The switch falls through to opengl for anything it does not recognise.
-        Assert.Contains("_ => \"opengl\",", config);
+        // Anything the normaliser does not recognise falls back to opengl. The
+        // assertion is anchored to the tail of the normaliser's ternary chain -
+        // a bare "opengl" would already be satisfied by the field declarations
+        // above and could not detect the fallback branch being dropped.
+        string normalised = Regex.Replace(config, @"\s+", " ");
+        Assert.Contains(
+            "string.Equals(requestedRenderer, \"auto\", StringComparison.OrdinalIgnoreCase) ? \"auto\" : \"opengl\";",
+            normalised);
     }
 
     /// <summary>
@@ -275,8 +282,8 @@ public class VulkanBackendIntegrationTests
     {
         string added = AddedLines(Read(ShaderProgramBasePatch));
 
-        Assert.Contains("optimumOffset + 4", added);
-        Assert.Contains("optimumOffset + 8", added);
+        // The device lays the three components out itself; the location is opaque here.
+        Assert.Contains("value.X, value.Y, value.Z)", added);
         // The Vec2i overload keeps the cast the GL body performs.
         Assert.Contains("(float)value.X, (float)value.Y", added);
     }
@@ -414,6 +421,7 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("\"SetupOptimumFrameBuffers\"", patcher);
         Assert.Contains("\"CreateOptimumColorTarget\"", patcher);
+        Assert.Contains("\"SetupOptimumTextureSampler\"", patcher);
         Assert.Contains("\"CreateOptimumDepthTarget\"", patcher);
     }
 
@@ -424,4 +432,52 @@ public class VulkanBackendIntegrationTests
 
     private static string Read(string relativePath) =>
         File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));
+
+    [Fact]
+    public void ThePresentPathWaitsForTheSwapchainImageAtEveryStageAndOwnsSemaphoresPerImage()
+    {
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        // The first use of the acquired image is the present blit (transfer);
+        // a COLOR_ATTACHMENT_OUTPUT wait would not order it.
+        Assert.Contains("PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)", ring);
+
+        string swapchain = Read("Optimum.Render.Vulkan/Core/Swapchain.cs");
+        Assert.Contains("signalSemaphore = _renderFinished[(int)imageIndex %", swapchain);
+        Assert.DoesNotContain("signalSemaphore = _renderFinished[_semaphoreIndex];", swapchain);
+    }
+
+    [Fact]
+    public void ValidationMessagesAlwaysReachAFileAndExtraFeaturesCanBeRequested()
+    {
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.Contains("DefaultValidationLogPath", device);
+        Assert.Contains("OPTIMUM_VULKAN_VALIDATION_FEATURES", device);
+        string context = Read("Optimum.Render.Vulkan/Core/VulkanContext.cs");
+        Assert.Contains("ValidationFeatureEnableEXT.SynchronizationValidationExt", context);
+        Assert.Contains("ValidationFeatureEnableEXT.BestPracticesExt", context);
+        Assert.Contains("StructureType.ValidationFeaturesExt", context);
+    }
+
+    [Fact]
+    public void UnwrittenFragmentOutputsAreMaskedOffInThePipeline()
+    {
+        string cache = Read("Optimum.Render.Vulkan/Core/PipelineCache.cs");
+        Assert.Contains("request.Program.Interface.WrittenFragmentOutputs.Contains(i)", cache);
+        Assert.Contains("ColorWriteMask = writeMask,", cache);
+        string layout = Read("Optimum.Render.Vulkan/Shaders/ProgramInterfaceLayout.cs");
+        Assert.Contains("internal static bool FragmentOutputIsAssigned(string source, string name)", layout);
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.Contains("if (instanceCount <= 0) return;", device);
+        string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
+        Assert.Contains("internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer)", textures);
+    }
+
+    [Fact]
+    public void TheBootstrapAlwaysLogsWhichRendererItChose()
+    {
+        string program = Read("patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch");
+        Assert.Contains("\"[Optimum] OpenGL renderer: selected by config\"", program);
+        Assert.Contains("(OptimumRenderBootstrap.Advisory ?? \"selected by config\")", program);
+        Assert.Contains("\"[Optimum] OpenGL renderer: \" + optimumRendererReason", program);
+    }
 }

@@ -100,18 +100,37 @@ internal static class ShaderCorpus
         return files;
     }
 
+    /// <summary>
+    /// The shader includes, with Optimum's own overlays replacing their vanilla
+    /// counterparts - the same relationship <see cref="LoadShaderFiles" /> has,
+    /// and the same one `make deploy` and the package scripts produce on disk.
+    /// Without the overlay the corpus would translate the vanilla vertexwarp.vsh
+    /// while the client runs Optimum's WarpState one.
+    /// </summary>
     public static Dictionary<string, string> LoadIncludes()
     {
         var includes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (AssetRoot == null) return includes;
-
-        string directory = Path.Combine(AssetRoot, "shaderincludes");
-        if (!Directory.Exists(directory)) return includes;
-
-        foreach (string path in Directory.EnumerateFiles(directory))
+        if (AssetRoot != null)
         {
-            includes[Path.GetFileName(path)] = File.ReadAllText(path);
+            string directory = Path.Combine(AssetRoot, "shaderincludes");
+            if (Directory.Exists(directory))
+            {
+                foreach (string path in Directory.EnumerateFiles(directory))
+                {
+                    includes[Path.GetFileName(path)] = File.ReadAllText(path);
+                }
+            }
         }
+
+        string overlays = Path.Combine(RepositoryRoot, "sources", "shaderincludes");
+        if (Directory.Exists(overlays))
+        {
+            foreach (string path in Directory.EnumerateFiles(overlays))
+            {
+                includes[Path.GetFileName(path)] = File.ReadAllText(path);
+            }
+        }
+
         return includes;
     }
 
@@ -170,6 +189,19 @@ internal static class ShaderCorpus
         public int GreedyMesh;
         public float MinBright;
         public int MaxAnimatedElements = 35;
+        /// <summary>TAA motion-vector writers compiled in (OptimumConfig.EffectiveTaa).</summary>
+        public int TaaMotion;
+        /// <summary>Primary colour attachment the motion texture occupies: 4 with the SSAO G-buffer, 2 without.</summary>
+        public int TaaMotionLocation = 2;
+
+        /// <summary>
+        /// Defines a caller put on the program itself before the engine's block,
+        /// the way ModSystemFpHands stamps ALLOWDEPTHOFFSET on its two private
+        /// copies of standard and entityanimated. Those copies are the only place
+        /// the gl_FragDepth writer exists, so without this the corpus never
+        /// translates it.
+        /// </summary>
+        public string ExtraPrefix = "";
 
         public override string ToString() => Name;
     }
@@ -207,6 +239,30 @@ internal static class ShaderCorpus
             Name = "shadows-and-ssbo",
             ShadowQuality = 2, DynLights = 8, UseSsbo = 1,
         };
+        // TAA on, without the SSAO G-buffer (motion at attachment 2) and with it
+        // (attachment 4): the motion-vector writers only exist in these, and the
+        // two rows move the output location the same way the client does.
+        yield return new ShaderVariant
+        {
+            Name = "taa-no-ssao",
+            TaaMotion = 1, TaaMotionLocation = 2,
+        };
+        yield return new ShaderVariant
+        {
+            Name = "taa-with-ssao",
+            SsaoLevel = 2, DynLights = 4, TaaMotion = 1, TaaMotionLocation = 4,
+        };
+        // TAA on with the waving-stuff, foam and shiny settings off. Those are
+        // ordinary client settings, and WAVINGSTUFF in particular is what gates
+        // the bodies of every vertexwarp function the motion writers replay for
+        // the previous frame - so with TAA on it is a shipped combination that
+        // no other row produced (the "everything-off" row carries TAAMOTION 0).
+        yield return new ShaderVariant
+        {
+            Name = "taa-no-waving",
+            TaaMotion = 1, TaaMotionLocation = 2,
+            WavingStuff = 0, FoamEffect = 0, ShinyEffect = 0,
+        };
     }
 
     /// <summary>
@@ -231,6 +287,8 @@ internal static class ShaderCorpus
             lines.Add($"#define USEOIT {variant.UseOit}");
             lines.Add($"#define GREEDYMESH {variant.GreedyMesh}");
             lines.Add($"#define GREEDYMESH_GRAD 0");
+            lines.Add($"#define TAAMOTION {variant.TaaMotion}");
+            lines.Add($"#define TAAMOTIONLOCATION {variant.TaaMotionLocation}");
         }
         else
         {
@@ -246,9 +304,17 @@ internal static class ShaderCorpus
             lines.Add($"#define DYNLIGHTS {variant.DynLights}");
             lines.Add($"#define MAXANIMATEDELEMENTS {variant.MaxAnimatedElements}");
             lines.Add($"#define GREEDYMESH {variant.GreedyMesh}");
+            lines.Add($"#define TAAMOTION {variant.TaaMotion}");
+            lines.Add($"#define TAAMOTIONLOCATION {variant.TaaMotionLocation}");
         }
 
-        return string.Join("\r\n", lines) + "\r\n";
+        string prefix = string.Join("\r\n", lines) + "\r\n";
+        // The client puts the program's own PrefixCode first and appends the
+        // engine block to it (ShaderRegistry.registerDefaultShaderCodePrefixes
+        // does `PrefixCode = PrefixCode + ...`), so a caller's defines lead.
+        return variant.ExtraPrefix.Length > 0
+            ? variant.ExtraPrefix + "\r\n" + prefix
+            : prefix;
     }
 
     /// <summary>Builds the two stages of one program, ready for translation.</summary>

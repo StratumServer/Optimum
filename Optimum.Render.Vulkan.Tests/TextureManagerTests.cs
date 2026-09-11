@@ -142,7 +142,7 @@ public class TextureManagerTests
             SamplerState mipmapped = textures.Get(id)!.State;
             Assert.True(mipmapped.Mipmapped);
             Assert.Equal(3, mipmapped.MaxLevel);
-            Assert.Equal(4f, mipmapped.LodCeiling);
+            Assert.Equal(3f, mipmapped.LodCeiling);
 
             // Uncapped stays uncapped.
             textures.SetParameter(id, GlEnums.TextureMaxLevel, -1);

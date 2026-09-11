@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..324fffa 100644
+index 374f827..4b3b3d3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 @@ -1,15 +1,36 @@
@@ -281,13 +281,26 @@ index 374f827..324fffa 100644
  	public void OnRenderOpaque3D(float deltaTime)
  	{
  		RuntimeStats.renderedEntities = 0;
-@@ -82,15 +303,44 @@ public class SystemRenderEntities : ClientSystem
+@@ -82,15 +303,71 @@ public class SystemRenderEntities : ClientSystem
  		game.Platform.GlDisableCullFace();
  		game.GlMatrixModeModelView();
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
  		game.Platform.GlToggleBlend(on: true);
 -		foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
++		// Optimum TAA (P3): every draw in the batched loop below goes through
++		// entityanimated, which writes motion vectors, so the motion attachment
++		// joins Primary's draw-buffer mask for the whole loop. The held-item and
++		// first-person passes above open their own window where they need one; a
++		// pass whose shader has no motion output must stay outside it, or the
++		// attachment keeps whatever was there and the resolve reprojects a pixel
++		// by a vector that belongs to another surface. A no-op when TAA is off.
++		ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
++		// The window is opened per renderer, only around the game's own
++		// EntityShapeRenderer family (the entityanimated writers). A mod
++		// renderer with its own shader stays outside it, so it cannot leave
++		// another surface's vector standing under its pixels.
++		bool optimumMotionWrite = false;
 +		OptimumEntityShaderState.End();
 +		bool shaderStateCacheEnabled = OptimumConfig.EffectiveEntityShaderStateCache && !optimumEntityShaderCacheDisabled;
 +		bool shaderSegmentActive = false;
@@ -311,6 +324,16 @@ index 374f827..324fffa 100644
 +						EndOptimumEntityShaderSegment();
 +						shaderSegmentActive = false;
 +					}
++					bool optimumWritesMotion = optimumPlatform != null && OptimumIsMotionWriter(entityRenderer2.Value);
++					if (optimumWritesMotion && !optimumMotionWrite)
++					{
++						optimumMotionWrite = optimumPlatform.BeginMotionWrite();
++					}
++					else if (!optimumWritesMotion && optimumMotionWrite)
++					{
++						optimumPlatform.EndMotionWrite();
++						optimumMotionWrite = false;
++					}
 +					entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
 +				}
 +			}
@@ -324,12 +347,16 @@ index 374f827..324fffa 100644
 +			else
 +			{
 +				OptimumEntityShaderState.End();
++			}
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
  			}
  		}
  		game.GlPopMatrix();
  		entityanimated.Stop();
  		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -127,10 +377,25 @@ public class SystemRenderEntities : ClientSystem
+@@ -127,10 +404,25 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
@@ -355,3 +382,34 @@ index 374f827..324fffa 100644
  				entity.IsShadowRendered = true;
  				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
  			}
+@@ -182,6 +474,30 @@ public class SystemRenderEntities : ClientSystem
+ 
+ 	public override EnumClientSystemType GetSystemType()
+ 	{
+ 		return EnumClientSystemType.Render;
+ 	}
++
++	// No field initializer: injected static fields are not initialised by the
++	// transplant (the static constructor is vanilla's), so it is created lazily.
++	private static Dictionary<Type, bool> optimumMotionWriterTypes;
++
++	/// <summary>
++	/// Optimum TAA: whether a renderer's batched opaque draw goes through the
++	/// entityanimated motion writer. True for the game's own EntityShapeRenderer
++	/// family (Vintagestory.GameContent); a renderer from another assembly may
++	/// draw any shader, so it stays outside the motion window and the resolve
++	/// camera-reprojects its pixels. Cached per concrete type; render thread only.
++	/// </summary>
++	internal static bool OptimumIsMotionWriter(EntityRenderer renderer)
++	{
++		Type type = renderer.GetType();
++		Dictionary<Type, bool> cache = optimumMotionWriterTypes ??= new Dictionary<Type, bool>();
++		if (!cache.TryGetValue(type, out bool writes))
++		{
++			writes = type.Namespace != null && type.Namespace.StartsWith("Vintagestory.GameContent", StringComparison.Ordinal)
++				&& type.Assembly.GetName().Name == "VSEssentials";
++			cache[type] = writes;
++		}
++		return writes;
++	}
+ }

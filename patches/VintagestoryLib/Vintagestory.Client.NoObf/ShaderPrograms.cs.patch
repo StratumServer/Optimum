@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-index f19d524..64a9dd4 100644
+index f19d524..1e3972a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-@@ -40,10 +40,14 @@ public static class ShaderPrograms
+@@ -40,10 +40,33 @@ public static class ShaderPrograms
  
  	public static ShaderProgramEntityanimated Entityanimated;
  
@@ -11,6 +11,25 @@ index f19d524..64a9dd4 100644
 +	public static ShaderProgram FsrEasu;
 +
 +	public static ShaderProgram FsrRcas;
++
++	public static ShaderProgram TaaDebug;
++
++	public static ShaderProgram TaaResolve;
++
++	// Optimum TAA (P5): the post-resolve sharpen pass (taa-sharpen). Registered
++	// like the other Optimum-only programs, so a failed compile marks LoadError
++	// and the post chain simply keeps reading the unsharpened resolve.
++	public static ShaderProgram TaaSharpen;
++
++	// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	// Registered like the other Optimum-only programs, so a failed compile marks
++	// LoadError instead of failing the whole shader load.
++	public static ShaderProgram ChunkLiquidMotion;
++
++	// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
++	// Registered like the other Optimum-only programs, so a failed compile marks
++	// LoadError instead of failing the whole shader load.
++	public static ShaderProgram TaaSkyMotion;
 +
  	public static ShaderProgramFindbright Findbright;
  

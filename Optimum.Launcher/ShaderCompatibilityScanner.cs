@@ -319,6 +319,69 @@ public static class ShaderCompatibilityScanner
         AddFeatureDecision(report, "Vulkan", rawOpenGl,
             "a mod calls OpenGL directly, which the Vulkan backend cannot serve");
 
+        // "Taa" is deliberately absent from ShaderFeatures for the same reason as
+        // "Vulkan": OptimumConfig.EffectiveTaa consults IsFeatureExplicitlyDisabled,
+        // so a missing scan must not silently veto a renderer feature the user
+        // asked for - only an explicit verdict does.
+        //
+        // An external copy of any shader Optimum's motion-vector writers live in,
+        // or of the vertexwarp include they evaluate twice, replaces the writer
+        // with one that emits nothing to the motion attachment. The resolve would
+        // then reproject those pixels by camera motion alone while everything
+        // around them used real vectors, which is worse than not running TAA.
+        bool externalMotionShader =
+            HasExternalShader(report, "chunkopaque.vsh") || HasExternalShader(report, "chunkopaque.fsh") ||
+            HasExternalShader(report, "chunktopsoil.vsh") || HasExternalShader(report, "chunktopsoil.fsh") ||
+            HasExternalShader(report, "entityanimated.vsh") || HasExternalShader(report, "entityanimated.fsh") ||
+            HasExternalShader(report, "standard.vsh") || HasExternalShader(report, "standard.fsh") ||
+            HasExternalShader(report, "instanced.vsh") || HasExternalShader(report, "instanced.fsh") ||
+            // The liquid velocity pass re-draws the liquid pools through its own
+            // program and has to land on exactly the surface chunkliquid.vsh
+            // shaded; an external copy of either file breaks that agreement, and
+            // its vectors would then be rejected or - worse - accepted for a
+            // surface half a pixel away.
+            HasExternalShader(report, "chunkliquid.vsh") ||
+            HasExternalShader(report, "chunkliquidmotion.vsh") || HasExternalShader(report, "chunkliquidmotion.fsh") ||
+            // Cube particles write the motion attachment themselves, and the
+            // OIT merge is where every transparent that cannot write it gets its
+            // reactive value. An external copy of either drops that content back
+            // to camera reprojection with no reactive flag at all, which ghosts
+            // exactly the fast-moving, alpha-blended pixels TAA is worst at.
+            HasExternalShader(report, "particlescube.vsh") || HasExternalShader(report, "particlescube.fsh") ||
+            HasExternalShader(report, "transparentcompose.fsh") ||
+            // A decal that no longer writes the attachment leaves the block's
+            // vector behind a depth the decal itself moved, which the resolve
+            // rejects; and an external sky-motion pass would decide the reactive
+            // policy for every cloud pixel in the frame.
+            HasExternalShader(report, "decals.vsh") || HasExternalShader(report, "decals.fsh") ||
+            // Every stage Optimum owns outright: the resolve itself, the debug
+            // views, the sky-motion pass and the post-resolve sharpen. An
+            // external copy of any of them is not a writer that emits nothing,
+            // it is a replacement resolve running against a contract (MRT
+            // layout, history formats, jitter and reactive semantics) it cannot
+            // know. The prefix rule covers taa-* files added after this line was
+            // written, so a new stage cannot ship without a scanner rule.
+            HasExternalShader(report, "taa-resolve.vsh") || HasExternalShader(report, "taa-resolve.fsh") ||
+            HasExternalShader(report, "taa-debug.vsh") || HasExternalShader(report, "taa-debug.fsh") ||
+            HasExternalShader(report, "taa-skymotion.vsh") || HasExternalShader(report, "taa-skymotion.fsh") ||
+            HasExternalShader(report, "taa-sharpen.vsh") || HasExternalShader(report, "taa-sharpen.fsh") ||
+            HasExternalShaderPrefix(report, "taa-") ||
+            // The sharpen pass is an RCAS variant and shares its vertex stage and
+            // lobe maths with the FSR1 pair, which is also what render scale
+            // resolves through: an external copy leaves TAA sharpening either
+            // doubled with FSR's own tap or gone.
+            HasExternalShader(report, "fsr-rcas.vsh") || HasExternalShader(report, "fsr-rcas.fsh") ||
+            HasExternalShader(report, "fsr-easu.vsh") || HasExternalShader(report, "fsr-easu.fsh") ||
+            // Not just vertexwarp.vsh: ShaderRegistry merges every shaderinclude
+            // into one dictionary that all the motion writers compile against, so
+            // an external file anywhere in that directory can redefine a helper
+            // the writers call - and unlike a shader, an include has no program
+            // of its own to point the blame at.
+            HasExternalShader(report, "vertexwarp.vsh") ||
+            HasExternalShaderInclude(report);
+        AddFeatureDecision(report, "Taa", externalMotionShader,
+            "external shader owns a motion-vector writer contract");
+
         if (report.ScanFailed)
         {
             foreach (string feature in ShaderFeatures)
@@ -344,6 +407,27 @@ public static class ShaderCompatibilityScanner
     {
         return report.ShaderOwners.Keys.Any(path =>
             string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// True when any external shader file name starts with <paramref name="prefix" />.
+    /// Optimum's own stages share the "taa-" prefix, so a stage added later is
+    /// covered without touching the feature decision.
+    /// </summary>
+    private static bool HasExternalShaderPrefix(ShaderCompatibilityReport report, string prefix)
+    {
+        return report.ShaderOwners.Keys.Any(path =>
+            Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// True when any external file lands in the shaderincludes directory.
+    /// NormalizeShaderPath keeps those under a "shaderincludes/" prefix.
+    /// </summary>
+    private static bool HasExternalShaderInclude(ShaderCompatibilityReport report)
+    {
+        return report.ShaderOwners.Keys.Any(path =>
+            path.Replace('\\', '/').Contains("shaderincludes/", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsShaderHookIndicator(string indicator) =>
@@ -385,6 +469,7 @@ public static class ShaderCompatibilityScanner
         string normalized = path.Replace('\\', '/');
         int marker = normalized.IndexOf("assets/game/shaders/", StringComparison.OrdinalIgnoreCase);
         string shader;
+        bool isInclude = false;
         if (marker >= 0)
         {
             shader = normalized[marker..];
@@ -402,12 +487,45 @@ public static class ShaderCompatibilityScanner
             }
             else
             {
-                return null;
+                // Optimum: shaderincludes is a first-class asset category that
+                // ShaderRegistry merges into the same include dictionary as
+                // shaders, so an external vertexwarp.vsh replaces Optimum's copy
+                // exactly the way an external chunkopaque.vsh would - and with it
+                // the WarpState overloads the motion-vector writers evaluate.
+                marker = normalized.IndexOf("/shaderincludes/", StringComparison.OrdinalIgnoreCase);
+                if (marker >= 0)
+                {
+                    shader = normalized[(marker + 1)..];
+                    isInclude = true;
+                }
+                else if (normalized.StartsWith("shaderincludes/", StringComparison.OrdinalIgnoreCase))
+                {
+                    shader = normalized;
+                    isInclude = true;
+                }
+                else
+                {
+                    return null;
+                }
             }
         }
 
+        // Optimum: the stage-extension filter is only meaningful for shaders/,
+        // where a file is a vertex, fragment or geometry stage. ShaderRegistry
+        // loads every shaderinclude regardless of extension - vanilla ships five
+        // .ash includes next to the .fsh/.vsh ones - so an external .ash override
+        // replaces a helper the motion writers compile against just the same.
         string extension = Path.GetExtension(shader);
-        if (extension is not ".fsh" and not ".vsh" and not ".gsh") return null;
+        if (isInclude)
+        {
+            // Any real file counts; a directory entry (no extension) does not.
+            if (extension.Length == 0) return null;
+        }
+        else if (extension is not ".fsh" and not ".vsh" and not ".gsh")
+        {
+            return null;
+        }
+
         return shader.ToLowerInvariant();
     }
 

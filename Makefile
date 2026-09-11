@@ -102,7 +102,27 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@cp $(MOD_OUT)/VSSurvivalMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
-	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
+	@# The Vulkan renderer and its dependencies, loaded by name at startup; a
+	@# stale copy here makes the probe throw and the client fall back to OpenGL.
+	@cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(VANILLA_DIR)/
+	@cp $(MOD_OUT)/Silk.NET.*.dll $(VANILLA_DIR)/
+	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/Lib/; fi
+	@# Every file, not *.fsh plus *.vsh: the packagers copy the whole directory,
+	@# and a stage that ships only on one of the two paths is the bug the
+	@# completeness check below exists to catch.
+	@for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(VANILLA_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done
+	@# Shader includes (TAA P3: the WarpState vertexwarp.vsh). Same override
+	@# mechanism as shaders - ShaderRegistry merges both asset categories into one
+	@# include dictionary - but a separate directory, so it needs its own copy.
+	@if [ -d "sources/shaderincludes" ]; then mkdir -p $(VANILLA_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(VANILLA_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi
+	@# Both copies above are wildcards, so a file that never arrives means a moved
+	@# source path or a missing destination directory, not a forgotten list entry -
+	@# and the symptom is silent, vanilla's shader running in place of Optimum's.
+	@# TAA fails worst that way: its stages (taa-resolve, taa-debug, taa-skymotion,
+	@# taa-sharpen), the liquid velocity pass and the includes the motion writers
+	@# compile against have to arrive together or the resolve reads vectors nobody
+	@# wrote. Fail the deploy instead.
+	@for f in sources/shaders/* sources/shaderincludes/*; do [ -f "$$f" ] || continue; d="$(VANILLA_DIR)/assets/game/$$(echo $$f | cut -d/ -f2)/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done
 	@if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(VANILLA_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi
 	@if [ -d "$(INSTALL_DIR)" ]; then \
 		echo "Deploying to $(INSTALL_DIR)..."; \
@@ -115,7 +135,11 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/VSSurvivalMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
-		cp sources/shaders/*.fsh sources/shaders/*.vsh $(INSTALL_DIR)/assets/game/shaders/; \
+		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
+		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/Lib/; fi; \
+		for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done; \
+		if [ -d "sources/shaderincludes" ]; then mkdir -p $(INSTALL_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi; \
+		for f in sources/shaders/* sources/shaderincludes/*; do [ -f "$$f" ] || continue; d="$(INSTALL_DIR)/assets/game/$$(echo $$f | cut -d/ -f2)/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \
 		if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(INSTALL_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi; \
 	fi
 	@echo "Deploy complete."

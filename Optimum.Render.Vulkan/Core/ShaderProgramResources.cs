@@ -110,12 +110,16 @@ internal sealed unsafe class ShaderProgramResources : IDisposable
                 StageFlags = allGraphics,
             });
         }
+        // A block the shader declares for itself is dynamic for the same reason
+        // the generated one is: the client re-uploads it between draws that are
+        // only recorded, so each draw needs its own slice of the frame's uniform
+        // ring, reached through an offset rather than through a set of its own.
         foreach (BlockBinding block in Interface.UniformBlocks)
         {
             uniformBindings.Add(new DescriptorSetLayoutBinding
             {
                 Binding = (uint)block.Binding,
-                DescriptorType = DescriptorType.UniformBuffer,
+                DescriptorType = DescriptorType.UniformBufferDynamic,
                 DescriptorCount = 1,
                 StageFlags = allGraphics,
             });

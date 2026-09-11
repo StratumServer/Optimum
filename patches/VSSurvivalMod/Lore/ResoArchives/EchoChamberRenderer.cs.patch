@@ -1,0 +1,43 @@
+diff --git a/VSSurvivalMod/Lore/ResoArchives/EchoChamberRenderer.cs b/VSSurvivalMod/Lore/ResoArchives/EchoChamberRenderer.cs
+index 1df7c9d..666c84e 100644
+--- a/VSSurvivalMod/Lore/ResoArchives/EchoChamberRenderer.cs
++++ b/VSSurvivalMod/Lore/ResoArchives/EchoChamberRenderer.cs
+@@ -207,18 +207,32 @@ namespace Vintagestory.GameContent
+ 
+             capi.Render.GlPopMatrix();
+ 
+             if (meshRef1 != null)
+             {
+-                prog.BindTexture2D("entityTex", echoTexture1.TextureId, 0);
+-                capi.Render.RenderMesh(meshRef1);
++                // Optimum TAA (P3): three meshes, one pose, one model matrix - and
++                // drawn from DoRender3DOpaque rather than the shared batched pass,
++                // so this renderer opens the motion-attachment window itself. The
++                // previous pose came from the Animation UBO update above; all three
++                // draws reuse it, which is exactly right because they share the
++                // transform.
++                bool optimumMotionWrite = OptimumMotionWrite.Begin();
++                try
++                {
++                    prog.BindTexture2D("entityTex", echoTexture1.TextureId, 0);
++                    capi.Render.RenderMesh(meshRef1);
+ 
+-                prog.BindTexture2D("entityTex", echoTexture2.TextureId, 0);
+-                capi.Render.RenderMesh(meshRef2);
++                    prog.BindTexture2D("entityTex", echoTexture2.TextureId, 0);
++                    capi.Render.RenderMesh(meshRef2);
+ 
+-                prog.BindTexture2D("entityTex", echoTexture3.TextureId, 0);
+-                capi.Render.RenderMesh(meshRef3);
++                    prog.BindTexture2D("entityTex", echoTexture3.TextureId, 0);
++                    capi.Render.RenderMesh(meshRef3);
++                }
++                finally
++                {
++                    if (optimumMotionWrite) OptimumMotionWrite.End();
++                }
+             }
+ 
+             prog.Stop();
+ 
+         }

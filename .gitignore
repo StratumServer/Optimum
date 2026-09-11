@@ -66,7 +66,15 @@ graphify-out/
 __pycache__/
 
 # Private development artifacts
-docs/
+# (docs/* rather than docs/, so the one tracked deliverable below can be excepted -
+# a negation inside a fully excluded directory is never reconsidered by git.)
+docs/*
+# ...except the TAA acceptance checklist: it is a deliverable the P5 coverage test
+# (Optimum.Tests/taa-acceptance-harness-coverage-tests.cs) reads, so it has to be tracked.
+!docs/taa-acceptance.md
+# ...and the frozen temporal frame contract, for the same reason: the P6 stability
+# test (Optimum.Tests/temporal-contract-tests.cs) reads it.
+!docs/temporal-frame-contract.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1

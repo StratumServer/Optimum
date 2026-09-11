@@ -81,6 +81,16 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumDynamicLightCache",
         "OptimumRenderScale",
     },
+    // TAA P4: the cube-particle motion writer's previous-frame uniforms.
+    ["Vintagestory.Client.NoObf.SystemRenderParticles"] = new()
+    {
+        "SetOptimumMotionUniforms",
+    },
+    // TAA P4: the decal motion writer's previous-frame uniforms.
+    ["Vintagestory.Client.NoObf.SystemRenderDecals"] = new()
+    {
+        "SetOptimumMotionUniforms",
+    },
     ["Vintagestory.Client.NoObf.SystemRenderPlayerEffects"] = new()
     {
         "GetOptimumLightRadius",
@@ -100,6 +110,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "PrepareOptimumEntityLights",
         "BeginOptimumEntityShaderSegment",
         "EndOptimumEntityShaderSegment",
+        // TAA review fix: per-renderer motion-window gate.
+        "optimumMotionWriterTypes",
+        "OptimumIsMotionWriter",
     },
     ["Vintagestory.Client.NoObf.ClientChunk"] = new()
     {
@@ -120,6 +133,7 @@ var membersToInject = new Dictionary<string, List<string>>
         // Vulkan backend: the device-path framebuffer setup and its helpers.
         "SetupOptimumFrameBuffers",
         "CreateOptimumColorTarget",
+        "SetupOptimumTextureSampler",
         "CreateOptimumDepthTarget",
         "CreateOptimumPlaceholderTarget",
         "CreateOptimumFramebuffer",
@@ -131,15 +145,92 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumClearA",
         "optimumBoundTexture2d",
         "optimumScissorEnabled",
+        // TAA: motion attachment, history/aux/prev-depth targets, and the
+        // debug-view blit path (P1).
+        "OptimumTaaHistoryIndexA",
+        "OptimumTaaHistoryIndexB",
+        "OptimumGlR32f",
+        "MotionAttachmentIndex",
+        "TaaTargetsReady",
+        "optimumTaaDisabled",
+        "TaaHistory",
+        "CreateOptimumHistoryTarget",
+        "CreateOptimumHistoryTargetGl",
+        "DisableOptimumTaa",
+        "optimumTaaShaderReloadPending",
+        "OptimumRunPendingTaaShaderReload",
+        "_taaFrameParity",
+        "_taaHistoryValid",
+        "taaResolvedColorTexture",
+        "taaResolvedGlowTexture",
+        "TaaResolvedThisFrame",
+        "RenderOptimumTaaResolve",
+        // TAA P3: the motion-attachment draw-buffer window the terrain (and
+        // later entity/standard/instanced) writers open around their draws.
+        "OptimumMotionWriteActive",
+        "BeginMotionWrite",
+        "EndMotionWrite",
+        "ApplyOptimumMotionBlendState",
+        "InstallOptimumMotionWriteHooks",
+        "optimumMotionDrawBuffersOn",
+        "optimumMotionDrawBuffersOff",
+        // TAA P4: the motion-only window the liquid velocity pass opens - the
+        // motion attachment alone, every other colour attachment masked out.
+        "BeginMotionOnlyWrite",
+        "EndMotionOnlyWrite",
+        "optimumMotionOnlyDrawBuffers",
+        // TAA P4: additive blending on the motion attachment for the OIT merge,
+        // which contributes the transparent layer's coverage to the reactive
+        // channel without touching the vector or the writer depth under it.
+        "ApplyOptimumMotionAccumulateBlendState",
+        // TAA P4: the sky / volumetric-cloud motion and reactive pass and the
+        // reactive constant it stamps.
+        "RenderOptimumSkyMotion",
+        "OptimumCloudReactive",
+        // TAA P5: the post-resolve sharpen pass, its dedicated target slot and
+        // the shared "is FSR's RCAS going to run this frame" test the pass and
+        // BlitPrimaryToDefault both ask so the two never sharpen the same
+        // pixels twice.
+        "OptimumTaaSharpenIndex",
+        "OptimumFsrBlitActive",
+        "RenderOptimumTaaSharpen",
+    },
+    // TAA P3: the uniform block a buffer feeds and the point it is bound to.
+    // Vanilla had one block per program and Bind() hard-coded binding point 0;
+    // the entity motion writer adds a second ("AnimationPrev") beside it, and
+    // Update routes the bone upload through OptimumEntityMotion by block name.
+    ["Vintagestory.Client.NoObf.UBO"] = new()
+    {
+        "BlockName",
+        "BindingPoint",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
         "FsrEasu",
         "FsrRcas",
+        "TaaDebug",
+        "TaaResolve",
+        // TAA P5: the post-resolve sharpen pass program.
+        "TaaSharpen",
+        // TAA P4: the liquid velocity pass program.
+        "ChunkLiquidMotion",
+        // TAA P4: the sky / volumetric-cloud motion pass program.
+        "TaaSkyMotion",
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
         "RegisterOptimumShaderProgram",
+        // TAA: shared per-program post-compile handling extracted out of
+        // loadRegisteredShaderPrograms (both the parallel-preprocess and
+        // vanilla single-threaded paths call it); treats taa-debug as
+        // optional exactly like the two FSR programs.
+        "CompileAndTrackShaderProgram",
+        // TAA P5 review: the terrain sampler objects' LOD bias, reachable from
+        // ChunkRenderer so the TAA mip-bias row applies without a shader reload.
+        // A bound sampler object overrides the atlas texture parameter, so this
+        // is the only place chunkopaque/chunktopsoil mip selection changes.
+        "ApplyOptimumTerrainSamplerLodBias",
+        "ApplyOptimumSamplerLodBias",
     },
     ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
     {
@@ -184,6 +275,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumEntityShaderCacheChanged",
         "onOptimumRenderScaleChanged",
         "onOptimumGodRaysCapChanged",
+        "onOptimumTaaChanged",
+        "onOptimumTaaSharpnessChanged",
+        "onOptimumTaaMipBiasChanged",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",
@@ -230,6 +324,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumTextureLodBias",
         "ApplyOptimumTextureLodBias",
         "SetOptimumTextureLodBias",
+        // TAA P3: previous-frame transforms for the terrain motion writers.
+        "SetOptimumMotionUniforms",
+        // TAA P4: the liquid velocity pass and its reactive constant.
+        "RenderLiquidMotion",
+        "OptimumLiquidReactive",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
     // (_lastSortPlayerPos/_lastSortYaw), plus the multi-tesselator worker pool and
@@ -281,6 +380,24 @@ var membersToInject = new Dictionary<string, List<string>>
         "RegisterTesselationThread",
         "GetTesselationWorkerSlot",
         "ChunkTesselatorManager",
+        // TAA P1: unjittered projection companion to CurrentProjectionMatrix
+        // (new property; the jittered getter itself is an existing transplant
+        // target below).
+        "CurrentProjectionMatrixUnjittered",
+        // TAA P5: OPTIMUM_FPS_LOG per-second frame-time line, read by
+        // scripts/dev/perf-capture.sh. Called from MainRenderLoop (a transplant
+        // target below); inert unless the env var names a file.
+        "optimumFpsLogPath",
+        "optimumFpsLogResolved",
+        "optimumFpsLogSamples",
+        "optimumFpsLogFrames",
+        "optimumFpsLogSeconds",
+        "OptimumLogFrameTime",
+    },
+    ["Vintagestory.Client.NoObf.RenderAPIGame"] = new()
+    {
+        "CurrentProjectionMatrixUnjittered",
+        "TemporalContext",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
@@ -445,6 +562,22 @@ var targets = new List<MethodTarget>
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
     new("Vintagestory.Client.NoObf.ChunkRenderer", "OnBeforeRenderOpaque", 1),
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RuntimeAddBlockTextureAtlas", 1),
+    // TAA P3: terrain motion-vector writers - the opaque pass, the AfterOIT
+    // terrain overlay (pass 7) and the LiquidDepth prepass comment that records
+    // why it stays jittered but writes no motion.
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderAfterOIT", 1),
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "OnRenderBefore", 1),
+    // TAA P1: temporal frame contract - Advance()/JitterActive wiring in the
+    // render loop, the jittered projection getter, its capture at both
+    // Set3DProjection call sites, and the resets (FOV change, resize, world
+    // load already listed below as Start, shader reload).
+    new("Vintagestory.Client.NoObf.ClientMain", "MainRenderLoop", 1),
+    new("Vintagestory.Client.NoObf.ClientMain", "Set3DProjection", 2),
+    new("Vintagestory.Client.NoObf.ClientMain", "get_CurrentProjectionMatrix", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "OnFowChanged", 1),
+    new("Vintagestory.Client.NoObf.ClientMain", "OnResize", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "RenderAfterPostProcessing", 1),
+    new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerReloadShaders", 0),
     // ClientMain: mouse wheel fix (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)
@@ -488,6 +621,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformAbstract", "DisposeIndexBuffer", 0),
     // FSR: allocate the native intermediate and replace the final bilinear blit.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
+    // TAA P2: a framebuffer rebuild throws the history away - the flag and the
+    // temporal contract's reset reason are both set where the swap completes.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RebuildFrameBuffers", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BlitPrimaryToDefault", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
     // R4: pass the configured god-rays sample limit to the post-process shader.
@@ -637,6 +773,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.UBO", "Dispose", 0),
     new("Vintagestory.Client.NoObf.UBO", "Update", 3,
         new[] { "System.Object", "System.Int32", "System.Int32" }),
+    // TAA P3: the second "AnimationPrev" uniform block for the skinned-entity
+    // motion writer, created beside "Animation" while TAA is on.
+    new("Vintagestory.Client.NoObf.ShaderProgramEntityanimated", "initUbos", 0),
     // Vulkan backend: the packed-face storage buffer the SSBO chunk path uses.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UpdateSSBOMesh", 2),
     // Vulkan backend, world rendering: the render systems that reach past
@@ -663,6 +802,10 @@ var targets = new List<MethodTarget>
     // window only if something tells them to.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Window_Resize", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "MergeTransparentRenderPass", 0),
+    // TAA P4: the cube-particle motion window and its uniforms.
+    new("Vintagestory.Client.NoObf.SystemRenderParticles", "OnRenderFrame3D", 1),
+    // TAA P4: the decal motion window.
+    new("Vintagestory.Client.NoObf.SystemRenderDecals", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),

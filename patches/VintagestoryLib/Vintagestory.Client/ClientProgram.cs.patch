@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..8adc77a 100644
+index afa4d5f..c960fc3 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -48,7 +48,7 @@ index afa4d5f..8adc77a 100644
  		new ClientProgram(rawArgs);
  	}
  
-@@ -295,12 +330,77 @@ public class ClientProgram
+@@ -295,12 +330,84 @@ public class ClientProgram
  		};
  		if (RuntimeEnv.OS == OS.Mac)
  		{
@@ -81,10 +81,17 @@ index afa4d5f..8adc77a 100644
 +				OptimumRender.FallBackToOpenGL(optimumRendererReason);
 +				Console.WriteLine("[Optimum] OpenGL renderer: " + optimumRendererReason);
 +			}
-+			else if (OptimumRenderBootstrap.Advisory != null)
++			else
 +			{
-+				Console.WriteLine("[Optimum] Vulkan renderer: " + OptimumRenderBootstrap.Advisory);
++				// Always one line, so a log can never be read as "Vulkan" by
++				// the absence of a fallback message (CLAUDE.md rule 1).
++				Console.WriteLine("[Optimum] Vulkan renderer: " +
++					(OptimumRenderBootstrap.Advisory ?? "selected by config"));
 +			}
++		}
++		else
++		{
++			Console.WriteLine("[Optimum] OpenGL renderer: selected by config");
 +		}
 +		if (optimumUseVulkan)
 +		{
@@ -126,7 +133,7 @@ index afa4d5f..8adc77a 100644
  			try
  			{
  				((NativeWindow)gameWindowNative).CenterWindow();
-@@ -337,10 +437,13 @@ public class ClientProgram
+@@ -337,10 +444,13 @@ public class ClientProgram
  			}
  			Thread.CurrentThread.Priority = ThreadPriority.Normal;
  			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");

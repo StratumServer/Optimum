@@ -1,14 +1,24 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs b/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs
-index f250b1b..5518d04 100644
+index f250b1b..db1cc08 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs
-@@ -7,33 +7,64 @@ using Vintagestory.API.Util;
+@@ -7,33 +7,74 @@ using Vintagestory.API.Util;
  
  namespace Vintagestory.Client.NoObf;
  
  public class UBO : UBORef
  {
 +	// Mono.Cecil transplant.
++	// The block this buffer feeds and the point it is bound to. Vanilla knew
++	// neither: every program had exactly one uniform block and Bind() hard-coded
++	// binding point 0. TAA's entity writer adds a second block ("AnimationPrev")
++	// next to "Animation", so re-binding on every Update would otherwise take
++	// over the first block's binding point and hand both declarations the same
++	// buffer. Recorded by CreateUBO on both backends.
++	public string BlockName;
++
++	public int BindingPoint;
++
 +	// Handle carries the device's uniform-buffer handle on the device path, the
 +	// same convention VAO.VaoId uses for meshes, so UBORef stays the type mods
 +	// already hold and the binding point survives from CreateUBO.
@@ -21,7 +31,8 @@ index f250b1b..5518d04 100644
 +			return;
 +		}
  		GL.BindBuffer((BufferTarget)35345, Handle);
- 		GL.BindBufferBase((BufferRangeTarget)35345, 0, Handle);
+-		GL.BindBufferBase((BufferRangeTarget)35345, 0, Handle);
++		GL.BindBufferBase((BufferRangeTarget)35345, BindingPoint, Handle);
  	}
  
  	public override void Dispose()
@@ -67,7 +78,7 @@ index f250b1b..5518d04 100644
  		{
  			GL.BufferData((BufferTarget)35345, base.Size, (IntPtr)gCHandleProvider.Pointer, (BufferUsageHint)35048);
  		}
-@@ -44,20 +75,43 @@ public class UBO : UBORef
+@@ -44,20 +85,59 @@ public class UBO : UBORef
  	{
  		if (Unsafe.SizeOf<T>() != base.Size)
  		{
@@ -92,6 +103,22 @@ index f250b1b..5518d04 100644
  
  	public override void Update(object data, int offset, int size)
  	{
++		// Optimum TAA (P3): the skinned-entity motion writer needs the same
++		// entity's previous pose, and this upload is the one gate every entity
++		// draw passes through - the animator's bone matrices reaching "Animation"
++		// immediately before the draw. Routing it here covers the shared entity
++		// pass, the first-person hands (their own program) and the echo chamber
++		// without each renderer keeping its own history. Costs one string compare
++		// per UBO upload when TAA is off, and nothing at all for a program that
++		// has no AnimationPrev block.
++		if (BlockName == "Animation")
++		{
++			ShaderProgramBase optimumProgram = ShaderProgramBase.CurrentShaderProgram;
++			if (optimumProgram != null && optimumProgram.ubos.TryGetValue("AnimationPrev", out var optimumPrevBones))
++			{
++				OptimumEntityMotion.OnAnimationUpload(optimumProgram, optimumPrevBones, data, size);
++			}
++		}
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		if (optimumDevice != null)
 +		{

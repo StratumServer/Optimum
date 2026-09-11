@@ -157,6 +157,21 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityShapeRenderer", ".ctor", 2),
                 new("Vintagestory.GameContent.EntityShapeRenderer", "BeforeRender", 1),
                 new("Vintagestory.GameContent.EntityShapeRenderer", "DoRender3DOpaqueBatched", 2),
+                // TAA P3: the first-person hands draw entity geometry outside the
+                // shared entity pass, with their own program, their own FOV and
+                // their own copy of the animation blocks, so both methods carry
+                // motion-writer changes.
+                new("Vintagestory.GameContent.EntityPlayerShapeRenderer", "DoRender3DOpaque", 2),
+                new("Vintagestory.GameContent.ModSystemFpHands", "LoadShaders", 0),
+                // TAA P3: the standard-shader motion writer. Held items (both hands,
+                // and the first-person item program) get their previous transform in
+                // RenderItem; dropped items in EntityItemRenderer.DoRender3DOpaque
+                // above. Both also open the motion-attachment window around their draw.
+                new("Vintagestory.GameContent.EntityShapeRenderer", "RenderItem", 5),
+                // TAA P4: the falling-block renderer is shared by every falling
+                // block in view, so each block keys its own previous model matrix
+                // on its entity and the window is opened once around the loop.
+                new("Vintagestory.GameContent.ModSystemRenderFallingBlocksFast", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.WeatherSimulationSound", "updateSounds", 1),
@@ -244,6 +259,53 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.GearRenderer", "LoadShader", 0),
                 new("Vintagestory.GameContent.GearRenderer", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.GearRenderer", "updateSuperMechState", 2),
+                // TAA P3: the echo chamber draws three meshes on the shared
+                // entityanimated program from DoRender3DOpaque, so it opens the
+                // motion-attachment window itself.
+                new("Vintagestory.GameContent.EchoChamberRenderer", "DoRender3DOpaque", 2),
+                // TAA P3: the quern top is the block-entity model that actually
+                // moves, so it keeps a previous model matrix and writes motion.
+                new("Vintagestory.GameContent.QuernTopRenderer", "OnRenderFrame", 2),
+                // TAA P4: the remaining moving standard-shader block-entity
+                // renderers. Each keeps a previous model matrix through
+                // OptimumStandardMotion and opens the motion-attachment window
+                // around its own draw; without these entries the installed runtime
+                // keeps the vanilla bodies and they ghost on the camera fallback.
+                new("Vintagestory.GameContent.HelveHammerRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.FruitpressContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.ResonatorRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.BloomeryContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.ForgeContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.FirepitContentsRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.PotInFirepitRenderer", "OnRenderFrame", 2),
+                // TAA P3, the instanced writer: every mechanical-power renderer now
+                // fills OptimumInstanceMotion's instance layout (light, transform,
+                // previous transform, metadata) instead of vanilla's light+transform,
+                // so the buffer allocations, the transform writers and the instance
+                // counts all move together. MechNetworkRenderer sets the pass uniforms
+                // and opens the draw-buffer window around the whole loop.
+                new("Vintagestory.GameContent.Mechanics.MechNetworkRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.MechBlockRenderer", "UpdateCustomFloatBuffer", 0),
+                new("Vintagestory.GameContent.Mechanics.MechBlockRenderer", "UpdateLightAndTransformMatrix", 7),
+                new("Vintagestory.GameContent.Mechanics.GenericMechBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.GenericMechBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.AngledCageGearRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.AngledCageGearRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.AngledGearsBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.AngledGearsBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.TransmissionBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.TransmissionBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.ClutchBlockRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.ClutchBlockRenderer", "UpdateLightAndTransformMatrix", 9),
+                new("Vintagestory.GameContent.Mechanics.ClutchBlockRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", "createCustomFloats", 1),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", "UpdateLightAndTransformMatrix", 8),
+                new("Vintagestory.GameContent.Mechanics.CreativeRotorRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", ".ctor", 4),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", "createCustomFloats", 1),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", "UpdateLightAndTransformMatrix", 8),
+                new("Vintagestory.GameContent.Mechanics.PulverizerRenderer", "OnRenderFrame", 2),
             ]);
     }
 
