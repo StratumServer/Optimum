@@ -100,6 +100,15 @@ internal sealed unsafe class FrameSlot : IDisposable
         StartCommandBuffer();
     }
 
+    private static long s_recordingSerials;
+
+    /// <summary>
+    /// Unique across every slot and every begin of <see cref="CommandBuffer" />: a
+    /// recycled handle gets a new serial, so state remembered per command buffer
+    /// (<see cref="DynamicStateCache" />) never outlives the recording it describes.
+    /// </summary>
+    public ulong RecordingSerial { get; private set; }
+
     private void StartCommandBuffer(bool frameCommands = true)
     {
         Vk api = _context.Api;
@@ -122,6 +131,7 @@ internal sealed unsafe class FrameSlot : IDisposable
             _commandBuffers.Add(commandBuffer);
         }
         _commandBuffersUsed++;
+        RecordingSerial = (ulong)System.Threading.Interlocked.Increment(ref s_recordingSerials);
 
         var begin = new CommandBufferBeginInfo
         {

@@ -1591,6 +1591,10 @@ public class VulkanDeviceIntegrationTests
             seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
             seam.SetDrawBuffers(framebuffer, 0b1);
 
+            // This test is about the long-lived cache's eviction; a texture made a
+            // moment ago would otherwise get its set from the per-slot arena.
+            device!.ShortLivedFramesForTests = 0;
+
             int first = SolidTexture(seam, size, 10, 20, 30);
 
             seam.BeginFrame();

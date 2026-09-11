@@ -356,7 +356,10 @@ public class PacingStatsTests
         // The per-draw dynamic-state count matches the commands actually recorded.
         string dynamicState = Body(device, "private void ApplyDynamicState(");
         Assert.Equal(VulkanStats.DynamicStateCommandsPerDraw, Count(dynamicState, "api.CmdSet"));
-        Assert.Contains("VulkanStats.NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw);", dynamicState);
+        // Phase 1B step 6: dirty-masked, so the count is what was emitted, not a constant.
+        Assert.Contains("DynamicStateDirty dirty = _dynamicState.Update(serial, values);", dynamicState);
+        Assert.Contains("VulkanStats.NoteDynamicStateCommands(emitted);", dynamicState);
+        Assert.DoesNotContain("NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw)", dynamicState);
 
         Assert.Contains("VulkanStats.NoteScopeOpened();", Source("Core/RenderTargetManager.cs"));
         // Phase 1B step 5: ReBAR misses are counted where the ReBAR class falls

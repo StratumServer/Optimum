@@ -98,8 +98,10 @@ internal static class VulkanStats
     public const int WaitSiteCount = 9;
 
     /// <summary>
-    /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> records per
-    /// draw today. A source test keeps this equal to the calls in that method.
+    /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> can record for
+    /// one draw: all of them, at the first draw of a command buffer. Later draws
+    /// record only the ones whose value changed (Phase 1B step 6). A source test
+    /// keeps this equal to the calls in that method.
     /// </summary>
     public const int DynamicStateCommandsPerDraw = 14;
 
@@ -197,6 +199,13 @@ internal static class VulkanStats
     public static void NoteRebarFallback() => Interlocked.Increment(ref _rebarFallbacks);
 
     public static long RebarFallbacks => Interlocked.Read(ref _rebarFallbacks);
+
+    /// <summary>A multi-draw that did not fit its frame slot's indirect buffer and took an overflow buffer.</summary>
+    public static void NoteIndirectOverflow() => Interlocked.Increment(ref _indirectOverflows);
+
+    public static long IndirectOverflows => Interlocked.Read(ref _indirectOverflows);
+
+    private static long _indirectOverflows;
 
     public static void NoteDynamicStateCommands(int count) => Interlocked.Add(ref _dynamicStateCommands, count);
 

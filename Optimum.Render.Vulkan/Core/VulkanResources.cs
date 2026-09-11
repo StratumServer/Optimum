@@ -22,6 +22,9 @@ internal static class ResourceIds
     private static long _next;
 
     public static ulong Next() => (ulong)Interlocked.Increment(ref _next);
+
+    /// <summary>The highest id issued so far (0 before the first).</summary>
+    public static ulong Highest => (ulong)Interlocked.Read(ref _next);
 }
 
 /// <summary>A device buffer with its backing memory.</summary>
