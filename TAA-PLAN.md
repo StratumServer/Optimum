@@ -582,6 +582,138 @@ Lessons: screenshots cannot capture one-frame alternation; read the layer's log,
   histories 31.6 MiB + aux 7.9 MiB + prev-depth 15.8 MiB.
 - Decide default-on only after the matrix passes.
 
+P5 status (2026-09-11): landed on `feat/taa` (13b4cd0 sharpen + mip bias, cd72089 settings
+rows / scanner rules / packaging, c897e23 runtime donors, 8a3c33f acceptance and performance
+harness, f1a6300 integrate, 77f0c6d adversarial-review fixes). **The acceptance matrix has not
+been run** - no phase of P5 ran `make deploy` or the client, so by rule 3 P5 is not done, and
+the default-on decision is not takeable yet. Everything below is what the code now does and
+what the tests prove about it, which is a different claim from "it looks right".
+
+What P5 built:
+
+- **Sharpen**. `taa-sharpen.vsh/.fsh`, an RCAS variant with the lobe strength as a uniform
+  instead of the baked `exp2(-0.2)`, running on the resolved RGBA16F colour into its own
+  render-resolution target (frame buffer slot 21), placed immediately after the resolve so
+  bloom, god rays and the Luma copy Final reads all see the same image.
+  `TaaSharpness <= 0` is a true bypass - the shader returns the centre texel before the first
+  ring tap, and the pass does not run at all - and the HDR upper clamp is dropped (RCAS's own
+  lobe already passes anything above 1 through unsharpened). A target that fails to allocate
+  costs the sharpening only, never TAA.
+- **No double sharpening**. `OptimumFsrBlitActive()` is one shared condition asked by both
+  `RenderOptimumTaaSharpen` and `BlitPrimaryToDefault`: below render scale 1 the blit finishes
+  the frame with FSR's own RCAS at native resolution, so the TAA sharpen skips itself entirely.
+- **Mip bias**. `OptimumConfig.EffectiveTerrainLodBias` = the render scale's `log2` term (as
+  before) plus `TaaMipBias` while `EffectiveTaa`, clamped. Applied on both backends at both
+  call sites: the atlas texture parameter in `ChunkRenderer` and the chunkopaque/chunktopsoil
+  sampler objects in `ShaderRegistry`. Zero total makes no call at all.
+- **Settings**. Three rows in the Optimum tab (`optTaa`, `optTaaSharpness`, `optTaaMipBias`)
+  with lang strings and hover texts, persisted in `optimum.json` and clamped on load. The
+  toggle rebuilds the frame buffers, reloads the shaders and raises
+  `EnumTemporalResetReason.Toggle`; both sliders apply live. The toggle refuses on
+  `IsFeatureExplicitlyDisabled("Taa")`, never on `IsShaderFeatureDisabled`, so a missing
+  launcher scan cannot veto TAA.
+- **Scanner**. TAA is vetoed by an external copy of any stage it owns - the `taa-` prefix
+  (so a stage added later is covered without editing the decision), the liquid velocity pass,
+  the FSR pair the sharpen shares its maths with, and **any** file in a `shaderincludes/`
+  directory, because `ShaderRegistry` merges them all into the one dictionary every motion
+  writer compiles against.
+- **Packaging**. `make deploy` and all five `scripts/package*` copy the two asset directories
+  by wildcard and then **verify every source file arrived**, failing the deploy or the package
+  instead of shipping vanilla's shader under Optimum's name; `package.ps1`'s required-file list
+  names the TAA stages one by one so a reviewer can read what a release contains.
+- **Installed-runtime donors**. P3 finding (f) and P4 finding (t) are closed: 23
+  `patches/runtime/**` donors now carry the movers, `check-patches.sh` reports 43 runtime
+  patches applied with exact donors compiled, and two test families keep it that way -
+  `TaaRuntimeDonorCoverageTests` (marker parity fork patch vs donor patch, plus "every
+  instrumented fork patch is mapped") and `ModPatcherManifestConsistencyTests.
+  EveryTransplantedMethodHasARuntimeDonor` (every `Methods` entry's declaring type has a donor
+  or an Optimum-authored overlay, with the two FluffyClouds gaps listed explicitly).
+- **Harness**. `docs/taa-acceptance.md` is the runnable matrix (18 rows plus performance and
+  memory, tooling, preconditions, and the decision gate); `scripts/dev/perf-capture.sh` drives
+  a launch-warmup-measure-close cycle; `scripts/dev/luma-diff.py` is the still-frame luminance
+  measurement; `ClientMain.OptimumLogFrameTime` writes a per-second frame-time line, inert
+  unless `OPTIMUM_FPS_LOG` names a file, so the numbers are backend-neutral.
+
+Exact vs fallback, updated for P5 (the P4 table is otherwise unchanged):
+
+| Class | Vector | Reactive | Change in P5 |
+|---|---|---|---|
+| Resolved colour, post-resolve | - | - | new: optional RCAS sharpen at `TaaSharpness`, bypassed at 0 and skipped whole when FSR's RCAS will run at native resolution |
+| chunkopaque, chunktopsoil | exact | 0 | unchanged vectors; mip selection now carries `TaaMipBias` through the sampler objects, live |
+| Every other terrain pass (liquid, transparent, shadow) | as P4 | as P4 | mip selection now carries the same bias through the atlas texture parameter, live and in step with the samplers |
+| Liquid surfaces | exact | **0.3, still a compile-time constant** | `taaLiquidReactive` was on P4's "still owed" list to become a setting in P5; it did not |
+| Volumetric clouds | camera-rotation-only | **`mix(coverage, 1, coverage)`, still a compile-time constant** | same: `taaCloudReactive` is still `ClientPlatformWindows.OptimumCloudReactive = 1f` |
+| Helve hammer, resonator, fruitpress, pot lid, bloomery/forge/firepit contents, falling blocks, FP hands, echo chamber, held/dropped items, quern, every mech renderer | exact | 0 | **now exact on the installed-launcher path too**, not only in a from-source build: `patches/runtime/**` donors exist for all of them |
+| Forge/anvil work items, static standard-shader users, mod geometry | fallback | 0 | unchanged |
+
+Findings to carry:
+
+(ab) **A sampler object hides a texture parameter, and the setting was on the wrong side of
+it.** `chunkopaque`/`chunktopsoil` sample the atlas through sampler objects, and a bound
+sampler object overrides the texture object's state on that unit for everything it carries,
+LOD bias included. The bias was written into those samplers once per shader load and into the
+atlas texture every frame, so dragging the mip-bias slider moved liquid, transparent and
+shadow terrain and left opaque terrain and topsoil on the bias they were compiled with - two
+mip selections of the same atlas in one frame, while the tooltip said "applies immediately".
+`ShaderRegistry.ApplyOptimumTerrainSamplerLodBias` is now the single writer and
+`ChunkRenderer.SetOptimumTextureLodBias` calls it, so both halves move together or neither
+does. The backend half is not free either: the live change only reaches the GPU because
+`VulkanDevice` resolves the unit's sampler at draw time and the descriptor set is keyed on the
+resolved `VkSampler`, not on the sampler id - pinned by
+`VulkanDeviceIntegrationTests.ALodBiasWrittenToAnAlreadyBoundSamplerChangesTheMipTheGpuReads`.
+
+(ac) **"No call at all" needs a cache value that means "never".**
+`ChunkRenderer.optimumTextureLodBias` started at `0f`, so the first frame of a TAA-off
+native-scale session saw "0 wanted, cache not NaN" and wrote an explicit LOD bias of 0 over
+the driver default on every atlas - the one call that configuration is documented never to
+make, and with (ab) fixed it would have reached every terrain sampler too. `float.NaN` is the
+only initialiser that says "Optimum has never touched this".
+
+(ad) **The translation gate picked the new stage up for free, and that is worth knowing.**
+`taa-sharpen` needed no corpus row: `ShaderCorpus.LoadShaderFiles` overlays `sources/shaders`
+and `ProgramNames` takes every base name with both stages, so
+`EveryVanillaProgramTranslatesToSpirv` translates it in every variant. That is only true for a
+stage that is a plain `.vsh`/`.fsh` pair under `sources/shaders`; the P3/P4 writers needed
+explicit rows precisely because they live inside define combinations no row produced
+(findings (d) and (v)).
+
+(ae) **The sharpen target is allocated whenever TAA is on, including at render scale below 1
+where the pass can never run** - 16 MiB at 1080p, ~64 MiB at 4K, on the handheld this plan
+targets. Deliberately left: gating it on the render scale would put a second copy of the
+"is FSR going to run" condition next to the shared `OptimumFsrBlitActive()` the phase
+introduced to stop exactly that drift. Revisit with the memory numbers from the matrix.
+
+(af) **Finding (z) is unpaid.** `RenderOptimumTaaResolve` and `RenderOptimumSkyMotion` still
+allocate five small arrays each per frame; P4 said "fold both into fields when P5 measures",
+and P5 did not measure.
+
+Still owed for P5 (rule 3), in the game, on both backends, with the renderer confirmed from
+the log - all of it is `docs/taa-acceptance.md`:
+- the 18 acceptance rows (A1-A18), each twice per backend, TAA on and off, with the
+  seven-pair luminance medians recorded; A18 is the TAA-off byte-identity check, which so far
+  exists only as a code argument and a coverage test, never as a measured frame;
+- everything P4 left owed and P5 did not close: the liquid velocity pass's depth write against
+  block outlines, SSAO near water and rifts; whether reactive 1 on cloud-covered sky costs the
+  sky's own AA and whether `mix(coverage, 1, coverage)` is the right curve; the near-decal
+  ghosting finding (o) identified; the movers through their animations; faint cube particles;
+  and the vertex-warp cost of evaluating the warp twice (finding (j), still unpaid);
+- the GL path of everything P3/P4/P5 added: `Optimum.Render.Vulkan.Tests` is still the only
+  GPU harness, so every GL branch - the sky pass's depth-func dance,
+  `BeginMotionOnlyWrite`'s `GL_NONE` array, `glBlendFunci`, and now the sharpen pass and the
+  `GL.SamplerParameter` half of the live mip bias - has never executed;
+- performance on the Arc 140V: frame delta, GPU pass timestamps, CPU frame time, 1% lows, with
+  renderer name, power mode and thermals; and the measured memory against the plan's estimate
+  (motion 15.8 + two colour histories 31.6 + aux 7.9 + prev-depth 15.8 MiB, plus the sharpen
+  target's 15.8 MiB, which the plan's figure does not include);
+- `taaLiquidReactive` and `taaCloudReactive` as settings rather than constants, which P4
+  assigned to P5 and P5 did not do. They are uniforms already, so this is a config field and a
+  row each, not a shader change - but they should be tuned by measurement in the matrix first,
+  which is why leaving them until the matrix runs is defensible.
+
+**Default-on is not decided.** The plan says decide only after the matrix passes, and the
+matrix has not been run. The decision belongs to the user, with the evidence paths recorded
+here; until then `OptimumConfig.Taa` stays `false` and TAA is opt-in from the settings tab.
+
 **P6. Freeze the contract.**
 - Document the immutable frame input record, resource formats/conventions, per-class motion status
   and the adapter tests; reserve backend-native execution, presentation lifetime and extra ray
