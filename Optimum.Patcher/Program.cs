@@ -106,6 +106,32 @@ var membersToInject = new Dictionary<string, List<string>>
         "UnbindUBO",
         "UpdateUBO",
         "DeleteUBO",
+        // Phase 1A step 4: the frame bracket, window-size notification, thick-line probe
+        // and the graphics-API fragments of the framebuffer, post-chain and TAA methods.
+        // Neutral bodies; ClientPlatformWindows overrides them with the GL lines and
+        // VulkanClientPlatform with the device calls.
+        "BeginFrame",
+        "EndFrame",
+        "ProbeThickLineSupport",
+        "OnWindowSizeChanged",
+        "BindCurrentFrameBuffer",
+        "BindCurrentFrameBufferKeepViewport",
+        "ClearBoundFrameBuffer",
+        "ClearFrameBufferPass",
+        "ApplyTransparentPassBlendState",
+        "SelectBackDrawBuffer",
+        "SetBlendEnabled",
+        "ApplyTransparentMergeBlendState",
+        "ClearSsaoTarget",
+        "BeginFinalCompositionDrawBuffers",
+        "RestoreWorldDrawBuffers",
+        "EnableMotionDrawBuffers",
+        "RestorePrimaryDrawBuffers",
+        "EnableMotionOnlyDrawBuffers",
+        "ApplyOptimumMotionBlendState",
+        "ApplyOptimumMotionAccumulateBlendState",
+        "SelectFsrDrawBuffer",
+        "ReadTextureForParity",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -235,6 +261,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "BeginMotionOnlyWrite",
         "EndMotionOnlyWrite",
         "optimumMotionOnlyDrawBuffers",
+        // Phase 1A step 4: the GL halves of the motion windows and the FSR target
+        // selection, overrides of ClientPlatformAbstract's virtuals.
+        "EnableMotionDrawBuffers",
+        "RestorePrimaryDrawBuffers",
+        "EnableMotionOnlyDrawBuffers",
+        "SelectFsrDrawBuffer",
         // TAA P4: additive blending on the motion attachment for the OIT merge,
         // which contributes the transparent layer's coverage to the reactive
         // channel without touching the vector or the writer depth under it.

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..7766958 100644
+index d6eb844..150ea7f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,218 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,313 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -199,6 +199,101 @@ index d6eb844..7766958 100644
 +
 +	public virtual void DeleteUBO(UBO ubo)
 +	{
++	}
++
++	// Optimum (Vulkan-native plan, Phase 1A step 4): the frame bracket, the window-size
++	// notification, the thick-line probe, and the graphics-API fragments of the
++	// framebuffer, post-chain and TAA methods whose surrounding logic reads platform state.
++	// Neutral bodies here; ClientPlatformWindows overrides each with the GL lines and
++	// VulkanClientPlatform with the device calls.
++	public virtual void BeginFrame()
++	{
++	}
++
++	public virtual void EndFrame()
++	{
++	}
++
++	public virtual bool ProbeThickLineSupport()
++	{
++		return false;
++	}
++
++	public virtual void OnWindowSizeChanged(int width, int height)
++	{
++	}
++
++	public virtual void BindCurrentFrameBuffer(FrameBufferRef frameBuffer)
++	{
++	}
++
++	public virtual void BindCurrentFrameBufferKeepViewport(FrameBufferRef frameBuffer)
++	{
++	}
++
++	public virtual void ClearBoundFrameBuffer(FrameBufferRef framebuffer, float[] clearColor, bool clearDepthBuffer, bool clearColorBuffers)
++	{
++	}
++
++	public virtual void ClearFrameBufferPass(EnumFrameBuffer framebuffer)
++	{
++	}
++
++	public virtual void ApplyTransparentPassBlendState()
++	{
++	}
++
++	public virtual void SelectBackDrawBuffer()
++	{
++	}
++
++	public virtual void SetBlendEnabled(bool enabled)
++	{
++	}
++
++	public virtual void ApplyTransparentMergeBlendState()
++	{
++	}
++
++	public virtual void ClearSsaoTarget()
++	{
++	}
++
++	public virtual void BeginFinalCompositionDrawBuffers()
++	{
++	}
++
++	public virtual void RestoreWorldDrawBuffers(bool ssaoAttachments)
++	{
++	}
++
++	public virtual void EnableMotionDrawBuffers()
++	{
++	}
++
++	public virtual void RestorePrimaryDrawBuffers()
++	{
++	}
++
++	public virtual void EnableMotionOnlyDrawBuffers()
++	{
++	}
++
++	public virtual void ApplyOptimumMotionBlendState()
++	{
++	}
++
++	public virtual void ApplyOptimumMotionAccumulateBlendState()
++	{
++	}
++
++	public virtual void SelectFsrDrawBuffer(FrameBufferRef target)
++	{
++	}
++
++	public virtual Vintagestory.API.Config.OptimumTextureReadback ReadTextureForParity(int textureId)
++	{
++		return null;
 +	}
 +
  	public static void DisposeIndexBuffer()

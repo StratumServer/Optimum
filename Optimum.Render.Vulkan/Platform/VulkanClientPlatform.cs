@@ -20,8 +20,18 @@ namespace Optimum.Render.Vulkan.Platform;
 /// declares the virtuals this class relies on, and fails the install (OpenGL
 /// fallback) instead of letting a call bypass an override mid-frame.
 /// </summary>
-public class VulkanClientPlatform : ClientPlatformWindows
+public partial class VulkanClientPlatform : ClientPlatformWindows
 {
+    /// <summary>
+    /// The device this platform brought up in <see cref="InitializeGraphics" />. Every
+    /// graphics override in the partial files calls it directly; null before a successful
+    /// install and after <see cref="ShutdownGraphics" />.
+    /// </summary>
+    private VulkanDevice device;
+
+    /// <summary>Test seam: the device the overrides draw with.</summary>
+    internal VulkanDevice? GraphicsDevice => device;
+
     public const string ForceInstallFailureVariable = "OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE";
     public const string ForcedInstallFailureReason = "forced by " + ForceInstallFailureVariable;
 
@@ -41,6 +51,13 @@ public class VulkanClientPlatform : ClientPlatformWindows
         new(false, "DisposeFrameBuffers", new[] { "List`1" }),
         new(false, "RenderFullscreenTriangle", new[] { "MeshRef" }),
         new(false, "GetGraphicsCardRenderer", Array.Empty<string>()),
+        // Phase 1A step 4: TAA motion windows and FSR target selection.
+        new(true, "EnableMotionDrawBuffers", Array.Empty<string>()),
+        new(true, "RestorePrimaryDrawBuffers", Array.Empty<string>()),
+        new(true, "EnableMotionOnlyDrawBuffers", Array.Empty<string>()),
+        new(true, "ApplyOptimumMotionBlendState", Array.Empty<string>()),
+        new(true, "ApplyOptimumMotionAccumulateBlendState", Array.Empty<string>()),
+        new(true, "SelectFsrDrawBuffer", new[] { "FrameBufferRef" }),
     };
 
     /// <summary>Test seam: the device to bring up (tests add validation capture).</summary>
@@ -138,7 +155,11 @@ public class VulkanClientPlatform : ClientPlatformWindows
         // Installing is a single transition: a device that is already published
         // stays, so a second call cannot displace and leak the one the client
         // is drawing with.
-        if (OptimumRender.Device != null) return true;
+        if (OptimumRender.Device != null)
+        {
+            this.device ??= OptimumRender.Device as VulkanDevice;
+            return true;
+        }
 
         VulkanDevice? device = null;
         try
@@ -159,6 +180,7 @@ public class VulkanClientPlatform : ClientPlatformWindows
                 return false;
             }
 
+            this.device = device;
             OptimumRender.Device = device;
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
             return true;
@@ -194,6 +216,7 @@ public class VulkanClientPlatform : ClientPlatformWindows
             // A driver throwing on teardown must not stop the client exiting.
         }
 
+        device = null;
         OptimumRender.Device = null;
         OptimumRender.ActiveBackend = EnumRenderBackend.OpenGL;
         OptimumRender.NoGraphicsApiWindow = false;
