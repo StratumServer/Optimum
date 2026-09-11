@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/ForgeContentsRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/ForgeContentsRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/ForgeContentsRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/ForgeContentsRenderer.cs
+@@ -245,7 +245,24 @@ public class ForgeContentsRenderer : IRe
+ 			standardShader.ModelMatrix = ModelMat.Identity().Translate((double)pos.X - cameraPos.X, (double)pos.Y - cameraPos.Y + (double)((fuelLevel - 1f) / 16f / 4f), (double)pos.Z - cameraPos.Z).Values;
+ 			standardShader.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShader.ProjectionMatrix = render.CurrentProjectionMatrix;
+-			render.RenderMultiTextureMesh(coalMeshRef, "tex");
++			// Optimum TAA (P4): the coal bed sinks as fuel is consumed - the
++			// model matrix's Y translation follows fuelLevel - so the previous
++			// model matrix is worth keeping. The work-item draw above runs the
++			// mod's own smithing program, which declares no motion output, so it
++			// stays outside the window. No-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShader, this, coalMeshRef, ModelMat.Values);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMultiTextureMesh(coalMeshRef, "tex");
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			standardShader.Stop();
+ 		}
+ 	}

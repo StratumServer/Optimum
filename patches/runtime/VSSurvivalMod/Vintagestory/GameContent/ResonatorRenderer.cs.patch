@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs
+@@ -73,7 +73,24 @@ public class ResonatorRenderer : IRender
+ 				.Scale(0.9f, 0.9f, 0.9f)
+ 				.Translate(num, y, num2)
+ 				.Values;
+-			render.RenderMesh(cylinderMeshRef);
++			// Optimum TAA (P4): the disc spins - discRotRad.Y is driven by elapsed
++			// time - so the camera fallback would ghost it. This renderer also
++			// registers on AfterFinalComposition and runs the same body there; the
++			// window refuses outside the temporal jitter window, so that draw writes
++			// nothing. No-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShader, this, cylinderMeshRef, ModelMat.Values);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMesh(cylinderMeshRef);
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			standardShader.Stop();
+ 		}
+ 	}

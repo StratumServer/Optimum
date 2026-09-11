@@ -1,0 +1,83 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/CreativeRotorRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/CreativeRotorRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/CreativeRotorRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/CreativeRotorRenderer.cs
+@@ -41,7 +41,9 @@ public class CreativeRotorRenderer : Mec
+ 		capi.Tesselator.TesselateShape(textureSoureBlock, shape3, out var modeldata3, meshRotationDeg);
+ 		Shape shape4 = Shape.TryGet(capi, new AssetLocation("shapes/block/metal/mechanics/creativerotor-spinball.json"));
+ 		capi.Tesselator.TesselateShape(textureSoureBlock, shape4, out var modeldata4, meshRotationDeg);
+-		int count = 42000;
++		// 16 floats matrix, 4 floats light rgbs, plus the TAA writer's previous
++		// transform and metadata (Optimum P3, OptimumInstanceMotion).
++		int count = 2100;
+ 		modeldata.CustomFloats = (matrixAndLightFloats1 = createCustomFloats(count));
+ 		modeldata2.CustomFloats = (matrixAndLightFloats2 = createCustomFloats(count));
+ 		modeldata3.CustomFloats = (matrixAndLightFloats3 = createCustomFloats(count));
+@@ -53,16 +55,11 @@ public class CreativeRotorRenderer : Mec
+ 		blockMeshRef4 = capi.Render.UploadMesh(modeldata4);
+ 	}
+ 
+-	private CustomMeshDataPartFloat createCustomFloats(int count)
++	// Optimum TAA (P3): the instance layout is OptimumInstanceMotion's, which adds
++	// the previous transform and the TAA metadata to vanilla's light and transform.
++	private CustomMeshDataPartFloat createCustomFloats(int instanceCapacity)
+ 	{
+-		CustomMeshDataPartFloat customMeshDataPartFloat = new CustomMeshDataPartFloat(count);
+-		customMeshDataPartFloat.Instanced = true;
+-		customMeshDataPartFloat.InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 };
+-		customMeshDataPartFloat.InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 };
+-		customMeshDataPartFloat.InterleaveStride = 80;
+-		customMeshDataPartFloat.StaticDraw = false;
+-		customMeshDataPartFloat.SetAllocationSize(count);
+-		return customMeshDataPartFloat;
++		return OptimumInstanceMotion.CreateInstanceFloats(instanceCapacity);
+ 	}
+ 
+ 	protected override void UpdateLightAndTransformMatrix(int index, Vec3f distToCamera, float rotation, IMechanicalPowerRenderable dev)
+@@ -142,15 +139,9 @@ public class CreativeRotorRenderer : Mec
+ 		}
+ 		Mat4f.MulQuat(tmpMat, quat);
+ 		Mat4f.Translate(tmpMat, tmpMat, 0f - axis.X, 0f - axis.Y, 0f - axis.Z);
+-		int num = index * 20;
+-		values[num] = lightRgba.R;
+-		values[++num] = lightRgba.G;
+-		values[++num] = lightRgba.B;
+-		values[++num] = lightRgba.A;
+-		for (int i = 0; i < 16; i++)
+-		{
+-			values[++num] = tmpMat[i];
+-		}
++		// Optimum TAA (P3): light and this frame's transform as vanilla wrote them,
++		// plus the same device's previous transform for the motion writer.
++		OptimumInstanceMotion.WriteInstance(values, index, lightRgba, tmpMat);
+ 	}
+ 
+ 	public override void OnRenderFrame(float deltaTime, IShaderProgram prog)
+@@ -158,23 +149,23 @@ public class CreativeRotorRenderer : Mec
+ 		UpdateCustomFloatBuffer();
+ 		if (quantityBlocks > 0)
+ 		{
+-			matrixAndLightFloats1.Count = quantityBlocks * 20;
++			matrixAndLightFloats1.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats1;
+ 			capi.Render.UpdateMesh(blockMeshRef1, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef1, quantityBlocks);
+-			matrixAndLightFloats2.Count = quantityBlocks * 20;
++			matrixAndLightFloats2.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats2;
+ 			capi.Render.UpdateMesh(blockMeshRef2, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef2, quantityBlocks);
+-			matrixAndLightFloats3.Count = quantityBlocks * 20;
++			matrixAndLightFloats3.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats3;
+ 			capi.Render.UpdateMesh(blockMeshRef3, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef3, quantityBlocks);
+-			matrixAndLightFloats4.Count = quantityBlocks * 20;
++			matrixAndLightFloats4.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats4;
+ 			capi.Render.UpdateMesh(blockMeshRef4, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef4, quantityBlocks);
+-			matrixAndLightFloats5.Count = quantityBlocks * 20;
++			matrixAndLightFloats5.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats5;
+ 			capi.Render.UpdateMesh(blockMeshRef4, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef4, quantityBlocks);
