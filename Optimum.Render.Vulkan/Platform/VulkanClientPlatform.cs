@@ -51,6 +51,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(false, "DisposeFrameBuffers", new[] { "List`1" }),
         new(false, "RenderFullscreenTriangle", new[] { "MeshRef" }),
         new(false, "GetGraphicsCardRenderer", Array.Empty<string>()),
+        new(false, "LogAndTestHardwareInfosStage2", Array.Empty<string>()),
         // Phase 1A step 4: TAA motion windows and FSR target selection.
         new(true, "EnableMotionDrawBuffers", Array.Empty<string>()),
         new(true, "RestorePrimaryDrawBuffers", Array.Empty<string>()),

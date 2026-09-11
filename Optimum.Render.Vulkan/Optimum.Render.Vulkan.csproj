@@ -57,6 +57,17 @@
       <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <!-- VulkanClientPlatform overrides platform members whose signatures or bodies name
+         types from the game's own libraries (Cairo surfaces, OpenAL version query,
+         OpenTK PrimitiveType/Matrix4). Compile-time only: the client already loads them. -->
+    <Reference Include="cairo-sharp">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Audio.OpenAL">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Audio.OpenAL.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
