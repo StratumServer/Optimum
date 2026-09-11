@@ -421,10 +421,17 @@ public class VulkanBackendIntegrationTests
 
         Assert.Contains("new Random(5)", added);
 
-        int noise = added.IndexOf("noise[texel * 4]", StringComparison.Ordinal);
+        // The noise texels come from BuildOptimumSsaoNoise (Phase 2 ssao-alpha), called on
+        // the same Random before the kernel loop; SsaoNoiseAlphaTests pins the stream position.
+        int noise = added.IndexOf("BuildOptimumSsaoNoise(random, noiseSize)", StringComparison.Ordinal);
         int kernel = added.IndexOf("ssaoKernel[sample * 3]", StringComparison.Ordinal);
         Assert.True(noise >= 0 && kernel >= 0);
         Assert.True(noise < kernel, "the noise texels must be drawn before the sample kernel");
+
+        // GL uploads GL_RGB data into GL_RGBA32F and fills alpha with 1; the device copies
+        // four channels verbatim, so the texels carry that 1 themselves.
+        Assert.Contains("noise[texel * 4 + 3] = 1f;", added);
+        Assert.DoesNotContain("noise[texel * 4 + 3] = 0f;", added);
     }
 
     /// <summary>
