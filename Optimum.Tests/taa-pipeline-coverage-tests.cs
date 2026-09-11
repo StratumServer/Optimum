@@ -437,6 +437,8 @@ public class TaaPipelineCoverageTests
     {
         string resolve = Read("sources/shaders/taa-resolve.fsh");
         Assert.Contains("bool sky = depth >= 0.999999;", resolve);
-        Assert.Contains("prevViewProj * vec4(world, 0.0)", resolve);
+        // Far point minus near point: the far point alone carries the eye offset
+        // of CameraMatrixOrigin (see TaaSkyDecalMotionCoverageTests).
+        Assert.Contains("prevViewProj * vec4(skyDirection, 0.0)", resolve);
     }
 }

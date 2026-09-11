@@ -330,16 +330,30 @@ public class TaaResolveTests
 
     /// <summary>
     /// Sky (depth == 1, nothing wrote the motion attachment) is a direction: a
-    /// camera translation must not move it. With a previous view-projection
-    /// whose clip w equals z (so directions project like points), a finite
-    /// reprojection would shift the history band by cameraDelta.x * Size / 2 =
-    /// 4 columns; the infinite-direction path keeps it where it is.
+    /// camera translation must not move it. With a real perspective (far 60)
+    /// and the previous camera 8 blocks to the side, the finite reprojection
+    /// would slide the history band by 8 / 60 * 32 / tan(35 deg) = 6 px; the
+    /// infinite-direction path keeps it exactly where it is. The view has the
+    /// eye 1.7 blocks above the origin, as CameraMatrixOrigin does, so the
+    /// direction has to be far minus near rather than the far point alone.
     /// </summary>
     [SkippableFact]
     public unsafe void SkyDoesNotMoveUnderCameraTranslation()
     {
         var messages = new List<string>();
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        const double near = 0.0689, far = 60.0, fov = 70.0 * Math.PI / 180.0, eyeHeight = 1.7;
+        double[] projection = Vintagestory.API.MathTools.Mat4d.Perspective(Vintagestory.API.MathTools.Mat4d.Create(), fov, 1.0, near, far);
+        double[] view = Vintagestory.API.MathTools.Mat4d.Identity(Vintagestory.API.MathTools.Mat4d.Create());
+        view = Vintagestory.API.MathTools.Mat4d.Translate(view, view, 0.0, -eyeHeight, 0.0);
+        double[] viewProj = Vintagestory.API.MathTools.Mat4d.Mul(Vintagestory.API.MathTools.Mat4d.Create(), projection, view);
+        double[] inverse = Vintagestory.API.MathTools.Mat4d.Invert(Vintagestory.API.MathTools.Mat4d.Create(), viewProj)!;
+        float[] invF = Array.ConvertAll(inverse, v => (float)v);
+        float[] vpF = Array.ConvertAll(viewProj, v => (float)v);
+        float[] viewF = Array.ConvertAll(view, v => (float)v);
+        const float cameraDeltaX = 8f;
+        double finiteShift = cameraDeltaX / far * (Size / 2.0) / Math.Tan(fov / 2.0);
 
         using (context)
         using (var commands = new VulkanCommands(context!))
@@ -353,8 +367,8 @@ public class TaaResolveTests
             using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             var inputs = CreateInputSet(textures);
-            UploadRgba16F(textures, inputs.SceneTex, (x, _) => (x % 2 == 0) ? 0.3f : 0.7f,
-                (x, _) => (x % 2 == 0) ? 0.3f : 0.7f, (x, _) => (x % 2 == 0) ? 0.3f : 0.7f, (_, _) => 1f);
+            UploadRgba16F(textures, inputs.SceneTex, (x, y) => ((x + y) % 2 == 0) ? 0.3f : 0.7f,
+                (x, y) => ((x + y) % 2 == 0) ? 0.3f : 0.7f, (x, y) => ((x + y) % 2 == 0) ? 0.3f : 0.7f, (_, _) => 1f);
             UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
             // Sky everywhere, nothing wrote motion (a = 0).
             UploadFlatR32F(textures, inputs.DepthTex, 1.0f);
@@ -368,34 +382,27 @@ public class TaaResolveTests
                 (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
                 (_, _) => 1f);
             UploadFlatRgba8(textures, inputs.HistoryGlow, 0, 0, 0, 255);
-            // linearDepth = -(viewMatrix * world).z = -1 for depth 1 under identity.
-            UploadFlatR32F(textures, inputs.HistoryDepth, -1.0f);
-
-            // Identity, except clip.w = z so a w = 0 direction still divides.
-            float[] prevViewProj = (float[])Identity4.Clone();
-            prevViewProj[11] = 1f;
-            prevViewProj[15] = 0f;
+            UploadFlatR32F(textures, inputs.HistoryDepth, (float)far);
 
             TaaAttachmentSet output = CreateAttachmentSet(textures, targets);
             var uniforms = new TaaUniforms
             {
                 ResetHistory = 0,
                 BlendAlpha = 0.05f,
-                PrevViewProj = prevViewProj,
-                CameraDelta = new[] { 0.25f, 0f, 0f },
+                InvViewProjJittered = invF,
+                PrevViewProj = vpF,
+                ViewMatrix = viewF,
+                CameraDelta = new[] { cameraDeltaX, 0f, 0f },
             };
 
             ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
                 inputs, uniforms, output);
 
             byte[] colorBytes = ReadTextureBytes(context!, commands, textures, output.Color, 8);
-            float stayed = AverageRed(colorBytes, stripeStart, stripeStart + stripeWidth);
-            float shifted = AverageRed(colorBytes, stripeStart - 4, stripeStart);
-            float control = AverageRed(colorBytes, 24, 28);
-            _output.WriteLine($"band in place={stayed}, band shifted by translation={shifted}, control={control}");
-
-            Assert.True(stayed > control + 0.1f, $"sky history should stay in place (avg {stayed} vs control {control})");
-            Assert.True(shifted < control + 0.05f, $"camera translation must not move the sky (shifted window avg {shifted} vs control {control})");
+            double centroid = RedCentroidX(colorBytes, stripeStart - 8, stripeStart + stripeWidth + 8, background);
+            _output.WriteLine($"stripe centroid x = {centroid:F3}, expected {stripeStart + stripeWidth / 2.0:F1}; a finite reprojection would have moved it by {finiteShift:F1} px");
+            Assert.True(finiteShift > 3.0, "the translation chosen is too small to tell the two paths apart");
+            Assert.InRange(centroid, stripeStart + stripeWidth / 2.0 - 0.35, stripeStart + stripeWidth / 2.0 + 0.35);
 
             ValidationAssert.NoErrors(messages);
         }
@@ -650,6 +657,127 @@ public class TaaResolveTests
         var program = new ShaderProgramResources(context, 1, translated);
         state.SetProgram(1);
         return program;
+    }
+
+    /// <summary>
+    /// The resolve's own sky path had the same trap the sky pass had: it treated
+    /// the reconstructed far point (in the origin space CameraMatrixOrigin draws
+    /// in, where the eye sits at LocalEyePos) as the view direction. A still
+    /// camera above the origin then reprojected every sky pixel by a fixed
+    /// eye / far * (rows / 2) / tan(fov / 2) pixels - 0.6 px in game - and the
+    /// history drifted by that much every frame. With a real perspective and a
+    /// translated view the band has to stay exactly where it is, horizontally
+    /// and vertically (the in-game error was vertical: the eye offset is on Y).
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(1.7)]
+    [InlineData(6.0)]
+    public unsafe void SkyStaysPutWhenTheCameraSitsAboveTheOrigin(double eyeHeight)
+    {
+        var messages = new List<string>();
+        Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
+
+        const double near = 0.0689, far = 60.0, fov = 70.0 * Math.PI / 180.0;
+        double[] projection = Vintagestory.API.MathTools.Mat4d.Perspective(Vintagestory.API.MathTools.Mat4d.Create(), fov, 1.0, near, far);
+        double[] view = Vintagestory.API.MathTools.Mat4d.Identity(Vintagestory.API.MathTools.Mat4d.Create());
+        view = Vintagestory.API.MathTools.Mat4d.RotateX(view, view, -0.2);
+        view = Vintagestory.API.MathTools.Mat4d.Translate(view, view, 0.0, -eyeHeight, 0.0);
+        double[] viewProj = Vintagestory.API.MathTools.Mat4d.Mul(Vintagestory.API.MathTools.Mat4d.Create(), projection, view);
+        double[] inverse = Vintagestory.API.MathTools.Mat4d.Invert(Vintagestory.API.MathTools.Mat4d.Create(), viewProj)!;
+        float[] invF = Array.ConvertAll(inverse, v => (float)v);
+        float[] vpF = Array.ConvertAll(viewProj, v => (float)v);
+        float[] viewF = Array.ConvertAll(view, v => (float)v);
+        double predictedBias = eyeHeight / far * (Size / 2.0) / Math.Tan(fov / 2.0);
+        _output.WriteLine($"eye {eyeHeight}: far-point-as-direction would drift the sky by ~{predictedBias:F2} px per frame");
+
+        using (context)
+        using (var commands = new VulkanCommands(context!))
+        using (var textures = new TextureManager(context!, commands))
+        {
+            var state = new GlStateTracker();
+            using var targets = new RenderTargetManager(context!, textures, state);
+            using var pipelines = new GraphicsPipelineCache(context!);
+            using var compiler = new ShaderCompiler();
+            using var descriptors = new DescriptorCache(context!);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
+
+            var inputs = CreateInputSet(textures);
+            // A checkered scene keeps the neighbourhood clip box wide (0.3..0.7),
+            // so the history stripe survives the rectification.
+            UploadRgba16F(textures, inputs.SceneTex, (x, y) => ((x + y) % 2 == 0) ? 0.3f : 0.7f,
+                (x, y) => ((x + y) % 2 == 0) ? 0.3f : 0.7f, (x, y) => ((x + y) % 2 == 0) ? 0.3f : 0.7f, (_, _) => 1f);
+            UploadFlatRgba8(textures, inputs.GlowTex, 0, 0, 0, 255);
+            UploadFlatR32F(textures, inputs.DepthTex, 1.0f);
+            UploadFlatRgba16F(textures, inputs.MotionTex, 0f, 0f, 0f, 0f);
+
+            const int stripeStart = 14, stripeWidth = 4;
+            const float background = 0.5f, stripe = 1.0f;
+            UploadFlatRgba8(textures, inputs.HistoryGlow, 0, 0, 0, 255);
+            // Linear view depth of the far plane, so the disocclusion test passes.
+            UploadFlatR32F(textures, inputs.HistoryDepth, (float)far);
+            TaaAttachmentSet output = CreateAttachmentSet(textures, targets);
+            var uniforms = new TaaUniforms
+            {
+                ResetHistory = 0,
+                BlendAlpha = 0.05f,
+                InvViewProjJittered = invF,
+                PrevViewProj = vpF,
+                ViewMatrix = viewF,
+                CameraDelta = new[] { 0f, 0f, 0f },
+            };
+
+            UploadRgba16F(textures, inputs.HistoryColor,
+                (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (x, _) => x is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (_, _) => 1f);
+            ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
+                inputs, uniforms, output);
+            byte[] colorBytes = ReadTextureBytes(context!, commands, textures, output.Color, 8);
+            double centroid = RedCentroidX(colorBytes, stripeStart - 8, stripeStart + stripeWidth + 8, background);
+            _output.WriteLine($"stripe centroid x = {centroid:F3} (expected {stripeStart + stripeWidth / 2.0:F1})");
+            Assert.InRange(centroid, stripeStart + stripeWidth / 2.0 - 0.35, stripeStart + stripeWidth / 2.0 + 0.35);
+
+            UploadRgba16F(textures, inputs.HistoryColor,
+                (_, y) => y is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (_, y) => y is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (_, y) => y is >= stripeStart and < stripeStart + stripeWidth ? stripe : background,
+                (_, _) => 1f);
+            ResolveOnce(context!, commands, textures, state, targets, pipelines, program, descriptors,
+                inputs, uniforms, output);
+            colorBytes = ReadTextureBytes(context!, commands, textures, output.Color, 8);
+            double centroidY = RedCentroidY(colorBytes, stripeStart - 8, stripeStart + stripeWidth + 8, background);
+            _output.WriteLine($"stripe centroid y = {centroidY:F3} (expected {stripeStart + stripeWidth / 2.0:F1})");
+            Assert.InRange(centroidY, stripeStart + stripeWidth / 2.0 - 0.35, stripeStart + stripeWidth / 2.0 + 0.35);
+            Assert.True(predictedBias > 0.6, "the case is too weak to catch the eye-offset bug");
+
+            ValidationAssert.NoErrors(messages);
+        }
+    }
+
+    /// <summary>Red-weighted column centroid above <paramref name="background" /> over [startX, endX), pixel-centre convention.</summary>
+    private static double RedCentroidX(byte[] colorBytes, int startX, int endX, float background)
+    {
+        double num = 0, den = 0;
+        for (int y = 4; y < Size - 4; y++)
+        for (int x = startX; x < endX; x++)
+        {
+            double w = Math.Max(0f, ReadHalf(colorBytes, x, y, 0, 8) - background);
+            num += w * (x + 0.5); den += w;
+        }
+        return den > 0 ? num / den : double.NaN;
+    }
+
+    private static double RedCentroidY(byte[] colorBytes, int startY, int endY, float background)
+    {
+        double num = 0, den = 0;
+        for (int x = 4; x < Size - 4; x++)
+        for (int y = startY; y < endY; y++)
+        {
+            double w = Math.Max(0f, ReadHalf(colorBytes, x, y, 0, 8) - background);
+            num += w * (y + 0.5); den += w;
+        }
+        return den > 0 ? num / den : double.NaN;
     }
 
     /// <summary>The seven sampler inputs the resolve declares.</summary>
