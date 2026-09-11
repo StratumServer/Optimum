@@ -12,8 +12,11 @@ Tooling used by this document:
 | `scripts/dev/client-renderer.sh` | which renderer actually started - read it every time |
 | `scripts/dev/screenshot.sh` | one PNG of the active window |
 | `scripts/dev/kill-client.sh` | clean close; close as soon as a row is done |
-| `scripts/dev/perf-capture.sh` | launch, warm up, record 30 s of frame times, close, print mean and 1% low |
+| `scripts/dev/perf-capture.sh` | launch, warm up, record 30 s of frame times, close, print mean, 1% low and stddev |
+| `scripts/dev/pacing-gate.sh` | pass/fail on a captured run's pacing logs (section 3, P3) |
 | `scripts/dev/luma-diff.py` | still-frame luminance diff (parity skill section 2c) |
+| `scripts/dev/parity-capture.sh` | one parity dump of every attachment on one backend (config restored on exit) |
+| `scripts/dev/taa-rejection.py` | history rejection rates per region from a parity dump; fails above 1.5 percent 3x3 leaf-far rejection (row A19) |
 
 ## 0. Preconditions for every row
 
@@ -177,6 +180,15 @@ measurement to record. "TAA off byte-identical" is checked once, in row A18, not
 - Pass: `cmp` reports identical files, or the luminance diff is exactly 0.000.
 - Record: the `cmp` result and the diff value, per backend.
 
+### A19. distant foliage stability (resolve rejection rate)
+Added 2026-09-11 (TAA-PLAN.md "Follow-up 2026-09-11: distant foliage jitter was the resolve"): a
+single-sample disocclusion test rejected history on ~3.7% of distant leaf pixels per frame; the 3x3
+nearest-depth test measures ~1.1%. This row keeps it that way.
+- Scene: a tree line or forest edge 60 or more blocks away, camera parked, section 0 applied (wind stilled), `Taa: true`, the default two frames in flight.
+- Commands: per backend `scripts/dev/parity-capture.sh --renderer vulkan --world "<world>" --frame 600 --out /tmp/taa-rej-vulkan` (and `--renderer opengl ... --out /tmp/taa-rej-opengl`), then `python3 scripts/dev/taa-rejection.py /tmp/taa-rej-<backend>`; then `RENDERER=<backend> scripts/dev/run-client.sh "<world>"`, `scripts/dev/client-renderer.sh`, and look at the same distant foliage.
+- Pass: `taa-rejection.py` exits 0 on both dumps (3x3 nearest-depth leaf-far rejection <= 1.5 percent), and the user's eyes on distant foliage see no shimmer on either backend at the default two frames in flight.
+- Record: both renderer lines, both rejection tables (single-sample and 3x3, per region), the user's verdict and date.
+
 ## 3. Performance
 
 ### P1. Performance on the Arc 140V
@@ -218,6 +230,103 @@ scripts/dev/perf-capture.sh --renderer opengl --taa on  --label gl-on
   `patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch`), so it
   belongs in the budget and was missing from the earlier 71.1 MiB figure.
 - Record: the measured MiB per target and the total, per backend.
+
+### P3. Frame pacing gate
+- Scene: the P1 scene and runs; no extra launch.
+- Commands: over the logs `perf-capture.sh` already wrote (vsync off for the cost runs):
+
+```
+scripts/dev/pacing-gate.sh --renderer opengl --fps /tmp/optimum-perf/gl-on/fps.log
+scripts/dev/pacing-gate.sh --renderer vulkan --fps /tmp/optimum-perf/vk-on/fps.log \
+    --stats /tmp/optimum-perf/vk-on/vulkan-stats.log --baseline /tmp/optimum-perf/gl-on/fps.log
+scripts/dev/pacing-gate.sh --self-test      # the gate's own pass case and one case per fail rule
+```
+
+  `--skip-seconds N` drops windows and samples that start in the first N seconds of a log
+  (perf-capture's logs include the warm-up). Exit 0 is a pass, 1 a failed rule, 2 unusable
+  input (a Vulkan run without its stats file, no fps windows).
+- Pass: every applicable rule prints PASS:
+  - `blocking_uploads`: Vulkan only, `blocking_uploads=0` on the `stats.counters` line of every sample
+    (fails on today's backend by design; Phase 1B removes the synchronous upload path);
+  - `stddev_vs_baseline`: with `--baseline`, median window stddev <= 1.25 x the baseline's median stddev;
+  - `p99_vs_mean`: median window p99 <= 1.5 x median window mean;
+  - `dropped_mesh_writes`: `mesh writes dropped 0` in every stats sample;
+  - `uniform_overflows`: `uniform overflows 0` in every stats sample.
+- Record: the gate's table per backend, the exit code, and the renderer line from P1.
+
+#### Log formats
+
+`OPTIMUM_FPS_LOG`, both backends, one line per second of client frames
+(`ClientMain.OptimumLogFrameTime`; milliseconds; `p99` nearest-rank; `stddev` is the
+population standard deviation over the same window, appended after `p99`; logs from builds
+before it lack the field and still parse, but cannot be compared against a baseline):
+
+```
+[Optimum] fps window=<s> frames=<n> mean=<ms> min=<ms> max=<ms> p99=<ms> stddev=<ms>
+```
+
+`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of five lines. The first line is
+unchanged from earlier builds; the other four carry stable `key=value` tokens:
+
+```
+stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
+stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
+stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
+stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n>
+stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
+stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> leases=<n> aliased_leases=<n> readself_copies=<n> readself_pool=<n>
+```
+
+- The first line's "blocking uploads" counts every synchronous setup submission (uploads and
+  readbacks); `blocking_uploads` counts only uploads that really waited on a fence or the
+  queue, and `uploads` every texture upload or mip generation requested, waiting or not.
+- `stats.pacing`: CPU frame interval (start of one frame to the start of the next) over a ring
+  of the last 512 frames, not reset per sample; `stutters` counts intervals above 2 x `p50_ms`.
+- `stats.waits`: count (`_n`) and milliseconds (`_ms`) of CPU waits in the interval, per site:
+  `frame_pacing` (slot fence at frame start), `upload_submit` (upload setup fence),
+  `flush_frame` (slot fence inside a mid-frame flush), `device_wait_idle`, `readback`
+  (readback setup fence), `occlusion_query` (polling a query result), `swapchain_acquire`,
+  `present` (vkQueuePresentKHR including the queue lock), `queue_submit` (vkQueueSubmit of a
+  frame including the queue lock, which a worker's synchronous upload holds through its fence
+  wait).
+- `stats.counters`, per interval: `scopes` (vkCmdBeginRendering), `barriers` (image barriers
+  recorded), `rebar_fallbacks` (per-frame dynamic buffers - uniform ring, indirect ring - that
+  asked for the ReBAR pool class and fell through to host staging memory because no ReBAR type
+  exists, the cap was reached or `OPTIMUM_VULKAN_NO_REBAR=1`; each is also logged),
+  `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame
+  slot used), `uniform_ring_capacity` (bytes per slot), `barrier_commands`
+  (vkCmdPipelineBarrier2 calls carrying image barriers: one per `BarrierBatcher` flush, so
+  `barriers` / `barrier_commands` is the batching factor), `barriers_per_frame` (`barriers`
+  divided by the interval's frames), `mask_restarts` (scope restarts that
+  reopened an identical attachment set; draw buffers and motion windows are write masks since
+  Phase 2 contract C4, so this must be 0) and `feedback_splits` (restarts that took a sampled,
+  draw-buffer-excluded slot out of the scope, as the final composition does with Primary 1, or
+  let it rejoin). Frame graph (Phase 2 step 2, `OPTIMUM_VULKAN_FRAMEGRAPH=0` turns it off):
+  `passes` (passes that opened their scope, declared or not), `pass_splits` (extra scopes
+  inside one declared pass; `scopes` = `passes` + `pass_splits`), `plan_hits` and
+  `plan_misses` (frames that did or did not match the load/store plan solved from the previous
+  frame), `in_pass_clears` (clears recorded as vkCmdClearAttachments inside an open pass),
+  `promoted_clears` (clears issued with no pass open that became LOAD_OP_CLEAR) and
+  `standalone_clears` (promoted clears whose image was used before a pass attached it, recorded
+  as a clear-image command). The colour write tier is on the device-up validation log line;
+  `OPTIMUM_VULKAN_COLOR_WRITE_TIER=enable|mask|pipeline` forces one.
+- `stats.transients` (Phase 2 step 4, `TransientAllocator` and `FeedbackCopyPool`): `transient_mib`
+  (at the last frame boundary: the post-chain colour textures of framebuffer slots 2, 3, 4, 7, 8, 9,
+  10, 13, 14, 15, 18 and 21, which live in the Transient pool class, plus the allocator's physical
+  transient images), `aliased_mib` (the interval's largest per-frame bytes of leases served by an
+  image an earlier lease of the same frame used; 0 unless `OPTIMUM_VULKAN_ALIAS=1`),
+  `heap_peak_mib` (peak block MiB of the Transient pool class, dedicated blocks included),
+  `leases` and `aliased_leases` (over the interval), `readself_copies` (draws that sampled a colour
+  attachment they write and took a pooled copy) and `readself_pool` (copies the pool holds; a
+  released copy is reused after the Frame timeline passed the frame that released it).
+- `stats.memory`, a snapshot at sample time (Phase 1B step 5): `blocks` (live device
+  allocations the allocator holds), `dedicated` (of them, one-resource blocks), `rebar_used` and
+  `rebar_cap` (ReBAR class bytes and its cap, min(192 MiB, heap budget x 0.25)), `rebar_misses`
+  and `empty_blocks_freed` (cumulative; empty pooled blocks are freed after 120 frames, or at once
+  while a heap is over budget), `budget_ext` (1 when `VK_EXT_memory_budget` supplies the budgets,
+  0 for heap x 0.7; `OPTIMUM_VULKAN_NO_MEMORY_BUDGET=1` forces 0), `class_bytes` (block bytes per
+  pool class in the order DeviceImages, DeviceBuffers, Staging, ReBar, Transient, Dedicated) and
+  `heaps` (this allocator's bytes and the budget, per memory heap).
 
 ## 4. Still owed from P4, to be closed in this matrix
 

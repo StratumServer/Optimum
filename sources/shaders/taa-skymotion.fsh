@@ -81,9 +81,19 @@ void main()
 	// actually taken, not to the pixel centre.
 	vec2 ndc = gl_FragCoord.xy / taaRenderSize * 2.0 - 1.0;
 	vec4 farH = taaInvViewProjJittered * vec4(ndc, 1.0, 1.0);
-	// A point at infinity is a direction: the w divide only scales it, and a
-	// negative w flips it, so the sign is all that has to be carried over.
-	vec3 direction = farH.w < 0.0 ? -farH.xyz : farH.xyz;
+	vec4 nearH = taaInvViewProjJittered * vec4(ndc, -1.0, 1.0);
+	// The far point's position is NOT the view direction: CameraMatrixOrigin is
+	// a look-at with the eye at LocalEyePos (~1.7 blocks above the origin), so
+	// every reconstructed point carries that eye offset, and treating the far
+	// point as a direction projected it into a fixed ~0.6 px vertical error on
+	// every sky vector (1.7 / 3000 far-plane blocks, at 745 rows over tan 35 deg).
+	// far - near cancels the eye position exactly. Kept homogeneous - the
+	// difference of the two points scaled by farH.w * nearH.w - so a projection
+	// whose far plane sits at infinity (farH.w == 0) still yields a direction.
+	// The sign carries the product's sign; farH.w == 0 counts as positive, which
+	// is the +farH.xyz the pass has always used at infinity.
+	vec3 direction = farH.xyz * nearH.w - nearH.xyz * farH.w;
+	if ((farH.w < 0.0) != (nearH.w < 0.0)) direction = -direction;
 
 	// w = 0 drops the previous view-projection's translation column, which is
 	// exactly "the camera may have rotated, it may not have moved": a point on

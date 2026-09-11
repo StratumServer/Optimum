@@ -172,6 +172,9 @@ attachment so no existing index moves, and it is **never in the default draw-buf
 that writes it opens a window explicitly (`BeginMotionWrite` / `EndMotionWrite`, or
 `BeginMotionOnlyWrite` for the liquid velocity pass). A window is refused unless Primary is bound
 and `JitterActive` is true.
+Since 2026-09-11 (Vulkan-native plan, Phase 1A step 2) these members are declared virtual on
+`ClientPlatformAbstract` with neutral bodies and `ClientPlatformWindows` overrides them with the
+bodies described here; the move changes no semantics of v1.
 
 Cleared to `vec4(0)` each frame — which is what makes `a == 0` mean "nothing wrote here".
 
@@ -208,7 +211,8 @@ a  = writerDepth  window depth in [0,1] at write time
   covers precision; the floor covers depths near the near plane. Where the test fails, the resolve
   falls back to camera reprojection. **This is the contract for unknown writers**: mod geometry,
   uninstrumented renderers and sky all land in the fallback without relying on undefined
-  unwritten-output contents.
+  unwritten-output contents. The reference resolve evaluates this rule at the nearest-depth tap of
+  its 3x3 (note under §4, 2026-09-11); the rule itself is unchanged.
 
   Consequence, measured (P4 finding (o)): a draw whose depth offset moves the depth buffer further
   than the tolerance — a decal at one block's distance moves it ~1.3e-3 against a tolerance of
@@ -283,6 +287,38 @@ contract and nothing else:
 MRT outputs: `outColor` (colour), `outGlow` (glow), `outDepth` (linear view depth) — the three
 history attachments. The camera fallback reprojects a finite surface as `world + cameraDelta` and
 sky (`depth >= 0.999999`) as a **direction** with `w = 0`, so camera translation cannot move it.
+
+**Note (2026-09-11): anti-flicker weighting and nearest-depth disocclusion.** A change inside the
+reference consumer only: the contract stays **v1** (motion-vector semantics, the §3.2 validity rule,
+history formats and slot layout are unchanged). Root cause of the distant-foliage jitter, measured on
+parity dumps of both backends: the resolve's single-sample disocclusion test (this pixel's linear
+depth against the one history depth under `historyUv`) rejected history on **~3.7%** of distant leaf
+pixels per frame, because a sub-pixel leaf hits the leaf in one jitter phase and the far background in
+the next; and a fixed current weight let the neighbourhood clip box, moved every frame by that leaf,
+drag the history with it. What the resolve does since:
+
+- **Nearest-depth tap.** The 3x3 loop keeps the tap with the smallest window depth (`closestPixel`,
+  `closestDepth`). The motion vector comes from that tap: the validity rule is evaluated there as
+  `bool written = motion.a > 0.0 && abs(motion.a - closestDepth) <= max(2e-4, 8e-4 * closestDepth);`
+  (`motion` and `closestDepth` are read at the same tap, so it is still a writer against its own
+  pixel), and the camera fallback, the sky test and the far-minus-near sky direction use that tap's
+  reconstructed point. `historyUv` stays anchored at this pixel's centre, reactive stays this pixel's
+  own `motion.b`, and the history still stores this pixel's own linear depth.
+- **3x3 nearest-depth disocclusion.** The nearest finite history depth in the 3x3 around `historyUv`
+  against the nearest tap's linear depth, tolerance `0.5 + 0.08 * closestLinearDepth`.
+- **Anti-flicker current weight** (Playdead INSIDE TAA). For pixels not rejected (reset, off-screen,
+  NaN history, disocclusion): `alpha = mix(blendAlpha * 1.2, blendAlpha * 0.3, w * w)` with
+  `w = 1 - |lumCur - lumHist| / max(lumCur, max(lumHist, 0.2))` on the rectified YCoCg luminance,
+  then `alpha = max(alpha, reactive)`. Rejected pixels keep `alpha = 1`.
+
+Measured: leaf-far rejection **~3.7% -> ~1.1%** per frame; the user confirmed on Vulkan that the
+distant-foliage flicker is gone. **Never revert** to a single-sample depth test or a fixed blend
+weight. Pinned by `TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifference`,
+`FlippingSubPixelLeafKeepsItsHistory`, `DisocclusionLargerThanTheNeighbourhoodStillResets` and
+`MotionComesFromTheNearestDepthTapAtAnEdge` (GPU), `Optimum.Tests/taa-antiflicker-coverage-tests.cs`
+(source), and gated in the game by `python3 scripts/dev/taa-rejection.py <parity dump dir>` (3x3
+leaf-far rejection <= 1.5 percent; `docs/taa-acceptance.md` row A19). External consumers (FSR, XeSS,
+DLSS) do their own dilation and rejection and are not bound by this.
 
 ---
 

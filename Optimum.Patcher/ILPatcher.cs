@@ -67,7 +67,9 @@ public static class ILPatcher
         List<HookTarget>? hooks = null,
         Dictionary<string, List<string>>? interfacesToInject = null,
         bool requireAllTargets = true,
-        Dictionary<string, List<string>>? fieldsToRetype = null)
+        Dictionary<string, List<string>>? fieldsToRetype = null,
+        List<string>? typesToUnseal = null,
+        List<MethodTarget>? methodsToVirtualize = null)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
@@ -237,6 +239,18 @@ public static class ILPatcher
             }
         }
 
+        // Phase 4: platform substitution attribute surgery. Runs after every body
+        // transplant and hook: TransplantBody never touches MethodAttributes today, but
+        // applying the flags last means no earlier phase can drop them.
+        int unsealedTypes = 0;
+        int virtualizedMethods = 0;
+        if (typesToUnseal != null && typesToUnseal.Count > 0)
+            unsealedTypes = PlatformSubstitution.UnsealTypes(vanillaAsm.MainModule, typesToUnseal);
+        if (methodsToVirtualize != null && methodsToVirtualize.Count > 0)
+            virtualizedMethods = PlatformSubstitution.VirtualizeMethods(vanillaAsm.MainModule, methodsToVirtualize).Count;
+        if (unsealedTypes + virtualizedMethods > 0)
+            Console.WriteLine($"  Platform substitution: {unsealedTypes} types unsealed, {virtualizedMethods} methods virtualized.");
+
         int requiredTargetCount = targets.Count(target => !target.Optional);
         Console.WriteLine(
             $"\n  Summary: {injectedTypes} types, {injectedMembers} members, " +
@@ -282,6 +296,23 @@ public static class ILPatcher
             foreach (var err in ilErrors)
                 Console.Error.WriteLine($"    {err}");
             return -1;
+        }
+
+        if (unsealedTypes + virtualizedMethods > 0)
+        {
+            var dispatchErrors = PlatformSubstitution.VerifyVirtualDispatch(
+                vanillaAsm.MainModule,
+                typesToUnseal ?? new List<string>(),
+                methodsToVirtualize ?? new List<MethodTarget>(),
+                out int virtualCallSites);
+            if (dispatchErrors.Count > 0)
+            {
+                Console.Error.WriteLine($"\n  {dispatchErrors.Count} virtual dispatch error(s), output not written:");
+                foreach (var err in dispatchErrors)
+                    Console.Error.WriteLine($"    {err}");
+                return -1;
+            }
+            Console.WriteLine($"  Virtual dispatch verifier: ok, {virtualCallSites} callvirt/ldvirtftn sites reach virtualized methods, 0 call/ldftn.");
         }
 
         AssemblyWriter.Write(vanillaAsm, outputPath, preserveSymbols);

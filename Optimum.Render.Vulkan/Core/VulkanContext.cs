@@ -28,6 +28,25 @@ internal sealed class VulkanContextOptions
 
     /// <summary>Called with each validation message when validation is on.</summary>
     public Action<string>? DebugCallback;
+
+    /// <summary>
+    /// Fills freshly created images and host-visible buffers with a loud value
+    /// before first use (see <see cref="VulkanPoison" />). Null reads
+    /// OPTIMUM_VULKAN_POISON once, at context creation.
+    /// </summary>
+    public bool? Poison;
+
+    /// <summary>
+    /// Forces a colour write tier (<see cref="Core.ColorWriteTier" />); null reads
+    /// OPTIMUM_VULKAN_COLOR_WRITE_TIER. A tier the device lacks degrades to the next below.
+    /// </summary>
+    public ColorWriteTier? ColorWriteTier;
+
+    /// <summary>
+    /// Tests only: sleeps this long before every vkAcquireNextImageKHR, standing
+    /// in for a compositor that holds images back (PresentDecouplingTests).
+    /// </summary>
+    public TimeSpan AcquireDelayForTests;
 }
 
 /// <summary>What the chosen device can do, once it is up.</summary>
@@ -42,10 +61,22 @@ internal sealed class VulkanCapabilities
     public bool FillModeNonSolid;
     public bool SamplerAnisotropy;
     public bool MultiDrawIndirect;
+    /// <summary>Enabled whenever available; occlusion queries then count samples exactly, like GL_SAMPLES_PASSED.</summary>
+    public bool OcclusionQueryPrecise;
     public float MaxSamplerLodBias;
     public int MaxBoundDescriptorSets;
     public ulong MinUniformBufferOffsetAlignment;
     public ulong MaxUniformBufferRange;
+    public uint MaxColorAttachments = 8;
+
+    /// <summary>VK_EXT_color_write_enable enabled (only when the selected tier uses it).</summary>
+    public bool ColorWriteEnable;
+    /// <summary>VK_EXT_extended_dynamic_state3 colorWriteMask enabled (only for the mask tier).</summary>
+    public bool DynamicColorWriteMask;
+    /// <summary>colorBlendEnable + colorBlendEquation enabled alongside the mask tier: the blend set is dynamic.</summary>
+    public bool DynamicColorBlend;
+    /// <summary>The tier draws use; see <see cref="Core.ColorWriteTier" />.</summary>
+    public ColorWriteTier ColorWriteTier = ColorWriteTier.PipelineKey;
 }
 
 /// <summary>
@@ -92,7 +123,20 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// an option.
     /// </summary>
     public VulkanAllocator Allocator { get; private set; } = null!;
+
+    /// <summary>
+    /// VK_EXT_memory_budget is enabled, so the allocator reads per-heap budgets
+    /// from the driver. Off when the device lacks it or OPTIMUM_VULKAN_NO_MEMORY_BUDGET=1
+    /// forces the heap x 0.7 fallback.
+    /// </summary>
+    public bool MemoryBudgetAvailable { get; private set; }
     public VulkanCapabilities Capabilities { get; private set; } = new();
+
+    /// <summary>vkCmdSetColorWriteEnableEXT, when the enable tier is selected.</summary>
+    public ExtColorWriteEnable? ColorWriteEnableApi { get; private set; }
+
+    /// <summary>vkCmdSetColorWriteMaskEXT / BlendEnable / BlendEquation, when the mask tier is selected.</summary>
+    public ExtExtendedDynamicState3? DynamicState3Api { get; private set; }
 
     /// <summary>
     /// Whether the validation layers are actually loaded, which is not the same
@@ -101,6 +145,21 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// reads as "nothing is wrong".
     /// </summary>
     public bool ValidationEnabled { get; private set; }
+
+    /// <summary>
+    /// Whether freshly created images and host-visible buffers are filled with
+    /// <see cref="VulkanPoison" /> values. Fixed for the context's life.
+    /// </summary>
+    public bool PoisonFreshResources { get; private set; }
+
+    /// <summary>Tests only; see <see cref="VulkanContextOptions.AcquireDelayForTests" />.</summary>
+    public TimeSpan AcquireDelayForTests { get; private set; }
+
+    /// <summary>OPTIMUM_VULKAN_POISON: any value but empty and "0" turns poison mode on.</summary>
+    public const string PoisonVariable = "OPTIMUM_VULKAN_POISON";
+
+    internal static bool PoisonRequested(string? setting) =>
+        !string.IsNullOrWhiteSpace(setting) && setting.Trim() != "0";
 
     /// <summary>Marks a diagnostic the layers reported at error severity.</summary>
     public const string ErrorPrefix = "[error] ";
@@ -143,6 +202,9 @@ internal sealed unsafe class VulkanContext : IDisposable
         failureReason = null;
 
         var created = new VulkanContext();
+        created.AcquireDelayForTests = options.AcquireDelayForTests;
+        created.PoisonFreshResources = options.Poison
+            ?? PoisonRequested(Environment.GetEnvironmentVariable(PoisonVariable));
         try
         {
             created.Api = Vk.GetApi();
@@ -402,7 +464,12 @@ internal sealed unsafe class VulkanContext : IDisposable
             string prefix = severity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt)
                 ? ErrorPrefix
                 : "[warning] ";
-            _debugCallback?.Invoke(prefix + message);
+            // The layer names the check separately (SYNC-HAZARD-WRITE-AFTER-WRITE,
+            // BestPractices-..., a VUID); current layers no longer repeat it in
+            // the text, and without it a log line cannot be grouped or pinned.
+            string? id = SilkMarshal.PtrToString((nint)data->PMessageIdName);
+            string idTag = string.IsNullOrEmpty(id) ? "" : "[" + id + "] ";
+            _debugCallback?.Invoke(prefix + idTag + message);
         }
         return Vk.False;
     }
@@ -636,10 +703,62 @@ internal sealed unsafe class VulkanContext : IDisposable
             OcclusionQueryPrecise = available.OcclusionQueryPrecise,
         };
 
+        // Optional tier (Phase 2, C4): colour write masks as dynamic state. Only the
+        // extension the selected tier uses is enabled, so validation sees exactly
+        // what draws record. OPTIMUM_VULKAN_COLOR_WRITE_TIER forces a fallback.
+        var colorWriteFeatures = new PhysicalDeviceColorWriteEnableFeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceColorWriteEnableFeaturesExt,
+        };
+        var dynamicState3Features = new PhysicalDeviceExtendedDynamicState3FeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceExtendedDynamicState3FeaturesExt,
+        };
+        bool hasColorWriteEnable = deviceExtensionsAvailable.Contains("VK_EXT_color_write_enable");
+        bool hasDynamicState3 = deviceExtensionsAvailable.Contains("VK_EXT_extended_dynamic_state3");
+        if (hasColorWriteEnable || hasDynamicState3)
+        {
+            colorWriteFeatures.PNext = hasDynamicState3 ? &dynamicState3Features : null;
+            var query = new PhysicalDeviceFeatures2
+            {
+                SType = StructureType.PhysicalDeviceFeatures2,
+                PNext = hasColorWriteEnable ? &colorWriteFeatures : &dynamicState3Features,
+            };
+            Api.GetPhysicalDeviceFeatures2(PhysicalDevice, &query);
+        }
+        bool canEnable = hasColorWriteEnable && colorWriteFeatures.ColorWriteEnable;
+        bool canMask = hasDynamicState3 && dynamicState3Features.ExtendedDynamicState3ColorWriteMask;
+        bool canBlend = canMask && dynamicState3Features.ExtendedDynamicState3ColorBlendEnable
+            && dynamicState3Features.ExtendedDynamicState3ColorBlendEquation;
+        ColorWriteTier colorWriteTier = DeviceCaps.SelectColorWriteTier(canEnable, canMask,
+            options.ColorWriteTier ?? DeviceCaps.FromEnvironment());
+
+        // Re-request only what the tier uses; the queries may have reported more.
+        colorWriteFeatures = new PhysicalDeviceColorWriteEnableFeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceColorWriteEnableFeaturesExt,
+            PNext = wantDeviceFault ? &faultFeatures : null,
+            ColorWriteEnable = true,
+        };
+        dynamicState3Features = new PhysicalDeviceExtendedDynamicState3FeaturesEXT
+        {
+            SType = StructureType.PhysicalDeviceExtendedDynamicState3FeaturesExt,
+            PNext = wantDeviceFault ? &faultFeatures : null,
+            ExtendedDynamicState3ColorWriteMask = true,
+            ExtendedDynamicState3ColorBlendEnable = canBlend,
+            ExtendedDynamicState3ColorBlendEquation = canBlend,
+        };
+        void* optionalFeatures = colorWriteTier switch
+        {
+            ColorWriteTier.DynamicEnable => &colorWriteFeatures,
+            ColorWriteTier.DynamicMask => &dynamicState3Features,
+            _ => wantDeviceFault ? &faultFeatures : null,
+        };
+
         var vulkan13 = new PhysicalDeviceVulkan13Features
         {
             SType = StructureType.PhysicalDeviceVulkan13Features,
-            PNext = wantDeviceFault ? &faultFeatures : null,
+            PNext = optionalFeatures,
             DynamicRendering = true,
             Synchronization2 = true,
         };
@@ -661,6 +780,14 @@ internal sealed unsafe class VulkanContext : IDisposable
         if (!options.Headless) deviceExtensions.Add("VK_KHR_swapchain");
         if (wantCheckpoints) deviceExtensions.Add("VK_NV_device_diagnostic_checkpoints");
         if (wantDeviceFault) deviceExtensions.Add("VK_EXT_device_fault");
+
+        // Optional tier: per-heap budgets from the driver; without it the
+        // allocator budgets heap x 0.7. The env override forces the fallback.
+        bool wantMemoryBudget = deviceExtensionsAvailable.Contains("VK_EXT_memory_budget")
+            && Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_NO_MEMORY_BUDGET") != "1";
+        if (wantMemoryBudget) deviceExtensions.Add("VK_EXT_memory_budget");
+        if (colorWriteTier == ColorWriteTier.DynamicEnable) deviceExtensions.Add("VK_EXT_color_write_enable");
+        if (colorWriteTier == ColorWriteTier.DynamicMask) deviceExtensions.Add("VK_EXT_extended_dynamic_state3");
 
         nint extensionsPtr = deviceExtensions.Count > 0
             ? SilkMarshal.StringArrayToPtr(deviceExtensions)
@@ -694,6 +821,19 @@ internal sealed unsafe class VulkanContext : IDisposable
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
         LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
+        Capabilities.ColorWriteTier = colorWriteTier;
+        Capabilities.ColorWriteEnable = colorWriteTier == ColorWriteTier.DynamicEnable;
+        Capabilities.DynamicColorWriteMask = colorWriteTier == ColorWriteTier.DynamicMask;
+        Capabilities.DynamicColorBlend = colorWriteTier == ColorWriteTier.DynamicMask && canBlend;
+        if (Capabilities.ColorWriteEnable && Api.TryGetDeviceExtension(Instance, Device, out ExtColorWriteEnable writeEnable))
+        {
+            ColorWriteEnableApi = writeEnable;
+        }
+        if (Capabilities.DynamicColorWriteMask && Api.TryGetDeviceExtension(Instance, Device, out ExtExtendedDynamicState3 state3))
+        {
+            DynamicState3Api = state3;
+        }
+        MemoryBudgetAvailable = wantMemoryBudget;
         Allocator = new VulkanAllocator(this);
         return true;
     }
@@ -854,10 +994,12 @@ internal sealed unsafe class VulkanContext : IDisposable
             FillModeNonSolid = features.FillModeNonSolid,
             SamplerAnisotropy = features.SamplerAnisotropy,
             MultiDrawIndirect = features.MultiDrawIndirect,
+            OcclusionQueryPrecise = features.OcclusionQueryPrecise,
             MaxSamplerLodBias = properties.Limits.MaxSamplerLodBias,
             MaxBoundDescriptorSets = (int)properties.Limits.MaxBoundDescriptorSets,
             MinUniformBufferOffsetAlignment = properties.Limits.MinUniformBufferOffsetAlignment,
             MaxUniformBufferRange = properties.Limits.MaxUniformBufferRange,
+            MaxColorAttachments = properties.Limits.MaxColorAttachments,
         };
     }
 
@@ -871,7 +1013,7 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         if (Device.Handle != 0)
         {
-            Api.DeviceWaitIdle(Device);
+            VulkanStats.WaitDeviceIdle(Api, Device);
 
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.

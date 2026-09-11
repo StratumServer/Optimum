@@ -347,7 +347,7 @@ public class TaaParticleMotionTests
         float jitterX = 0f,
         float jitterY = 0f)
     {
-        IOptimumGraphicsDevice seam = device;
+        VulkanDevice seam = device;
 
         var files = ShaderCorpus.LoadShaderFiles();
         var includes = ShaderCorpus.LoadIncludes();
@@ -439,7 +439,7 @@ public class TaaParticleMotionTests
         float seedReactive,
         float seedDepth)
     {
-        IOptimumGraphicsDevice seam = device;
+        VulkanDevice seam = device;
 
         var files = ShaderCorpus.LoadShaderFiles();
         var includes = ShaderCorpus.LoadIncludes();
@@ -527,7 +527,7 @@ public class TaaParticleMotionTests
 
     /// <summary>Colour, glow and an RGBA16F motion attachment at index 2 - what
     /// SetupDefaultFrameBuffers builds without the SSAO G-buffer.</summary>
-    private static (int Scene, int Motion) CreatePrimaryStandIn(IOptimumGraphicsDevice seam, out int colour)
+    private static (int Scene, int Motion) CreatePrimaryStandIn(VulkanDevice seam, out int colour)
     {
         colour = seam.CreateTexture2D(Size, Size, EnumTextureInternalFormat.Rgba8,
             EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -552,7 +552,7 @@ public class TaaParticleMotionTests
     }
 
     private static unsafe int SolidTexture(
-        IOptimumGraphicsDevice seam, float r, float g, float b, float a)
+        VulkanDevice seam, float r, float g, float b, float a)
     {
         var pixels = new byte[Size * Size * 4];
         byte[] value =
@@ -576,7 +576,7 @@ public class TaaParticleMotionTests
 
     /// <summary>The opaque writer's stand-in: writes the motion attachment and
     /// nothing else, the way chunkliquidmotion does.</summary>
-    private static int SeedMotionProgram(IOptimumGraphicsDevice seam)
+    private static int SeedMotionProgram(VulkanDevice seam)
     {
         const string vertex = @"#version 330 core
 layout(location = 0) in vec3 xyz;
@@ -597,7 +597,7 @@ void main(void) { outMotion = vec4(seedR, seedG, seedB, seedA); }
         }, "taa-particle-seed");
     }
 
-    private static int FullscreenQuad(IOptimumGraphicsDevice seam)
+    private static int FullscreenQuad(VulkanDevice seam)
     {
         var quad = new MeshData(4, 6, withNormals: false, withUv: false, withRgba: false, withFlags: false)
         {
@@ -612,7 +612,7 @@ void main(void) { outMotion = vec4(seedR, seedG, seedB, seedA); }
     }
 
     /// <summary>Colour attachment 0 of the scene target, read inside the frame.</summary>
-    private static unsafe byte[] ReadColour(IOptimumGraphicsDevice seam, int scene)
+    private static unsafe byte[] ReadColour(VulkanDevice seam, int scene)
     {
         var pixels = new byte[Size * Size * 4];
         fixed (byte* destination = pixels)
@@ -629,7 +629,7 @@ void main(void) { outMotion = vec4(seedR, seedG, seedB, seedA); }
     /// With <paramref name="reactive" /> the blue channel is put in red at full
     /// scale, so reactive can be checked without the mv quantisation.
     /// </summary>
-    private unsafe byte[] DecodeMotion(IOptimumGraphicsDevice seam, int motionTexture, bool reactive)
+    private unsafe byte[] DecodeMotion(VulkanDevice seam, int motionTexture, bool reactive)
     {
         const string decodeVertex = @"#version 330 core
 layout(location = 0) in vec3 xyz;
@@ -766,7 +766,7 @@ void main(void)
     /// path. Every intensity is zero, so neither the current nor the previous
     /// position is warped and the motion is the camera's alone.
     /// </summary>
-    private static void SetWarpUniforms(IOptimumGraphicsDevice seam, int program)
+    private static void SetWarpUniforms(VulkanDevice seam, int program)
     {
         SetFloat(seam, program, "timeCounter", 0f);
         SetFloat(seam, program, "windWaveCounter", 0f);
@@ -795,38 +795,38 @@ void main(void)
         SetFloat3(seam, program, "prevPlayerpos", 0f, 0f, 0f);
     }
 
-    private static void SetFloat(IOptimumGraphicsDevice seam, int program, string name, float value)
+    private static void SetFloat(VulkanDevice seam, int program, string name, float value)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, value);
     }
 
-    private static void SetInt(IOptimumGraphicsDevice seam, int program, string name, int value)
+    private static void SetInt(VulkanDevice seam, int program, string name, int value)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, value);
     }
 
-    private static void SetFloat2(IOptimumGraphicsDevice seam, int program, string name, float x, float y)
+    private static void SetFloat2(VulkanDevice seam, int program, string name, float x, float y)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, x, y);
     }
 
-    private static void SetFloat3(IOptimumGraphicsDevice seam, int program, string name, float x, float y, float z)
+    private static void SetFloat3(VulkanDevice seam, int program, string name, float x, float y, float z)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, x, y, z);
     }
 
-    private static void SetMatrix(IOptimumGraphicsDevice seam, int program, string name, float[] matrix)
+    private static void SetMatrix(VulkanDevice seam, int program, string name, float[] matrix)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniformMatrix(program, location, matrix);
     }
 
     private static int LinkFromCorpus(
-        IOptimumGraphicsDevice seam, List<ShaderStageSource> stages, string name)
+        VulkanDevice seam, List<ShaderStageSource> stages, string name)
     {
         var program = new CorpusProgram { PassName = name };
 
@@ -850,26 +850,10 @@ void main(void)
         return programId;
     }
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
+    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device) =>
+        GpuTest.TryCreateDevice(output, out device);
 
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
-
-    private static void AssertClean(IOptimumGraphicsDevice seam)
-    {
-        string? diagnostics = seam.GetError();
-        Assert.True(string.IsNullOrEmpty(diagnostics), "device diagnostics:\n" + diagnostics);
-    }
+    private static void AssertClean(VulkanDevice seam) => GpuTest.AssertClean(seam);
 
     private sealed class CorpusShader : IShader
     {

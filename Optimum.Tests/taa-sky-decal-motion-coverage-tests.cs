@@ -25,6 +25,38 @@ public class TaaSkyDecalMotionCoverageTests
     // ------------------------------------------------- (a) sky and clouds
 
     /// <summary>
+    /// The sky direction is far point MINUS near point. CameraMatrixOrigin is a
+    /// look-at with the eye at LocalEyePos, ~1.7 blocks above the origin the
+    /// terrain is drawn relative to, so a reconstructed far point's position
+    /// vector is not the view direction: it carries the eye offset, which
+    /// projected into a fixed ~0.6 px vertical error on every sky vector on
+    /// both backends (measured 2026-09-11, eye / far * rows / 2 / tan(fov / 2)).
+    /// Both consumers - the sky pass and the resolve's own sky branch - take the
+    /// homogeneous difference of the two reconstructed points.
+    /// </summary>
+    [Fact]
+    public void TheSkyDirectionIsFarMinusNearInBothConsumers()
+    {
+        string sky = Read("sources/shaders/taa-skymotion.fsh");
+        string resolve = Read("sources/shaders/taa-resolve.fsh");
+
+        Assert.Contains("vec4 nearH = taaInvViewProjJittered * vec4(ndc, -1.0, 1.0);", sky);
+        Assert.Contains("vec3 direction = farH.xyz * nearH.w - nearH.xyz * farH.w;", sky);
+        Assert.Contains("if ((farH.w < 0.0) != (nearH.w < 0.0)) direction = -direction;", sky);
+        Assert.DoesNotContain("farH.w < 0.0 ? -farH.xyz : farH.xyz", sky);
+
+        // The resolve reprojects the nearest-depth tap of its 3x3 (2026-09-11), so
+        // its far and near points are that tap's; the direction is still far minus
+        // near with the same sign rule.
+        Assert.Contains("vec4 nearH = invViewProjJittered * vec4(closestNdc, -1.0, 1.0);", resolve);
+        Assert.Contains("vec3 skyDirection = closestH.xyz * nearH.w - nearH.xyz * closestH.w;", resolve);
+        Assert.Contains("if ((closestH.w < 0.0) != (nearH.w < 0.0)) skyDirection = -skyDirection;", resolve);
+        Assert.Contains("prevViewProj * vec4(skyDirection, 0.0)", resolve);
+        Assert.DoesNotContain("prevViewProj * vec4(world, 0.0)", resolve);
+        Assert.DoesNotContain("prevViewProj * vec4(closestWorld, 0.0)", resolve);
+    }
+
+    /// <summary>
     /// Sky colour, the night sky, the sun and the moon draw on Primary with the
     /// depth test disabled or the depth mask off, so they leave Primary's depth
     /// at the far plane and never claim a motion pixel. taa-resolve.fsh's camera
@@ -110,7 +142,7 @@ public class TaaSkyDecalMotionCoverageTests
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
         string clientMain = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
 
-        string pass = MethodBodyAfter(platform, "internal bool RenderOptimumSkyMotion()");
+        string pass = MethodBodyAfter(platform, "public override bool RenderOptimumSkyMotion()");
 
         // The motion-only window, like the liquid velocity pass: this one
         // re-records motion for pixels the frame has already shaded.
@@ -166,7 +198,7 @@ public class TaaSkyDecalMotionCoverageTests
     public void TheSkyPassRestoresCullingOnBothPaths()
     {
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        string pass = MethodBodyAfter(platform, "internal bool RenderOptimumSkyMotion()");
+        string pass = MethodBodyAfter(platform, "public override bool RenderOptimumSkyMotion()");
 
         // The disable that has to be undone, and it is outside the try.
         int disable = pass.IndexOf("GlDisableCullFace();", StringComparison.Ordinal);
@@ -382,8 +414,8 @@ public class TaaSkyDecalMotionCoverageTests
 
         foreach (string signature in new[]
         {
-            "public bool BeginMotionWrite()",
-            "public bool BeginMotionOnlyWrite()",
+            "public override bool BeginMotionWrite()",
+            "public override bool BeginMotionOnlyWrite()",
         })
         {
             string body = MethodBodyAfter(platform, signature);

@@ -152,7 +152,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
 
         Misses++;
         CachedSet cached = Allocate(layout);
-        Write(cached.Set, contents);
+        Write(_context, cached.Set, contents);
         _sets[contents] = cached;
         Index(contents);
         return cached.Set;
@@ -323,6 +323,18 @@ internal sealed unsafe class DescriptorCache : IDisposable
 
     private PoolSlot GrowPool()
     {
+        // Evicted sets are freed individually, which a pool has to allow.
+        DescriptorPool pool = CreatePool(_context, SetsPerPool, DescriptorPoolCreateFlags.FreeDescriptorSetBit);
+
+        var slot = new PoolSlot { Pool = pool, Remaining = SetsPerPool };
+        _pools.Add(slot);
+        _current = slot;
+        return slot;
+    }
+
+    /// <summary>A pool sized for the rewriter's three set kinds; shared with <see cref="DescriptorArena" />.</summary>
+    internal static DescriptorPool CreatePool(VulkanContext context, uint maxSets, DescriptorPoolCreateFlags flags)
+    {
         // A pool can only satisfy the descriptor types it was sized for. Set 0
         // holds the generated block plus every block the shader declares for
         // itself - entityanimated's ElementTransforms is one - and all of them
@@ -343,26 +355,21 @@ internal sealed unsafe class DescriptorCache : IDisposable
         var createInfo = new DescriptorPoolCreateInfo
         {
             SType = StructureType.DescriptorPoolCreateInfo,
-            // Evicted sets are freed individually, which a pool has to allow.
-            Flags = DescriptorPoolCreateFlags.FreeDescriptorSetBit,
+            Flags = flags,
             PoolSizeCount = 3,
             PPoolSizes = sizes,
-            MaxSets = SetsPerPool,
+            MaxSets = maxSets,
         };
 
-        if (_context.Api.CreateDescriptorPool(_context.Device, &createInfo, null, out DescriptorPool pool)
+        if (context.Api.CreateDescriptorPool(context.Device, &createInfo, null, out DescriptorPool pool)
             != Result.Success)
         {
             throw new InvalidOperationException("vkCreateDescriptorPool failed");
         }
-
-        var slot = new PoolSlot { Pool = pool, Remaining = SetsPerPool };
-        _pools.Add(slot);
-        _current = slot;
-        return slot;
+        return pool;
     }
 
-    private void Write(DescriptorSet set, DescriptorSetContents contents)
+    internal static void Write(VulkanContext context, DescriptorSet set, DescriptorSetContents contents)
     {
         int writeCount = contents.Samplers.Length + contents.Buffers.Length;
         if (writeCount == 0) return;
@@ -428,7 +435,7 @@ internal sealed unsafe class DescriptorCache : IDisposable
 
             fixed (WriteDescriptorSet* writesPtr = writes)
             {
-                _context.Api.UpdateDescriptorSets(_context.Device, (uint)writeCount, writesPtr, 0, null);
+                context.Api.UpdateDescriptorSets(context.Device, (uint)writeCount, writesPtr, 0, null);
             }
         }
     }

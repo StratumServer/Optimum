@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs b/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs
-index f250b1b..db1cc08 100644
+index f250b1b..477cf2a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/UBO.cs
-@@ -7,33 +7,74 @@ using Vintagestory.API.Util;
+@@ -7,60 +7,90 @@ using Vintagestory.API.Util;
  
  namespace Vintagestory.Client.NoObf;
  
@@ -19,43 +19,27 @@ index f250b1b..db1cc08 100644
 +
 +	public int BindingPoint;
 +
-+	// Handle carries the device's uniform-buffer handle on the device path, the
-+	// same convention VAO.VaoId uses for meshes, so UBORef stays the type mods
-+	// already hold and the binding point survives from CreateUBO.
++	// Optimum (Vulkan-native plan, Phase 1A step 3): bind, unbind, update and delete
++	// call the platform, which issues them on its backend. Handle is whatever the
++	// platform's CreateUBO handed out, so UBORef stays the type mods already hold.
  	public override void Bind()
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.BindUniformBuffer(Handle);
-+			return;
-+		}
- 		GL.BindBuffer((BufferTarget)35345, Handle);
+-		GL.BindBuffer((BufferTarget)35345, Handle);
 -		GL.BindBufferBase((BufferRangeTarget)35345, 0, Handle);
-+		GL.BindBufferBase((BufferRangeTarget)35345, BindingPoint, Handle);
++		ScreenManager.Platform.BindUBO(this);
  	}
  
  	public override void Dispose()
  	{
  		base.Dispose();
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.DeleteUniformBuffer(Handle);
-+			return;
-+		}
- 		GL.DeleteBuffers(1, ref Handle);
+-		GL.DeleteBuffers(1, ref Handle);
++		ScreenManager.Platform.DeleteUBO(this);
  	}
  
  	public override void Unbind()
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.UnbindUniformBuffer(Handle);
-+			return;
-+		}
- 		GL.BindBuffer((BufferTarget)35345, 0);
+-		GL.BindBuffer((BufferTarget)35345, 0);
++		ScreenManager.Platform.UnbindUBO(this);
  	}
  
  	public override void Update<T>(T data)
@@ -64,45 +48,33 @@ index f250b1b..db1cc08 100644
  		{
  			throw new ArgumentException("Supplied struct must be of byte size " + base.Size + " but has size " + Unsafe.SizeOf<T>());
  		}
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			using (GCHandleProvider optimumPin = new GCHandleProvider(data))
-+			{
-+				optimumDevice.UpdateUniformBuffer(Handle, (IntPtr)optimumPin.Pointer, 0, base.Size);
-+			}
-+			return;
-+		}
- 		Bind();
+-		Bind();
  		using (GCHandleProvider gCHandleProvider = new GCHandleProvider(data))
  		{
- 			GL.BufferData((BufferTarget)35345, base.Size, (IntPtr)gCHandleProvider.Pointer, (BufferUsageHint)35048);
+-			GL.BufferData((BufferTarget)35345, base.Size, (IntPtr)gCHandleProvider.Pointer, (BufferUsageHint)35048);
++			ScreenManager.Platform.UpdateUBO(this, (IntPtr)gCHandleProvider.Pointer, 0, base.Size, true);
  		}
-@@ -44,20 +85,59 @@ public class UBO : UBORef
+-		Unbind();
+ 	}
+ 
+ 	public override void Update<T>(T data, int offset, int size)
  	{
  		if (Unsafe.SizeOf<T>() != base.Size)
  		{
  			throw new ArgumentException("Supplied struct must be of byte size " + base.Size + " but has size " + Unsafe.SizeOf<T>());
  		}
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			using (GCHandleProvider optimumPin = new GCHandleProvider(data))
-+			{
-+				optimumDevice.UpdateUniformBuffer(Handle, (IntPtr)optimumPin.Pointer, offset, size);
-+			}
-+			return;
-+		}
- 		Bind();
+-		Bind();
  		using (GCHandleProvider gCHandleProvider = new GCHandleProvider(data))
  		{
- 			GL.BufferSubData((BufferTarget)35345, (IntPtr)offset, size, (IntPtr)gCHandleProvider.Pointer);
+-			GL.BufferSubData((BufferTarget)35345, (IntPtr)offset, size, (IntPtr)gCHandleProvider.Pointer);
++			ScreenManager.Platform.UpdateUBO(this, (IntPtr)gCHandleProvider.Pointer, offset, size, false);
  		}
- 		Unbind();
+-		Unbind();
  	}
  
  	public override void Update(object data, int offset, int size)
  	{
+-		Bind();
 +		// Optimum TAA (P3): the skinned-entity motion writer needs the same
 +		// entity's previous pose, and this upload is the one gate every entity
 +		// draw passes through - the animator's bone matrices reaching "Animation"
@@ -119,22 +91,20 @@ index f250b1b..db1cc08 100644
 +				OptimumEntityMotion.OnAnimationUpload(optimumProgram, optimumPrevBones, data, size);
 +			}
 +		}
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			GCHandle optimumPin = GCHandle.Alloc(data, GCHandleType.Pinned);
-+			try
-+			{
-+				optimumDevice.UpdateUniformBuffer(Handle, optimumPin.AddrOfPinnedObject(), offset, size);
-+			}
-+			finally
-+			{
-+				optimumPin.Free();
-+			}
-+			return;
-+		}
- 		Bind();
  		GCHandle gCHandle = GCHandle.Alloc(data, GCHandleType.Pinned);
- 		nint num = gCHandle.AddrOfPinnedObject();
- 		GL.BufferSubData((BufferTarget)35345, (IntPtr)offset, size, (IntPtr)num);
- 		gCHandle.Free();
+-		nint num = gCHandle.AddrOfPinnedObject();
+-		GL.BufferSubData((BufferTarget)35345, (IntPtr)offset, size, (IntPtr)num);
+-		gCHandle.Free();
+-		Unbind();
++		try
++		{
++			nint num = gCHandle.AddrOfPinnedObject();
++			ScreenManager.Platform.UpdateUBO(this, (IntPtr)num, offset, size, false);
++		}
++		finally
++		{
++			// The device path freed the pin in a finally before the move; kept for both.
++			gCHandle.Free();
++		}
+ 	}
+ }

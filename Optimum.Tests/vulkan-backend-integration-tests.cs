@@ -37,10 +37,10 @@ public class VulkanBackendIntegrationTests
 
         int decision = added.IndexOf("ShouldTryVulkan", StringComparison.Ordinal);
         int noApi = added.IndexOf("ContextAPI.NoAPI", StringComparison.Ordinal);
-        int install = added.IndexOf("OptimumRenderBootstrap.Install", StringComparison.Ordinal);
+        int install = added.IndexOf("clientPlatformWindows.InitializeGraphics(", StringComparison.Ordinal);
 
         Assert.True(decision < noApi, "the backend decision must precede the API choice");
-        Assert.True(noApi < install, "the window must be configured before the device is installed");
+        Assert.True(noApi < install, "the window must be configured before the graphics are initialized");
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public class VulkanBackendIntegrationTests
     {
         string added = AddedLines(Read(ClientProgramPatch));
 
-        Assert.Contains("OptimumRenderBootstrap.Install", added);
+        Assert.Contains("clientPlatformWindows.InitializeGraphics(", added);
         Assert.Contains("OptimumRender.FallBackToOpenGL", added);
         Assert.Contains("ContextAPI.OpenGL", added);
         Assert.Contains("AttemptToOpenWindow", added);
@@ -155,13 +155,13 @@ public class VulkanBackendIntegrationTests
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch";
 
     /// <summary>
-    /// The guarantee the whole design rests on: with no device installed, the
-    /// client runs the vanilla GL body. Each branch is added <em>in front of</em>
-    /// the original code rather than replacing it, so an OpenGL session costs one
-    /// null check and behaves exactly as it always did.
+    /// The guarantee the whole design rests on: an OpenGL session runs the vanilla GL
+    /// body. Since Phase 1A step 4 the device call is not a branch in front of that body
+    /// any more but VulkanClientPlatform's override of the same method, so the GL body is
+    /// untouched vanilla and an OpenGL session pays nothing at all.
     ///
-    /// Checked by confirming the vanilla GL call is still present alongside the
-    /// device call for a representative spread of the routed methods.
+    /// Checked for a representative spread of the routed methods: the vanilla GL call is
+    /// in ClientPlatformWindows, the device call in VulkanClientPlatform.
     /// </summary>
     [Theory]
     [InlineData("SetViewport", "GL.Viewport(x, y, width, height);")]
@@ -173,23 +173,21 @@ public class VulkanBackendIntegrationTests
     [InlineData("DeleteTexture", "GL.DeleteTexture(id);")]
     public void RoutedMethodsKeepTheirVanillaOpenGlBody(string deviceCall, string vanillaCall)
     {
-        string patch = Read(PlatformPatch);
-
-        Assert.Contains("optimumDevice." + deviceCall, patch);
-        // The vanilla line survives, either as untouched context or as an added
-        // line where the branch was inserted above it.
-        Assert.Contains(vanillaCall, patch);
+        Assert.Contains("device." + deviceCall + "(", VulkanPlatformSource.Read());
+        Assert.Contains(vanillaCall, VulkanPlatformSource.ReadClientPlatformWindows());
     }
 
     /// <summary>
-    /// A branch that is not registered as a transplant target compiles into the
-    /// donor and then ships nothing, because Optimum patches the vanilla
-    /// assembly rather than replacing it. That failure is silent.
+    /// Phase 1A step 4: the fixed-function methods VulkanClientPlatform overrides have
+    /// vanilla bodies again, so they are no longer transplant targets - only GlToggleBlend
+    /// (TAA's motion-attachment blend override) still is. Each must be overridden, or a
+    /// Vulkan session would reach a GL call with no context.
     /// </summary>
     [Fact]
-    public void EveryRoutedPlatformMethodIsRegisteredAsATransplantTarget()
+    public void EveryRoutedPlatformMethodIsOverriddenByTheVulkanPlatform()
     {
         string patcher = Read("Optimum.Patcher/Program.cs");
+        string vulkan = VulkanPlatformSource.Read();
 
         string[] routed =
         {
@@ -206,31 +204,40 @@ public class VulkanBackendIntegrationTests
         foreach (string method in routed)
         {
             Assert.True(
-                patcher.Contains($"\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"{method}\"",
-                    StringComparison.Ordinal),
-                $"{method} is routed to the device but is not a Cecil transplant target");
+                System.Text.RegularExpressions.Regex.IsMatch(vulkan, @"public override \w+ " + method + @"\("),
+                $"{method} is not overridden by VulkanClientPlatform");
+            bool target = patcher.Contains($"new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"{method}\"", StringComparison.Ordinal);
+            Assert.True(target == (method == "GlToggleBlend") || method == "GetGraphicsCardRenderer",
+                $"{method}: only GlToggleBlend keeps a non-vanilla body and a transplant target");
         }
+        // GetGraphicsCardRenderer is virtualized in place, not transplanted.
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"GlToggleBlend\", 2)", patcher);
     }
 
     /// <summary>
-    /// The frame is bracketed by the device, and the OpenGL path still reaches
-    /// SwapBuffers. Losing either end would either never present or present
-    /// twice.
+    /// The frame is bracketed by the platform, and the OpenGL path still reaches
+    /// SwapBuffers. Losing either end would either never present or present twice.
     /// </summary>
     [Fact]
     public void TheDeviceBracketsTheFrameAndOpenGlStillSwaps()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string platform = VulkanPlatformSource.ReadClientPlatformWindows();
+        int frame = platform.IndexOf("private void window_RenderFrame(FrameEventArgs e)", StringComparison.Ordinal);
+        Assert.True(frame >= 0);
+        int begin = platform.IndexOf("BeginFrame();", frame, StringComparison.Ordinal);
+        int onNewFrame = platform.IndexOf("frameHandler.OnNewFrame(dt);", frame, StringComparison.Ordinal);
+        int end = platform.IndexOf("EndFrame();", frame, StringComparison.Ordinal);
+        Assert.True(begin > frame && onNewFrame > begin && end > onNewFrame,
+            "the frame must be opened before the frame handler runs and ended after it");
 
-        Assert.Contains("optimumDevice.BeginFrame();", added);
-        Assert.Contains("optimumDevice.Present();", added);
+        // The vanilla swap survives for the OpenGL path, as the EndFrame override.
+        int swapOverride = platform.IndexOf("public override void EndFrame()", StringComparison.Ordinal);
+        Assert.True(swapOverride >= 0);
+        Assert.Contains("((GameWindow)window).SwapBuffers();", platform.Substring(swapOverride, 200));
 
-        int begin = added.IndexOf("optimumDevice.BeginFrame();", StringComparison.Ordinal);
-        int present = added.IndexOf("optimumDevice.Present();", StringComparison.Ordinal);
-        Assert.True(begin < present, "the frame must be opened before it is presented");
-
-        // The vanilla swap survives for the OpenGL path.
-        Assert.Contains("SwapBuffers();", Read(PlatformPatch));
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("device.BeginFrame();", vulkan);
+        Assert.Contains("device.Present();", vulkan);
     }
 
     /// <summary>
@@ -261,14 +268,20 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void UniformSettersUseTheLocationTheDeviceHandedOut()
     {
+        // Phase 1A step 3: the program passes the location it looked up to the
+        // platform, whose override hands it to the device unchanged.
         string added = AddedLines(Read(ShaderProgramBasePatch));
 
-        Assert.Contains("optimumDevice.SetUniform(ProgramId, uniformLocations[uniformName]", added);
-        Assert.Contains("optimumDevice.SetUniformArray1(ProgramId, uniformLocations[uniformName]", added);
-        Assert.Contains("optimumDevice.SetUniformMatrix(ProgramId, uniformLocations[uniformName]", added);
+        Assert.Contains("ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName]", added);
+        Assert.Contains("ScreenManager.Platform.SetUniformArray1(ProgramId, uniformLocations[uniformName]", added);
+        Assert.Contains("ScreenManager.Platform.SetUniformMatrix(ProgramId, uniformLocations[uniformName]", added);
 
-        string platform = AddedLines(Read(PlatformPatch));
-        Assert.Contains("optimumDevice.GetUniformLocation(program.ProgramId, name)", platform);
+        // Phase 1A step 4: the device calls are VulkanClientPlatform's overrides.
+        string platform = VulkanPlatformSource.Read();
+        Assert.Contains("device.SetUniform(programId, location, value)", platform);
+        Assert.Contains("device.SetUniformArray1(programId, location, count, values)", platform);
+        Assert.Contains("device.SetUniformMatrix(programId, location, matrix)", platform);
+        Assert.Contains("device.GetUniformLocation(program.ProgramId, name)", platform);
     }
 
     /// <summary>
@@ -297,11 +310,12 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void TextureBindingAimsTheSamplerAndClearsAnyStaleOverride()
     {
-        string added = AddedLines(Read(ShaderProgramBasePatch));
+        // Phase 1A step 4: the device body is VulkanClientPlatform.BindProgramTexture2D.
+        string added = VulkanPlatformSource.Read();
 
-        Assert.Contains("optimumDevice.SetSamplerUnit(ProgramId, samplerName, textureNumber)", added);
-        Assert.Contains("optimumDevice.BindTexture(textureNumber, textureId)", added);
-        Assert.Contains("optimumDevice.BindSampler(textureNumber, 0)", added);
+        Assert.Contains("device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber)", added);
+        Assert.Contains("device.BindTexture(textureNumber, textureId)", added);
+        Assert.Contains("device.BindSampler(textureNumber, 0)", added);
     }
 
     /// <summary>
@@ -313,10 +327,11 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void ShaderStagesAreStagedAtCompileAndTranslatedAtLink()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        // Phase 1A step 4: VulkanClientPlatform.CompileShader / CreateShaderProgram.
+        string added = VulkanPlatformSource.Read();
 
-        Assert.Contains("optimumDevice.CompileShader(shader)", added);
-        Assert.Contains("optimumDevice.LinkProgram(program)", added);
+        Assert.Contains("device.CompileShader(shader)", added);
+        Assert.Contains("device.LinkProgram(program)", added);
         Assert.Contains("program.ProgramId = optimumProgramId;", added);
         // A link failure is reported the same way the GL path reports one.
         Assert.Contains("Link error in shader program for pass", added);
@@ -357,7 +372,8 @@ public class VulkanBackendIntegrationTests
     [InlineData("list[13]", "SSAO")]
     public void TheDevicePathPopulatesEveryFramebufferSlot(string slot, string name)
     {
-        string added = AddedLines(Read(PlatformPatch));
+        // Phase 1A step 4: VulkanClientPlatform.SetupDefaultFrameBuffers.
+        string added = VulkanPlatformSource.Read();
         Assert.True(added.Contains(slot + " =", StringComparison.Ordinal),
             $"the device framebuffer setup never assigns {slot} ({name})");
     }
@@ -370,7 +386,7 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void TheTransparentTargetSharesPrimaryDepth()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string added = VulkanPlatformSource.Read();
 
         Assert.Contains("transparent.DepthTextureId = primary.DepthTextureId;", added);
         Assert.Contains(
@@ -386,9 +402,10 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void SsaoWidensPrimaryToFourAttachments()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string added = VulkanPlatformSource.Read();
 
-        Assert.Contains("int primaryAttachments = (SetupSSAO ? 4 : 2);", added);
+        Assert.Contains("bool setupSsao = ClientSettings.SSAOQuality > 0;", added);
+        Assert.Contains("int primaryAttachments = (setupSsao ? 4 : 2);", added);
         Assert.Contains("device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);", added);
     }
 
@@ -400,29 +417,49 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void SsaoNoiseAndKernelKeepTheirSeedAndOrder()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string added = VulkanPlatformSource.Read();
 
         Assert.Contains("new Random(5)", added);
 
-        int noise = added.IndexOf("noise[texel * 4]", StringComparison.Ordinal);
+        // The noise texels come from BuildOptimumSsaoNoise (Phase 2 ssao-alpha), called on
+        // the same Random before the kernel loop; SsaoNoiseAlphaTests pins the stream position.
+        int noise = added.IndexOf("BuildOptimumSsaoNoise(random, noiseSize)", StringComparison.Ordinal);
         int kernel = added.IndexOf("ssaoKernel[sample * 3]", StringComparison.Ordinal);
         Assert.True(noise >= 0 && kernel >= 0);
         Assert.True(noise < kernel, "the noise texels must be drawn before the sample kernel");
+
+        // GL uploads GL_RGB data into GL_RGBA32F and fills alpha with 1; the device copies
+        // four channels verbatim, so the texels carry that 1 themselves.
+        Assert.Contains("noise[texel * 4 + 3] = 1f;", added);
+        Assert.DoesNotContain("noise[texel * 4 + 3] = 0f;", added);
     }
 
     /// <summary>
-    /// The device path's helpers are injected members, not just donor code. An
-    /// unregistered one compiles and then is missing at runtime.
+    /// Phase 1A step 4: the device path's framebuffer helpers are private members of
+    /// VulkanClientPlatform, which ships in the renderer assembly as is - so they are not
+    /// patcher entries any more. The platform state they need is reached through members
+    /// injected into ClientPlatformWindows, and those have to be registered, or they
+    /// compile into the donor and are missing at runtime.
     /// </summary>
     [Fact]
-    public void TheFramebufferHelpersAreInjectedMembers()
+    public void TheFramebufferHelpersLiveInTheVulkanPlatformAndTheirStateAccessorsAreInjected()
     {
         string patcher = Read("Optimum.Patcher/Program.cs");
+        string vulkan = VulkanPlatformSource.Read();
 
-        Assert.Contains("\"SetupOptimumFrameBuffers\"", patcher);
-        Assert.Contains("\"CreateOptimumColorTarget\"", patcher);
-        Assert.Contains("\"SetupOptimumTextureSampler\"", patcher);
-        Assert.Contains("\"CreateOptimumDepthTarget\"", patcher);
+        foreach (string helper in new[] { "SetupOptimumFrameBuffers", "CreateOptimumColorTarget", "SetupOptimumTextureSampler", "CreateOptimumDepthTarget", "CreateOptimumFramebuffer" })
+        {
+            Assert.DoesNotContain("\"" + helper + "\"", patcher);
+        }
+        Assert.Contains("private void SetupOptimumTextureSampler(int textureId, int filter, int wrap)", vulkan);
+        Assert.Contains("private FrameBufferRef CreateOptimumColorTarget(int width, int height, EnumTextureInternalFormat format)", vulkan);
+        Assert.Contains("private FrameBufferRef CreateOptimumDepthTarget(int width, int height)", vulkan);
+
+        foreach (string accessor in new[] { "OptimumAdoptFrameBufferSettings", "OptimumTaaRequested", "OptimumSsaoKernel", "SetOptimumMotionAttachmentIndex", "OptimumAdoptTaaTargets", "OptimumFinishDeviceFrameBufferSetup", "OptimumRenderSsao" })
+        {
+            Assert.Contains("\"" + accessor + "\",", patcher);
+            Assert.Contains("\"" + accessor + "\",", vulkan);
+        }
     }
 
     private static string AddedLines(string patch) =>
@@ -433,17 +470,177 @@ public class VulkanBackendIntegrationTests
     private static string Read(string relativePath) =>
         File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));
 
+    /// <summary>
+    /// Phase 1B step 4: the frame and the present are two submissions. The CPU
+    /// acquires only after the frame is in flight, the present submission waits on
+    /// the acquire semaphore at the image's first use (never ALL_COMMANDS) and on
+    /// the frame at COLOR_ATTACHMENT_OUTPUT, present semaphores stay per image, and
+    /// recreation passes oldSwapchain and never waits for the device.
+    /// </summary>
     [Fact]
-    public void ThePresentPathWaitsForTheSwapchainImageAtEveryStageAndOwnsSemaphoresPerImage()
+    public void ThePresentPathSplitsTheSubmissionAndRecreatesWithoutWaiting()
     {
         string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
-        // The first use of the acquired image is the present blit (transfer);
-        // a COLOR_ATTACHMENT_OUTPUT wait would not order it.
-        Assert.Contains("PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)", ring);
+        Assert.DoesNotContain("PipelineStageFlags.AllCommandsBit", ring);
+        Assert.Contains("PresentWaitStages.RequireAcquireStage(acquireStage);", ring);
+        Assert.Contains("waitStages[waitCount] = PresentWaitStages.FrameWait;", ring);
 
-        string swapchain = Read("Optimum.Render.Vulkan/Core/Swapchain.cs");
-        Assert.Contains("signalSemaphore = _renderFinished[(int)imageIndex %", swapchain);
-        Assert.DoesNotContain("signalSemaphore = _renderFinished[_semaphoreIndex];", swapchain);
+        string stages = Read("Optimum.Render.Vulkan/Present/IPresentPath.cs");
+        Assert.Contains("FrameWait = PipelineStageFlags.ColorAttachmentOutputBit;", stages);
+        Assert.Contains("BlitAcquireWait = PipelineStageFlags.TransferBit;", stages);
+
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        int present = device.IndexOf("    public void Present()", StringComparison.Ordinal);
+        int frameSubmit = device.IndexOf("ulong renderValue = _frames.EndFrame();", present, StringComparison.Ordinal);
+        int acquire = device.IndexOf("_swapchain.TryAcquire(out PresentTarget target)", present, StringComparison.Ordinal);
+        int presentSubmit = device.IndexOf("_frames.SubmitPresent(", present, StringComparison.Ordinal);
+        int queuePresent = device.IndexOf("_swapchain.Present(target);", present, StringComparison.Ordinal);
+        Assert.True(present >= 0 && frameSubmit > present && acquire > frameSubmit &&
+                    presentSubmit > acquire && queuePresent > presentSubmit,
+            "Present must submit the frame, then acquire, then submit the present path, then present");
+        int resizeStart = device.IndexOf("    public void Resize(", StringComparison.Ordinal);
+        int resizeEnd = device.IndexOf("    public void SetVSync(", resizeStart, StringComparison.Ordinal);
+        Assert.True(resizeStart >= 0 && resizeEnd > resizeStart);
+        Assert.DoesNotContain("WaitDeviceIdle", device.Substring(resizeStart, resizeEnd - resizeStart));
+
+        string swapchain = Read("Optimum.Render.Vulkan/Present/Swapchain.cs");
+        Assert.Contains("OldSwapchain = old?.Handle ?? default,", swapchain);
+        // Keyed on the frame after the last present submission (Phase 1 review): only a
+        // submission queued after vkQueuePresentKHR proves the present was processed.
+        Assert.Contains("_retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));", swapchain);
+        Assert.Contains("public Semaphore PresentSemaphoreFor(uint imageIndex) => _presentSemaphores[imageIndex];", swapchain);
+        // vkDeviceWaitIdle only at teardown (Dispose), never in a rebuild.
+        Assert.Equal(1, swapchain.Split("WaitDeviceIdle").Length - 1);
+    }
+
+    /// <summary>
+    /// Phase 1B step 1: timeline semaphores are the frame clock. The ring paces on
+    /// the Frame timeline and never on a fence, every frame submit signals it, and
+    /// deferred destruction is keyed on recorded timeline values.
+    /// </summary>
+    [Fact]
+    public void TheFrameRingPacesOnTheFrameTimelineAndRetiresOnTimelineValues()
+    {
+        string timeline = Read("Optimum.Render.Vulkan/Frame/FrameTimeline.cs");
+        Assert.Contains("SemaphoreType = SemaphoreType.Timeline", timeline);
+        Assert.Contains("WaitSemaphores(", timeline);
+        Assert.Contains("GetSemaphoreCounterValue(", timeline);
+
+        string retire = Read("Optimum.Render.Vulkan/Frame/RetireQueue.cs");
+        Assert.Contains("entry.Frame <= frameCompleted && entry.Transfer <= transferCompleted", retire);
+
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        Assert.DoesNotContain("WaitForFences", ring);
+        Assert.DoesNotContain("CreateFence", ring);
+        Assert.DoesNotContain("ConcurrentQueue", ring);
+        Assert.Contains("StructureType.TimelineSemaphoreSubmitInfo", ring);
+        Assert.Contains("signals[signalCount] = _timeline.Frame;", ring);
+        Assert.Contains("_timeline.NoteFrameSubmitted(FrameValue);", ring);
+
+        // Every deferred destroy in the renderer goes through the ring's retire queue.
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.DoesNotContain("_frames.Current.DeferDeletion(", device);
+        Assert.Contains("ring.DeferDeletion(texture)", Read("Optimum.Render.Vulkan/Core/TextureManager.cs"));
+        Assert.Contains("ring.DeferDeletion(mesh)", Read("Optimum.Render.Vulkan/Core/MeshManager.cs"));
+    }
+
+    /// <summary>
+    /// Phase 1B step 2: readbacks submit the frame's recorded part and continue in
+    /// the same slot, waiting only on their own timeline value; occlusion queries
+    /// read results from a per-slot ring without ever waiting; FlushFrame is gone.
+    /// </summary>
+    [Fact]
+    public void ReadbacksAndOcclusionQueriesNeverFlushTheFrameOrWaitForTheDevice()
+    {
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.DoesNotContain("FlushFrame", device);
+        Assert.DoesNotContain("Thread.Yield", device);
+        Assert.DoesNotContain("BeforeSynchronousSubmit", device);
+        Assert.Contains("ReadbackTicket ticket = _readbacks.CopyToHost(", device);
+        Assert.Contains("_queryRing.BeginSlot(slot.Index, slot.CommandBuffer);", device);
+        Assert.Contains("public int GetQueryResult(int queryId) => _queryRing.GetResult(queryId);", device);
+
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        Assert.Contains("public ulong SubmitPartial()", ring);
+        Assert.Contains("_timeline.WaitForFrame(slot.LastSignalledValue, WaitSite.FramePacing);", ring);
+        Assert.Contains("LastSignalledValue = FrameValue;", ring);
+
+        string queries = Read("Optimum.Render.Vulkan/Frame/QueryRing.cs");
+        Assert.Contains("CmdResetQueryPool(", queries);
+        Assert.Contains("QueryResultFlags.ResultWithAvailabilityBit", queries);
+        Assert.Contains("if (_clock.FrameCompleted < record.FrameValue) return;", queries);
+        Assert.DoesNotContain("ResultWaitBit", queries);
+        Assert.DoesNotContain("WaitForFrame(", queries);
+
+        // Review fix: a query survives scope ends (suspend before vkCmdEndRendering,
+        // resume after vkCmdBeginRendering), so no query is active across a
+        // restart, a partial submit or present.
+        string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
+        Assert.Contains("ScopeClosing?.Invoke(commandBuffer);", targets);
+        Assert.Contains("ScopeClosed?.Invoke(commandBuffer);", targets);
+        Assert.Contains("ScopeOpened?.Invoke(commandBuffer);", targets);
+        Assert.Contains("_targets.ScopeClosing = _queryRing.OnScopeClosing;", device);
+        Assert.Contains("_targets.ScopeClosed = _queryRing.OnScopeClosed;", device);
+        Assert.Contains("_targets.ScopeOpened = _queryRing.OnScopeOpened;", device);
+        Assert.Contains("public void OnScopeClosing(CommandBuffer commandBuffer)", queries);
+
+        string readbacks = Read("Optimum.Render.Vulkan/Transfer/ReadbackManager.cs");
+        // Review fix: buffer offsets are multiples of the texel size (RGBA32F needs 16).
+        Assert.Contains("OffsetAlignmentFor(texel)", readbacks);
+        Assert.Contains("CmdCopyImageToBuffer(", readbacks);
+        Assert.Contains("WaitSite.Readback", readbacks);
+        Assert.DoesNotContain("WaitDeviceIdle", readbacks);
+    }
+
+    /// <summary>
+    /// Phase 1B step 3: no upload waits. Texture uploads, mip chains, poison
+    /// clears and staged buffer writes record into an upload batch that the next
+    /// frame submission carries first (one SubmitInfo, Frame and Transfer
+    /// timelines signalled together), or inline into the frame command buffer when
+    /// that already used the destination; the synchronous setup submit is deleted.
+    /// </summary>
+    [Fact]
+    public void UploadsRideTheFrameSubmissionAndNeverWait()
+    {
+        string resources = Read("Optimum.Render.Vulkan/Core/VulkanResources.cs");
+        Assert.DoesNotContain("class VulkanCommands", resources);
+        Assert.DoesNotContain("SubmitAndWait", resources);
+
+        string uploads = Read("Optimum.Render.Vulkan/Transfer/UploadManager.cs");
+        Assert.Contains("free.TransferValue = _timeline.ReserveTransfer();", uploads);
+        Assert.Contains("if (completed >= candidate.TransferValue)", uploads);
+        Assert.Contains("_retired.Retire(dedicated);", uploads);
+        Assert.Contains("VulkanStats.NoteStagingOverflow();", uploads);
+        Assert.Contains("_timeline.NoteTransferSubmitted(transferValue);", uploads);
+        Assert.Contains("CloseRenderingScope?.Invoke(frameCommands);", uploads);
+        Assert.DoesNotContain("WaitForFences(", uploads);
+        Assert.DoesNotContain("WaitSemaphores(", uploads);
+        // A staged buffer copy is ordered against the draws around it by buffer barriers.
+        Assert.Contains("SType = StructureType.BufferMemoryBarrier2,", uploads);
+        Assert.Contains("PipelineStageFlags2.CopyBit, AccessFlags2.TransferWriteBit);", uploads);
+
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        Assert.Contains("_uploads.TakeOpenBatchLocked(out CommandBuffer uploadCommands, out ulong transferValue);", ring);
+        Assert.Contains("signals[signalCount] = _timeline.Transfer;", ring);
+        Assert.Contains("if (uploads) _timeline.NoteTransferSubmitted(transferValue);", ring);
+        Assert.Contains("_uploads.OnFrameCommandsStarted(commandBuffer);", ring);
+
+        string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
+        Assert.Contains("_uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));", textures);
+        Assert.Contains("_uploads.NoteUse(commandBuffer, texture);", textures);
+        Assert.Contains("_uploads.BeginRecording(inlineInFrame: false);", textures);
+        // A worker's upload and a delete on the render thread are ordered by the upload lock.
+        Assert.Contains("if (!ReferenceEquals(Get(textureId), texture)) return;", textures);
+        Assert.Contains("_uploads.EnterLock();", textures);
+
+        string meshes = Read("Optimum.Render.Vulkan/Core/MeshManager.cs");
+        Assert.Contains("_uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);", meshes);
+
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.DoesNotContain("_setupCommands", device);
+        Assert.Contains("_uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);", device);
+        Assert.Contains("ulong transferValue = _uploads.SubmitStandalone();", device);
+        Assert.Contains("_frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);", device);
     }
 
     [Fact]
@@ -468,8 +665,51 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("internal static bool FragmentOutputIsAssigned(string source, string name)", layout);
         string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
         Assert.Contains("if (instanceCount <= 0) return;", device);
+    }
+
+    /// <summary>
+    /// Phase 2 step 1: every image barrier derives its stages from the usage
+    /// through ResourceStateTracker and is recorded by BarrierBatcher; no barrier
+    /// on the texture, attachment, present or upload path names ALL_COMMANDS.
+    /// </summary>
+    [Fact]
+    public void ImageBarriersGoThroughTheBatcherWithUsageDerivedStages()
+    {
+        string batcher = Read("Optimum.Render.Vulkan/Graph/BarrierBatcher.cs");
+        Assert.Contains("_api.CmdPipelineBarrier2(commandBuffer, &dependency);", batcher);
+        Assert.Contains("VulkanStats.NoteBarrierCommand();", batcher);
+        Assert.Contains("throw new InvalidOperationException(\"image barriers flushed inside an open rendering scope\");", batcher);
+        Assert.Contains("public static UsageState For(ResourceUsage usage, bool depth)",
+            Read("Optimum.Render.Vulkan/Graph/ResourceUsage.cs"));
+
+        foreach (string path in new[]
+                 {
+                     "Optimum.Render.Vulkan/Core/TextureManager.cs",
+                     "Optimum.Render.Vulkan/Core/RenderTargetManager.cs",
+                     "Optimum.Render.Vulkan/Present/IPresentPath.cs",
+                     "Optimum.Render.Vulkan/VulkanDevice.cs",
+                     "Optimum.Render.Vulkan/Transfer/ReadbackManager.cs",
+                 })
+        {
+            string source = Read(path);
+            Assert.DoesNotContain("CmdPipelineBarrier2(", source);
+            Assert.DoesNotContain("AllCommandsBit", source);
+        }
+
         string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
-        Assert.Contains("internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer)", textures);
+        Assert.DoesNotContain("AccessForLayout", textures);
+        Assert.Contains("_barriers.Require(texture, baseMip, mipCount, 0, texture.Layers, usage, discard);", textures);
+        Assert.Contains("TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferDst, discard: true);", textures);
+
+        string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
+        Assert.Contains("_barriers.Flush(commandBuffer);\n\n        fixed (RenderingAttachmentInfo* attachmentsPtr = attachments)",
+            targets.Replace("\r\n", "\n"));
+
+        string uploads = Read("Optimum.Render.Vulkan/Transfer/UploadManager.cs");
+        Assert.DoesNotContain("AllCommandsBit", uploads);
+        Assert.Contains("Graph.BufferUsageState.UsesOf(destination.Usage);", uploads);
+
+        Assert.Contains("barrier_commands={8} barriers_per_frame={9:F1}", Read("Optimum.Render.Vulkan/Core/VulkanStats.cs"));
     }
 
     [Fact]

@@ -32,22 +32,8 @@ public class ChunkRenderPathTests
     public ChunkRenderPathTests(ITestOutputHelper output) => _output = output;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created)
-        {
-            output.WriteLine("Vulkan unavailable: " + failureReason);
-        }
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     /// <summary>
     /// The real chunkopaque program, compiled the way the client compiles it,
@@ -64,8 +50,8 @@ public class ChunkRenderPathTests
 
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -162,6 +148,7 @@ public class ChunkRenderPathTests
             // silently turn this into a weaker assertion.
             Assert.Equal(ShaderCorpus.Variants().Count(), built);
             ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -192,8 +179,8 @@ public class ChunkRenderPathTests
 
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -260,6 +247,7 @@ public class ChunkRenderPathTests
 
             Assert.NotEqual((ulong)0, pipeline.Handle);
             ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -281,8 +269,8 @@ public class ChunkRenderPathTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -424,6 +412,8 @@ public class ChunkRenderPathTests
             Assert.Equal(0, uncovered[2]);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -441,8 +431,8 @@ public class ChunkRenderPathTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -555,6 +545,8 @@ public class ChunkRenderPathTests
             Assert.Equal(255, PixelAt(pixels, size, 9, 9)[2]);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -581,7 +573,7 @@ public class ChunkRenderPathTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * 4;

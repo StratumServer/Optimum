@@ -10,7 +10,7 @@ namespace Optimum.Render.Vulkan.Tests;
 
 /// <summary>
 /// Drives the backend the way the client will: through
-/// <see cref="IOptimumGraphicsDevice" /> and nothing else.
+/// <see cref="VulkanDevice" /> and nothing else.
 ///
 /// Every other test in this project reaches past the seam into a specific
 /// manager. This one deliberately does not, because the seam is the contract that
@@ -23,20 +23,8 @@ public class VulkanDeviceIntegrationTests
 
     public VulkanDeviceIntegrationTests(ITestOutputHelper output) => _output = output;
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
-
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
+    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device) =>
+        GpuTest.TryCreateDevice(output, out device);
 
     // Unlike the lower-level TaaResolveTests, allocate through the same raw GL
     // format API as ClientPlatformWindows.CreateOptimumHistoryTarget. A missing
@@ -61,7 +49,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 64, frames = 16;
             string vertex = ShaderCorpus.LoadShaderFiles()["taa-resolve.vsh"];
             int accumulate = LinkProgram(seam, vertex, """
@@ -184,7 +172,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 8;
             var files = ShaderCorpus.LoadShaderFiles();
             int resolve = LinkProgram(seam, files["taa-resolve.vsh"], files["taa-resolve.fsh"], "taa-resolve");
@@ -351,7 +339,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             int program = LinkProgram(seam, """
                 #version 330 core
                 void main() {
@@ -455,7 +443,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 4;
             int program = LinkProgram(seam, """
                 #version 330 core
@@ -544,7 +532,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 32;
             int program = LinkProgram(seam, """
                 #version 330 core
@@ -619,7 +607,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             int program = LinkProgram(seam, """
                 #version 330 core
                 void main() {
@@ -674,7 +662,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             int program = LinkProgram(seam, """
                 #version 330 core
                 void main() {
@@ -739,7 +727,7 @@ public class VulkanDeviceIntegrationTests
     /// IShaderProgram implementations across the seam, so the device must work
     /// against the interfaces rather than any concrete type.
     /// </summary>
-    private sealed class TestShader : IShader
+    internal sealed class TestShader : IShader
     {
         public EnumShaderType Type { get; set; }
         public string Code { get; set; } = "";
@@ -747,7 +735,7 @@ public class VulkanDeviceIntegrationTests
         public bool Compile() => true;
     }
 
-    private sealed class TestProgram : IShaderProgram
+    internal sealed class TestProgram : IShaderProgram
     {
         public int ProgramId { get; set; }
         public string AssetDomain { get; set; } = "game";
@@ -784,8 +772,8 @@ public class VulkanDeviceIntegrationTests
         public bool HasUniform(string uniformName) => false;
     }
 
-    private static int LinkProgram(
-        IOptimumGraphicsDevice device, string vertexCode, string fragmentCode, string name = "test")
+    internal static int LinkProgram(
+        VulkanDevice device, string vertexCode, string fragmentCode, string name = "test")
     {
         var vertex = new TestShader { Type = EnumShaderType.VertexShader, Code = vertexCode };
         var fragment = new TestShader { Type = EnumShaderType.FragmentShader, Code = fragmentCode };
@@ -805,7 +793,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             _output.WriteLine($"backend  : {seam.BackendName}");
             _output.WriteLine($"renderer : {seam.RendererString}");
@@ -834,7 +822,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 32;
 
             int programId = LinkProgram(seam, """
@@ -910,7 +898,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             int programId = LinkProgram(seam, """
@@ -974,7 +962,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             int first = seam.CreateTexture2D(8, 8,
                 EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -1002,7 +990,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             int programId = LinkProgram(seam, """
@@ -1087,7 +1075,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             const string fullscreenVertex = """
@@ -1179,7 +1167,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             const string fullscreenVertex = """
@@ -1273,7 +1261,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             int programId = LinkProgram(seam, """
@@ -1348,7 +1336,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             int program = LinkProgram(seam, """
@@ -1426,7 +1414,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             // Big enough, with a long enough fragment loop, that the first frame
             // is still running on the GPU while the second is recorded: that is
             // the window the buffer-per-block design got wrong.
@@ -1533,7 +1521,7 @@ public class VulkanDeviceIntegrationTests
     }
 
     /// <summary>A quad spanning the full height between two x coordinates.</summary>
-    private static int HalfScreenQuad(IOptimumGraphicsDevice device, float x0, float x1)
+    private static int HalfScreenQuad(VulkanDevice device, float x0, float x1)
     {
         var data = new MeshData(4, 6)
         {
@@ -1546,7 +1534,7 @@ public class VulkanDeviceIntegrationTests
         return device.CreateMesh(data, true);
     }
 
-    private static unsafe void SetTint(IOptimumGraphicsDevice device, int ubo, byte r, byte g, byte b)
+    private static unsafe void SetTint(VulkanDevice device, int ubo, byte r, byte g, byte b)
     {
         var tint = new[] { r / 255f, g / 255f, b / 255f, 1f };
         fixed (float* values = tint)
@@ -1557,15 +1545,9 @@ public class VulkanDeviceIntegrationTests
 
     /// <summary>
     /// Drains the device's diagnostics and fails on anything the layers reported
-    /// at error severity.
+    /// at error severity, or on an unpinned synchronization hazard.
     /// </summary>
-    private static void AssertNoValidationErrors(IOptimumGraphicsDevice device)
-    {
-        string? diagnostics = device.GetError();
-        ValidationAssert.NoErrors(diagnostics == null
-            ? Array.Empty<string>()
-            : diagnostics.Split('\n'));
-    }
+    private static void AssertNoValidationErrors(VulkanDevice device) => GpuTest.AssertClean(device);
 
     /// <summary>
     /// The loading-screen crash. A texture is deleted and a new one takes its
@@ -1582,7 +1564,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 8;
 
             int program = LinkProgram(seam, """
@@ -1608,6 +1590,10 @@ public class VulkanDeviceIntegrationTests
             int framebuffer = seam.CreateFramebuffer(size, size);
             seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
             seam.SetDrawBuffers(framebuffer, 0b1);
+
+            // This test is about the long-lived cache's eviction; a texture made a
+            // moment ago would otherwise get its set from the per-slot arena.
+            device!.ShortLivedFramesForTests = 0;
 
             int first = SolidTexture(seam, size, 10, 20, 30);
 
@@ -1661,7 +1647,7 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
-    private static unsafe int SolidTexture(IOptimumGraphicsDevice seam, int size, byte r, byte g, byte b)
+    private static unsafe int SolidTexture(VulkanDevice seam, int size, byte r, byte g, byte b)
     {
         var pixels = new byte[size * size * 4];
         for (int i = 0; i < pixels.Length; i += 4)
@@ -1693,7 +1679,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int verticesPerSlice = 3;
             const int slices = 4;
 
@@ -1761,7 +1747,7 @@ public class VulkanDeviceIntegrationTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 8;
 
             int texture = seam.CreateTexture2D(size, size,
@@ -1783,14 +1769,5 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
-    private static void AssertClean(IOptimumGraphicsDevice device)
-    {
-        string? diagnostics = device.GetError();
-        if (diagnostics == null) return;
-
-        Assert.False(
-            diagnostics.Contains("Error", StringComparison.OrdinalIgnoreCase)
-            || diagnostics.Contains("VUID", StringComparison.Ordinal),
-            "validation errors:\n" + diagnostics);
-    }
+    private static void AssertClean(VulkanDevice device) => GpuTest.AssertClean(device);
 }

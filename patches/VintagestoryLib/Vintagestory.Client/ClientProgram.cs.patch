@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..c960fc3 100644
+index afa4d5f..e5a9ad6 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -48,34 +48,50 @@ index afa4d5f..c960fc3 100644
  		new ClientProgram(rawArgs);
  	}
  
-@@ -295,12 +330,84 @@ public class ClientProgram
- 		};
- 		if (RuntimeEnv.OS == OS.Mac)
- 		{
- 			val2.Flags = (ContextFlags)2;
+@@ -174,14 +209,66 @@ public class ClientProgram
+ 			Environment.CurrentDirectory = directoryName;
  		}
-+		// Optimum: pick the renderer before the window opens.
+ 		GamePaths.EnsurePathsExist();
+ 		logger = new ClientLogger();
+ 		logger.TraceLog = args.TraceLog;
+-		ClientPlatformWindows clientPlatformWindows = new ClientPlatformWindows(logger);
+-		clientPlatformWindows.ShaderUniforms.SepiaLevel = ClientSettings.SepiaLevel;
+-		clientPlatformWindows.ShaderUniforms.ExtraContrastLevel = ClientSettings.ExtraContrastLevel;
+-		CrashReporter.SetLogger((Logger)clientPlatformWindows.Logger);
++		// Optimum: pick the renderer before the platform exists.
 +		//
 +		// A window created with no graphics API cannot be handed back to OpenGL
 +		// without being destroyed and reopened, so the decision has to be final
-+		// here. ShouldTryVulkan loads the backend assembly and creates a throwaway
-+		// device to answer it, because driver support for the features this
-+		// renderer needs cannot be inferred from a vendor string.
++		// before the window opens. ShouldTryVulkan loads the backend assembly and
++		// creates a throwaway device to answer it, because driver support for the
++		// features this renderer needs cannot be inferred from a vendor string.
++		// On Vulkan the platform is the backend's VulkanClientPlatform, created by
++		// reflection so this assembly never references the renderer.
++		//
++		// optimum.json is normally read on the first rendered frame, from
++		// ClientPlatformWindows.EnsureOptimumDefaults - far too late to choose a
++		// backend. Loading it here is idempotent: the later call re-reads the file.
 +		//
 +		// Everything below is written without lambdas so the body survives the
 +		// Mono.Cecil transplant.
-+		// optimum.json is normally read on the first rendered frame, from
-+		// ClientPlatformWindows.EnsureOptimumDefaults - which is far too late to
-+		// choose a backend, since the window has been created by then. Loading it
-+		// here is idempotent: the later call re-reads the same file.
 +		OptimumConfig.SetDataPath(GamePaths.DataPath);
 +		OptimumConfig.Load();
 +
 +		bool optimumUseVulkan = false;
++		ClientPlatformWindows clientPlatformWindows = null;
 +		if (OptimumConfig.WantsVulkanRenderer)
 +		{
 +			string optimumRendererReason;
 +			optimumUseVulkan = OptimumRenderBootstrap.ShouldTryVulkan(GamePaths.DataPath, out optimumRendererReason);
++			if (optimumUseVulkan)
++			{
++				clientPlatformWindows = OptimumRenderBootstrap.CreatePlatform(logger) as ClientPlatformWindows;
++				if (clientPlatformWindows == null)
++				{
++					optimumUseVulkan = false;
++					optimumRendererReason = OptimumRenderBootstrap.PlatformCreationError ?? "the Vulkan platform is not a ClientPlatformWindows";
++				}
++			}
 +			if (!optimumUseVulkan)
 +			{
 +				OptimumRender.FallBackToOpenGL(optimumRendererReason);
@@ -93,6 +109,51 @@ index afa4d5f..c960fc3 100644
 +		{
 +			Console.WriteLine("[Optimum] OpenGL renderer: selected by config");
 +		}
++		if (clientPlatformWindows == null)
++		{
++			clientPlatformWindows = new ClientPlatformWindows(logger);
++		}
++		ConfigureClientPlatform(clientPlatformWindows);
+ 		clientPlatformWindows.LogAndTestHardwareInfosStage1();
+ 		screenManager = new ScreenManager(clientPlatformWindows);
+ 		GuiStyle.DecorativeFontName = ClientSettings.DecorativeFontName;
+ 		GuiStyle.StandardFontName = ClientSettings.DefaultFontName;
+ 		if (!Directory.Exists(GamePaths.AssetsPath))
+@@ -209,25 +296,11 @@ public class ClientProgram
+ 				return;
+ 			}
+ 		}
+ 		Signals[0] = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnExit);
+ 		Signals[1] = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnExit);
+-		clientPlatformWindows.SetServerExitInterface(clientPlatformWindows.ServerExitState);
+-		clientPlatformWindows.crashreporter = crashreporter;
+-		clientPlatformWindows.singlePlayerServerDummyNetwork = new DummyNetwork[2];
+-		clientPlatformWindows.singlePlayerServerDummyNetwork[0] = dummyNetwork;
+-		clientPlatformWindows.singlePlayerServerDummyNetwork[1] = dummyNetworkUdp;
+-		platform = clientPlatformWindows;
+-		clientPlatformWindows.OnStartSinglePlayerServer = delegate(StartServerArgs serverargs)
+-		{
+-			startServerargs = serverargs;
+-			Thread thread = new Thread(ServerThreadStart);
+-			thread.Name = "SingleplayerServer";
+-			thread.Priority = ThreadPriority.BelowNormal;
+-			thread.IsBackground = true;
+-			thread.Start();
+-		};
++		WireClientPlatform(clientPlatformWindows);
+ 		WindowState val = (WindowState)(ClientSettings.GameWindowMode switch
+ 		{
+ 			3 => 3, 
+ 			2 => 2, 
+ 			1 => 3, 
+@@ -295,37 +368,89 @@ public class ClientProgram
+ 		};
+ 		if (RuntimeEnv.OS == OS.Mac)
+ 		{
+ 			val2.Flags = (ContextFlags)2;
+ 		}
++		// Optimum: the renderer was chosen before the platform was constructed;
++		// a Vulkan platform needs a window without a GL context.
 +		if (optimumUseVulkan)
 +		{
 +			val2.API = ContextAPI.NoAPI;
@@ -100,6 +161,7 @@ index afa4d5f..c960fc3 100644
 +		}
  		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
  		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
+-		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
 +		if (optimumUseVulkan)
 +		{
 +			string optimumInstallReason;
@@ -108,42 +170,142 @@ index afa4d5f..c960fc3 100644
 +			// and the device sizes its default render target from this. A target
 +			// smaller than the window clips every draw to its top-left corner,
 +			// because the viewport comes from the window instead.
-+			bool optimumInstalled = OptimumRenderBootstrap.Install(
++			bool optimumInstalled = clientPlatformWindows.InitializeGraphics(
 +				(IntPtr)((NativeWindow)gameWindowNative).WindowPtr,
 +				((NativeWindow)gameWindowNative).ClientSize.X,
 +				((NativeWindow)gameWindowNative).ClientSize.Y,
-+				GamePaths.DataPath,
 +				out optimumInstallReason);
 +
 +			if (!optimumInstalled)
 +			{
 +				// The probe passed but the surface or swapchain did not come up.
 +				// The window has no graphics API at this point, so it has to be
-+				// replaced rather than reused.
++				// replaced rather than reused, and the Vulkan platform with it:
++				// screenManager.Start has not run yet, so nothing else holds it.
 +				OptimumRender.FallBackToOpenGL(optimumInstallReason);
 +				Console.WriteLine("[Optimum] Vulkan unavailable, reopening for OpenGL: " + optimumInstallReason);
 +				((NativeWindow)gameWindowNative).Close();
 +				OptimumRender.NoGraphicsApiWindow = false;
 +				val2.API = ContextAPI.OpenGL;
 +				gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
++				clientPlatformWindows = new ClientPlatformWindows(logger);
++				ConfigureClientPlatform(clientPlatformWindows);
++				WireClientPlatform(clientPlatformWindows);
++				ScreenManager.Platform = clientPlatformWindows;
 +			}
 +		}
- 		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
++		// Optimum: the Run block's teardown only covers Run itself. A throw between
++		// the graphics bring-up above and Run (window setup, screenManager.Start, the
++		// platform's Start) would skip it, keeping the device alive and leaving the
++		// Vulkan crash marker for the next start to misread, so graphics shut down on
++		// that path too before the exception carries on. Empty on the OpenGL platform.
++		try
  		{
- 			try
+-			try
++			if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
  			{
- 				((NativeWindow)gameWindowNative).CenterWindow();
-@@ -337,10 +444,13 @@ public class ClientProgram
+-				((NativeWindow)gameWindowNative).CenterWindow();
++				try
++				{
++					((NativeWindow)gameWindowNative).CenterWindow();
++				}
++				catch (Exception e)
++				{
++					ScreenManager.Platform.Logger.Warning("Error trying to center the window");
++					ScreenManager.Platform.Logger.Warning(e);
++				}
+ 			}
+-			catch (Exception e)
++			clientPlatformWindows.StartAudio();
++			clientPlatformWindows.LogAndTestHardwareInfosStage2();
++			clientPlatformWindows.window = gameWindowNative;
++			clientPlatformWindows.XPlatInterface.Window = (GameWindow)(object)gameWindowNative;
++			clientPlatformWindows.SetDirectMouseMode(ClientSettings.DirectMouseMode);
++			clientPlatformWindows.WindowSize.Width = ((NativeWindow)gameWindowNative).ClientSize.X;
++			clientPlatformWindows.WindowSize.Height = ((NativeWindow)gameWindowNative).ClientSize.Y;
++			if (ClientSettings.GameWindowMode == 3)
+ 			{
+-				ScreenManager.Platform.Logger.Warning("Error trying to center the window");
+-				ScreenManager.Platform.Logger.Warning(e);
++				clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
+ 			}
++			screenManager.Start(args, rawArgs);
++			clientPlatformWindows.Start();
+ 		}
+-		clientPlatformWindows.StartAudio();
+-		clientPlatformWindows.LogAndTestHardwareInfosStage2();
+-		clientPlatformWindows.window = gameWindowNative;
+-		clientPlatformWindows.XPlatInterface.Window = (GameWindow)(object)gameWindowNative;
+-		clientPlatformWindows.SetDirectMouseMode(ClientSettings.DirectMouseMode);
+-		clientPlatformWindows.WindowSize.Width = ((NativeWindow)gameWindowNative).ClientSize.X;
+-		clientPlatformWindows.WindowSize.Height = ((NativeWindow)gameWindowNative).ClientSize.Y;
+-		if (ClientSettings.GameWindowMode == 3)
++		catch (Exception)
+ 		{
+-			clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
++			clientPlatformWindows.ShutdownGraphics();
++			throw;
+ 		}
+-		screenManager.Start(args, rawArgs);
+-		clientPlatformWindows.Start();
+ 		Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
+ 		try
+ 		{
+ 			((GameWindow)gameWindowNative).Run();
+ 		}
+@@ -337,14 +462,55 @@ public class ClientProgram
  			}
  			Thread.CurrentThread.Priority = ThreadPriority.Normal;
  			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");
  			clientPlatformWindows.DisposeFrameBuffers(clientPlatformWindows.FrameBuffers);
  			clientPlatformWindows.StopAudio();
-+			// Tear the Vulkan device down before its window goes, and clear the
-+			// crash marker so the next start does not read this exit as a crash.
-+			OptimumRenderBootstrap.Shutdown();
++			// Tear the graphics backend down before its window goes; the Vulkan
++			// platform also clears the crash marker so the next start does not
++			// read this exit as a crash. Empty on the OpenGL platform.
++			clientPlatformWindows.ShutdownGraphics();
  			((NativeWindow)gameWindowNative).Dispose();
  		}
  	}
  
++	// Optimum (Vulkan-native plan, Phase 1A): the per-platform wiring Start used to do
++	// inline, split at the two places vanilla does it (right after construction, and
++	// after the install checks and signal handlers), so the OpenGL fallback can apply
++	// both to the platform that replaces a Vulkan platform whose graphics did not come
++	// up. Lambda-free for the Cecil transplant.
++	private void ConfigureClientPlatform(ClientPlatformWindows clientPlatformWindows)
++	{
++		clientPlatformWindows.ShaderUniforms.SepiaLevel = ClientSettings.SepiaLevel;
++		clientPlatformWindows.ShaderUniforms.ExtraContrastLevel = ClientSettings.ExtraContrastLevel;
++		CrashReporter.SetLogger((Logger)clientPlatformWindows.Logger);
++	}
++
++	// Optimum: vanilla's second wiring block (server exit, crash reporter, dummy
++	// networks, the singleplayer server handler), at vanilla's position in Start.
++	private void WireClientPlatform(ClientPlatformWindows clientPlatformWindows)
++	{
++		clientPlatformWindows.SetServerExitInterface(clientPlatformWindows.ServerExitState);
++		clientPlatformWindows.crashreporter = crashreporter;
++		clientPlatformWindows.singlePlayerServerDummyNetwork = new DummyNetwork[2];
++		clientPlatformWindows.singlePlayerServerDummyNetwork[0] = dummyNetwork;
++		clientPlatformWindows.singlePlayerServerDummyNetwork[1] = dummyNetworkUdp;
++		platform = clientPlatformWindows;
++		clientPlatformWindows.OnStartSinglePlayerServer = OptimumStartSinglePlayerServer;
++	}
++
++	// Optimum: vanilla's anonymous OnStartSinglePlayerServer handler as a named method, so
++	// ConfigureClientPlatform needs no compiler-generated member the transplant cannot find.
++	private void OptimumStartSinglePlayerServer(StartServerArgs serverargs)
++	{
++		startServerargs = serverargs;
++		Thread thread = new Thread(ServerThreadStart);
++		thread.Name = "SingleplayerServer";
++		thread.Priority = ThreadPriority.BelowNormal;
++		thread.IsBackground = true;
++		thread.Start();
++	}
++
  	private GameWindowNative AttemptToOpenWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings, int openGlMajor, int openGlMinor, int tries)
+ 	{
+ 		nativeWindowSettings.APIVersion = new Version(openGlMajor, openGlMinor);
+ 		GameWindowNative result;
+ 		try

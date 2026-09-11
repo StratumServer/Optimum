@@ -44,20 +44,8 @@ public class ChunkTerrainRenderTests
         return record;
     }
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
-
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
+    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device) =>
+        GpuTest.TryCreateDevice(output, out device);
 
     private sealed class Shader : IShader
     {
@@ -153,7 +141,7 @@ public class ChunkTerrainRenderTests
         Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             var variant = ShaderCorpus.Variants().First();
             variant.UseSsbo = ssbo ? 1 : 0;
             int program = LinkFromCorpus(seam, ShaderCorpus.BuildProgram("chunktopsoil",
@@ -242,7 +230,7 @@ public class ChunkTerrainRenderTests
 
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             var files = ShaderCorpus.LoadShaderFiles();
             var includes = ShaderCorpus.LoadIncludes();
@@ -336,7 +324,7 @@ public class ChunkTerrainRenderTests
 
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             var files = ShaderCorpus.LoadShaderFiles();
             var includes = ShaderCorpus.LoadIncludes();
@@ -405,7 +393,7 @@ public class ChunkTerrainRenderTests
 
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             var files = ShaderCorpus.LoadShaderFiles();
             var includes = ShaderCorpus.LoadIncludes();
@@ -545,7 +533,7 @@ public class ChunkTerrainRenderTests
 
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             var files = ShaderCorpus.LoadShaderFiles();
             var includes = ShaderCorpus.LoadIncludes();
@@ -691,7 +679,7 @@ public class ChunkTerrainRenderTests
 
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             var files = ShaderCorpus.LoadShaderFiles();
             var includes = ShaderCorpus.LoadIncludes();
@@ -829,7 +817,7 @@ public class ChunkTerrainRenderTests
 
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
 
             var files = ShaderCorpus.LoadShaderFiles();
             var includes = ShaderCorpus.LoadIncludes();
@@ -930,7 +918,7 @@ public class ChunkTerrainRenderTests
         }
     }
 
-    private static unsafe byte[] ReadTarget(IOptimumGraphicsDevice seam, int framebuffer)
+    private static unsafe byte[] ReadTarget(VulkanDevice seam, int framebuffer)
     {
         var pixels = new byte[Size * Size * 4];
         fixed (byte* destination = pixels)
@@ -945,7 +933,7 @@ public class ChunkTerrainRenderTests
         pixels[offset] >= 250 && pixels[offset + 1] <= 5 && pixels[offset + 2] >= 250;
 
     private static int LinkFromCorpus(
-        IOptimumGraphicsDevice seam, List<ShaderStageSource> stages, string name)
+        VulkanDevice seam, List<ShaderStageSource> stages, string name)
     {
         var program = new Program { PassName = name };
 
@@ -979,7 +967,7 @@ public class ChunkTerrainRenderTests
     /// </summary>
     /// <returns>The first texture unit the program did not claim.</returns>
     private static unsafe int BindEveryDeclaredSampler(
-        VulkanDevice device, IOptimumGraphicsDevice seam, int programId)
+        VulkanDevice device, VulkanDevice seam, int programId)
     {
         var white = new byte[] { 255, 255, 255, 255 };
         int unit = 0;
@@ -1010,7 +998,7 @@ public class ChunkTerrainRenderTests
     /// The client sets them each frame; a test that does not is testing a
     /// configuration the game never runs.
     /// </summary>
-    private static void SetViewUniforms(IOptimumGraphicsDevice seam, int programId)
+    private static void SetViewUniforms(VulkanDevice seam, int programId)
     {
         SetFloat(seam, programId, "viewDistance", 1024f);
         SetFloat(seam, programId, "viewDistanceLod0", 1024f);
@@ -1029,7 +1017,7 @@ public class ChunkTerrainRenderTests
         if (frameSize >= 0) seam.SetUniform(programId, frameSize, (float)Size, (float)Size);
     }
 
-    private static void SetFloat(IOptimumGraphicsDevice seam, int programId, string name, float value)
+    private static void SetFloat(VulkanDevice seam, int programId, string name, float value)
     {
         int location = seam.GetUniformLocation(programId, name);
         if (location >= 0) seam.SetUniform(programId, location, value);
@@ -1039,7 +1027,7 @@ public class ChunkTerrainRenderTests
     /// The matrices every chunk program multiplies by. Identity leaves the mesh's
     /// clip-space positions alone, which is what makes the output checkable.
     /// </summary>
-    private static void SetIdentityMatrices(IOptimumGraphicsDevice seam, int programId)
+    private static void SetIdentityMatrices(VulkanDevice seam, int programId)
     {
         float[] identity =
         {
@@ -1060,9 +1048,5 @@ public class ChunkTerrainRenderTests
         }
     }
 
-    private static void AssertClean(IOptimumGraphicsDevice seam)
-    {
-        string? diagnostics = seam.GetError();
-        Assert.True(string.IsNullOrEmpty(diagnostics), "device diagnostics:\n" + diagnostics);
-    }
+    private static void AssertClean(VulkanDevice seam) => GpuTest.AssertClean(seam);
 }

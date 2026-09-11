@@ -140,7 +140,7 @@ public class TaaEntityMotionCoverageTests
 
         Assert.Contains("public string BlockName;", ubo);
         Assert.Contains("public int BindingPoint;", ubo);
-        Assert.Contains("GL.BindBufferBase((BufferRangeTarget)35345, BindingPoint, Handle);", ubo);
+        // Phase 1A step 3: the bind itself is ClientPlatformWindows.BindUBO (asserted below).
         Assert.DoesNotContain("GL.BindBufferBase((BufferRangeTarget)35345, 0, Handle);", ubo);
 
         // The bone upload is the gate every entity draw passes through.
@@ -156,9 +156,15 @@ public class TaaEntityMotionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        // Both backends record it, or the GL path binds to point 0 regardless.
-        Assert.Equal(2, Count(platform, "BlockName = blockName;"));
-        Assert.Equal(2, Count(platform, "BindingPoint = bindingPoint;"));
+        Assert.Contains("GL.BindBufferBase((BufferRangeTarget)35345, ubo.BindingPoint, ubo.Handle);", platform);
+
+        // Both backends record it, or the GL path binds to point 0 regardless. Phase 1A
+        // step 4: the device CreateUBO is VulkanClientPlatform's override.
+        Assert.Equal(1, Count(platform, "BlockName = blockName;"));
+        Assert.Equal(1, Count(platform, "BindingPoint = bindingPoint;"));
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Equal(1, Count(vulkan, "optimumUbo.BlockName = blockName;"));
+        Assert.Equal(1, Count(vulkan, "optimumUbo.BindingPoint = bindingPoint;"));
     }
 
     // ---------------------------------------------------- the per-draw history

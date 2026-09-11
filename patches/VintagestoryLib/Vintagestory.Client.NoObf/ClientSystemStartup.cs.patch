@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..db565ba 100644
+index f437458..35e8da7 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 @@ -738,11 +738,14 @@ public class ClientSystemStartup : ClientSystem
@@ -41,7 +41,7 @@ index f437458..db565ba 100644
  	}
  
  	internal void BeginItemTesselation()
-@@ -1071,11 +1080,17 @@ public class ClientSystemStartup : ClientSystem
+@@ -1071,11 +1080,13 @@ public class ClientSystemStartup : ClientSystem
  				}
  			}, 1000L);
  		}
@@ -49,12 +49,8 @@ index f437458..db565ba 100644
  		game.AmbientManager.LateInit();
 -		if (GL.GetString((StringName)7937).Contains("Arc(TM)") && ClientSettings.AllowSSBOs)
 +		// The advisory is about an Intel Arc OpenGL driver bug, so it only applies
-+		// when the OpenGL backend is actually live; a non-OpenGL device skips it.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		string optimumRendererName = optimumDevice != null
-+			? null
-+			: GL.GetString((StringName)7937);
-+		if (optimumRendererName != null && optimumRendererName.Contains("Arc(TM)") && ClientSettings.AllowSSBOs)
++		// when the OpenGL backend is actually live; any other backend skips the GL query.
++		if (game.Platform.GraphicsBackendName == "OpenGL" && GL.GetString((StringName)7937).Contains("Arc(TM)") && ClientSettings.AllowSSBOs)
  		{
  			game.eventManager?.AddDelayedCallback(delegate
  			{

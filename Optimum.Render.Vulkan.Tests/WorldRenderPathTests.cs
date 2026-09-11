@@ -38,22 +38,8 @@ public class WorldRenderPathTests
         """;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created)
-        {
-            output.WriteLine("Vulkan unavailable: " + failureReason);
-        }
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     /// <summary>
     /// OIT accumulates into three layers of one 2D array texture, attached a
@@ -72,8 +58,8 @@ public class WorldRenderPathTests
         {
             const uint size = 8;
             const uint layers = 3;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -112,6 +98,8 @@ public class WorldRenderPathTests
             Assert.Equal(new byte[] { 0, 0, 255 }, FirstPixel(context!, commands, textures, accumulation, size, 2));
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -130,8 +118,8 @@ public class WorldRenderPathTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -183,6 +171,8 @@ public class WorldRenderPathTests
             Assert.InRange(accumPixels[0], 56, 72);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -201,8 +191,8 @@ public class WorldRenderPathTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -255,6 +245,8 @@ public class WorldRenderPathTests
             Assert.InRange(stored, 0.74f, 0.76f);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -273,8 +265,8 @@ public class WorldRenderPathTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -323,6 +315,8 @@ public class WorldRenderPathTests
             Assert.Equal((ulong)(size * size), passed);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -336,7 +330,7 @@ public class WorldRenderPathTests
         }, compiler);
 
     private static unsafe void RenderFullscreen(
-        VulkanContext context, VulkanCommands commands, RenderTargetManager targets,
+        VulkanContext context, SetupQueue commands, RenderTargetManager targets,
         GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
         int framebuffer, uint size, bool depthTest = false, QueryPool queryPool = default)
     {
@@ -417,7 +411,7 @@ public class WorldRenderPathTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, uint layer = 0)
     {
         VulkanTexture texture = textures.Get(textureId)!;
@@ -445,12 +439,12 @@ public class WorldRenderPathTests
     }
 
     private static byte[] FirstPixel(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, uint layer) =>
         ReadTexture(context, commands, textures, textureId, size, layer).Take(3).ToArray();
 
     private static unsafe float ReadDepth(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * sizeof(float);

@@ -38,18 +38,8 @@ public class AttachmentSemanticsTests
         """;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     /// <summary>
     /// Five colour attachments, a shader that declares outputs only at locations
@@ -67,8 +57,8 @@ public class AttachmentSemanticsTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -118,6 +108,8 @@ public class AttachmentSemanticsTests
             }
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -139,8 +131,8 @@ public class AttachmentSemanticsTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -200,6 +192,8 @@ public class AttachmentSemanticsTests
             Assert.True(preserved, "an enabled attachment the shader never writes must keep its contents");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -220,8 +214,8 @@ public class AttachmentSemanticsTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -271,6 +265,8 @@ public class AttachmentSemanticsTests
             Assert.InRange(motion[0], 196, 212);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -291,8 +287,8 @@ public class AttachmentSemanticsTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -370,6 +366,8 @@ public class AttachmentSemanticsTests
             Assert.InRange(resolved[0], (byte)185, (byte)198);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -383,7 +381,7 @@ public class AttachmentSemanticsTests
         }, compiler);
 
     private static unsafe void RenderFullscreen(
-        VulkanContext context, VulkanCommands commands, RenderTargetManager targets,
+        VulkanContext context, SetupQueue commands, RenderTargetManager targets,
         GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
         int framebuffer, uint size, bool depthTest = false)
     {
@@ -448,7 +446,7 @@ public class AttachmentSemanticsTests
     /// depth test/write stay off throughout.
     /// </summary>
     private static unsafe void RenderFullscreenSamplingDepth(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, RenderTargetManager targets,
+        VulkanContext context, SetupQueue commands, TextureManager textures, RenderTargetManager targets,
         GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
         int framebuffer, int sampledDepthTextureId, uint size)
     {
@@ -536,7 +534,7 @@ public class AttachmentSemanticsTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * 4;

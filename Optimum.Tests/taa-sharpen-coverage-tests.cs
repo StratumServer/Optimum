@@ -94,17 +94,19 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
         Assert.Contains("private const int OptimumTaaSharpenIndex = 21;", platform);
-        // Device path: RGBA16F, render resolution.
+        // Device path (VulkanClientPlatform since Phase 1A step 4): RGBA16F, render resolution.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("private const int OptimumTaaSharpenIndex = 21;", vulkan);
         Assert.Contains(
-            "list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(device, width, height,",
-            platform);
-        Assert.Contains("EnumTextureInternalFormat.Rgba16f);", platform);
+            "list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(width, height,",
+            vulkan);
+        Assert.Contains("EnumTextureInternalFormat.Rgba16f);", vulkan);
         // GL path: the same format token (GL_RGBA16F) through setupAttachment.
         Assert.Contains("setupAttachment(optimumSharpen, num, num2, 0, val, (PixelInternalFormat)34842);", platform);
         // Both live inside the taaRequested block, i.e. they are allocated and
         // released with the history slots (DisposeFrameBuffers walks the list).
-        int historyDevice = platform.IndexOf("list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTarget(", StringComparison.Ordinal);
-        int sharpenDevice = platform.IndexOf("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(", StringComparison.Ordinal);
+        int historyDevice = vulkan.IndexOf("list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTarget(", StringComparison.Ordinal);
+        int sharpenDevice = vulkan.IndexOf("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(", StringComparison.Ordinal);
         Assert.True(historyDevice >= 0 && sharpenDevice > historyDevice);
         int historyGl = platform.IndexOf("list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTargetGl(", StringComparison.Ordinal);
         int sharpenGl = platform.IndexOf("FrameBufferRef optimumSharpen = (list[OptimumTaaSharpenIndex]", StringComparison.Ordinal);
@@ -119,9 +121,12 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
         // Neither failure path may call DisableOptimumTaa - TAA without the
-        // sharpen pass is a working configuration.
-        Assert.Equal(2, Count(platform, "Optimum disabled the TAA sharpen pass"));
-        Assert.Equal(2, Count(platform, "list[OptimumTaaSharpenIndex] = null;"));
+        // sharpen pass is a working configuration. GL here, device in VulkanClientPlatform.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Equal(1, Count(platform, "Optimum disabled the TAA sharpen pass"));
+        Assert.Equal(1, Count(platform, "list[OptimumTaaSharpenIndex] = null;"));
+        Assert.Equal(1, Count(vulkan, "Optimum disabled the TAA sharpen pass"));
+        Assert.Equal(1, Count(vulkan, "list[OptimumTaaSharpenIndex] = null;"));
     }
 
     // --- the pass -----------------------------------------------------------
@@ -153,7 +158,7 @@ public class TaaSharpenCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        string body = MethodBody(platform, "private int RenderOptimumTaaSharpen(int resolvedScene)");
+        string body = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
 
         Assert.Contains("if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)", body);
         Assert.Contains("if (sharpen == null || sharpen.LoadError || target == null)", body);
@@ -180,10 +185,10 @@ public class TaaSharpenCoverageTests
         // One shared condition, asked by both passes: the sharpen pass skips
         // itself when the blit is going to run FSR's own RCAS at native
         // resolution, so the same pixels are never sharpened twice.
-        Assert.Contains("private bool OptimumFsrBlitActive()", platform);
+        Assert.Contains("public override bool OptimumFsrBlitActive()", platform);
         Assert.Contains("bool useFsr = OptimumFsrBlitActive();", platform);
 
-        string body = MethodBody(platform, "private int RenderOptimumTaaSharpen(int resolvedScene)");
+        string body = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
         int guard = body.IndexOf("if (OptimumFsrBlitActive())", StringComparison.Ordinal);
         int draw = body.IndexOf("RenderFullscreenTriangle(screenQuad);", StringComparison.Ordinal);
         Assert.True(guard >= 0 && guard < draw);
@@ -191,7 +196,7 @@ public class TaaSharpenCoverageTests
         Assert.Contains("two RCAS passes to the same pixels", platform);
 
         // The shared test still carries every term the old inline condition had.
-        string helper = MethodBody(platform, "private bool OptimumFsrBlitActive()");
+        string helper = MethodBody(platform, "public override bool OptimumFsrBlitActive()");
         Assert.Contains("!optimumFsrDisabled", helper);
         Assert.Contains("ClientSettings.OptimumRenderScale < 1.0f", helper);
         Assert.Contains("frameBuffers[OptimumFsrFramebufferIndex] != null", helper);
@@ -281,9 +286,11 @@ public class TaaSharpenCoverageTests
         // ...and the branch really is just that branch: the nonzero path below
         // it is outside it.
         Assert.DoesNotContain("SetOptimumTextureLodBias(textureLodBias)", zeroBranch);
-        // Both backends keep getting the same value through the same setter.
-        Assert.Contains("optimumDevice.SetTextureParameter(textureIds[k],", chunkRenderer);
-        Assert.Contains("GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", chunkRenderer);
+        // Both backends keep getting the same value through the same setter: the platform
+        // virtual SetTextureLodBias (Phase 1A step 5).
+        Assert.Contains("game.Platform.SetTextureLodBias(textureIds, bias);", chunkRenderer);
+        Assert.Contains("device.SetTextureParameter(textureIds[k], OptimumGlConstants.TextureLodBias, bias);", VulkanPlatformSource.Read());
+        Assert.Contains("GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", VulkanPlatformSource.ReadClientPlatformWindows());
 
         string registry = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
@@ -318,11 +325,12 @@ public class TaaSharpenCoverageTests
         // The sampler write is a reusable entry point, not inlined into the load.
         Assert.Contains("public static void ApplyOptimumTerrainSamplerLodBias(float bias)", registry);
         Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", registry);
-        // Both backends, through the same per-sampler helper.
+        // Both backends, through the same per-sampler helper and the platform virtual.
+        Assert.Contains("platform.SetSamplerLodBias(sampler, bias);", registry);
         Assert.Contains(
-            "optimumDevice.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, bias);",
-            registry);
-        Assert.Contains("GL.SamplerParameter(sampler, (SamplerParameterName)34049, bias);", registry);
+            "device.SetSamplerParameter(samplerId, OptimumGlConstants.TextureLodBias, bias);",
+            VulkanPlatformSource.Read());
+        Assert.Contains("GL.SamplerParameter(samplerId, (SamplerParameterName)34049, bias);", VulkanPlatformSource.ReadClientPlatformWindows());
         // Callable before the samplers exist: ChunkRenderer runs a frame before
         // the first shader load has created them.
         Assert.Contains("program == null || !program.customSamplers.TryGetValue(samplerName, out var sampler)", registry);
@@ -332,10 +340,10 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
         string setter = MethodBody(chunkRenderer, "private void SetOptimumTextureLodBias(float bias)");
         Assert.Contains("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", setter);
-        // Before the device/GL split, so both paths reach it.
+        // Before the texture half, and on every backend: both go through the platform.
         Assert.True(
             setter.IndexOf("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", StringComparison.Ordinal)
-            < setter.IndexOf("if (optimumDevice != null)", StringComparison.Ordinal));
+            < setter.IndexOf("game.Platform.SetTextureLodBias(textureIds, bias);", StringComparison.Ordinal));
 
         // And the Cecil transplant carries both new members.
         string patcher = Read("Optimum.Patcher/Program.cs");

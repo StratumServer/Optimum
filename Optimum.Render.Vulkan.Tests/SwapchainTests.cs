@@ -29,7 +29,7 @@ public class SwapchainTests
     /// Creates a hidden window with no graphics API attached, the way the
     /// patched client will.
     /// </summary>
-    private static unsafe bool TryCreateWindow(
+    internal static unsafe bool TryCreateWindow(
         ITestOutputHelper output, int width, int height, out Window* window)
     {
         window = null;
@@ -75,7 +75,7 @@ public class SwapchainTests
 
         try
         {
-            var device = new VulkanDevice { DebugMode = true };
+            var device = GpuTest.NewDevice();
             if (!device.Initialize((IntPtr)window, width, height, out string failureReason))
             {
                 device.Dispose();
@@ -85,7 +85,7 @@ public class SwapchainTests
 
             using (device)
             {
-                IOptimumGraphicsDevice seam = device;
+                VulkanDevice seam = device;
                 _output.WriteLine($"presenting on {seam.RendererString}");
 
                 int programId = LinkFullscreenProgram(seam);
@@ -131,7 +131,7 @@ public class SwapchainTests
 
         try
         {
-            var device = new VulkanDevice { DebugMode = true };
+            var device = GpuTest.NewDevice();
             if (!device.Initialize((IntPtr)window, width, height, out string failureReason))
             {
                 device.Dispose();
@@ -141,7 +141,7 @@ public class SwapchainTests
 
             using (device)
             {
-                IOptimumGraphicsDevice seam = device;
+                VulkanDevice seam = device;
                 int programId = LinkFullscreenProgram(seam);
 
                 void RenderFrames(int count, int w, int h)
@@ -190,7 +190,7 @@ public class SwapchainTests
 
         try
         {
-            var device = new VulkanDevice { DebugMode = true };
+            var device = GpuTest.NewDevice();
             if (!device.Initialize((IntPtr)window, width, height, out string failureReason))
             {
                 device.Dispose();
@@ -200,7 +200,7 @@ public class SwapchainTests
 
             using (device)
             {
-                IOptimumGraphicsDevice seam = device;
+                VulkanDevice seam = device;
                 int programId = LinkFullscreenProgram(seam);
 
                 foreach (bool vsync in new[] { false, true, false })
@@ -236,7 +236,7 @@ public class SwapchainTests
         public bool Compile() => true;
     }
 
-    private static int LinkFullscreenProgram(IOptimumGraphicsDevice device)
+    internal static int LinkFullscreenProgram(VulkanDevice device)
     {
         var vertex = new TestShader
         {
@@ -311,14 +311,5 @@ public class SwapchainTests
         public bool HasUniform(string uniformName) => false;
     }
 
-    private static void AssertClean(IOptimumGraphicsDevice device)
-    {
-        string? diagnostics = device.GetError();
-        if (diagnostics == null) return;
-
-        Assert.False(
-            diagnostics.Contains("Error", StringComparison.OrdinalIgnoreCase)
-            || diagnostics.Contains("VUID", StringComparison.Ordinal),
-            "validation errors:\n" + diagnostics);
-    }
+    private static void AssertClean(VulkanDevice device) => GpuTest.AssertClean(device);
 }

@@ -1,28 +1,62 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs b/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
-index 6e4f262..2e7101a 100644
+index 6e4f262..e59d597 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
-@@ -70,10 +70,23 @@ public class VAO : MeshRef
- 		}
- 	}
+@@ -72,51 +72,18 @@ public class VAO : MeshRef
  
  	public override void Dispose()
  	{
-+		// Optimum: on the device path VaoId is a device handle, not a GL vertex
-+		// array, and the per-attribute vbo fields are all zero - the device owns
-+		// those buffers and frees them through its own deferred deletion. Falling
-+		// through to the GL body would hand an unrelated integer to
-+		// glDeleteVertexArray.
-+		//
-+		// This also runs from the finalizer thread, which is exactly why the
-+		// device defers rather than destroying inline.
-+		if (Vintagestory.API.Config.OptimumRender.Device != null)
-+		{
-+			base.Dispose();
-+			return;
-+		}
  		if (!base.Disposed)
  		{
- 			if (xyzVboId != 0)
+-			if (xyzVboId != 0)
++			// Optimum: the buffers behind this mesh are the platform's handles (GL buffer
++			// and vertex-array names, or the Vulkan platform's device mesh), so the
++			// platform that made them deletes them.
++			ClientPlatformAbstract platform = ScreenManager.Platform;
++			if (platform != null)
  			{
- 				GL.DeleteBuffer(xyzVboId);
+-				GL.DeleteBuffer(xyzVboId);
++				platform.DeleteVertexArrayHandles(this);
+ 			}
+-			if (normalsVboId != 0)
+-			{
+-				GL.DeleteBuffer(normalsVboId);
+-			}
+-			if (uvVboId != 0)
+-			{
+-				GL.DeleteBuffer(uvVboId);
+-			}
+-			if (rgbaVboId != 0)
+-			{
+-				GL.DeleteBuffer(rgbaVboId);
+-			}
+-			if (customDataFloatVboId != 0)
+-			{
+-				GL.DeleteBuffer(customDataFloatVboId);
+-			}
+-			if (customDataShortVboId != 0)
+-			{
+-				GL.DeleteBuffer(customDataShortVboId);
+-			}
+-			if (customDataIntVboId != 0)
+-			{
+-				GL.DeleteBuffer(customDataIntVboId);
+-			}
+-			if (customDataByteVboId != 0)
+-			{
+-				GL.DeleteBuffer(customDataByteVboId);
+-			}
+-			if (vboIdIndex != 0 && vboIdIndex != ClientPlatformAbstract.singleIndexBufferId)
+-			{
+-				GL.DeleteBuffer(vboIdIndex);
+-			}
+-			if (flagsVboId != 0)
+-			{
+-				GL.DeleteBuffer(flagsVboId);
+-			}
+-			GL.DeleteVertexArray(VaoId);
+ 			base.Dispose();
+ 		}
+ 	}
+ 
+ 	~VAO()

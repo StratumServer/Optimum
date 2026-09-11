@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
-index ce8dd81..8ab1d9c 100644
+index ce8dd81..e0e2a80 100644
 --- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
 +++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererVolumetric.cs
 @@ -73,10 +73,26 @@ namespace FluffyClouds {
@@ -10,16 +10,16 @@ index ce8dd81..8ab1d9c 100644
  
 +            // Optimum: state goes through the device on its own backend, where
 +            // the GL binding does not exist.
-+            Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+            if (optimumDevice != null)
++            Vintagestory.API.Config.OptimumForkGraphics optimumGraphics = Vintagestory.API.Config.OptimumForkGraphics.Active;
++            if (optimumGraphics != null)
 +            {
-+                optimumDevice.SetDepthTest(false);
-+                optimumDevice.SetBlendEnabled(true);
++                optimumGraphics.SetDepthTest(false);
++                optimumGraphics.SetBlendEnabled(true);
 +
 +                capi.Render.RenderMesh(quad);
 +
 +                // GL leaves blending enabled for the remaining OIT draws.
-+                optimumDevice.SetDepthTest(true);
++                optimumGraphics.SetDepthTest(true);
 +                program.Stop();
 +                return;
 +            }

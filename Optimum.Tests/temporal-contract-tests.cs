@@ -375,20 +375,32 @@ public class TemporalContractTests
         const string tolerance =
             "bool written = motion.a > 0.0 && abs(motion.a - depth) <= max(2e-4, 8e-4 * depth);";
 
+        // The reference resolve evaluates the rule at the nearest-depth tap of its
+        // 3x3 (2026-09-11, section 4): `motion` is read at closestPixel and
+        // `closestDepth` is the depth attachment at that same tap, so the rule is
+        // still "a writer's a against the depth of the pixel it wrote", unchanged.
+        string atClosestTap = tolerance.Replace("depth", "closestDepth", StringComparison.Ordinal);
         string resolve = Read("sources/shaders/taa-resolve.fsh");
-        Assert.True(resolve.Contains(tolerance, StringComparison.Ordinal),
+        Assert.True(resolve.Contains(atClosestTap, StringComparison.Ordinal),
             $"taa-resolve.fsh no longer carries the writer-depth validity test {Doc} section 3.2 freezes. "
             + "Change the document and bump the contract version before changing this line.");
+        Assert.True(resolve.Contains("vec4 motion = texelFetch(motionTex, closestPixel, 0);", StringComparison.Ordinal)
+            && resolve.Contains("float tapDepth = texelFetch(depthTex, p, 0).r;", StringComparison.Ordinal)
+            && resolve.Contains("if (tapDepth < closestDepth) { closestDepth = tapDepth; closestPixel = p; }", StringComparison.Ordinal),
+            $"taa-resolve.fsh no longer reads the motion vector and its depth from the same tap; {Doc} section 3.2 compares a writer against its own pixel.");
 
         string doc = ReadDoc();
         Assert.True(doc.Contains(tolerance, StringComparison.Ordinal),
             $"{Doc} section 3.2 no longer quotes the writer-depth validity test.");
+        Assert.True(doc.Contains(atClosestTap, StringComparison.Ordinal),
+            $"{Doc} section 4 no longer states that the resolve applies the validity test at the nearest-depth tap.");
 
         // And the channel semantics it rests on.
         Assert.True(resolve.Contains("uniform sampler2D motionTex;", StringComparison.Ordinal),
             $"taa-resolve.fsh no longer reads the motion attachment {Doc} section 3.2 describes.");
-        Assert.True(resolve.Contains("float reactive = clamp(motion.b, 0.0, 1.0);", StringComparison.Ordinal),
-            $"taa-resolve.fsh no longer reads reactive from motion.b, which {Doc} section 3.2 freezes.");
+        // Reactive stays this pixel's own value, not the nearest tap's.
+        Assert.True(resolve.Contains("float reactive = clamp(texelFetch(motionTex, pixel, 0).b, 0.0, 1.0);", StringComparison.Ordinal),
+            $"taa-resolve.fsh no longer reads reactive from this pixel's motion.b, which {Doc} section 3.2 freezes.");
         Assert.True(resolve.Contains("vec2 historyUv = (pixelCentre + mv) * invSize;", StringComparison.Ordinal),
             $"taa-resolve.fsh no longer anchors the history lookup where {Doc} section 3.2 says it does.");
     }
@@ -441,36 +453,41 @@ public class TemporalContractTests
     public void TheAttachmentFormatsAreFrozenOnBothBackends()
     {
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        // Vulkan-native plan, Phase 1A step 4: the device-path framebuffer setup moved, text
+        // unchanged apart from the device field, into VulkanClientPlatform. Same formats.
+        string device = VulkanPlatformSource.Read();
 
         // Motion attachment: RGBA16F on Primary, appended after every existing
         // attachment, on both paths.
-        Assert.True(platform.Contains("int motionTextureId = device.CreateTexture2D(width, height,", StringComparison.Ordinal)
-            && platform.Contains("EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);", StringComparison.Ordinal),
+        Assert.True(device.Contains("int motionTextureId = device.CreateTexture2D(width, height,", StringComparison.Ordinal)
+            && device.Contains("EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);", StringComparison.Ordinal),
             $"The device path no longer creates the motion attachment as RGBA16F; {Doc} section 3.1 freezes the format.");
         // 34842 = GL_RGBA16F, the GL path's raw token for the same thing.
         Assert.True(platform.Contains("GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);", StringComparison.Ordinal),
             $"The GL path no longer creates the motion attachment as RGBA16F (34842); {Doc} section 3.1 freezes the format.");
-        Assert.True(platform.Contains("public int MotionAttachmentIndex { get; private set; } = -1;", StringComparison.Ordinal),
+        Assert.True(platform.Contains("public override int MotionAttachmentIndex", StringComparison.Ordinal)
+            && platform.Contains("private int optimumMotionAttachmentIndex = -1;", StringComparison.Ordinal),
             $"MotionAttachmentIndex changed shape; {Doc} section 3.1 describes it as 2 without SSAO, 4 with, -1 when off.");
 
         // Primary depth: DepthComponent32 on the device path, 33191 = GL_DEPTH_COMPONENT32 on GL,
         // NEAREST + CLAMP_TO_EDGE on both.
-        Assert.True(platform.Contains("EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);", StringComparison.Ordinal),
+        Assert.True(device.Contains("EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);", StringComparison.Ordinal),
             $"Primary's depth format changed; {Doc} section 3.1 freezes it at 32-bit, 0 = near.");
-        Assert.True(platform.Contains("SetupOptimumTextureSampler(device, primary.DepthTextureId, 9728, 33071);", StringComparison.Ordinal),
+        Assert.True(device.Contains("SetupOptimumTextureSampler(primary.DepthTextureId, 9728, 33071);", StringComparison.Ordinal),
             $"Primary's depth sampler changed; {Doc} section 3.1 freezes NEAREST + CLAMP_TO_EDGE.");
         Assert.True(platform.Contains("GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, num, num2, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);", StringComparison.Ordinal),
             $"The GL path's Primary depth format changed; {Doc} section 3.1 freezes GL_DEPTH_COMPONENT32.");
 
         // History slot: RGBA16F colour (LINEAR), RGBA8 aux (LINEAR), R32F linear
         // depth (NEAREST), CLAMP_TO_EDGE throughout - device path.
-        Assert.True(platform.Contains("private const int OptimumGlR32f = 0x822E;", StringComparison.Ordinal),
+        Assert.True(platform.Contains("private const int OptimumGlR32f = 0x822E;", StringComparison.Ordinal)
+            && device.Contains("private const int OptimumGlR32f = 0x822E;", StringComparison.Ordinal),
             $"The R32F token used for the linear depth history moved; {Doc} section 3.3 freezes the format.");
-        Assert.True(platform.Contains("target.ColorTextureIds[2] = device.CreateTexture2DRaw(width, height, OptimumGlR32f, IntPtr.Zero, 4);", StringComparison.Ordinal),
+        Assert.True(device.Contains("target.ColorTextureIds[2] = device.CreateTexture2DRaw(width, height, OptimumGlR32f, IntPtr.Zero, 4);", StringComparison.Ordinal),
             $"The device path's linear depth history is no longer R32F; {Doc} section 3.3 freezes it.");
-        Assert.True(platform.Contains("SetupOptimumTextureSampler(device, target.ColorTextureIds[0], 9729, 33071);", StringComparison.Ordinal)
-            && platform.Contains("SetupOptimumTextureSampler(device, target.ColorTextureIds[1], 9729, 33071);", StringComparison.Ordinal)
-            && platform.Contains("SetupOptimumTextureSampler(device, target.ColorTextureIds[2], 9728, 33071);", StringComparison.Ordinal),
+        Assert.True(device.Contains("SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);", StringComparison.Ordinal)
+            && device.Contains("SetupOptimumTextureSampler(target.ColorTextureIds[1], 9729, 33071);", StringComparison.Ordinal)
+            && device.Contains("SetupOptimumTextureSampler(target.ColorTextureIds[2], 9728, 33071);", StringComparison.Ordinal),
             $"The history slot's sampler state changed on the device path; {Doc} section 3.3 freezes "
             + "LINEAR colour, LINEAR glow, NEAREST linear depth, all CLAMP_TO_EDGE.");
 
@@ -484,8 +501,8 @@ public class TemporalContractTests
             $"The GL linear depth history is no longer R32F; {Doc} section 3.3 freezes it.");
 
         // Sharpen target: RGBA16F at render resolution, both paths.
-        Assert.True(platform.Contains("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(device, width, height,", StringComparison.Ordinal)
-            && platform.Contains("EnumTextureInternalFormat.Rgba16f);", StringComparison.Ordinal),
+        Assert.True(device.Contains("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(width, height,", StringComparison.Ordinal)
+            && device.Contains("EnumTextureInternalFormat.Rgba16f);", StringComparison.Ordinal),
             $"The sharpen target is no longer RGBA16F on the device path; {Doc} section 3.4 freezes it.");
         Assert.True(platform.Contains("setupAttachment(optimumSharpen, num, num2, 0, val, (PixelInternalFormat)34842);", StringComparison.Ordinal),
             $"The sharpen target is no longer RGBA16F on the GL path; {Doc} section 3.4 freezes it.");

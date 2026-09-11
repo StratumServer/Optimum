@@ -14,11 +14,11 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <summary>
 /// Covers render targets, and specifically the semantics of glDrawBuffers.
 ///
-/// This is the least obvious behaviour in the whole backend. glDrawBuffers does
-/// not mask writes, it selects which attachments take part, and the game leans on
-/// that: the final composition pass renders into the primary framebuffer's
-/// attachment 0 while sampling its attachment 1. Reproducing it as a write mask
-/// would either corrupt the glow buffer or trip a feedback-loop error.
+/// This is the least obvious behaviour in the whole backend. Since Phase 2 (C4)
+/// glDrawBuffers is a write mask inside a scope that keeps every bound attachment;
+/// the game's one read of an excluded slot (the final composition pass renders into
+/// Primary 0 while sampling Primary 1) takes that slot out of the scope instead of
+/// tripping a feedback-loop error. MotionWindowTests covers the pixels per tier.
 /// </summary>
 public class RenderTargetTests
 {
@@ -27,18 +27,8 @@ public class RenderTargetTests
     public RenderTargetTests(ITestOutputHelper output) => _output = output;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     private const string SingleOutputVertex = """
         #version 330 core
@@ -63,8 +53,8 @@ public class RenderTargetTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -105,6 +95,8 @@ public class RenderTargetTests
             Assert.All(glow, b => Assert.Equal(0x77, b));
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -121,8 +113,8 @@ public class RenderTargetTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -164,15 +156,19 @@ public class RenderTargetTests
             Assert.Equal(255, glow[1]);    // green
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
     /// <summary>
-    /// Changing the draw-buffer mask changes which attachments participate, so
-    /// the open scope no longer describes the target and has to be restarted.
+    /// Phase 2 (C4): a draw-buffer change is a write-mask change. The scope keeps
+    /// every bound attachment, so changing the mask never restarts it; sampling a
+    /// slot whose draw buffer is off takes that slot out (one feedback split), and
+    /// selecting it again lets it rejoin (another).
     /// </summary>
     [SkippableFact]
-    public unsafe void ChangingTheDrawBufferMaskRestartsTheRenderingScope()
+    public unsafe void ChangingTheDrawBufferMaskKeepsTheRenderingScope()
     {
         var messages = new List<string>();
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
@@ -180,8 +176,8 @@ public class RenderTargetTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
 
@@ -203,32 +199,60 @@ public class RenderTargetTests
                 targets.EnsureRendering(commandBuffer);
                 Assert.Equal(1, targets.ScopesOpened);
 
+                // Mask changes, back and forth: still the one scope.
                 targets.SetDrawBuffers(framebuffer, 0b11);
                 targets.EnsureRendering(commandBuffer);
+                targets.SetDrawBuffers(framebuffer, 0b01);
+                targets.EnsureRendering(commandBuffer);
+                targets.SetDrawBuffers(framebuffer, 0b10);
+                targets.EnsureRendering(commandBuffer);
+                Assert.Equal(1, targets.ScopesOpened);
+                Assert.Equal(0, targets.MaskRestarts);
+                Assert.Equal(0, targets.FeedbackSplits);
+
+                // Sampling b while its draw buffer is off takes it out of the scope.
+                targets.SetDrawBuffers(framebuffer, 0b01);
+                targets.ExcludeSampledAttachment(commandBuffer, b);
+                Assert.False(targets.RenderingActive);
+                textures.TransitionTexture(commandBuffer, textures.Get(b)!, ImageLayout.ShaderReadOnlyOptimal);
+                targets.EnsureRendering(commandBuffer);
                 Assert.Equal(2, targets.ScopesOpened);
+                Assert.Equal(1, targets.FeedbackSplits);
+                Assert.Equal(1, targets.EnabledAttachmentCount(targets.Get(framebuffer)!));
+
+                // Selecting b again lets it rejoin.
+                targets.SetDrawBuffers(framebuffer, 0b11);
+                targets.EnsureRendering(commandBuffer);
+                Assert.Equal(3, targets.ScopesOpened);
+                Assert.Equal(2, targets.FeedbackSplits);
+                Assert.Equal(2, targets.EnabledAttachmentCount(targets.Get(framebuffer)!));
+                Assert.Equal(0, targets.MaskRestarts);
 
                 targets.EndRendering(commandBuffer);
             });
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
     /// <summary>
     /// The attachment formats fed to the pipeline must match the attachments the
-    /// scope was opened with, including the gaps: a disabled slot is Undefined,
-    /// which keeps fragment output N aimed at slot N.
+    /// scope was opened with. Since Phase 2 (C4) that is every bound slot whatever
+    /// its draw buffer, so the formats id is stable across mask toggles; only a
+    /// sample-excluded or unbound slot is Undefined, keeping output N aimed at slot N.
     /// </summary>
     [SkippableFact]
-    public void DisabledAttachmentsReportAnUndefinedFormatToThePipeline()
+    public void DrawBufferMasksDoNotChangeTheFormatsThePipelineSees()
     {
         var messages = new List<string>();
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
 
@@ -238,17 +262,33 @@ public class RenderTargetTests
                 targets.Attach(framebuffer, i, textures.Create(8, 8, Format.R8G8B8A8Unorm));
             }
 
+            VulkanFramebuffer bound = targets.Get(framebuffer)!;
+            targets.SetDrawBuffers(framebuffer, 0b1111);
+            int allSelected = targets.FormatsIdOf(bound);
+
             // The OIT pass draws to 0 and 3 while leaving 1 and 2 out.
             targets.SetDrawBuffers(framebuffer, 0b1001);
-
-            VulkanFramebuffer bound = targets.Get(framebuffer)!;
             RenderTargetFormats formats = state.TargetFormats(targets.FormatsIdOf(bound));
 
+            Assert.Equal(allSelected, targets.FormatsIdOf(bound));
             Assert.Equal(4, formats.ColorFormats.Length);
-            Assert.Equal(Format.R8G8B8A8Unorm, formats.ColorFormats[0]);
-            Assert.Equal(Format.Undefined, formats.ColorFormats[1]);
-            Assert.Equal(Format.Undefined, formats.ColorFormats[2]);
-            Assert.Equal(Format.R8G8B8A8Unorm, formats.ColorFormats[3]);
+            Assert.All(formats.ColorFormats, format => Assert.Equal(Format.R8G8B8A8Unorm, format));
+
+            // A slot a draw samples with its draw buffer off leaves the scope: Undefined.
+            commands.SubmitAndWait(commandBuffer =>
+            {
+                targets.Bind(commandBuffer, framebuffer);
+                targets.ExcludeSampledAttachment(commandBuffer, bound.Color[2].TextureId);
+            });
+            RenderTargetFormats excluded = state.TargetFormats(targets.FormatsIdOf(bound));
+            Assert.Equal(4, excluded.ColorFormats.Length);
+            Assert.Equal(Format.R8G8B8A8Unorm, excluded.ColorFormats[1]);
+            Assert.Equal(Format.Undefined, excluded.ColorFormats[2]);
+            Assert.Equal(Format.R8G8B8A8Unorm, excluded.ColorFormats[3]);
+
+            ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -262,7 +302,7 @@ public class RenderTargetTests
         }, compiler);
 
     private static unsafe void RenderFullscreen(
-        VulkanContext context, VulkanCommands commands, RenderTargetManager targets,
+        VulkanContext context, SetupQueue commands, RenderTargetManager targets,
         GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
         int framebuffer, uint size)
     {
@@ -319,7 +359,7 @@ public class RenderTargetTests
     }
 
     private static unsafe void FillTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, byte value)
     {
         var pixels = new byte[size * size * 4];
@@ -331,7 +371,7 @@ public class RenderTargetTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * 4;

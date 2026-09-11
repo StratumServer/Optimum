@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -68,6 +69,15 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public ulong Id { get; } = ResourceIds.Next();
 
     public Format Format { get; init; }
+
+    /// <summary>
+    /// The GL internal format token the client asked for, or 0 when the texture
+    /// was not created through a GL-token entry point. Kept because the Vulkan
+    /// format can be a promotion (GL_RGB lands in RGBA8 storage), and the parity
+    /// dump names files by what was requested so both backends pair.
+    /// </summary>
+    public int GlInternalFormat { get; set; }
+
     public uint Width { get; init; }
     public uint Height { get; init; }
     public uint MipLevels { get; init; }
@@ -80,8 +90,37 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// <summary>Mutable, as glTexParameter is.</summary>
     public SamplerState State { get; set; } = SamplerState.Default;
 
-    /// <summary>Tracked because Vulkan offers no way to query it.</summary>
-    public ImageLayout Layout { get; set; } = ImageLayout.Undefined;
+    private ResourceStateTracker? _sync;
+
+    /// <summary>
+    /// Per-subresource layout, write and read stages, which every barrier on this
+    /// texture derives from (<see cref="BarrierBatcher" />). Created on first use,
+    /// once the image's dimensions are set.
+    /// </summary>
+    internal ResourceStateTracker Sync
+    {
+        get
+        {
+            ResourceStateTracker? sync = _sync;
+            if (sync != null) return sync;
+            System.Threading.Interlocked.CompareExchange(ref _sync,
+                new ResourceStateTracker(MipLevels, Layers, Aspect != ImageAspectFlags.ColorBit), null);
+            return _sync!;
+        }
+    }
+
+    /// <summary>
+    /// The layout of the whole image, tracked because Vulkan offers no way to
+    /// query it; UNDEFINED while its subresources are in different layouts.
+    /// </summary>
+    public ImageLayout Layout => Sync.Layout;
+
+    /// <summary>
+    /// The frame command buffer generation that last used this texture; an
+    /// upload to a texture the frame being recorded already used goes inline.
+    /// See <see cref="UploadManager.NoteUse(CommandBuffer, VulkanTexture)" />.
+    /// </summary>
+    internal long FrameUse;
 
     /// <summary>
     /// Single-layer views, created on demand and keyed by layer.
@@ -234,18 +273,19 @@ internal sealed unsafe class TextureManager : IDisposable
     }
 
     private readonly VulkanContext _context;
-    private readonly VulkanCommands _commands;
+    private readonly UploadManager _uploads;
     private readonly List<VulkanTexture?> _textures = new();
     private readonly Stack<int> _freeIds = new();
     private bool _disposed;
 
     public SamplerCache Samplers { get; }
 
-    public TextureManager(VulkanContext context, VulkanCommands commands)
+    public TextureManager(VulkanContext context, UploadManager uploads)
     {
         _context = context;
-        _commands = commands;
+        _uploads = uploads;
         Samplers = new SamplerCache(context);
+        _barriers = CreateBatcher();
 
         // Index 0 is reserved so a zero id never names a real texture.
         _textures.Add(null);
@@ -269,15 +309,25 @@ internal sealed unsafe class TextureManager : IDisposable
 
     private int Register(VulkanTexture texture)
     {
-        if (_freeIds.Count > 0)
+        // Under the upload lock, like Delete: an upload from another thread
+        // looks its texture up again under the same lock.
+        _uploads.EnterLock();
+        try
         {
-            int reused = _freeIds.Pop();
-            _textures[reused] = texture;
-            return reused;
-        }
+            if (_freeIds.Count > 0)
+            {
+                int reused = _freeIds.Pop();
+                _textures[reused] = texture;
+                return reused;
+            }
 
-        _textures.Add(texture);
-        return _textures.Count - 1;
+            _textures.Add(texture);
+            return _textures.Count - 1;
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
     }
 
     /// <summary>
@@ -288,7 +338,7 @@ internal sealed unsafe class TextureManager : IDisposable
     public int Create(
         uint width, uint height, Format format,
         uint layers = 1, bool cube = false, bool generateMipmaps = false,
-        ImageUsageFlags extraUsage = 0)
+        ImageUsageFlags extraUsage = 0, MemoryPoolClass poolClass = MemoryPoolClass.DeviceImages)
     {
         // GL tolerates a zero-sized texture - it creates nothing and carries on -
         // while Vulkan rejects the extent outright. The client asks for one when
@@ -331,10 +381,10 @@ internal sealed unsafe class TextureManager : IDisposable
             throw new InvalidOperationException("vkCreateImage failed");
         }
 
-        api.GetImageMemoryRequirements(_context.Device, image, out MemoryRequirements requirements);
+        MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
         MemoryAllocation allocation = _context.Allocator.Allocate(
             requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
-            $"a {width}x{height} {format} image");
+            $"a {width}x{height} {format} image", poolClass, dedicated, default, image);
         if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
         {
             api.DestroyImage(_context.Device, image, null);
@@ -374,14 +424,52 @@ internal sealed unsafe class TextureManager : IDisposable
             Aspect = aspect,
         };
 
+        if (_context.PoisonFreshResources) Poison(texture);
+
         return Register(texture);
     }
 
     /// <summary>
-    /// Uploads pixels into a region. Staging plus a copy, then back to a
-    /// shader-readable layout, submitted and waited on. That is stronger
-    /// ordering than GL guarantees, which makes it correct; recording the copy
-    /// inline in the frame's command buffer is the later optimisation.
+    /// Poison mode: fills every level and layer of a new image with
+    /// <see cref="VulkanPoison" />'s value for its format, so a read of content
+    /// nobody wrote is loud instead of whatever the allocator's memory held.
+    /// Recorded into the upload batch like any upload: a fresh texture has no use
+    /// yet, so the clear runs before anything that could read it.
+    /// </summary>
+    private void Poison(VulkanTexture texture)
+    {
+        if (VulkanPoison.IsCompressed(texture.Format)) return;
+
+        CommandBuffer commandBuffer = _uploads.BeginRecording(inlineInFrame: false);
+        try
+        {
+            TransitionTexture(commandBuffer, texture, ImageLayout.TransferDstOptimal);
+            var range = new ImageSubresourceRange(texture.Aspect, 0, texture.MipLevels, 0, texture.Layers);
+            if (texture.Aspect == ImageAspectFlags.DepthBit)
+            {
+                var depth = new ClearDepthStencilValue(VulkanPoison.Depth, 0);
+                _context.Api.CmdClearDepthStencilImage(commandBuffer, texture.Image,
+                    ImageLayout.TransferDstOptimal, &depth, 1, &range);
+            }
+            else
+            {
+                ClearColorValue color = VulkanPoison.ColorFor(texture.Format);
+                _context.Api.CmdClearColorImage(commandBuffer, texture.Image,
+                    ImageLayout.TransferDstOptimal, &color, 1, &range);
+            }
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
+    }
+
+    /// <summary>
+    /// Uploads pixels into a region: staged, copied, and back to a shader-readable
+    /// layout, recorded into the upload batch that the next frame submission runs
+    /// first. Nothing waits. When the frame command buffer being recorded already
+    /// used the texture, the copy goes inline into it instead, so a draw recorded
+    /// before the upload still sees the old texels, as on GL.
     /// </summary>
     public void Upload(
         int textureId, int level, int x, int y, uint width, uint height,
@@ -393,14 +481,18 @@ internal sealed unsafe class TextureManager : IDisposable
         ulong size = (ulong)width * height * (ulong)bytesPerPixel;
         if (size == 0) return;
 
-        using var staging = new VulkanBuffer(_context, size,
-            BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-
-        System.Buffer.MemoryCopy((void*)pixels, (void*)staging.Mapped, (long)size, (long)size);
-
-        _commands.SubmitAndWait(commandBuffer =>
+        VulkanStats.NoteUploadRequest();
+        CommandBuffer commandBuffer = _uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));
+        try
         {
+            // Again under the lock: a delete on another thread either came first
+            // (nothing to upload to) or retires the texture against this batch's
+            // Transfer value, so the batch never names a destroyed image.
+            if (!ReferenceEquals(Get(textureId), texture)) return;
+
+            StagingSlice staging = _uploads.Stage(size);
+            System.Buffer.MemoryCopy((void*)pixels, (void*)staging.Pointer, (long)size, (long)size);
+
             if (_context.CheckpointsAvailable)
             {
                 _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Upload(textureId, width, height));
@@ -410,28 +502,38 @@ internal sealed unsafe class TextureManager : IDisposable
 
             var region = new BufferImageCopy
             {
+                BufferOffset = staging.Offset,
                 ImageSubresource = new ImageSubresourceLayers(texture.Aspect, (uint)level, layer, 1),
                 ImageOffset = new Offset3D(x, y, 0),
                 ImageExtent = new Extent3D(width, height, 1),
             };
-            _context.Api.CmdCopyBufferToImage(commandBuffer, staging.Handle, texture.Image,
+            _context.Api.CmdCopyBufferToImage(commandBuffer, staging.Buffer, texture.Image,
                 ImageLayout.TransferDstOptimal, 1, &region);
 
             TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
-        });
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
     }
 
     /// <summary>
     /// Builds the mip chain by successive blits, which is how every Vulkan
-    /// implementation of glGenerateMipmap works.
+    /// implementation of glGenerateMipmap works. Batched or inline by the same
+    /// rule as <see cref="Upload" />, so it follows the uploads it is built from.
     /// </summary>
     public void GenerateMipmaps(int textureId)
     {
         VulkanTexture? texture = Get(textureId);
         if (texture == null || texture.MipLevels <= 1) return;
 
-        _commands.SubmitAndWait(commandBuffer =>
+        VulkanStats.NoteUploadRequest();
+        CommandBuffer commandBuffer = _uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));
+        try
         {
+            if (!ReferenceEquals(Get(textureId), texture)) return;
+
             Vk api = _context.Api;
             int mipWidth = (int)texture.Width;
             int mipHeight = (int)texture.Height;
@@ -441,15 +543,15 @@ internal sealed unsafe class TextureManager : IDisposable
                 _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Mipmaps(textureId, texture.MipLevels));
             }
 
-            TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
+            TransitionTexture(commandBuffer, texture, ResourceUsage.TransferSrc);
 
             for (uint level = 1; level < texture.MipLevels; level++)
             {
                 int nextWidth = Math.Max(1, mipWidth / 2);
                 int nextHeight = Math.Max(1, mipHeight / 2);
 
-                TransitionRange(commandBuffer, texture, level, 1,
-                    ImageLayout.Undefined, ImageLayout.TransferDstOptimal);
+                // The level is about to be overwritten whole: discard it.
+                TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferDst, discard: true);
 
                 var blit = new ImageBlit
                 {
@@ -466,16 +568,20 @@ internal sealed unsafe class TextureManager : IDisposable
                     texture.Image, ImageLayout.TransferDstOptimal,
                     1, &blit, Filter.Linear);
 
-                TransitionRange(commandBuffer, texture, level, 1,
-                    ImageLayout.TransferDstOptimal, ImageLayout.TransferSrcOptimal);
+                TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferSrc, discard: false);
 
                 mipWidth = nextWidth;
                 mipHeight = nextHeight;
             }
 
-            texture.Layout = ImageLayout.TransferSrcOptimal;
-            TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
-        });
+            // Every level is TRANSFER_SRC again, so the tracker merged the
+            // per-level entries back into one and this is a single barrier.
+            TransitionTexture(commandBuffer, texture, ResourceUsage.SampleFragment);
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
     }
 
     /// <summary>
@@ -540,86 +646,155 @@ internal sealed unsafe class TextureManager : IDisposable
 
     public void Delete(int textureId, FrameRing? ring = null)
     {
-        VulkanTexture? texture = Get(textureId);
-        if (texture == null) return;
+        // Under the upload lock; see Upload. Retiring inside it keys the entry on
+        // the Transfer value of any batch that recorded this texture already.
+        _uploads.EnterLock();
+        try
+        {
+            // A texture served by a transient image this frame deletes its own image.
+            RestoreBindingLocked(textureId);
+            VulkanTexture? texture = Get(textureId);
+            if (texture == null) return;
 
-        _textures[textureId] = null;
-        _freeIds.Push(textureId);
+            _textures[textureId] = null;
+            _freeIds.Push(textureId);
 
-        // Handing it to the ring means it outlives any frame still referencing it.
-        if (ring != null) ring.DeferDeletion(texture);
-        else texture.Dispose();
+            // Handing it to the ring means it outlives any frame still referencing it.
+            if (ring != null) ring.DeferDeletion(texture);
+            else texture.Dispose();
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    // ------------------------------------------------------------ transient binds
+
+    // Texture ids that resolve to a transient image for the current frame, and the
+    // texture each owns. See TransientAllocator.Bind.
+    private readonly Dictionary<int, VulkanTexture?> _reboundOriginals = new();
+
+    /// <summary>
+    /// Makes <paramref name="id" /> resolve to <paramref name="physicalId" />'s image until
+    /// <see cref="RestoreBindings" />. Every path that looks the id up (attachments,
+    /// samplers, readback) then uses that image, which is how an aliased transient
+    /// takes the place of a client texture for one frame.
+    /// </summary>
+    public void Rebind(int id, int physicalId)
+    {
+        _uploads.EnterLock();
+        try
+        {
+            VulkanTexture? physical = Get(physicalId);
+            if (physical == null || id <= 0 || id >= _textures.Count || id == physicalId) return;
+            if (!_reboundOriginals.ContainsKey(id)) _reboundOriginals.Add(id, _textures[id]);
+            _textures[id] = physical;
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    /// <summary>Undoes every <see cref="Rebind" />.</summary>
+    public void RestoreBindings()
+    {
+        if (_reboundOriginals.Count == 0) return;
+        _uploads.EnterLock();
+        try
+        {
+            foreach (KeyValuePair<int, VulkanTexture?> entry in _reboundOriginals) _textures[entry.Key] = entry.Value;
+            _reboundOriginals.Clear();
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    /// <summary>Undoes a <see cref="Rebind" /> of one id; nothing when it is not rebound.</summary>
+    public void RestoreBinding(int id)
+    {
+        if (_reboundOriginals.Count == 0) return;
+        _uploads.EnterLock();
+        try
+        {
+            RestoreBindingLocked(id);
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    private void RestoreBindingLocked(int id)
+    {
+        if (_reboundOriginals.Remove(id, out VulkanTexture? original)) _textures[id] = original;
+    }
+
+    /// <summary>Whether <paramref name="id" /> currently resolves to another texture's image.</summary>
+    public bool IsRebound(int id) => _reboundOriginals.ContainsKey(id);
+
+    /// <summary>The texture's contents stop mattering: its next use transitions from UNDEFINED.</summary>
+    public void DiscardContents(VulkanTexture texture)
+    {
+        ResourceStateTracker tracker = texture.Sync;
+        lock (tracker) tracker.Discard();
     }
 
     // ------------------------------------------------------------------ barriers
 
-    public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ImageLayout target)
-    {
-        if (texture.Layout == target) return;
-        TransitionRange(commandBuffer, texture, 0, texture.MipLevels, texture.Layout, target);
-        texture.Layout = target;
-    }
-
-    private void TransitionRange(
-        CommandBuffer commandBuffer, VulkanTexture texture,
-        uint baseMip, uint mipCount, ImageLayout from, ImageLayout to)
-    {
-        // Execution dependency stays ALL_COMMANDS on both sides (a transition
-        // must order against every earlier use, and this backend does not
-        // track per-use stages); the access masks name what each layout is
-        // really used for, which is what makes the availability/visibility
-        // operations precise and keeps the layers quiet about them.
-        var barrier = new ImageMemoryBarrier2
-        {
-            SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = AccessForLayout(from, writer: true),
-            DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = AccessForLayout(to, writer: false),
-            OldLayout = from,
-            NewLayout = to,
-            Image = texture.Image,
-            SubresourceRange = new ImageSubresourceRange(texture.Aspect, baseMip, mipCount, 0, texture.Layers),
-        };
-
-        var dependency = new DependencyInfo
-        {
-            SType = StructureType.DependencyInfo,
-            ImageMemoryBarrierCount = 1,
-            PImageMemoryBarriers = &barrier,
-        };
-        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
-    }
+    // Barriers for the immediate transitions below. Uploads record from any
+    // thread under the upload lock and the frame thread records without it, so
+    // the shared batcher is used under its own lock, one Require+Flush at a time.
+    private readonly BarrierBatcher _barriers;
+    private readonly object _barrierLock = new();
 
     /// <summary>
-    /// The accesses a layout is used for: as the source side of a barrier the
-    /// writes that must be made available, as the destination side the reads
-    /// and writes that must see them.
+    /// Whether a rendering scope is open in a command buffer; the device answers
+    /// for its frame command buffer. Every batcher from <see cref="CreateBatcher" />
+    /// asks it at flush time (debug builds reject a flush inside a scope).
     /// </summary>
-    internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer) => layout switch
+    public Func<CommandBuffer, bool>? ScopeOpen { get; set; }
+
+    /// <summary>A batcher for one recording thread (a render target manager, the present path).</summary>
+    public BarrierBatcher CreateBatcher() =>
+        new(_context.Api) { ScopeOpen = commandBuffer => ScopeOpen?.Invoke(commandBuffer) == true };
+
+    /// <summary>
+    /// Adds a whole-texture use to <paramref name="batcher" /> without flushing, so
+    /// several textures move in one barrier command. The caller flushes before
+    /// recording the commands that use them.
+    /// </summary>
+    public void Require(BarrierBatcher batcher, CommandBuffer commandBuffer, VulkanTexture texture, ResourceUsage usage)
     {
-        ImageLayout.TransferDstOptimal => AccessFlags2.TransferWriteBit,
-        ImageLayout.TransferSrcOptimal => writer ? AccessFlags2.None : AccessFlags2.TransferReadBit,
-        ImageLayout.ColorAttachmentOptimal => writer
-            ? AccessFlags2.ColorAttachmentWriteBit
-            : AccessFlags2.ColorAttachmentReadBit | AccessFlags2.ColorAttachmentWriteBit,
-        ImageLayout.DepthAttachmentOptimal or ImageLayout.DepthStencilAttachmentOptimal => writer
-            ? AccessFlags2.DepthStencilAttachmentWriteBit
-            : AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.DepthStencilAttachmentWriteBit,
-        // Read-only depth is still written by the pass's storeOp, so as a
-        // source it must make that write available or the next transition is
-        // a write-after-write hazard (synchronization validation, 2026-09-11).
-        ImageLayout.DepthReadOnlyOptimal or ImageLayout.DepthStencilReadOnlyOptimal => writer
-            ? AccessFlags2.DepthStencilAttachmentWriteBit
-            : AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderSampledReadBit,
-        ImageLayout.ShaderReadOnlyOptimal => writer ? AccessFlags2.None : AccessFlags2.ShaderSampledReadBit,
-        ImageLayout.General => writer
-            ? AccessFlags2.MemoryWriteBit
-            : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-        ImageLayout.PresentSrcKhr => AccessFlags2.None,
-        ImageLayout.Undefined or ImageLayout.Preinitialized => writer ? AccessFlags2.None : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-        _ => writer ? AccessFlags2.MemoryWriteBit : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-    };
+        _uploads.NoteUse(commandBuffer, texture);
+        batcher.Require(texture, 0, texture.MipLevels, 0, texture.Layers, usage);
+    }
+
+    /// <summary>A transition named by layout (tests, a readback restoring what it found); see <see cref="UsageState.ForLayout" />.</summary>
+    public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ImageLayout target) =>
+        TransitionTexture(commandBuffer, texture, UsageState.ForLayout(target));
+
+    public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ResourceUsage usage,
+        bool discard = false)
+    {
+        // Every path that records a texture into a command buffer goes through
+        // here or Require (attachments, reads, copies, blits), even when no barrier is due.
+        _uploads.NoteUse(commandBuffer, texture);
+        TransitionRange(commandBuffer, texture, 0, texture.MipLevels, usage, discard);
+    }
+
+    private void TransitionRange(CommandBuffer commandBuffer, VulkanTexture texture,
+        uint baseMip, uint mipCount, ResourceUsage usage, bool discard)
+    {
+        lock (_barrierLock)
+        {
+            _barriers.Require(texture, baseMip, mipCount, 0, texture.Layers, usage, discard);
+            _barriers.Flush(commandBuffer);
+        }
+    }
 
     // -------------------------------------------------------------------- helpers
 
@@ -635,6 +810,9 @@ internal sealed unsafe class TextureManager : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        // A rebound id holds a transient image that has its own entry; dispose owners only.
+        foreach (KeyValuePair<int, VulkanTexture?> entry in _reboundOriginals) _textures[entry.Key] = entry.Value;
+        _reboundOriginals.Clear();
         foreach (VulkanTexture? texture in _textures) texture?.Dispose();
         _textures.Clear();
         Samplers.Dispose();

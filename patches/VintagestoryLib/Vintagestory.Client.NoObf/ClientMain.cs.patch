@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..06614a9 100644
+index 67feafa..4037dee 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -15,7 +15,7 @@ index 67feafa..06614a9 100644
  	public TerrainIlluminator terrainIlluminator;
  
  	public ClientWorldMap WorldMap;
-@@ -240,10 +242,110 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -240,10 +242,129 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public IColorPresets ColorPreset;
  
@@ -106,9 +106,28 @@ index 67feafa..06614a9 100644
 +			total += window[i];
 +		}
 +		int p99Index = Math.Max(0, Math.Min(sampled - 1, (int)Math.Ceiling(0.99 * (double)sampled) - 1));
++		double mean = total / (double)sampled;
++		double squares = 0.0;
++		for (int i = 0; i < sampled; i++)
++		{
++			double delta = (double)window[i] - mean;
++			squares += delta * delta;
++		}
++		double stddev = Math.Sqrt(squares / (double)sampled);
++		// An explicit object[] rather than seven loose arguments: with more than three
++		// the compiler picks string.Format's params ReadOnlySpan overload and lowers it
++		// into a hidden InlineArray type the Cecil transplant cannot carry.
++		object[] fields = new object[7];
++		fields[0] = optimumFpsLogSeconds;
++		fields[1] = optimumFpsLogFrames;
++		fields[2] = mean;
++		fields[3] = window[0];
++		fields[4] = window[sampled - 1];
++		fields[5] = window[p99Index];
++		fields[6] = stddev;
 +		string line = string.Format(System.Globalization.CultureInfo.InvariantCulture,
-+			"[Optimum] fps window={0:F3} frames={1} mean={2:F3} min={3:F3} max={4:F3} p99={5:F3}",
-+			optimumFpsLogSeconds, optimumFpsLogFrames, total / (double)sampled, window[0], window[sampled - 1], window[p99Index]);
++			"[Optimum] fps window={0:F3} frames={1} mean={2:F3} min={3:F3} max={4:F3} p99={5:F3} stddev={6:F3}",
++			fields);
 +		try
 +		{
 +			System.IO.File.AppendAllText(optimumFpsLogPath, line + "\n");
@@ -126,7 +145,7 @@ index 67feafa..06614a9 100644
  	private ClientSystemStartup csStartup;
  
  	private bool ungrabbedFromDefocus;
-@@ -314,11 +416,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -314,11 +435,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	private int lastWidth;
  
@@ -139,7 +158,7 @@ index 67feafa..06614a9 100644
  
  	public Queue<ClientTask> MainThreadTasks;
  
-@@ -340,15 +442,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -340,15 +461,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal bool ignoreServerCalendarUpdates;
  
@@ -157,7 +176,7 @@ index 67feafa..06614a9 100644
  
  	public object EntityLoadQueueLock = new object();
  
-@@ -378,11 +480,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -378,11 +499,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal PickingRayUtil pickingRayUtil = new PickingRayUtil();
  
@@ -170,7 +189,7 @@ index 67feafa..06614a9 100644
  
  	internal List<IPointLight> pointlights = new List<IPointLight>();
  
-@@ -402,27 +504,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -402,27 +523,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal int frameSeed;
  
@@ -203,7 +222,7 @@ index 67feafa..06614a9 100644
  
  	internal ServerInformation ServerInfo;
  
-@@ -511,10 +613,52 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -511,10 +632,52 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public long[] LoadedChunkIndices => WorldMap.chunks.Keys.ToArray();
  
  	public long[] LoadedMapChunkIndices => WorldMap.MapChunks.Keys.ToArray();
@@ -256,7 +275,7 @@ index 67feafa..06614a9 100644
  		{
  			for (int i = 0; i < 16; i++)
  			{
-@@ -859,29 +1003,39 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -859,29 +1022,39 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  	}
  
@@ -299,7 +318,7 @@ index 67feafa..06614a9 100644
  		_clientThreadsCts = new CancellationTokenSource();
  		ClientSystem clientSystem = new SystemCompressChunks(this);
  		Thread thread = new Thread(new ClientThread(this, "compresschunks", new ClientSystem[1] { clientSystem }, _clientThreadsCts.Token).Process);
-@@ -899,17 +1053,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -899,17 +1072,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Thread thread3 = new Thread(new ClientThread(this, "relight", new ClientSystem[1] { clientSystem3 }, _clientThreadsCts.Token).Process);
  		thread3.IsBackground = true;
  		thread3.Start();
@@ -323,7 +342,7 @@ index 67feafa..06614a9 100644
  		thread5.IsBackground = true;
  		thread5.Start();
  		thread5.Name = "chunkvis";
-@@ -1032,11 +1190,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1032,11 +1209,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public void ExecuteMainThreadTasks(float deltaTime)
  	{
  		ScreenManager.FrameProfiler.Mark("beginMTT");
@@ -357,7 +376,19 @@ index 67feafa..06614a9 100644
  		{
  			if (SuspendMainThreadTasks)
  			{
-@@ -1094,10 +1273,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1087,17 +1285,23 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 
+ 	public void TriggerRenderStage(EnumRenderStage stage, float dt)
+ 	{
+ 		ScreenManager.FrameProfiler.Mark("beginrenderstage-", stage);
+ 		currentRenderStage = stage;
++		// Vulkan-native plan, Phase 2: the platform sees where each stage's renderers
++		// start and end (frame-graph pass boundaries). Neutral on OpenGL.
++		ClientPlatformAbstract stagePlatform = Platform;
++		stagePlatform.BeginRenderStage(stage);
+ 		eventManager?.TriggerRenderStage(stage, dt);
++		stagePlatform.EndRenderStage(stage);
+ 		Platform.CheckGlError("After render stage " + stage);
  	}
  
  	public void MainRenderLoop(float dt)
@@ -369,7 +400,7 @@ index 67feafa..06614a9 100644
  			timelapse = 0f;
  			timelapsedCurrent = 0f;
  			timelapseEnd = float.MaxValue;
-@@ -1122,10 +1302,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1122,10 +1326,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			Platform.ThreadSpinWait(10000000);
  		}
  		shUniforms.Update(dt, api);
@@ -387,7 +418,7 @@ index 67feafa..06614a9 100644
  		Platform.GlDepthMask(flag: true);
  		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
  		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
-@@ -1140,10 +1327,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1140,10 +1351,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
  		GlMatrixModeModelView();
@@ -412,7 +443,7 @@ index 67feafa..06614a9 100644
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1176,14 +1377,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1176,14 +1401,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Platform.GlDepthMask(flag: true);
  		Platform.GlEnableDepthTest();
  		Platform.GlCullFaceBack();
@@ -438,9 +469,9 @@ index 67feafa..06614a9 100644
 +		// so every writer that could claim a pixel has to have run first. Still
 +		// inside the temporal window; a no-op with TAA off, and skipped when the
 +		// transparent pass that produced the revealage did not run.
-+		if (doTransparentRenderPass && Platform is ClientPlatformWindows optimumSkyMotionPlatform)
++		if (doTransparentRenderPass)
 +		{
-+			optimumSkyMotionPlatform.RenderOptimumSkyMotion();
++			Platform.RenderOptimumSkyMotion();
 +		}
  	}
  
@@ -456,7 +487,7 @@ index 67feafa..06614a9 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1650,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1420,10 +1674,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -471,20 +502,14 @@ index 67feafa..06614a9 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1799,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1823,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
  		GlPushMatrix();
  		GlLoadIdentity();
 -		GL.DepthRange(0f, 20000f);
-+		// glDepthRange clamps both bounds to [0, 1], so 20000 means 1 and this is
-+		// the default range restated. The device has no equivalent call and needs
-+		// none; PerspectiveMode's restore to (0, 1) is the same no-op.
-+		if (Vintagestory.API.Config.OptimumRender.Device == null)
-+		{
-+			GL.DepthRange(0f, 20000f);
-+		}
++		Platform.SetDepthRange(0f, 20000f);
  		GlTranslate(0.0, 0.0, -19849.0);
  	}
  
@@ -495,16 +520,13 @@ index 67feafa..06614a9 100644
  		GlMatrixModeModelView();
  		GlPopMatrix();
 -		GL.DepthRange(0f, 1f);
-+		if (Vintagestory.API.Config.OptimumRender.Device == null)
-+		{
-+			GL.DepthRange(0f, 1f);
-+		}
++		Platform.SetDepthRange(0f, 1f);
  	}
  
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2367,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2382,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -529,7 +551,7 @@ index 67feafa..06614a9 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2796,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2811,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -543,7 +565,7 @@ index 67feafa..06614a9 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3787,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3802,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

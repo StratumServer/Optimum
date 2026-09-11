@@ -99,6 +99,11 @@ void main(void)
 
 	// ---- current frame: 3x3 neighbourhood, un-jittered reconstruction and statistics
 	vec4 centreSample = texelFetch(sceneTex, pixel, 0);
+	// Nearest window depth in the 3x3 (0 = near): its motion and its linear depth
+	// drive the reprojection and the disocclusion test, so a sub-pixel leaf in front
+	// of a far background keeps one consistent answer across jitter phases.
+	float closestDepth = 2.0;
+	ivec2 closestPixel = pixel;
 	vec4 filtered = vec4(0.0);
 	float filteredWeight = 0.0;
 	vec3 m1 = vec3(0.0), m2 = vec3(0.0);
@@ -108,6 +113,8 @@ void main(void)
 	{
 		ivec2 p = clamp(pixel + ivec2(x, y), ivec2(0), ivec2(renderSize) - ivec2(1));
 		vec4 c = texelFetch(sceneTex, p, 0);
+		float tapDepth = texelFetch(depthTex, p, 0).r;
+		if (tapDepth < closestDepth) { closestDepth = tapDepth; closestPixel = p; }
 		vec3 ycc = rgbToYCoCg(c.rgb);
 		m1 += ycc; m2 += ycc * ycc;
 		boxMin = min(boxMin, ycc); boxMax = max(boxMax, ycc);
@@ -133,19 +140,24 @@ void main(void)
 	vec4 worldH = invViewProjJittered * vec4(ndc, depth * 2.0 - 1.0, 1.0);
 	vec3 world = worldH.xyz / max(abs(worldH.w), 1e-6) * sign(worldH.w);
 	float linearDepth = -(viewMatrix * vec4(world, 1.0)).z;
+	vec2 closestCentre = vec2(closestPixel) + 0.5;
+	vec2 closestNdc = closestCentre * invSize * 2.0 - 1.0;
+	vec4 closestH = invViewProjJittered * vec4(closestNdc, closestDepth * 2.0 - 1.0, 1.0);
+	vec3 closestWorld = closestH.xyz / max(abs(closestH.w), 1e-6) * sign(closestH.w);
+	float closestLinearDepth = -(viewMatrix * vec4(closestWorld, 1.0)).z;
 
 	vec4 glow = texelFetch(glowTex, pixel, 0);
 
 	// ---- motion: written vector when its depth matches, else camera reprojection
-	vec4 motion = texelFetch(motionTex, pixel, 0);
-	float reactive = clamp(motion.b, 0.0, 1.0);
-	vec2 currentUnjittered = pixelCentre - jitterPx;
+	float reactive = clamp(texelFetch(motionTex, pixel, 0).b, 0.0, 1.0);
+	vec4 motion = texelFetch(motionTex, closestPixel, 0);
+	vec2 currentUnjittered = closestCentre - jitterPx;
 	vec2 mv;
 	// motion.a is the writer's window depth in [0,1], stored in an RGBA16F
 	// attachment: half precision alone costs ~5e-4 near 1.0, so the tolerance
 	// has to scale with the value and keep a floor for depths near the near
 	// plane. A fixed 1e-4 rejected every legitimate writer past mid-range.
-	bool written = motion.a > 0.0 && abs(motion.a - depth) <= max(2e-4, 8e-4 * depth);
+	bool written = motion.a > 0.0 && abs(motion.a - closestDepth) <= max(2e-4, 8e-4 * closestDepth);
 	if (written)
 	{
 		mv = motion.rg;
@@ -156,9 +168,18 @@ void main(void)
 		// reproject it with w = 0 so camera translation cannot move it (plan:
 		// "infinite-direction reprojection where depth == 1"). Finite surfaces
 		// translate by cameraDelta into the previous camera's frame.
-		bool sky = depth >= 0.999999;
-		vec4 prevClip = sky ? prevViewProj * vec4(world, 0.0)
-		                    : prevViewProj * vec4(world + cameraDelta, 1.0);
+		bool sky = closestDepth >= 0.999999;
+		// The sky direction is far point minus near point, never the far point's
+		// position alone: the view matrix's eye sits ~1.7 blocks above the origin
+		// (CameraMatrixOrigin is a look-at from LocalEyePos), and that offset in a
+		// "direction" is a fixed ~0.6 px error at 3000 blocks. Homogeneous
+		// difference with the sign of worldH.w * nearH.w, w == 0 counting as
+		// positive, exactly as taa-skymotion.fsh does.
+		vec4 nearH = invViewProjJittered * vec4(closestNdc, -1.0, 1.0);
+		vec3 skyDirection = closestH.xyz * nearH.w - nearH.xyz * closestH.w;
+		if ((closestH.w < 0.0) != (nearH.w < 0.0)) skyDirection = -skyDirection;
+		vec4 prevClip = sky ? prevViewProj * vec4(skyDirection, 0.0)
+		                    : prevViewProj * vec4(closestWorld + cameraDelta, 1.0);
 		if (prevClip.w <= 1e-6) { outColor = current; outGlow = glow; outDepth = vec4(linearDepth); return; }
 		vec2 prevPixel = (prevClip.xy / prevClip.w * 0.5 + 0.5) * renderSize;
 		mv = prevPixel - currentUnjittered;
@@ -173,7 +194,8 @@ void main(void)
 	// ---- history sample and rejection
 	float alpha = blendAlpha;
 	bool offscreen = any(lessThan(historyUv, vec2(0.0))) || any(greaterThan(historyUv, vec2(1.0)));
-	if (resetHistory != 0 || offscreen) alpha = 1.0;
+	bool rejected = resetHistory != 0 || offscreen;
+	if (rejected) alpha = 1.0;
 
 	vec4 history = sampleCatmullRom(historyColor, historyUv);
 	vec4 historyGlowSample = texture(historyGlow, historyUv);
@@ -190,20 +212,82 @@ void main(void)
 		historyGlowSample = glow;
 		historyLinear = linearDepth;
 		alpha = 1.0;
+		rejected = true;
 	}
 	// Disocclusion: the surface seen last frame at that location must be at a
 	// comparable distance. Tolerance grows with distance; camera translation
 	// along the view axis is covered by the relative term. A disoccluded pixel
 	// has no valid history at all, so it is rejected outright - half-rejecting
 	// it just blends in whatever surface used to be in front.
-	float depthTolerance = 0.5 + 0.08 * linearDepth;
-	if (abs(historyLinear - linearDepth) > depthTolerance) alpha = 1.0;
-	alpha = max(alpha, reactive);
+	// ==== 2026-09-11: distant foliage jitter was THIS test ====================
+	// Root cause: a single-sample depth test (this pixel's linear depth against
+	// the one history depth under historyUv) rejected history on ~3.7% of distant
+	// leaf pixels per frame, on BOTH backends (parity dumps). A sub-pixel leaf
+	// covers the leaf in one jitter phase and the far background in the next, so
+	// the two depths disagree by tens of blocks and the pixel reset to the raw
+	// aliased sample - the shimmer the user saw on distant trees.
+	// Fix: the nearest current depth in the 3x3 (closestLinearDepth, the tap the
+	// motion vector also comes from) against the nearest finite history depth in
+	// the 3x3 around historyUv, tolerance 0.5 + 0.08 * closestLinearDepth. A leaf
+	// that moves one pixel between phases stays inside both windows and keeps its
+	// history. Measured: leaf-far rejection ~3.7% -> ~1.1% per frame; the user
+	// confirmed on Vulkan that the distant-foliage flicker is gone.
+	// Guard: scripts/dev/taa-rejection.py on a parity dump (3x3 leaf-far <= 1.5%).
+	// DO NOT REVERT to a single-sample depth test. Pinned by
+	// TaaResolveTests.FlippingSubPixelLeafKeepsItsHistory,
+	// TaaResolveTests.DisocclusionLargerThanTheNeighbourhoodStillResets,
+	// TaaResolveTests.MotionComesFromTheNearestDepthTapAtAnEdge and
+	// Optimum.Tests TaaAntiFlickerCoverageTests.
+	// ==========================================================================
+	// Nearest history depth in the 3x3 around the reprojected point, against the
+	// nearest current depth: a single-sample test flips on sub-pixel foliage every
+	// few frames (leaf in one jitter phase, background in the next) and threw the
+	// history away on ~3.7% of distant leaf pixels per frame.
+	float historyNearest = historyLinear;
+	for (int hy = -1; hy <= 1; hy++)
+	for (int hx = -1; hx <= 1; hx++)
+	{
+		float h = texture(historyDepth, historyUv + vec2(hx, hy) * invSize).r;
+		if (!isnan(h) && !isinf(h)) historyNearest = min(historyNearest, h);
+	}
+	float depthTolerance = 0.5 + 0.08 * closestLinearDepth;
+	if (abs(historyNearest - closestLinearDepth) > depthTolerance) { alpha = 1.0; rejected = true; }
 
 	// ---- rectify and blend in YCoCg with luminance weighting
 	float clipKeep = 1.0;
 	vec3 histYcc = clipToBox(clipMin, clipMax, rgbToYCoCg(history.rgb), clipKeep);
 	vec3 curYcc = rgbToYCoCg(current.rgb);
+	// ==== 2026-09-11: distant foliage jitter, second half =====================
+	// Root cause: with a fixed current weight (blendAlpha for every pixel that
+	// survived rejection), a sub-pixel leaf that enters and leaves the 3x3 moves
+	// the neighbourhood clip box every frame, and the clip drags the history
+	// with it at full blendAlpha - the history itself oscillates.
+	// Fix: current weight mix(1.2, 0.3, w * w) * blendAlpha with
+	// w = 1 - |lumCur - lumHist| / max(lumCur, max(lumHist, 0.2)) on the
+	// rectified YCoCg luminance, only for pixels not rejected above (reset,
+	// off-screen, NaN history, disocclusion keep alpha = 1); reactive is applied
+	// after it. Together with the 3x3 nearest-depth test above this took distant
+	// leaf rejection from ~3.7% to ~1.1% per frame and removed the flicker in game.
+	// DO NOT REVERT to a fixed blend weight. Pinned by
+	// TaaResolveTests.AntiFlickerWeightsFollowTheLuminanceDifference and
+	// Optimum.Tests TaaAntiFlickerCoverageTests.
+	// ==========================================================================
+	// Anti-flicker feedback (Playdead INSIDE TAA, 2016): a sub-pixel feature that
+	// appears in some jitter phases and not in others moves the neighbourhood box
+	// every frame, and a fixed current weight lets the clip drag the history back
+	// and forth - the shimmer on distant foliage. Weight the current sample by how
+	// different it is from the rectified history in luminance: near-identical
+	// pixels keep more history (0.3 x blendAlpha), real changes take more of the
+	// current frame (1.2 x blendAlpha). Rejected pixels keep their full reset.
+	if (!rejected)
+	{
+		float lumCur = max(curYcc.x, 0.0);
+		float lumHist = max(histYcc.x, 0.0);
+		float unbiasedDiff = abs(lumCur - lumHist) / max(lumCur, max(lumHist, 0.2));
+		float unbiasedWeight = 1.0 - unbiasedDiff;
+		alpha = mix(blendAlpha * 1.2, blendAlpha * 0.3, unbiasedWeight * unbiasedWeight);
+	}
+	alpha = max(alpha, reactive);
 	float wCur = alpha / (1.0 + curYcc.x);
 	float wHist = (1.0 - alpha) / (1.0 + histYcc.x);
 	vec3 resolvedYcc = (curYcc * wCur + histYcc * wHist) / max(wCur + wHist, 1e-5);

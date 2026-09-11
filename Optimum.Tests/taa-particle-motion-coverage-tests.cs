@@ -257,7 +257,8 @@ public class TaaParticleMotionCoverageTests
         // would overwrite the per-attachment factors; and the attachment is put
         // back on replace before the window closes, so no later pass inherits
         // the accumulating factors.
-        int mode = merge.IndexOf("SetBlend(true, EnumBlendMode.Standard);", StringComparison.Ordinal);
+        // Phase 1A step 4: the global mode is the ApplyTransparentMergeBlendState virtual.
+        int mode = merge.IndexOf("ApplyTransparentMergeBlendState();", StringComparison.Ordinal);
         int begin = merge.IndexOf("BeginMotionWrite();", StringComparison.Ordinal);
         int accumulate = merge.IndexOf("ApplyOptimumMotionAccumulateBlendState();", StringComparison.Ordinal);
         int draw = merge.IndexOf("RenderFullscreenTriangle(screenQuad);", StringComparison.Ordinal);
@@ -268,12 +269,15 @@ public class TaaParticleMotionCoverageTests
         Assert.True(restore > draw && end > restore, "replace blending must be restored before the window closes");
 
         // The blend state itself, on both backends: FUNC_ADD with (ONE, ONE).
-        string state = MethodBodyAfter(platform, "private void ApplyOptimumMotionAccumulateBlendState()");
+        // Phase 1A step 4: a platform virtual - GL override here, device override in VulkanClientPlatform.
+        string state = MethodBodyAfter(platform, "public override void ApplyOptimumMotionAccumulateBlendState()");
         Assert.Contains("if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;", state);
-        Assert.Contains("optimumDevice.SetBlendEquation(MotionAttachmentIndex, 32774);", state);
-        Assert.Contains("optimumDevice.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 1, 1, 1);", state);
         Assert.Contains("GL.BlendEquation(MotionAttachmentIndex, (BlendEquationMode)32774);", state);
         Assert.Contains("GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)1);", state);
+        string deviceState = MethodBodyAfter(VulkanPlatformSource.Read(), "public override void ApplyOptimumMotionAccumulateBlendState()");
+        Assert.Contains("if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;", deviceState);
+        Assert.Contains("device.SetBlendEquation(MotionAttachmentIndex, 32774);", deviceState);
+        Assert.Contains("device.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 1, 1, 1);", deviceState);
 
         string? patch = TryFind("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch");
         Assert.True(patch != null, "ClientPlatformWindows has no patch, so the change never ships");

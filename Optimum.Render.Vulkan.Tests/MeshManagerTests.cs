@@ -28,18 +28,8 @@ public class MeshManagerTests
     public MeshManagerTests(ITestOutputHelper output) => _output = output;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     [SkippableTheory]
     [InlineData(false)]
@@ -379,8 +369,8 @@ public class MeshManagerTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -497,6 +487,8 @@ public class MeshManagerTests
             Assert.Equal(255, pixels[centre + 3]);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -518,7 +510,7 @@ public class MeshManagerTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * 4;

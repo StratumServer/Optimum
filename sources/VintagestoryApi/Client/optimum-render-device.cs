@@ -4,352 +4,225 @@ using Vintagestory.API.Client;
 namespace Vintagestory.API.Config;
 
 /// <summary>
-/// The graphics backend seam.
-///
-/// Vintage Story renders through OpenGL. Every upscaler and frame-generation SDK
-/// worth shipping speaks D3D12 or Vulkan, and frame generation has to own
-/// presentation, so Optimum grows a second renderer rather than a bridge. This
-/// interface is that seam: <c>ClientPlatformWindows</c> and the handful of render
-/// systems that call GL directly route through it when a device is installed, and
-/// execute their untouched vanilla GL bodies when one is not.
-///
-/// The contract is deliberately GL-shaped. The game and its mods were written
-/// against an immediate-mode state machine - set state, set named uniforms on the
-/// active program, bind textures to units, draw a MeshRef - and reproducing that
-/// protocol is what lets every render system and every mod keep working unchanged.
-/// An implementation is expected to record state and resolve it at draw time, the
-/// way Zink and ANGLE do, not to execute it eagerly.
-///
-/// Handles are <c>int</c> throughout because the game stores raw GL ids in public
-/// API surface it cannot change: <see cref="LoadedTexture.TextureId" />,
-/// <see cref="FrameBufferRef.FboId" />, <see cref="UBORef.Handle" />. An
-/// implementation hands out opaque dense indices into its own tables; mods that
-/// pass those ids back through the API never notice the difference.
-///
-/// UI toolkit types stay out. Cairo surfaces and Skia bitmaps arrive as raw pixel
-/// pointers so this assembly, and any implementation of it, depends on nothing but
-/// the game API.
-///
-/// Threading: every member must be called on the render thread, the same thread
-/// that owns the GL context today. Deletions are the one exception - they may
-/// arrive from a finalizer thread, and implementations must defer them.
+/// One texture's level-0 contents in the representation both backends agree on
+/// for the parity dump: <c>glGetTexImage(GL_RGBA, GL_UNSIGNED_BYTE)</c> for 8-bit
+/// unsigned-normalised formats, <c>glGetTexImage(GL_RGBA, GL_FLOAT)</c> for every
+/// other colour format and <c>glGetTexImage(GL_DEPTH_COMPONENT, GL_FLOAT)</c> for
+/// depth. A plain data holder, so the patched client can fill it without any
+/// generated helper types.
 /// </summary>
-public interface IOptimumGraphicsDevice : IDisposable
+public sealed class OptimumTextureReadback
 {
-    // ---------------------------------------------------------------- lifecycle
+    /// <summary>The sized GL internal format the texture was created with (Vulkan) or reports (GL).</summary>
+    public int GlInternalFormat;
+
+    public int Width;
+
+    public int Height;
+
+    /// <summary>RGBA8, four bytes per texel, rows bottom-up. Null for float and depth formats.</summary>
+    public byte[] Bytes;
 
     /// <summary>
-    /// Brings the device up against an already-created window. Returns false when
-    /// the device cannot run here (missing API version, feature or presentable
-    /// queue); the caller then falls back to OpenGL for the session. Must not
-    /// throw for an ordinary unsupported-hardware outcome.
+    /// Four floats per texel (RGBA) for colour formats, one per texel for depth,
+    /// rows bottom-up. Null for 8-bit unsigned-normalised formats.
     /// </summary>
-    bool Initialize(IntPtr windowHandle, int width, int height, out string failureReason);
+    public float[] Floats;
+}
 
-    /// <summary>Human-readable backend name for logs and the settings screen.</summary>
-    string BackendName { get; }
+/// <summary>
+/// Per-attachment parity dump, shared by both backends so the two write the same
+/// file names in the same encodings.
+///
+/// Off unless <c>OPTIMUM_PARITY_DUMP</c> names an absolute directory. With it
+/// unset the client pays one static bool check per frame and makes no GL or
+/// Vulkan call. With it set, the platform counts frames rendered while the player
+/// is in the world (the first is frame 0) and on frame <c>OPTIMUM_PARITY_FRAME</c>
+/// (default 0), after the post chain and the final FSR or plain blit and before
+/// presentation, dumps every attachment of every framebuffer slot once.
+///
+/// Encodings, rows always bottom-up in GL order (the first row in the file is GL
+/// row 0, so a PPM opened in an image viewer appears upside down; PFM is
+/// bottom-up by convention already):
+/// - 8-bit unsigned-normalised formats: binary PPM (P6) of RGB, plus a PGM (P5)
+///   of alpha when the format has alpha. Single-channel 8-bit formats are one PGM.
+/// - Every other colour format and depth: PFM, little-endian float32, negative
+///   scale. Three and four channel formats write "PF" (RGB) and, with alpha, a
+///   second "Pf" file with the extension <c>alpha.pfm</c>; one-channel formats
+///   and depth write "Pf".
+/// </summary>
+public static class OptimumParityDump
+{
+    /// <summary>The absolute dump directory, or null when the dump is off.</summary>
+    public static readonly string Directory = ResolveDirectory();
 
-    string RendererString { get; }
-    string VendorString { get; }
-    string VersionString { get; }
-    string ShaderVersionString { get; }
+    /// <summary>True when <c>OPTIMUM_PARITY_DUMP</c> names an absolute directory.</summary>
+    public static readonly bool Enabled = Directory != null;
 
-    int MaxTextureSize { get; }
-    bool SupportsThickLines { get; }
-    bool SupportsSSBOs { get; }
-
-    /// <summary>Enables validation/debug reporting if the implementation has it.</summary>
-    bool DebugMode { get; set; }
+    /// <summary>The in-world frame to dump, counted from 0.</summary>
+    public static readonly long Frame = ResolveFrame();
 
     /// <summary>
-    /// Drains queued diagnostics. Returns null when clean, mirroring the
-    /// contract of <c>ClientPlatformAbstract.GlGetError</c>.
+    /// The one file-name format both backends use:
+    /// <c>&lt;slotIndex&gt;-&lt;slotName&gt;-&lt;color&lt;i&gt;|depth&gt;-&lt;format&gt;.&lt;ext&gt;</c>.
     /// </summary>
-    string GetError();
+    public const string FileNameFormat = "{0}-{1}-{2}-{3}.{4}";
 
-    // -------------------------------------------------------------------- frame
+    private static string ResolveDirectory()
+    {
+        string value = Environment.GetEnvironmentVariable("OPTIMUM_PARITY_DUMP");
+        if (string.IsNullOrWhiteSpace(value) || !System.IO.Path.IsPathRooted(value)) return null;
+        return System.IO.Path.GetFullPath(value);
+    }
 
-    /// <summary>Starts a frame: resets per-frame pools and acquires a target.</summary>
-    void BeginFrame();
+    private static long ResolveFrame()
+    {
+        string value = Environment.GetEnvironmentVariable("OPTIMUM_PARITY_FRAME");
+        return long.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out long frame) && frame >= 0 ? frame : 0;
+    }
+
+    public static string FileName(int slotIndex, string slotName, string attachment, string format, string extension)
+    {
+        return string.Format(System.Globalization.CultureInfo.InvariantCulture, FileNameFormat,
+            slotIndex, slotName, attachment, format, extension);
+    }
 
     /// <summary>
-    /// Ends the frame and presents. This is the single point in the system where
-    /// the image is flipped for scanout; see the coordinate note on
-    /// <see cref="SetViewport" />.
+    /// The backend-neutral format name. Aliases that denote the same storage
+    /// collapse to one name (GL reports GL_RGB8 for a texture requested as
+    /// GL_RGB; the Vulkan device promotes it to RGBA8 storage but reports the
+    /// requested token), so the two dumps pair by file name.
     /// </summary>
-    void Present();
+    public static string FormatName(int glInternalFormat)
+    {
+        switch (glInternalFormat)
+        {
+            case 0x8058: case 0x1908: return "rgba8";      // GL_RGBA8, GL_RGBA
+            case 0x8051: case 0x1907: return "rgb8";       // GL_RGB8, GL_RGB
+            case 0x8229: case 0x1903: return "r8";         // GL_R8, GL_RED
+            case 0x881A: return "rgba16f";
+            case 0x881B: return "rgb16f";
+            case 0x822D: return "r16f";
+            case 0x822E: return "r32f";
+            case 0x8814: return "rgba32f";
+            case 0x8815: return "rgb32f";
+            case 0x8C3A: return "r11g11b10f";
+            case 0x805B: return "rgba16";
+            case 0x1902: case 0x81A5: case 0x81A6: case 0x81A7: case 0x8CAC: return "depth";
+            default: return "gl" + glInternalFormat.ToString("x4", System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
 
-    void Resize(int width, int height);
-    void SetVSync(bool enabled);
+    public static bool IsDepthFormat(int glInternalFormat) => FormatName(glInternalFormat) == "depth";
 
-    // ---------------------------------------------------------- immediate state
+    /// <summary>True for the 8-bit unsigned-normalised formats, which dump as PPM/PGM.</summary>
+    public static bool IsUnorm8Format(int glInternalFormat)
+    {
+        string name = FormatName(glInternalFormat);
+        return name == "rgba8" || name == "rgb8" || name == "r8";
+    }
+
+    /// <summary>Stored channels: 4, 3 or 1.</summary>
+    public static int ChannelsOf(int glInternalFormat)
+    {
+        string name = FormatName(glInternalFormat);
+        if (name == "depth" || name == "r8" || name == "r16f" || name == "r32f") return 1;
+        if (name.StartsWith("rgba", StringComparison.Ordinal)) return 4;
+        if (name.StartsWith("rgb", StringComparison.Ordinal) || name == "r11g11b10f") return 3;
+        return 4;
+    }
 
     /// <summary>
-    /// Sets the viewport. Coordinates are GL's, unmodified: the implementation
-    /// must not flip Y here. OpenGL and Vulkan differ only in what they *call*
-    /// the origin - the memory relationship between clip space, framebuffer rows
-    /// and texture coordinates is identical in both - so a layer that flips
-    /// nothing reproduces GL's results bit for bit through every render-to-texture
-    /// round trip. Only scanout differs, and that is handled once in
-    /// <see cref="Present" />.
+    /// Writes one attachment's files and returns how many were written (0 when the
+    /// readback is malformed).
     /// </summary>
-    void SetViewport(int x, int y, int width, int height);
+    public static int Write(string directory, int slotIndex, string slotName, string attachment,
+        OptimumTextureReadback readback)
+    {
+        if (directory == null || readback == null || readback.Width <= 0 || readback.Height <= 0) return 0;
+        int texels = readback.Width * readback.Height;
+        string format = FormatName(readback.GlInternalFormat);
+        int channels = ChannelsOf(readback.GlInternalFormat);
+        System.IO.Directory.CreateDirectory(directory);
 
-    void SetScissor(int x, int y, int width, int height);
-    void SetScissorEnabled(bool enabled);
-    bool ScissorEnabled { get; }
+        if (readback.Bytes != null)
+        {
+            if (readback.Bytes.Length < texels * 4) return 0;
+            if (channels == 1)
+            {
+                WriteNetpbm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pgm")),
+                    readback.Width, readback.Height, readback.Bytes, 0, 1);
+                return 1;
+            }
+            WriteNetpbm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "ppm")),
+                readback.Width, readback.Height, readback.Bytes, 0, 3);
+            if (channels < 4) return 1;
+            WriteNetpbm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pgm")),
+                readback.Width, readback.Height, readback.Bytes, 3, 1);
+            return 2;
+        }
 
-    void SetDepthTest(bool enabled);
-    void SetDepthMask(bool enabled);
-    /// <summary>
-    /// GL comparison constant (GL_LESS 513, GL_LEQUAL 515, ...). The game's own
-    /// <c>EnumDepthFunction</c> lives in VintagestoryLib, which this assembly does
-    /// not reference, and the caller already holds the constant.
-    /// </summary>
-    void SetDepthFunc(int func);
+        if (readback.Floats == null) return 0;
+        int stride = readback.Floats.Length >= texels * 4 ? 4 : 1;
+        if (readback.Floats.Length < texels * stride) return 0;
+        if (stride == 1 || channels == 1)
+        {
+            WritePfm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pfm")),
+                readback.Width, readback.Height, readback.Floats, stride, 0, 1);
+            return 1;
+        }
+        WritePfm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pfm")),
+            readback.Width, readback.Height, readback.Floats, 4, 0, 3);
+        if (channels < 4) return 1;
+        WritePfm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "alpha.pfm")),
+            readback.Width, readback.Height, readback.Floats, 4, 3, 1);
+        return 2;
+    }
 
-    void SetCullFace(bool enabled);
-    /// <summary>true = cull back faces, false = cull front faces.</summary>
-    void SetCullFaceMode(bool back);
+    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels)
+    {
+        using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);
+        byte[] header = System.Text.Encoding.ASCII.GetBytes(
+            (channels == 3 ? "P6\n" : "P5\n") + width + " " + height + "\n255\n");
+        file.Write(header, 0, header.Length);
+        byte[] row = new byte[width * channels];
+        for (int y = 0; y < height; y++)
+        {
+            int source = y * width * 4;
+            for (int x = 0; x < width; x++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    row[x * channels + c] = rgba[source + x * 4 + firstChannel + c];
+                }
+            }
+            file.Write(row, 0, row.Length);
+        }
+    }
 
-    void SetBlend(bool enabled, EnumBlendMode mode);
-    /// <summary>Toggle blending without replacing per-attachment factors or equations.</summary>
-    void SetBlendEnabled(bool enabled);
-    /// <summary>Per-attachment blend, as used by the OIT and SSAO passes.</summary>
-    void SetBlendFuncSeparate(int attachment, int srcColor, int dstColor, int srcAlpha, int dstAlpha);
-    void SetBlendEquation(int attachment, int mode);
-
-    void SetColorMask(bool r, bool g, bool b, bool a);
-
-    void SetStencilTest(bool enabled);
-    void SetStencilMask(int mask);
-    void SetStencilFunc(int func, int refValue, int mask);
-    void SetStencilOp(int sfail, int dpfail, int dppass);
-
-    void SetWireframe(bool enabled);
-    void SetLineWidth(float width);
-
-    // ------------------------------------------------------------------ shaders
-
-    /// <summary>
-    /// Prepares one stage. An implementation that links across stages (Vulkan
-    /// must, because GL resolves uniforms by name across the whole program) does
-    /// preprocessing and declaration analysis here and defers code generation to
-    /// <see cref="LinkProgram" />. Errors are logged by the implementation and
-    /// reported as false, matching the GL path.
-    /// </summary>
-    bool CompileShader(IShader shader);
-
-    /// <summary>
-    /// Links the staged stages into a usable program and returns its id, or 0 if
-    /// linking failed.
-    ///
-    /// The id comes back rather than being written through the interface because
-    /// <see cref="IShaderProgram.ProgramId" /> is read-only there; the caller
-    /// assigns it, exactly as the GL path assigns what glCreateProgram returned.
-    /// </summary>
-    int LinkProgram(IShaderProgram program);
-
-    void DeleteProgram(int programId);
-    void UseProgram(int programId);
-
-    /// <summary>
-    /// Resolves a uniform name to an implementation-defined location, or -1 when
-    /// the program does not use it. Callers treat this as opaque, exactly as they
-    /// treat a GL uniform location.
-    /// </summary>
-    int GetUniformLocation(int programId, string name);
-
-    void SetUniform(int programId, int location, float value);
-    void SetUniform(int programId, int location, int value);
-    /// <summary>
-    /// Writes an <c>ivec3</c>. The location is opaque, so the implementation,
-    /// not the caller, knows where the second and third components land.
-    /// </summary>
-    void SetUniform(int programId, int location, int x, int y, int z);
-    void SetUniform(int programId, int location, float x, float y);
-    void SetUniform(int programId, int location, float x, float y, float z);
-    void SetUniform(int programId, int location, float x, float y, float z, float w);
-    void SetUniformArray1(int programId, int location, int count, float[] values);
-    void SetUniformArray2(int programId, int location, int count, float[] values);
-    void SetUniformArray3(int programId, int location, int count, float[] values);
-    void SetUniformArray4(int programId, int location, int count, float[] values);
-    void SetUniformMatrix(int programId, int location, float[] matrix);
-    void SetUniformMatrices(int programId, int location, int count, float[] matrices);
-    void SetUniformMatrices4x3(int programId, int location, int count, float[] matrices);
-
-    /// <summary>
-    /// Points a sampler uniform at a texture unit. In GL this is just
-    /// <c>Uniform1i</c>; here it is distinct so the implementation can bind the
-    /// right descriptor at draw time.
-    /// </summary>
-    void SetSamplerUnit(int programId, string samplerName, int unit);
-
-    // --------------------------------------------------------- uniform  buffers
-
-    int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size);
-    void UpdateUniformBuffer(int handle, IntPtr data, int offset, int size);
-    void BindUniformBuffer(int handle);
-    void UnbindUniformBuffer(int handle);
-    void DeleteUniformBuffer(int handle);
-
-    // ----------------------------------------------------------------- textures
-
-    int CreateTexture2D(int width, int height, EnumTextureInternalFormat internalFormat,
-        EnumTexturePixelFormat pixelFormat, IntPtr pixels, bool generateMipmaps);
-
-    /// <summary>
-    /// Creates a texture from a raw GL internal format.
-    ///
-    /// <see cref="EnumTextureInternalFormat" /> names only the four formats the
-    /// public API exposes, but the client's own framebuffer setup uses several
-    /// more - GL_RGB for the SSAO occlusion target, GL_RGBA32F for its noise
-    /// texture. Taking the constant directly avoids widening a vanilla enum, and
-    /// matches how the rest of this seam already accepts GL constants.
-    /// </summary>
-    /// <param name="generateMipmaps">
-    /// Whether the image gets a full mip chain. It has to be decided here: an
-    /// image is created with a fixed number of mip levels, so a later
-    /// <c>GenerateMipmaps</c> on a single-level image has nowhere to write and
-    /// silently does nothing. GL let the two be separate calls, which is why the
-    /// block atlas ended up with no mipmaps at all.
-    /// </param>
-    int CreateTexture2DRaw(int width, int height, int glInternalFormat, IntPtr pixels, int bytesPerPixel,
-        bool generateMipmaps = false);
-
-    /// <summary>
-    /// Creates a cubemap from a raw GL internal format, the cube counterpart of
-    /// <see cref="CreateTexture2DRaw" />. The skybox faces arrive as BGRA bytes,
-    /// which <see cref="EnumTextureInternalFormat" /> cannot name.
-    /// </summary>
-    int CreateTextureCubeRaw(int size, int glInternalFormat, IntPtr[] facePixels, int bytesPerPixel);
-
-    int CreateTextureCube(int size, EnumTextureInternalFormat internalFormat,
-        EnumTexturePixelFormat pixelFormat, IntPtr[] facePixels);
-
-    /// <summary>Array texture, as used for the OIT accumulation attachments.</summary>
-    int CreateTexture2DArray(int width, int height, int layers,
-        EnumTextureInternalFormat internalFormat, EnumTexturePixelFormat pixelFormat);
-
-    void UploadTexture2D(int textureId, int level, int x, int y, int width, int height,
-        EnumTexturePixelFormat pixelFormat, IntPtr pixels);
-    /// <summary>
-    /// Uploads signed 16-bit normalised pixels (GL_SHORT into a normalised
-    /// format), as the cloud map's tile data does.
-    /// </summary>
-    void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
-        int width, int height, short[] pixels);
-
-    /// <summary>
-    /// Uploads one layer of a <see cref="CreateTexture2DArray"/> texture, as
-    /// <c>glTexSubImage3D</c> with depth 1 does. Pixels are RGBA8.
-    /// </summary>
-    void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y,
-        int width, int height, IntPtr pixels);
-
-    void GenerateMipmaps(int textureId);
-    void DeleteTexture(int textureId);
-
-    /// <summary>
-    /// Per-texture sampler state, keyed by the GL parameter name the caller would
-    /// have passed to <c>glTexParameteri</c>. Kept GL-shaped because 107 call
-    /// sites across the client and its mods pass these constants directly.
-    /// </summary>
-    void SetTextureParameter(int textureId, int parameterName, int value);
-    void SetTextureParameter(int textureId, int parameterName, float value);
-    /// <summary>Texture border colour for clamped G-buffers and shadow maps.</summary>
-    void SetTextureBorderColor(int textureId, float r, float g, float b, float a);
-    int GetTextureParameter(int textureId, int parameterName);
-
-    void BindTexture(int unit, int textureId);
-    void BindTextureCube(int unit, int textureId);
-
-    int CreateSampler(bool linear);
-    void SetSamplerParameter(int samplerId, int parameterName, float value);
-    /// <summary>Overrides the texture's own state on this unit; 0 clears.</summary>
-    void BindSampler(int unit, int samplerId);
-    void DeleteSampler(int samplerId);
-
-    // ------------------------------------------------------------- framebuffers
-
-    int CreateFramebuffer(int width, int height);
-    void AttachTexture(int framebufferId, EnumFramebufferAttachment attachment, int textureId, int layer);
-
-    /// <summary>
-    /// Selects which colour attachments are written, as <c>glDrawBuffers</c> does.
-    /// This is attachment *selection*, not a write mask: the final composition
-    /// pass renders into attachment 0 while sampling attachment 1, which is legal
-    /// only because attachment 1 is not part of the rendering scope.
-    /// </summary>
-    void SetDrawBuffers(int framebufferId, int attachmentMask);
-
-    bool CheckFramebufferComplete(int framebufferId, out string status);
-    void BindFramebuffer(int framebufferId);
-    /// <summary>Binds the window's own target; the GL default framebuffer.</summary>
-    void BindDefaultFramebuffer();
-    void DeleteFramebuffer(int framebufferId);
-
-    void ClearColor(int attachment, float r, float g, float b, float a);
-    void ClearDepth(float depth);
-    void ClearStencil();
-
-    // ------------------------------------------------------------------- meshes
-
-    int CreateMesh(MeshData data, bool staticDraw);
-
-    int CreateEmptyMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize,
-        int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts,
-        CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts,
-        EnumDrawMode drawMode, bool staticDraw, bool ssbo);
-
-    void UpdateMesh(int meshId, MeshData data);
-
-    /// <summary>
-    /// Persistently mapped pointer for a dynamic mesh part, or
-    /// <see cref="IntPtr.Zero" /> when that part is not mapped. The game writes
-    /// straight through these while the GPU may still be reading, exactly as it
-    /// does under GL; implementations reproduce the semantics rather than adding
-    /// synchronisation the game does not expect.
-    /// </summary>
-    IntPtr GetMappedPointer(int meshId, EnumMeshBufferPart part);
-
-    void DeleteMesh(int meshId);
-
-    void DrawMesh(int meshId);
-    void DrawMeshInstanced(int meshId, int instanceCount);
-    void DrawMeshMulti(int meshId, int[] indicesStarts, int[] indicesSizes, int groupCount, bool ssbo);
-
-    /// <summary>
-    /// Writes packed face records into a mesh's storage buffer.
-    ///
-    /// The SSBO chunk path does not upload vertex attributes at all: it packs
-    /// four vertices into one 16-byte face record and the vertex shader expands
-    /// them from gl_VertexIndex. That leaves nothing for
-    /// <see cref="UpdateMesh" /> to map onto, so the raw write is its own entry
-    /// point. <paramref name="byteOffset" /> is into the buffer, not a vertex
-    /// index.
-    /// </summary>
-    void UpdateMeshStorageBuffer(int meshId, IntPtr data, int byteOffset, int byteSize);
-    /// <summary>The three-vertex fullscreen triangle every post pass draws.</summary>
-    void DrawFullscreenTriangle();
-
-    // ------------------------------------------------------------------ queries
-
-    int CreateOcclusionQuery();
-    void BeginOcclusionQuery(int queryId);
-    void EndOcclusionQuery(int queryId);
-    bool IsQueryResultAvailable(int queryId);
-    int GetQueryResult(int queryId);
-    void DeleteQuery(int queryId);
-
-    // ----------------------------------------------------------------- readback
-
-    /// <summary>
-    /// Reads the default framebuffer back as BGRA8. Rows come back bottom-up,
-    /// which is what <c>glReadPixels</c> produces and therefore what the existing
-    /// screenshot and AVI paths already expect.
-    /// </summary>
-    void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination);
+    private static void WritePfm(string path, int width, int height, float[] data, int stride,
+        int firstChannel, int channels)
+    {
+        using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);
+        byte[] header = System.Text.Encoding.ASCII.GetBytes(
+            (channels == 3 ? "PF\n" : "Pf\n") + width + " " + height + "\n-1.0\n");
+        file.Write(header, 0, header.Length);
+        byte[] row = new byte[width * channels * 4];
+        for (int y = 0; y < height; y++)
+        {
+            int source = y * width * stride;
+            for (int x = 0; x < width; x++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(
+                        row.AsSpan((x * channels + c) * 4, 4), data[source + x * stride + firstChannel + c]);
+                }
+            }
+            file.Write(row, 0, row.Length);
+        }
+    }
 }
 
 /// <summary>
@@ -417,21 +290,16 @@ public enum EnumRenderBackend
 }
 
 /// <summary>
-/// Where the client finds its graphics device.
+/// Which backend the client runs, after fallbacks.
 ///
-/// <see cref="Device" /> is null on the OpenGL path, and every routed call site
-/// checks it before doing anything, so an OpenGL session executes the vanilla
-/// body with one null check in front of it. That is the same shape the greedy-mesh
-/// and FSR features use: off is vanilla, exactly.
-///
-/// The device is created reflectively by the launcher so that VintagestoryLib
-/// never carries an assembly reference to a renderer implementation.
+/// The graphics operations themselves are virtual members of the client platform
+/// (Vulkan-native plan, Phase 1A): <c>ClientPlatformWindows</c> implements them with
+/// the vanilla OpenGL calls and the renderer's <c>VulkanClientPlatform</c> overrides
+/// them, so nothing in the client asks this class which API to call. What remains
+/// is the backend decision, which is made before any platform or window exists.
 /// </summary>
 public static class OptimumRender
 {
-    /// <summary>The active device, or null when running on OpenGL.</summary>
-    public static IOptimumGraphicsDevice Device;
-
     /// <summary>Which backend was actually selected, after fallbacks.</summary>
     public static EnumRenderBackend ActiveBackend = EnumRenderBackend.OpenGL;
 
@@ -441,16 +309,17 @@ public static class OptimumRender
     /// </summary>
     public static string FallbackReason;
 
-    public static bool IsVulkan => Device != null;
+    /// <summary>True once the Vulkan platform brought its graphics up for the window.</summary>
+    public static bool IsVulkan => ActiveBackend == EnumRenderBackend.Vulkan;
 
     /// <summary>
     /// Set before the window is created when the backend decision was "not
     /// OpenGL", so the window opens with no graphics API at all.
     ///
-    /// <see cref="Device" /> cannot answer this question: the device is created
-    /// against an existing window, so during window construction it is still
-    /// null even on the Vulkan path. Vanilla code that issues GL calls while the
-    /// window comes up - GameWindowNative's clear-and-swap, for one - has to test
+    /// <see cref="ActiveBackend" /> cannot answer this question: graphics come up
+    /// against an existing window, so during window construction the backend is
+    /// still OpenGL even on the Vulkan path. Vanilla code that issues GL calls while
+    /// the window comes up - GameWindowNative's clear-and-swap, for one - has to test
     /// this flag instead, because with ContextAPI.NoAPI there is no GL binding
     /// loaded and every GL entry point throws.
     /// </summary>
@@ -462,7 +331,6 @@ public static class OptimumRender
     /// </summary>
     public static void FallBackToOpenGL(string reason)
     {
-        Device = null;
         ActiveBackend = EnumRenderBackend.OpenGL;
         // The caller reopens the window for OpenGL after this, so GL calls during
         // window construction are live again.
@@ -472,4 +340,63 @@ public static class OptimumRender
             FallbackReason = reason;
         }
     }
+}
+
+/// <summary>
+/// The graphics operations the forked vanilla mods (VSEssentials clouds and world map,
+/// VSSurvivalMod's boat water mask) need beyond <c>IRenderAPI</c>, on the Vulkan path.
+///
+/// The forks reference only the game API and the contracts, so they cannot call the
+/// client platform's virtuals; on OpenGL they keep their own GL bodies and this is
+/// null. <c>VulkanClientPlatform</c> publishes an implementation while its graphics
+/// are up. It is deliberately limited to what those fork files call today and is
+/// not a general device seam: the client lib never uses it, and Phase 5 of the
+/// Vulkan-native plan ports the forks onto the contracts pass API and removes it.
+///
+/// Handles and parameters are the same GL-shaped ints the platform uses:
+/// texture and framebuffer ids as the API carries them, GL tokens for texture
+/// parameters and internal formats, a bit per colour attachment for draw buffers.
+/// </summary>
+public abstract class OptimumForkGraphics
+{
+    /// <summary>The implementation while Vulkan graphics are up; null on OpenGL.</summary>
+    public static OptimumForkGraphics Active;
+
+    public abstract int CreateTexture2DRaw(int width, int height, int glInternalFormat, IntPtr pixels, int bytesPerPixel);
+
+    public abstract int CreateTexture2DArray(int width, int height, int layers,
+        EnumTextureInternalFormat internalFormat, EnumTexturePixelFormat pixelFormat);
+
+    public abstract void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y, int width, int height, IntPtr pixels);
+
+    /// <summary>Signed shorts normalised into RGBA16 storage, as glTexSubImage2D(GL_SHORT) converts them.</summary>
+    public abstract void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y, int width, int height, short[] pixels);
+
+    public abstract void SetTextureParameter(int textureId, int parameterName, int value);
+
+    public abstract void BindTexture(int unit, int textureId);
+
+    public abstract void DeleteTexture(int textureId);
+
+    public abstract int CreateFramebuffer(int width, int height);
+
+    public abstract void AttachTexture(int framebufferId, EnumFramebufferAttachment attachment, int textureId, int layer);
+
+    public abstract void SetDrawBuffers(int framebufferId, int attachmentMask);
+
+    public abstract void BindFramebuffer(int framebufferId);
+
+    public abstract void BindDefaultFramebuffer();
+
+    public abstract void DeleteFramebuffer(int framebufferId);
+
+    public abstract void SetViewport(int x, int y, int width, int height);
+
+    public abstract void SetDepthTest(bool enabled);
+
+    public abstract void SetBlendEnabled(bool enabled);
+
+    public abstract int GetUniformLocation(int programId, string name);
+
+    public abstract void SetUniformArray3(int programId, int location, int count, float[] values);
 }

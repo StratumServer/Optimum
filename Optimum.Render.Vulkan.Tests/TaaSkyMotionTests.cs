@@ -4,6 +4,7 @@ using System.Linq;
 using Optimum.Render.Vulkan.Shaders;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
+using Vintagestory.API.MathTools;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -292,6 +293,58 @@ public class TaaSkyMotionTests
     }
 
     /// <summary>
+    /// The game's CameraMatrixOrigin is a look-at whose eye sits at LocalEyePos,
+    /// about 1.7 blocks above the origin the terrain is drawn relative to. A
+    /// still camera must then still write a zero vector on every sky pixel. The
+    /// original pass took the reconstructed far point's position as the view
+    /// direction, which carries that eye offset and projected it into a fixed
+    /// eye / far * (rows / 2) / tan(fov / 2) pixel error: 0.6 px at 1490 rows and
+    /// 3000 blocks, measured in game on both backends (2026-09-11). The far
+    /// plane here is short so the same error is several decode steps at 64 rows.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData(1.7, 0.0)]
+    [InlineData(1.7, -0.35)]
+    [InlineData(25.0, 0.2)]
+    public void AStillCameraAboveTheOriginWritesZeroSkyMotion(double eyeHeight, double pitch)
+    {
+        Skip.If(ShaderCorpus.AssetRoot == null, "No bootstrapped game assets.");
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+
+        const double near = 0.0689, far = 60.0, fov = 70.0 * Math.PI / 180.0;
+        double[] projection = Mat4d.Perspective(Mat4d.Create(), fov, 1.0, near, far);
+        // View = pitch about X after moving the eye to the origin: the shape of
+        // Camera.GetCameraMatrix(originPos, ...) for a camera at (0, eye, 0).
+        double[] view = Mat4d.Identity(Mat4d.Create());
+        view = Mat4d.RotateX(view, view, pitch);
+        view = Mat4d.Translate(view, view, 0.0, -eyeHeight, 0.0);
+        double[] viewProj = Mat4d.Mul(Mat4d.Create(), projection, view);
+        double[] inverse = Mat4d.Invert(Mat4d.Create(), viewProj);
+        Assert.NotNull(inverse);
+        float[] invF = Array.ConvertAll(inverse!, v => (float)v);
+        float[] prevF = Array.ConvertAll(viewProj, v => (float)v);
+
+        // What the original formulation would have produced, so the test's
+        // sensitivity is stated in the output rather than assumed.
+        double predictedBias = eyeHeight / far * (Size / 2.0) / Math.Tan(fov / 2.0);
+        _output.WriteLine($"eye {eyeHeight}, pitch {pitch}: far-point-as-direction would bias by ~{predictedBias:F2} px");
+
+        using (device)
+        {
+            Result result = RenderSkyMotion(device!, coverage: 0f, invViewProjJittered: invF, prevViewProj: prevF);
+            foreach ((int x, int y) in new[] { (32, 32), (8, 56), (56, 8), (20, 44) })
+            {
+                Decoded pixel = result.At(x, y);
+                _output.WriteLine($"({x}, {y}): mv = ({pixel.MotionX}, {pixel.MotionY}), writerDepth {pixel.WriterDepth}");
+                Assert.True(pixel.WriterDepth > 0.99f, "the pass did not cover this sky pixel");
+                Assert.InRange(pixel.MotionX, -0.3f, 0.3f);
+                Assert.InRange(pixel.MotionY, -0.3f, 0.3f);
+            }
+            Assert.True(predictedBias > 0.6, "the case is too weak to catch the eye-offset bug at this decode step");
+        }
+    }
+
+    /// <summary>
     /// The pass runs after the OIT merge has already composed the frame into
     /// Primary, so colour attachment 0 has to come back exactly as it went in -
     /// which is what the motion-only draw-buffer mask is for.
@@ -363,9 +416,11 @@ public class TaaSkyMotionTests
         float coverage,
         float jitterX = 0f,
         float jitterY = 0f,
-        bool seedLeftHalf = false)
+        bool seedLeftHalf = false,
+        float[]? invViewProjJittered = null,
+        float[]? prevViewProj = null)
     {
-        IOptimumGraphicsDevice seam = device;
+        VulkanDevice seam = device;
 
         var files = ShaderCorpus.LoadShaderFiles();
         var includes = ShaderCorpus.LoadIncludes();
@@ -455,8 +510,8 @@ public class TaaSkyMotionTests
         seam.BindTexture(14, reveal);
         SetFloat2(seam, program, "taaRenderSize", Size, Size);
         SetFloat2(seam, program, "taaJitterPx", jitterX, jitterY);
-        SetMatrix(seam, program, "taaInvViewProjJittered", InverseJittered(jitterX, jitterY));
-        SetMatrix(seam, program, "taaPrevViewProj", PreviousViewProjection(Yaw));
+        SetMatrix(seam, program, "taaInvViewProjJittered", invViewProjJittered ?? InverseJittered(jitterX, jitterY));
+        SetMatrix(seam, program, "taaPrevViewProj", prevViewProj ?? PreviousViewProjection(Yaw));
         SetFloat(seam, program, "taaCloudReactive", 1f);
 
         // Depth test on, depth writes OFF: the pass reads the depth buffer to
@@ -486,7 +541,7 @@ public class TaaSkyMotionTests
     /// the attachment. Location 2 is hard-coded because this program is not
     /// built through the corpus and so has no TAAMOTIONLOCATION define.
     /// </summary>
-    private static int seamSeedProgram(IOptimumGraphicsDevice seam)
+    private static int seamSeedProgram(VulkanDevice seam)
     {
         const string vertex = @"#version 330 core
 layout(location = 0) in vec3 xyz;
@@ -516,7 +571,7 @@ void main(void) { outMotion = vec4(8.0, -8.0, 0.25, gl_FragCoord.z); }
     }
 
     /// <summary>Colour attachment 0 of the scene target, read inside the frame.</summary>
-    private static unsafe byte[] ReadColour(IOptimumGraphicsDevice seam, int scene)
+    private static unsafe byte[] ReadColour(VulkanDevice seam, int scene)
     {
         var pixels = new byte[Size * Size * 4];
         fixed (byte* destination = pixels)
@@ -531,7 +586,7 @@ void main(void) { outMotion = vec4(8.0, -8.0, 0.25, gl_FragCoord.z); }
     /// Reads the RGBA16F motion attachment through an RGBA8 decode pass, because
     /// the seam's readback is fixed at four bytes per pixel from attachment 0.
     /// </summary>
-    private static unsafe byte[] DecodeMotion(IOptimumGraphicsDevice seam, int motionTexture, bool reactive)
+    private static unsafe byte[] DecodeMotion(VulkanDevice seam, int motionTexture, bool reactive)
     {
         const string decodeVertex = @"#version 330 core
 layout(location = 0) in vec3 xyz;
@@ -594,32 +649,32 @@ void main(void)
         return pixels;
     }
 
-    private static void SetFloat(IOptimumGraphicsDevice seam, int program, string name, float value)
+    private static void SetFloat(VulkanDevice seam, int program, string name, float value)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, value);
     }
 
-    private static void SetInt(IOptimumGraphicsDevice seam, int program, string name, int value)
+    private static void SetInt(VulkanDevice seam, int program, string name, int value)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, value);
     }
 
-    private static void SetFloat2(IOptimumGraphicsDevice seam, int program, string name, float x, float y)
+    private static void SetFloat2(VulkanDevice seam, int program, string name, float x, float y)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, x, y);
     }
 
-    private static void SetMatrix(IOptimumGraphicsDevice seam, int program, string name, float[] matrix)
+    private static void SetMatrix(VulkanDevice seam, int program, string name, float[] matrix)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniformMatrix(program, location, matrix);
     }
 
     private static int LinkFromCorpus(
-        IOptimumGraphicsDevice seam, List<ShaderStageSource> stages, string name)
+        VulkanDevice seam, List<ShaderStageSource> stages, string name)
     {
         var program = new CorpusProgram { PassName = name };
 
@@ -643,26 +698,10 @@ void main(void)
         return programId;
     }
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
+    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device) =>
+        GpuTest.TryCreateDevice(output, out device);
 
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
-
-    private static void AssertClean(IOptimumGraphicsDevice seam)
-    {
-        string? diagnostics = seam.GetError();
-        Assert.True(string.IsNullOrEmpty(diagnostics), "device diagnostics:\n" + diagnostics);
-    }
+    private static void AssertClean(VulkanDevice seam) => GpuTest.AssertClean(seam);
 
     private sealed class CorpusShader : IShader
     {
