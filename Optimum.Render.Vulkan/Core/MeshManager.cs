@@ -310,6 +310,7 @@ internal sealed unsafe class MeshManager : IDisposable
         catch (InvalidOperationException)
         {
             // No resizable BAR: fall back to a plain host-visible allocation.
+            if (!persistent) VulkanStats.NoteRebarFallback();
             return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
                 MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
         }

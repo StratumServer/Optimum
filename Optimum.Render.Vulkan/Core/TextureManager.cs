@@ -399,6 +399,7 @@ internal sealed unsafe class TextureManager : IDisposable
 
         System.Buffer.MemoryCopy((void*)pixels, (void*)staging.Mapped, (long)size, (long)size);
 
+        VulkanStats.NoteUploadRequest();
         _commands.SubmitAndWait(commandBuffer =>
         {
             if (_context.CheckpointsAvailable)
@@ -430,6 +431,7 @@ internal sealed unsafe class TextureManager : IDisposable
         VulkanTexture? texture = Get(textureId);
         if (texture == null || texture.MipLevels <= 1) return;
 
+        VulkanStats.NoteUploadRequest();
         _commands.SubmitAndWait(commandBuffer =>
         {
             Vk api = _context.Api;
@@ -589,6 +591,7 @@ internal sealed unsafe class TextureManager : IDisposable
             PImageMemoryBarriers = &barrier,
         };
         _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
+        VulkanStats.NoteImageBarriers(1);
     }
 
     /// <summary>

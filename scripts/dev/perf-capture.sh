@@ -8,10 +8,15 @@
 #
 # Sources, both written by the client itself (no external overlay needed):
 #   OPTIMUM_FPS_LOG      one line per second, both backends
-#                        "[Optimum] fps window=.. frames=.. mean=.. min=.. max=.. p99=.."
-#                        (ClientMain.OptimumLogFrameTime; inert unless the var is set)
-#   OPTIMUM_VULKAN_STATS one line per second, Vulkan only (VulkanStats.SampleIfDue),
-#                        carries frameMs plus allocation/upload counters
+#                        "[Optimum] fps window=.. frames=.. mean=.. min=.. max=.. p99=.. stddev=.."
+#                        (ClientMain.OptimumLogFrameTime; inert unless the var is set;
+#                        stddev is optional so logs from older builds still parse)
+#   OPTIMUM_VULKAN_STATS one sample per second, Vulkan only (VulkanStats.SampleIfDue):
+#                        "stats <s>s: <n> frames (<ms> ms/frame), ..." plus the
+#                        stats.pacing / stats.waits / stats.counters key=value lines
+#
+# The pass/fail verdict on pacing is scripts/dev/pacing-gate.sh, run over the same
+# two files; this script only measures and summarises.
 #
 # Usage:
 #   scripts/dev/perf-capture.sh --renderer vulkan|opengl [options]
@@ -181,11 +186,10 @@ def tail(path, offset):
     with open(path, errors="replace") as handle:
         return handle.read().splitlines()[offset:]
 
-line_re = re.compile(
-    r"\[Optimum\] fps window=(?P<window>[\d.]+) frames=(?P<frames>\d+) "
-    r"mean=(?P<mean>[\d.]+) min=(?P<min>[\d.]+) max=(?P<max>[\d.]+) p99=(?P<p99>[\d.]+)")
+# Must stay equal to FPS_LINE_RE in pacing-gate.sh (Optimum.Tests/pacing-log-format-coverage-tests.cs).
+FPS_LINE_RE = re.compile(r"\[Optimum\] fps window=(?P<window>[\d.]+) frames=(?P<frames>\d+) mean=(?P<mean>[\d.]+) min=(?P<min>[\d.]+) max=(?P<max>[\d.]+) p99=(?P<p99>[\d.]+)(?: stddev=(?P<stddev>[\d.]+))?")
 
-windows = [m.groupdict() for m in (line_re.search(l) for l in tail(fps_log, fps_offset)) if m]
+windows = [m.groupdict() for m in (FPS_LINE_RE.search(l) for l in tail(fps_log, fps_offset)) if m]
 if not windows:
     print("no [Optimum] fps lines in the measurement window of " + fps_log, file=sys.stderr)
     print("is the client built with the OPTIMUM_FPS_LOG patch and was the var exported?", file=sys.stderr)
@@ -200,10 +204,18 @@ mean_ms = total_ms / frames
 p99s = [float(w["p99"]) for w in windows]
 low_ms = sum(p99s) / len(p99s)
 worst_ms = max(float(w["max"]) for w in windows)
+# Per-second stddev (the client computes it over the same window as p99); the median
+# across windows, so one hitch does not stand in for the whole run. Old logs have none.
+stddevs = sorted(float(w["stddev"]) for w in windows if w.get("stddev") is not None)
+stddev_ms = None
+if stddevs and len(stddevs) == len(windows):
+    middle = len(stddevs) // 2
+    stddev_ms = stddevs[middle] if len(stddevs) % 2 else (stddevs[middle - 1] + stddevs[middle]) / 2.0
 
+# VulkanStats writes "stats 1.0s: 120 frames (8.4 ms/frame), ..."; take the last sample.
 vk_frame_ms = None
 for line in tail(vk_log, vk_offset):
-    m = re.search(r"frameMs[= ]+([\d.]+)", line)
+    m = re.search(r"^stats [\d.]+s: \d+ frames \(([\d.]+) ms/frame\)", line)
     if m:
         vk_frame_ms = float(m.group(1))
 
@@ -215,14 +227,21 @@ print("windows          %d seconds, %d frames" % (len(windows), frames))
 print("mean frame time  %.3f ms  (%.1f fps)" % (mean_ms, 1000.0 / mean_ms))
 print("1%% low frame time %.3f ms  (%.1f fps)" % (low_ms, 1000.0 / low_ms))
 print("worst frame      %.3f ms" % worst_ms)
+if stddev_ms is not None:
+    print("frame stddev     %.3f ms  (median of per-second windows)" % stddev_ms)
+else:
+    print("frame stddev     -  (fps log has no stddev field; client built before it)")
 if vk_frame_ms is not None:
-    print("vulkan stats     last frameMs %.3f (%s)" % (vk_frame_ms, vk_log))
+    print("vulkan stats     last sample %.1f ms/frame (%s)" % (vk_frame_ms, vk_log))
+print("pacing verdict   scripts/dev/pacing-gate.sh --renderer %s --fps %s%s"
+      % (renderer.lower(), fps_log, (" --stats " + vk_log) if renderer.lower() == "vulkan" else ""))
 print("logs             " + out_dir)
 
 summary = os.path.join(out_dir, "summary.csv")
 with open(summary, "w") as handle:
-    handle.write("label,renderer,taa,windows,frames,mean_ms,low1pct_ms,worst_ms\n")
-    handle.write("%s,%s,%s,%d,%d,%.3f,%.3f,%.3f\n"
-                 % (label, renderer, taa or "asconfigured", len(windows), frames, mean_ms, low_ms, worst_ms))
+    handle.write("label,renderer,taa,windows,frames,mean_ms,low1pct_ms,worst_ms,stddev_ms\n")
+    handle.write("%s,%s,%s,%d,%d,%.3f,%.3f,%.3f,%s\n"
+                 % (label, renderer, taa or "asconfigured", len(windows), frames, mean_ms, low_ms, worst_ms,
+                    "%.3f" % stddev_ms if stddev_ms is not None else ""))
 print("summary          " + summary)
 PY

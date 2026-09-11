@@ -327,6 +327,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         _renderingActive = true;
         _needsRestart = false;
         ScopesOpened++;
+        VulkanStats.NoteScopeOpened();
     }
 
     /// <summary>

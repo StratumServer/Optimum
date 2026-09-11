@@ -357,7 +357,7 @@ internal sealed unsafe class VulkanCommands : IDisposable
     /// uploads reach this from asset-loading worker threads while the render
     /// thread is submitting frames.
     /// </summary>
-    public void SubmitAndWait(Action<CommandBuffer> record)
+    public void SubmitAndWait(Action<CommandBuffer> record, WaitSite site = WaitSite.UploadSubmit)
     {
         BeforeSynchronousSubmit?.Invoke();
 
@@ -369,6 +369,10 @@ internal sealed unsafe class VulkanCommands : IDisposable
             SubmitAndWaitLocked(record);
         }
         VulkanStats.NoteUpload(System.Diagnostics.Stopwatch.GetTimestamp() - start);
+        // Uploads and readbacks are told apart by the caller: only an upload
+        // that waited here is a blocking upload (the pacing gate's first rule).
+        VulkanStats.NoteWait(site, start);
+        if (site == WaitSite.UploadSubmit) VulkanStats.NoteBlockingUpload();
     }
 
     private void SubmitAndWaitLocked(Action<CommandBuffer> record)
@@ -443,6 +447,7 @@ internal sealed unsafe class VulkanCommands : IDisposable
         };
 
         _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
+        VulkanStats.NoteImageBarriers(1);
         image.Layout = target;
     }
 

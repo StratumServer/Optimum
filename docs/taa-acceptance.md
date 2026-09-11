@@ -12,7 +12,8 @@ Tooling used by this document:
 | `scripts/dev/client-renderer.sh` | which renderer actually started - read it every time |
 | `scripts/dev/screenshot.sh` | one PNG of the active window |
 | `scripts/dev/kill-client.sh` | clean close; close as soon as a row is done |
-| `scripts/dev/perf-capture.sh` | launch, warm up, record 30 s of frame times, close, print mean and 1% low |
+| `scripts/dev/perf-capture.sh` | launch, warm up, record 30 s of frame times, close, print mean, 1% low and stddev |
+| `scripts/dev/pacing-gate.sh` | pass/fail on a captured run's pacing logs (section 3, P3) |
 | `scripts/dev/luma-diff.py` | still-frame luminance diff (parity skill section 2c) |
 
 ## 0. Preconditions for every row
@@ -218,6 +219,65 @@ scripts/dev/perf-capture.sh --renderer opengl --taa on  --label gl-on
   `patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch`), so it
   belongs in the budget and was missing from the earlier 71.1 MiB figure.
 - Record: the measured MiB per target and the total, per backend.
+
+### P3. Frame pacing gate
+- Scene: the P1 scene and runs; no extra launch.
+- Commands: over the logs `perf-capture.sh` already wrote (vsync off for the cost runs):
+
+```
+scripts/dev/pacing-gate.sh --renderer opengl --fps /tmp/optimum-perf/gl-on/fps.log
+scripts/dev/pacing-gate.sh --renderer vulkan --fps /tmp/optimum-perf/vk-on/fps.log \
+    --stats /tmp/optimum-perf/vk-on/vulkan-stats.log --baseline /tmp/optimum-perf/gl-on/fps.log
+scripts/dev/pacing-gate.sh --self-test      # the gate's own pass case and one case per fail rule
+```
+
+  `--skip-seconds N` drops windows and samples that start in the first N seconds of a log
+  (perf-capture's logs include the warm-up). Exit 0 is a pass, 1 a failed rule, 2 unusable
+  input (a Vulkan run without its stats file, no fps windows).
+- Pass: every applicable rule prints PASS:
+  - `blocking_uploads`: Vulkan only, `blocking_uploads=0` on the `stats.counters` line of every sample
+    (fails on today's backend by design; Phase 1B removes the synchronous upload path);
+  - `stddev_vs_baseline`: with `--baseline`, median window stddev <= 1.25 x the baseline's median stddev;
+  - `p99_vs_mean`: median window p99 <= 1.5 x median window mean;
+  - `dropped_mesh_writes`: `mesh writes dropped 0` in every stats sample;
+  - `uniform_overflows`: `uniform overflows 0` in every stats sample.
+- Record: the gate's table per backend, the exit code, and the renderer line from P1.
+
+#### Log formats
+
+`OPTIMUM_FPS_LOG`, both backends, one line per second of client frames
+(`ClientMain.OptimumLogFrameTime`; milliseconds; `p99` nearest-rank; `stddev` is the
+population standard deviation over the same window, appended after `p99`; logs from builds
+before it lack the field and still parse, but cannot be compared against a baseline):
+
+```
+[Optimum] fps window=<s> frames=<n> mean=<ms> min=<ms> max=<ms> p99=<ms> stddev=<ms>
+```
+
+`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of four lines. The first line is
+unchanged from earlier builds; the other three carry stable `key=value` tokens:
+
+```
+stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
+stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
+stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms>
+stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes>
+```
+
+- The first line's "blocking uploads" counts every synchronous setup submission (uploads and
+  readbacks); `blocking_uploads` counts only uploads that really waited on a fence or the
+  queue, and `uploads` every texture upload or mip generation requested, waiting or not.
+- `stats.pacing`: CPU frame interval (start of one frame to the start of the next) over a ring
+  of the last 512 frames, not reset per sample; `stutters` counts intervals above 2 x `p50_ms`.
+- `stats.waits`: count (`_n`) and milliseconds (`_ms`) of CPU waits in the interval, per site:
+  `frame_pacing` (slot fence at frame start), `upload_submit` (upload setup fence),
+  `flush_frame` (slot fence inside a mid-frame flush), `device_wait_idle`, `readback`
+  (readback setup fence), `occlusion_query` (polling a query result), `swapchain_acquire`,
+  `present` (vkQueuePresentKHR including the queue lock).
+- `stats.counters`, per interval: `scopes` (vkCmdBeginRendering), `barriers` (image barriers
+  recorded), `rebar_fallbacks` (static mesh buffers that asked for ReBAR and got plain host
+  memory), `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame
+  slot used) and `uniform_ring_capacity` (bytes per slot).
 
 ## 4. Still owed from P4, to be closed in this matrix
 

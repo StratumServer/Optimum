@@ -133,7 +133,7 @@ public class TaaAcceptanceHarnessCoverageTests
 
         Assert.Contains("OptimumLogFrameTime(dt);", clientMain);
         Assert.Contains("Environment.GetEnvironmentVariable(\"OPTIMUM_FPS_LOG\")", clientMain);
-        Assert.Contains("\"[Optimum] fps window={0:F3} frames={1} mean={2:F3} min={3:F3} max={4:F3} p99={5:F3}\"", clientMain);
+        Assert.Contains("\"[Optimum] fps window={0:F3} frames={1} mean={2:F3} min={3:F3} max={4:F3} p99={5:F3} stddev={6:F3}\"", clientMain);
         // Off by default: no path, no work beyond the null check, so TAA off (and
         // every ordinary run) is unchanged.
         Assert.Contains("if (optimumFpsLogPath == null", clientMain);

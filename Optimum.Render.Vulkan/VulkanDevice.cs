@@ -592,7 +592,17 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void BeginFrame()
     {
-        _frames.BeginFrame();
+        // CPU frame interval: start of one frame to the start of the next, so it
+        // includes the pacing fence wait below and everything the client did.
+        long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastFrameStart != 0)
+        {
+            VulkanStats.NoteFrameInterval(
+                (frameStart - _lastFrameStart) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+        }
+        _lastFrameStart = frameStart;
+
+        _frames.BeginFrame(WaitSite.FramePacing);
         _frameActive = true;
         _renderThreadId = Environment.CurrentManagedThreadId;
         _frameCounter++;
@@ -611,6 +621,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             try
             {
+                // One sample is several lines (see VulkanStats); the first keeps the original format.
                 System.IO.File.AppendAllText(StatsLogPath, sample + "\n");
             }
             catch (System.IO.IOException)
@@ -618,6 +629,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             }
         }
     }
+
+    /// <summary>Stopwatch timestamp of the last BeginFrame, 0 before the first.</summary>
+    private long _lastFrameStart;
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
@@ -796,6 +810,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             PImageMemoryBarriers = &barrier,
         };
         _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
+        VulkanStats.NoteImageBarriers(1);
     }
 
     private void RecreateSwapchain()
@@ -813,7 +828,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         if (_swapchain == null || width <= 0 || height <= 0) return;
         if ((uint)width == _windowWidth && (uint)height == _windowHeight) return;
 
-        _context.Api.DeviceWaitIdle(_context.Device);
+        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
 
         DestroyDefaultFramebuffer();
         CreateDefaultFramebuffer((uint)width, (uint)height);
@@ -2351,6 +2366,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, _state.StencilReference);
 
         api.CmdSetLineWidth(commandBuffer, _context.Capabilities.WideLines ? _state.LineWidth : 1.0f);
+
+        VulkanStats.NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw);
     }
 
     private VulkanBuffer? _indirectScratch;
@@ -2473,7 +2490,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         FlushFrame();
 
         long deadline = System.Diagnostics.Stopwatch.GetTimestamp() + System.Diagnostics.Stopwatch.Frequency * 2;
+        long waitStart = VulkanStats.WaitStart();
         ulong result = 0;
+        try
+        {
         while (true)
         {
             Result status = _context.Api.GetQueryPoolResults(
@@ -2492,6 +2512,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             }
             System.Threading.Thread.Yield();
         }
+        }
+        finally
+        {
+            VulkanStats.NoteWait(WaitSite.OcclusionQuery, waitStart);
+        }
     }
 
     /// <summary>
@@ -2506,7 +2531,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         _targets.EndRendering(Commands);
         _frames.EndFrame();
-        _frames.BeginFrame();
+        _frames.BeginFrame(WaitSite.FlushFrame);
         _frameCounter++;
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
     }
@@ -2572,7 +2597,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             ulong bytes = (ulong)width * (ulong)height * (ulong)bytesPerPixel;
 
             FlushFrame();
-            _context.Api.DeviceWaitIdle(_context.Device);
+            VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
 
             using var readback = new VulkanBuffer(_context, bytes,
                 BufferUsageFlags.TransferDstBit,
@@ -2591,7 +2616,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 };
                 _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
                     ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
-            });
+            }, WaitSite.Readback);
 
             bool bgra = texture.Format is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb;
             bool written = TextureDump.Write(textureId, width, height, bgra, texture.Format,
@@ -2604,7 +2629,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             if (restore != ImageLayout.Undefined)
             {
                 _setupCommands.SubmitAndWait(commandBuffer =>
-                    _textures.TransitionTexture(commandBuffer, texture, restore));
+                    _textures.TransitionTexture(commandBuffer, texture, restore), WaitSite.Readback);
             }
         }
     }
@@ -2631,7 +2656,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         // the game reads pixels mid-frame and carries on drawing, and a present
         // here silently dropped everything it drew afterwards.
         FlushFrame();
-        _context.Api.DeviceWaitIdle(_context.Device);
+        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
 
         ulong bytes = (ulong)width * (ulong)height * 4;
         using var readback = new VulkanBuffer(_context, bytes,
@@ -2651,14 +2676,14 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             };
             _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
                 ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
-        });
+        }, WaitSite.Readback);
 
         System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)bytes);
 
         if (restore != ImageLayout.Undefined)
         {
             _setupCommands.SubmitAndWait(commandBuffer =>
-                _textures.TransitionTexture(commandBuffer, texture, restore));
+                _textures.TransitionTexture(commandBuffer, texture, restore), WaitSite.Readback);
         }
     }
 
@@ -2671,7 +2696,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         if (_context != null)
         {
-            _context.Api.DeviceWaitIdle(_context.Device);
+            VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
         }
 
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();

@@ -282,8 +282,10 @@ internal sealed unsafe class Swapchain : IDisposable
         imageIndex = 0;
         waitSemaphore = _imageAvailable[_semaphoreIndex];
 
+        long waitStart = VulkanStats.WaitStart();
         Result result = _swapchainApi.AcquireNextImage(
             _context.Device, _handle, ulong.MaxValue, waitSemaphore, default, ref imageIndex);
+        VulkanStats.NoteWait(WaitSite.SwapchainAcquire, waitStart);
 
         // The render-finished semaphore belongs to the acquired IMAGE, not to a
         // rolling counter: vkQueuePresentKHR keeps waiting on it until that image
@@ -331,10 +333,12 @@ internal sealed unsafe class Swapchain : IDisposable
         // Presenting is a queue operation like any other, so it takes the same
         // lock as submission.
         Result result;
+        long waitStart = VulkanStats.WaitStart();
         lock (_context.QueueLock)
         {
             result = _swapchainApi.QueuePresent(_context.GraphicsQueue, &presentInfo);
         }
+        VulkanStats.NoteWait(WaitSite.Present, waitStart);
         if (result is Result.ErrorOutOfDateKhr or Result.SuboptimalKhr)
         {
             NeedsRecreation = true;
@@ -349,7 +353,7 @@ internal sealed unsafe class Swapchain : IDisposable
 
     public bool Recreate(uint width, uint height, bool vsync, out string? failureReason)
     {
-        _context.Api.DeviceWaitIdle(_context.Device);
+        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
         DestroyChain();
         return Build(width, height, vsync, out failureReason);
     }
@@ -389,7 +393,7 @@ internal sealed unsafe class Swapchain : IDisposable
         if (_disposed) return;
         _disposed = true;
 
-        _context.Api.DeviceWaitIdle(_context.Device);
+        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
         DestroyChain();
         DestroySemaphores();
 

@@ -871,7 +871,7 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         if (Device.Handle != 0)
         {
-            Api.DeviceWaitIdle(Device);
+            VulkanStats.WaitDeviceIdle(Api, Device);
 
             // Memory blocks are freed while the device still exists, and after
             // the wait, so nothing is executing against them.
