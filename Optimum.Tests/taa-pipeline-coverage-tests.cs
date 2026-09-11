@@ -326,9 +326,11 @@ public class TaaPipelineCoverageTests
         // The resolve pass accepts a writer whose recorded depth is within a
         // value-scaled tolerance; the debug validity view has to use the same
         // expression or it paints red where the resolve reprojects happily.
-        Assert.Contains("abs(motion.a - depth) <= max(2e-4, 8e-4 * depth)", resolve);
+        // The resolve evaluates it at the nearest-depth tap of its 3x3 (2026-09-11);
+        // the expression is what has to match.
+        Assert.Contains("abs(motion.a - closestDepth) <= max(2e-4, 8e-4 * closestDepth)", resolve);
         Assert.Contains("abs(motion.a - sceneDepth) <= max(2e-4, 8e-4 * sceneDepth)", debug);
-        Assert.Equal(Tolerance(resolve, "depth"), Tolerance(debug, "sceneDepth"));
+        Assert.Equal(Tolerance(resolve, "closestDepth"), Tolerance(debug, "sceneDepth"));
         Assert.DoesNotContain("abs(motion.a - sceneDepth) < 1e-4", debug);
     }
 
@@ -454,7 +456,9 @@ public class TaaPipelineCoverageTests
     public void SkyPixelsReprojectAsDirections()
     {
         string resolve = Read("sources/shaders/taa-resolve.fsh");
-        Assert.Contains("bool sky = depth >= 0.999999;", resolve);
+        // Sky is decided on the tap the vector comes from (the nearest depth in the
+        // 3x3): a pixel next to a finite surface reprojects as that surface.
+        Assert.Contains("bool sky = closestDepth >= 0.999999;", resolve);
         // Far point minus near point: the far point alone carries the eye offset
         // of CameraMatrixOrigin (see TaaSkyDecalMotionCoverageTests).
         Assert.Contains("prevViewProj * vec4(skyDirection, 0.0)", resolve);

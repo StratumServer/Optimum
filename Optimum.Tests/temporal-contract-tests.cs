@@ -375,20 +375,32 @@ public class TemporalContractTests
         const string tolerance =
             "bool written = motion.a > 0.0 && abs(motion.a - depth) <= max(2e-4, 8e-4 * depth);";
 
+        // The reference resolve evaluates the rule at the nearest-depth tap of its
+        // 3x3 (2026-09-11, section 4): `motion` is read at closestPixel and
+        // `closestDepth` is the depth attachment at that same tap, so the rule is
+        // still "a writer's a against the depth of the pixel it wrote", unchanged.
+        string atClosestTap = tolerance.Replace("depth", "closestDepth", StringComparison.Ordinal);
         string resolve = Read("sources/shaders/taa-resolve.fsh");
-        Assert.True(resolve.Contains(tolerance, StringComparison.Ordinal),
+        Assert.True(resolve.Contains(atClosestTap, StringComparison.Ordinal),
             $"taa-resolve.fsh no longer carries the writer-depth validity test {Doc} section 3.2 freezes. "
             + "Change the document and bump the contract version before changing this line.");
+        Assert.True(resolve.Contains("vec4 motion = texelFetch(motionTex, closestPixel, 0);", StringComparison.Ordinal)
+            && resolve.Contains("float tapDepth = texelFetch(depthTex, p, 0).r;", StringComparison.Ordinal)
+            && resolve.Contains("if (tapDepth < closestDepth) { closestDepth = tapDepth; closestPixel = p; }", StringComparison.Ordinal),
+            $"taa-resolve.fsh no longer reads the motion vector and its depth from the same tap; {Doc} section 3.2 compares a writer against its own pixel.");
 
         string doc = ReadDoc();
         Assert.True(doc.Contains(tolerance, StringComparison.Ordinal),
             $"{Doc} section 3.2 no longer quotes the writer-depth validity test.");
+        Assert.True(doc.Contains(atClosestTap, StringComparison.Ordinal),
+            $"{Doc} section 4 no longer states that the resolve applies the validity test at the nearest-depth tap.");
 
         // And the channel semantics it rests on.
         Assert.True(resolve.Contains("uniform sampler2D motionTex;", StringComparison.Ordinal),
             $"taa-resolve.fsh no longer reads the motion attachment {Doc} section 3.2 describes.");
-        Assert.True(resolve.Contains("float reactive = clamp(motion.b, 0.0, 1.0);", StringComparison.Ordinal),
-            $"taa-resolve.fsh no longer reads reactive from motion.b, which {Doc} section 3.2 freezes.");
+        // Reactive stays this pixel's own value, not the nearest tap's.
+        Assert.True(resolve.Contains("float reactive = clamp(texelFetch(motionTex, pixel, 0).b, 0.0, 1.0);", StringComparison.Ordinal),
+            $"taa-resolve.fsh no longer reads reactive from this pixel's motion.b, which {Doc} section 3.2 freezes.");
         Assert.True(resolve.Contains("vec2 historyUv = (pixelCentre + mv) * invSize;", StringComparison.Ordinal),
             $"taa-resolve.fsh no longer anchors the history lookup where {Doc} section 3.2 says it does.");
     }

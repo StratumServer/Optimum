@@ -45,10 +45,15 @@ public class TaaSkyDecalMotionCoverageTests
         Assert.Contains("if ((farH.w < 0.0) != (nearH.w < 0.0)) direction = -direction;", sky);
         Assert.DoesNotContain("farH.w < 0.0 ? -farH.xyz : farH.xyz", sky);
 
-        Assert.Contains("vec4 nearH = invViewProjJittered * vec4(ndc, -1.0, 1.0);", resolve);
-        Assert.Contains("vec3 skyDirection = worldH.xyz * nearH.w - nearH.xyz * worldH.w;", resolve);
+        // The resolve reprojects the nearest-depth tap of its 3x3 (2026-09-11), so
+        // its far and near points are that tap's; the direction is still far minus
+        // near with the same sign rule.
+        Assert.Contains("vec4 nearH = invViewProjJittered * vec4(closestNdc, -1.0, 1.0);", resolve);
+        Assert.Contains("vec3 skyDirection = closestH.xyz * nearH.w - nearH.xyz * closestH.w;", resolve);
+        Assert.Contains("if ((closestH.w < 0.0) != (nearH.w < 0.0)) skyDirection = -skyDirection;", resolve);
         Assert.Contains("prevViewProj * vec4(skyDirection, 0.0)", resolve);
         Assert.DoesNotContain("prevViewProj * vec4(world, 0.0)", resolve);
+        Assert.DoesNotContain("prevViewProj * vec4(closestWorld, 0.0)", resolve);
     }
 
     /// <summary>
