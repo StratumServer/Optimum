@@ -86,7 +86,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentR = 0.7f, currentG = 0.3f, currentB = 0.2f;
             var inputs = CreateInputSet(textures);
@@ -142,7 +142,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentValue = 0.6f;
             var inputs = CreateInputSet(textures);
@@ -220,7 +220,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             var inputs = CreateInputSet(textures);
             // Per-column checker: every 3-wide window has both 0.3 and 0.7, so
@@ -289,7 +289,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentValue = 0.5f;
             var inputs = CreateInputSet(textures);
@@ -350,7 +350,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             var inputs = CreateInputSet(textures);
             UploadRgba16F(textures, inputs.SceneTex, (x, _) => (x % 2 == 0) ? 0.3f : 0.7f,
@@ -433,7 +433,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float edgeCentre = 16f;
             // One-pixel-wide linear coverage ramp around `pos`, standing in
@@ -528,7 +528,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const int brightColumn = 16;
             var inputs = CreateInputSet(textures);
@@ -596,7 +596,7 @@ public class TaaResolveTests
             using var pipelines = new GraphicsPipelineCache(context!);
             using var compiler = new ShaderCompiler();
             using var descriptors = new DescriptorCache(context!);
-            ShaderProgramResources program = LoadProgram(context!, compiler, state);
+            using ShaderProgramResources program = LoadProgram(context!, compiler, state);
 
             const float currentR = 0.65f, currentG = 0.4f, currentB = 0.25f;
             var inputs = CreateInputSet(textures);

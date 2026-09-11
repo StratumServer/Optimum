@@ -191,9 +191,21 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         var extensions = new List<string>(options.RequiredInstanceExtensions);
         bool validation = options.EnableValidation && HasValidationLayer();
+
+        // Extra layer features (sync validation, best practices, GPU assisted)
+        // ride on VK_EXT_validation_features. Parse them before the extension
+        // list is marshalled, because the extension has to be enabled under
+        // exactly the same condition as the pNext chain below - a chained
+        // struct whose extension was never enabled is ignored at best.
+        List<ValidationFeatureEnableEXT> enables = ParseValidationFeatures(options.ValidationFeatures);
+        bool chainValidationFeatures = validation && enables.Count > 0;
         if (validation)
         {
             extensions.Add(ExtDebugUtils.ExtensionName);
+        }
+        if (chainValidationFeatures)
+        {
+            extensions.Add(ValidationFeaturesExtensionName);
         }
 
         byte* applicationName = (byte*)SilkMarshal.StringToPtr("Optimum");
@@ -213,19 +225,6 @@ internal sealed unsafe class VulkanContext : IDisposable
                 ApiVersion = MinimumApiVersion,
             };
 
-            // Extra layer features (sync validation, best practices, GPU
-            // assisted) through VK_EXT_validation_features, chained only when
-            // the layer is on and something was asked for.
-            var enables = new List<ValidationFeatureEnableEXT>();
-            foreach (string feature in (options.ValidationFeatures ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                switch (feature.ToLowerInvariant())
-                {
-                    case "sync": enables.Add(ValidationFeatureEnableEXT.SynchronizationValidationExt); break;
-                    case "best": enables.Add(ValidationFeatureEnableEXT.BestPracticesExt); break;
-                    case "gpu": enables.Add(ValidationFeatureEnableEXT.GpuAssistedExt); break;
-                }
-            }
             ValidationFeatureEnableEXT* enablesPtr = stackalloc ValidationFeatureEnableEXT[Math.Max(enables.Count, 1)];
             for (int i = 0; i < enables.Count; i++) enablesPtr[i] = enables[i];
             var validationFeatures = new ValidationFeaturesEXT
@@ -238,7 +237,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             var createInfo = new InstanceCreateInfo
             {
                 SType = StructureType.InstanceCreateInfo,
-                PNext = validation && enables.Count > 0 ? &validationFeatures : null,
+                PNext = chainValidationFeatures ? &validationFeatures : null,
                 PApplicationInfo = &applicationInfo,
                 EnabledExtensionCount = (uint)extensions.Count,
                 PpEnabledExtensionNames = (byte**)extensionsPtr,
@@ -268,6 +267,25 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>Name of VK_EXT_validation_features; Silk.NET has no wrapper class for it.</summary>
+    internal const string ValidationFeaturesExtensionName = "VK_EXT_validation_features";
+
+    /// <summary>Maps the comma list from OPTIMUM_VULKAN_VALIDATION_FEATURES onto layer feature flags.</summary>
+    internal static List<ValidationFeatureEnableEXT> ParseValidationFeatures(string? features)
+    {
+        var enables = new List<ValidationFeatureEnableEXT>();
+        foreach (string feature in (features ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            switch (feature.ToLowerInvariant())
+            {
+                case "sync": enables.Add(ValidationFeatureEnableEXT.SynchronizationValidationExt); break;
+                case "best": enables.Add(ValidationFeatureEnableEXT.BestPracticesExt); break;
+                case "gpu": enables.Add(ValidationFeatureEnableEXT.GpuAssistedExt); break;
+            }
+        }
+        return enables;
     }
 
     private bool HasValidationLayer()

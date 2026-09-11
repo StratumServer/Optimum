@@ -435,8 +435,33 @@ internal sealed class ProgramInterfaceLayout
                 ? declaration.Location
                 : layout.FragmentOutputLocations.TryGetValue(declaration.Name, out int assignedLocation) ? assignedLocation : -1;
             if (location < 0) continue;
-            if (!FragmentOutputIsAssigned(fragmentSource, declaration.Name)) continue;
-            for (int i = 0; i < LocationSpan(declaration); i++) layout.WrittenFragmentOutputs.Add(location + i);
+            if (!TryGetWrittenFragmentOutputElements(fragmentSource, declaration.Name, out HashSet<int>? writtenElements))
+            {
+                continue;
+            }
+            int span = LocationSpan(declaration);
+            // An index on a non-array output selects a component (or a matrix
+            // column), not an attachment, so it still writes the whole span.
+            if (writtenElements == null || declaration.ArrayLength == 0)
+            {
+                for (int i = 0; i < span; i++) layout.WrittenFragmentOutputs.Add(location + i);
+                continue;
+            }
+
+            // Only some elements of an output array are stored to. Marking the
+            // whole span written would leave colour writes on for attachments
+            // the shader never touches, and Vulkan then writes undefined data
+            // into them (GL would have preserved the attachment).
+            int perElement = span / Math.Max(declaration.ArrayLength == 0 ? 1 : declaration.ArrayLength, 1);
+            perElement = Math.Max(perElement, 1);
+            foreach (int element in writtenElements)
+            {
+                for (int i = 0; i < perElement; i++)
+                {
+                    int slot = location + element * perElement + i;
+                    if (slot < location + span) layout.WrittenFragmentOutputs.Add(slot);
+                }
+            }
         }
     }
 
@@ -447,18 +472,55 @@ internal sealed class ProgramInterfaceLayout
     /// the "out" keyword on the same statement.
     /// </summary>
     internal static bool FragmentOutputIsAssigned(string source, string name)
+        => TryGetWrittenFragmentOutputElements(source, name, out _);
+
+    /// <summary>
+    /// Which elements of a fragment output the body stores to.
+    /// Returns false when nothing stores to it at all. On true,
+    /// <paramref name="elements" /> is null when the whole variable is written -
+    /// a plain or swizzled store, or an index the parser cannot fold to a
+    /// constant - and otherwise holds the constant element indices that are.
+    /// </summary>
+    internal static bool TryGetWrittenFragmentOutputElements(
+        string source, string name, out HashSet<int>? elements)
     {
+        elements = null;
         var store = new System.Text.RegularExpressions.Regex(
             @"(?<![\w.])" + System.Text.RegularExpressions.Regex.Escape(name) +
-            @"\s*(\.[xyzwrgbastpq]+|\[[^\]]*\])?\s*(=(?!=)|\+=|-=|\*=|/=)");
+            @"\s*((?:\.[xyzwrgbastpq]+|\[[^\]]*\])*)\s*(=(?!=)|\+=|-=|\*=|/=)");
+        bool assigned = false;
+        var indices = new HashSet<int>();
         foreach (System.Text.RegularExpressions.Match match in store.Matches(source))
         {
             int lineStart = source.LastIndexOf('\n', Math.Max(match.Index - 1, 0)) + 1;
             string before = source.Substring(lineStart, match.Index - lineStart);
             if (System.Text.RegularExpressions.Regex.IsMatch(before, @"\bout\b|\bin\b|\buniform\b")) continue;
-            return true;
+
+            assigned = true;
+            string suffix = match.Groups[1].Value;
+            if (!suffix.StartsWith("[", StringComparison.Ordinal))
+            {
+                // Whole variable or a swizzle of it: everything is written.
+                elements = null;
+                return true;
+            }
+
+            int close = suffix.IndexOf(']');
+            string index = close < 0 ? "" : suffix.Substring(1, close - 1).Trim();
+            if (!int.TryParse(index, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out int element)
+                || element < 0)
+            {
+                // Dynamic index: assume every element can be written.
+                elements = null;
+                return true;
+            }
+            indices.Add(element);
         }
-        return false;
+
+        if (!assigned) return false;
+        elements = indices;
+        return true;
     }
 
 
