@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..df5d592 100644
+index 431e51a..df65338 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -51,7 +51,7 @@ index 431e51a..df5d592 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +133,61 @@ public class ChunkRenderer
+@@ -105,10 +133,68 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -62,9 +62,17 @@ index 431e51a..df5d592 100644
 +
 +	private void ApplyOptimumTextureLodBias()
 +	{
-+		// Only apply LOD bias when FSR is active (RenderScale < 1.0).
-+		// At 1.0, skip TexParameter calls entirely to match vanilla behavior.
-+		if (ClientSettings.OptimumRenderScale >= 1.0f)
++		// Only apply a LOD bias when something asks for one: FSR (render scale
++		// below 1) or TAA (OptimumConfig.TaaMipBias, since the jitter supplies
++		// the sub-pixel samples a sharper mip needs). The two add, and both
++		// terms live in OptimumConfig.EffectiveTerrainLodBias so this and the
++		// sampler objects ShaderRegistry sets cannot drift apart.
++		//
++		// At a total of 0 - TAA off and render scale 1.0 - no TexParameter call
++		// is made at all, which is what keeps that configuration identical to
++		// vanilla.
++		float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;
++		if (textureLodBias == 0f)
 +		{
 +			if (!float.IsNaN(optimumTextureLodBias))
 +			{
@@ -73,7 +81,6 @@ index 431e51a..df5d592 100644
 +			}
 +			return;
 +		}
-+		float textureLodBias = MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f));
 +		if (Math.Abs(textureLodBias - optimumTextureLodBias) < 0.0001f)
 +		{
 +			return;
@@ -113,7 +120,7 @@ index 431e51a..df5d592 100644
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -142,10 +221,16 @@ public class ChunkRenderer
+@@ -142,10 +228,16 @@ public class ChunkRenderer
  		culler.CullInvisibleChunks();
  	}
  
@@ -130,7 +137,7 @@ index 431e51a..df5d592 100644
  		subPixelPaddingX = game.BlockAtlasManager.SubPixelPaddingX;
  		subPixelPaddingY = game.BlockAtlasManager.SubPixelPaddingY;
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
-@@ -170,10 +255,11 @@ public class ChunkRenderer
+@@ -170,10 +262,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -142,7 +149,7 @@ index 431e51a..df5d592 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,23 +294,59 @@ public class ChunkRenderer
+@@ -208,23 +301,59 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -205,7 +212,7 @@ index 431e51a..df5d592 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
  		platform.GlDepthMask(flag: true);
-@@ -232,10 +354,15 @@ public class ChunkRenderer
+@@ -232,10 +361,15 @@ public class ChunkRenderer
  		platform.GlToggleBlend(on: true);
  		platform.GlEnableCullFace();
  		game.GlMatrixModeModelView();
@@ -221,7 +228,7 @@ index 431e51a..df5d592 100644
  		chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
  		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
  		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
-@@ -249,10 +376,14 @@ public class ChunkRenderer
+@@ -249,10 +383,14 @@ public class ChunkRenderer
  		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
  		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
  		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
@@ -236,7 +243,7 @@ index 431e51a..df5d592 100644
  			chunkopaque.TerrainTex2D = textureIds[i];
  			chunkopaque.TerrainTexLinear2D = textureIds[i];
  			poolsByRenderPass[0][i].Render(cameraPos, "origin");
-@@ -268,10 +399,14 @@ public class ChunkRenderer
+@@ -268,10 +406,14 @@ public class ChunkRenderer
  		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
  		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
  		chunktopsoil.BlockTextureSize = blockTextureSize;
@@ -251,7 +258,7 @@ index 431e51a..df5d592 100644
  			chunktopsoil.TerrainTex2D = textureIds[j];
  			chunktopsoil.TerrainTexLinear2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin");
-@@ -314,23 +449,42 @@ public class ChunkRenderer
+@@ -314,23 +456,42 @@ public class ChunkRenderer
  			chunkopaque.TerrainTexLinear2D = textureIds[m];
  			poolsByRenderPass[8][m].Render(cameraPos, "origin");
  		}
@@ -303,7 +310,7 @@ index 431e51a..df5d592 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,15 +556,134 @@ public class ChunkRenderer
+@@ -402,15 +563,134 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -438,7 +445,7 @@ index 431e51a..df5d592 100644
  		platform.GlToggleBlend(on: false);
  		platform.GlEnableDepthTest();
  		chunkopaque.Use();
-@@ -425,28 +698,36 @@ public class ChunkRenderer
+@@ -425,28 +705,36 @@ public class ChunkRenderer
  		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
  		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
  		chunkopaque.HaxyFade = 1;

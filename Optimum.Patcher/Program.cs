@@ -187,6 +187,13 @@ var membersToInject = new Dictionary<string, List<string>>
         // reactive constant it stamps.
         "RenderOptimumSkyMotion",
         "OptimumCloudReactive",
+        // TAA P5: the post-resolve sharpen pass, its dedicated target slot and
+        // the shared "is FSR's RCAS going to run this frame" test the pass and
+        // BlitPrimaryToDefault both ask so the two never sharpen the same
+        // pixels twice.
+        "OptimumTaaSharpenIndex",
+        "OptimumFsrBlitActive",
+        "RenderOptimumTaaSharpen",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
@@ -203,6 +210,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "FsrRcas",
         "TaaDebug",
         "TaaResolve",
+        // TAA P5: the post-resolve sharpen pass program.
+        "TaaSharpen",
         // TAA P4: the liquid velocity pass program.
         "ChunkLiquidMotion",
         // TAA P4: the sky / volumetric-cloud motion pass program.
