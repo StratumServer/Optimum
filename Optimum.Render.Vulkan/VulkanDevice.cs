@@ -27,7 +27,7 @@ namespace Optimum.Render.Vulkan;
 public sealed unsafe class VulkanDevice : IDisposable
 {
     private VulkanContext _context = null!;
-    private VulkanCommands _setupCommands = null!;
+    private UploadManager _uploads = null!;
     private GlStateTracker _state = null!;
     private TextureManager _textures = null!;
     private MeshManager _meshes = null!;
@@ -50,9 +50,40 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
-    private int _renderThreadId = -1;
     private readonly Dictionary<IShader, StagedStage> _stagedStages = new();
-    private readonly List<string> _diagnostics = new();
+
+    /// <summary>
+    /// Error-severity diagnostics since the last GetError, under their own lock:
+    /// the layers call back from whichever thread made the Vulkan call.
+    /// </summary>
+    private readonly List<string> _errors = new();
+
+    /// <summary>
+    /// How many entries <see cref="_errors" /> holds. GetError runs after every
+    /// render stage, and in steady state this read is all it costs.
+    /// </summary>
+    private volatile int _errorCount;
+
+    /// <summary>A client that never drains the queue does not grow it without bound.</summary>
+    private const int MaxQueuedErrors = 1024;
+
+    /// <summary>What the frame command buffer already holds, so a draw emits only changed dynamic state.</summary>
+    private readonly DynamicStateCache _dynamicState = new();
+    private long _dynamicStateCommands;
+
+    /// <summary>Which resources are young enough that their descriptor sets belong in the per-slot arena.</summary>
+    private readonly ResourceAge _resourceAge = new();
+    private DescriptorArena[] _descriptorArenas = Array.Empty<DescriptorArena>();
+
+    /// <summary>Per-slot indirect-command buffers; see <see cref="IndirectRing" />.</summary>
+    private IndirectRing _indirectRing = null!;
+    private VulkanBuffer?[] _indirectBuffers = Array.Empty<VulkanBuffer?>();
+
+    /// <summary>Buffers taken this frame by multi-draws that did not fit their slot's buffer.</summary>
+    private readonly List<VulkanBuffer> _indirectOverflow = new();
+    private ulong _indirectOverflowCursor;
+    private long _indirectOverflows;
+    private long _indirectGrowths;
 
     /// <summary>
     /// Whether the last draw got its own slice of the frame's uniform ring. A
@@ -283,7 +314,7 @@ public sealed unsafe class VulkanDevice : IDisposable
             ValidationFeatures = ValidationFeatureSetting,
             DebugCallback = message =>
             {
-                _diagnostics.Add(SanitiseForClientLog(message));
+                AddDiagnostic(SanitiseForClientLog(message));
                 MirrorValidationMessage(message);
                 if (RenderTrace.Enabled)
                     RenderTrace.Write("validation: program=" + (_state?.CurrentProgram ?? 0) +
@@ -311,7 +342,7 @@ public sealed unsafe class VulkanDevice : IDisposable
             // A failed Vulkan call is an error by definition, so it carries the
             // same prefix the layers' error-severity messages do and reaches the
             // client through GetError.
-            _diagnostics.Add(VulkanContext.ErrorPrefix + message);
+            AddDiagnostic(VulkanContext.ErrorPrefix + message);
             MirrorValidationMessage(message);
         };
         VulkanResult.DescribeDeviceLoss = DescribeDeviceLoss;
@@ -320,22 +351,28 @@ public sealed unsafe class VulkanDevice : IDisposable
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off"));
-        _setupCommands = new VulkanCommands(_context);
-        // Only the render thread records frames, so only its synchronous submits
-        // can race one; a worker's upload is ordered by the queue lock alone. The
-        // frame's recorded part is submitted first and recording continues in the
-        // same slot: queue order is all the setup command needs, so nothing waits.
-        _setupCommands.BeforeSynchronousSubmit = () =>
-        {
-            if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) SubmitPartial();
-        };
+        // A ReBAR miss is logged, not an error: the validation mirror and the
+        // trace, never GetError. The stats sample reads this allocator's heaps.
+        _context.Allocator.Log = MirrorValidationMessage;
+        VulkanStats.MemorySource = _context.Allocator;
         _state = new GlStateTracker();
-        _textures = new TextureManager(_context, _setupCommands);
-        _meshes = new MeshManager(_context, _state);
+        // Uploads never wait: they ride the next frame submission, recorded from
+        // any thread into the ring's upload batch (or inline into the frame when
+        // it already used the destination; see UploadManager).
+        _frames = new FrameRing(_context);
+        _uploads = _frames.Uploads;
+        _textures = new TextureManager(_context, _uploads);
+        _meshes = new MeshManager(_context, _state, _uploads);
         _targets = new RenderTargetManager(_context, _textures, _state);
+        // An inline upload records transfer commands into the frame command
+        // buffer, which no rendering scope may enclose.
+        _uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);
         _pipelines = new GraphicsPipelineCache(_context);
         _descriptors = new DescriptorCache(_context);
-        _frames = new FrameRing(_context);
+        _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
+        for (int i = 0; i < _descriptorArenas.Length; i++) _descriptorArenas[i] = new DescriptorArena(_context);
+        _indirectRing = new IndirectRing(_frames.FramesInFlight);
+        _indirectBuffers = new VulkanBuffer?[_frames.FramesInFlight];
         _queryRing = new QueryRing(_context, _frames.Timeline, _frames.FramesInFlight);
         _readbacks = new ReadbackManager(_context, _textures, _frames);
         // A GL query counts across scope ends; a Vulkan one must not be active
@@ -356,7 +393,7 @@ public sealed unsafe class VulkanDevice : IDisposable
                 return false;
             }
 
-            if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync,
+            if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
                     out Swapchain? swapchain, out string? swapchainError))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
@@ -364,6 +401,7 @@ public sealed unsafe class VulkanDevice : IDisposable
             }
 
             _swapchain = swapchain;
+            _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
             CreateDefaultFramebuffer((uint)width, (uint)height);
         }
 
@@ -372,7 +410,13 @@ public sealed unsafe class VulkanDevice : IDisposable
     }
 
     private Swapchain? _swapchain;
+    private IPresentPath? _presentPath;
+    private readonly MissedVsyncDetector _missedVsyncs = new();
+    private long _lastPresentReturn;
+    private string? _reportedRebuildFailure;
     private bool _vsync = true;
+
+    private VulkanTexture? DefaultColorTexture() => _textures.Get(_defaultColor);
     private int _defaultFramebuffer;
     private int _defaultColor;
     private int _defaultDepth;
@@ -593,20 +637,39 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     public string GetError()
     {
-        if (_diagnostics.Count == 0) return null!;
+        // Phase 1B step 6: a volatile read; the message is built only when there is one.
+        if (_errorCount == 0) return null!;
 
-        var errors = new List<string>();
-        foreach (string diagnostic in _diagnostics)
+        lock (_errors)
         {
-            if (diagnostic.StartsWith(VulkanContext.ErrorPrefix, StringComparison.Ordinal))
-            {
-                errors.Add(diagnostic);
-            }
+            if (_errors.Count == 0) return null!;
+            string joined = string.Join("\n", _errors);
+            _errors.Clear();
+            _errorCount = 0;
+            return joined;
         }
-        _diagnostics.Clear();
-
-        return errors.Count == 0 ? null! : string.Join("\n", errors);
     }
+
+    /// <summary>
+    /// Queues a diagnostic for GetError. Only error-severity messages (the
+    /// <see cref="VulkanContext.ErrorPrefix" /> ones) are kept: GetError never
+    /// reported anything else, and warnings already reach the trace and the
+    /// validation log where they are raised. Safe from any thread.
+    /// </summary>
+    private void AddDiagnostic(string message)
+    {
+        if (!message.StartsWith(VulkanContext.ErrorPrefix, StringComparison.Ordinal)) return;
+
+        lock (_errors)
+        {
+            if (_errors.Count >= MaxQueuedErrors) return;
+            _errors.Add(message);
+            _errorCount = _errors.Count;
+        }
+    }
+
+    /// <summary>Queues a diagnostic as the device's own sources do. Tests only.</summary>
+    internal void AddDiagnosticForTests(string message) => AddDiagnostic(message);
 
     // ---------------------------------------------------------------------- frame
 
@@ -624,10 +687,15 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         FrameSlot slot = _frames.BeginFrame();
         _frameActive = true;
-        _renderThreadId = Environment.CurrentManagedThreadId;
         _frameCounter++;
-        _indirectFrameUsage = 0;
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
+
+        // The slot's previous frame has completed (FrameRing waited for it), so
+        // its indirect cursor and descriptor arena reset wholesale.
+        BeginIndirectFrame(slot.Index);
+        _descriptorArenas[slot.Index].Reset();
+        _resourceAge.NoteFrame(ResourceIds.Highest);
+        _dynamicState.Invalidate();
 
         // The slot's previous frame has finished: its query results move to the
         // host buffer before the pools reset, and its readback arena is free again.
@@ -663,6 +731,21 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>The frame ring's timelines. Tests only.</summary>
     internal FrameTimeline TimelineForTests => _frames.Timeline;
+
+    /// <summary>The frame ring's upload manager. Tests only.</summary>
+    internal UploadManager UploadsForTests => _uploads;
+
+    /// <summary>Static meshes on device-local memory through staging (Phase 1B step 5's default). Tests only.</summary>
+    internal bool DeviceLocalStaticMeshesForTests
+    {
+        set => _meshes.DeviceLocalStaticBuffers = value;
+    }
+
+    /// <summary>The mesh store. Tests only.</summary>
+    internal MeshManager MeshesForTests => _meshes;
+
+    /// <summary>The context (and its allocator). Tests only.</summary>
+    internal VulkanContext ContextForTests => _context;
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
@@ -737,6 +820,14 @@ public sealed unsafe class VulkanDevice : IDisposable
         _ => stage.ToString(),
     };
 
+    /// <summary>
+    /// Ends the frame in two submissions. Submit A carries the upload batch and
+    /// the frame and signals the Frame timeline; only then does the CPU block on
+    /// vkAcquireNextImageKHR, with the whole frame already in flight. Submit B
+    /// (the present path: the flipped blit) waits on the frame at
+    /// COLOR_ATTACHMENT_OUTPUT and on the acquire semaphore at the image's first
+    /// use, and signals the image's present semaphore; then the image is presented.
+    /// </summary>
     public void Present()
     {
         if (!_frameActive) return;
@@ -744,133 +835,95 @@ public sealed unsafe class VulkanDevice : IDisposable
         TextureDump.NoteFrame();
         if (TextureDump.Wanted) DumpRequestedTextures();
 
-        CommandBuffer commandBuffer = _frames.Current.CommandBuffer;
-
         // Any open rendering scope has to close before the command buffer ends.
-        _targets.EndRendering(commandBuffer);
+        _targets.EndRendering(_frames.Current.CommandBuffer);
 
-        if (_swapchain == null)
-        {
-            // Headless: nothing to present, but the frame still has to be
-            // submitted or the slot's fence would never signal.
-            _frames.EndFrame();
-            _frameActive = false;
-            return;
-        }
-
-        if (!_swapchain.TryAcquire(out uint imageIndex,
-                out Semaphore imageAvailable, out Semaphore renderFinished))
-        {
-            _frames.EndFrame();
-            _frameActive = false;
-            RecreateSwapchain();
-            return;
-        }
-
-        Checkpoint(commandBuffer, CheckpointMarker.PresentBlit(imageIndex, _frameCounter));
-        BlitToSwapchain(commandBuffer, imageIndex);
-
-        _frames.EndFrame(imageAvailable, renderFinished);
+        long presentEntry = System.Diagnostics.Stopwatch.GetTimestamp();
+        ulong renderValue = _frames.EndFrame();
         _frameActive = false;
+        long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        _swapchain.Present(imageIndex, renderFinished);
-        if (_swapchain.NeedsRecreation) RecreateSwapchain();
+        // Headless: nothing to present; the frame is submitted all the same.
+        if (_swapchain == null || _presentPath == null) return;
+
+        bool acquired = _swapchain.TryAcquire(out PresentTarget target);
+        long acquireReturned = System.Diagnostics.Stopwatch.GetTimestamp();
+        bool renderCompletedAtAcquire = _frames.Timeline.FrameCompleted >= renderValue;
+        ReportRebuildFailure();
+        if (!acquired)
+        {
+            LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, 0,
+                renderValue, 0, renderCompletedAtAcquire, false);
+            return;
+        }
+
+        CommandBuffer presentCommands = _frames.BeginPresentCommands();
+        Checkpoint(presentCommands, CheckpointMarker.PresentBlit(target.ImageIndex, _frameCounter));
+        _presentPath.Record(presentCommands, target);
+        ulong presentValue = _frames.SubmitPresent(
+            target.AcquireSemaphore, _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);
+        _swapchain.NotePresentSubmitted(target, presentValue);
+        long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        _swapchain.Present(target);
+        LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
+            renderValue, presentValue, renderCompletedAtAcquire, true);
+
+        long presentReturn = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastPresentReturn != 0 && _vsync &&
+            _missedVsyncs.NoteInterval((presentReturn - _lastPresentReturn) * 1000.0 / System.Diagnostics.Stopwatch.Frequency) &&
+            _swapchain.PromoteToRelaxedFifo())
+        {
+            MirrorValidationMessage("--- sustained missed vsyncs: swapchain promoted to FIFO_RELAXED");
+        }
+        _lastPresentReturn = presentReturn;
+    }
+
+    /// <summary>Stopwatch timestamps of one Present, for PresentDecouplingTests.</summary>
+    internal readonly record struct PresentTimings(
+        long PresentEntry, long FrameSubmitted, long AcquireReturned, long PresentSubmitted,
+        ulong RenderValue, ulong PresentValue, bool RenderCompletedAtAcquire, bool Presented);
+
+    /// <summary>The last Present's timings. Tests only.</summary>
+    internal PresentTimings LastPresentTimingsForTests { get; private set; }
+
+    /// <summary>The swapchain, null when headless. Tests only.</summary>
+    internal Swapchain? SwapchainForTests => _swapchain;
+
+    /// <summary>The present path's acquire wait stage. Tests only.</summary>
+    internal PipelineStageFlags PresentAcquireWaitStageForTests =>
+        _presentPath?.AcquireWaitStage ?? PresentWaitStages.BlitAcquireWait;
+
+    private void ReportRebuildFailure()
+    {
+        string? failure = _swapchain?.RebuildFailure;
+        if (failure != null && failure != _reportedRebuildFailure)
+        {
+            AddDiagnostic("swapchain recreation failed: " + failure);
+        }
+        _reportedRebuildFailure = failure;
     }
 
     /// <summary>
-    /// Copies the rendered frame into the acquired swapchain image, flipped.
-    ///
-    /// This inverted blit is the entire Y-flip story for the backend. Everything
-    /// upstream stays in OpenGL's orientation, which is what keeps intermediate
-    /// targets and screenshots byte-identical to the GL path; the display wants
-    /// row 0 at the top, so the source rows are read bottom-to-top exactly once,
-    /// here.
+    /// A new window size: the default framebuffer is rebuilt now (its old images
+    /// retire on the timelines), the swapchain at the next acquire. Nothing waits.
     /// </summary>
-    private void BlitToSwapchain(CommandBuffer commandBuffer, uint imageIndex)
-    {
-        VulkanTexture? source = _textures.Get(_defaultColor);
-        if (source == null || _swapchain == null) return;
-
-        Vk api = _context.Api;
-        Image destination = _swapchain.ImageAt(imageIndex);
-
-        _textures.TransitionTexture(commandBuffer, source, ImageLayout.TransferSrcOptimal);
-        TransitionSwapchainImage(commandBuffer, destination,
-            ImageLayout.Undefined, ImageLayout.TransferDstOptimal);
-
-        var blit = new ImageBlit
-        {
-            SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-            DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-        };
-        // Source Y runs backwards: this is the flip.
-        blit.SrcOffsets.Element0 = new Offset3D(0, (int)source.Height, 0);
-        blit.SrcOffsets.Element1 = new Offset3D((int)source.Width, 0, 1);
-        blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
-        blit.DstOffsets.Element1 = new Offset3D((int)_swapchain.Extent.Width, (int)_swapchain.Extent.Height, 1);
-
-        api.CmdBlitImage(commandBuffer,
-            source.Image, ImageLayout.TransferSrcOptimal,
-            destination, ImageLayout.TransferDstOptimal,
-            1, &blit, Filter.Linear);
-
-        TransitionSwapchainImage(commandBuffer, destination,
-            ImageLayout.TransferDstOptimal, ImageLayout.PresentSrcKhr);
-    }
-
-    private void TransitionSwapchainImage(
-        CommandBuffer commandBuffer, Image image, ImageLayout from, ImageLayout to)
-    {
-        var barrier = new ImageMemoryBarrier2
-        {
-            SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = TextureManager.AccessForLayout(from, writer: true),
-            DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = TextureManager.AccessForLayout(to, writer: false),
-            OldLayout = from,
-            NewLayout = to,
-            Image = image,
-            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
-        };
-
-        var dependency = new DependencyInfo
-        {
-            SType = StructureType.DependencyInfo,
-            ImageMemoryBarrierCount = 1,
-            PImageMemoryBarriers = &barrier,
-        };
-        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
-        VulkanStats.NoteImageBarriers(1);
-    }
-
-    private void RecreateSwapchain()
-    {
-        if (_swapchain == null || _windowWidth == 0 || _windowHeight == 0) return;
-
-        if (!_swapchain.Recreate(_windowWidth, _windowHeight, _vsync, out string? failureReason))
-        {
-            _diagnostics.Add("swapchain recreation failed: " + failureReason);
-        }
-    }
-
     public void Resize(int width, int height)
     {
         if (_swapchain == null || width <= 0 || height <= 0) return;
         if ((uint)width == _windowWidth && (uint)height == _windowHeight) return;
 
-        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
-
         DestroyDefaultFramebuffer();
         CreateDefaultFramebuffer((uint)width, (uint)height);
-        RecreateSwapchain();
+        _swapchain.RequestRebuild(_windowWidth, _windowHeight, _vsync);
     }
 
     public void SetVSync(bool enabled)
     {
         if (_vsync == enabled) return;
         _vsync = enabled;
-        RecreateSwapchain();
+        _missedVsyncs.Reset();
+        _swapchain?.RequestRebuild(_windowWidth, _windowHeight, _vsync);
     }
 
     private CommandBuffer Commands => _frames.Current.CommandBuffer;
@@ -930,12 +983,12 @@ public sealed unsafe class VulkanDevice : IDisposable
         string stageName = shader.Type.ToString();
         if (shader.Code.Length + (shader.PrefixCode?.Length ?? 0) > MaxShaderSourceBytes)
         {
-            _diagnostics.Add($"{stageName}: shader source exceeds {MaxShaderSourceBytes} bytes and was rejected");
+            AddDiagnostic($"{stageName}: shader source exceeds {MaxShaderSourceBytes} bytes and was rejected");
             return false;
         }
         if (shader.Code.IndexOf('\0') >= 0 || (shader.PrefixCode?.IndexOf('\0') ?? -1) >= 0)
         {
-            _diagnostics.Add($"{stageName}: shader source contains a NUL byte and was rejected");
+            AddDiagnostic($"{stageName}: shader source contains a NUL byte and was rejected");
             return false;
         }
 
@@ -958,7 +1011,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         if (stages.Count == 0)
         {
-            _diagnostics.Add($"shader program '{program.PassName}' has no stages");
+            AddDiagnostic($"shader program '{program.PassName}' has no stages");
             return 0;
         }
 
@@ -967,7 +1020,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         {
             foreach (string error in translated.Errors)
             {
-                _diagnostics.Add($"{program.PassName}: {error}");
+                AddDiagnostic($"{program.PassName}: {error}");
             }
             return 0;
         }
@@ -1946,6 +1999,10 @@ public sealed unsafe class VulkanDevice : IDisposable
                 continue;
             }
 
+            // Sampled by this frame command buffer: a later upload to it this
+            // frame must go inline, after this draw, as it would on GL.
+            _uploads.NoteUse(commandBuffer, texture);
+
             // The bound depth attachment read with writes off: EnsureRendering
             // puts it in the read-only layout, which serves both uses at once.
             if (_targets.DepthReadOnly && _targets.IsBoundDepth(_boundTextures[unit])) continue;
@@ -2076,7 +2133,7 @@ public sealed unsafe class VulkanDevice : IDisposable
             " (" + _frames.Current.UniformBytesUsed + " of " + _frames.Current.UniformCapacity +
             " bytes used) at a draw with program " + program.ProgramId +
             " '" + ProgramNameOf(program.ProgramId) + "' for " + what;
-        _diagnostics.Add(SanitiseForClientLog(message));
+        AddDiagnostic(SanitiseForClientLog(message));
         MirrorValidationMessage(message);
     }
 
@@ -2222,7 +2279,7 @@ public sealed unsafe class VulkanDevice : IDisposable
                 program.ProgramId, ProgramInterfaceLayout.DefaultBlockSet,
                 Array.Empty<SamplerBindingValue>(), buffers.ToArray());
 
-            DescriptorSet uniformSet = _descriptors.Get(
+            DescriptorSet uniformSet = GetDescriptorSet(
                 uniformContents, program.SetLayouts[ProgramInterfaceLayout.DefaultBlockSet]);
 
             api.CmdBindDescriptorSets(commandBuffer, PipelineBindPoint.Graphics, program.PipelineLayout,
@@ -2316,7 +2373,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
             if (complete)
             {
-                DescriptorSet samplerSet = _descriptors.Get(
+                DescriptorSet samplerSet = GetDescriptorSet(
                     new DescriptorSetContents(program.ProgramId, ProgramInterfaceLayout.SamplerSet,
                         bindings, Array.Empty<BufferBindingValue>()),
                     program.SetLayouts[ProgramInterfaceLayout.SamplerSet]);
@@ -2351,7 +2408,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
             if (storage.Count == program.Interface.StorageBlocks.Count)
             {
-                DescriptorSet storageSet = _descriptors.Get(
+                DescriptorSet storageSet = GetDescriptorSet(
                     new DescriptorSetContents(program.ProgramId, ProgramInterfaceLayout.StorageSet,
                         Array.Empty<SamplerBindingValue>(), storage.ToArray()),
                     program.SetLayouts[ProgramInterfaceLayout.StorageSet]);
@@ -2372,45 +2429,148 @@ public sealed unsafe class VulkanDevice : IDisposable
         Vk api = _context.Api;
 
         Rect2D viewport = _state.Viewport;
-        var vulkanViewport = new Viewport(
-            viewport.Offset.X, viewport.Offset.Y,
-            viewport.Extent.Width, viewport.Extent.Height, 0f, 1f);
-        api.CmdSetViewport(commandBuffer, 0, 1, &vulkanViewport);
+        var values = new DynamicStateValues
+        {
+            Viewport = new Viewport(
+                viewport.Offset.X, viewport.Offset.Y,
+                viewport.Extent.Width, viewport.Extent.Height, 0f, 1f),
+            // GL leaves the whole target writable when the scissor test is off;
+            // Vulkan always has a scissor, so "off" becomes the full target.
+            Scissor = _state.ScissorEnabled
+                ? _state.Scissor
+                : new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height)),
+            CullMode = _state.CullEnabled ? _state.CullMode : CullModeFlags.None,
+            FrontFace = GlStateTracker.FrontFace,
+            Topology = _state.Topology,
+            DepthTest = _state.DepthTest,
+            DepthWrite = _state.DepthWrite,
+            DepthCompare = _state.DepthCompare,
+            StencilTest = _state.StencilTest,
+            StencilFail = _state.StencilFail,
+            StencilPass = _state.StencilPass,
+            StencilDepthFail = _state.StencilDepthFail,
+            StencilCompare = _state.StencilCompare,
+            StencilCompareMask = _state.StencilCompareMask,
+            StencilWriteMask = _state.StencilWriteMask,
+            StencilReference = _state.StencilReference,
+            LineWidth = _context.Capabilities.WideLines ? _state.LineWidth : 1.0f,
+        };
 
-        // GL leaves the whole target writable when the scissor test is off;
-        // Vulkan always has a scissor, so "off" becomes the full target.
-        Rect2D scissor = _state.ScissorEnabled
-            ? _state.Scissor
-            : new Rect2D(new Offset2D(0, 0), new Extent2D(target.Width, target.Height));
-        api.CmdSetScissor(commandBuffer, 0, 1, &scissor);
+        // Dirty-masked (Phase 1B step 6): the cache knows what this recording of
+        // the command buffer already holds. A command buffer that is not the
+        // slot's current one is never trusted.
+        FrameSlot slot = _frames.Current;
+        ulong serial = slot.CommandBuffer.Handle == commandBuffer.Handle ? slot.RecordingSerial : 0;
+        DynamicStateDirty dirty = _dynamicState.Update(serial, values);
+        if (dirty == DynamicStateDirty.None) return;
 
-        api.CmdSetCullMode(commandBuffer, _state.CullEnabled ? _state.CullMode : CullModeFlags.None);
-        api.CmdSetFrontFace(commandBuffer, GlStateTracker.FrontFace);
-        api.CmdSetPrimitiveTopology(commandBuffer, _state.Topology);
+        if ((dirty & DynamicStateDirty.Viewport) != 0) api.CmdSetViewport(commandBuffer, 0, 1, &values.Viewport);
+        if ((dirty & DynamicStateDirty.Scissor) != 0) api.CmdSetScissor(commandBuffer, 0, 1, &values.Scissor);
+        if ((dirty & DynamicStateDirty.CullMode) != 0) api.CmdSetCullMode(commandBuffer, values.CullMode);
+        if ((dirty & DynamicStateDirty.FrontFace) != 0) api.CmdSetFrontFace(commandBuffer, values.FrontFace);
+        if ((dirty & DynamicStateDirty.Topology) != 0) api.CmdSetPrimitiveTopology(commandBuffer, values.Topology);
 
-        api.CmdSetDepthTestEnable(commandBuffer, _state.DepthTest);
-        api.CmdSetDepthWriteEnable(commandBuffer, _state.DepthWrite);
-        api.CmdSetDepthCompareOp(commandBuffer, _state.DepthCompare);
+        if ((dirty & DynamicStateDirty.DepthTestEnable) != 0) api.CmdSetDepthTestEnable(commandBuffer, values.DepthTest);
+        if ((dirty & DynamicStateDirty.DepthWriteEnable) != 0) api.CmdSetDepthWriteEnable(commandBuffer, values.DepthWrite);
+        if ((dirty & DynamicStateDirty.DepthCompareOp) != 0) api.CmdSetDepthCompareOp(commandBuffer, values.DepthCompare);
 
-        api.CmdSetStencilTestEnable(commandBuffer, _state.StencilTest);
-        api.CmdSetStencilOp(commandBuffer, StencilFaceFlags.FaceFrontAndBack,
-            _state.StencilFail, _state.StencilPass, _state.StencilDepthFail, _state.StencilCompare);
-        api.CmdSetStencilCompareMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, _state.StencilCompareMask);
-        api.CmdSetStencilWriteMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, _state.StencilWriteMask);
-        api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, _state.StencilReference);
+        if ((dirty & DynamicStateDirty.StencilTestEnable) != 0) api.CmdSetStencilTestEnable(commandBuffer, values.StencilTest);
+        if ((dirty & DynamicStateDirty.StencilOp) != 0)
+            api.CmdSetStencilOp(commandBuffer, StencilFaceFlags.FaceFrontAndBack,
+                values.StencilFail, values.StencilPass, values.StencilDepthFail, values.StencilCompare);
+        if ((dirty & DynamicStateDirty.StencilCompareMask) != 0)
+            api.CmdSetStencilCompareMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilCompareMask);
+        if ((dirty & DynamicStateDirty.StencilWriteMask) != 0)
+            api.CmdSetStencilWriteMask(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilWriteMask);
+        if ((dirty & DynamicStateDirty.StencilReference) != 0)
+            api.CmdSetStencilReference(commandBuffer, StencilFaceFlags.FaceFrontAndBack, values.StencilReference);
 
-        api.CmdSetLineWidth(commandBuffer, _context.Capabilities.WideLines ? _state.LineWidth : 1.0f);
+        if ((dirty & DynamicStateDirty.LineWidth) != 0) api.CmdSetLineWidth(commandBuffer, values.LineWidth);
 
-        VulkanStats.NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw);
+        int emitted = DynamicStateCache.CommandCount(dirty);
+        _dynamicStateCommands += emitted;
+        VulkanStats.NoteDynamicStateCommands(emitted);
     }
 
-    private VulkanBuffer? _indirectScratch;
-    private ulong _indirectCursor;
-    private ulong _indirectFrameUsage;
-    private ulong _indirectPeakFrameUsage;
+    /// <summary>Dynamic-state commands this device recorded. Tests only.</summary>
+    internal long DynamicStateCommandsForTests => _dynamicStateCommands;
+
+    /// <summary>False emits every dynamic-state command on every draw, as before masking. Tests only.</summary>
+    internal bool DynamicStateMaskingForTests
+    {
+        get => _dynamicState.Enabled;
+        set => _dynamicState.Enabled = value;
+    }
 
     /// <summary>
-    /// Hands out a region of the indirect-command buffer for one multi-draw.
+    /// Routes a set to the current slot's arena when it names a resource created
+    /// in the last <see cref="ResourceAge.ShortLivedFrames" /> frames (GUI text,
+    /// atlas tasks, fresh meshes, overflow uniform copies), otherwise to the
+    /// long-lived cache.
+    /// </summary>
+    private DescriptorSet GetDescriptorSet(DescriptorSetContents contents, DescriptorSetLayout layout) =>
+        _resourceAge.NamesShortLived(contents)
+            ? _descriptorArenas[_frames.Current.Index].Get(contents, layout)
+            : _descriptors.Get(contents, layout);
+
+    /// <summary>The frames a resource's sets stay in the arena; 0 sends every set to the cache. Tests only.</summary>
+    internal int ShortLivedFramesForTests
+    {
+        get => _resourceAge.ShortLivedFrames;
+        set => _resourceAge.ShortLivedFrames = value;
+    }
+
+    /// <summary>A slot's descriptor arena. Tests only.</summary>
+    internal DescriptorArena DescriptorArenaForTests(int slot) => _descriptorArenas[slot];
+
+    /// <summary>The slot the current (or last) frame records into. Tests only.</summary>
+    internal int CurrentSlotForTests => _frames.Current.Index;
+
+    /// <summary>The indirect ring's bookkeeping. Tests only.</summary>
+    internal IndirectRing IndirectRingForTests => _indirectRing;
+
+    /// <summary>Multi-draws that took an overflow buffer, and slot buffers grown at a frame boundary. Tests only.</summary>
+    internal long IndirectOverflowsForTests => _indirectOverflows;
+    internal long IndirectGrowthsForTests => _indirectGrowths;
+
+    /// <summary>Replaces the ring with one whose slot buffers start at <paramref name="value" /> bytes. Before the first multi-draw only. Tests only.</summary>
+    internal ulong IndirectMinimumCapacityForTests
+    {
+        set => _indirectRing = new IndirectRing(_frames.FramesInFlight, value);
+    }
+
+    /// <summary>
+    /// The frame boundary of the indirect ring: this slot's cursor returns to 0,
+    /// and its buffer grows here, and only here, when the busiest frame so far did
+    /// not fit. Overflow buffers of the frames before retire on the timelines.
+    /// </summary>
+    private void BeginIndirectFrame(int slot)
+    {
+        foreach (VulkanBuffer overflow in _indirectOverflow) _frames.DeferDeletion(overflow);
+        _indirectOverflow.Clear();
+        _indirectOverflowCursor = 0;
+
+        if (_indirectRing.BeginFrame(slot, out ulong capacity))
+        {
+            // Draws of the slot's previous frame named the old buffer; it retires
+            // on the timelines like any other resource.
+            _frames.DeferDeletion(_indirectBuffers[slot]!);
+            _indirectBuffers[slot] = CreateIndirectBuffer(capacity);
+            _indirectRing.Attach(capacity);
+            _indirectGrowths++;
+        }
+    }
+
+    /// <summary>Per-frame dynamic data, so the ReBAR class (a miss falls through, counted).</summary>
+    private VulkanBuffer CreateIndirectBuffer(ulong size) =>
+        new(_context, size,
+            BufferUsageFlags.IndirectBufferBit,
+            MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+            MemoryPoolClass.ReBar);
+
+    /// <summary>
+    /// Hands out a region of the current slot's indirect-command buffer for one
+    /// multi-draw.
     ///
     /// The commands are written on the CPU when the draw is recorded and read by
     /// the GPU when it executes, which is later - after every other draw of the
@@ -2419,34 +2579,43 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// the ranges of whichever was recorded last, and the chunk pass is hundreds
     /// of them.
     ///
-    /// The buffer is a ring that wraps, sized to hold four times the busiest
-    /// frame seen, so a wrap can never reach a region a frame still in flight is
-    /// reading. A buffer that has to grow is deferred rather than freed, because
-    /// draws already recorded this frame still name it.
+    /// Regions are bump-allocated per slot and never wrap (Phase 1B step 6): the
+    /// cursor resets only at the slot's next frame start. A frame that outgrows
+    /// its slot's buffer continues in an overflow buffer, counted, and the slot
+    /// grows at its next frame boundary.
     /// </summary>
     private VulkanBuffer AllocateIndirect(int groupCount, out ulong offset)
     {
         ulong needed = (ulong)Math.Max(groupCount, 1) * (ulong)sizeof(DrawIndexedIndirectCommand);
+        int slot = _indirectRing.Current;
 
-        _indirectFrameUsage += needed;
-        if (_indirectFrameUsage > _indirectPeakFrameUsage) _indirectPeakFrameUsage = _indirectFrameUsage;
-
-        ulong required = Math.Max(Math.Max(_indirectPeakFrameUsage * 4, needed), 256UL * 1024);
-        if (_indirectScratch == null || _indirectScratch.Size < required)
+        if (_indirectRing.NeedsBuffer(needed, out ulong capacity))
         {
-            if (_indirectScratch != null) _frames.DeferDeletion(_indirectScratch);
-
-            _indirectScratch = new VulkanBuffer(_context, required,
-                BufferUsageFlags.IndirectBufferBit,
-                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-            _indirectCursor = 0;
+            // Nothing recorded names a buffer the slot never had, so creating one is safe mid-frame.
+            _indirectBuffers[slot] = CreateIndirectBuffer(capacity);
+            _indirectRing.Attach(capacity);
         }
 
-        if (_indirectCursor + needed > _indirectScratch.Size) _indirectCursor = 0;
+        if (_indirectRing.TryAllocate(needed, out offset)) return _indirectBuffers[slot]!;
 
-        offset = _indirectCursor;
-        _indirectCursor += needed;
-        return _indirectScratch;
+        _indirectOverflows++;
+        VulkanStats.NoteIndirectOverflow();
+        VulkanBuffer? current = _indirectOverflow.Count == 0 ? null : _indirectOverflow[^1];
+        if (current == null || _indirectOverflowCursor + needed > current.Size)
+        {
+            current = CreateIndirectBuffer(_indirectRing.CapacityFor(Math.Max(needed, _indirectRing.CapacityOf(slot))));
+            _indirectOverflow.Add(current);
+            _indirectOverflowCursor = 0;
+            if (RenderTrace.Enabled)
+            {
+                RenderTrace.Write("indirect overflow: slot " + slot + " capacity " + _indirectRing.CapacityOf(slot) +
+                    " frame usage " + _indirectRing.FrameUsageOf(slot) + "; overflow buffer " + current.Size);
+            }
+        }
+
+        offset = _indirectOverflowCursor;
+        _indirectOverflowCursor += needed;
+        return current;
     }
 
     // -------------------------------------------------------------------- queries
@@ -2503,9 +2672,9 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>
     /// Submits everything the frame has recorded so far and keeps recording it in
-    /// the same slot, so a readback or a synchronous setup command queued next
-    /// sees work the frame already issued. No wait, no new slot, no frame counter
-    /// increment: arena cursors and uniform snapshots carry on.
+    /// the same slot, so a readback queued next sees work the frame already issued.
+    /// The open upload batch rides along, first. No wait, no new slot, no frame
+    /// counter increment: arena cursors and uniform snapshots carry on.
     /// </summary>
     private ulong SubmitPartial()
     {
@@ -2581,9 +2750,11 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// itself (into the slot's readback arena), the recorded part is submitted
     /// with <see cref="SubmitPartial" /> and the caller waits on that single Frame
     /// timeline value; the frame carries on in the same slot, so every draw after
-    /// the read still reaches the screen. Between frames a setup submission
-    /// serves: the queue runs it after every frame already submitted, so its own
-    /// fence wait is enough. Neither path waits for the whole device.
+    /// the read still reaches the screen. Between frames the copy is appended to
+    /// the open upload batch (after every upload recorded so far), which is
+    /// submitted on its own; the queue runs it after every frame already submitted,
+    /// so waiting on its Transfer value is enough. Neither path waits for the
+    /// whole device.
     /// </summary>
     private void ReadBack(VulkanTexture texture, int x, int y, uint width, uint height,
         ImageAspectFlags aspect, ulong bytes, IntPtr destination)
@@ -2603,10 +2774,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         ulong handed = Math.Min(bytes, copied);
         using var readback = new VulkanBuffer(_context, Math.Max(bytes, copied),
             BufferUsageFlags.TransferDstBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
 
         ImageLayout restore = texture.Layout;
-        _setupCommands.SubmitAndWait(commandBuffer =>
+        CommandBuffer commandBuffer = _uploads.BeginRecording(inlineInFrame: false);
+        try
         {
             _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
 
@@ -2620,7 +2792,13 @@ public sealed unsafe class VulkanDevice : IDisposable
                 ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
 
             if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
-        }, WaitSite.Readback);
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
+        ulong transferValue = _uploads.SubmitStandalone();
+        _frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);
 
         System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)handed);
     }
@@ -2704,7 +2882,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         _queryRing?.Dispose();
         _readbacks?.Dispose();
 
-        _indirectScratch?.Dispose();
+        foreach (VulkanBuffer? indirect in _indirectBuffers) indirect?.Dispose();
+        foreach (VulkanBuffer overflow in _indirectOverflow) overflow.Dispose();
+        _indirectOverflow.Clear();
+        foreach (DescriptorArena arena in _descriptorArenas) arena.Dispose();
         _defaultAttributes?.Dispose();
         _placeholderUniforms?.Dispose();
         _swapchain?.Dispose();
@@ -2715,7 +2896,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         _targets?.Dispose();
         _meshes?.Dispose();
         _textures?.Dispose();
-        _setupCommands?.Dispose();
+        if (_context != null && ReferenceEquals(VulkanStats.MemorySource, _context.Allocator))
+        {
+            VulkanStats.MemorySource = null;
+        }
         _context?.Dispose();
     }
 }

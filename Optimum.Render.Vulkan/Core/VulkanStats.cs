@@ -19,7 +19,11 @@ internal enum WaitSite
     /// start of frame n; exactly one per frame start, the ring's only steady-state wait.
     /// </summary>
     FramePacing = 0,
-    /// <summary>A setup command buffer that uploads data and waits for its fence.</summary>
+    /// <summary>
+    /// An upload that waited for the GPU. Retired in Phase 1B step 3: uploads ride
+    /// the next frame submission (UploadManager) and never wait, so this stays
+    /// zero; the token stays for log compatibility and the pacing gate.
+    /// </summary>
     UploadSubmit = 1,
     /// <summary>
     /// The Frame timeline wait inside a mid-frame flush. Retired in Phase 1B:
@@ -94,8 +98,10 @@ internal static class VulkanStats
     public const int WaitSiteCount = 9;
 
     /// <summary>
-    /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> records per
-    /// draw today. A source test keeps this equal to the calls in that method.
+    /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> can record for
+    /// one draw: all of them, at the first draw of a command buffer. Later draws
+    /// record only the ones whose value changed (Phase 1B step 6). A source test
+    /// keeps this equal to the calls in that method.
     /// </summary>
     public const int DynamicStateCommandsPerDraw = 14;
 
@@ -159,6 +165,26 @@ internal static class VulkanStats
     public static long BlockingUploads => Interlocked.Read(ref _blockingUploads);
     public static long UploadRequests => Interlocked.Read(ref _uploadRequests);
 
+    private static long _inlineUploads;
+    private static long _stagingOverflows;
+    private static long _uploadBatchGrowths;
+
+    /// <summary>
+    /// An upload recorded into the frame command buffer because that command
+    /// buffer already used its destination (GL order), instead of the upload batch.
+    /// </summary>
+    public static void NoteInlineUpload() => Interlocked.Increment(ref _inlineUploads);
+
+    /// <summary>An upload that did not fit its batch's staging region and took a dedicated staging buffer.</summary>
+    public static void NoteStagingOverflow() => Interlocked.Increment(ref _stagingOverflows);
+
+    /// <summary>An upload batch created beyond the staging ring's regions (more batches in flight than frames).</summary>
+    public static void NoteUploadBatchGrowth() => Interlocked.Increment(ref _uploadBatchGrowths);
+
+    public static long InlineUploads => Interlocked.Read(ref _inlineUploads);
+    public static long StagingOverflows => Interlocked.Read(ref _stagingOverflows);
+    public static long UploadBatchGrowths => Interlocked.Read(ref _uploadBatchGrowths);
+
     /// <summary>One vkCmdBeginRendering.</summary>
     public static void NoteScopeOpened() => Interlocked.Increment(ref _scopesOpened);
 
@@ -173,6 +199,13 @@ internal static class VulkanStats
     public static void NoteRebarFallback() => Interlocked.Increment(ref _rebarFallbacks);
 
     public static long RebarFallbacks => Interlocked.Read(ref _rebarFallbacks);
+
+    /// <summary>A multi-draw that did not fit its frame slot's indirect buffer and took an overflow buffer.</summary>
+    public static void NoteIndirectOverflow() => Interlocked.Increment(ref _indirectOverflows);
+
+    public static long IndirectOverflows => Interlocked.Read(ref _indirectOverflows);
+
+    private static long _indirectOverflows;
 
     public static void NoteDynamicStateCommands(int count) => Interlocked.Add(ref _dynamicStateCommands, count);
 
@@ -273,12 +306,22 @@ internal static class VulkanStats
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
+        VulkanAllocator? memory = MemorySource;
+        MemorySnapshot memorySnapshot = memory == null ? default : memory.Snapshot();
+
         return FormatIntervalLine(elapsed, frames, allocations, VulkanMemory.LiveAllocations,
                    uploads, uploadMs, created, deleted, dropped, overflows) + "\n" +
                FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
-               FormatCountersLine(counters);
+               FormatCountersLine(counters) + "\n" +
+               VulkanAllocator.FormatMemoryLine(memorySnapshot);
     }
+
+    /// <summary>
+    /// The allocator whose pool classes and heaps the <c>stats.memory</c> line
+    /// reports; the device sets it at init and clears it at dispose.
+    /// </summary>
+    public static volatile VulkanAllocator? MemorySource;
 
     /// <summary>The original stats line. Its format must not change.</summary>
     public static string FormatIntervalLine(double elapsed, long frames, long allocations, int liveAllocations,

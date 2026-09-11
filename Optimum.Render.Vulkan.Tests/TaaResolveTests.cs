@@ -64,8 +64,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -122,8 +122,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -202,8 +202,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -273,8 +273,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -350,8 +350,8 @@ public class TaaResolveTests
         double finiteShift = cameraDeltaX / far * (Size / 2.0) / Math.Tan(fov / 2.0);
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -428,8 +428,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -475,7 +475,7 @@ public class TaaResolveTests
     /// <see cref="JitteredReconstructionMatchesTheUnjitteredStaticEdge" />.
     /// </summary>
     private static unsafe float ResolveEdgeCentroid(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, GlStateTracker state,
+        VulkanContext context, SetupQueue commands, TextureManager textures, GlStateTracker state,
         RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
         DescriptorCache descriptors, (float x, float y) jitterPx, Func<float, float> sceneAt)
     {
@@ -525,8 +525,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -595,8 +595,8 @@ public class TaaResolveTests
         Skip.IfNot(TryCreateContext(_output, messages, out VulkanContext? context), "No usable Vulkan device.");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -693,8 +693,8 @@ public class TaaResolveTests
         _output.WriteLine($"eye {eyeHeight}: far-point-as-direction would drift the sky by ~{predictedBias:F2} px per frame");
 
         using (context)
-        using (var commands = new VulkanCommands(context!))
-        using (var textures = new TextureManager(context!, commands))
+        using (var commands = new SetupQueue(context!))
+        using (var textures = new TextureManager(context!, commands.Uploads))
         {
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
@@ -855,7 +855,7 @@ public class TaaResolveTests
     /// draw path follows, scoped to a single named-uniform, named-sampler pass.
     /// </summary>
     private static unsafe void ResolveOnce(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, GlStateTracker state,
+        VulkanContext context, SetupQueue commands, TextureManager textures, GlStateTracker state,
         RenderTargetManager targets, GraphicsPipelineCache pipelines, ShaderProgramResources program,
         DescriptorCache descriptors, TaaInputSet inputs, TaaUniforms uniforms, TaaAttachmentSet output)
     {
@@ -1091,7 +1091,7 @@ public class TaaResolveTests
     // --------------------------------------------------------------- readback
 
     private static unsafe byte[] ReadTextureBytes(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, int bytesPerPixel)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, int bytesPerPixel)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)Size * Size * (ulong)bytesPerPixel;

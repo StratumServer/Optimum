@@ -14,8 +14,8 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <summary>
 /// The pacing measurement the Phase 0 plan asks for: the frame-interval ring, the
 /// stats lines' stable tokens, the pacing gate reading them, every wait site being
-/// counted, and one GPU case that pins today's blocking upload so Phase 1B can
-/// flip it.
+/// counted, and the GPU case Phase 1B step 3 flipped: an upload inside a frame
+/// never blocks.
 /// </summary>
 public class PacingStatsTests
 {
@@ -144,7 +144,7 @@ public class PacingStatsTests
     }
 
     [Fact]
-    public void SampleIsTheOriginalLineFollowedByThreeTokenLines()
+    public void SampleIsTheOriginalLineFollowedByFourTokenLines()
     {
         // The first call may only arm the interval clock.
         VulkanStats.SampleIfDue(TimeSpan.Zero);
@@ -152,7 +152,9 @@ public class PacingStatsTests
 
         Assert.NotNull(sample);
         string[] lines = sample!.Split('\n');
-        Assert.Equal(4, lines.Length);
+        Assert.Equal(5, lines.Length);
+        // Phase 1B step 5: pool classes, ReBAR use and misses, used/budget per heap.
+        Assert.StartsWith("stats.memory blocks=", lines[4]);
         Assert.Matches(new Regex(
             @"^stats [\d.]+s: \d+ frames \([\d.]+ ms/frame\), \d+ allocations \(\d+ live\), " +
             @"\d+ blocking uploads costing \d+ ms \(\S+% of the interval\), textures \+\d+/-\d+, " +
@@ -171,6 +173,7 @@ public class PacingStatsTests
                  {
                      VulkanStats.FormatPacingLine(default),
                      VulkanStats.FormatCountersLine(default),
+                     VulkanAllocator.FormatMemoryLine(default),
                  })
         {
             foreach (Match token in Regex.Matches(line, @"([a-z0-9_]+)="))
@@ -185,6 +188,7 @@ public class PacingStatsTests
         Assert.Contains("stats.pacing", doc);
         Assert.Contains("stats.waits", doc);
         Assert.Contains("stats.counters", doc);
+        Assert.Contains("stats.memory", doc);
     }
 
     [Fact]
@@ -283,8 +287,11 @@ public class PacingStatsTests
             if (text.Contains("WaitForFences(")) Assert.Contains("VulkanStats.NoteWait(", text);
             // So does every timeline semaphore wait.
             if (text.Contains("WaitSemaphores(")) Assert.Contains("VulkanStats.NoteWait(", text);
-            // So does every queue submission (the queue lock is held through upload fence waits).
+            // So does every queue submission (the queue lock is shared with present).
             if (text.Contains("QueueSubmit(")) Assert.Contains("VulkanStats.NoteWait(", text);
+            // Phase 1B step 3: no synchronous upload submit exists anywhere.
+            Assert.DoesNotContain("SubmitAndWait", text);
+            Assert.DoesNotContain("BeforeSynchronousSubmit", text);
         }
 
         // Phase 1B step 1: the frame ring paces on the Frame timeline, never on a fence.
@@ -310,12 +317,23 @@ public class PacingStatsTests
         Assert.True(submitStart >= 0 && queueLock > submitStart && submitNoted > queueLock,
             "the frame submit must be timed from before the queue lock to after the submit");
 
-        string resources = Source("Core/VulkanResources.cs");
-        string submit = Body(resources, "public void SubmitAndWait(");
-        Assert.Contains("VulkanStats.NoteWait(site, start);", submit);
-        Assert.Contains("if (site == WaitSite.UploadSubmit) VulkanStats.NoteBlockingUpload();", submit);
+        // Phase 1B step 3: the upload batch rides the frame submission, first, and
+        // nothing in the upload path waits; its own between-frames submission is
+        // counted like the frame's.
+        Assert.Contains("_uploads.TakeOpenBatchLocked(out CommandBuffer uploadCommands, out ulong transferValue);", frameSubmit);
+        Assert.True(frameSubmit.IndexOf("commandBuffers[commandBufferCount++] = uploadCommands;", StringComparison.Ordinal) <
+                    frameSubmit.IndexOf("commandBuffers[commandBufferCount++] = commandBuffer;", StringComparison.Ordinal),
+            "the upload batch must precede the frame command buffer in the submission");
+        string uploads = Source("Transfer/UploadManager.cs");
+        Assert.DoesNotContain("WaitForFences(", uploads);
+        Assert.DoesNotContain("WaitSemaphores(", uploads);
+        Assert.DoesNotContain("WaitForTransfer(", uploads);
+        Assert.DoesNotContain("WaitForFrame(", uploads);
+        Assert.Contains("VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);", Body(uploads, "public ulong SubmitStandalone()"));
+        Assert.DoesNotContain("NoteBlockingUpload", uploads);
+        Assert.DoesNotContain("WaitSite.UploadSubmit", Source("Core/TextureManager.cs"));
 
-        string swapchain = Source("Core/Swapchain.cs");
+        string swapchain = Source("Present/Swapchain.cs");
         Assert.Contains("WaitSite.SwapchainAcquire", Body(swapchain, "public bool TryAcquire("));
         Assert.Contains("WaitSite.Present", Body(swapchain, "public void Present("));
 
@@ -331,31 +349,42 @@ public class PacingStatsTests
         Assert.Contains("_readbacks.WaitAndCopy(ticket, destination);", readBack);
         Assert.Contains("_frames.Timeline.WaitForFrame(ticket.FrameValue, WaitSite.Readback);",
             Source("Transfer/ReadbackManager.cs"));
-        // A between-frames readback waits on a setup fence, but it is not an upload.
-        Assert.Equal(Count(device, "_setupCommands.SubmitAndWait("), Count(device, "WaitSite.Readback);"));
+        // A between-frames readback waits on its upload batch's Transfer value, at the readback site.
+        Assert.Contains("_frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);", readBack);
+        Assert.DoesNotContain("WaitSite.UploadSubmit", device);
 
         // The per-draw dynamic-state count matches the commands actually recorded.
         string dynamicState = Body(device, "private void ApplyDynamicState(");
         Assert.Equal(VulkanStats.DynamicStateCommandsPerDraw, Count(dynamicState, "api.CmdSet"));
-        Assert.Contains("VulkanStats.NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw);", dynamicState);
+        // Phase 1B step 6: dirty-masked, so the count is what was emitted, not a constant.
+        Assert.Contains("DynamicStateDirty dirty = _dynamicState.Update(serial, values);", dynamicState);
+        Assert.Contains("VulkanStats.NoteDynamicStateCommands(emitted);", dynamicState);
+        Assert.DoesNotContain("NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw)", dynamicState);
 
         Assert.Contains("VulkanStats.NoteScopeOpened();", Source("Core/RenderTargetManager.cs"));
-        Assert.Contains("VulkanStats.NoteRebarFallback();", Source("Core/MeshManager.cs"));
+        // Phase 1B step 5: ReBAR misses are counted where the ReBAR class falls
+        // through, and a static mesh never asks for ReBAR.
+        Assert.Contains("VulkanStats.NoteRebarFallback();", Body(Source("Core/VulkanAllocator.cs"), "private MemoryAllocation AllocateReBarLocked("));
+        string meshCreateBuffer = Body(Source("Core/MeshManager.cs"), "private VulkanBuffer CreateBuffer(");
+        Assert.DoesNotContain("MemoryPoolClass.ReBar", meshCreateBuffer);
+        Assert.DoesNotContain("MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit", meshCreateBuffer);
+        Assert.Contains("_allocator.AdvanceFrame();", ringBegin);
         Assert.Equal(Count(device, "CmdPipelineBarrier2("), Count(device, "VulkanStats.NoteImageBarriers(1);"));
     }
 
     // ------------------------------------------------------------------ GPU
 
     /// <summary>
-    /// Today a texture upload inside a frame submits a setup command buffer and
-    /// waits for its fence: one blocking upload, one wait at the upload site.
-    /// Phase 1B (non-blocking transfer) flips both deltas to zero - rename this
-    /// test then, keep the readback half as it is. The readback that verifies the
-    /// pixels waits too, but at the readback site, and must never count as an
-    /// upload.
+    /// Phase 1B step 3 flipped this test (it was
+    /// TextureUploadInsideAFrameBlocksOnTheUploadSiteUntilPhase1B, pinning one
+    /// blocking upload and one wait at the upload site). A texture upload inside a
+    /// frame is recorded into the upload batch that the frame's one submission
+    /// carries first: no blocking upload, no wait at the upload site, no extra
+    /// submission. The readback that verifies the pixels waits, at the readback
+    /// site, and never counts as an upload.
     /// </summary>
     [SkippableFact]
-    public unsafe void TextureUploadInsideAFrameBlocksOnTheUploadSiteUntilPhase1B()
+    public unsafe void TextureUploadInsideAFrameNeverBlocks()
     {
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
@@ -383,6 +412,7 @@ public class PacingStatsTests
             long blockingBefore = VulkanStats.BlockingUploads;
             long requestsBefore = VulkanStats.UploadRequests;
             long uploadWaitsBefore = VulkanStats.WaitCount(WaitSite.UploadSubmit);
+            long submitsBefore = VulkanStats.WaitCount(WaitSite.QueueSubmit);
             fixed (byte* pixels = data)
                 seam.UploadTexture2D(texture, 0, 0, 0, size, size, EnumTexturePixelFormat.Rgba, (IntPtr)pixels);
             long blockingDelta = VulkanStats.BlockingUploads - blockingBefore;
@@ -390,6 +420,7 @@ public class PacingStatsTests
             long uploadWaitsDelta = VulkanStats.WaitCount(WaitSite.UploadSubmit) - uploadWaitsBefore;
 
             seam.Present();
+            long submitsDelta = VulkanStats.WaitCount(WaitSite.QueueSubmit) - submitsBefore;
 
             long blockingBeforeReadback = VulkanStats.BlockingUploads;
             long readbackWaitsBefore = VulkanStats.WaitCount(WaitSite.Readback);
@@ -400,9 +431,10 @@ public class PacingStatsTests
             Assert.Equal(data, pixelsOut);
 
             Assert.Equal(1, requestsDelta);
-            // Phase 1B: both of these become Assert.Equal(0, ...).
-            Assert.Equal(1, blockingDelta);
-            Assert.Equal(1, uploadWaitsDelta);
+            Assert.Equal(0, blockingDelta);
+            Assert.Equal(0, uploadWaitsDelta);
+            // The upload rode the frame's own submission.
+            Assert.Equal(1, submitsDelta);
 
             Assert.Equal(0, VulkanStats.BlockingUploads - blockingBeforeReadback);
             Assert.True(VulkanStats.WaitCount(WaitSite.Readback) - readbackWaitsBefore >= 1);
@@ -411,10 +443,10 @@ public class PacingStatsTests
         }
     }
     /// <summary>
-    /// A frame's vkQueueSubmit is a counted wait: it takes the queue lock that a
-    /// worker's synchronous upload holds through its fence wait. One frame, one
-    /// submit at the queue_submit site; the readback that checks the frame's
-    /// pixels goes through the setup queue path and adds none.
+    /// A frame's vkQueueSubmit is a counted wait: it takes the queue lock the
+    /// swapchain's present shares. One frame, one submit at the queue_submit site;
+    /// the between-frames readback that checks the frame's pixels submits its
+    /// upload batch on its own, which is exactly one more.
     /// </summary>
     [SkippableFact]
     public unsafe void AFrameSubmitIsCountedAtTheQueueSubmitSite()
@@ -448,7 +480,7 @@ public class PacingStatsTests
                 Assert.Equal(new byte[] { 64, 51, 191, 255 }, pixelsOut[i..(i + 4)]);
             }
             Assert.Equal(1, submitsAfterFrame - submitsBefore);
-            Assert.Equal(submitsAfterFrame, VulkanStats.WaitCount(WaitSite.QueueSubmit));
+            Assert.Equal(submitsAfterFrame + 1, VulkanStats.WaitCount(WaitSite.QueueSubmit));
 
             GpuTest.AssertClean(seam);
         }

@@ -326,13 +326,14 @@ public class ReadbackMidFrameTests
     }
 
     /// <summary>
-    /// A texture upload on the render thread in the middle of a frame submits
-    /// the frame's recorded part first (the clear of A) and recording continues
-    /// (the clear of B): both clears and the uploaded texels land, with two
-    /// frame submissions and no flush.
+    /// A texture upload on the render thread in the middle of a frame (between
+    /// the clear of A and the clear of B) no longer splits the frame (Phase 1B
+    /// step 3): it lands in the upload batch the frame's one submission carries
+    /// first. Both clears and the uploaded texels land, with one frame submission
+    /// and no flush.
     /// </summary>
     [SkippableFact]
-    public unsafe void AnUploadInsideAFrameSubmitsTheRecordedPartAndRecordingContinues()
+    public unsafe void AnUploadInsideAFrameRidesTheFramesOneSubmission()
     {
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
@@ -367,7 +368,7 @@ public class ReadbackMidFrameTests
             seam.ClearColor(0, 0f, 0f, 1f, 1f);
             seam.Present();
 
-            Assert.Equal(2, VulkanStats.WaitCount(WaitSite.QueueSubmit) - submitsBefore);
+            Assert.Equal(1, VulkanStats.WaitCount(WaitSite.QueueSubmit) - submitsBefore);
             AssertUnchanged(NeverSites, neverBefore);
 
             // Binding is a no-op between frames: read all three in the next frame.

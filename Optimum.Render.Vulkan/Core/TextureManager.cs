@@ -93,6 +93,13 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public ImageLayout Layout { get; set; } = ImageLayout.Undefined;
 
     /// <summary>
+    /// The frame command buffer generation that last used this texture; an
+    /// upload to a texture the frame being recorded already used goes inline.
+    /// See <see cref="UploadManager.NoteUse(CommandBuffer, VulkanTexture)" />.
+    /// </summary>
+    internal long FrameUse;
+
+    /// <summary>
     /// Single-layer views, created on demand and keyed by layer.
     ///
     /// <see cref="View" /> covers the whole image, which is what a sampler wants.
@@ -243,17 +250,17 @@ internal sealed unsafe class TextureManager : IDisposable
     }
 
     private readonly VulkanContext _context;
-    private readonly VulkanCommands _commands;
+    private readonly UploadManager _uploads;
     private readonly List<VulkanTexture?> _textures = new();
     private readonly Stack<int> _freeIds = new();
     private bool _disposed;
 
     public SamplerCache Samplers { get; }
 
-    public TextureManager(VulkanContext context, VulkanCommands commands)
+    public TextureManager(VulkanContext context, UploadManager uploads)
     {
         _context = context;
-        _commands = commands;
+        _uploads = uploads;
         Samplers = new SamplerCache(context);
 
         // Index 0 is reserved so a zero id never names a real texture.
@@ -278,15 +285,25 @@ internal sealed unsafe class TextureManager : IDisposable
 
     private int Register(VulkanTexture texture)
     {
-        if (_freeIds.Count > 0)
+        // Under the upload lock, like Delete: an upload from another thread
+        // looks its texture up again under the same lock.
+        _uploads.EnterLock();
+        try
         {
-            int reused = _freeIds.Pop();
-            _textures[reused] = texture;
-            return reused;
-        }
+            if (_freeIds.Count > 0)
+            {
+                int reused = _freeIds.Pop();
+                _textures[reused] = texture;
+                return reused;
+            }
 
-        _textures.Add(texture);
-        return _textures.Count - 1;
+            _textures.Add(texture);
+            return _textures.Count - 1;
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
     }
 
     /// <summary>
@@ -340,10 +357,10 @@ internal sealed unsafe class TextureManager : IDisposable
             throw new InvalidOperationException("vkCreateImage failed");
         }
 
-        api.GetImageMemoryRequirements(_context.Device, image, out MemoryRequirements requirements);
+        MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
         MemoryAllocation allocation = _context.Allocator.Allocate(
             requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
-            $"a {width}x{height} {format} image");
+            $"a {width}x{height} {format} image", MemoryPoolClass.DeviceImages, dedicated, default, image);
         if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
         {
             api.DestroyImage(_context.Device, image, null);
@@ -392,13 +409,15 @@ internal sealed unsafe class TextureManager : IDisposable
     /// Poison mode: fills every level and layer of a new image with
     /// <see cref="VulkanPoison" />'s value for its format, so a read of content
     /// nobody wrote is loud instead of whatever the allocator's memory held.
-    /// Synchronous on purpose; poison mode is a diagnostic, not a fast path.
+    /// Recorded into the upload batch like any upload: a fresh texture has no use
+    /// yet, so the clear runs before anything that could read it.
     /// </summary>
     private void Poison(VulkanTexture texture)
     {
         if (VulkanPoison.IsCompressed(texture.Format)) return;
 
-        _commands.SubmitAndWait(commandBuffer =>
+        CommandBuffer commandBuffer = _uploads.BeginRecording(inlineInFrame: false);
+        try
         {
             TransitionTexture(commandBuffer, texture, ImageLayout.TransferDstOptimal);
             var range = new ImageSubresourceRange(texture.Aspect, 0, texture.MipLevels, 0, texture.Layers);
@@ -414,14 +433,19 @@ internal sealed unsafe class TextureManager : IDisposable
                 _context.Api.CmdClearColorImage(commandBuffer, texture.Image,
                     ImageLayout.TransferDstOptimal, &color, 1, &range);
             }
-        });
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
     }
 
     /// <summary>
-    /// Uploads pixels into a region. Staging plus a copy, then back to a
-    /// shader-readable layout, submitted and waited on. That is stronger
-    /// ordering than GL guarantees, which makes it correct; recording the copy
-    /// inline in the frame's command buffer is the later optimisation.
+    /// Uploads pixels into a region: staged, copied, and back to a shader-readable
+    /// layout, recorded into the upload batch that the next frame submission runs
+    /// first. Nothing waits. When the frame command buffer being recorded already
+    /// used the texture, the copy goes inline into it instead, so a draw recorded
+    /// before the upload still sees the old texels, as on GL.
     /// </summary>
     public void Upload(
         int textureId, int level, int x, int y, uint width, uint height,
@@ -433,15 +457,18 @@ internal sealed unsafe class TextureManager : IDisposable
         ulong size = (ulong)width * height * (ulong)bytesPerPixel;
         if (size == 0) return;
 
-        using var staging = new VulkanBuffer(_context, size,
-            BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-
-        System.Buffer.MemoryCopy((void*)pixels, (void*)staging.Mapped, (long)size, (long)size);
-
         VulkanStats.NoteUploadRequest();
-        _commands.SubmitAndWait(commandBuffer =>
+        CommandBuffer commandBuffer = _uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));
+        try
         {
+            // Again under the lock: a delete on another thread either came first
+            // (nothing to upload to) or retires the texture against this batch's
+            // Transfer value, so the batch never names a destroyed image.
+            if (!ReferenceEquals(Get(textureId), texture)) return;
+
+            StagingSlice staging = _uploads.Stage(size);
+            System.Buffer.MemoryCopy((void*)pixels, (void*)staging.Pointer, (long)size, (long)size);
+
             if (_context.CheckpointsAvailable)
             {
                 _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Upload(textureId, width, height));
@@ -451,20 +478,26 @@ internal sealed unsafe class TextureManager : IDisposable
 
             var region = new BufferImageCopy
             {
+                BufferOffset = staging.Offset,
                 ImageSubresource = new ImageSubresourceLayers(texture.Aspect, (uint)level, layer, 1),
                 ImageOffset = new Offset3D(x, y, 0),
                 ImageExtent = new Extent3D(width, height, 1),
             };
-            _context.Api.CmdCopyBufferToImage(commandBuffer, staging.Handle, texture.Image,
+            _context.Api.CmdCopyBufferToImage(commandBuffer, staging.Buffer, texture.Image,
                 ImageLayout.TransferDstOptimal, 1, &region);
 
             TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
-        });
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
     }
 
     /// <summary>
     /// Builds the mip chain by successive blits, which is how every Vulkan
-    /// implementation of glGenerateMipmap works.
+    /// implementation of glGenerateMipmap works. Batched or inline by the same
+    /// rule as <see cref="Upload" />, so it follows the uploads it is built from.
     /// </summary>
     public void GenerateMipmaps(int textureId)
     {
@@ -472,8 +505,11 @@ internal sealed unsafe class TextureManager : IDisposable
         if (texture == null || texture.MipLevels <= 1) return;
 
         VulkanStats.NoteUploadRequest();
-        _commands.SubmitAndWait(commandBuffer =>
+        CommandBuffer commandBuffer = _uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));
+        try
         {
+            if (!ReferenceEquals(Get(textureId), texture)) return;
+
             Vk api = _context.Api;
             int mipWidth = (int)texture.Width;
             int mipHeight = (int)texture.Height;
@@ -517,7 +553,11 @@ internal sealed unsafe class TextureManager : IDisposable
 
             texture.Layout = ImageLayout.TransferSrcOptimal;
             TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
-        });
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
     }
 
     /// <summary>
@@ -582,21 +622,34 @@ internal sealed unsafe class TextureManager : IDisposable
 
     public void Delete(int textureId, FrameRing? ring = null)
     {
-        VulkanTexture? texture = Get(textureId);
-        if (texture == null) return;
+        // Under the upload lock; see Upload. Retiring inside it keys the entry on
+        // the Transfer value of any batch that recorded this texture already.
+        _uploads.EnterLock();
+        try
+        {
+            VulkanTexture? texture = Get(textureId);
+            if (texture == null) return;
 
-        _textures[textureId] = null;
-        _freeIds.Push(textureId);
+            _textures[textureId] = null;
+            _freeIds.Push(textureId);
 
-        // Handing it to the ring means it outlives any frame still referencing it.
-        if (ring != null) ring.DeferDeletion(texture);
-        else texture.Dispose();
+            // Handing it to the ring means it outlives any frame still referencing it.
+            if (ring != null) ring.DeferDeletion(texture);
+            else texture.Dispose();
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
     }
 
     // ------------------------------------------------------------------ barriers
 
     public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ImageLayout target)
     {
+        // Every path that records a texture into a command buffer goes through
+        // here (attachments, reads, copies, blits), even when no barrier is due.
+        _uploads.NoteUse(commandBuffer, texture);
         if (texture.Layout == target) return;
         TransitionRange(commandBuffer, texture, 0, texture.MipLevels, texture.Layout, target);
         texture.Layout = target;

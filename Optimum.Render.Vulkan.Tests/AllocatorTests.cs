@@ -232,8 +232,8 @@ public class AllocatorTests
 
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             var buffer = new VulkanBuffer(context!, 4096,
                 BufferUsageFlags.VertexBufferBit,

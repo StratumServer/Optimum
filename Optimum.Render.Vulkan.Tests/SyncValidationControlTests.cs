@@ -32,8 +32,8 @@ public class SyncValidationControlTests
         {
             Skip.IfNot(context!.ValidationEnabled, "Validation layer not installed.");
             const uint size = 16;
-            using var commands = new VulkanCommands(context);
-            using var textures = new TextureManager(context, commands);
+            using var commands = new SetupQueue(context);
+            using var textures = new TextureManager(context, commands.Uploads);
             VulkanTexture a = textures.Get(textures.Create(size, size, Format.R8G8B8A8Unorm))!;
             VulkanTexture b = textures.Get(textures.Create(size, size, Format.R8G8B8A8Unorm))!;
             VulkanTexture c = textures.Get(textures.Create(size, size, Format.R8G8B8A8Unorm))!;

@@ -58,8 +58,8 @@ public class WorldRenderPathTests
         {
             const uint size = 8;
             const uint layers = 3;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -118,8 +118,8 @@ public class WorldRenderPathTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -191,8 +191,8 @@ public class WorldRenderPathTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -265,8 +265,8 @@ public class WorldRenderPathTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -330,7 +330,7 @@ public class WorldRenderPathTests
         }, compiler);
 
     private static unsafe void RenderFullscreen(
-        VulkanContext context, VulkanCommands commands, RenderTargetManager targets,
+        VulkanContext context, SetupQueue commands, RenderTargetManager targets,
         GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
         int framebuffer, uint size, bool depthTest = false, QueryPool queryPool = default)
     {
@@ -411,7 +411,7 @@ public class WorldRenderPathTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, uint layer = 0)
     {
         VulkanTexture texture = textures.Get(textureId)!;
@@ -439,12 +439,12 @@ public class WorldRenderPathTests
     }
 
     private static byte[] FirstPixel(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, uint layer) =>
         ReadTexture(context, commands, textures, textureId, size, layer).Take(3).ToArray();
 
     private static unsafe float ReadDepth(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * sizeof(float);

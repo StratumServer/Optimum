@@ -254,14 +254,15 @@ before it lack the field and still parse, but cannot be compared against a basel
 [Optimum] fps window=<s> frames=<n> mean=<ms> min=<ms> max=<ms> p99=<ms> stddev=<ms>
 ```
 
-`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of four lines. The first line is
-unchanged from earlier builds; the other three carry stable `key=value` tokens:
+`OPTIMUM_VULKAN_STATS`, Vulkan only, one sample per second of five lines. The first line is
+unchanged from earlier builds; the other four carry stable `key=value` tokens:
 
 ```
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
 stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
 stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
 stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes>
+stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
 ```
 
 - The first line's "blocking uploads" counts every synchronous setup submission (uploads and
@@ -277,9 +278,19 @@ stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fa
   frame including the queue lock, which a worker's synchronous upload holds through its fence
   wait).
 - `stats.counters`, per interval: `scopes` (vkCmdBeginRendering), `barriers` (image barriers
-  recorded), `rebar_fallbacks` (static mesh buffers that asked for ReBAR and got plain host
-  memory), `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame
+  recorded), `rebar_fallbacks` (per-frame dynamic buffers - uniform ring, indirect ring - that
+  asked for the ReBAR pool class and fell through to host staging memory because no ReBAR type
+  exists, the cap was reached or `OPTIMUM_VULKAN_NO_REBAR=1`; each is also logged),
+  `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame
   slot used) and `uniform_ring_capacity` (bytes per slot).
+- `stats.memory`, a snapshot at sample time (Phase 1B step 5): `blocks` (live device
+  allocations the allocator holds), `dedicated` (of them, one-resource blocks), `rebar_used` and
+  `rebar_cap` (ReBAR class bytes and its cap, min(192 MiB, heap budget x 0.25)), `rebar_misses`
+  and `empty_blocks_freed` (cumulative; empty pooled blocks are freed after 120 frames, or at once
+  while a heap is over budget), `budget_ext` (1 when `VK_EXT_memory_budget` supplies the budgets,
+  0 for heap x 0.7; `OPTIMUM_VULKAN_NO_MEMORY_BUDGET=1` forces 0), `class_bytes` (block bytes per
+  pool class in the order DeviceImages, DeviceBuffers, Staging, ReBar, Transient, Dedicated) and
+  `heaps` (this allocator's bytes and the budget, per memory heap).
 
 ## 4. Still owed from P4, to be closed in this matrix
 
