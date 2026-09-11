@@ -206,7 +206,6 @@ internal sealed unsafe class PassRecorder
             if (texture == null) continue;
 
             AttachmentUse attachment = _uses[use];
-            _textures.Require(_barriers, commandBuffer, texture, attachment.Usage);
             if (_graph.TakeForLoad(texture, framebuffer.Color[i].Layer, depth: false, out PendingClear clear))
             {
                 attachments[i].LoadOp = AttachmentLoadOp.Clear;
@@ -216,6 +215,12 @@ internal sealed unsafe class PassRecorder
             {
                 attachments[i].LoadOp = passIndex >= 0 ? _graph.PlannedLoad(passIndex, use) : AttachmentLoadOp.Load;
             }
+            // LOAD reads the attachment: a plain-write declaration only drops the read
+            // access when the contents are not loaded (sync validation: read-after-write).
+            ResourceUsage usage = attachment.Usage == ResourceUsage.ColorWrite && attachments[i].LoadOp == AttachmentLoadOp.Load
+                ? ResourceUsage.ColorBlend
+                : attachment.Usage;
+            _textures.Require(_barriers, commandBuffer, texture, usage);
             use++;
         }
 
