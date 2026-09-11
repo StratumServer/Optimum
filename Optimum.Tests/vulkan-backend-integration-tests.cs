@@ -658,8 +658,51 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("internal static bool FragmentOutputIsAssigned(string source, string name)", layout);
         string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
         Assert.Contains("if (instanceCount <= 0) return;", device);
+    }
+
+    /// <summary>
+    /// Phase 2 step 1: every image barrier derives its stages from the usage
+    /// through ResourceStateTracker and is recorded by BarrierBatcher; no barrier
+    /// on the texture, attachment, present or upload path names ALL_COMMANDS.
+    /// </summary>
+    [Fact]
+    public void ImageBarriersGoThroughTheBatcherWithUsageDerivedStages()
+    {
+        string batcher = Read("Optimum.Render.Vulkan/Graph/BarrierBatcher.cs");
+        Assert.Contains("_api.CmdPipelineBarrier2(commandBuffer, &dependency);", batcher);
+        Assert.Contains("VulkanStats.NoteBarrierCommand();", batcher);
+        Assert.Contains("throw new InvalidOperationException(\"image barriers flushed inside an open rendering scope\");", batcher);
+        Assert.Contains("public static UsageState For(ResourceUsage usage, bool depth)",
+            Read("Optimum.Render.Vulkan/Graph/ResourceUsage.cs"));
+
+        foreach (string path in new[]
+                 {
+                     "Optimum.Render.Vulkan/Core/TextureManager.cs",
+                     "Optimum.Render.Vulkan/Core/RenderTargetManager.cs",
+                     "Optimum.Render.Vulkan/Present/IPresentPath.cs",
+                     "Optimum.Render.Vulkan/VulkanDevice.cs",
+                     "Optimum.Render.Vulkan/Transfer/ReadbackManager.cs",
+                 })
+        {
+            string source = Read(path);
+            Assert.DoesNotContain("CmdPipelineBarrier2(", source);
+            Assert.DoesNotContain("AllCommandsBit", source);
+        }
+
         string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
-        Assert.Contains("internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer)", textures);
+        Assert.DoesNotContain("AccessForLayout", textures);
+        Assert.Contains("_barriers.Require(texture, baseMip, mipCount, 0, texture.Layers, usage, discard);", textures);
+        Assert.Contains("TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferDst, discard: true);", textures);
+
+        string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
+        Assert.Contains("_barriers.Flush(commandBuffer);\n\n        fixed (RenderingAttachmentInfo* attachmentsPtr = attachments)",
+            targets.Replace("\r\n", "\n"));
+
+        string uploads = Read("Optimum.Render.Vulkan/Transfer/UploadManager.cs");
+        Assert.DoesNotContain("AllCommandsBit", uploads);
+        Assert.Contains("Graph.BufferUsageState.UsesOf(destination.Usage);", uploads);
+
+        Assert.Contains("barrier_commands={8} barriers_per_frame={9:F1}", Read("Optimum.Render.Vulkan/Core/VulkanStats.cs"));
     }
 
     [Fact]

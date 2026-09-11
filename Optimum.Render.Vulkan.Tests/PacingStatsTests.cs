@@ -132,8 +132,8 @@ public class PacingStatsTests
 
         Assert.Equal(
             "stats.counters blocking_uploads=1 uploads=2 scopes=3 barriers=4 rebar_fallbacks=5 " +
-            "dynamic_state=6 uniform_ring_used=7 uniform_ring_capacity=8",
-            VulkanStats.FormatCountersLine(new CounterSample(1, 2, 3, 4, 5, 6, 7, 8)));
+            "dynamic_state=6 uniform_ring_used=7 uniform_ring_capacity=8 barrier_commands=9 barriers_per_frame=2.0",
+            VulkanStats.FormatCountersLine(new CounterSample(1, 2, 3, 4, 5, 6, 7, 8, 9, 2)));
 
         // The enum and the token table cannot drift apart.
         Assert.Equal(VulkanStats.WaitSiteCount, Enum.GetValues<WaitSite>().Length);

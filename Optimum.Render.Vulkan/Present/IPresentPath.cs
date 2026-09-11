@@ -1,4 +1,5 @@
 using System;
+using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
 namespace Optimum.Render.Vulkan.Core;
@@ -63,6 +64,11 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
     private readonly VulkanContext _context;
     private readonly TextureManager _textures;
     private readonly Func<VulkanTexture?> _source;
+    /// <summary>Created at the first record, so a path built for its stage table alone needs no texture table.</summary>
+    private BarrierBatcher? _barriers;
+
+    /// <summary>The acquired image's state; reset per frame, since its contents are discarded.</summary>
+    private readonly ResourceStateTracker _swapchainImage = new(1, 1, depth: false);
 
     public BlitPresentPath(VulkanContext context, TextureManager textures, Func<VulkanTexture?> source)
     {
@@ -78,15 +84,20 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
         Image destination = target.Image;
 
         // Every present leaves the swapchain image in PRESENT_SRC, and nothing
-        // else writes it, so UNDEFINED discards nothing that matters.
-        TransitionSwapchainImage(commandBuffer, destination,
-            ImageLayout.Undefined, ImageLayout.TransferDstOptimal,
-            PipelineStageFlags2.TransferBit, PipelineStageFlags2.TransferBit);
+        // else writes it, so UNDEFINED discards nothing that matters. The
+        // destination and the source move in one barrier command.
+        // The acquire touched it last, at the stage this submission waits on it.
+        BarrierBatcher barriers = _barriers ??= _textures.CreateBatcher();
+        _swapchainImage.Reset((PipelineStageFlags2)(ulong)AcquireWaitStage);
+        barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
+            ResourceUsage.TransferDst, discard: true);
 
         VulkanTexture? source = _source();
+        if (source != null) _textures.Require(barriers, commandBuffer, source, ResourceUsage.TransferSrc);
+        barriers.Flush(commandBuffer);
+
         if (source != null)
         {
-            _textures.TransitionTexture(commandBuffer, source, ImageLayout.TransferSrcOptimal);
 
             var blit = new ImageBlit
             {
@@ -105,35 +116,9 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
                 1, &blit, Filter.Linear);
         }
 
-        TransitionSwapchainImage(commandBuffer, destination,
-            ImageLayout.TransferDstOptimal, ImageLayout.PresentSrcKhr,
-            PipelineStageFlags2.TransferBit, PipelineStageFlags2.BottomOfPipeBit);
-    }
-
-    private void TransitionSwapchainImage(
-        CommandBuffer commandBuffer, Image image, ImageLayout from, ImageLayout to,
-        PipelineStageFlags2 srcStage, PipelineStageFlags2 dstStage)
-    {
-        var barrier = new ImageMemoryBarrier2
-        {
-            SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = srcStage,
-            SrcAccessMask = from == ImageLayout.TransferDstOptimal ? AccessFlags2.TransferWriteBit : AccessFlags2.None,
-            DstStageMask = dstStage,
-            DstAccessMask = to == ImageLayout.TransferDstOptimal ? AccessFlags2.TransferWriteBit : AccessFlags2.None,
-            OldLayout = from,
-            NewLayout = to,
-            Image = image,
-            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
-        };
-
-        var dependency = new DependencyInfo
-        {
-            SType = StructureType.DependencyInfo,
-            ImageMemoryBarrierCount = 1,
-            PImageMemoryBarriers = &barrier,
-        };
-        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
-        VulkanStats.NoteImageBarriers(1);
+        // TRANSFER_DST (written at TRANSFER) to PRESENT_SRC (BOTTOM_OF_PIPE, no access).
+        barriers.Require(destination, ImageAspectFlags.ColorBit, _swapchainImage, 0, 1, 0, 1,
+            ResourceUsage.PresentSrc, discard: false);
+        barriers.Flush(commandBuffer);
     }
 }

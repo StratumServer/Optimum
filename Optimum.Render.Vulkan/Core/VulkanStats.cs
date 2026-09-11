@@ -118,6 +118,7 @@ internal static class VulkanStats
     private static long _uploadRequests;
     private static long _scopesOpened;
     private static long _imageBarriers;
+    private static long _barrierCommands;
     private static long _rebarFallbacks;
     private static long _dynamicStateCommands;
     private static long _uniformRingPeak;
@@ -194,6 +195,11 @@ internal static class VulkanStats
     public static void NoteImageBarriers(int count) => Interlocked.Add(ref _imageBarriers, count);
 
     public static long ImageBarriers => Interlocked.Read(ref _imageBarriers);
+
+    /// <summary>One vkCmdPipelineBarrier2 carrying image barriers (a BarrierBatcher flush).</summary>
+    public static void NoteBarrierCommand() => Interlocked.Increment(ref _barrierCommands);
+
+    public static long BarrierCommands => Interlocked.Read(ref _barrierCommands);
 
     /// <summary>A buffer that asked for ReBAR (device-local and host-visible) and fell back to plain host memory.</summary>
     public static void NoteRebarFallback() => Interlocked.Increment(ref _rebarFallbacks);
@@ -302,7 +308,9 @@ internal static class VulkanStats
             RebarFallbacks: Interlocked.Exchange(ref _rebarFallbacks, 0),
             DynamicState: Interlocked.Exchange(ref _dynamicStateCommands, 0),
             UniformRingUsed: Interlocked.Exchange(ref _uniformRingPeak, 0),
-            UniformRingCapacity: Interlocked.Read(ref _uniformRingCapacity));
+            UniformRingCapacity: Interlocked.Read(ref _uniformRingCapacity),
+            BarrierCommands: Interlocked.Exchange(ref _barrierCommands, 0),
+            Frames: frames);
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -359,9 +367,11 @@ internal static class VulkanStats
     public static string FormatCountersLine(CounterSample counters) =>
         string.Format(CultureInfo.InvariantCulture,
             "stats.counters blocking_uploads={0} uploads={1} scopes={2} barriers={3} rebar_fallbacks={4} " +
-            "dynamic_state={5} uniform_ring_used={6} uniform_ring_capacity={7}",
+            "dynamic_state={5} uniform_ring_used={6} uniform_ring_capacity={7} " +
+            "barrier_commands={8} barriers_per_frame={9:F1}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
-            counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity);
+            counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
+            counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0);
 
     private static long _lastSample;
 }
@@ -375,7 +385,9 @@ internal readonly record struct CounterSample(
     long RebarFallbacks,
     long DynamicState,
     long UniformRingUsed,
-    long UniformRingCapacity);
+    long UniformRingCapacity,
+    long BarrierCommands = 0,
+    long Frames = 0);
 
 /// <summary>Percentiles and spread of the frame-interval ring at one moment.</summary>
 internal readonly record struct FramePacingSnapshot(

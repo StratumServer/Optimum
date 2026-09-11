@@ -367,6 +367,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         // An inline upload records transfer commands into the frame command
         // buffer, which no rendering scope may enclose.
         _uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);
+        // A barrier flushed into the frame command buffer while a scope is open
+        // is a transition inside the scope; debug builds reject it.
+        _textures.ScopeOpen = commandBuffer =>
+            _frameActive && _targets.RenderingActive && commandBuffer.Handle == Commands.Handle;
+        _barriers = _textures.CreateBatcher();
         _pipelines = new GraphicsPipelineCache(_context);
         _descriptors = new DescriptorCache(_context);
         _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
@@ -1973,6 +1978,12 @@ public sealed unsafe class VulkanDevice : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// The frame thread's barriers for sampled textures and feedback snapshots:
+    /// every texture a draw samples moves in one barrier command.
+    /// </summary>
+    private Graph.BarrierBatcher _barriers = null!;
+
     private void TransitionSampledTextures(CommandBuffer commandBuffer, ShaderProgramResources program)
     {
         _sampledTextureOverrides.Clear();
@@ -2027,10 +2038,14 @@ public sealed unsafe class VulkanDevice : IDisposable
             if (texture.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
 
             _targets.EndRendering(commandBuffer);
-            _textures.TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
+            _textures.Require(_barriers, commandBuffer, texture, Graph.ResourceUsage.SampleFragment);
         }
 
-        if (!placeholderNeeded) return;
+        if (!placeholderNeeded)
+        {
+            _barriers.Flush(commandBuffer);
+            return;
+        }
 
         foreach (int id in new[]
                  {
@@ -2041,8 +2056,9 @@ public sealed unsafe class VulkanDevice : IDisposable
             if (placeholder == null || placeholder.Layout == ImageLayout.ShaderReadOnlyOptimal) continue;
 
             _targets.EndRendering(commandBuffer);
-            _textures.TransitionTexture(commandBuffer, placeholder, ImageLayout.ShaderReadOnlyOptimal);
+            _textures.Require(_barriers, commandBuffer, placeholder, Graph.ResourceUsage.SampleFragment);
         }
+        _barriers.Flush(commandBuffer);
     }
 
     private void SnapshotColorAttachment(CommandBuffer commandBuffer, int textureId, VulkanTexture source)
@@ -2060,8 +2076,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         VulkanTexture copy = _textures.Get(copyId)!;
         copy.State = source.State;
 
-        _textures.TransitionTexture(commandBuffer, source, ImageLayout.TransferSrcOptimal);
-        _textures.TransitionTexture(commandBuffer, copy, ImageLayout.TransferDstOptimal);
+        // Source, copy, and any texture this draw already queued: one command.
+        _textures.Require(_barriers, commandBuffer, source, Graph.ResourceUsage.TransferSrc);
+        _textures.Require(_barriers, commandBuffer, copy, Graph.ResourceUsage.TransferDst);
+        _barriers.Flush(commandBuffer);
         for (uint level = 0; level < source.MipLevels; level++)
         {
             var region = new ImageCopy
@@ -2074,7 +2092,8 @@ public sealed unsafe class VulkanDevice : IDisposable
             _context.Api.CmdCopyImage(commandBuffer, source.Image, ImageLayout.TransferSrcOptimal,
                 copy.Image, ImageLayout.TransferDstOptimal, 1, &region);
         }
-        _textures.TransitionTexture(commandBuffer, copy, ImageLayout.ShaderReadOnlyOptimal);
+        _textures.Require(_barriers, commandBuffer, copy, Graph.ResourceUsage.SampleFragment);
+        _barriers.Flush(commandBuffer);
         _sampledTextureOverrides.Add(textureId, copyId);
         if (RenderTrace.Enabled)
             RenderTrace.Write("snapshot texture=" + textureId + " copy=" + copyId +

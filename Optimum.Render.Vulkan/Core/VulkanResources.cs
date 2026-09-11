@@ -36,6 +36,9 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     public Buffer Handle { get; }
     public ulong Size { get; }
 
+    /// <summary>What the buffer was created for; the barriers around a staged copy name these uses.</summary>
+    public BufferUsageFlags Usage { get; }
+
     /// <summary>Never reused, unlike <see cref="Handle" />; see <see cref="ResourceIds" />.</summary>
     public ulong Id { get; } = ResourceIds.Next();
 
@@ -67,6 +70,7 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     {
         _context = context;
         Size = size;
+        Usage = usage;
 
         var createInfo = new BufferCreateInfo
         {
