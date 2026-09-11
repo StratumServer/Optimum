@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Config;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -298,11 +299,145 @@ internal static class TextureDump
     public static int BytesPerTexel(Format format) => format switch
     {
         Format.R16G16B16A16Sfloat => 8,
+        Format.R16G16B16A16Unorm => 8,
+        Format.R32G32B32A32Sfloat => 16,
         Format.R32Sfloat => 4,
         Format.R16Sfloat => 2,
+        Format.D32Sfloat => 4,
+        Format.D16Unorm => 2,
         Format.R8Unorm or Format.R8Uint or Format.R8Srgb => 1,
         _ => 4,
     };
+
+    /// <summary>
+    /// The GL token for a Vulkan format, for textures created without one
+    /// (<see cref="VulkanTexture.GlInternalFormat" /> is 0). The inverse of
+    /// <see cref="GlEnums.TextureFormatFromGl" /> where that mapping is one to one.
+    /// </summary>
+    public static int GlInternalFormatOf(Format format) => format switch
+    {
+        Format.R8G8B8A8Unorm or Format.R8G8B8A8Srgb or Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb => 0x8058,
+        Format.R8Unorm => 0x8229,
+        Format.R16G16B16A16Sfloat => 0x881A,
+        Format.R16G16B16A16Unorm => 0x805B,
+        Format.R32G32B32A32Sfloat => 0x8814,
+        Format.R16Sfloat => 0x822D,
+        Format.R32Sfloat => 0x822E,
+        Format.B10G11R11UfloatPack32 => 0x8C3A,
+        Format.D32Sfloat => 0x8CAC,
+        Format.D16Unorm => 0x81A5,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Decodes a raw level-0 readback (<paramref name="data" />, rows in memory
+    /// order, which is GL order) into the parity dump's shared representation -
+    /// what <c>glGetTexImage</c> returns on the OpenGL path: RGBA8 bytes for 8-bit
+    /// unsigned-normalised formats, RGBA float32 for other colour formats (missing
+    /// channels 0, alpha 1, as GL fills them), one float32 per texel for depth.
+    /// Returns null for a format the dump does not decode.
+    /// </summary>
+    public static OptimumTextureReadback? ToParityReadback(Format format, int glInternalFormat,
+        int width, int height, ReadOnlySpan<byte> data)
+    {
+        if (width <= 0 || height <= 0) return null;
+        int texels = width * height;
+        if (data.Length < texels * BytesPerTexel(format)) return null;
+
+        var readback = new OptimumTextureReadback
+        {
+            GlInternalFormat = glInternalFormat,
+            Width = width,
+            Height = height,
+        };
+
+        switch (format)
+        {
+            case Format.R8G8B8A8Unorm or Format.R8G8B8A8Srgb:
+                readback.Bytes = data.Slice(0, texels * 4).ToArray();
+                return readback;
+            case Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb:
+            {
+                var bytes = new byte[texels * 4];
+                for (int i = 0; i < texels; i++)
+                {
+                    bytes[i * 4] = data[i * 4 + 2];
+                    bytes[i * 4 + 1] = data[i * 4 + 1];
+                    bytes[i * 4 + 2] = data[i * 4];
+                    bytes[i * 4 + 3] = data[i * 4 + 3];
+                }
+                readback.Bytes = bytes;
+                return readback;
+            }
+            case Format.R8Unorm:
+            {
+                var bytes = new byte[texels * 4];
+                for (int i = 0; i < texels; i++)
+                {
+                    bytes[i * 4] = data[i];
+                    bytes[i * 4 + 3] = 255;
+                }
+                readback.Bytes = bytes;
+                return readback;
+            }
+            case Format.R16G16B16A16Sfloat:
+            {
+                var source = MemoryMarshal.Cast<byte, Half>(data);
+                var floats = new float[texels * 4];
+                for (int i = 0; i < floats.Length; i++) floats[i] = (float)source[i];
+                readback.Floats = floats;
+                return readback;
+            }
+            case Format.R16G16B16A16Unorm:
+            {
+                var source = MemoryMarshal.Cast<byte, ushort>(data);
+                var floats = new float[texels * 4];
+                for (int i = 0; i < floats.Length; i++) floats[i] = source[i] / 65535f;
+                readback.Floats = floats;
+                return readback;
+            }
+            case Format.R32G32B32A32Sfloat:
+                readback.Floats = MemoryMarshal.Cast<byte, float>(data).Slice(0, texels * 4).ToArray();
+                return readback;
+            case Format.R16Sfloat:
+            {
+                var source = MemoryMarshal.Cast<byte, Half>(data);
+                var floats = new float[texels * 4];
+                for (int i = 0; i < texels; i++)
+                {
+                    floats[i * 4] = (float)source[i];
+                    floats[i * 4 + 3] = 1f;
+                }
+                readback.Floats = floats;
+                return readback;
+            }
+            case Format.R32Sfloat:
+            {
+                var source = MemoryMarshal.Cast<byte, float>(data);
+                var floats = new float[texels * 4];
+                for (int i = 0; i < texels; i++)
+                {
+                    floats[i * 4] = source[i];
+                    floats[i * 4 + 3] = 1f;
+                }
+                readback.Floats = floats;
+                return readback;
+            }
+            case Format.D32Sfloat:
+                readback.Floats = MemoryMarshal.Cast<byte, float>(data).Slice(0, texels).ToArray();
+                return readback;
+            case Format.D16Unorm:
+            {
+                var source = MemoryMarshal.Cast<byte, ushort>(data);
+                var floats = new float[texels];
+                for (int i = 0; i < texels; i++) floats[i] = source[i] / 65535f;
+                readback.Floats = floats;
+                return readback;
+            }
+            default:
+                return null;
+        }
+    }
 
     /// <summary>Clamps [0,1] colour data to a byte.</summary>
     private static byte ColorByte(float value) => (byte)(Math.Clamp(value, 0f, 1f) * 255f);

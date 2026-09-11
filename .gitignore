@@ -75,6 +75,10 @@ docs/*
 # ...and the frozen temporal frame contract, for the same reason: the P6 stability
 # test (Optimum.Tests/temporal-contract-tests.cs) reads it.
 !docs/temporal-frame-contract.md
+# ...and the Vulkan acceptance checklist and the parity allowlist: ssim.py reads the
+# allowlist, and Optimum.Tests/parity-dump-coverage-tests.cs reads both.
+!docs/vulkan-acceptance.md
+!docs/parity-allowlist.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1

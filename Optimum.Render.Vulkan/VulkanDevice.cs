@@ -1221,6 +1221,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         int id = _textures.Create((uint)width, (uint)height,
             GlEnums.TextureFormatFrom(internalFormat), generateMipmaps: generateMipmaps);
+        RecordGlInternalFormat(id, (int)internalFormat);
 
         if (pixels != IntPtr.Zero)
         {
@@ -1235,6 +1236,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         Format format = GlEnums.TextureFormatFromGl(glInternalFormat);
         int id = _textures.Create((uint)width, (uint)height, format, generateMipmaps: generateMipmaps);
+        RecordGlInternalFormat(id, glInternalFormat);
 
         if (pixels != IntPtr.Zero && bytesPerPixel > 0)
         {
@@ -2568,45 +2570,91 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
             int width = (int)texture.Width;
             int height = (int)texture.Height;
-            int bytesPerPixel = BytesPerPixel(texture.Format);
-            ulong bytes = (ulong)width * (ulong)height * (ulong)bytesPerPixel;
-
-            FlushFrame();
-            _context.Api.DeviceWaitIdle(_context.Device);
-
-            using var readback = new VulkanBuffer(_context, bytes,
-                BufferUsageFlags.TransferDstBit,
-                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-
-            ImageLayout restore = texture.Layout;
-            _setupCommands.SubmitAndWait(commandBuffer =>
-            {
-                _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
-
-                var region = new BufferImageCopy
-                {
-                    ImageSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-                    ImageOffset = new Offset3D(0, 0, 0),
-                    ImageExtent = new Extent3D((uint)width, (uint)height, 1),
-                };
-                _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
-                    ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
-            });
+            byte[] data = ReadBackLevel0(texture);
 
             bool bgra = texture.Format is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb;
-            bool written = TextureDump.Write(textureId, width, height, bgra, texture.Format,
-                new ReadOnlySpan<byte>((void*)readback.Mapped, (int)bytes));
+            bool written = TextureDump.Write(textureId, width, height, bgra, texture.Format, data);
             if (written) TextureDump.Complete(textureId);
 
             RenderTrace.Write("texture dump: " + textureId + " " + width + "x" + height +
                 " " + texture.Format + " mips=" + texture.MipLevels + " -> " + (written ? "ok" : "failed"));
-
-            if (restore != ImageLayout.Undefined)
-            {
-                _setupCommands.SubmitAndWait(commandBuffer =>
-                    _textures.TransitionTexture(commandBuffer, texture, restore));
-            }
         }
+    }
+
+    /// <summary>
+    /// Copies level 0 of a texture into host memory, raw texels in the image's own
+    /// format, rows in memory order (GL order: the backend never flips Y). Submits
+    /// what the frame has recorded first and waits, the way a mid-frame
+    /// <see cref="ReadDefaultFramebuffer" /> does, so the frame stays open. Depth
+    /// images are copied through their depth aspect.
+    /// </summary>
+    private byte[] ReadBackLevel0(VulkanTexture texture)
+    {
+        int width = (int)texture.Width;
+        int height = (int)texture.Height;
+        ulong bytes = (ulong)width * (ulong)height * (ulong)BytesPerPixel(texture.Format);
+        ImageAspectFlags aspect = (texture.Aspect & ImageAspectFlags.DepthBit) != 0
+            ? ImageAspectFlags.DepthBit
+            : ImageAspectFlags.ColorBit;
+
+        FlushFrame();
+        _context.Api.DeviceWaitIdle(_context.Device);
+
+        using var readback = new VulkanBuffer(_context, bytes,
+            BufferUsageFlags.TransferDstBit,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+
+        ImageLayout restore = texture.Layout;
+        _setupCommands.SubmitAndWait(commandBuffer =>
+        {
+            _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
+
+            var region = new BufferImageCopy
+            {
+                ImageSubresource = new ImageSubresourceLayers(aspect, 0, 0, 1),
+                ImageOffset = new Offset3D(0, 0, 0),
+                ImageExtent = new Extent3D((uint)width, (uint)height, 1),
+            };
+            _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
+                ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
+        });
+
+        byte[] data = new ReadOnlySpan<byte>((void*)readback.Mapped, (int)bytes).ToArray();
+
+        if (restore != ImageLayout.Undefined)
+        {
+            _setupCommands.SubmitAndWait(commandBuffer =>
+                _textures.TransitionTexture(commandBuffer, texture, restore));
+        }
+        return data;
+    }
+
+    private void RecordGlInternalFormat(int textureId, int glInternalFormat)
+    {
+        VulkanTexture? texture = _textures.Get(textureId);
+        if (texture != null) texture.GlInternalFormat = glInternalFormat;
+    }
+
+    /// <summary>
+    /// The parity dump's readback (<see cref="OptimumParityDump" />): level 0 in
+    /// the representation glGetTexImage produces on the OpenGL path, decoded by
+    /// <see cref="TextureDump.ToParityReadback" />. Debug only.
+    /// </summary>
+    public OptimumTextureReadback? ReadTextureForParity(int textureId)
+    {
+        if (!_frameActive) return null;
+        VulkanTexture? texture = _textures.Get(textureId);
+        if (texture == null || texture.Cube || texture.Layers > 1) return null;
+
+        byte[] data = ReadBackLevel0(texture);
+        int glInternalFormat = texture.GlInternalFormat != 0
+            ? texture.GlInternalFormat
+            : TextureDump.GlInternalFormatOf(texture.Format);
+        OptimumTextureReadback? readback = TextureDump.ToParityReadback(texture.Format, glInternalFormat,
+            (int)texture.Width, (int)texture.Height, data);
+        RenderTrace.Write("parity dump: texture " + textureId + " " + texture.Width + "x" + texture.Height +
+            " " + texture.Format + " -> " + (readback != null ? "ok" : "undecodable"));
+        return readback;
     }
 
     /// <summary>

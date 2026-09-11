@@ -194,6 +194,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumTaaSharpenIndex",
         "OptimumFsrBlitActive",
         "RenderOptimumTaaSharpen",
+        // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
+        // window_RenderFrame, its in-world frame counter, slot names, the single
+        // device-readback call site and the glGetTexImage body.
+        "optimumParityWorldFrames",
+        "optimumParityDumpDone",
+        "OptimumRunParityDump",
+        "OptimumParitySlotName",
+        "OptimumParityDumpAttachment",
+        "OptimumParityReadTextureGl",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
