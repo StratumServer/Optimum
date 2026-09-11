@@ -16,13 +16,21 @@ namespace Vintagestory.API.Config;
 /// graphics API cannot be handed back to OpenGL without being destroyed and
 /// reopened, so the decision has to be final before the window opens.
 /// <see cref="ShouldTryVulkan" /> answers that without one;
-/// <see cref="Install" /> runs afterwards and can still fail, in which case the
-/// caller reopens the window for OpenGL.
+/// <see cref="CreatePlatform" /> then builds the backend's client platform, whose
+/// <c>InitializeGraphics</c> runs once the window is open and can still fail, in
+/// which case the caller reopens the window for OpenGL.
 /// </summary>
 public static class OptimumRenderBootstrap
 {
     private const string AssemblyName = "Optimum.Render.Vulkan";
     private const string DeviceTypeName = "Optimum.Render.Vulkan.VulkanDevice";
+    private const string PlatformTypeName = "Optimum.Render.Vulkan.Platform.VulkanClientPlatform";
+
+    /// <summary>
+    /// Why the last <see cref="CreatePlatform" /> returned null; null after a
+    /// successful call.
+    /// </summary>
+    public static string PlatformCreationError;
 
     /// <summary>
     /// Written when a Vulkan session starts and removed when it shuts down
@@ -101,90 +109,52 @@ public static class OptimumRenderBootstrap
     }
 
     /// <summary>
-    /// Creates the device against the already-open window and installs it.
-    /// Returns false if it could not be created, which leaves the caller holding
-    /// a window with no graphics API that it must reopen for OpenGL.
+    /// Creates the backend's client platform (a subclass of the client's
+    /// <c>ClientPlatformWindows</c>) for <paramref name="logger" />, the client's
+    /// <c>Vintagestory.Logger</c>. Typed <c>object</c> both ways because this
+    /// assembly cannot reference the client lib; the caller casts. Returns null,
+    /// with <see cref="PlatformCreationError" /> set, when the type cannot be
+    /// created - typically a lib that was not patched for this renderer, where
+    /// loading a subclass of a sealed class throws.
     /// </summary>
-    public static bool Install(IntPtr windowHandle, int width, int height, string dataPath, out string reason)
+    public static object CreatePlatform(object logger)
     {
-        reason = null;
-
-        // Installing is a single transition: a device that is already published
-        // stays, so a second call cannot displace and leak the one the client
-        // is drawing with.
-        if (OptimumRender.Device != null)
-        {
-            return true;
-        }
+        PlatformCreationError = null;
 
         try
         {
-            if (!TryLoadBackend(out reason)) return false;
-
-            Type deviceType = _backendAssembly.GetType(DeviceTypeName);
-            if (deviceType == null)
+            string loadError;
+            if (!TryLoadBackend(out loadError))
             {
-                reason = DeviceTypeName + " not found in " + AssemblyName;
-                return false;
+                PlatformCreationError = loadError;
+                return null;
             }
 
-            object instance = Activator.CreateInstance(deviceType);
-            IOptimumGraphicsDevice device = instance as IOptimumGraphicsDevice;
-            if (device == null)
+            Type platformType = _backendAssembly.GetType(PlatformTypeName, false);
+            if (platformType == null)
             {
-                reason = DeviceTypeName + " does not implement IOptimumGraphicsDevice";
-                return false;
+                PlatformCreationError = PlatformTypeName + " not found in " + AssemblyName;
+                return null;
             }
 
-            // The marker goes down before the driver is touched: a crash inside
-            // device creation is exactly the kind the next start must see. A
-            // clean failure clears it again, since the caller falls back to
-            // OpenGL on its own.
-            WriteCrashMarker(dataPath);
-
-            string failureReason;
-            if (!device.Initialize(windowHandle, width, height, out failureReason))
+            ConstructorInfo[] constructors = platformType.GetConstructors();
+            for (int i = 0; i < constructors.Length; i++)
             {
-                device.Dispose();
-                ClearCrashMarker();
-                reason = failureReason;
-                return false;
+                if (constructors[i].GetParameters().Length != 1) continue;
+                object[] arguments = new object[1];
+                arguments[0] = logger;
+                return constructors[i].Invoke(arguments);
             }
 
-            OptimumRender.Device = device;
-            OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
-            return true;
+            PlatformCreationError = PlatformTypeName + " has no logger constructor";
+            return null;
         }
         catch (Exception error)
         {
-            ClearCrashMarker();
-            reason = error.Message;
-            return false;
+            Exception inner = error.InnerException == null ? error : error.InnerException;
+            PlatformCreationError = "could not create " + PlatformTypeName + ": " + inner.Message;
+            return null;
         }
-    }
-
-    /// <summary>
-    /// Shuts the device down, returns the backend state to OpenGL and clears the
-    /// crash marker. Safe to call more than once and on the OpenGL path.
-    /// </summary>
-    public static void Shutdown()
-    {
-        try
-        {
-            if (OptimumRender.Device != null)
-            {
-                OptimumRender.Device.Dispose();
-            }
-        }
-        catch (Exception)
-        {
-            // A driver throwing on teardown must not stop the client exiting.
-        }
-
-        OptimumRender.Device = null;
-        OptimumRender.ActiveBackend = EnumRenderBackend.OpenGL;
-        OptimumRender.NoGraphicsApiWindow = false;
-        ClearCrashMarker();
     }
 
     private static bool TryLoadBackend(out string reason)
@@ -287,7 +257,11 @@ public static class OptimumRenderBootstrap
         }
     }
 
-    private static void WriteCrashMarker(string dataPath)
+    /// <summary>
+    /// Written by the Vulkan platform before the driver is touched: a crash
+    /// inside device creation is exactly the kind the next start must see.
+    /// </summary>
+    public static void WriteCrashMarker(string dataPath)
     {
         try
         {
@@ -302,7 +276,8 @@ public static class OptimumRenderBootstrap
         }
     }
 
-    private static void ClearCrashMarker()
+    /// <summary>Removes the crash marker; safe when none was written.</summary>
+    public static void ClearCrashMarker()
     {
         try
         {
