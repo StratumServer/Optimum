@@ -231,6 +231,48 @@ public class TaaLiquidMotionCoverageTests
     }
 
     /// <summary>
+    /// Review finding: the pass used to restore useSSBOs, pop the matrix and
+    /// turn blending back on INSIDE the try, after the pool draws. A throwing
+    /// draw then left the renderer with SSBOs off, an unbalanced matrix stack
+    /// and blending off for the rest of the frame. Every restore now sits in
+    /// the finally, and the useSSBOs snapshot is taken before the try so the
+    /// finally always has something to hand back.
+    /// </summary>
+    [Fact]
+    public void EveryLiquidPassRestoreRunsInTheFinallyBlock()
+    {
+        string chunk = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+
+        string pass = MethodBodyAfter(chunk, "internal void RenderLiquidMotion(float deltaTime)");
+
+        var tryMatch = System.Text.RegularExpressions.Regex.Match(pass, @"try\s*\{");
+        Assert.True(tryMatch.Success, "the pass no longer has a try block");
+        int tryStart = tryMatch.Index;
+        int capture = pass.IndexOf("bool useSSBOs = game.api.renderapi.useSSBOs;", StringComparison.Ordinal);
+        Assert.True(capture >= 0 && capture < tryStart,
+            "the useSSBOs snapshot must be taken before the try, or the finally cannot restore it");
+
+        string restores = FinallyBlock(pass);
+        Assert.Contains("game.api.renderapi.useSSBOs = useSSBOs;", restores);
+        Assert.Contains("game.GlPopMatrix();", restores);
+        Assert.Contains("platform.GlToggleBlend(on: true);", restores);
+        Assert.Contains("optimumPlatform.EndMotionOnlyWrite();", restores);
+
+        // ...and nowhere else: a restore left in the try is a restore a throwing
+        // pool draw skips.
+        string guarded = pass.Substring(tryStart, pass.IndexOf(restores, StringComparison.Ordinal) - tryStart);
+        Assert.DoesNotContain("game.api.renderapi.useSSBOs = useSSBOs;", guarded);
+        Assert.DoesNotContain("GlPopMatrix", guarded);
+        Assert.DoesNotContain("GlToggleBlend(on: true)", guarded);
+
+        // The pop is balanced against the push that actually happened.
+        Assert.Contains("pushedMatrix = true;", pass);
+        Assert.Contains("if (pushedMatrix)", restores);
+    }
+
+    /// <summary>
     /// Placement is the whole reason this is a separate pass. It has to run
     /// after the OIT merge (the liquid it re-draws was shaded into the
     /// Transparent target), after every AfterOIT renderer (it writes depth for
@@ -323,6 +365,25 @@ public class TaaLiquidMotionCoverageTests
     }
 
     // ----------------------------------------------------------------- helpers
+
+    /// <summary>The braced block of the method's finally clause.</summary>
+    private static string FinallyBlock(string body)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(body, @"finally\s*\{");
+        Assert.True(match.Success, "no finally block");
+        int open = body.IndexOf('{', match.Index);
+        int depth = 0;
+        for (int i = open; i < body.Length; i++)
+        {
+            if (body[i] == '{') depth++;
+            else if (body[i] == '}')
+            {
+                depth--;
+                if (depth == 0) return body.Substring(open, i - open + 1);
+            }
+        }
+        throw new InvalidOperationException("unterminated finally block");
+    }
 
     private static string MethodBodyAfter(string source, string signature)
     {

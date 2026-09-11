@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
-index f52d0f6..e0a7d3c 100644
+index f52d0f6..fa89321 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
 @@ -387,10 +387,34 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
@@ -37,12 +37,29 @@ index f52d0f6..e0a7d3c 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		if (decalOrigin.SquareDistanceTo(cameraPos) > 1000000f)
  		{
-@@ -399,10 +423,24 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
+@@ -399,27 +423,59 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
  		}
  		if (decals.Count > 0)
  		{
  			game.GlPushMatrix();
  			game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+-			game.Platform.GlToggleBlend(on: true);
+-			game.Platform.GlDisableCullFace();
+-			ShaderProgramDecals shaderProgramDecals = ShaderPrograms.Decals;
+-			shaderProgramDecals.Use();
+-			shaderProgramDecals.WindWaveCounter = game.shUniforms.WindWaveCounter;
+-			shaderProgramDecals.WindWaveCounterHighFreq = game.shUniforms.WindWaveCounterHighFreq;
+-			shaderProgramDecals.BlockTexture2D = game.BlockAtlasManager.AtlasTextures[0].TextureId;
+-			shaderProgramDecals.DecalTexture2D = decalTextureAtlas.TextureId;
+-			shaderProgramDecals.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-			shaderProgramDecals.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-			shaderProgramDecals.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-			shaderProgramDecals.FogMinIn = game.AmbientManager.BlendedFogMin;
+-			shaderProgramDecals.Origin = new Vec3f((float)(decalOrigin.X - cameraPos.X), (float)(decalOrigin.Y - cameraPos.Y), (float)(decalOrigin.Z - cameraPos.Z));
+-			shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;
+-			shaderProgramDecals.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
+-			shaderProgramDecals.Stop();
 +			// Optimum TAA (P4): a decal overwrites the depth buffer with a value
 +			// slightly nearer than the block it sits on (decals.vsh's zOffset
 +			// w-offset), so the block's own motion vector - whose writer depth is
@@ -57,25 +74,33 @@ index f52d0f6..e0a7d3c 100644
 +			// surface. A no-op when TAA is off.
 +			ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
 +			bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
- 			game.Platform.GlToggleBlend(on: true);
- 			game.Platform.GlDisableCullFace();
- 			ShaderProgramDecals shaderProgramDecals = ShaderPrograms.Decals;
- 			shaderProgramDecals.Use();
- 			shaderProgramDecals.WindWaveCounter = game.shUniforms.WindWaveCounter;
-@@ -414,11 +452,25 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
- 			shaderProgramDecals.FogDensityIn = game.AmbientManager.BlendedFogDensity;
- 			shaderProgramDecals.FogMinIn = game.AmbientManager.BlendedFogMin;
- 			shaderProgramDecals.Origin = new Vec3f((float)(decalOrigin.X - cameraPos.X), (float)(decalOrigin.Y - cameraPos.Y), (float)(decalOrigin.Z - cameraPos.Z));
- 			shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;
- 			shaderProgramDecals.ModelViewMatrix = game.CurrentModelViewMatrix;
--			decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
-+			if (optimumMotionWrite)
-+			{
-+				SetOptimumMotionUniforms(shaderProgramDecals);
-+			}
 +			try
 +			{
++				// Everything between the window opening and EndMotionWrite lives
++				// inside the try: a throw in the GL setup, the shader activation,
++				// the uniform setup or the draw would otherwise leave the motion
++				// attachment in Primary's draw-buffer mask for the rest of the frame.
++				game.Platform.GlToggleBlend(on: true);
++				game.Platform.GlDisableCullFace();
++				ShaderProgramDecals shaderProgramDecals = ShaderPrograms.Decals;
++				shaderProgramDecals.Use();
++				shaderProgramDecals.WindWaveCounter = game.shUniforms.WindWaveCounter;
++				shaderProgramDecals.WindWaveCounterHighFreq = game.shUniforms.WindWaveCounterHighFreq;
++				shaderProgramDecals.BlockTexture2D = game.BlockAtlasManager.AtlasTextures[0].TextureId;
++				shaderProgramDecals.DecalTexture2D = decalTextureAtlas.TextureId;
++				shaderProgramDecals.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++				shaderProgramDecals.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++				shaderProgramDecals.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++				shaderProgramDecals.FogMinIn = game.AmbientManager.BlendedFogMin;
++				shaderProgramDecals.Origin = new Vec3f((float)(decalOrigin.X - cameraPos.X), (float)(decalOrigin.Y - cameraPos.Y), (float)(decalOrigin.Z - cameraPos.Z));
++				shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;
++				shaderProgramDecals.ModelViewMatrix = game.CurrentModelViewMatrix;
++				if (optimumMotionWrite)
++				{
++					SetOptimumMotionUniforms(shaderProgramDecals);
++				}
 +				decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
++				shaderProgramDecals.Stop();
 +			}
 +			finally
 +			{
@@ -84,8 +109,8 @@ index f52d0f6..e0a7d3c 100644
 +					optimumPlatform.EndMotionWrite();
 +				}
 +			}
- 			shaderProgramDecals.Stop();
  			game.Platform.GlToggleBlend(on: true);
  			game.Platform.GlEnableCullFace();
  			game.GlPopMatrix();
  		}
+ 	}
