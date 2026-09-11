@@ -163,7 +163,8 @@ public partial class VulkanClientPlatform
             ssao.ColorTextureIds = new int[2];
             // GL_RGB in the vanilla path; the device promotes it, because RGB is
             // not a guaranteed colour-attachment format in Vulkan.
-            ssao.ColorTextureIds[0] = device.CreateTexture2DRaw(ssaoWidth, ssaoHeight, 6407, IntPtr.Zero, 0);
+            // A post-chain transient (Transient pool class); see TransientAllocator.PostChainSlots.
+            ssao.ColorTextureIds[0] = device.CreateTransientTexture2DRaw(ssaoWidth, ssaoHeight, 6407, 13);
             device.AttachTexture(ssao.FboId, EnumFramebufferAttachment.ColorAttachment0, ssao.ColorTextureIds[0], 0);
             device.SetDrawBuffers(ssao.FboId, 1);
 
@@ -281,6 +282,15 @@ public partial class VulkanClientPlatform
             device.SetTextureParameter(textureId, OptimumGlConstants.TextureCompareMode, OptimumGlConstants.CompareRefToTexture);
         }
 
+        // The post chain's colour textures are transients; record the slot each one serves.
+        foreach (int transientSlot in Graph.TransientAllocator.PostChainSlots)
+        {
+            FrameBufferRef transientTarget = list[transientSlot];
+            if (transientTarget == null || transientTarget.ColorTextureIds == null ||
+                transientTarget.ColorTextureIds.Length == 0) continue;
+            device.OptInTransient(transientTarget.ColorTextureIds[0], transientSlot);
+        }
+
         OptimumFinishDeviceFrameBufferSetup(list);
         return list;
     }
@@ -354,7 +364,11 @@ public partial class VulkanClientPlatform
         device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapT, wrap);
     }
 
-    /// <summary>A single-colour-attachment target, as the post chain uses.</summary>
+    /// <summary>
+    /// A single-colour-attachment target, as the post chain uses. Every caller is a post-chain
+    /// slot, so the colour texture is a transient (Transient pool class, registered with the
+    /// device's transient allocator; SetupDefaultFrameBuffers tags its slot number).
+    /// </summary>
     private FrameBufferRef CreateOptimumColorTarget(int width, int height, EnumTextureInternalFormat format)
     {
         FrameBufferRef target = new FrameBufferRef();
@@ -362,8 +376,7 @@ public partial class VulkanClientPlatform
         target.Height = height;
         target.FboId = device.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[1];
-        target.ColorTextureIds[0] = device.CreateTexture2D(width, height, format,
-            EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+        target.ColorTextureIds[0] = device.CreateTransientTexture2D(width, height, format, -1);
         // setupAttachment uses linear filtering and edge clamping. FXAA and
         // the reduced-resolution blur passes require fractional texel samples.
         SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);

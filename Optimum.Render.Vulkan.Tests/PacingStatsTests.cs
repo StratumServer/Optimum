@@ -137,6 +137,12 @@ public class PacingStatsTests
             "promoted_clears=16 standalone_clears=17 pass_splits=18",
             VulkanStats.FormatCountersLine(new CounterSample(1, 2, 3, 4, 5, 6, 7, 8, 9, 2, 10, 11, 12, 13, 14, 15, 16, 17, 18)));
 
+        Assert.Equal(
+            "stats.transients transient_mib=1.5 aliased_mib=0.5 heap_peak_mib=64.0 leases=3 aliased_leases=1 " +
+            "readself_copies=2 readself_pool=4",
+            VulkanStats.FormatTransientsLine(new TransientSample(1536UL * 1024, 512UL * 1024, 64UL * 1024 * 1024,
+                3, 1, 2, 4)));
+
         // The enum and the token table cannot drift apart.
         Assert.Equal(VulkanStats.WaitSiteCount, Enum.GetValues<WaitSite>().Length);
         Assert.Equal(VulkanStats.WaitSiteCount, VulkanStats.WaitSiteTokens.Length);
@@ -154,7 +160,9 @@ public class PacingStatsTests
 
         Assert.NotNull(sample);
         string[] lines = sample!.Split('\n');
-        Assert.Equal(5, lines.Length);
+        Assert.Equal(6, lines.Length);
+        // Phase 2 step 4: transient and aliased MiB, the Transient pool's heap peak, ReadSelf copies.
+        Assert.StartsWith("stats.transients transient_mib=", lines[5]);
         // Phase 1B step 5: pool classes, ReBAR use and misses, used/budget per heap.
         Assert.StartsWith("stats.memory blocks=", lines[4]);
         Assert.Matches(new Regex(
@@ -176,6 +184,7 @@ public class PacingStatsTests
                      VulkanStats.FormatPacingLine(default),
                      VulkanStats.FormatCountersLine(default),
                      VulkanAllocator.FormatMemoryLine(default),
+                     VulkanStats.FormatTransientsLine(default),
                  })
         {
             foreach (Match token in Regex.Matches(line, @"([a-z0-9_]+)="))
@@ -191,6 +200,7 @@ public class PacingStatsTests
         Assert.Contains("stats.waits", doc);
         Assert.Contains("stats.counters", doc);
         Assert.Contains("stats.memory", doc);
+        Assert.Contains("stats.transients", doc);
     }
 
     [Fact]

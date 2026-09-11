@@ -338,7 +338,7 @@ internal sealed unsafe class TextureManager : IDisposable
     public int Create(
         uint width, uint height, Format format,
         uint layers = 1, bool cube = false, bool generateMipmaps = false,
-        ImageUsageFlags extraUsage = 0)
+        ImageUsageFlags extraUsage = 0, MemoryPoolClass poolClass = MemoryPoolClass.DeviceImages)
     {
         // GL tolerates a zero-sized texture - it creates nothing and carries on -
         // while Vulkan rejects the extent outright. The client asks for one when
@@ -384,7 +384,7 @@ internal sealed unsafe class TextureManager : IDisposable
         MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
         MemoryAllocation allocation = _context.Allocator.Allocate(
             requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
-            $"a {width}x{height} {format} image", MemoryPoolClass.DeviceImages, dedicated, default, image);
+            $"a {width}x{height} {format} image", poolClass, dedicated, default, image);
         if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
         {
             api.DestroyImage(_context.Device, image, null);
@@ -651,6 +651,8 @@ internal sealed unsafe class TextureManager : IDisposable
         _uploads.EnterLock();
         try
         {
+            // A texture served by a transient image this frame deletes its own image.
+            RestoreBindingLocked(textureId);
             VulkanTexture? texture = Get(textureId);
             if (texture == null) return;
 
@@ -665,6 +667,80 @@ internal sealed unsafe class TextureManager : IDisposable
         {
             _uploads.ExitLock();
         }
+    }
+
+    // ------------------------------------------------------------ transient binds
+
+    // Texture ids that resolve to a transient image for the current frame, and the
+    // texture each owns. See TransientAllocator.Bind.
+    private readonly Dictionary<int, VulkanTexture?> _reboundOriginals = new();
+
+    /// <summary>
+    /// Makes <paramref name="id" /> resolve to <paramref name="physicalId" />'s image until
+    /// <see cref="RestoreBindings" />. Every path that looks the id up (attachments,
+    /// samplers, readback) then uses that image, which is how an aliased transient
+    /// takes the place of a client texture for one frame.
+    /// </summary>
+    public void Rebind(int id, int physicalId)
+    {
+        _uploads.EnterLock();
+        try
+        {
+            VulkanTexture? physical = Get(physicalId);
+            if (physical == null || id <= 0 || id >= _textures.Count || id == physicalId) return;
+            if (!_reboundOriginals.ContainsKey(id)) _reboundOriginals.Add(id, _textures[id]);
+            _textures[id] = physical;
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    /// <summary>Undoes every <see cref="Rebind" />.</summary>
+    public void RestoreBindings()
+    {
+        if (_reboundOriginals.Count == 0) return;
+        _uploads.EnterLock();
+        try
+        {
+            foreach (KeyValuePair<int, VulkanTexture?> entry in _reboundOriginals) _textures[entry.Key] = entry.Value;
+            _reboundOriginals.Clear();
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    /// <summary>Undoes a <see cref="Rebind" /> of one id; nothing when it is not rebound.</summary>
+    public void RestoreBinding(int id)
+    {
+        if (_reboundOriginals.Count == 0) return;
+        _uploads.EnterLock();
+        try
+        {
+            RestoreBindingLocked(id);
+        }
+        finally
+        {
+            _uploads.ExitLock();
+        }
+    }
+
+    private void RestoreBindingLocked(int id)
+    {
+        if (_reboundOriginals.Remove(id, out VulkanTexture? original)) _textures[id] = original;
+    }
+
+    /// <summary>Whether <paramref name="id" /> currently resolves to another texture's image.</summary>
+    public bool IsRebound(int id) => _reboundOriginals.ContainsKey(id);
+
+    /// <summary>The texture's contents stop mattering: its next use transitions from UNDEFINED.</summary>
+    public void DiscardContents(VulkanTexture texture)
+    {
+        ResourceStateTracker tracker = texture.Sync;
+        lock (tracker) tracker.Discard();
     }
 
     // ------------------------------------------------------------------ barriers
@@ -734,6 +810,9 @@ internal sealed unsafe class TextureManager : IDisposable
         if (_disposed) return;
         _disposed = true;
 
+        // A rebound id holds a transient image that has its own entry; dispose owners only.
+        foreach (KeyValuePair<int, VulkanTexture?> entry in _reboundOriginals) _textures[entry.Key] = entry.Value;
+        _reboundOriginals.Clear();
         foreach (VulkanTexture? texture in _textures) texture?.Dispose();
         _textures.Clear();
         Samplers.Dispose();

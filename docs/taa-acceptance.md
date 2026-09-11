@@ -263,6 +263,7 @@ stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stut
 stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
 stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
+stats.transients transient_mib=<MiB> aliased_mib=<MiB> heap_peak_mib=<MiB> leases=<n> aliased_leases=<n> readself_copies=<n> readself_pool=<n>
 ```
 
 - The first line's "blocking uploads" counts every synchronous setup submission (uploads and
@@ -298,6 +299,15 @@ stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar
   `standalone_clears` (promoted clears whose image was used before a pass attached it, recorded
   as a clear-image command). The colour write tier is on the device-up validation log line;
   `OPTIMUM_VULKAN_COLOR_WRITE_TIER=enable|mask|pipeline` forces one.
+- `stats.transients` (Phase 2 step 4, `TransientAllocator` and `FeedbackCopyPool`): `transient_mib`
+  (at the last frame boundary: the post-chain colour textures of framebuffer slots 2, 3, 4, 7, 8, 9,
+  10, 13, 14, 15, 18 and 21, which live in the Transient pool class, plus the allocator's physical
+  transient images), `aliased_mib` (the interval's largest per-frame bytes of leases served by an
+  image an earlier lease of the same frame used; 0 unless `OPTIMUM_VULKAN_ALIAS=1`),
+  `heap_peak_mib` (peak block MiB of the Transient pool class, dedicated blocks included),
+  `leases` and `aliased_leases` (over the interval), `readself_copies` (draws that sampled a colour
+  attachment they write and took a pooled copy) and `readself_pool` (copies the pool holds; a
+  released copy is reused after the Frame timeline passed the frame that released it).
 - `stats.memory`, a snapshot at sample time (Phase 1B step 5): `blocks` (live device
   allocations the allocator holds), `dedicated` (of them, one-resource blocks), `rebar_used` and
   `rebar_cap` (ReBAR class bytes and its cap, min(192 MiB, heap budget x 0.25)), `rebar_misses`

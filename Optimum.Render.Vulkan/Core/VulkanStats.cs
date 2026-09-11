@@ -237,6 +237,41 @@ internal static class VulkanStats
     /// <summary>A second rendering scope inside one declared pass.</summary>
     public static void NotePassSplit() => Interlocked.Increment(ref _passSplits);
 
+    private static long _transientBytes;
+    private static long _aliasedBytesPeak;
+    private static long _transientLeases;
+    private static long _aliasedLeases;
+    private static long _readSelfCopies;
+    private static long _readSelfPool;
+
+    /// <summary>
+    /// One finished frame's transients (Phase 2 step 4): bytes of transient images
+    /// (the opted-in textures plus the allocator's physical images), bytes of leases
+    /// served by an image an earlier lease of the frame used, the lease counts, and the
+    /// ReadSelf copies the pool holds.
+    /// </summary>
+    public static void NoteTransientFrame(ulong transientBytes, ulong aliasedBytes, int leases, int aliasedLeases,
+        int readSelfPool)
+    {
+        Interlocked.Exchange(ref _transientBytes, (long)Math.Min(transientBytes, long.MaxValue));
+        long aliased = (long)Math.Min(aliasedBytes, long.MaxValue);
+        long peak = Interlocked.Read(ref _aliasedBytesPeak);
+        while (aliased > peak)
+        {
+            long seen = Interlocked.CompareExchange(ref _aliasedBytesPeak, aliased, peak);
+            if (seen == peak) break;
+            peak = seen;
+        }
+        Interlocked.Add(ref _transientLeases, leases);
+        Interlocked.Add(ref _aliasedLeases, aliasedLeases);
+        Interlocked.Exchange(ref _readSelfPool, readSelfPool);
+    }
+
+    /// <summary>A draw sampled a colour attachment it writes and took a pooled ReadSelf copy.</summary>
+    public static void NoteReadSelfCopy() => Interlocked.Increment(ref _readSelfCopies);
+
+    public static long ReadSelfCopies => Interlocked.Read(ref _readSelfCopies);
+
     public static long MaskRestarts => Interlocked.Read(ref _maskRestarts);
     public static long FeedbackSplits => Interlocked.Read(ref _feedbackSplits);
 
@@ -380,8 +415,31 @@ internal static class VulkanStats
                FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
                FormatCountersLine(counters) + "\n" +
-               VulkanAllocator.FormatMemoryLine(memorySnapshot);
+               VulkanAllocator.FormatMemoryLine(memorySnapshot) + "\n" +
+               FormatTransientsLine(new TransientSample(
+                   TransientBytes: (ulong)Interlocked.Read(ref _transientBytes),
+                   AliasedBytes: (ulong)Interlocked.Exchange(ref _aliasedBytesPeak, 0),
+                   HeapPeakBytes: memory?.TakeTransientHeapPeak() ?? 0,
+                   Leases: Interlocked.Exchange(ref _transientLeases, 0),
+                   AliasedLeases: Interlocked.Exchange(ref _aliasedLeases, 0),
+                   ReadSelfCopies: Interlocked.Exchange(ref _readSelfCopies, 0),
+                   ReadSelfPool: Interlocked.Read(ref _readSelfPool)));
     }
+
+    private static double Mib(ulong bytes) => bytes / (1024.0 * 1024.0);
+
+    /// <summary>
+    /// <c>stats.transients</c>: transient image MiB at the last frame boundary, the
+    /// interval's largest aliased MiB in one frame, the Transient pool class's peak
+    /// block MiB, leases and aliased leases over the interval, ReadSelf copies taken
+    /// over the interval and the copies the pool holds.
+    /// </summary>
+    public static string FormatTransientsLine(TransientSample sample) =>
+        string.Format(CultureInfo.InvariantCulture,
+            "stats.transients transient_mib={0:F1} aliased_mib={1:F1} heap_peak_mib={2:F1} leases={3} " +
+            "aliased_leases={4} readself_copies={5} readself_pool={6}",
+            Mib(sample.TransientBytes), Mib(sample.AliasedBytes), Mib(sample.HeapPeakBytes), sample.Leases,
+            sample.AliasedLeases, sample.ReadSelfCopies, sample.ReadSelfPool);
 
     /// <summary>
     /// The allocator whose pool classes and heaps the <c>stats.memory</c> line
@@ -459,6 +517,16 @@ internal readonly record struct CounterSample(
     long PromotedClears = 0,
     long StandaloneClears = 0,
     long PassSplits = 0);
+
+/// <summary>The values on the <c>stats.transients</c> line.</summary>
+internal readonly record struct TransientSample(
+    ulong TransientBytes,
+    ulong AliasedBytes,
+    ulong HeapPeakBytes,
+    long Leases,
+    long AliasedLeases,
+    long ReadSelfCopies,
+    long ReadSelfPool);
 
 /// <summary>Percentiles and spread of the frame-interval ring at one moment.</summary>
 internal readonly record struct FramePacingSnapshot(
