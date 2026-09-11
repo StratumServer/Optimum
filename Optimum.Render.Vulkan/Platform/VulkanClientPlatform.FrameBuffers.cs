@@ -171,19 +171,11 @@ public partial class VulkanClientPlatform
             // and draw order as the GL path, so the pattern matches exactly.
             Random random = new Random(5);
             int noiseSize = 16;
-            float[] noise = new float[noiseSize * noiseSize * 4];
-            Vec3f direction = new Vec3f();
-            for (int texel = 0; texel < noiseSize * noiseSize; texel++)
-            {
-                direction.Set((float)random.NextDouble() * 2f - 1f, (float)random.NextDouble() * 2f - 1f, 0f).Normalize();
-                noise[texel * 4] = direction.X;
-                noise[texel * 4 + 1] = direction.Y;
-                noise[texel * 4 + 2] = direction.Z;
-                noise[texel * 4 + 3] = 0f;
-            }
+            float[] noise = BuildOptimumSsaoNoise(random, noiseSize);
             GCHandle noiseHandle = GCHandle.Alloc(noise, GCHandleType.Pinned);
-            // RGBA32F rather than the GL path's RGB32F: the fourth channel is
-            // padding, and a three-channel float format is not guaranteed.
+            // GL_RGBA32F, the same internal format the GL path allocates; GL
+            // uploads GL_RGB data into it and fills alpha with 1 (see
+            // BuildOptimumSsaoNoise), the device copies all four channels as given.
             ssao.ColorTextureIds[1] = device.CreateTexture2DRaw(
                 noiseSize, noiseSize, 34836, noiseHandle.AddrOfPinnedObject(), 16);
             noiseHandle.Free();
@@ -661,6 +653,31 @@ public partial class VulkanClientPlatform
         device.SetDepthTest(false);
         device.SetBlend(true, EnumBlendMode.Standard);
         device.SetBlendFuncSeparate(0, 770, 771, 770, 771);
+    }
+
+    /// <summary>
+    /// The SSAO rotation noise as RGBA float texels, drawing from <paramref name="random" />
+    /// in the GL path's order (two doubles per texel) so the sample kernel drawn after it
+    /// matches too.
+    ///
+    /// Alpha is 1, not 0. The GL path allocates GL_RGBA32F and uploads GL_RGB pixel data;
+    /// GL's pixel transfer fills the missing alpha with 1, so the texture holds 1.0 in every
+    /// texel (the parity dump reads 1.0 on OpenGL). The device takes the four channels
+    /// verbatim, and a padding 0 here left SSAO colour1 alpha at 0.0 on Vulkan.
+    /// </summary>
+    internal static float[] BuildOptimumSsaoNoise(Random random, int noiseSize)
+    {
+        float[] noise = new float[noiseSize * noiseSize * 4];
+        Vec3f direction = new Vec3f();
+        for (int texel = 0; texel < noiseSize * noiseSize; texel++)
+        {
+            direction.Set((float)random.NextDouble() * 2f - 1f, (float)random.NextDouble() * 2f - 1f, 0f).Normalize();
+            noise[texel * 4] = direction.X;
+            noise[texel * 4 + 1] = direction.Y;
+            noise[texel * 4 + 2] = direction.Z;
+            noise[texel * 4 + 3] = 1f;
+        }
+        return noise;
     }
 
     public override void ClearSsaoTarget()
