@@ -350,7 +350,9 @@ public sealed unsafe class VulkanDevice : IDisposable
             "; validation layers " + (_context.ValidationEnabled ? "ENABLED" : "NOT AVAILABLE") +
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
-            "; poison " + (_context.PoisonFreshResources ? "ON" : "off"));
+            "; poison " + (_context.PoisonFreshResources ? "ON" : "off") +
+            "; color write tier " + DeviceCaps.Token(_context.Capabilities.ColorWriteTier) +
+            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : ""));
         // A ReBAR miss is logged, not an error: the validation mirror and the
         // trace, never GetError. The stats sample reads this allocator's heaps.
         _context.Allocator.Log = MirrorValidationMessage;
@@ -372,7 +374,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         _textures.ScopeOpen = commandBuffer =>
             _frameActive && _targets.RenderingActive && commandBuffer.Handle == Commands.Handle;
         _barriers = _textures.CreateBatcher();
-        _pipelines = new GraphicsPipelineCache(_context);
+        // Colour write tier (C4): draw buffers and motion windows are write masks.
+        _state.ColorWriteTier = _context.Capabilities.ColorWriteTier;
+        _state.DynamicBlend = _context.Capabilities.DynamicColorBlend;
+        _pipelines = new GraphicsPipelineCache(_context, _context.Capabilities.ColorWriteTier,
+            _context.Capabilities.DynamicColorBlend);
         _descriptors = new DescriptorCache(_context);
         _descriptorArenas = new DescriptorArena[_frames.FramesInFlight];
         for (int i = 0; i < _descriptorArenas.Length; i++) _descriptorArenas[i] = new DescriptorArena(_context);
@@ -1897,8 +1903,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         RenderTargetFormats formats = _state.TargetFormats(formatsId);
         int attachmentCount = _targets.EnabledAttachmentCount(target);
 
+        // Draw buffers are write masks (C4): the tier decides whether they reach
+        // the pipeline key, a dynamic enable or a dynamic mask.
+        uint drawBuffers = target.DrawBufferMask;
         var blend = new AttachmentBlend[Math.Max(formats.ColorFormats.Length, 1)];
-        for (int i = 0; i < blend.Length; i++) blend[i] = _state.BlendFor(i);
+        for (int i = 0; i < blend.Length; i++) blend[i] = _state.PipelineBlendFor(i, drawBuffers);
 
         // A mesh that no longer exists reports -1; falling back to the reserved
         // empty layout keeps the key valid rather than indexing past the interner.
@@ -1917,7 +1926,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         }
 
         Pipeline pipeline = _pipelines.Get(
-            _state.BuildKey(layoutId, formatsId, attachmentCount),
+            _state.BuildKey(layoutId, formatsId, attachmentCount, drawBuffers),
             new GraphicsPipelineCache.PipelineRequest
             {
                 Program = program,
@@ -1944,7 +1953,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         }
 
         BindDescriptors(commandBuffer, program, meshId);
-        ApplyDynamicState(commandBuffer, target);
+        ApplyDynamicState(commandBuffer, target, program);
         return true;
     }
 
@@ -2017,6 +2026,10 @@ public sealed unsafe class VulkanDevice : IDisposable
             // The bound depth attachment read with writes off: EnsureRendering
             // puts it in the read-only layout, which serves both uses at once.
             if (_targets.DepthReadOnly && _targets.IsBoundDepth(_boundTextures[unit])) continue;
+
+            // A bound slot whose draw buffer is off is in the scope with a zero
+            // write mask (C4); sampling it takes it out, so it can be read below.
+            _targets.ExcludeSampledAttachment(commandBuffer, _boundTextures[unit]);
 
             if (_targets.IsAttachmentOfBound(_boundTextures[unit]))
             {
@@ -2443,9 +2456,28 @@ public sealed unsafe class VulkanDevice : IDisposable
         }
     }
 
-    private void ApplyDynamicState(CommandBuffer commandBuffer, VulkanFramebuffer target)
+    private void ApplyDynamicState(CommandBuffer commandBuffer, VulkanFramebuffer target, ShaderProgramResources program)
     {
         Vk api = _context.Api;
+        ColorWriteTier tier = _context.Capabilities.ColorWriteTier;
+        bool dynamicBlend = tier == ColorWriteTier.DynamicMask && _context.Capabilities.DynamicColorBlend;
+        int colorStates = (int)Math.Min(_context.Capabilities.MaxColorAttachments, (uint)GlStateTracker.MaxColorAttachments);
+
+        // The colour write state the tier makes dynamic, folded into one value so
+        // the cache can tell whether it changed.
+        uint colorWrite = 0;
+        if (tier == ColorWriteTier.DynamicEnable)
+        {
+            colorWrite = target.DrawBufferMask & ((1u << colorStates) - 1);
+        }
+        else if (tier == ColorWriteTier.DynamicMask)
+        {
+            uint written = GlStateTracker.OutputBits(program.Interface.WrittenFragmentOutputs);
+            for (int i = 0; i < colorStates; i++)
+            {
+                colorWrite |= (uint)_state.EffectiveWriteMask(i, target.DrawBufferMask, written) << (i * 4);
+            }
+        }
 
         Rect2D viewport = _state.Viewport;
         var values = new DynamicStateValues
@@ -2473,6 +2505,8 @@ public sealed unsafe class VulkanDevice : IDisposable
             StencilWriteMask = _state.StencilWriteMask,
             StencilReference = _state.StencilReference,
             LineWidth = _context.Capabilities.WideLines ? _state.LineWidth : 1.0f,
+            ColorWrite = colorWrite,
+            BlendStateId = dynamicBlend ? _state.BlendId(GlStateTracker.MaxColorAttachments) : 0,
         };
 
         // Dirty-masked (Phase 1B step 6): the cache knows what this recording of
@@ -2481,7 +2515,51 @@ public sealed unsafe class VulkanDevice : IDisposable
         FrameSlot slot = _frames.Current;
         ulong serial = slot.CommandBuffer.Handle == commandBuffer.Handle ? slot.RecordingSerial : 0;
         DynamicStateDirty dirty = _dynamicState.Update(serial, values);
+        if (tier == ColorWriteTier.PipelineKey) dirty &= ~DynamicStateDirty.ColorWrite;
+        if (!dynamicBlend) dirty &= ~DynamicStateDirty.ColorBlend;
         if (dirty == DynamicStateDirty.None) return;
+        int extraCommands = 0;
+
+        if ((dirty & DynamicStateDirty.ColorWrite) != 0)
+        {
+            if (tier == ColorWriteTier.DynamicEnable)
+            {
+                // All of maxColorAttachments, so the count covers every pipeline's attachments.
+                Silk.NET.Core.Bool32* enables = stackalloc Silk.NET.Core.Bool32[colorStates];
+                for (int i = 0; i < colorStates; i++) enables[i] = ((colorWrite >> i) & 1) != 0;
+                _context.ColorWriteEnableApi!.CmdSetColorWriteEnable(commandBuffer, (uint)colorStates, enables);
+            }
+            else
+            {
+                ColorComponentFlags* masks = stackalloc ColorComponentFlags[colorStates];
+                for (int i = 0; i < colorStates; i++) masks[i] = (ColorComponentFlags)((colorWrite >> (i * 4)) & 0xF);
+                _context.DynamicState3Api!.CmdSetColorWriteMask(commandBuffer, 0, (uint)colorStates, masks);
+            }
+            extraCommands++;
+        }
+
+        if ((dirty & DynamicStateDirty.ColorBlend) != 0)
+        {
+            Silk.NET.Core.Bool32* blendEnables = stackalloc Silk.NET.Core.Bool32[colorStates];
+            ColorBlendEquationEXT* equations = stackalloc ColorBlendEquationEXT[colorStates];
+            for (int i = 0; i < colorStates; i++)
+            {
+                AttachmentBlend blend = _state.BlendFor(i);
+                blendEnables[i] = blend.Enabled;
+                equations[i] = new ColorBlendEquationEXT
+                {
+                    SrcColorBlendFactor = blend.SrcColor,
+                    DstColorBlendFactor = blend.DstColor,
+                    ColorBlendOp = blend.ColorOp,
+                    SrcAlphaBlendFactor = blend.SrcAlpha,
+                    DstAlphaBlendFactor = blend.DstAlpha,
+                    AlphaBlendOp = blend.AlphaOp,
+                };
+            }
+            _context.DynamicState3Api!.CmdSetColorBlendEnable(commandBuffer, 0, (uint)colorStates, blendEnables);
+            _context.DynamicState3Api!.CmdSetColorBlendEquation(commandBuffer, 0, (uint)colorStates, equations);
+            extraCommands += 2;
+        }
 
         if ((dirty & DynamicStateDirty.Viewport) != 0) api.CmdSetViewport(commandBuffer, 0, 1, &values.Viewport);
         if ((dirty & DynamicStateDirty.Scissor) != 0) api.CmdSetScissor(commandBuffer, 0, 1, &values.Scissor);
@@ -2506,10 +2584,31 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         if ((dirty & DynamicStateDirty.LineWidth) != 0) api.CmdSetLineWidth(commandBuffer, values.LineWidth);
 
-        int emitted = DynamicStateCache.CommandCount(dirty);
+        int emitted = DynamicStateCache.CommandCount(dirty & DynamicStateDirty.All) + extraCommands;
         _dynamicStateCommands += emitted;
         VulkanStats.NoteDynamicStateCommands(emitted);
     }
+
+    /// <summary>
+    /// Commands the first draw of a recording emits: the core set plus the colour
+    /// write state of the tier (one command; two more with dynamic blend). Tests only.
+    /// </summary>
+    internal int DynamicStateCommandsPerDrawForTests =>
+        VulkanStats.DynamicStateCommandsPerDraw +
+        (_context.Capabilities.ColorWriteTier == ColorWriteTier.PipelineKey ? 0 : 1) +
+        (_context.Capabilities.DynamicColorBlend ? 2 : 0);
+
+    /// <summary>The colour write tier this device's draws use. Tests only.</summary>
+    internal ColorWriteTier ColorWriteTierForTests => _context.Capabilities.ColorWriteTier;
+
+    /// <summary>vkCmdBeginRendering calls of this device. Tests only.</summary>
+    internal long ScopesOpenedForTests => _targets.ScopesOpened;
+
+    /// <summary>Restarts that reopened an identical attachment set; must stay 0. Tests only.</summary>
+    internal long MaskRestartsForTests => _targets.MaskRestarts;
+
+    /// <summary>Restarts for a sampled, draw-buffer-excluded slot. Tests only.</summary>
+    internal long FeedbackSplitsForTests => _targets.FeedbackSplits;
 
     /// <summary>Dynamic-state commands this device recorded. Tests only.</summary>
     internal long DynamicStateCommandsForTests => _dynamicStateCommands;

@@ -191,6 +191,26 @@ internal static class VulkanStats
 
     public static long ScopesOpened => Interlocked.Read(ref _scopesOpened);
 
+    private static long _maskRestarts;
+    private static long _feedbackSplits;
+
+    /// <summary>
+    /// A scope restart that reopened exactly the attachment set it closed (same
+    /// views, same layouts). Draw-buffer and colour-mask changes only alter write
+    /// masks (Phase 2, C4), so this must stay 0.
+    /// </summary>
+    public static void NoteMaskRestart() => Interlocked.Increment(ref _maskRestarts);
+
+    /// <summary>
+    /// A scope restart because a draw samples a bound colour attachment its draw
+    /// buffers exclude (the composition pass reads Primary 1), or because such a
+    /// slot rejoins the scope once its draw buffer is enabled again.
+    /// </summary>
+    public static void NoteFeedbackSplit() => Interlocked.Increment(ref _feedbackSplits);
+
+    public static long MaskRestarts => Interlocked.Read(ref _maskRestarts);
+    public static long FeedbackSplits => Interlocked.Read(ref _feedbackSplits);
+
     /// <summary>Image memory barriers recorded into a command buffer.</summary>
     public static void NoteImageBarriers(int count) => Interlocked.Add(ref _imageBarriers, count);
 
@@ -310,7 +330,9 @@ internal static class VulkanStats
             UniformRingUsed: Interlocked.Exchange(ref _uniformRingPeak, 0),
             UniformRingCapacity: Interlocked.Read(ref _uniformRingCapacity),
             BarrierCommands: Interlocked.Exchange(ref _barrierCommands, 0),
-            Frames: frames);
+            Frames: frames,
+            MaskRestarts: Interlocked.Exchange(ref _maskRestarts, 0),
+            FeedbackSplits: Interlocked.Exchange(ref _feedbackSplits, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -368,10 +390,11 @@ internal static class VulkanStats
         string.Format(CultureInfo.InvariantCulture,
             "stats.counters blocking_uploads={0} uploads={1} scopes={2} barriers={3} rebar_fallbacks={4} " +
             "dynamic_state={5} uniform_ring_used={6} uniform_ring_capacity={7} " +
-            "barrier_commands={8} barriers_per_frame={9:F1}",
+            "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
-            counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0);
+            counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
+            counters.MaskRestarts, counters.FeedbackSplits);
 
     private static long _lastSample;
 }
@@ -387,7 +410,9 @@ internal readonly record struct CounterSample(
     long UniformRingUsed,
     long UniformRingCapacity,
     long BarrierCommands = 0,
-    long Frames = 0);
+    long Frames = 0,
+    long MaskRestarts = 0,
+    long FeedbackSplits = 0);
 
 /// <summary>Percentiles and spread of the frame-interval ring at one moment.</summary>
 internal readonly record struct FramePacingSnapshot(

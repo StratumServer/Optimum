@@ -25,6 +25,7 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     private readonly VulkanContext _context;
     private readonly Dictionary<PipelineKey, Pipeline> _pipelines = new();
     private readonly Silk.NET.Vulkan.PipelineCache _driverCache;
+    private readonly DynamicState[] _dynamicStates;
     private bool _disposed;
 
     /// <summary>How many pipelines have been compiled, for diagnostics.</summary>
@@ -36,9 +37,55 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
     /// <summary>How many lookups had to compile.</summary>
     public long Misses { get; private set; }
 
+    /// <summary>The colour write tier every pipeline of this cache is built for.</summary>
+    public ColorWriteTier ColorWriteTier { get; }
+
+    /// <summary>Everything Vulkan 1.3 core lets us change without a new pipeline.</summary>
+    private static readonly DynamicState[] CoreDynamicStates =
+    {
+        DynamicState.Viewport,
+        DynamicState.Scissor,
+        DynamicState.LineWidth,
+        DynamicState.CullMode,
+        DynamicState.FrontFace,
+        DynamicState.PrimitiveTopology,
+        DynamicState.DepthTestEnable,
+        DynamicState.DepthWriteEnable,
+        DynamicState.DepthCompareOp,
+        DynamicState.StencilTestEnable,
+        DynamicState.StencilOp,
+        DynamicState.StencilCompareMask,
+        DynamicState.StencilWriteMask,
+        DynamicState.StencilReference,
+    };
+
     public GraphicsPipelineCache(VulkanContext context, byte[]? initialData = null)
+        : this(context, ColorWriteTier.PipelineKey, dynamicBlend: false, initialData)
+    {
+    }
+
+    /// <summary>
+    /// A cache whose pipelines declare the colour write state of <paramref name="tier" />
+    /// dynamic (and the blend set, with <paramref name="dynamicBlend" /> on the mask tier).
+    /// Draws through it must then emit that state (VulkanDevice.ApplyDynamicState).
+    /// </summary>
+    public GraphicsPipelineCache(VulkanContext context, ColorWriteTier tier, bool dynamicBlend, byte[]? initialData = null)
     {
         _context = context;
+        ColorWriteTier = tier;
+
+        var dynamicStates = new List<DynamicState>(CoreDynamicStates);
+        if (tier == ColorWriteTier.DynamicEnable) dynamicStates.Add(DynamicState.ColorWriteEnableExt);
+        if (tier == ColorWriteTier.DynamicMask)
+        {
+            dynamicStates.Add(DynamicState.ColorWriteMaskExt);
+            if (dynamicBlend)
+            {
+                dynamicStates.Add(DynamicState.ColorBlendEnableExt);
+                dynamicStates.Add(DynamicState.ColorBlendEquationExt);
+            }
+        }
+        _dynamicStates = dynamicStates.ToArray();
 
         fixed (byte* data = initialData)
         {
@@ -153,25 +200,10 @@ internal sealed unsafe class GraphicsPipelineCache : IDisposable
             };
         }
 
-        // Everything Vulkan 1.3 lets us change without a new pipeline. Keeping
-        // this list wide is what keeps the cache small.
-        var dynamicStates = new[]
-        {
-            DynamicState.Viewport,
-            DynamicState.Scissor,
-            DynamicState.LineWidth,
-            DynamicState.CullMode,
-            DynamicState.FrontFace,
-            DynamicState.PrimitiveTopology,
-            DynamicState.DepthTestEnable,
-            DynamicState.DepthWriteEnable,
-            DynamicState.DepthCompareOp,
-            DynamicState.StencilTestEnable,
-            DynamicState.StencilOp,
-            DynamicState.StencilCompareMask,
-            DynamicState.StencilWriteMask,
-            DynamicState.StencilReference,
-        };
+        // Everything Vulkan lets us change without a new pipeline, plus the
+        // colour write state of the tier. Keeping this list wide is what keeps
+        // the cache small.
+        DynamicState[] dynamicStates = _dynamicStates;
 
         try
         {

@@ -113,7 +113,7 @@ public class PerDrawCostTests
             int red = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, SolidFragment("1.0, 0.0, 0.0, 1.0"), "dyn-red");
             int a = CreateTarget(seam);
             int b = CreateTarget(seam);
-            int all = VulkanStats.DynamicStateCommandsPerDraw;
+            int all = device!.DynamicStateCommandsPerDrawForTests;
 
             seam.BeginFrame();
             seam.BindFramebuffer(a);

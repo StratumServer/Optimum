@@ -23,7 +23,14 @@ internal enum DynamicStateDirty : ushort
     StencilWriteMask = 1 << 11,
     StencilReference = 1 << 12,
     LineWidth = 1 << 13,
+    /// <summary>The Vulkan 1.3 core set every pipeline declares dynamic.</summary>
     All = (1 << 14) - 1,
+    /// <summary>vkCmdSetColorWriteEnableEXT or vkCmdSetColorWriteMaskEXT, per the colour write tier.</summary>
+    ColorWrite = 1 << 14,
+    /// <summary>vkCmdSetColorBlendEnableEXT + vkCmdSetColorBlendEquationEXT (mask tier with dynamic blend).</summary>
+    ColorBlend = 1 << 15,
+    /// <summary>What a fresh recording marks dirty; the device drops the bits its tier does not use.</summary>
+    Everything = All | ColorWrite | ColorBlend,
 }
 
 /// <summary>The values a draw's dynamic state resolves to, already in Vulkan terms.</summary>
@@ -46,6 +53,13 @@ internal struct DynamicStateValues
     public uint StencilWriteMask;
     public uint StencilReference;
     public float LineWidth;
+    /// <summary>
+    /// The colour write state the tier makes dynamic: enable bits (enable tier) or
+    /// the effective masks packed four bits per attachment (mask tier); 0 otherwise.
+    /// </summary>
+    public uint ColorWrite;
+    /// <summary>Interned id of the full per-attachment blend set (mask tier with dynamic blend); 0 otherwise.</summary>
+    public int BlendStateId;
 }
 
 /// <summary>
@@ -80,7 +94,7 @@ internal sealed class DynamicStateCache
         DynamicStateDirty dirty;
         if (!Enabled || serial == 0 || serial != _serial)
         {
-            dirty = DynamicStateDirty.All;
+            dirty = DynamicStateDirty.Everything;
         }
         else
         {
@@ -107,6 +121,8 @@ internal sealed class DynamicStateCache
             {
                 dirty |= DynamicStateDirty.LineWidth;
             }
+            if (_last.ColorWrite != next.ColorWrite) dirty |= DynamicStateDirty.ColorWrite;
+            if (_last.BlendStateId != next.BlendStateId) dirty |= DynamicStateDirty.ColorBlend;
         }
 
         _serial = serial;
