@@ -557,6 +557,17 @@ Still owed for P4 (rule 3), in the game, on both backends, with the renderer con
 - `taaLiquidReactive` (0.3) and `taaCloudReactive` (1.0) are hard-coded constants, not settings;
   wiring them to `OptimumConfig` is P5 work.
 
+P4 status addendum (2026-09-11): P4 accepted in game by the user on Vulkan after commit 95bf71d
+("that fixed the instability issue fully"). The Vulkan-only frame-to-frame shimmer that survived every
+single-frame probe was not in the resolve: fullscreen passes on Primary left the SSAO normal/position
+attachments write-enabled without storing to them, so Vulkan wrote undefined values into the G-buffer
+every frame (GL keeps the old values) and SSAO's dark outlines flickered per frame. Found only after
+the validation log was made readable (`OPTIMUM_VULKAN_VALIDATION=1` used to log nowhere) and
+synchronization + best-practices validation were enabled. Fixed by masking unwritten fragment outputs
+in the pipeline; the present path also got a correct wait stage and per-image semaphores.
+Lessons: screenshots cannot capture one-frame alternation; read the layer's log, not the client log;
+"looks identical per frame on both backends" says nothing about what alternates between frames.
+
 **P5. Integration, sharpen, settings, fallback, acceptance.**
 - RCAS variant with a sharpness uniform and true bypass; no double sharpening with FSR1 render
   scale; `TaaMipBias` optional and measured; settings rows in `GuiCompositeSettings.cs.patch`;
