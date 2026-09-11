@@ -714,6 +714,25 @@ the log - all of it is `docs/taa-acceptance.md`:
 matrix has not been run. The decision belongs to the user, with the evidence paths recorded
 here; until then `OptimumConfig.Taa` stays `false` and TAA is opt-in from the settings tab.
 
+P5 in-game verification (2026-09-11, Fable): deployed c9758ce+5b952da; both backends start, log their
+renderer, load `taa-sharpen`, no exceptions; Vulkan under synchronization + best-practices validation
+shows no backend hazards (only MangoHud's external overlay hazard). Frame times via
+`scripts/dev/perf-capture.sh` (30 s at spawn in "serene cave world", ssaa 0.5, 2755x1727 window):
+
+| backend | TAA | mean ms | 1% low ms | frames/30 s |
+|---|---|---|---|---|
+| Vulkan | on | 6.87 | 15.8 | 4397 |
+| Vulkan | off | 6.09 | 12.0 | 4941 |
+| OpenGL | on | 6.06 | 8.1 | 4963 |
+| OpenGL | off | 6.07 | 10.0 | 4962 |
+
+Caveat: the Wayland compositor caps presentation at the 165 Hz refresh even with `vsyncMode 0`
+(`--vsync off` added to the script), so every row except Vulkan+TAA sits on the cap; the only
+cost visible is Vulkan TAA >= 0.8 ms at half render resolution. A real cost number needs GPU
+timestamps or an uncapped surface; the Arc 140V run in the plan's P5 matrix remains the target
+measurement. The 18-row acceptance matrix (docs/taa-acceptance.md) and the default-on decision are
+the user's; TAA stays default-off until then.
+
 **P6. Freeze the contract.**
 - Document the immutable frame input record, resource formats/conventions, per-class motion status
   and the adapter tests; reserve backend-native execution, presentation lifetime and extra ray

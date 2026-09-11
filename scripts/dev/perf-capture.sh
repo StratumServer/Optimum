@@ -18,6 +18,8 @@
 # Options:
 #   --renderer <vulkan|opengl>  required; also rewritten into optimum.json by run-client.sh
 #   --taa <on|off>              rewrite OptimumConfig "Taa" before launching (default: leave as is)
+#   --vsync <on|off>            set clientsettings "vsyncMode" for the run and restore it after;
+#                               use off for cost measurements, a vsync-capped run measures the monitor
 #   --world <name>              bare save name passed to run-client.sh (default: "serene cave world")
 #   --seconds <n>               measurement window (default 30)
 #   --warmup <n>                seconds after the Welcome line before measuring (default 8)
@@ -31,6 +33,7 @@ set -u
 
 RENDERER_ARG=""
 TAA_ARG=""
+VSYNC_ARG=""
 WORLD="serene cave world"
 SECONDS_WINDOW=30
 WARMUP=8
@@ -42,6 +45,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --renderer) RENDERER_ARG="${2:-}"; shift 2;;
     --taa)      TAA_ARG="${2:-}"; shift 2;;
+    --vsync)    VSYNC_ARG="${2:-}"; shift 2;;
     --world)    WORLD="${2:-}"; shift 2;;
     --seconds)  SECONDS_WINDOW="${2:-}"; shift 2;;
     --warmup)   WARMUP="${2:-}"; shift 2;;
@@ -90,6 +94,27 @@ PY
     exit 1
   fi
   echo "config: Taa=$TAA_ARG"
+fi
+
+# 1b. vsync for the run, restored on exit whatever happens next.
+CLIENTSETTINGS="$DATA_PATH/clientsettings.json"
+VSYNC_SAVED=""
+set_vsync() {
+  python3 -c 'import json,sys
+path, value = sys.argv[1], int(sys.argv[2])
+data = json.load(open(path))
+data["vsyncMode"] = value
+json.dump(data, open(path, "w"), indent=2)' "$CLIENTSETTINGS" "$1"
+}
+restore_vsync() {
+  if [[ -n "$VSYNC_SAVED" ]]; then set_vsync "$VSYNC_SAVED" || true; fi
+}
+if [[ -n "$VSYNC_ARG" ]]; then
+  VSYNC_SAVED="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("vsyncMode", 1))' "$CLIENTSETTINGS")" || exit 1
+  trap restore_vsync EXIT
+  WANT=1; [[ "$VSYNC_ARG" == "off" ]] && WANT=0
+  set_vsync "$WANT" || { echo "failed to set vsyncMode in $CLIENTSETTINGS; not launching" >&2; exit 1; }
+  echo "clientsettings: vsyncMode=$WANT (was $VSYNC_SAVED)"
 fi
 
 # 2. Launch. The client writes both logs itself; run-client.sh rewrites Renderer.
