@@ -61,8 +61,10 @@ internal sealed class IndirectRing
     /// </summary>
     public ulong CapacityFor(ulong demand)
     {
+        // A ring whose minimum is below the granularity (tests) rounds to its minimum.
+        ulong granularity = Math.Min(Granularity, MinimumCapacity);
         ulong wanted = demand + demand / 2;
-        ulong rounded = (wanted + Granularity - 1) / Granularity * Granularity;
+        ulong rounded = (wanted + granularity - 1) / granularity * granularity;
         return Math.Max(MinimumCapacity, rounded);
     }
 
