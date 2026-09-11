@@ -10,10 +10,12 @@ namespace Optimum.Render.Vulkan.Platform;
 /// The client platform on the Vulkan path (Vulkan-native plan, Phase 1A).
 ///
 /// Created by <see cref="OptimumRenderBootstrap.CreatePlatform" /> in place of a
-/// plain <see cref="ClientPlatformWindows" />, so windowing, input, audio and the
-/// frame loop are inherited. In this step it only owns graphics bring-up and
-/// teardown; the base's existing <see cref="OptimumRender.Device" /> branches keep
-/// rendering until later steps move them into overrides here.
+/// plain <see cref="ClientPlatformWindows" />, so windowing, input, audio, the frame
+/// pacing and the API-neutral render logic (post chain, TAA windows) are inherited.
+/// It owns graphics bring-up and teardown and, since Phase 1A step 4, every graphics
+/// operation: the partial files override each graphics member with calls to the
+/// <see cref="VulkanDevice" /> this platform created, and ClientPlatformWindows keeps
+/// only the GL path.
 ///
 /// Compiled against the donor lib and bound at runtime to the Cecil-patched one,
 /// so <see cref="InitializeGraphics" /> first checks that the loaded lib really
@@ -71,6 +73,12 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "ClearSsaoTarget", Array.Empty<string>()),
         new(true, "BeginFinalCompositionDrawBuffers", Array.Empty<string>()),
         new(true, "RestoreWorldDrawBuffers", new[] { "Boolean" }),
+        // Phase 1A step 4: frame bracket, thick-line probe, window size, parity readback.
+        new(true, "BeginFrame", Array.Empty<string>()),
+        new(true, "EndFrame", Array.Empty<string>()),
+        new(true, "ProbeThickLineSupport", Array.Empty<string>()),
+        new(true, "OnWindowSizeChanged", new[] { "Int32", "Int32" }),
+        new(true, "ReadTextureForParity", new[] { "Int32" }),
     };
 
     /// <summary>

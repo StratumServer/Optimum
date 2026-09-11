@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..8de2a1d 100644
+index 6edf0c9..e7837a0 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -337,7 +337,7 @@ index 6edf0c9..8de2a1d 100644
  	public override bool GlDebugMode
  	{
  		get
-@@ -478,40 +713,147 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,40 +713,140 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -453,44 +453,38 @@ index 6edf0c9..8de2a1d 100644
  		ShadowMapQuality = ClientSettings.ShadowMapQuality;
  		ShaderProgramBase.shadowmapQuality = ShadowMapQuality;
 +
-+		// Optimum: the device brackets the frame. BeginFrame recycles the frame
-+		// slot and opens a command buffer; Present closes the rendering scope,
-+		// submits, and blits the result into the swapchain. On the OpenGL path
-+		// this is one null check and SwapBuffers, exactly as before.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.BeginFrame();
-+			frameHandler.OnNewFrame(dt);
-+			// Optimum: per-attachment parity dump (OPTIMUM_PARITY_DUMP), after the
-+			// post chain and the final blit, before presentation. Unset, this is
-+			// one static bool check.
-+			if (Vintagestory.API.Config.OptimumParityDump.Enabled)
-+			{
-+				OptimumRunParityDump();
-+			}
-+			optimumDevice.Present();
-+			ScreenManager.FrameProfiler.End();
-+			return;
-+		}
-+
++		// Optimum (Vulkan-native plan, Phase 1A step 4): the platform brackets the
++		// frame. On OpenGL BeginFrame is empty and EndFrame is SwapBuffers, exactly as
++		// before; VulkanClientPlatform recycles the frame slot and opens a command
++		// buffer in BeginFrame and submits and presents in EndFrame.
++		BeginFrame();
  		frameHandler.OnNewFrame(dt);
+-		((GameWindow)window).SwapBuffers();
++		// Optimum: per-attachment parity dump (OPTIMUM_PARITY_DUMP), after the
++		// post chain and the final blit, before presentation. Unset, this is
++		// one static bool check.
 +		if (Vintagestory.API.Config.OptimumParityDump.Enabled)
 +		{
 +			OptimumRunParityDump();
 +		}
- 		((GameWindow)window).SwapBuffers();
++		EndFrame();
  		ScreenManager.FrameProfiler.End();
  	}
  
 -	public string GetGraphicsCardRenderer()
++	/// <summary>Optimum (Phase 1A step 4): presents the frame on the OpenGL path.</summary>
++	public override void EndFrame()
++	{
++		((GameWindow)window).SwapBuffers();
++	}
++
 +	public virtual string GetGraphicsCardRenderer()
  	{
  		return GL.GetString((StringName)7937);
  	}
  
  	public void LogAndTestHardwareInfosStage1()
-@@ -531,11 +873,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -531,11 +866,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		logger.Notification("C# Framework: " + GetFrameworkInfos());
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
@@ -503,27 +497,29 @@ index 6edf0c9..8de2a1d 100644
  		logger.Notification("Graphics Card Version: " + GL.GetString((StringName)7938));
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
-@@ -702,24 +1044,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1037,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
  		windowsize.Width = ((NativeWindow)window).ClientSize.X;
  		windowsize.Height = ((NativeWindow)window).ClientSize.Y;
 +		// Mono.Cecil transplant.
-+		// GL discovers thick-line support by setting a width and seeing whether
-+		// that raised an error; the device answers it as a capability instead.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumStartDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumStartDevice != null)
-+		{
-+			optimumStartDevice.SetLineWidth(1.5f);
-+			SupportsThickLines = optimumStartDevice.SupportsThickLines;
-+			cpuCoreCount = Environment.ProcessorCount;
-+			return;
-+		}
++		SupportsThickLines = ProbeThickLineSupport();
++		cpuCoreCount = Environment.ProcessorCount;
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): GL discovers thick-line support by setting a width and
++	/// seeing whether that raised an error; VulkanClientPlatform answers it as a device
++	/// capability instead.
++	/// </summary>
++	public override bool ProbeThickLineSupport()
++	{
  		GL.LineWidth(1.5f);
  		OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
- 		SupportsThickLines = (int)error != 1281;
- 		cpuCoreCount = Environment.ProcessorCount;
+-		SupportsThickLines = (int)error != 1281;
+-		cpuCoreCount = Environment.ProcessorCount;
++		return (int)error != 1281;
  	}
  
  	public override void RebuildFrameBuffers()
@@ -546,31 +542,27 @@ index 6edf0c9..8de2a1d 100644
  
  	private void Window_FileDrop(FileDropEventArgs e)
  	{
-@@ -796,10 +1156,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1149,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
  		{
  			logger.Notification("Window was resized to {0} {1}, rebuilding framebuffers...", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
 +			// Mono.Cecil transplant.
-+			// The device owns the default render target and the swapchain, and
-+			// neither follows the window on its own. This has to happen before
-+			// RebuildFrameBuffers, because that recreates the client's own
-+			// targets against the new size and the default one has to agree with
-+			// them - a default target left at the old size silently clips every
-+			// draw to its top-left corner, since the viewport is set from the
-+			// window rather than from the target.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.Resize(((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
-+			}
++			// A platform that owns the default render target and the swapchain
++			// (VulkanClientPlatform) has to follow the window before
++			// RebuildFrameBuffers, because that recreates the client's own targets
++			// against the new size and the default one has to agree with them - a
++			// default target left at the old size silently clips every draw to its
++			// top-left corner, since the viewport is set from the window rather
++			// than from the target. Empty on OpenGL.
++			OnWindowSizeChanged(((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  			RebuildFrameBuffers();
  			windowsize.Width = ((NativeWindow)window).ClientSize.X;
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1023,11 +1396,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1023,11 +1385,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.DrawElements(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, 0);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
@@ -583,7 +575,7 @@ index 6edf0c9..8de2a1d 100644
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
-@@ -1150,11 +1523,300 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,11 +1512,300 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -728,16 +720,7 @@ index 6edf0c9..8de2a1d 100644
 +		string where = slot + " " + attachment;
 +		try
 +		{
-+			OptimumTextureReadback readback;
-+			Vintagestory.API.Config.IOptimumGraphicsDevice device = Vintagestory.API.Config.OptimumRender.Device;
-+			if (device != null)
-+			{
-+				readback = device.ReadTextureForParity(textureId);
-+			}
-+			else
-+			{
-+				readback = OptimumParityReadTextureGl(textureId);
-+			}
++			OptimumTextureReadback readback = ReadTextureForParity(textureId);
 +			if (readback == null)
 +			{
 +				logger.Warning("[Optimum] parity dump: slot " + where + " could not be read");
@@ -750,6 +733,15 @@ index 6edf0c9..8de2a1d 100644
 +			logger.Error("[Optimum] parity dump: slot " + where + " failed: " + error.Message);
 +			return 0;
 +		}
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): the parity dump's readback on the OpenGL path;
++	/// VulkanClientPlatform overrides it with the device readback.
++	/// </summary>
++	public override OptimumTextureReadback ReadTextureForParity(int textureId)
++	{
++		return OptimumParityReadTextureGl(textureId);
 +	}
 +
 +	/// <summary>
@@ -885,7 +877,7 @@ index 6edf0c9..8de2a1d 100644
  		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
  		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
  		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
-@@ -1187,10 +1849,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1187,10 +1838,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
  		if (num == 0 || num2 == 0)
  		{
@@ -903,7 +895,7 @@ index 6edf0c9..8de2a1d 100644
  		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
-@@ -1210,11 +1879,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1210,11 +1868,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -920,7 +912,7 @@ index 6edf0c9..8de2a1d 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1251,10 +1924,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1251,10 +1913,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
@@ -959,7 +951,7 @@ index 6edf0c9..8de2a1d 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1436,10 +2137,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +2126,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
@@ -1035,7 +1027,7 @@ index 6edf0c9..8de2a1d 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +2314,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +2303,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -1050,7 +1042,7 @@ index 6edf0c9..8de2a1d 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +2337,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +2326,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1145,7 +1137,7 @@ index 6edf0c9..8de2a1d 100644
  			}
  		}
  	}
-@@ -1591,11 +2431,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +2420,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1164,7 +1156,7 @@ index 6edf0c9..8de2a1d 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1619,27 +2466,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1619,27 +2455,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -1251,7 +1243,7 @@ index 6edf0c9..8de2a1d 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,71 +2575,68 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +2564,68 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1337,7 +1329,7 @@ index 6edf0c9..8de2a1d 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,39 +2655,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1753,39 +2644,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
@@ -1423,7 +1415,7 @@ index 6edf0c9..8de2a1d 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,22 +2737,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +2726,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -1684,7 +1676,7 @@ index 6edf0c9..8de2a1d 100644
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,20 +3001,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,20 +2990,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -1721,7 +1713,7 @@ index 6edf0c9..8de2a1d 100644
  			RenderFullscreenTriangle(screenQuad);
  			findbright.Stop();
  			ShaderProgramBlur blur = ShaderPrograms.Blur;
-@@ -1848,45 +3040,48 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1848,45 +3029,48 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			RenderFullscreenTriangle(screenQuad);
  			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
  			blur.IsVertical = 1;
@@ -1776,7 +1768,7 @@ index 6edf0c9..8de2a1d 100644
  			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
  			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
  			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-@@ -1915,35 +3110,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,35 +3099,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -1827,7 +1819,7 @@ index 6edf0c9..8de2a1d 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,19 +3159,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,19 +3148,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -1853,7 +1845,7 @@ index 6edf0c9..8de2a1d 100644
  			if (RenderSSAO)
  			{
  				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
-@@ -1987,24 +3195,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +3184,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -1910,7 +1902,7 @@ index 6edf0c9..8de2a1d 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3250,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +3239,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -2396,7 +2388,7 @@ index 6edf0c9..8de2a1d 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +3886,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +3875,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -2436,7 +2428,7 @@ index 6edf0c9..8de2a1d 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +4284,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +4273,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -2489,7 +2481,7 @@ index 6edf0c9..8de2a1d 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +4379,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +4368,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2534,7 +2526,7 @@ index 6edf0c9..8de2a1d 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4416,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +4405,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2555,7 +2547,7 @@ index 6edf0c9..8de2a1d 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4435,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +4424,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2576,7 +2568,7 @@ index 6edf0c9..8de2a1d 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4454,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +4443,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2597,7 +2589,7 @@ index 6edf0c9..8de2a1d 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4473,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +4462,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2618,7 +2610,7 @@ index 6edf0c9..8de2a1d 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4496,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +4485,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -2639,7 +2631,7 @@ index 6edf0c9..8de2a1d 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5058,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5047,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -2663,7 +2655,7 @@ index 6edf0c9..8de2a1d 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +5417,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +5406,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

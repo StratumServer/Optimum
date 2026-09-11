@@ -228,6 +228,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "ClearSsaoTarget",
         "BeginFinalCompositionDrawBuffers",
         "RestoreWorldDrawBuffers",
+        // Phase 1A step 4: the GL frame end, thick-line probe and parity readback.
+        "EndFrame",
+        "ProbeThickLineSupport",
+        "ReadTextureForParity",
         "OptimumTaaHistoryIndexA",
         "OptimumTaaHistoryIndexB",
         "OptimumGlR32f",
