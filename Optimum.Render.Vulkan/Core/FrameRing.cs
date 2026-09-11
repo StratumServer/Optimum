@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Silk.NET.Vulkan;
 
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -15,7 +16,13 @@ internal readonly record struct RingAllocation(Buffer Buffer, uint Offset, IntPt
 /// Everything here is reset wholesale rather than freed piecemeal: the command
 /// pool, and the bump cursor into this slot's slice of the shared uniform ring. A
 /// slot is only reused once the Frame timeline says the GPU has finished the
-/// frame that last used it (<see cref="FrameRing.BeginFrame" /> waits for that).
+/// last submission that used it (<see cref="FrameRing.BeginFrame" /> waits for that).
+///
+/// A frame may be submitted in parts (<see cref="SubmitPartial" />, for a
+/// readback that has to see the frame's work so far). Every command buffer
+/// carries its own Frame timeline value, and all of them stay in this slot: the
+/// uniform cursor keeps counting, so snapshots taken before a partial submit stay
+/// valid after it.
 /// </summary>
 internal sealed unsafe class FrameSlot : IDisposable
 {
@@ -25,17 +32,33 @@ internal sealed unsafe class FrameSlot : IDisposable
     private readonly ulong _regionStart;
     private readonly ulong _regionSize;
     private readonly VulkanBuffer _uniformRing;
+    // Allocated once and recycled: resetting the pool returns every one of them
+    // to the initial state, where it can be begun again.
+    private readonly List<CommandBuffer> _commandBuffers = new();
+    private int _commandBuffersUsed;
     private ulong _cursor;
     private bool _disposed;
+
+    /// <summary>The slot's position in the ring.</summary>
+    public int Index { get; }
 
     public CommandPool CommandPool { get; }
     public CommandBuffer CommandBuffer { get; private set; }
 
-    /// <summary>The Frame timeline value this slot's current frame signals when submitted.</summary>
+    /// <summary>The Frame timeline value the command buffer being recorded signals when submitted.</summary>
     public ulong FrameValue { get; private set; }
 
+    /// <summary>
+    /// The value of this slot's newest accepted submission, 0 before the first.
+    /// The next frame to use the slot waits for it.
+    /// </summary>
+    public ulong LastSignalledValue { get; private set; }
+
+    /// <summary>Partial submissions in the current frame.</summary>
+    public int PartialSubmits { get; private set; }
+
     public FrameSlot(VulkanContext context, FrameTimeline timeline, VulkanBuffer uniformRing,
-        ulong regionStart, ulong regionSize)
+        ulong regionStart, ulong regionSize, int index = 0)
     {
         _context = context;
         _timeline = timeline;
@@ -43,6 +66,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         _regionStart = regionStart;
         _regionSize = regionSize;
         _alignment = Math.Max(1, context.Capabilities.MinUniformBufferOffsetAlignment);
+        Index = index;
 
         var poolInfo = new CommandPoolCreateInfo
         {
@@ -55,34 +79,51 @@ internal sealed unsafe class FrameSlot : IDisposable
     }
 
     /// <summary>
-    /// Recycles the slot for frame <paramref name="frameValue" />. The caller has
-    /// already waited for the frame that last used it, so resetting the pool is legal.
+    /// Recycles the slot for a frame whose first command buffer signals
+    /// <paramref name="frameValue" />. The caller has already waited for the last
+    /// submission that used the slot, so resetting the pool is legal.
     /// </summary>
     public void Begin(ulong frameValue)
     {
-        Vk api = _context.Api;
-        FrameValue = frameValue;
-
-        api.ResetCommandPool(_context.Device, CommandPool, 0);
+        _context.Api.ResetCommandPool(_context.Device, CommandPool, 0);
         _cursor = 0;
+        _commandBuffersUsed = 0;
+        PartialSubmits = 0;
+        FrameValue = frameValue;
+        StartCommandBuffer();
+    }
 
-        var allocateInfo = new CommandBufferAllocateInfo
-        {
-            SType = StructureType.CommandBufferAllocateInfo,
-            CommandPool = CommandPool,
-            Level = CommandBufferLevel.Primary,
-            CommandBufferCount = 1,
-        };
+    private void StartCommandBuffer()
+    {
+        Vk api = _context.Api;
         CommandBuffer commandBuffer;
-        api.AllocateCommandBuffers(_context.Device, &allocateInfo, &commandBuffer);
-        CommandBuffer = commandBuffer;
+        if (_commandBuffersUsed < _commandBuffers.Count)
+        {
+            commandBuffer = _commandBuffers[_commandBuffersUsed];
+        }
+        else
+        {
+            var allocateInfo = new CommandBufferAllocateInfo
+            {
+                SType = StructureType.CommandBufferAllocateInfo,
+                CommandPool = CommandPool,
+                Level = CommandBufferLevel.Primary,
+                CommandBufferCount = 1,
+            };
+            VulkanResult.Check(api.AllocateCommandBuffers(_context.Device, &allocateInfo, &commandBuffer),
+                "vkAllocateCommandBuffers for a frame slot");
+            _commandBuffers.Add(commandBuffer);
+        }
+        _commandBuffersUsed++;
 
         var begin = new CommandBufferBeginInfo
         {
             SType = StructureType.CommandBufferBeginInfo,
             Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
         };
-        api.BeginCommandBuffer(commandBuffer, &begin);
+        VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
+            "vkBeginCommandBuffer for a frame slot");
+        CommandBuffer = commandBuffer;
     }
 
     /// <summary>
@@ -107,6 +148,22 @@ internal sealed unsafe class FrameSlot : IDisposable
     }
 
     /// <summary>
+    /// Submits what the frame has recorded so far and continues in a new command
+    /// buffer of this slot, under a newly reserved Frame value. Nothing waits and
+    /// nothing is reset. The caller closes any open rendering scope first (and
+    /// must not have an occlusion query open). Returns the value just signalled.
+    /// </summary>
+    public ulong SubmitPartial()
+    {
+        ulong submitted = FrameValue;
+        Submit(default, default, PipelineStageFlags.AllCommandsBit);
+        PartialSubmits++;
+        FrameValue = _timeline.ReserveFrame();
+        StartCommandBuffer();
+        return submitted;
+    }
+
+    /// <summary>
     /// Closes the command buffer and submits it, signalling the Frame timeline to
     /// <see cref="FrameValue" /> (and the binary present semaphore when given).
     ///
@@ -122,10 +179,15 @@ internal sealed unsafe class FrameSlot : IDisposable
         // the display would show a stale or torn frame. Wait at every stage.
         PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)
     {
+        Submit(waitSemaphore, signalSemaphore, waitStage);
+        VulkanStats.NoteUniformRingUse(_cursor, _regionSize);
+    }
+
+    private void Submit(Semaphore waitSemaphore, Semaphore signalSemaphore, PipelineStageFlags waitStage)
+    {
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         api.EndCommandBuffer(commandBuffer);
-        VulkanStats.NoteUniformRingUse(_cursor, _regionSize);
 
         Semaphore wait = waitSemaphore;
         ulong waitValue = 0;
@@ -179,6 +241,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         }
         VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);
         _timeline.NoteFrameSubmitted(FrameValue);
+        LastSignalledValue = FrameValue;
     }
 
     public ulong UniformBytesUsed => _cursor;
@@ -199,9 +262,11 @@ internal sealed unsafe class FrameSlot : IDisposable
 /// the next frame, few enough that input latency stays close to what the OpenGL
 /// path had. Frame generation will want a third later.
 ///
-/// Frame <c>n</c> uses slot <c>(n - 1) % FramesInFlight</c> and, before it
-/// starts, waits for Frame value <c>n - FramesInFlight</c>: the frame that last
-/// used that slot. That wait is the only CPU wait the ring makes in steady state.
+/// Frames use the slots in turn. Before a frame starts, it waits for the newest
+/// Frame value its slot signalled: the end of the frame that last used it (or of
+/// that frame's last partial submission). Without partial submissions that is
+/// frame <c>n - FramesInFlight</c>. That wait is the only CPU wait the ring makes
+/// in steady state.
 ///
 /// The uniform ring is one buffer for the whole ring rather than one per slot,
 /// with each slot bump-allocating inside its own slice. That is what lets
@@ -234,7 +299,7 @@ internal sealed class FrameRing : IDisposable
         _slots = new FrameSlot[framesInFlight];
         for (int i = 0; i < framesInFlight; i++)
         {
-            _slots[i] = new FrameSlot(context, _timeline, _uniformRing, regionSize * (ulong)i, regionSize);
+            _slots[i] = new FrameSlot(context, _timeline, _uniformRing, regionSize * (ulong)i, regionSize, i);
         }
     }
 
@@ -251,25 +316,29 @@ internal sealed class FrameRing : IDisposable
         : _slots[_index];
 
     /// <summary>
-    /// Starts the next frame: reserves its Frame value, waits for the frame that
-    /// last used its slot, destroys whatever the timelines say is no longer
-    /// referenced, and recycles the slot.
+    /// Starts the next frame: reserves its first Frame value, waits for the last
+    /// submission of the frame that used its slot before, destroys whatever the
+    /// timelines say is no longer referenced, and recycles the slot.
     /// </summary>
-    /// <param name="site">
-    /// Which wait the timeline wait counts as: frame pacing at a real frame start,
-    /// <see cref="WaitSite.FlushFrame" /> when a mid-frame flush continues the frame.
-    /// </param>
-    public FrameSlot BeginFrame(WaitSite site = WaitSite.FramePacing)
+    public FrameSlot BeginFrame()
     {
+        int index = (_index + 1) % _slots.Length;
+        FrameSlot slot = _slots[index];
+
         ulong frameValue = _timeline.ReserveFrame();
-        _timeline.WaitForFrame(FrameTimeline.PacingTarget(frameValue, _slots.Length), site);
+        _timeline.WaitForFrame(slot.LastSignalledValue, WaitSite.FramePacing);
         _retired.Collect();
 
-        _index = (int)((frameValue - 1) % (ulong)_slots.Length);
-        FrameSlot slot = _slots[_index];
+        _index = index;
         slot.Begin(frameValue);
         return slot;
     }
+
+    /// <summary>
+    /// Submits the current frame's work so far and keeps recording it in the same
+    /// slot; see <see cref="FrameSlot.SubmitPartial" />.
+    /// </summary>
+    public ulong SubmitPartial() => Current.SubmitPartial();
 
     /// <summary>Ends and submits the current frame. Pairs with every BeginFrame.</summary>
     public void EndFrame(

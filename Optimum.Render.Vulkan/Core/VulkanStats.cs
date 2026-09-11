@@ -21,13 +21,23 @@ internal enum WaitSite
     FramePacing = 0,
     /// <summary>A setup command buffer that uploads data and waits for its fence.</summary>
     UploadSubmit = 1,
-    /// <summary>The Frame timeline wait inside a mid-frame flush (queries, readbacks, dumps).</summary>
+    /// <summary>
+    /// The Frame timeline wait inside a mid-frame flush. Retired in Phase 1B:
+    /// readbacks and uploads submit partially without waiting and queries never
+    /// flush, so this stays zero; the token stays for log compatibility.
+    /// </summary>
     FlushFrame = 2,
     /// <summary>vkDeviceWaitIdle, wherever it is called.</summary>
     DeviceWaitIdle = 3,
-    /// <summary>A setup command buffer that copies GPU data back and waits for its fence.</summary>
+    /// <summary>
+    /// A readback the caller needs now: the Frame timeline value of the partial
+    /// submission that carried the copy, or a between-frames setup fence.
+    /// </summary>
     Readback = 4,
-    /// <summary>Polling an occlusion query until its result is available.</summary>
+    /// <summary>
+    /// Polling an occlusion query until its result is available. Retired in
+    /// Phase 1B (QueryRing reads results without waiting); stays zero.
+    /// </summary>
     OcclusionQuery = 5,
     /// <summary>vkAcquireNextImageKHR.</summary>
     SwapchainAcquire = 6,

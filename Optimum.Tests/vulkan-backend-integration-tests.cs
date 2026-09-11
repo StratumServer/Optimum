@@ -477,6 +477,40 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("ring.DeferDeletion(mesh)", Read("Optimum.Render.Vulkan/Core/MeshManager.cs"));
     }
 
+    /// <summary>
+    /// Phase 1B step 2: readbacks submit the frame's recorded part and continue in
+    /// the same slot, waiting only on their own timeline value; occlusion queries
+    /// read results from a per-slot ring without ever waiting; FlushFrame is gone.
+    /// </summary>
+    [Fact]
+    public void ReadbacksAndOcclusionQueriesNeverFlushTheFrameOrWaitForTheDevice()
+    {
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.DoesNotContain("FlushFrame", device);
+        Assert.DoesNotContain("Thread.Yield", device);
+        Assert.Contains("if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) SubmitPartial();", device);
+        Assert.Contains("ReadbackTicket ticket = _readbacks.CopyToHost(", device);
+        Assert.Contains("_queryRing.BeginSlot(slot.Index, slot.CommandBuffer);", device);
+        Assert.Contains("public int GetQueryResult(int queryId) => _queryRing.GetResult(queryId);", device);
+
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        Assert.Contains("public ulong SubmitPartial()", ring);
+        Assert.Contains("_timeline.WaitForFrame(slot.LastSignalledValue, WaitSite.FramePacing);", ring);
+        Assert.Contains("LastSignalledValue = FrameValue;", ring);
+
+        string queries = Read("Optimum.Render.Vulkan/Frame/QueryRing.cs");
+        Assert.Contains("CmdResetQueryPool(", queries);
+        Assert.Contains("QueryResultFlags.ResultWithAvailabilityBit", queries);
+        Assert.Contains("if (_clock.FrameCompleted < record.FrameValue) return;", queries);
+        Assert.DoesNotContain("ResultWaitBit", queries);
+        Assert.DoesNotContain("WaitForFrame(", queries);
+
+        string readbacks = Read("Optimum.Render.Vulkan/Transfer/ReadbackManager.cs");
+        Assert.Contains("CmdCopyImageToBuffer(", readbacks);
+        Assert.Contains("WaitSite.Readback", readbacks);
+        Assert.DoesNotContain("WaitDeviceIdle", readbacks);
+    }
+
     [Fact]
     public void ValidationMessagesAlwaysReachAFileAndExtraFeaturesCanBeRequested()
     {

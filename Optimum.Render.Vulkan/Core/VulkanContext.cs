@@ -49,6 +49,8 @@ internal sealed class VulkanCapabilities
     public bool FillModeNonSolid;
     public bool SamplerAnisotropy;
     public bool MultiDrawIndirect;
+    /// <summary>Enabled whenever available; occlusion queries then count samples exactly, like GL_SAMPLES_PASSED.</summary>
+    public bool OcclusionQueryPrecise;
     public float MaxSamplerLodBias;
     public int MaxBoundDescriptorSets;
     public ulong MinUniformBufferOffsetAlignment;
@@ -880,6 +882,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             FillModeNonSolid = features.FillModeNonSolid,
             SamplerAnisotropy = features.SamplerAnisotropy,
             MultiDrawIndirect = features.MultiDrawIndirect,
+            OcclusionQueryPrecise = features.OcclusionQueryPrecise,
             MaxSamplerLodBias = properties.Limits.MaxSamplerLodBias,
             MaxBoundDescriptorSets = (int)properties.Limits.MaxBoundDescriptorSets,
             MinUniformBufferOffsetAlignment = properties.Limits.MinUniformBufferOffsetAlignment,

@@ -296,12 +296,14 @@ public class PacingStatsTests
         string frameRing = Source("Core/FrameRing.cs");
         Assert.DoesNotContain("WaitForFences(", frameRing);
         Assert.DoesNotContain("Fence Fence", frameRing);
-        string ringBegin = Body(frameRing, "public FrameSlot BeginFrame(WaitSite site");
+        string ringBegin = Body(frameRing, "public FrameSlot BeginFrame(");
         Assert.Equal(1, Count(ringBegin, "_timeline.WaitForFrame("));
-        Assert.Contains("FrameTimeline.PacingTarget(frameValue, _slots.Length), site);", ringBegin);
+        Assert.Contains("_timeline.WaitForFrame(slot.LastSignalledValue, WaitSite.FramePacing);", ringBegin);
         Assert.Contains("_retired.Collect();", ringBegin);
         Assert.Contains("_retired.Retire(resource)", frameRing);
-        string frameSubmit = Body(frameRing, "public void EndFrameAndSubmit(");
+        // Phase 1B step 2: a partial submit never waits.
+        Assert.DoesNotContain("WaitForFrame(", Body(frameRing, "public ulong SubmitPartial()"));
+        string frameSubmit = Body(frameRing, "private void Submit(");
         int submitStart = frameSubmit.IndexOf("long submitStart = VulkanStats.WaitStart();", StringComparison.Ordinal);
         int queueLock = frameSubmit.IndexOf("lock (_context.QueueLock)", StringComparison.Ordinal);
         int submitNoted = frameSubmit.IndexOf("VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);", StringComparison.Ordinal);
@@ -318,10 +320,18 @@ public class PacingStatsTests
         Assert.Contains("WaitSite.Present", Body(swapchain, "public void Present("));
 
         string device = Source("VulkanDevice.cs");
-        Assert.Contains("_frames.BeginFrame(WaitSite.FramePacing);", Body(device, "public void BeginFrame()"));
-        Assert.Contains("_frames.BeginFrame(WaitSite.FlushFrame);", Body(device, "private void FlushFrame()"));
-        Assert.Contains("VulkanStats.NoteWait(WaitSite.OcclusionQuery, waitStart);", Body(device, "public int GetQueryResult("));
-        // Readbacks wait on a setup fence too, but they are not uploads.
+        Assert.Contains("FrameSlot slot = _frames.BeginFrame();", Body(device, "public void BeginFrame()"));
+        // Phase 1B step 2: no flush, no query wait, no device-idle wait on a readback.
+        Assert.DoesNotContain("FlushFrame", device);
+        Assert.DoesNotContain("WaitSite.OcclusionQuery", device);
+        Assert.DoesNotContain("WaitSite.FlushFrame", frameRing);
+        Assert.DoesNotContain("ResultWaitBit", Source("Frame/QueryRing.cs"));
+        string readBack = Body(device, "private void ReadBack(");
+        Assert.DoesNotContain("WaitDeviceIdle", readBack);
+        Assert.Contains("_readbacks.WaitAndCopy(ticket, destination);", readBack);
+        Assert.Contains("_frames.Timeline.WaitForFrame(ticket.FrameValue, WaitSite.Readback);",
+            Source("Transfer/ReadbackManager.cs"));
+        // A between-frames readback waits on a setup fence, but it is not an upload.
         Assert.Equal(Count(device, "_setupCommands.SubmitAndWait("), Count(device, "WaitSite.Readback);"));
 
         // The per-draw dynamic-state count matches the commands actually recorded.

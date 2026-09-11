@@ -148,17 +148,6 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
 
     // ------------------------------------------------------------------ rules
 
-    /// <summary>
-    /// The Frame value frame <paramref name="frameValue" /> waits for before it
-    /// starts: <c>n - framesInFlight</c>, the frame that last used the same slot,
-    /// saturating at zero for the first frames.
-    /// </summary>
-    public static ulong PacingTarget(ulong frameValue, int framesInFlight)
-    {
-        ulong inFlight = (ulong)Math.Max(1, framesInFlight);
-        return frameValue > inFlight ? frameValue - inFlight : 0;
-    }
-
     /// <summary>Never wait past the newest signalled value; nothing would ever wake the wait.</summary>
     public static ulong WaitTarget(ulong requested, ulong signalled) => Math.Min(requested, signalled);
 
