@@ -352,7 +352,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 return false;
             }
 
-            if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync,
+            if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
                     out Swapchain? swapchain, out string? swapchainError))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
@@ -360,6 +360,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             }
 
             _swapchain = swapchain;
+            _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
             CreateDefaultFramebuffer((uint)width, (uint)height);
         }
 
@@ -368,7 +369,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     }
 
     private Swapchain? _swapchain;
+    private IPresentPath? _presentPath;
+    private readonly MissedVsyncDetector _missedVsyncs = new();
+    private long _lastPresentReturn;
+    private string? _reportedRebuildFailure;
     private bool _vsync = true;
+
+    private VulkanTexture? DefaultColorTexture() => _textures.Get(_defaultColor);
     private int _defaultFramebuffer;
     private int _defaultColor;
     private int _defaultDepth;
@@ -741,6 +748,14 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _ => stage.ToString(),
     };
 
+    /// <summary>
+    /// Ends the frame in two submissions. Submit A carries the upload batch and
+    /// the frame and signals the Frame timeline; only then does the CPU block on
+    /// vkAcquireNextImageKHR, with the whole frame already in flight. Submit B
+    /// (the present path: the flipped blit) waits on the frame at
+    /// COLOR_ATTACHMENT_OUTPUT and on the acquire semaphore at the image's first
+    /// use, and signals the image's present semaphore; then the image is presented.
+    /// </summary>
     public void Present()
     {
         if (!_frameActive) return;
@@ -748,133 +763,95 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         TextureDump.NoteFrame();
         if (TextureDump.Wanted) DumpRequestedTextures();
 
-        CommandBuffer commandBuffer = _frames.Current.CommandBuffer;
-
         // Any open rendering scope has to close before the command buffer ends.
-        _targets.EndRendering(commandBuffer);
+        _targets.EndRendering(_frames.Current.CommandBuffer);
 
-        if (_swapchain == null)
-        {
-            // Headless: nothing to present, but the frame still has to be
-            // submitted or the slot's fence would never signal.
-            _frames.EndFrame();
-            _frameActive = false;
-            return;
-        }
-
-        if (!_swapchain.TryAcquire(out uint imageIndex,
-                out Semaphore imageAvailable, out Semaphore renderFinished))
-        {
-            _frames.EndFrame();
-            _frameActive = false;
-            RecreateSwapchain();
-            return;
-        }
-
-        Checkpoint(commandBuffer, CheckpointMarker.PresentBlit(imageIndex, _frameCounter));
-        BlitToSwapchain(commandBuffer, imageIndex);
-
-        _frames.EndFrame(imageAvailable, renderFinished);
+        long presentEntry = System.Diagnostics.Stopwatch.GetTimestamp();
+        ulong renderValue = _frames.EndFrame();
         _frameActive = false;
+        long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        _swapchain.Present(imageIndex, renderFinished);
-        if (_swapchain.NeedsRecreation) RecreateSwapchain();
+        // Headless: nothing to present; the frame is submitted all the same.
+        if (_swapchain == null || _presentPath == null) return;
+
+        bool acquired = _swapchain.TryAcquire(out PresentTarget target);
+        long acquireReturned = System.Diagnostics.Stopwatch.GetTimestamp();
+        bool renderCompletedAtAcquire = _frames.Timeline.FrameCompleted >= renderValue;
+        ReportRebuildFailure();
+        if (!acquired)
+        {
+            LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, 0,
+                renderValue, 0, renderCompletedAtAcquire, false);
+            return;
+        }
+
+        CommandBuffer presentCommands = _frames.BeginPresentCommands();
+        Checkpoint(presentCommands, CheckpointMarker.PresentBlit(target.ImageIndex, _frameCounter));
+        _presentPath.Record(presentCommands, target);
+        ulong presentValue = _frames.SubmitPresent(
+            target.AcquireSemaphore, _presentPath.AcquireWaitStage, renderValue, target.PresentSemaphore);
+        _swapchain.NotePresentSubmitted(target, presentValue);
+        long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        _swapchain.Present(target);
+        LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
+            renderValue, presentValue, renderCompletedAtAcquire, true);
+
+        long presentReturn = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (_lastPresentReturn != 0 && _vsync &&
+            _missedVsyncs.NoteInterval((presentReturn - _lastPresentReturn) * 1000.0 / System.Diagnostics.Stopwatch.Frequency) &&
+            _swapchain.PromoteToRelaxedFifo())
+        {
+            MirrorValidationMessage("--- sustained missed vsyncs: swapchain promoted to FIFO_RELAXED");
+        }
+        _lastPresentReturn = presentReturn;
+    }
+
+    /// <summary>Stopwatch timestamps of one Present, for PresentDecouplingTests.</summary>
+    internal readonly record struct PresentTimings(
+        long PresentEntry, long FrameSubmitted, long AcquireReturned, long PresentSubmitted,
+        ulong RenderValue, ulong PresentValue, bool RenderCompletedAtAcquire, bool Presented);
+
+    /// <summary>The last Present's timings. Tests only.</summary>
+    internal PresentTimings LastPresentTimingsForTests { get; private set; }
+
+    /// <summary>The swapchain, null when headless. Tests only.</summary>
+    internal Swapchain? SwapchainForTests => _swapchain;
+
+    /// <summary>The present path's acquire wait stage. Tests only.</summary>
+    internal PipelineStageFlags PresentAcquireWaitStageForTests =>
+        _presentPath?.AcquireWaitStage ?? PresentWaitStages.BlitAcquireWait;
+
+    private void ReportRebuildFailure()
+    {
+        string? failure = _swapchain?.RebuildFailure;
+        if (failure != null && failure != _reportedRebuildFailure)
+        {
+            _diagnostics.Add("swapchain recreation failed: " + failure);
+        }
+        _reportedRebuildFailure = failure;
     }
 
     /// <summary>
-    /// Copies the rendered frame into the acquired swapchain image, flipped.
-    ///
-    /// This inverted blit is the entire Y-flip story for the backend. Everything
-    /// upstream stays in OpenGL's orientation, which is what keeps intermediate
-    /// targets and screenshots byte-identical to the GL path; the display wants
-    /// row 0 at the top, so the source rows are read bottom-to-top exactly once,
-    /// here.
+    /// A new window size: the default framebuffer is rebuilt now (its old images
+    /// retire on the timelines), the swapchain at the next acquire. Nothing waits.
     /// </summary>
-    private void BlitToSwapchain(CommandBuffer commandBuffer, uint imageIndex)
-    {
-        VulkanTexture? source = _textures.Get(_defaultColor);
-        if (source == null || _swapchain == null) return;
-
-        Vk api = _context.Api;
-        Image destination = _swapchain.ImageAt(imageIndex);
-
-        _textures.TransitionTexture(commandBuffer, source, ImageLayout.TransferSrcOptimal);
-        TransitionSwapchainImage(commandBuffer, destination,
-            ImageLayout.Undefined, ImageLayout.TransferDstOptimal);
-
-        var blit = new ImageBlit
-        {
-            SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-            DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-        };
-        // Source Y runs backwards: this is the flip.
-        blit.SrcOffsets.Element0 = new Offset3D(0, (int)source.Height, 0);
-        blit.SrcOffsets.Element1 = new Offset3D((int)source.Width, 0, 1);
-        blit.DstOffsets.Element0 = new Offset3D(0, 0, 0);
-        blit.DstOffsets.Element1 = new Offset3D((int)_swapchain.Extent.Width, (int)_swapchain.Extent.Height, 1);
-
-        api.CmdBlitImage(commandBuffer,
-            source.Image, ImageLayout.TransferSrcOptimal,
-            destination, ImageLayout.TransferDstOptimal,
-            1, &blit, Filter.Linear);
-
-        TransitionSwapchainImage(commandBuffer, destination,
-            ImageLayout.TransferDstOptimal, ImageLayout.PresentSrcKhr);
-    }
-
-    private void TransitionSwapchainImage(
-        CommandBuffer commandBuffer, Image image, ImageLayout from, ImageLayout to)
-    {
-        var barrier = new ImageMemoryBarrier2
-        {
-            SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = TextureManager.AccessForLayout(from, writer: true),
-            DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = TextureManager.AccessForLayout(to, writer: false),
-            OldLayout = from,
-            NewLayout = to,
-            Image = image,
-            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1),
-        };
-
-        var dependency = new DependencyInfo
-        {
-            SType = StructureType.DependencyInfo,
-            ImageMemoryBarrierCount = 1,
-            PImageMemoryBarriers = &barrier,
-        };
-        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
-        VulkanStats.NoteImageBarriers(1);
-    }
-
-    private void RecreateSwapchain()
-    {
-        if (_swapchain == null || _windowWidth == 0 || _windowHeight == 0) return;
-
-        if (!_swapchain.Recreate(_windowWidth, _windowHeight, _vsync, out string? failureReason))
-        {
-            _diagnostics.Add("swapchain recreation failed: " + failureReason);
-        }
-    }
-
     public void Resize(int width, int height)
     {
         if (_swapchain == null || width <= 0 || height <= 0) return;
         if ((uint)width == _windowWidth && (uint)height == _windowHeight) return;
 
-        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
-
         DestroyDefaultFramebuffer();
         CreateDefaultFramebuffer((uint)width, (uint)height);
-        RecreateSwapchain();
+        _swapchain.RequestRebuild(_windowWidth, _windowHeight, _vsync);
     }
 
     public void SetVSync(bool enabled)
     {
         if (_vsync == enabled) return;
         _vsync = enabled;
-        RecreateSwapchain();
+        _missedVsyncs.Reset();
+        _swapchain?.RequestRebuild(_windowWidth, _windowHeight, _vsync);
     }
 
     private CommandBuffer Commands => _frames.Current.CommandBuffer;

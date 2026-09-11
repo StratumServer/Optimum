@@ -433,17 +433,45 @@ public class VulkanBackendIntegrationTests
     private static string Read(string relativePath) =>
         File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));
 
+    /// <summary>
+    /// Phase 1B step 4: the frame and the present are two submissions. The CPU
+    /// acquires only after the frame is in flight, the present submission waits on
+    /// the acquire semaphore at the image's first use (never ALL_COMMANDS) and on
+    /// the frame at COLOR_ATTACHMENT_OUTPUT, present semaphores stay per image, and
+    /// recreation passes oldSwapchain and never waits for the device.
+    /// </summary>
     [Fact]
-    public void ThePresentPathWaitsForTheSwapchainImageAtEveryStageAndOwnsSemaphoresPerImage()
+    public void ThePresentPathSplitsTheSubmissionAndRecreatesWithoutWaiting()
     {
         string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
-        // The first use of the acquired image is the present blit (transfer);
-        // a COLOR_ATTACHMENT_OUTPUT wait would not order it.
-        Assert.Contains("PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)", ring);
+        Assert.DoesNotContain("PipelineStageFlags.AllCommandsBit", ring);
+        Assert.Contains("PresentWaitStages.RequireAcquireStage(acquireStage);", ring);
+        Assert.Contains("waitStages[waitCount] = PresentWaitStages.FrameWait;", ring);
 
-        string swapchain = Read("Optimum.Render.Vulkan/Core/Swapchain.cs");
-        Assert.Contains("signalSemaphore = _renderFinished[(int)imageIndex %", swapchain);
-        Assert.DoesNotContain("signalSemaphore = _renderFinished[_semaphoreIndex];", swapchain);
+        string stages = Read("Optimum.Render.Vulkan/Present/IPresentPath.cs");
+        Assert.Contains("FrameWait = PipelineStageFlags.ColorAttachmentOutputBit;", stages);
+        Assert.Contains("BlitAcquireWait = PipelineStageFlags.TransferBit;", stages);
+
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        int present = device.IndexOf("    public void Present()", StringComparison.Ordinal);
+        int frameSubmit = device.IndexOf("ulong renderValue = _frames.EndFrame();", present, StringComparison.Ordinal);
+        int acquire = device.IndexOf("_swapchain.TryAcquire(out PresentTarget target)", present, StringComparison.Ordinal);
+        int presentSubmit = device.IndexOf("_frames.SubmitPresent(", present, StringComparison.Ordinal);
+        int queuePresent = device.IndexOf("_swapchain.Present(target);", present, StringComparison.Ordinal);
+        Assert.True(present >= 0 && frameSubmit > present && acquire > frameSubmit &&
+                    presentSubmit > acquire && queuePresent > presentSubmit,
+            "Present must submit the frame, then acquire, then submit the present path, then present");
+        int resizeStart = device.IndexOf("    public void Resize(", StringComparison.Ordinal);
+        int resizeEnd = device.IndexOf("    public void SetVSync(", resizeStart, StringComparison.Ordinal);
+        Assert.True(resizeStart >= 0 && resizeEnd > resizeStart);
+        Assert.DoesNotContain("WaitDeviceIdle", device.Substring(resizeStart, resizeEnd - resizeStart));
+
+        string swapchain = Read("Optimum.Render.Vulkan/Present/Swapchain.cs");
+        Assert.Contains("OldSwapchain = old?.Handle ?? default,", swapchain);
+        Assert.Contains("_retirement.Retire(old, old.LastPresentValue);", swapchain);
+        Assert.Contains("public Semaphore PresentSemaphoreFor(uint imageIndex) => _presentSemaphores[imageIndex];", swapchain);
+        // vkDeviceWaitIdle only at teardown (Dispose), never in a rebuild.
+        Assert.Equal(1, swapchain.Split("WaitDeviceIdle").Length - 1);
     }
 
     /// <summary>

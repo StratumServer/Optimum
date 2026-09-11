@@ -35,6 +35,12 @@ internal sealed class VulkanContextOptions
     /// OPTIMUM_VULKAN_POISON once, at context creation.
     /// </summary>
     public bool? Poison;
+
+    /// <summary>
+    /// Tests only: sleeps this long before every vkAcquireNextImageKHR, standing
+    /// in for a compositor that holds images back (PresentDecouplingTests).
+    /// </summary>
+    public TimeSpan AcquireDelayForTests;
 }
 
 /// <summary>What the chosen device can do, once it is up.</summary>
@@ -117,6 +123,9 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// </summary>
     public bool PoisonFreshResources { get; private set; }
 
+    /// <summary>Tests only; see <see cref="VulkanContextOptions.AcquireDelayForTests" />.</summary>
+    public TimeSpan AcquireDelayForTests { get; private set; }
+
     /// <summary>OPTIMUM_VULKAN_POISON: any value but empty and "0" turns poison mode on.</summary>
     public const string PoisonVariable = "OPTIMUM_VULKAN_POISON";
 
@@ -164,6 +173,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         failureReason = null;
 
         var created = new VulkanContext();
+        created.AcquireDelayForTests = options.AcquireDelayForTests;
         created.PoisonFreshResources = options.Poison
             ?? PoisonRequested(Environment.GetEnvironmentVariable(PoisonVariable));
         try

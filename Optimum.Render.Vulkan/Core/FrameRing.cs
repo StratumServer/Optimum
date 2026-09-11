@@ -100,7 +100,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         StartCommandBuffer();
     }
 
-    private void StartCommandBuffer()
+    private void StartCommandBuffer(bool frameCommands = true)
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer;
@@ -131,7 +131,9 @@ internal sealed unsafe class FrameSlot : IDisposable
         VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
             "vkBeginCommandBuffer for a frame slot");
         CommandBuffer = commandBuffer;
-        _uploads.OnFrameCommandsStarted(commandBuffer);
+        // The present command buffer is not the frame's: an upload recorded while
+        // it is open goes into the batch, which rides the present submission.
+        if (frameCommands) _uploads.OnFrameCommandsStarted(commandBuffer);
     }
 
     /// <summary>
@@ -164,7 +166,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     public ulong SubmitPartial()
     {
         ulong submitted = FrameValue;
-        Submit(default, default, PipelineStageFlags.AllCommandsBit);
+        Submit(default, default, default, 0);
         PartialSubmits++;
         FrameValue = _timeline.ReserveFrame();
         StartCommandBuffer();
@@ -172,35 +174,78 @@ internal sealed unsafe class FrameSlot : IDisposable
     }
 
     /// <summary>
-    /// Closes the command buffer and submits it, signalling the Frame timeline to
-    /// <see cref="FrameValue" /> (and the binary present semaphore when given).
+    /// Closes the frame's command buffer and submits it (Submit A), signalling the
+    /// Frame timeline to <see cref="FrameValue" />. Nothing waits. Returns the value
+    /// signalled, which the present submission waits on.
     ///
     /// Every frame that begins must end here: a reserved Frame value that is never
     /// signalled holds back every deferred destruction recorded at or after it.
     /// </summary>
-    public void EndFrameAndSubmit(
-        Semaphore waitSemaphore = default,
-        Semaphore signalSemaphore = default,
-        // The swapchain image's first use in the frame is the present blit, a
-        // transfer, which a COLOR_ATTACHMENT_OUTPUT wait does not order: the
-        // blit could overwrite an image the presentation engine still owns and
-        // the display would show a stale or torn frame. Wait at every stage.
-        PipelineStageFlags waitStage = PipelineStageFlags.AllCommandsBit)
+    public ulong EndFrameAndSubmit()
     {
-        Submit(waitSemaphore, signalSemaphore, waitStage);
+        ulong submitted = FrameValue;
+        Submit(default, default, default, 0);
         VulkanStats.NoteUniformRingUse(_cursor, _regionSize);
+        return submitted;
     }
 
-    private void Submit(Semaphore waitSemaphore, Semaphore signalSemaphore, PipelineStageFlags waitStage)
+    /// <summary>
+    /// After <see cref="EndFrameAndSubmit" /> and a successful acquire: starts the
+    /// present command buffer (Submit B) in this slot under a newly reserved Frame
+    /// value.
+    /// </summary>
+    public CommandBuffer BeginPresentCommands()
+    {
+        FrameValue = _timeline.ReserveFrame();
+        StartCommandBuffer(frameCommands: false);
+        return CommandBuffer;
+    }
+
+    /// <summary>
+    /// Submits the present command buffer (Submit B): waits on the Frame timeline
+    /// at <paramref name="renderValue" /> (COLOR_ATTACHMENT_OUTPUT) and on the
+    /// acquire semaphore at <paramref name="acquireStage" /> (TRANSFER or
+    /// COLOR_ATTACHMENT_OUTPUT, never ALL_COMMANDS); signals the binary present
+    /// semaphore and the Frame timeline. Returns the Frame value signalled.
+    /// </summary>
+    public ulong SubmitPresent(Semaphore acquireSemaphore, PipelineStageFlags acquireStage,
+        ulong renderValue, Semaphore presentSemaphore)
+    {
+        PresentWaitStages.RequireAcquireStage(acquireStage);
+        ulong submitted = FrameValue;
+        Submit(acquireSemaphore, acquireStage, presentSemaphore, renderValue);
+        return submitted;
+    }
+
+    /// <param name="waitSemaphore">A binary semaphore to wait on (the acquire semaphore), or none.</param>
+    /// <param name="waitStage">The stage <paramref name="waitSemaphore" /> is waited on at.</param>
+    /// <param name="signalSemaphore">A binary semaphore to signal (the present semaphore), or none.</param>
+    /// <param name="frameWaitValue">A Frame timeline value to wait on at COLOR_ATTACHMENT_OUTPUT, or 0.</param>
+    private void Submit(Semaphore waitSemaphore, PipelineStageFlags waitStage, Semaphore signalSemaphore,
+        ulong frameWaitValue)
     {
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         api.EndCommandBuffer(commandBuffer);
 
-        Semaphore wait = waitSemaphore;
-        ulong waitValue = 0;
-        PipelineStageFlags stage = waitStage;
-        uint waitCount = wait.Handle == 0 ? 0u : 1u;
+        Semaphore* waits = stackalloc Semaphore[2];
+        ulong* waitValues = stackalloc ulong[2];
+        PipelineStageFlags* waitStages = stackalloc PipelineStageFlags[2];
+        uint waitCount = 0;
+        if (waitSemaphore.Handle != 0)
+        {
+            waits[waitCount] = waitSemaphore;
+            waitValues[waitCount] = 0;
+            waitStages[waitCount] = waitStage;
+            waitCount++;
+        }
+        if (frameWaitValue != 0)
+        {
+            waits[waitCount] = _timeline.Frame;
+            waitValues[waitCount] = frameWaitValue;
+            waitStages[waitCount] = PresentWaitStages.FrameWait;
+            waitCount++;
+        }
 
         // Binary present semaphore first (its value is ignored), then the Frame
         // timeline, then the Transfer timeline when an upload batch rides along.
@@ -244,7 +289,7 @@ internal sealed unsafe class FrameSlot : IDisposable
             {
                 SType = StructureType.TimelineSemaphoreSubmitInfo,
                 WaitSemaphoreValueCount = waitCount,
-                PWaitSemaphoreValues = waitCount == 0 ? null : &waitValue,
+                PWaitSemaphoreValues = waitCount == 0 ? null : waitValues,
                 SignalSemaphoreValueCount = signalCount,
                 PSignalSemaphoreValues = signalValues,
             };
@@ -256,8 +301,8 @@ internal sealed unsafe class FrameSlot : IDisposable
                 CommandBufferCount = commandBufferCount,
                 PCommandBuffers = commandBuffers,
                 WaitSemaphoreCount = waitCount,
-                PWaitSemaphores = waitCount == 0 ? null : &wait,
-                PWaitDstStageMask = waitCount == 0 ? null : &stage,
+                PWaitSemaphores = waitCount == 0 ? null : waits,
+                PWaitDstStageMask = waitCount == 0 ? null : waitStages,
                 SignalSemaphoreCount = signalCount,
                 PSignalSemaphores = signals,
             };
@@ -381,11 +426,16 @@ internal sealed class FrameRing : IDisposable
     /// </summary>
     public ulong SubmitPartial() => Current.SubmitPartial();
 
-    /// <summary>Ends and submits the current frame. Pairs with every BeginFrame.</summary>
-    public void EndFrame(
-        Semaphore waitSemaphore = default,
-        Semaphore signalSemaphore = default) =>
-        Current.EndFrameAndSubmit(waitSemaphore, signalSemaphore);
+    /// <summary>Ends and submits the current frame (Submit A). Pairs with every BeginFrame. Returns its last Frame value.</summary>
+    public ulong EndFrame() => Current.EndFrameAndSubmit();
+
+    /// <summary>Starts the present command buffer; see <see cref="FrameSlot.BeginPresentCommands" />.</summary>
+    public CommandBuffer BeginPresentCommands() => Current.BeginPresentCommands();
+
+    /// <summary>Submits the present command buffer (Submit B); see <see cref="FrameSlot.SubmitPresent" />.</summary>
+    public ulong SubmitPresent(Semaphore acquireSemaphore, PipelineStageFlags acquireStage,
+        ulong renderValue, Semaphore presentSemaphore) =>
+        Current.SubmitPresent(acquireSemaphore, acquireStage, renderValue, presentSemaphore);
 
     /// <summary>
     /// Queues a resource for destruction once the GPU is done with it.

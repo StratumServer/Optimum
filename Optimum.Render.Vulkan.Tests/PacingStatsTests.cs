@@ -329,7 +329,7 @@ public class PacingStatsTests
         Assert.DoesNotContain("NoteBlockingUpload", uploads);
         Assert.DoesNotContain("WaitSite.UploadSubmit", Source("Core/TextureManager.cs"));
 
-        string swapchain = Source("Core/Swapchain.cs");
+        string swapchain = Source("Present/Swapchain.cs");
         Assert.Contains("WaitSite.SwapchainAcquire", Body(swapchain, "public bool TryAcquire("));
         Assert.Contains("WaitSite.Present", Body(swapchain, "public void Present("));
 

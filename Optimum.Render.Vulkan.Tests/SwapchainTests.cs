@@ -29,7 +29,7 @@ public class SwapchainTests
     /// Creates a hidden window with no graphics API attached, the way the
     /// patched client will.
     /// </summary>
-    private static unsafe bool TryCreateWindow(
+    internal static unsafe bool TryCreateWindow(
         ITestOutputHelper output, int width, int height, out Window* window)
     {
         window = null;
@@ -236,7 +236,7 @@ public class SwapchainTests
         public bool Compile() => true;
     }
 
-    private static int LinkFullscreenProgram(IOptimumGraphicsDevice device)
+    internal static int LinkFullscreenProgram(IOptimumGraphicsDevice device)
     {
         var vertex = new TestShader
         {
