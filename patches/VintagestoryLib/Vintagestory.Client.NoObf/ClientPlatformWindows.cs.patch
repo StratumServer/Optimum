@@ -1,7 +1,20 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..d786909 100644
+index 6edf0c9..5239c74 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
+@@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
+ using Vintagestory.Common;
+ using Vintagestory.Common.Convert;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+-public sealed class ClientPlatformWindows : ClientPlatformAbstract
++public class ClientPlatformWindows : ClientPlatformAbstract
+ {
+ 	public class GLBuffer
+ 	{
+ 		public int BufferId;
+ 	}
 @@ -45,10 +45,99 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private AssetManager assetManager;
@@ -466,7 +479,8 @@ index 6edf0c9..d786909 100644
  		ScreenManager.FrameProfiler.End();
  	}
  
- 	public string GetGraphicsCardRenderer()
+-	public string GetGraphicsCardRenderer()
++	public virtual string GetGraphicsCardRenderer()
  	{
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		if (optimumDevice != null)
@@ -624,7 +638,8 @@ index 6edf0c9..d786909 100644
  		GL.BindVertexArray(0);
  	}
  
- 	public void RenderFullscreenTriangle(MeshRef modelRef)
+-	public void RenderFullscreenTriangle(MeshRef modelRef)
++	public virtual void RenderFullscreenTriangle(MeshRef modelRef)
  	{
  		RuntimeStats.drawCallsCount++;
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
@@ -716,6 +731,7 @@ index 6edf0c9..d786909 100644
  		return frameBufferRef;
  	}
  
+-	public List<FrameBufferRef> SetupDefaultFrameBuffers()
 +	/// <summary>
 +	/// Optimum: builds the same framebuffer set as the GL path, through the
 +	/// device.
@@ -727,7 +743,7 @@ index 6edf0c9..d786909 100644
 +	/// render systems assume when they index FrameBuffers by EnumFrameBuffer.
 +	/// </summary>
 +	private List<FrameBufferRef> SetupOptimumFrameBuffers(Vintagestory.API.Config.IOptimumGraphicsDevice device)
-+	{
+ 	{
 +		SetupSSAO = ClientSettings.SSAOQuality > 0;
 +		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
 +		for (int i = 0; i <= 24; i++)
@@ -1173,8 +1189,8 @@ index 6edf0c9..d786909 100644
 +		return target;
 +	}
 +
- 	public List<FrameBufferRef> SetupDefaultFrameBuffers()
- 	{
++	public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()
++	{
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumSetupDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		if (optimumSetupDevice != null)
 +		{
@@ -1356,6 +1372,7 @@ index 6edf0c9..d786909 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
  	}
  
+-	public void DisposeFrameBuffers(List<FrameBufferRef> buffers)
 +	/// <summary>
 +	/// Optimum: the GL-path body of <see cref="CreateOptimumHistoryTarget" /> -
 +	/// a TAA history slot with colour (RGBA16F), aux (RGBA8: glow.rg, ssao.b)
@@ -1414,7 +1431,7 @@ index 6edf0c9..d786909 100644
 +		return target;
 +	}
 +
- 	public void DisposeFrameBuffers(List<FrameBufferRef> buffers)
++	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
  	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
