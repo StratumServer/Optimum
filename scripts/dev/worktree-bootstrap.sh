@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Materialise the git-ignored trees (build/, the fork checkouts, .vanilla, _ref, .baseline, .build)
+# Materialise the git-ignored trees (build/, the fork checkouts, .vanilla, _ref, .baseline, a private .build copy)
 # from .baseline + patches/ + sources/, offline. It mirrors scripts/bootstrap.sh steps 7 and 8
 # (patch apply, sources/ overlay, closure-class fixup). bin/ and obj/ are kept, so builds stay
 # incremental.
 #
 #   scripts/dev/worktree-bootstrap.sh [main-checkout-path]
-#       inside a secondary worktree: link the shared trees from the main checkout, then materialise.
+#       inside a secondary worktree: link .vanilla, _ref and .baseline read-only, copy .build, materialise.
 #   scripts/dev/worktree-bootstrap.sh --in-place
 #       inside the main checkout: refuses when build/ or a fork holds edits that
 #       extract-patches.sh has not written out yet (proves the tree is clean).
@@ -45,7 +45,7 @@ else
     echo "worktree-bootstrap: run this inside a secondary worktree, or pass --in-place in the main checkout" >&2
     exit 1
   fi
-  for d in .vanilla _ref .baseline .build; do
+  for d in .vanilla _ref .baseline; do
     if [[ ! -e "$main/$d" ]]; then
       echo "worktree-bootstrap: $main/$d is missing; run make bootstrap in the main checkout first" >&2
       exit 1
@@ -56,6 +56,12 @@ else
     exclude="$(git rev-parse --git-path info/exclude)"
     grep -qxF "$d" "$exclude" 2>/dev/null || echo "$d" >> "$exclude"
   done
+  # .build is a private copy, never a link: check-patches.sh (prepare-runtime-donors.sh) wipes and
+  # re-decompiles .build/runtime-donors, which through a link destroyed the main checkout's tree.
+  [[ -L "$wt/.build" ]] && rm "$wt/.build"
+  if [[ -d "$main/.build" && ! -e "$wt/.build" ]]; then
+    cp -a --reflink=auto "$main/.build" "$wt/.build"
+  fi
 fi
 
 is_vanilla_project() { case "$1" in VintagestoryLib|Vintagestory) return 0 ;; *) return 1 ;; esac; }
