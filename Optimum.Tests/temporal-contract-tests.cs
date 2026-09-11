@@ -450,7 +450,8 @@ public class TemporalContractTests
         // 34842 = GL_RGBA16F, the GL path's raw token for the same thing.
         Assert.True(platform.Contains("GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);", StringComparison.Ordinal),
             $"The GL path no longer creates the motion attachment as RGBA16F (34842); {Doc} section 3.1 freezes the format.");
-        Assert.True(platform.Contains("public int MotionAttachmentIndex { get; private set; } = -1;", StringComparison.Ordinal),
+        Assert.True(platform.Contains("public override int MotionAttachmentIndex", StringComparison.Ordinal)
+            && platform.Contains("private int optimumMotionAttachmentIndex = -1;", StringComparison.Ordinal),
             $"MotionAttachmentIndex changed shape; {Doc} section 3.1 describes it as 2 without SSAO, 4 with, -1 when off.");
 
         // Primary depth: DepthComponent32 on the device path, 33191 = GL_DEPTH_COMPONENT32 on GL,

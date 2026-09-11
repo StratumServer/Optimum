@@ -397,11 +397,11 @@ public class TaaPipelineCoverageTests
         Assert.Contains("public static bool DisableTaaAtRuntime()", config);
 
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        int disable = platform.IndexOf("public void DisableOptimumTaa(string reason)", StringComparison.Ordinal);
+        int disable = platform.IndexOf("public override void DisableOptimumTaa(string reason)", StringComparison.Ordinal);
         Assert.True(disable > 0);
         Assert.Contains("OptimumConfig.DisableTaaAtRuntime()", platform.Substring(disable, 1200));
         // The reload happens outside frame buffer setup, at the resolve decision.
-        int resolve = platform.IndexOf("private bool RenderOptimumTaaResolve()", StringComparison.Ordinal);
+        int resolve = platform.IndexOf("public override bool RenderOptimumTaaResolve()", StringComparison.Ordinal);
         Assert.Contains("OptimumRunPendingTaaShaderReload();", platform.Substring(resolve, 400));
         Assert.Contains("ShaderRegistry.ReloadShaders();", platform);
 

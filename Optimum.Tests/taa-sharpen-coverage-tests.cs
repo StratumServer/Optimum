@@ -153,7 +153,7 @@ public class TaaSharpenCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        string body = MethodBody(platform, "private int RenderOptimumTaaSharpen(int resolvedScene)");
+        string body = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
 
         Assert.Contains("if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)", body);
         Assert.Contains("if (sharpen == null || sharpen.LoadError || target == null)", body);
@@ -180,10 +180,10 @@ public class TaaSharpenCoverageTests
         // One shared condition, asked by both passes: the sharpen pass skips
         // itself when the blit is going to run FSR's own RCAS at native
         // resolution, so the same pixels are never sharpened twice.
-        Assert.Contains("private bool OptimumFsrBlitActive()", platform);
+        Assert.Contains("public override bool OptimumFsrBlitActive()", platform);
         Assert.Contains("bool useFsr = OptimumFsrBlitActive();", platform);
 
-        string body = MethodBody(platform, "private int RenderOptimumTaaSharpen(int resolvedScene)");
+        string body = MethodBody(platform, "public override int RenderOptimumTaaSharpen(int resolvedScene)");
         int guard = body.IndexOf("if (OptimumFsrBlitActive())", StringComparison.Ordinal);
         int draw = body.IndexOf("RenderFullscreenTriangle(screenQuad);", StringComparison.Ordinal);
         Assert.True(guard >= 0 && guard < draw);
@@ -191,7 +191,7 @@ public class TaaSharpenCoverageTests
         Assert.Contains("two RCAS passes to the same pixels", platform);
 
         // The shared test still carries every term the old inline condition had.
-        string helper = MethodBody(platform, "private bool OptimumFsrBlitActive()");
+        string helper = MethodBody(platform, "public override bool OptimumFsrBlitActive()");
         Assert.Contains("!optimumFsrDisabled", helper);
         Assert.Contains("ClientSettings.OptimumRenderScale < 1.0f", helper);
         Assert.Contains("frameBuffers[OptimumFsrFramebufferIndex] != null", helper);

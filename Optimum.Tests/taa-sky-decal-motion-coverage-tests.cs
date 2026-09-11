@@ -137,7 +137,7 @@ public class TaaSkyDecalMotionCoverageTests
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
         string clientMain = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
 
-        string pass = MethodBodyAfter(platform, "internal bool RenderOptimumSkyMotion()");
+        string pass = MethodBodyAfter(platform, "public override bool RenderOptimumSkyMotion()");
 
         // The motion-only window, like the liquid velocity pass: this one
         // re-records motion for pixels the frame has already shaded.
@@ -193,7 +193,7 @@ public class TaaSkyDecalMotionCoverageTests
     public void TheSkyPassRestoresCullingOnBothPaths()
     {
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        string pass = MethodBodyAfter(platform, "internal bool RenderOptimumSkyMotion()");
+        string pass = MethodBodyAfter(platform, "public override bool RenderOptimumSkyMotion()");
 
         // The disable that has to be undone, and it is outside the try.
         int disable = pass.IndexOf("GlDisableCullFace();", StringComparison.Ordinal);
@@ -409,8 +409,8 @@ public class TaaSkyDecalMotionCoverageTests
 
         foreach (string signature in new[]
         {
-            "public bool BeginMotionWrite()",
-            "public bool BeginMotionOnlyWrite()",
+            "public override bool BeginMotionWrite()",
+            "public override bool BeginMotionOnlyWrite()",
         })
         {
             string body = MethodBodyAfter(platform, signature);

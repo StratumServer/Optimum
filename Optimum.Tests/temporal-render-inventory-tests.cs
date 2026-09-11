@@ -142,8 +142,8 @@ public class TemporalRenderInventoryTests
         string clientMain = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
 
         // The pass exists, is registered, and is called last in the scene phase.
-        Assert.Contains("internal bool RenderOptimumSkyMotion()", platform);
-        Assert.Contains("optimumSkyMotionPlatform.RenderOptimumSkyMotion();", clientMain);
+        Assert.Contains("public override bool RenderOptimumSkyMotion()", platform);
+        Assert.Contains("Platform.RenderOptimumSkyMotion();", clientMain);
         Assert.Contains(
             "RegisterOptimumShaderProgram(\"taa-skymotion\", ShaderPrograms.TaaSkyMotion = new ShaderProgram());",
             Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs"));

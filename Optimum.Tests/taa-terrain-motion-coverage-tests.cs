@@ -211,9 +211,9 @@ public class TaaTerrainMotionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        Assert.Contains("public bool BeginMotionWrite()", platform);
-        Assert.Contains("public void EndMotionWrite()", platform);
-        Assert.Contains("public bool OptimumMotionWriteActive { get; private set; }", platform);
+        Assert.Contains("public override bool BeginMotionWrite()", platform);
+        Assert.Contains("public override void EndMotionWrite()", platform);
+        Assert.Contains("public override bool OptimumMotionWriteActive", platform);
 
         // Guards: no motion attachment, no TAA targets, TAA switched off, or a
         // window already open - all no-ops, so callers can wrap unconditionally.
@@ -246,7 +246,7 @@ public class TaaTerrainMotionCoverageTests
         Assert.Contains("\"optimumMotionDrawBuffersOff\"", patcher);
 
         // And nothing inside the window allocates.
-        int begin = platform.IndexOf("public bool BeginMotionWrite()", StringComparison.Ordinal);
+        int begin = platform.IndexOf("public override bool BeginMotionWrite()", StringComparison.Ordinal);
         int end = platform.IndexOf("private void ApplyOptimumMotionBlendState()", begin, StringComparison.Ordinal);
         Assert.True(begin >= 0 && end > begin);
         string window = platform.Substring(begin, end - begin);
@@ -274,7 +274,7 @@ public class TaaTerrainMotionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        int begin = platform.IndexOf("public bool BeginMotionWrite()", StringComparison.Ordinal);
+        int begin = platform.IndexOf("public override bool BeginMotionWrite()", StringComparison.Ordinal);
         Assert.True(begin >= 0);
         int drawBuffers = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", begin, StringComparison.Ordinal);
         Assert.True(drawBuffers > begin);

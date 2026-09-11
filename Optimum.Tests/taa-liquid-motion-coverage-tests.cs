@@ -141,8 +141,8 @@ public class TaaLiquidMotionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        Assert.Contains("public bool BeginMotionOnlyWrite()", platform);
-        Assert.Contains("public void EndMotionOnlyWrite()", platform);
+        Assert.Contains("public override bool BeginMotionOnlyWrite()", platform);
+        Assert.Contains("public override void EndMotionOnlyWrite()", platform);
 
         // Device path: the mask is the single motion bit, not the prefix mask.
         Assert.Contains("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, 1 << MotionAttachmentIndex);", platform);
@@ -159,7 +159,7 @@ public class TaaLiquidMotionCoverageTests
 
         // The same guards as the P3 window, including the one that keeps the two
         // backends from disagreeing about which framebuffer the mask belongs to.
-        int begin = platform.IndexOf("public bool BeginMotionOnlyWrite()", StringComparison.Ordinal);
+        int begin = platform.IndexOf("public override bool BeginMotionOnlyWrite()", StringComparison.Ordinal);
         int drawBuffers = platform.IndexOf(
             "optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, 1 << MotionAttachmentIndex);",
             begin, StringComparison.Ordinal);
@@ -171,7 +171,7 @@ public class TaaLiquidMotionCoverageTests
         Assert.Contains("if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;", guards);
 
         // Replace blending on the motion attachment, same as the P3 window.
-        int end = platform.IndexOf("public void EndMotionOnlyWrite()", begin, StringComparison.Ordinal);
+        int end = platform.IndexOf("public override void EndMotionOnlyWrite()", begin, StringComparison.Ordinal);
         Assert.True(end > begin);
         Assert.Contains("ApplyOptimumMotionBlendState();", platform.Substring(begin, end - begin));
 
