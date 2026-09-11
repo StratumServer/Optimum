@@ -180,7 +180,7 @@ fi
 #    skipped by line offset, so nothing truncates a file the client is appending to.
 sleep "$WARMUP"
 fps_offset=$(wc -l < "$FPS_LOG" 2>/dev/null || echo 0)
-vk_offset=$(wc -l < "$VK_STATS" 2>/dev/null || echo 0)
+vk_offset=0; [[ -f "$VK_STATS" ]] && vk_offset=$(wc -l < "$VK_STATS")
 sleep "$SECONDS_WINDOW"
 
 # 5. Close the client before parsing: never leave the game running (rule 5).
