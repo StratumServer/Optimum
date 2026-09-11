@@ -454,6 +454,8 @@ try {
         'assets/game/shaders/taa-debug.fsh',
         'assets/game/shaders/taa-skymotion.vsh',
         'assets/game/shaders/taa-skymotion.fsh',
+        'assets/game/shaders/taa-sharpen.vsh',
+        'assets/game/shaders/taa-sharpen.fsh',
         'assets/game/shaders/chunkliquidmotion.vsh',
         'assets/game/shaders/chunkliquidmotion.fsh',
         'assets/game/shaders/fsr-easu.vsh',

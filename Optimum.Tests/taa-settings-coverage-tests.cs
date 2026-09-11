@@ -302,6 +302,12 @@ public class TaaSettingsCoverageTests
             "assets/game/shaders/taa-debug.fsh",
             "assets/game/shaders/taa-skymotion.vsh",
             "assets/game/shaders/taa-skymotion.fsh",
+            // P5's post-resolve sharpen: a separate branch added the shader, this
+            // list came from another, and the wildcard overlay would have shipped
+            // it silently either way - the reviewer list is the only place the
+            // release states it is supposed to be there.
+            "assets/game/shaders/taa-sharpen.vsh",
+            "assets/game/shaders/taa-sharpen.fsh",
             "assets/game/shaders/chunkliquidmotion.vsh",
             "assets/game/shaders/chunkliquidmotion.fsh",
             "assets/game/shaders/fsr-easu.vsh",
@@ -320,6 +326,7 @@ public class TaaSettingsCoverageTests
         {
             "taa-resolve.vsh", "taa-resolve.fsh", "taa-debug.vsh", "taa-debug.fsh",
             "taa-skymotion.vsh", "taa-skymotion.fsh",
+            "taa-sharpen.vsh", "taa-sharpen.fsh",
             "chunkliquidmotion.vsh", "chunkliquidmotion.fsh",
             "fsr-easu.vsh", "fsr-easu.fsh", "fsr-rcas.vsh", "fsr-rcas.fsh",
         })
