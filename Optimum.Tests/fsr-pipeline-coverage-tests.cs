@@ -80,6 +80,21 @@ public class FsrPipelineCoverageTests
         // calls at all.
         Assert.Contains("float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;", chunkRenderer);
         Assert.Contains("if (textureLodBias == 0f)", chunkRenderer);
+        // ... but "no call" only holds once the bias has been cleared again. The
+        // cache starts at NaN and the zero branch is a RESTORE path: after a
+        // nonzero bias it writes 0 back through SetOptimumTextureLodBias (atlas
+        // TexParameter and, via ShaderRegistry, the terrain sampler objects)
+        // before it returns and resets the cache to NaN. Without that a user who
+        // turns TAA off, or leaves FSR, would keep the last bias until the next
+        // shader reload.
+        Assert.Contains("private float optimumTextureLodBias = float.NaN;", chunkRenderer);
+        string zeroBranch = BranchAfter(chunkRenderer, "if (textureLodBias == 0f)");
+        Assert.Contains("if (!float.IsNaN(optimumTextureLodBias))", zeroBranch);
+        Assert.Contains("SetOptimumTextureLodBias(0f);", zeroBranch);
+        Assert.Contains("optimumTextureLodBias = float.NaN;", zeroBranch);
+        // ...and the branch really is just that branch: the nonzero path below
+        // it is outside it.
+        Assert.DoesNotContain("SetOptimumTextureLodBias(textureLodBias)", zeroBranch);
         // The render-scale term itself still is log2 of the clamped scale; it
         // now lives in OptimumConfig so both call sites share it.
         string optimumConfig = Read("VintagestoryApi/Config/OptimumConfig.cs");
@@ -98,6 +113,13 @@ public class FsrPipelineCoverageTests
         // bias change has to write both). The load still passes the same value
         // and still only when it is non-zero.
         Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", shaderRegistry);
+        // The sampler entry point itself applies the RAW value: no "!= 0f"
+        // short-circuit inside it, or the restore path above would reach the
+        // atlas parameter and leave the two sampler objects biased.
+        string samplerEntry = MethodBody(shaderRegistry, "public static void ApplyOptimumTerrainSamplerLodBias(float bias)");
+        Assert.DoesNotContain("!= 0f", samplerEntry);
+        Assert.Equal(4, Count(samplerEntry, "ApplyOptimumSamplerLodBias("));
+        Assert.Equal(4, Count(samplerEntry, ", bias);"));
         Assert.Contains("(SamplerParameterName)34049, bias", shaderRegistry);
         Assert.Contains("OptimumGlConstants.TextureLodBias, bias", shaderRegistry);
         Assert.Contains("terrainTexLinear", shaderRegistry);
@@ -138,6 +160,40 @@ public class FsrPipelineCoverageTests
     public void MipBiasMatchesRenderScale(float scale, float expected)
     {
         Assert.InRange(MathF.Log2(scale), expected - 0.001f, expected + 0.001f);
+    }
+
+    /// <summary>
+    /// The body of the brace-delimited block that follows <paramref name="header"/>.
+    /// </summary>
+    private static string BranchAfter(string source, string header)
+    {
+        int start = source.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, "branch not found: " + header);
+        return Block(source, start + header.Length);
+    }
+
+    /// <summary>
+    /// The text of one method, signature included, up to its matching brace.
+    /// </summary>
+    private static string MethodBody(string source, string signature)
+    {
+        int start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, "method not found: " + signature);
+        return signature + Block(source, start + signature.Length);
+    }
+
+    private static string Block(string source, int offset)
+    {
+        int open = source.IndexOf('{', offset);
+        Assert.True(open > offset - 1, "no block after offset " + offset);
+        int depth = 0;
+        for (int i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return source.Substring(open, i - open + 1);
+        }
+        Assert.Fail("unbalanced block after offset " + offset);
+        return string.Empty;
     }
 
     private static int Count(string source, string value)

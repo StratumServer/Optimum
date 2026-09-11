@@ -267,6 +267,20 @@ public class TaaSharpenCoverageTests
         // A total of zero still makes no TexParameter call at all, which is what
         // keeps TAA off at native scale identical to vanilla.
         Assert.Contains("if (textureLodBias == 0f)", chunkRenderer);
+        // The zero branch is not a plain guard: it restores. optimumTextureLodBias
+        // caches the last applied value starting at NaN, so a nonzero -> zero
+        // transition (TAA switched off, render scale back to 1.0) writes 0 back
+        // through SetOptimumTextureLodBias - which resets the atlas texture
+        // parameter AND, through ShaderRegistry.ApplyOptimumTerrainSamplerLodBias,
+        // the two terrain sampler objects - before returning.
+        Assert.Contains("private float optimumTextureLodBias = float.NaN;", chunkRenderer);
+        string zeroBranch = BranchAfter(chunkRenderer, "if (textureLodBias == 0f)");
+        Assert.Contains("if (!float.IsNaN(optimumTextureLodBias))", zeroBranch);
+        Assert.Contains("SetOptimumTextureLodBias(0f);", zeroBranch);
+        Assert.Contains("optimumTextureLodBias = float.NaN;", zeroBranch);
+        // ...and the branch really is just that branch: the nonzero path below
+        // it is outside it.
+        Assert.DoesNotContain("SetOptimumTextureLodBias(textureLodBias)", zeroBranch);
         // Both backends keep getting the same value through the same setter.
         Assert.Contains("optimumDevice.SetTextureParameter(textureIds[k],", chunkRenderer);
         Assert.Contains("GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", chunkRenderer);
@@ -278,6 +292,12 @@ public class TaaSharpenCoverageTests
         // are bound to, so they must carry the same bias.
         Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;", registry);
         Assert.Contains("if (terrainLodBias != 0f)", registry);
+        // The load-time call skips zero (vanilla makes no such call), but the
+        // shared entry point applies whatever it is handed - the restore above
+        // hands it 0f and must reach the samplers.
+        string samplerEntry = BranchAfter(registry, "public static void ApplyOptimumTerrainSamplerLodBias(float bias)");
+        Assert.DoesNotContain("!= 0f", samplerEntry);
+        Assert.Equal(4, Count(samplerEntry, ", bias);"));
     }
 
     /// <summary>
@@ -382,6 +402,26 @@ public class TaaSharpenCoverageTests
         int end = source.IndexOf("\n\t}\n", start, StringComparison.Ordinal);
         Assert.True(end > start, "method end not found: " + signature);
         return source.Substring(start, end - start);
+    }
+
+    /// <summary>
+    /// The brace-delimited block that follows <paramref name="header"/>, matched
+    /// by brace depth so a nested block cannot end it early.
+    /// </summary>
+    private static string BranchAfter(string source, string header)
+    {
+        int start = source.IndexOf(header, StringComparison.Ordinal);
+        Assert.True(start >= 0, "not found: " + header);
+        int open = source.IndexOf('{', start + header.Length);
+        Assert.True(open > start, "no block after: " + header);
+        int depth = 0;
+        for (int i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return source.Substring(open, i - open + 1);
+        }
+        Assert.Fail("unbalanced block after: " + header);
+        return string.Empty;
     }
 
     private static void WithConfig(Action body)

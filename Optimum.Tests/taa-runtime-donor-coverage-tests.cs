@@ -129,6 +129,42 @@ public sealed class TaaRuntimeDonorCoverageTests
             missing.Count == 0,
             $"{runtimePatch} is behind {forkPatch}: the fork adds {string.Join(", ", missing)} but the runtime " +
             "donor does not. Regenerate the donor patch against a pristine .build/runtime-donors decompile.");
+
+        // File-wide sets are not enough: a donor that writes the same markers
+        // into some OTHER method of the same class passes that check while the
+        // transplanted body still draws without motion. Compare per method
+        // wherever the two trees are on disk (both git-ignored, so a clean clone
+        // keeps only the file-wide check above).
+        string? forkTree = PatchMethodScopes.FindPatchedTreeFile(RepoRoot(), forkPatch);
+        string? donorTree = PatchMethodScopes.FindPatchedTreeFile(RepoRoot(), runtimePatch);
+        if (forkTree is null || donorTree is null)
+        {
+            return;
+        }
+
+        var forkByMethod = PatchMethodScopes.MarkersByMethod(
+            forkPath, File.ReadAllText(forkTree), MotionMarkers);
+        var donorByMethod = PatchMethodScopes.MarkersByMethod(
+            runtimePath, File.ReadAllText(donorTree), MotionMarkers);
+
+        var misplaced = new List<string>();
+        foreach (var (method, markers) in forkByMethod.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            donorByMethod.TryGetValue(method, out var donorMarkers);
+            foreach (string marker in markers.OrderBy(m => m, StringComparer.Ordinal))
+            {
+                if (donorMarkers is null || !donorMarkers.Contains(marker))
+                {
+                    misplaced.Add($"{method}: {marker}");
+                }
+            }
+        }
+
+        Assert.True(
+            misplaced.Count == 0,
+            $"{runtimePatch} carries the fork's motion markers, but not in the same methods as " +
+            $"{forkPatch}. Cecil transplants per method, so a marker in the wrong body still ships a " +
+            "vanilla one:\n  " + string.Join("\n  ", misplaced));
     }
 
     [Fact]

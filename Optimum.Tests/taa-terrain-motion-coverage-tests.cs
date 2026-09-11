@@ -388,13 +388,27 @@ public class TaaTerrainMotionCoverageTests
     [Fact]
     public void TheLiquidDepthPrepassStaysJitteredAndWritesNoMotion()
     {
-        string chunk = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+        string chunk = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
 
         string prepass = MethodBodyAfter(chunk, "public void OnRenderBefore(float dt)");
 
-        Assert.Contains("chunkliquiddepth.ProjectionMatrix = game.CurrentProjectionMatrix;", prepass);
+        Assert.Contains("EnumFrameBuffer.LiquidDepth", prepass);
         Assert.DoesNotContain("BeginMotionWrite", prepass);
         Assert.DoesNotContain("SetOptimumMotionUniforms", prepass);
+
+        // The projection assignment itself is vanilla, so it sits outside every
+        // hunk and cannot be asserted on patch-derived text. Check it against the
+        // decompiled tree wherever that is checked out (build/ is git-ignored).
+        string? decompiled = TryFind("build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+        if (decompiled != null)
+        {
+            string full = MethodBodyAfter(File.ReadAllText(decompiled), "public void OnRenderBefore(float dt)");
+            Assert.Contains("chunkliquiddepth.ProjectionMatrix = game.CurrentProjectionMatrix;", full);
+            Assert.DoesNotContain("BeginMotionWrite", full);
+            Assert.DoesNotContain("SetOptimumMotionUniforms", full);
+        }
     }
 
     // ------------------------------------------------------ contract uniforms

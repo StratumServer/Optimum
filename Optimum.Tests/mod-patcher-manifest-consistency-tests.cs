@@ -137,15 +137,39 @@ public sealed class ModPatcherManifestConsistencyTests
     {
         var methods = GetManifestProperty<List<MethodTarget>>(manifestMethodName, "Methods");
 
-        // Coverage is checked per declaring type, not per method name: a hunk's
-        // three context lines rarely reach the enclosing signature, so "the
-        // method name appears in the patch" would be noise either way.
+        // Coverage is per METHOD where it can be: a runtime patch that touches
+        // one method of a type used to mark every transplant on that type as
+        // covered, so a sibling method kept its vanilla body silently. The
+        // patch's added lines are located inside the tree it was applied to
+        // (.build/runtime-donors, else the fork, both git-ignored) and attributed
+        // to the method whose braces enclose them. With neither tree on disk -
+        // a clean clone - the check degrades to the old per-type one.
         var uncovered = new List<string>();
+        var unchangedBody = new List<string>();
         foreach (var target in methods)
         {
             string shortName = ShortName(target.TypeFullName);
-            if (FindPatchFile(project, shortName) is not null)
+            string entry = $"{target.TypeFullName}::{target.MethodName}";
+            string? patchFile = FindPatchFile(project, shortName);
+            if (patchFile is not null)
             {
+                string? donor = PatchMethodScopes.FindDonorSource(RepoRoot(), project, target.TypeFullName)
+                    ?? FindForkSource(project, shortName);
+                if (donor is null)
+                {
+                    continue;
+                }
+                string donorText = File.ReadAllText(donor);
+                var touched = PatchMethodScopes.MethodsTouched(patchFile, donorText);
+                // ".ctor" is the IL name; the source declares it under the type
+                // name. A method the scanner cannot find at all (an accessor, a
+                // local function, a shape this scanner does not model) is left
+                // to the per-type check rather than reported as a gap.
+                string sourceName = target.MethodName == ".ctor" ? shortName : target.MethodName;
+                if (!touched.Contains(sourceName) && DeclaresMethod(donorText, sourceName))
+                {
+                    unchangedBody.Add(entry);
+                }
                 continue;
             }
             // Optimum-authored types are copied into the donor tree whole by
@@ -154,8 +178,25 @@ public sealed class ModPatcherManifestConsistencyTests
             {
                 continue;
             }
-            uncovered.Add($"{target.TypeFullName}::{target.MethodName}");
+            uncovered.Add(entry);
         }
+
+        var untouched = unchangedBody
+            .Where(entry => !KnownUnchangedTransplants.Contains(entry))
+            .OrderBy(entry => entry, StringComparer.Ordinal)
+            .ToList();
+        Assert.True(
+            untouched.Count == 0,
+            FormatFailure(
+                manifestMethodName,
+                untouched
+                    .Select(entry =>
+                        $"{entry}: the type has a patches/runtime/{project} donor, but no hunk in it lands " +
+                        "inside this method, so the transplant copies a body the donor never changed. Either " +
+                        "the donor patch is behind the fork (the installed runtime then ships a vanilla body) " +
+                        "or the manifest entry is redundant - decide which and record it in " +
+                        "KnownUnchangedTransplants if it is the latter.")
+                    .ToList()));
 
         var unexpected = uncovered
             .Where(entry => !KnownDonorGaps.Contains(entry))
@@ -187,6 +228,21 @@ public sealed class ModPatcherManifestConsistencyTests
     /// Vulkan-backend work on the FluffyClouds renderers (a separate assembly
     /// that ships inside VSEssentials.dll); neither is TAA.
     /// </summary>
+    /// <summary>
+    /// Transplants whose declaring type IS patched but whose own body no hunk
+    /// touches. Copying an unchanged body is a no-op, so these are redundant
+    /// manifest entries rather than ghosting gaps - but a NEW one is how a donor
+    /// patch falls behind its fork, which is why they are listed rather than
+    /// ignored.
+    /// </summary>
+    private static readonly HashSet<string> KnownUnchangedTransplants = new(StringComparer.Ordinal)
+    {
+        // ChunkMapLayer's map-piece caching changed every caller of
+        // loadFromChunkPixels; the two-line method itself (enqueue onto the
+        // vanilla readyMapPieces) is untouched in both trees.
+        "Vintagestory.GameContent.ChunkMapLayer::loadFromChunkPixels",
+    };
+
     private static readonly HashSet<string> KnownDonorGaps = new(StringComparer.Ordinal)
     {
         "FluffyClouds.CloudRendererMap::FreeGlResources",
@@ -220,6 +276,28 @@ public sealed class ModPatcherManifestConsistencyTests
     {
         string versionFile = PatchReader.FindRepositoryFile("VERSION");
         return Path.GetDirectoryName(versionFile)!;
+    }
+
+    private static bool DeclaresMethod(string source, string methodName) =>
+        PatchMethodScopes.Parse(source)
+            .Any(scope => scope.Kind == "method" && scope.Name == methodName);
+
+    // The fork tree carries the same edits as the prepared donor decompile, so
+    // it stands in when .build/runtime-donors has not been built. File names
+    // differ from type names there, so this greps for the declaration.
+    private static string? FindForkSource(string project, string shortTypeName)
+    {
+        string dir = Path.Combine(RepoRoot(), project);
+        if (!Directory.Exists(dir))
+        {
+            return null;
+        }
+        var declaration = new Regex($@"\b(class|struct|record)\s+{Regex.Escape(shortTypeName)}\b");
+        return Directory
+            .EnumerateFiles(dir, "*.cs", SearchOption.AllDirectories)
+            .Where(file => !file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                && !file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .FirstOrDefault(file => declaration.IsMatch(File.ReadAllText(file)));
     }
 
     private static string? FindPatchFile(string project, string shortTypeName)
