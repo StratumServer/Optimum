@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..f5dd1c6 100644
+index 67feafa..06614a9 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -15,7 +15,7 @@ index 67feafa..f5dd1c6 100644
  	public TerrainIlluminator terrainIlluminator;
  
  	public ClientWorldMap WorldMap;
-@@ -240,10 +242,36 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -240,10 +242,110 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public IColorPresets ColorPreset;
  
@@ -47,12 +47,86 @@ index 67feafa..f5dd1c6 100644
 +		return workers != null ? workers.GetSlot(threadId) : 0;
 +	}
 +
++	// Optimum (TAA P5, acceptance/perf harness): a per-second frame-time line for
++	// scripts/dev/perf-capture.sh. Entirely off unless OPTIMUM_FPS_LOG names a file,
++	// so a default run - and TAA off - costs one null check per frame and nothing
++	// else. Backend-neutral, unlike OPTIMUM_VULKAN_STATS, which only exists on Vulkan.
++	// Deliberately NOT field-initialized, for the Cecil member-injection reason
++	// documented on tesselationWorkers above.
++	private static string optimumFpsLogPath;
++
++	private static bool optimumFpsLogResolved;
++
++	private static float[] optimumFpsLogSamples;
++
++	private static int optimumFpsLogFrames;
++
++	private static double optimumFpsLogSeconds;
++
++	private static void OptimumLogFrameTime(float dt)
++	{
++		if (!optimumFpsLogResolved)
++		{
++			optimumFpsLogResolved = true;
++			try
++			{
++				string configuredPath = Environment.GetEnvironmentVariable("OPTIMUM_FPS_LOG");
++				if (!string.IsNullOrEmpty(configuredPath))
++				{
++					optimumFpsLogSamples = new float[8192];
++					optimumFpsLogPath = configuredPath;
++				}
++			}
++			catch (Exception)
++			{
++				optimumFpsLogPath = null;
++			}
++		}
++		if (optimumFpsLogPath == null || !(dt > 0f) || float.IsInfinity(dt))
++		{
++			return;
++		}
++		if (optimumFpsLogFrames < optimumFpsLogSamples.Length)
++		{
++			optimumFpsLogSamples[optimumFpsLogFrames] = dt * 1000f;
++		}
++		optimumFpsLogFrames++;
++		optimumFpsLogSeconds += dt;
++		if (optimumFpsLogSeconds < 1.0)
++		{
++			return;
++		}
++		int sampled = Math.Min(optimumFpsLogFrames, optimumFpsLogSamples.Length);
++		float[] window = new float[sampled];
++		Array.Copy(optimumFpsLogSamples, window, sampled);
++		Array.Sort(window);
++		double total = 0.0;
++		for (int i = 0; i < sampled; i++)
++		{
++			total += window[i];
++		}
++		int p99Index = Math.Max(0, Math.Min(sampled - 1, (int)Math.Ceiling(0.99 * (double)sampled) - 1));
++		string line = string.Format(System.Globalization.CultureInfo.InvariantCulture,
++			"[Optimum] fps window={0:F3} frames={1} mean={2:F3} min={3:F3} max={4:F3} p99={5:F3}",
++			optimumFpsLogSeconds, optimumFpsLogFrames, total / (double)sampled, window[0], window[sampled - 1], window[p99Index]);
++		try
++		{
++			System.IO.File.AppendAllText(optimumFpsLogPath, line + "\n");
++		}
++		catch (Exception)
++		{
++			optimumFpsLogPath = null;
++		}
++		optimumFpsLogFrames = 0;
++		optimumFpsLogSeconds = 0.0;
++	}
++
  	public DefaultShaderUniforms shUniforms = new DefaultShaderUniforms();
  
  	private ClientSystemStartup csStartup;
  
  	private bool ungrabbedFromDefocus;
-@@ -314,11 +342,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -314,11 +416,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	private int lastWidth;
  
@@ -65,7 +139,7 @@ index 67feafa..f5dd1c6 100644
  
  	public Queue<ClientTask> MainThreadTasks;
  
-@@ -340,15 +368,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -340,15 +442,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal bool ignoreServerCalendarUpdates;
  
@@ -83,7 +157,7 @@ index 67feafa..f5dd1c6 100644
  
  	public object EntityLoadQueueLock = new object();
  
-@@ -378,11 +406,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -378,11 +480,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal PickingRayUtil pickingRayUtil = new PickingRayUtil();
  
@@ -96,7 +170,7 @@ index 67feafa..f5dd1c6 100644
  
  	internal List<IPointLight> pointlights = new List<IPointLight>();
  
-@@ -402,27 +430,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -402,27 +504,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal int frameSeed;
  
@@ -129,7 +203,7 @@ index 67feafa..f5dd1c6 100644
  
  	internal ServerInformation ServerInfo;
  
-@@ -511,10 +539,52 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -511,10 +613,52 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public long[] LoadedChunkIndices => WorldMap.chunks.Keys.ToArray();
  
  	public long[] LoadedMapChunkIndices => WorldMap.MapChunks.Keys.ToArray();
@@ -182,7 +256,7 @@ index 67feafa..f5dd1c6 100644
  		{
  			for (int i = 0; i < 16; i++)
  			{
-@@ -859,29 +929,39 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -859,29 +1003,39 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  	}
  
@@ -225,7 +299,7 @@ index 67feafa..f5dd1c6 100644
  		_clientThreadsCts = new CancellationTokenSource();
  		ClientSystem clientSystem = new SystemCompressChunks(this);
  		Thread thread = new Thread(new ClientThread(this, "compresschunks", new ClientSystem[1] { clientSystem }, _clientThreadsCts.Token).Process);
-@@ -899,17 +979,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -899,17 +1053,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Thread thread3 = new Thread(new ClientThread(this, "relight", new ClientSystem[1] { clientSystem3 }, _clientThreadsCts.Token).Process);
  		thread3.IsBackground = true;
  		thread3.Start();
@@ -249,7 +323,7 @@ index 67feafa..f5dd1c6 100644
  		thread5.IsBackground = true;
  		thread5.Start();
  		thread5.Name = "chunkvis";
-@@ -1032,11 +1116,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1032,11 +1190,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public void ExecuteMainThreadTasks(float deltaTime)
  	{
  		ScreenManager.FrameProfiler.Mark("beginMTT");
@@ -283,7 +357,19 @@ index 67feafa..f5dd1c6 100644
  		{
  			if (SuspendMainThreadTasks)
  			{
-@@ -1122,10 +1227,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1094,10 +1273,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 	}
+ 
+ 	public void MainRenderLoop(float dt)
+ 	{
+ 		ScreenManager.FrameProfiler.Mark("mrl");
++		OptimumLogFrameTime(dt);
+ 		if ((timelapsedCurrent += timelapse) > timelapseEnd)
+ 		{
+ 			timelapse = 0f;
+ 			timelapsedCurrent = 0f;
+ 			timelapseEnd = float.MaxValue;
+@@ -1122,10 +1302,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			Platform.ThreadSpinWait(10000000);
  		}
  		shUniforms.Update(dt, api);
@@ -301,7 +387,7 @@ index 67feafa..f5dd1c6 100644
  		Platform.GlDepthMask(flag: true);
  		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
  		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
-@@ -1140,10 +1252,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1140,10 +1327,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
  		GlMatrixModeModelView();
@@ -326,7 +412,7 @@ index 67feafa..f5dd1c6 100644
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1176,14 +1302,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1176,14 +1377,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Platform.GlDepthMask(flag: true);
  		Platform.GlEnableDepthTest();
  		Platform.GlCullFaceBack();
@@ -370,7 +456,7 @@ index 67feafa..f5dd1c6 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1575,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1420,10 +1650,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -385,7 +471,7 @@ index 67feafa..f5dd1c6 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1724,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1799,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -418,7 +504,7 @@ index 67feafa..f5dd1c6 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2292,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2367,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -443,7 +529,7 @@ index 67feafa..f5dd1c6 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2721,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2796,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -457,7 +543,7 @@ index 67feafa..f5dd1c6 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3712,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3787,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);
