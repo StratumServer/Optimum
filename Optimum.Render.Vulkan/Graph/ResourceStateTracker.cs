@@ -100,6 +100,22 @@ internal sealed class ResourceStateTracker
     }
 
     /// <summary>
+    /// The contents stop mattering (an aliased transient starts a new lifetime): the
+    /// next use of every subresource transitions from UNDEFINED, even into the layout
+    /// it is already in. The uses recorded so far stay, so that barrier's source side
+    /// still names them.
+    /// </summary>
+    public void Discard()
+    {
+        if (_split == null)
+        {
+            _whole = _whole with { Layout = ImageLayout.Undefined };
+            return;
+        }
+        for (int i = 0; i < _split.Length; i++) _split[i] = _split[i] with { Layout = ImageLayout.Undefined };
+    }
+
+    /// <summary>
     /// Records a use of a subresource range and appends the barriers it needs to
     /// <paramref name="output" />, as few rectangles as the state allows.
     /// <paramref name="discard" /> says the contents do not matter, so a layout

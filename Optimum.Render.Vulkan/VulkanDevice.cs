@@ -112,9 +112,13 @@ public sealed unsafe class VulkanDevice : IDisposable
     private readonly int[] _unitSamplerOverrides = new int[GlStateTracker.MaxTextureUnits];
 
     // Atlas composition reads one tile while writing another in the same image.
-    // Reuse a snapshot image, but refresh its contents before each such draw.
-    private readonly Dictionary<int, int> _feedbackCopies = new();
+    // Each such draw takes a pooled ReadSelf copy, refreshed before the draw and
+    // released when the next draw's samplers are resolved (Phase 2 step 4).
+    private Graph.FeedbackCopyPool _readSelfCopies = null!;
     private readonly Dictionary<int, int> _sampledTextureOverrides = new();
+
+    // Physical backing for frame-graph transients (Transient pool class).
+    private Graph.TransientAllocator _transients = null!;
 
     private int _nextProgramId = 1;
     private bool _frameActive;
@@ -374,6 +378,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         _textures.ScopeOpen = commandBuffer =>
             _frameActive && _targets.RenderingActive && commandBuffer.Handle == Commands.Handle;
         _barriers = _textures.CreateBatcher();
+        // Transients and ReadSelf copies live in the Transient pool class; both
+        // release through ReleaseTexture, which retires on the timeline.
+        _transients = new Graph.TransientAllocator(new Graph.TextureTransientBacking(_textures, ReleaseTexture),
+            TransientAliasingOverride ?? Graph.TransientAllocator.AliasingFromEnvironment());
+        _readSelfCopies = new Graph.FeedbackCopyPool(_frames.Timeline, CreateReadSelfCopy, ReleaseTexture);
         // Colour write tier (C4): draw buffers and motion windows are write masks.
         _state.ColorWriteTier = _context.Capabilities.ColorWriteTier;
         _state.DynamicBlend = _context.Capabilities.DynamicColorBlend;
@@ -696,7 +705,17 @@ public sealed unsafe class VulkanDevice : IDisposable
         }
         _lastFrameStart = frameStart;
 
+        // The frame that ended: its ReadSelf copies wait on the Frame value it
+        // recorded (taken before the ring reserves the next), and its transient
+        // leases and bindings end.
+        ReleaseReadSelfCopies();
+        _readSelfCopies.EndFrame();
+        VulkanStats.NoteTransientFrame(_transients.PhysicalBytes + _transients.OptedInBytes,
+            _transients.AliasedBytes, _transients.Leases.Count, _transients.AliasedLeaseCount, _readSelfCopies.Live);
+        _transients.BeginFrame();
+
         FrameSlot slot = _frames.BeginFrame();
+        _readSelfCopies.Collect();
         _frameActive = true;
         _frameCounter++;
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
@@ -1363,6 +1382,62 @@ public sealed unsafe class VulkanDevice : IDisposable
         return id;
     }
 
+    /// <summary>
+    /// A post-chain colour texture (framebuffer slots in
+    /// <see cref="Graph.TransientAllocator.PostChainSlots" />): created in the Transient
+    /// memory pool class and registered with the transient allocator. Until the frame
+    /// graph binds it (<see cref="BindTransientForFrame" />) it behaves like any texture.
+    /// </summary>
+    public int CreateTransientTexture2D(int width, int height, EnumTextureInternalFormat internalFormat,
+        int framebufferSlot)
+    {
+        int id = _textures.Create((uint)width, (uint)height, GlEnums.TextureFormatFrom(internalFormat),
+            poolClass: MemoryPoolClass.Transient);
+        RecordGlInternalFormat(id, (int)internalFormat);
+        _transients.OptIn(id, framebufferSlot);
+        return id;
+    }
+
+    /// <summary><see cref="CreateTransientTexture2D" /> with a raw GL internal format token, no pixels.</summary>
+    public int CreateTransientTexture2DRaw(int width, int height, int glInternalFormat, int framebufferSlot)
+    {
+        Format format = GlEnums.TextureFormatFromGl(glInternalFormat);
+        int id = _textures.Create((uint)width, (uint)height, format, poolClass: MemoryPoolClass.Transient);
+        RecordGlInternalFormat(id, glInternalFormat);
+        RenderTrace.TextureCreated(id, width, height, format, IntPtr.Zero, 0);
+        _transients.OptIn(id, framebufferSlot);
+        return id;
+    }
+
+    /// <summary>
+    /// Serves a texture for passes [<paramref name="firstPass" />, <paramref name="lastPass" />]
+    /// of the current frame through the transient allocator and returns the texture id
+    /// that backs it (itself unless aliasing is on). Call after BeginFrame, in pass order.
+    /// </summary>
+    public int BindTransientForFrame(int textureId, int firstPass, int lastPass) =>
+        _transients.Bind(textureId, firstPass, lastPass);
+
+    /// <summary>The transient allocator the frame graph acquires physical images from.</summary>
+    internal Graph.TransientAllocator Transients => _transients;
+
+    /// <summary>The ReadSelf copy pool. Tests only.</summary>
+    internal Graph.FeedbackCopyPool ReadSelfCopiesForTests => _readSelfCopies;
+
+    /// <summary>Forces transient aliasing on or off before Initialize (default: <c>OPTIMUM_VULKAN_ALIAS</c>).</summary>
+    internal bool? TransientAliasingOverride { get; set; }
+
+    private int CreateReadSelfCopy(Graph.FeedbackCopyDesc desc) =>
+        _textures.Create(desc.Width, desc.Height, desc.Format, layers: desc.Layers, cube: desc.Cube,
+            generateMipmaps: desc.MipLevels > 1, poolClass: MemoryPoolClass.Transient);
+
+    /// <summary>Gives the previous draw's ReadSelf copies back to the pool.</summary>
+    private void ReleaseReadSelfCopies()
+    {
+        if (_sampledTextureOverrides.Count == 0) return;
+        foreach (int copy in _sampledTextureOverrides.Values) _readSelfCopies.Release(copy);
+        _sampledTextureOverrides.Clear();
+    }
+
     public int CreateTextureCubeRaw(int size, int glInternalFormat, IntPtr[] facePixels, int bytesPerPixel)
     {
         Format format = GlEnums.TextureFormatFromGl(glInternalFormat);
@@ -1427,8 +1502,9 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     private void ReleaseTexture(int textureId)
     {
-        if (_feedbackCopies.Remove(textureId, out int copy)) ReleaseTexture(copy);
-        _sampledTextureOverrides.Remove(textureId);
+        if (_sampledTextureOverrides.Remove(textureId, out int copy)) _readSelfCopies?.Release(copy);
+        _transients?.Forget(textureId);
+        _textures.RestoreBinding(textureId);
         VulkanTexture? texture = _textures.Get(textureId);
         if (texture != null) _descriptors.Release(texture.Id);
         _textures.Delete(textureId, _frames);
@@ -1995,7 +2071,7 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     private void TransitionSampledTextures(CommandBuffer commandBuffer, ShaderProgramResources program)
     {
-        _sampledTextureOverrides.Clear();
+        ReleaseReadSelfCopies();
         if (program.Interface.Samplers.Count == 0) return;
 
         bool placeholderNeeded = false;
@@ -2079,13 +2155,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         if (_sampledTextureOverrides.ContainsKey(textureId)) return;
 
         _targets.EndRendering(commandBuffer);
-        if (!_feedbackCopies.TryGetValue(textureId, out int copyId))
-        {
-            copyId = _textures.Create(source.Width, source.Height, source.Format,
-                layers: source.Layers, cube: source.Cube,
-                generateMipmaps: source.MipLevels > 1);
-            _feedbackCopies.Add(textureId, copyId);
-        }
+        // A pooled ReadSelf copy for this pass (FeedbackCopyPool).
+        int copyId = _readSelfCopies.Acquire(new Graph.FeedbackCopyDesc(source.Width, source.Height, source.Format,
+            source.MipLevels, source.Layers, source.Cube));
+        VulkanStats.NoteReadSelfCopy();
         VulkanTexture copy = _textures.Get(copyId)!;
         copy.State = source.State;
 

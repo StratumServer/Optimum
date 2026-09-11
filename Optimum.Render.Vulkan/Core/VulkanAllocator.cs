@@ -334,6 +334,9 @@ internal sealed unsafe class VulkanAllocator : IDisposable
     private readonly ulong[] _heapBudget;
     private readonly ulong[] _classBytes = new ulong[PoolClassCount];
     private ulong _reBarUsed;
+    // Block bytes of the Transient class, dedicated ones included, and their peak since the last take.
+    private ulong _transientBytes;
+    private ulong _transientPeak;
     private long _reBarMisses;
     private long _emptyBlocksFreed;
     private long _frame;
@@ -581,6 +584,34 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         _heapUsed[block.HeapIndex] += block.Size;
         _classBytes[(int)(block.Dedicated ? MemoryPoolClass.Dedicated : block.Class)] += block.Size;
         if (block.Class == MemoryPoolClass.ReBar) _reBarUsed += block.Size;
+        if (block.Class == MemoryPoolClass.Transient)
+        {
+            _transientBytes += block.Size;
+            if (_transientBytes > _transientPeak) _transientPeak = _transientBytes;
+        }
+    }
+
+    /// <summary>Block bytes of the Transient pool class, dedicated blocks included.</summary>
+    public ulong TransientHeapBytes
+    {
+        get
+        {
+            lock (_gate) return _transientBytes;
+        }
+    }
+
+    /// <summary>
+    /// The Transient class's peak block bytes since the previous call (the stats
+    /// sample's <c>heap_peak_mib</c>); the next peak starts from the current use.
+    /// </summary>
+    public ulong TakeTransientHeapPeak()
+    {
+        lock (_gate)
+        {
+            ulong peak = Math.Max(_transientPeak, _transientBytes);
+            _transientPeak = _transientBytes;
+            return peak;
+        }
     }
 
     private void NoteBlockReleased(MemoryBlock block)
@@ -589,6 +620,7 @@ internal sealed unsafe class VulkanAllocator : IDisposable
         int index = (int)(block.Dedicated ? MemoryPoolClass.Dedicated : block.Class);
         _classBytes[index] -= Math.Min(_classBytes[index], block.Size);
         if (block.Class == MemoryPoolClass.ReBar) _reBarUsed -= Math.Min(_reBarUsed, block.Size);
+        if (block.Class == MemoryPoolClass.Transient) _transientBytes -= Math.Min(_transientBytes, block.Size);
     }
 
     private void NoteFilled(MemoryBlock block)
