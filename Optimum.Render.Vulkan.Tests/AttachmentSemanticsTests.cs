@@ -38,18 +38,8 @@ public class AttachmentSemanticsTests
         """;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     /// <summary>
     /// Five colour attachments, a shader that declares outputs only at locations
@@ -118,6 +108,8 @@ public class AttachmentSemanticsTests
             }
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -200,6 +192,8 @@ public class AttachmentSemanticsTests
             Assert.True(preserved, "an enabled attachment the shader never writes must keep its contents");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -271,6 +265,8 @@ public class AttachmentSemanticsTests
             Assert.InRange(motion[0], 196, 212);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -370,6 +366,8 @@ public class AttachmentSemanticsTests
             Assert.InRange(resolved[0], (byte)185, (byte)198);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 

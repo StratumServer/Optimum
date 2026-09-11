@@ -75,6 +75,10 @@ internal sealed unsafe class VulkanBuffer : IDisposable
 
         api.BindBufferMemory(context.Device, buffer, _allocation.Memory, _allocation.Offset);
         Mapped = _allocation.Mapped;
+        if (context.PoisonFreshResources && Mapped != IntPtr.Zero)
+        {
+            VulkanPoison.FillHostMemory(Mapped, size);
+        }
     }
 
     public void Dispose()

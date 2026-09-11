@@ -52,13 +52,9 @@ public class ValidationFeaturesTests
     public void AnInstanceComesUpWithTheFeaturesRequested()
     {
         var messages = new List<string>();
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            ValidationFeatures = "sync,best",
-            DebugCallback = messages.Add,
-        };
+        var options = GpuTest.ContextOptions(messages);
+        // This test is about the features themselves, whatever the suite default.
+        options.ValidationFeatures = "sync,best";
 
         bool created = VulkanContext.TryCreate(options, out VulkanContext? context, out string? failureReason);
         if (!created) _output.WriteLine("Vulkan unavailable: " + failureReason);

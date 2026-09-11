@@ -19,13 +19,8 @@ public class AllocatorTests
 
     public AllocatorTests(ITestOutputHelper output) => _output = output;
 
-    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions { Headless = true };
-        bool created = VulkanContext.TryCreate(options, out context, out string? reason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + reason);
-        return created;
-    }
+    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, null, out context);
 
     /// <summary>
     /// The regression that matters. A chunk mesh is several buffers, and a world

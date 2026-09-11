@@ -24,13 +24,8 @@ public class FrameRingTests
 
     public FrameRingTests(ITestOutputHelper output) => _output = output;
 
-    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions { Headless = true, EnableValidation = true };
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, null, out context);
 
     private sealed class TrackedResource : IDisposable
     {

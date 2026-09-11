@@ -28,6 +28,13 @@ internal sealed class VulkanContextOptions
 
     /// <summary>Called with each validation message when validation is on.</summary>
     public Action<string>? DebugCallback;
+
+    /// <summary>
+    /// Fills freshly created images and host-visible buffers with a loud value
+    /// before first use (see <see cref="VulkanPoison" />). Null reads
+    /// OPTIMUM_VULKAN_POISON once, at context creation.
+    /// </summary>
+    public bool? Poison;
 }
 
 /// <summary>What the chosen device can do, once it is up.</summary>
@@ -102,6 +109,18 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// </summary>
     public bool ValidationEnabled { get; private set; }
 
+    /// <summary>
+    /// Whether freshly created images and host-visible buffers are filled with
+    /// <see cref="VulkanPoison" /> values. Fixed for the context's life.
+    /// </summary>
+    public bool PoisonFreshResources { get; private set; }
+
+    /// <summary>OPTIMUM_VULKAN_POISON: any value but empty and "0" turns poison mode on.</summary>
+    public const string PoisonVariable = "OPTIMUM_VULKAN_POISON";
+
+    internal static bool PoisonRequested(string? setting) =>
+        !string.IsNullOrWhiteSpace(setting) && setting.Trim() != "0";
+
     /// <summary>Marks a diagnostic the layers reported at error severity.</summary>
     public const string ErrorPrefix = "[error] ";
 
@@ -143,6 +162,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         failureReason = null;
 
         var created = new VulkanContext();
+        created.PoisonFreshResources = options.Poison
+            ?? PoisonRequested(Environment.GetEnvironmentVariable(PoisonVariable));
         try
         {
             created.Api = Vk.GetApi();
@@ -402,7 +423,12 @@ internal sealed unsafe class VulkanContext : IDisposable
             string prefix = severity.HasFlag(DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt)
                 ? ErrorPrefix
                 : "[warning] ";
-            _debugCallback?.Invoke(prefix + message);
+            // The layer names the check separately (SYNC-HAZARD-WRITE-AFTER-WRITE,
+            // BestPractices-..., a VUID); current layers no longer repeat it in
+            // the text, and without it a log line cannot be grouped or pinned.
+            string? id = SilkMarshal.PtrToString((nint)data->PMessageIdName);
+            string idTag = string.IsNullOrEmpty(id) ? "" : "[" + id + "] ";
+            _debugCallback?.Invoke(prefix + idTag + message);
         }
         return Vk.False;
     }

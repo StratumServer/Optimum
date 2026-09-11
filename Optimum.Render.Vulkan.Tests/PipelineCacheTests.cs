@@ -26,19 +26,8 @@ public class PipelineCacheTests
 
     public PipelineCacheTests(ITestOutputHelper output) => _output = output;
 
-    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context, List<string> messages)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context, List<string> messages) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     private static TranslatedProgram TranslateVanilla(string programName, ShaderCompiler compiler)
     {
@@ -89,6 +78,8 @@ public class PipelineCacheTests
             Assert.True(translated.Layout.BlockSize > 0);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -118,6 +109,8 @@ public class PipelineCacheTests
             Assert.NotEqual(0ul, program.PipelineLayout.Handle);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -183,6 +176,7 @@ public class PipelineCacheTests
 
             _output.WriteLine($"pipelines: {cache.Count}, hits: {cache.Hits}, misses: {cache.Misses}");
             ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -242,6 +236,8 @@ public class PipelineCacheTests
                 _output.WriteLine($"{cache.Count} pipelines, driver cache blob {blob.Length} bytes");
 
                 ValidationAssert.NoErrors(messages);
+
+                ValidationAssert.NoSyncHazards(messages);
             }
             finally
             {

@@ -48,22 +48,8 @@ public class TaaResolveTests
     };
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created)
-        {
-            output.WriteLine("Vulkan unavailable: " + failureReason);
-        }
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     // ------------------------------------------------------------------ tests
 
@@ -119,6 +105,8 @@ public class TaaResolveTests
             }
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -186,6 +174,8 @@ public class TaaResolveTests
             }
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -266,6 +256,8 @@ public class TaaResolveTests
                 $"than the control window (avg {controlAverage})");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -325,6 +317,8 @@ public class TaaResolveTests
             Assert.True(MathF.Abs(g - outlierG) > 0.3f, "the outlier's green channel should have been clipped away");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -398,6 +392,8 @@ public class TaaResolveTests
             Assert.True(shifted < control + 0.05f, $"camera translation must not move the sky (shifted window avg {shifted} vs control {control})");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -461,6 +457,8 @@ public class TaaResolveTests
                 "with the jitter; it should not move at all");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -570,6 +568,8 @@ public class TaaResolveTests
             Assert.True(farBackground < 0.1f, "a column away from the line should stay near background");
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -630,6 +630,8 @@ public class TaaResolveTests
             }
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
