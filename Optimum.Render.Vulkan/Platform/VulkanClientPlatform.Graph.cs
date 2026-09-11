@@ -144,7 +144,8 @@ public partial class VulkanClientPlatform
         case "TaaResolve":
             AddColour(reads, PrimaryIndex, 0);
             AddColour(reads, PrimaryIndex, 1);
-            if (MotionAttachmentIndex >= 0) AddColour(reads, PrimaryIndex, MotionAttachmentIndex);
+            // Absent motion attachment: the index stays -1.
+            if (MotionAttachmentIndex > -1) AddColour(reads, PrimaryIndex, MotionAttachmentIndex);
             AddDepth(reads, PrimaryIndex);
             for (int slot = 0; slot < 3; slot++)
             {
