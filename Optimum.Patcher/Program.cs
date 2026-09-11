@@ -378,6 +378,15 @@ var membersToInject = new Dictionary<string, List<string>>
         // (new property; the jittered getter itself is an existing transplant
         // target below).
         "CurrentProjectionMatrixUnjittered",
+        // TAA P5: OPTIMUM_FPS_LOG per-second frame-time line, read by
+        // scripts/dev/perf-capture.sh. Called from MainRenderLoop (a transplant
+        // target below); inert unless the env var names a file.
+        "optimumFpsLogPath",
+        "optimumFpsLogResolved",
+        "optimumFpsLogSamples",
+        "optimumFpsLogFrames",
+        "optimumFpsLogSeconds",
+        "OptimumLogFrameTime",
     },
     ["Vintagestory.Client.NoObf.RenderAPIGame"] = new()
     {
