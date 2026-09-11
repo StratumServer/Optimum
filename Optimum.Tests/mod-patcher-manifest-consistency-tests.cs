@@ -121,6 +121,82 @@ public sealed class ModPatcherManifestConsistencyTests
         Assert.True(problems.Count == 0, FormatFailure(manifestMethodName, problems));
     }
 
+    /// <summary>
+    /// Methods entries are the transplants themselves: Cecil copies each named
+    /// body out of the compiled donor into the user's own mod assembly. A method
+    /// listed here whose declaring type has no runtime patch (and no
+    /// Optimum-authored source overlay) is transplanted from an unmodified
+    /// decompile, so the installed runtime silently keeps the vanilla body while
+    /// the from-source fork build has the changed one - which is exactly how the
+    /// TAA P3/P4 movers shipped ghosting for installed players until
+    /// patches/runtime gained donors for them.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Manifests))]
+    public void EveryTransplantedMethodHasARuntimeDonor(string manifestMethodName, string project)
+    {
+        var methods = GetManifestProperty<List<MethodTarget>>(manifestMethodName, "Methods");
+
+        // Coverage is checked per declaring type, not per method name: a hunk's
+        // three context lines rarely reach the enclosing signature, so "the
+        // method name appears in the patch" would be noise either way.
+        var uncovered = new List<string>();
+        foreach (var target in methods)
+        {
+            string shortName = ShortName(target.TypeFullName);
+            if (FindPatchFile(project, shortName) is not null)
+            {
+                continue;
+            }
+            // Optimum-authored types are copied into the donor tree whole by
+            // scripts/prepare-runtime-donors.sh, so they never get a patch.
+            if (FindSourceFile(shortName) is not null)
+            {
+                continue;
+            }
+            uncovered.Add($"{target.TypeFullName}::{target.MethodName}");
+        }
+
+        var unexpected = uncovered
+            .Where(entry => !KnownDonorGaps.Contains(entry))
+            .OrderBy(entry => entry, StringComparer.Ordinal)
+            .ToList();
+        Assert.True(
+            unexpected.Count == 0,
+            FormatFailure(
+                manifestMethodName,
+                unexpected
+                    .Select(entry =>
+                        $"{entry}: no patches/runtime/{project}/**/*.cs.patch and no sources/** overlay produces " +
+                        "this type, so the installed runtime transplants a vanilla body.")
+                    .ToList()));
+
+        var closed = KnownDonorGaps
+            .Where(entry => methods.Any(m => $"{m.TypeFullName}::{m.MethodName}" == entry) && !uncovered.Contains(entry))
+            .OrderBy(entry => entry, StringComparer.Ordinal)
+            .ToList();
+        Assert.True(
+            closed.Count == 0,
+            "These entries now have runtime donors; remove them from KnownDonorGaps:\n  " +
+            string.Join("\n  ", closed));
+    }
+
+    /// <summary>
+    /// Transplants whose declaring type has no runtime donor today, listed so
+    /// that the gap is visible and a *new* one still fails the test. Both are
+    /// Vulkan-backend work on the FluffyClouds renderers (a separate assembly
+    /// that ships inside VSEssentials.dll); neither is TAA.
+    /// </summary>
+    private static readonly HashSet<string> KnownDonorGaps = new(StringComparer.Ordinal)
+    {
+        "FluffyClouds.CloudRendererMap::FreeGlResources",
+        "FluffyClouds.CloudRendererMap::OnRenderFrame",
+        "FluffyClouds.CloudRendererMap::WriteTexture",
+        "FluffyClouds.CloudRendererMap::makeTexture",
+        "FluffyClouds.CloudRendererMap::InitCloudTiles",
+        "FluffyClouds.CloudRendererVolumetric::OnRenderFrame",
+    };
+
     private static string FormatFailure(string manifestMethodName, List<string> problems) =>
         $"ModPatcher.{manifestMethodName} is out of sync with the runtime patches:\n  " +
         string.Join("\n  ", problems);

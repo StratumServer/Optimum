@@ -1,0 +1,54 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs
+@@ -79,7 +79,23 @@ public class PotInFirepitRenderer : IInF
+ 			.Values;
+ 		standardShaderProgram.ViewMatrix = render.CameraMatrixOriginf;
+ 		standardShaderProgram.ProjectionMatrix = render.CurrentProjectionMatrix;
+-		render.RenderMultiTextureMesh((potRef == null) ? potWithFoodRef : potRef, "tex");
++		// Optimum TAA (P4): the pot body itself is static, but it shares the
++		// renderer with the lid below and both draws have to be inside a window
++		// or the lid's vector would sit on top of the body's unwritten pixels.
++		// Identity is the renderer, shape the mesh actually drawn.
++		OptimumStandardMotion.Apply(standardShaderProgram, this, (potRef == null) ? potWithFoodRef : potRef, ModelMat.Values);
++		bool optimumPotMotionWrite = OptimumMotionWrite.Begin();
++		try
++		{
++			render.RenderMultiTextureMesh((potRef == null) ? potWithFoodRef : potRef, "tex");
++		}
++		finally
++		{
++			if (optimumPotMotionWrite)
++			{
++				OptimumMotionWrite.End();
++			}
++		}
+ 		if (!isInOutputSlot)
+ 		{
+ 			float num = GameMath.Sin((float)capi.World.ElapsedMilliseconds / 300f) * 5f / 16f;
+@@ -93,7 +109,24 @@ public class PotInFirepitRenderer : IInF
+ 				.Values;
+ 			standardShaderProgram.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShaderProgram.ProjectionMatrix = render.CurrentProjectionMatrix;
+-			render.RenderMultiTextureMesh(lidRef, "tex");
++			// Optimum TAA (P4): the lid rattles while the pot cooks - its origin
++			// orbits and it rocks on X and Z, all driven by elapsed time - so it
++			// is a real mover. It needs its own identity because the renderer's
++			// is already taken by the pot body, and lidRef is exactly as
++			// long-lived as the lid it draws. No-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShaderProgram, lidRef, lidRef, ModelMat.Values);
++			bool optimumLidMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMultiTextureMesh(lidRef, "tex");
++			}
++			finally
++			{
++				if (optimumLidMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 		}
+ 		standardShaderProgram.Stop();
+ 	}
