@@ -753,12 +753,6 @@ var targets = new List<MethodTarget>
     // fixed-function bodies are vanilla again (Phase 1A step 4): VulkanClientPlatform
     // overrides them, so they are no longer transplanted.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlToggleBlend", 2),
-    // Vulkan backend: shader staging and linking. CompileShader only stages a
-    // stage on the device path, because GL resolves uniforms and varyings by name
-    // across the whole program and nothing is final until link time.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetUniformLocation", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CompileShader", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateShaderProgram", 1),
     // Vulkan backend: the mod-facing uniform and texture-binding surface. A
     // uniform location here is a byte offset into the generated block rather than
     // a GL location, which callers never see.

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..2f72ffd 100644
+index 6edf0c9..8de2a1d 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -1064,7 +1064,7 @@ index 6edf0c9..2f72ffd 100644
 +	/// member for it) attachments.
 +	/// </summary>
 +	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
-+	{
+ 	{
 +		FrameBufferRef target = new FrameBufferRef
 +		{
 +			FboId = GL.GenFramebuffer(),
@@ -1116,7 +1116,7 @@ index 6edf0c9..2f72ffd 100644
 +	}
 +
 +	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
- 	{
++	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
 +		// Transparent, so the same handle appears in more than one FrameBufferRef.
@@ -1853,20 +1853,18 @@ index 6edf0c9..2f72ffd 100644
  			if (RenderSSAO)
  			{
  				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
-@@ -1986,25 +3194,44 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			}
+@@ -1987,24 +3195,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
  			RenderFullscreenTriangle(screenQuad);
--			final.Stop();
+ 			final.Stop();
 -			if (RenderSSAO)
 -			{
 -				array = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
 -				GL.DrawBuffers(4, array);
 -			}
 -			else
-+			final.Stop();
 +			// Restores the multi-attachment selection the world passes expect.
 +			RestoreWorldDrawBuffers(RenderSSAO);
 +		}
@@ -2438,33 +2436,7 @@ index 6edf0c9..2f72ffd 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2581,10 +4272,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return result;
- 	}
- 
- 	public override UBORef CreateUBO(int shaderProgramId, int bindingPoint, string blockName, int size)
- 	{
-+		// Mono.Cecil transplant.
-+		// The device resolves the block by name against the program's reflected
-+		// interface and binds it to the same point, so the four GL steps -
-+		// allocate, look up the block index, bind the index, bind the buffer -
-+		// collapse into one call. UBO.Handle then carries the device's handle.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			UBO optimumUbo = new UBO();
-+			optimumUbo.Handle = optimumDevice.CreateUniformBuffer(shaderProgramId, bindingPoint, blockName, size);
-+			optimumUbo.Size = size;
-+			optimumUbo.BlockName = blockName;
-+			optimumUbo.BindingPoint = bindingPoint;
-+			return optimumUbo;
-+		}
- 		int num = GL.GenBuffer();
- 		GL.BindBuffer((BufferTarget)35345, num);
- 		GL.BufferData((BufferTarget)35345, size, (IntPtr)IntPtr.Zero, (BufferUsageHint)35048);
- 		ScreenManager.Platform.CheckGlError();
- 		int uniformBlockIndex = GL.GetUniformBlockIndex(shaderProgramId, blockName);
-@@ -2593,15 +4299,77 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +4284,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -2477,30 +2449,17 @@ index 6edf0c9..2f72ffd 100644
  		return uBO;
  	}
  
-+	// Optimum (Vulkan-native plan, Phase 1A step 3): the uniform-buffer bodies UBO used
-+	// to hold, moved here unchanged: the device branch, then the GL lines. UBO.Handle
-+	// carries the device's uniform-buffer handle on the device path, the same convention
-+	// VAO.VaoId uses for meshes, and the binding point survives from CreateUBO.
++	// Optimum (Vulkan-native plan, Phase 1A step 3): the uniform-buffer GL lines UBO used
++	// to hold, moved here unchanged; VulkanClientPlatform overrides them with the device
++	// calls (step 4). The binding point survives from CreateUBO.
 +	public override void BindUBO(UBO ubo)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.BindUniformBuffer(ubo.Handle);
-+			return;
-+		}
 +		GL.BindBuffer((BufferTarget)35345, ubo.Handle);
 +		GL.BindBufferBase((BufferRangeTarget)35345, ubo.BindingPoint, ubo.Handle);
 +	}
 +
 +	public override void UnbindUBO(UBO ubo)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.UnbindUniformBuffer(ubo.Handle);
-+			return;
-+		}
 +		GL.BindBuffer((BufferTarget)35345, 0);
 +	}
 +
@@ -2508,12 +2467,6 @@ index 6edf0c9..2f72ffd 100644
 +	// ranged updates write into it (glBufferSubData). The device writes a range either way.
 +	public override void UpdateUBO(UBO ubo, IntPtr data, int offset, int size, bool reallocate)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.UpdateUniformBuffer(ubo.Handle, data, offset, size);
-+			return;
-+		}
 +		ubo.Bind();
 +		if (reallocate)
 +		{
@@ -2528,12 +2481,6 @@ index 6edf0c9..2f72ffd 100644
 +
 +	public override void DeleteUBO(UBO ubo)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.DeleteUniformBuffer(ubo.Handle);
-+			return;
-+		}
 +		GL.DeleteBuffers(1, ref ubo.Handle);
 +	}
 +
@@ -2542,7 +2489,7 @@ index 6edf0c9..2f72ffd 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +4419,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +4379,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2587,7 +2534,7 @@ index 6edf0c9..2f72ffd 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4456,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +4416,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2608,7 +2555,7 @@ index 6edf0c9..2f72ffd 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4475,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +4435,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2629,7 +2576,7 @@ index 6edf0c9..2f72ffd 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4494,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +4454,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2650,7 +2597,7 @@ index 6edf0c9..2f72ffd 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4513,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +4473,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2671,7 +2618,7 @@ index 6edf0c9..2f72ffd 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4536,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +4496,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -2692,7 +2639,7 @@ index 6edf0c9..2f72ffd 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5098,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5058,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -2716,51 +2663,22 @@ index 6edf0c9..2f72ffd 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3675,15 +5454,328 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return new MouseEvent((int)mouseX, (int)mouseY, button, 0);
- 	}
- 
+@@ -3678,10 +5417,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return optimumDevice.GetUniformLocation(program.ProgramId, name);
-+		}
  		return GL.GetUniformLocation(program.ProgramId, name);
  	}
  
 +	// Optimum (Vulkan-native plan, Phase 1A step 3): the program, uniform and texture
-+	// binding bodies ShaderProgramBase used to hold, moved here unchanged: the device
-+	// branch, then the GL lines. A uniform location here is whatever GetUniformLocation
-+	// handed out - a byte offset into the generated block on the device path - so the
-+	// setters read the same uniformLocations dictionary on both paths.
++	// binding GL lines ShaderProgramBase used to hold, moved here unchanged;
++	// VulkanClientPlatform overrides them with the device calls (step 4).
 +	public override void UseShaderProgram(int programId)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.UseProgram(programId);
-+			return;
-+		}
 +		GL.UseProgram(programId);
 +	}
 +
 +	public override void DisposeShaderProgram(ShaderProgramBase program)
 +	{
-+		// The device owns the SPIR-V modules inside the program and frees them
-+		// with it, so there is nothing matching GL's detach-and-delete of the
-+		// individual stages.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			foreach (KeyValuePair<string, int> optimumSampler in program.customSamplers)
-+			{
-+				optimumDevice.DeleteSampler(optimumSampler.Value);
-+			}
-+			optimumDevice.DeleteProgram(program.ProgramId);
-+			return;
-+		}
 +		if (program.VertexShader != null)
 +		{
 +			GL.DetachShader(program.ProgramId, program.VertexShader.ShaderId);
@@ -2785,213 +2703,81 @@ index 6edf0c9..2f72ffd 100644
 +
 +	public override void BindSampler(int unit, int samplerId)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.BindSampler(unit, samplerId);
-+			return;
-+		}
 +		GL.BindSampler(unit, samplerId);
 +	}
 +
 +	public override void SetUniform(int programId, int location, float value)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniform(programId, location, value);
-+			return;
-+		}
 +		GL.Uniform1(location, value);
 +	}
 +
 +	public override void SetUniform(int programId, int location, int value)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniform(programId, location, value);
-+			return;
-+		}
 +		GL.Uniform1(location, value);
 +	}
 +
 +	public override void SetUniform(int programId, int location, float x, float y)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniform(programId, location, x, y);
-+			return;
-+		}
 +		GL.Uniform2(location, x, y);
 +	}
 +
 +	public override void SetUniform(int programId, int location, float x, float y, float z)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniform(programId, location, x, y, z);
-+			return;
-+		}
 +		GL.Uniform3(location, x, y, z);
 +	}
 +
 +	public override void SetUniform(int programId, int location, float x, float y, float z, float w)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniform(programId, location, x, y, z, w);
-+			return;
-+		}
 +		GL.Uniform4(location, x, y, z, w);
 +	}
 +
 +	public override void SetUniform(int programId, int location, int x, int y, int z)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// Unlike the Vec2i overload, which casts to float before it gets here,
-+			// Vec3i keeps integers, so the shader declares an ivec3. The location is
-+			// opaque to this side, so the device lays the three components out itself.
-+			optimumDevice.SetUniform(programId, location, x, y, z);
-+			return;
-+		}
 +		GL.Uniform3(location, x, y, z);
 +	}
 +
 +	public override void SetUniformArray1(int programId, int location, int count, float[] values)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformArray1(programId, location, count, values);
-+			return;
-+		}
 +		GL.Uniform1(location, count, values);
 +	}
 +
 +	public override void SetUniformArray2(int programId, int location, int count, float[] values)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformArray2(programId, location, count, values);
-+			return;
-+		}
 +		GL.Uniform2(location, count, values);
 +	}
 +
 +	public override void SetUniformArray3(int programId, int location, int count, float[] values)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformArray3(programId, location, count, values);
-+			return;
-+		}
 +		GL.Uniform3(location, count, values);
 +	}
 +
 +	public override void SetUniformArray4(int programId, int location, int count, float[] values)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformArray4(programId, location, count, values);
-+			return;
-+		}
 +		GL.Uniform4(location, count, values);
 +	}
 +
 +	public override void SetUniformMatrix(int programId, int location, float[] matrix)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformMatrix(programId, location, matrix);
-+			return;
-+		}
 +		GL.UniformMatrix4(location, 1, false, matrix);
 +	}
 +
 +	public override void SetUniformMatrix(int programId, int location, ref Matrix4 matrix)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// Only the sun and moon renderers use this overload, a handful of
-+			// times per frame, so flattening into an array here is not worth a
-+			// dedicated entry point on the seam.
-+			float[] optimumMatrix = new float[16];
-+			optimumMatrix[0] = matrix.M11; optimumMatrix[1] = matrix.M12;
-+			optimumMatrix[2] = matrix.M13; optimumMatrix[3] = matrix.M14;
-+			optimumMatrix[4] = matrix.M21; optimumMatrix[5] = matrix.M22;
-+			optimumMatrix[6] = matrix.M23; optimumMatrix[7] = matrix.M24;
-+			optimumMatrix[8] = matrix.M31; optimumMatrix[9] = matrix.M32;
-+			optimumMatrix[10] = matrix.M33; optimumMatrix[11] = matrix.M34;
-+			optimumMatrix[12] = matrix.M41; optimumMatrix[13] = matrix.M42;
-+			optimumMatrix[14] = matrix.M43; optimumMatrix[15] = matrix.M44;
-+			optimumDevice.SetUniformMatrix(programId, location, optimumMatrix);
-+			return;
-+		}
 +		GL.UniformMatrix4(location, false, ref matrix);
 +	}
 +
 +	public override void SetUniformMatrices(int programId, int location, int count, float[] matrices)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformMatrices(programId, location, count, matrices);
-+			return;
-+		}
 +		GL.UniformMatrix4(location, count, false, matrices);
 +	}
 +
 +	public override void SetUniformMatrices4x3(int programId, int location, int count, float[] matrices)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetUniformMatrices4x3(programId, location, count, matrices);
-+			return;
-+		}
 +		GL.UniformMatrix4x3(location, count, false, matrices);
 +	}
 +
 +	public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// In GL this is three separate things - point the sampler uniform at
-+			// a unit, activate that unit, bind the texture. The device keeps the
-+			// same split so the two halves can be set independently, which the
-+			// render systems rely on.
-+			optimumDevice.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
-+			optimumDevice.BindTexture(textureNumber, textureId);
-+			if (program.customSamplers.TryGetValue(samplerName, out var optimumSampler))
-+			{
-+				optimumDevice.BindSampler(textureNumber, optimumSampler);
-+			}
-+			else
-+			{
-+				// Clear any override left on this unit, or the texture's own
-+				// filtering would be silently ignored.
-+				optimumDevice.BindSampler(textureNumber, 0);
-+			}
-+			if (program.clampTToEdge)
-+			{
-+				optimumDevice.SetTextureParameter(textureId,
-+					Vintagestory.API.Config.OptimumGlConstants.TextureWrapT,
-+					Vintagestory.API.Config.OptimumGlConstants.ClampToEdge);
-+			}
-+			return;
-+		}
 +		GL.Uniform1(program.uniformLocations[samplerName], textureNumber);
 +		GL.ActiveTexture((TextureUnit)(33984 + textureNumber));
 +		GL.BindTexture((TextureTarget)3553, textureId);
@@ -3007,19 +2793,6 @@ index 6edf0c9..2f72ffd 100644
 +
 +	public override void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetSamplerUnit(program.ProgramId, samplerName, textureNumber);
-+			optimumDevice.BindTextureCube(textureNumber, textureId);
-+			if (program.clampTToEdge)
-+			{
-+				optimumDevice.SetTextureParameter(textureId,
-+					Vintagestory.API.Config.OptimumGlConstants.TextureWrapT,
-+					Vintagestory.API.Config.OptimumGlConstants.ClampToEdge);
-+			}
-+			return;
-+		}
 +		GL.Uniform1(program.uniformLocations[samplerName], textureNumber);
 +		GL.ActiveTexture((TextureUnit)(33984 + textureNumber));
 +		GL.BindTexture((TextureTarget)34067, textureId);
@@ -3031,46 +2804,6 @@ index 6edf0c9..2f72ffd 100644
 +
  	public override bool CompileShader(Shader shader)
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The device only stages the stage here. GL resolves uniforms and
-+			// varyings by name across the whole program, so nothing about a stage
-+			// is final until its siblings are known, and the real translation
-+			// happens at link time.
-+			return optimumDevice.CompileShader(shader);
-+		}
  		int num = (shader.ShaderId = GL.CreateShader((ShaderType)shader.shaderType));
  		string text = shader.Code;
  		if (text != null)
- 		{
- 			if (text.IndexOfOrdinal("#version") == -1)
-@@ -3715,10 +5807,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return true;
- 	}
- 
- 	public override bool CreateShaderProgram(ShaderProgram program)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The device assigns the id, exactly as glCreateProgram did, and the
-+			// caller stores it - IShaderProgram.ProgramId is read-only on the
-+			// interface, so it comes back as a return value.
-+			int optimumProgramId = optimumDevice.LinkProgram(program);
-+			if (optimumProgramId == 0)
-+			{
-+				string optimumLinkError = optimumDevice.GetError();
-+				logger.Error("Link error in shader program for pass {0}: {1}",
-+					program.PassName, optimumLinkError == null ? "unknown" : optimumLinkError);
-+				return false;
-+			}
-+			program.ProgramId = optimumProgramId;
-+			logger.Notification("Loaded Shaderprogramm for render pass {0}.", program.PassName);
-+			return true;
-+		}
- 		bool result = true;
- 		int num = (program.ProgramId = GL.CreateProgram());
- 		GL.AttachShader(num, program.VertexShader.ShaderId);
- 		GL.AttachShader(num, program.FragmentShader.ShaderId);
- 		if (program.GeometryShader != null)
