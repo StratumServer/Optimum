@@ -124,6 +124,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "DeleteOcclusionQuery", new[] { "Int32" }),
         new(true, "ReadDefaultFramebuffer", new[] { "Int32", "Int32", "Int32", "Int32", "IntPtr" }),
         new(true, "get_GraphicsBackendName", Array.Empty<string>()),
+        // Phase 2: render-stage bracket from ClientMain.TriggerRenderStage (contract C3).
+        new(true, "BeginRenderStage", new[] { "EnumRenderStage" }),
+        new(true, "EndRenderStage", new[] { "EnumRenderStage" }),
     };
 
     /// <summary>

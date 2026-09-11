@@ -157,6 +157,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "DeleteOcclusionQuery",
         "ReadDefaultFramebuffer",
         "GraphicsBackendName",
+        // Phase 2 (contract C3): the render-stage bracket ClientMain.TriggerRenderStage calls.
+        "BeginRenderStage",
+        "EndRenderStage",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -732,6 +735,9 @@ var targets = new List<MethodTarget>
     // Set3DProjection call sites, and the resets (FOV change, resize, world
     // load already listed below as Start, shader reload).
     new("Vintagestory.Client.NoObf.ClientMain", "MainRenderLoop", 1),
+    // Phase 2 (contract C3): brackets the stage's renderers with the platform's
+    // BeginRenderStage/EndRenderStage virtuals.
+    new("Vintagestory.Client.NoObf.ClientMain", "TriggerRenderStage", 2),
     new("Vintagestory.Client.NoObf.ClientMain", "Set3DProjection", 2),
     new("Vintagestory.Client.NoObf.ClientMain", "get_CurrentProjectionMatrix", 0),
     new("Vintagestory.Client.NoObf.ClientMain", "OnFowChanged", 1),
