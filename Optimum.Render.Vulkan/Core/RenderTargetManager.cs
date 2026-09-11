@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
 namespace Optimum.Render.Vulkan.Core;
@@ -55,6 +56,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     private readonly TextureManager _textures;
     private readonly GlStateTracker _state;
 
+    /// <summary>Every attachment of a scope moves in one barrier command before vkCmdBeginRendering.</summary>
+    private readonly BarrierBatcher _barriers;
+
     private readonly List<VulkanFramebuffer?> _framebuffers = new();
     private readonly Stack<int> _freeIds = new();
 
@@ -83,6 +87,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         _context = context;
         _textures = textures;
         _state = state;
+        _barriers = textures.CreateBatcher();
 
         // Index 0 is the default framebuffer, installed separately.
         _framebuffers.Add(null);
@@ -251,7 +256,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             VulkanTexture? excluded = _textures.Get(unused.TextureId);
             if (excluded != null)
             {
-                _textures.TransitionTexture(commandBuffer, excluded, ImageLayout.ShaderReadOnlyOptimal);
+                _textures.Require(_barriers, commandBuffer, excluded, ResourceUsage.SampleFragment);
             }
         }
 
@@ -283,7 +288,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 continue;
             }
 
-            _textures.TransitionTexture(commandBuffer, texture, ImageLayout.ColorAttachmentOptimal);
+            // Blend state can change inside the scope, so the attachment is
+            // declared for the widest colour use (read and write).
+            _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.ColorBlend);
 
             attachments[i] = new RenderingAttachmentInfo
             {
@@ -309,7 +316,9 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 ImageLayout depthLayout = DepthReadOnly
                     ? ImageLayout.DepthReadOnlyOptimal
                     : ImageLayout.DepthAttachmentOptimal;
-                _textures.TransitionTexture(commandBuffer, depth, depthLayout);
+                // Read-only depth may be sampled by the draws of this scope.
+                _textures.Require(_barriers, commandBuffer, depth,
+                    DepthReadOnly ? ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite);
                 depthAttachment = new RenderingAttachmentInfo
                 {
                     SType = StructureType.RenderingAttachmentInfo,
@@ -321,6 +330,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 hasDepth = true;
             }
         }
+
+        _barriers.Flush(commandBuffer);
 
         fixed (RenderingAttachmentInfo* attachmentsPtr = attachments)
         {

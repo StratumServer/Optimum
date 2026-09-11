@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Optimum.Render.Vulkan.Graph;
 using Silk.NET.Vulkan;
 
 using Buffer = Silk.NET.Vulkan.Buffer;
@@ -89,8 +90,30 @@ internal sealed unsafe class VulkanTexture : IDisposable
     /// <summary>Mutable, as glTexParameter is.</summary>
     public SamplerState State { get; set; } = SamplerState.Default;
 
-    /// <summary>Tracked because Vulkan offers no way to query it.</summary>
-    public ImageLayout Layout { get; set; } = ImageLayout.Undefined;
+    private ResourceStateTracker? _sync;
+
+    /// <summary>
+    /// Per-subresource layout, write and read stages, which every barrier on this
+    /// texture derives from (<see cref="BarrierBatcher" />). Created on first use,
+    /// once the image's dimensions are set.
+    /// </summary>
+    internal ResourceStateTracker Sync
+    {
+        get
+        {
+            ResourceStateTracker? sync = _sync;
+            if (sync != null) return sync;
+            System.Threading.Interlocked.CompareExchange(ref _sync,
+                new ResourceStateTracker(MipLevels, Layers, Aspect != ImageAspectFlags.ColorBit), null);
+            return _sync!;
+        }
+    }
+
+    /// <summary>
+    /// The layout of the whole image, tracked because Vulkan offers no way to
+    /// query it; UNDEFINED while its subresources are in different layouts.
+    /// </summary>
+    public ImageLayout Layout => Sync.Layout;
 
     /// <summary>
     /// The frame command buffer generation that last used this texture; an
@@ -262,6 +285,7 @@ internal sealed unsafe class TextureManager : IDisposable
         _context = context;
         _uploads = uploads;
         Samplers = new SamplerCache(context);
+        _barriers = CreateBatcher();
 
         // Index 0 is reserved so a zero id never names a real texture.
         _textures.Add(null);
@@ -519,15 +543,15 @@ internal sealed unsafe class TextureManager : IDisposable
                 _context.CmdSetCheckpoint(commandBuffer, CheckpointMarker.Mipmaps(textureId, texture.MipLevels));
             }
 
-            TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
+            TransitionTexture(commandBuffer, texture, ResourceUsage.TransferSrc);
 
             for (uint level = 1; level < texture.MipLevels; level++)
             {
                 int nextWidth = Math.Max(1, mipWidth / 2);
                 int nextHeight = Math.Max(1, mipHeight / 2);
 
-                TransitionRange(commandBuffer, texture, level, 1,
-                    ImageLayout.Undefined, ImageLayout.TransferDstOptimal);
+                // The level is about to be overwritten whole: discard it.
+                TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferDst, discard: true);
 
                 var blit = new ImageBlit
                 {
@@ -544,15 +568,15 @@ internal sealed unsafe class TextureManager : IDisposable
                     texture.Image, ImageLayout.TransferDstOptimal,
                     1, &blit, Filter.Linear);
 
-                TransitionRange(commandBuffer, texture, level, 1,
-                    ImageLayout.TransferDstOptimal, ImageLayout.TransferSrcOptimal);
+                TransitionRange(commandBuffer, texture, level, 1, ResourceUsage.TransferSrc, discard: false);
 
                 mipWidth = nextWidth;
                 mipHeight = nextHeight;
             }
 
-            texture.Layout = ImageLayout.TransferSrcOptimal;
-            TransitionTexture(commandBuffer, texture, ImageLayout.ShaderReadOnlyOptimal);
+            // Every level is TRANSFER_SRC again, so the tracker merged the
+            // per-level entries back into one and this is a single barrier.
+            TransitionTexture(commandBuffer, texture, ResourceUsage.SampleFragment);
         }
         finally
         {
@@ -645,77 +669,56 @@ internal sealed unsafe class TextureManager : IDisposable
 
     // ------------------------------------------------------------------ barriers
 
-    public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ImageLayout target)
-    {
-        // Every path that records a texture into a command buffer goes through
-        // here (attachments, reads, copies, blits), even when no barrier is due.
-        _uploads.NoteUse(commandBuffer, texture);
-        if (texture.Layout == target) return;
-        TransitionRange(commandBuffer, texture, 0, texture.MipLevels, texture.Layout, target);
-        texture.Layout = target;
-    }
-
-    private void TransitionRange(
-        CommandBuffer commandBuffer, VulkanTexture texture,
-        uint baseMip, uint mipCount, ImageLayout from, ImageLayout to)
-    {
-        // Execution dependency stays ALL_COMMANDS on both sides (a transition
-        // must order against every earlier use, and this backend does not
-        // track per-use stages); the access masks name what each layout is
-        // really used for, which is what makes the availability/visibility
-        // operations precise and keeps the layers quiet about them.
-        var barrier = new ImageMemoryBarrier2
-        {
-            SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = AccessForLayout(from, writer: true),
-            DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = AccessForLayout(to, writer: false),
-            OldLayout = from,
-            NewLayout = to,
-            Image = texture.Image,
-            SubresourceRange = new ImageSubresourceRange(texture.Aspect, baseMip, mipCount, 0, texture.Layers),
-        };
-
-        var dependency = new DependencyInfo
-        {
-            SType = StructureType.DependencyInfo,
-            ImageMemoryBarrierCount = 1,
-            PImageMemoryBarriers = &barrier,
-        };
-        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
-        VulkanStats.NoteImageBarriers(1);
-    }
+    // Barriers for the immediate transitions below. Uploads record from any
+    // thread under the upload lock and the frame thread records without it, so
+    // the shared batcher is used under its own lock, one Require+Flush at a time.
+    private readonly BarrierBatcher _barriers;
+    private readonly object _barrierLock = new();
 
     /// <summary>
-    /// The accesses a layout is used for: as the source side of a barrier the
-    /// writes that must be made available, as the destination side the reads
-    /// and writes that must see them.
+    /// Whether a rendering scope is open in a command buffer; the device answers
+    /// for its frame command buffer. Every batcher from <see cref="CreateBatcher" />
+    /// asks it at flush time (debug builds reject a flush inside a scope).
     /// </summary>
-    internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer) => layout switch
+    public Func<CommandBuffer, bool>? ScopeOpen { get; set; }
+
+    /// <summary>A batcher for one recording thread (a render target manager, the present path).</summary>
+    public BarrierBatcher CreateBatcher() =>
+        new(_context.Api) { ScopeOpen = commandBuffer => ScopeOpen?.Invoke(commandBuffer) == true };
+
+    /// <summary>
+    /// Adds a whole-texture use to <paramref name="batcher" /> without flushing, so
+    /// several textures move in one barrier command. The caller flushes before
+    /// recording the commands that use them.
+    /// </summary>
+    public void Require(BarrierBatcher batcher, CommandBuffer commandBuffer, VulkanTexture texture, ResourceUsage usage)
     {
-        ImageLayout.TransferDstOptimal => AccessFlags2.TransferWriteBit,
-        ImageLayout.TransferSrcOptimal => writer ? AccessFlags2.None : AccessFlags2.TransferReadBit,
-        ImageLayout.ColorAttachmentOptimal => writer
-            ? AccessFlags2.ColorAttachmentWriteBit
-            : AccessFlags2.ColorAttachmentReadBit | AccessFlags2.ColorAttachmentWriteBit,
-        ImageLayout.DepthAttachmentOptimal or ImageLayout.DepthStencilAttachmentOptimal => writer
-            ? AccessFlags2.DepthStencilAttachmentWriteBit
-            : AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.DepthStencilAttachmentWriteBit,
-        // Read-only depth is still written by the pass's storeOp, so as a
-        // source it must make that write available or the next transition is
-        // a write-after-write hazard (synchronization validation, 2026-09-11).
-        ImageLayout.DepthReadOnlyOptimal or ImageLayout.DepthStencilReadOnlyOptimal => writer
-            ? AccessFlags2.DepthStencilAttachmentWriteBit
-            : AccessFlags2.DepthStencilAttachmentReadBit | AccessFlags2.ShaderSampledReadBit,
-        ImageLayout.ShaderReadOnlyOptimal => writer ? AccessFlags2.None : AccessFlags2.ShaderSampledReadBit,
-        ImageLayout.General => writer
-            ? AccessFlags2.MemoryWriteBit
-            : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-        ImageLayout.PresentSrcKhr => AccessFlags2.None,
-        ImageLayout.Undefined or ImageLayout.Preinitialized => writer ? AccessFlags2.None : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-        _ => writer ? AccessFlags2.MemoryWriteBit : AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-    };
+        _uploads.NoteUse(commandBuffer, texture);
+        batcher.Require(texture, 0, texture.MipLevels, 0, texture.Layers, usage);
+    }
+
+    /// <summary>A transition named by layout (tests, a readback restoring what it found); see <see cref="UsageState.ForLayout" />.</summary>
+    public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ImageLayout target) =>
+        TransitionTexture(commandBuffer, texture, UsageState.ForLayout(target));
+
+    public void TransitionTexture(CommandBuffer commandBuffer, VulkanTexture texture, ResourceUsage usage,
+        bool discard = false)
+    {
+        // Every path that records a texture into a command buffer goes through
+        // here or Require (attachments, reads, copies, blits), even when no barrier is due.
+        _uploads.NoteUse(commandBuffer, texture);
+        TransitionRange(commandBuffer, texture, 0, texture.MipLevels, usage, discard);
+    }
+
+    private void TransitionRange(CommandBuffer commandBuffer, VulkanTexture texture,
+        uint baseMip, uint mipCount, ResourceUsage usage, bool discard)
+    {
+        lock (_barrierLock)
+        {
+            _barriers.Require(texture, baseMip, mipCount, 0, texture.Layers, usage, discard);
+            _barriers.Flush(commandBuffer);
+        }
+    }
 
     // -------------------------------------------------------------------- helpers
 

@@ -237,15 +237,19 @@ internal sealed unsafe class UploadManager : IDisposable
             // command buffer (a later one in the same submission) that reads it
             // after. Synchronization validation reports both as hazards without an
             // explicit buffer barrier on each side (2026-09-11, the staged index
-            // buffer of AsyncTransferTests).
+            // buffer of AsyncTransferTests). The other side of each barrier is
+            // every use the buffer was created for (vertex/index input, uniform or
+            // storage reads, indirect, transfer), not ALL_COMMANDS.
+            (PipelineStageFlags2 readerStage, AccessFlags2 readerAccess) =
+                Graph.BufferUsageState.UsesOf(destination.Usage);
             BufferBarrier(commandBuffer, destination,
-                PipelineStageFlags2.AllCommandsBit, AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
+                readerStage, readerAccess,
                 PipelineStageFlags2.CopyBit, AccessFlags2.TransferWriteBit);
             var copy = new BufferCopy { SrcOffset = staging.Offset, DstOffset = offset, Size = size };
             _context.Api.CmdCopyBuffer(commandBuffer, staging.Buffer, destination.Handle, 1, &copy);
             BufferBarrier(commandBuffer, destination,
                 PipelineStageFlags2.CopyBit, AccessFlags2.TransferWriteBit,
-                PipelineStageFlags2.AllCommandsBit, AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit);
+                readerStage, readerAccess);
             NoteUse(commandBuffer, destination);
         }
         finally
