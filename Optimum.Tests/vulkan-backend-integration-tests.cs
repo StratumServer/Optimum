@@ -261,13 +261,18 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void UniformSettersUseTheLocationTheDeviceHandedOut()
     {
+        // Phase 1A step 3: the program passes the location it looked up to the
+        // platform, whose override hands it to the device unchanged.
         string added = AddedLines(Read(ShaderProgramBasePatch));
 
-        Assert.Contains("optimumDevice.SetUniform(ProgramId, uniformLocations[uniformName]", added);
-        Assert.Contains("optimumDevice.SetUniformArray1(ProgramId, uniformLocations[uniformName]", added);
-        Assert.Contains("optimumDevice.SetUniformMatrix(ProgramId, uniformLocations[uniformName]", added);
+        Assert.Contains("ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName]", added);
+        Assert.Contains("ScreenManager.Platform.SetUniformArray1(ProgramId, uniformLocations[uniformName]", added);
+        Assert.Contains("ScreenManager.Platform.SetUniformMatrix(ProgramId, uniformLocations[uniformName]", added);
 
         string platform = AddedLines(Read(PlatformPatch));
+        Assert.Contains("optimumDevice.SetUniform(programId, location, value)", platform);
+        Assert.Contains("optimumDevice.SetUniformArray1(programId, location, count, values)", platform);
+        Assert.Contains("optimumDevice.SetUniformMatrix(programId, location, matrix)", platform);
         Assert.Contains("optimumDevice.GetUniformLocation(program.ProgramId, name)", platform);
     }
 
@@ -297,9 +302,10 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void TextureBindingAimsTheSamplerAndClearsAnyStaleOverride()
     {
-        string added = AddedLines(Read(ShaderProgramBasePatch));
+        // Phase 1A step 3: the body lives in ClientPlatformWindows.BindProgramTexture2D.
+        string added = AddedLines(Read(PlatformPatch));
 
-        Assert.Contains("optimumDevice.SetSamplerUnit(ProgramId, samplerName, textureNumber)", added);
+        Assert.Contains("optimumDevice.SetSamplerUnit(program.ProgramId, samplerName, textureNumber)", added);
         Assert.Contains("optimumDevice.BindTexture(textureNumber, textureId)", added);
         Assert.Contains("optimumDevice.BindSampler(textureNumber, 0)", added);
     }

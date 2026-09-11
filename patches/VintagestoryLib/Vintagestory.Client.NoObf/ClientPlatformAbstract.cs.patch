@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..a8d3383 100644
+index d6eb844..7766958 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,122 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,218 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -102,6 +102,102 @@ index d6eb844..a8d3383 100644
 +	}
 +
 +	public virtual void DisableOptimumTaa(string reason)
++	{
++	}
++
++	// Optimum (Vulkan-native plan, Phase 1A step 3): the shader program, uniform and
++	// uniform-buffer operations ShaderProgramBase and UBO issue. A location is whatever
++	// GetUniformLocation handed out. Neutral bodies; ClientPlatformWindows overrides
++	// them with the OpenGL lines those two classes used to call directly.
++	public virtual void UseShaderProgram(int programId)
++	{
++	}
++
++	public virtual void DisposeShaderProgram(ShaderProgramBase program)
++	{
++	}
++
++	public virtual void BindSampler(int unit, int samplerId)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float value)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, int value)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float x, float y)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float x, float y, float z)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float x, float y, float z, float w)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, int x, int y, int z)
++	{
++	}
++
++	public virtual void SetUniformArray1(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformArray2(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformArray3(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformArray4(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformMatrix(int programId, int location, float[] matrix)
++	{
++	}
++
++	public virtual void SetUniformMatrix(int programId, int location, ref OpenTK.Mathematics.Matrix4 matrix)
++	{
++	}
++
++	public virtual void SetUniformMatrices(int programId, int location, int count, float[] matrices)
++	{
++	}
++
++	public virtual void SetUniformMatrices4x3(int programId, int location, int count, float[] matrices)
++	{
++	}
++
++	public virtual void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
++	{
++	}
++
++	public virtual void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
++	{
++	}
++
++	public virtual void BindUBO(UBO ubo)
++	{
++	}
++
++	public virtual void UnbindUBO(UBO ubo)
++	{
++	}
++
++	public virtual void UpdateUBO(UBO ubo, IntPtr data, int offset, int size, bool reallocate)
++	{
++	}
++
++	public virtual void DeleteUBO(UBO ubo)
 +	{
 +	}
 +

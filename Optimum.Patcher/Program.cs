@@ -86,6 +86,26 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumTaaSharpen",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
+        // Phase 1A step 3: the program, uniform and UBO operations ShaderProgramBase and
+        // UBO call. Neutral bodies; ClientPlatformWindows overrides them. SetUniform and
+        // SetUniformMatrix inject every overload the donor declares.
+        "UseShaderProgram",
+        "DisposeShaderProgram",
+        "BindSampler",
+        "SetUniform",
+        "SetUniformArray1",
+        "SetUniformArray2",
+        "SetUniformArray3",
+        "SetUniformArray4",
+        "SetUniformMatrix",
+        "SetUniformMatrices",
+        "SetUniformMatrices4x3",
+        "BindProgramTexture2D",
+        "BindProgramTextureCube",
+        "BindUBO",
+        "UnbindUBO",
+        "UpdateUBO",
+        "DeleteUBO",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -239,6 +259,26 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
+        // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
+        // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.
+        "UseShaderProgram",
+        "DisposeShaderProgram",
+        "BindSampler",
+        "SetUniform",
+        "SetUniformArray1",
+        "SetUniformArray2",
+        "SetUniformArray3",
+        "SetUniformArray4",
+        "SetUniformMatrix",
+        "SetUniformMatrices",
+        "SetUniformMatrices4x3",
+        "BindProgramTexture2D",
+        "BindProgramTextureCube",
+        "BindUBO",
+        "UnbindUBO",
+        "UpdateUBO",
+        "DeleteUBO",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
