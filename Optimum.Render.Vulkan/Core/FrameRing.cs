@@ -72,13 +72,15 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// Waits for the GPU to finish with this slot, then recycles it. This is the
     /// only point where deferred deletions actually happen.
     /// </summary>
-    public void BeginFrame(ConcurrentQueue<IDisposable> incomingDeletions)
+    public void BeginFrame(ConcurrentQueue<IDisposable> incomingDeletions, WaitSite site = WaitSite.FramePacing)
     {
         Vk api = _context.Api;
         Fence fence = Fence;
 
+        long waitStart = VulkanStats.WaitStart();
         VulkanResult.Check(api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue),
             "vkWaitForFences at the start of a frame");
+        VulkanStats.NoteWait(site, waitStart);
         VulkanResult.Check(api.ResetFences(_context.Device, 1, &fence),
             "vkResetFences at the start of a frame");
 
@@ -154,6 +156,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         Vk api = _context.Api;
         CommandBuffer commandBuffer = CommandBuffer;
         api.EndCommandBuffer(commandBuffer);
+        VulkanStats.NoteUniformRingUse(_cursor, _regionSize);
 
         Semaphore wait = waitSemaphore;
         Semaphore signal = signalSemaphore;
@@ -246,11 +249,15 @@ internal sealed class FrameRing : IDisposable
         ? throw new InvalidOperationException("BeginFrame has not been called yet")
         : _slots[_index];
 
-    public FrameSlot BeginFrame()
+    /// <param name="site">
+    /// Which wait the slot fence counts as: frame pacing at a real frame start,
+    /// <see cref="WaitSite.FlushFrame" /> when a mid-frame flush continues the frame.
+    /// </param>
+    public FrameSlot BeginFrame(WaitSite site = WaitSite.FramePacing)
     {
         _index = (_index + 1) % _slots.Length;
         FrameSlot slot = _slots[_index];
-        slot.BeginFrame(_incomingDeletions);
+        slot.BeginFrame(_incomingDeletions, site);
         return slot;
     }
 
