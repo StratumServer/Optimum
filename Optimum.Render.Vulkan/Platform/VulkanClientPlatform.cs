@@ -127,6 +127,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // Phase 2: render-stage bracket from ClientMain.TriggerRenderStage (contract C3).
         new(true, "BeginRenderStage", new[] { "EnumRenderStage" }),
         new(true, "EndRenderStage", new[] { "EnumRenderStage" }),
+        // Phase 2 step 2: the TAA post methods declare their frame-graph passes.
+        new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
+        new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
+        new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
     };
 
     /// <summary>
@@ -276,6 +280,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
+            // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
+            RenderStageListener = new FrameGraphStageListener(this);
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
             OptimumForkGraphics.Active = new VulkanForkGraphics(device);
             return true;
@@ -314,6 +320,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         }
 
         device = null;
+        RenderStageListener = null;
         OptimumRender.ActiveBackend = EnumRenderBackend.OpenGL;
         OptimumRender.NoGraphicsApiWindow = false;
         OptimumRenderBootstrap.ClearCrashMarker();

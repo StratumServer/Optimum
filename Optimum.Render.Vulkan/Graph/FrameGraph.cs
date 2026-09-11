@@ -92,8 +92,11 @@ internal sealed class FrameGraph
     private readonly Dictionary<string, int> _names = new(StringComparer.Ordinal);
     private readonly List<PassSignature> _frame = new();
     private readonly List<PendingClear> _pending = new();
-    private FramePlan? _plan;
-    private bool _prefixMatches = true;
+
+    // The plans of the last two frames: the TAA history ping-pong makes every frame's
+    // signature differ from the one before it but equal to the one before that.
+    private readonly FramePlan?[] _plans = new FramePlan?[2];
+    private readonly bool[] _prefixMatches = { true, true };
 
     // Totals for tests; VulkanStats carries the interval counters.
     public long Passes { get; private set; }
@@ -110,8 +113,11 @@ internal sealed class FrameGraph
     /// <summary>Passes opened in the frame being recorded.</summary>
     public int PassesThisFrame => _frame.Count;
 
-    /// <summary>The plan the current frame is matched against, null before the first frame ended.</summary>
-    public FramePlan? Plan => _plan;
+    /// <summary>The plan solved from the previous frame, null before the first frame ended.</summary>
+    public FramePlan? Plan => _plans[0];
+
+    /// <summary>Whether every pass opened so far this frame matches one of the last two plans.</summary>
+    public bool PrefixMatchesPlan => _prefixMatches[0] || _prefixMatches[1];
 
     public int NameId(string name)
     {
@@ -131,7 +137,12 @@ internal sealed class FrameGraph
     public int OpenPass(PassSignature signature, bool declared)
     {
         int index = _frame.Count;
-        _prefixMatches = _prefixMatches && _plan != null && !_plan.IsConservative && _plan.MatchesPass(index, signature);
+        for (int k = 0; k < _plans.Length; k++)
+        {
+            FramePlan? plan = _plans[k];
+            _prefixMatches[k] = _prefixMatches[k] && plan != null && !plan.IsConservative &&
+                                plan.MatchesPass(index, signature);
+        }
         _frame.Add(signature);
         Passes++;
         if (declared) DeclaredPasses++;
@@ -140,7 +151,7 @@ internal sealed class FrameGraph
         {
             RenderTrace.Write("pass " + index + " name=" + signature.NameId + " attachments=" + signature.Attachments.Length +
                 " reads=" + signature.Reads.Length + " " + signature.Width + "x" + signature.Height +
-                " plan=" + (_prefixMatches ? "match" : "conservative"));
+                " plan=" + (PrefixMatchesPlan ? "match" : "conservative"));
         }
         return index;
     }
@@ -152,8 +163,9 @@ internal sealed class FrameGraph
     /// </summary>
     public AttachmentLoadOp PlannedLoad(int pass, int attachment)
     {
-        if (!_prefixMatches || _plan == null || pass < 0 || pass >= _plan.PassCount) return AttachmentLoadOp.Load;
-        AttachmentLoadOp op = _plan.LoadOp(pass, attachment);
+        FramePlan? plan = _prefixMatches[0] ? _plans[0] : _prefixMatches[1] ? _plans[1] : null;
+        if (plan == null || pass < 0 || pass >= plan.PassCount) return AttachmentLoadOp.Load;
+        AttachmentLoadOp op = plan.LoadOp(pass, attachment);
         if (op == AttachmentLoadOp.DontCare) PlannedDontCareLoads++;
         return op;
     }
@@ -180,7 +192,12 @@ internal sealed class FrameGraph
     {
         if (_frame.Count > 0)
         {
-            if (_plan != null && !_plan.IsConservative && _plan.Matches(_frame))
+            bool hit = false;
+            foreach (FramePlan? plan in _plans)
+            {
+                hit |= plan != null && !plan.IsConservative && plan.Matches(_frame);
+            }
+            if (hit)
             {
                 PlanHits++;
                 VulkanStats.NotePlanHit();
@@ -190,10 +207,12 @@ internal sealed class FrameGraph
                 PlanMisses++;
                 VulkanStats.NotePlanMiss();
             }
-            _plan = FramePlan.Build(_frame);
+            _plans[1] = _plans[0];
+            _plans[0] = FramePlan.Build(_frame);
         }
         _frame.Clear();
-        _prefixMatches = true;
+        _prefixMatches[0] = true;
+        _prefixMatches[1] = true;
     }
 
     // ------------------------------------------------------------ clear promotion
