@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The Vulkan renderer backend. Referenced by nothing in the game: the
-       launcher loads it reflectively and hands the device to the client through
-       OptimumRender.Device, so no vanilla assembly ever gains an assembly
-       reference to a renderer implementation. -->
+       launcher loads it reflectively and OptimumRenderBootstrap.CreatePlatform
+       hands the client a VulkanClientPlatform, so no vanilla assembly ever gains
+       an assembly reference to a renderer implementation. -->
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -55,6 +55,33 @@
   <ItemGroup>
     <Reference Include="VintagestoryAPI">
       <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- VulkanClientPlatform overrides platform members whose signatures or bodies name
+         types from the game's own libraries (Cairo surfaces, OpenAL version query,
+         OpenTK PrimitiveType/Matrix4). Compile-time only: the client already loads them. -->
+    <Reference Include="cairo-sharp">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Audio.OpenAL">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Audio.OpenAL.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Windowing.Desktop">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Desktop.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Windowing.Common">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Mathematics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Graphics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Graphics.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

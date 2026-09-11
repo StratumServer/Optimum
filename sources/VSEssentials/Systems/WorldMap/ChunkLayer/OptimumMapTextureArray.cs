@@ -55,15 +55,15 @@ public sealed class OptimumMapTextureArray : IDisposable
 
         // Create the texture array. On the Vulkan backend the window has no GL
         // context, so the device owns the array; the GL body stays for OpenGL.
-        IOptimumGraphicsDevice optimumDevice = OptimumRender.Device;
-        if (optimumDevice != null)
+        OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
+        if (optimumGraphics != null)
         {
-            TextureId = optimumDevice.CreateTexture2DArray(PageSize, PageSize, maxLayers,
+            TextureId = optimumGraphics.CreateTexture2DArray(PageSize, PageSize, maxLayers,
                 EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba);
-            optimumDevice.SetTextureParameter(TextureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            optimumDevice.SetTextureParameter(TextureId, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            optimumDevice.SetTextureParameter(TextureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            optimumDevice.SetTextureParameter(TextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             return;
         }
 
@@ -164,8 +164,8 @@ public sealed class OptimumMapTextureArray : IDisposable
 
         if (TextureId != 0)
         {
-            IOptimumGraphicsDevice optimumDevice = OptimumRender.Device;
-            if (optimumDevice != null) optimumDevice.DeleteTexture(TextureId);
+            OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
+            if (optimumGraphics != null) optimumGraphics.DeleteTexture(TextureId);
             else GL.DeleteTexture(TextureId);
             TextureId = 0;
         }
@@ -178,14 +178,14 @@ public sealed class OptimumMapTextureArray : IDisposable
 
     private void UploadToLayer(int layer, int[] pixels)
     {
-        IOptimumGraphicsDevice optimumDevice = OptimumRender.Device;
-        if (optimumDevice != null)
+        OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
+        if (optimumGraphics != null)
         {
             unsafe
             {
                 fixed (int* ptr = pixels)
                 {
-                    optimumDevice.UploadTexture2DArrayLayer(TextureId, layer, 0, 0, PageSize, PageSize, (IntPtr)ptr);
+                    optimumGraphics.UploadTexture2DArrayLayer(TextureId, layer, 0, 0, PageSize, PageSize, (IntPtr)ptr);
                 }
             }
             return;

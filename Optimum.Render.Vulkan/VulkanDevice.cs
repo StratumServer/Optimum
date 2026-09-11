@@ -11,7 +11,8 @@ using Buffer = Silk.NET.Vulkan.Buffer;
 namespace Optimum.Render.Vulkan;
 
 /// <summary>
-/// The Vulkan implementation of Optimum's graphics backend seam.
+/// The Vulkan renderer behind <see cref="Platform.VulkanClientPlatform" />, which owns it
+/// and calls it from every graphics override (Vulkan-native plan, Phase 1A).
 ///
 /// It presents the OpenGL protocol the game and its mods were written against -
 /// set state, set named uniforms on the active program, bind textures to units,
@@ -23,7 +24,7 @@ namespace Optimum.Render.Vulkan;
 /// out integer ids, because the game's public API exposes raw GL names as fields
 /// that mods read and pass back.
 /// </summary>
-public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
+public sealed unsafe class VulkanDevice : IDisposable
 {
     private VulkanContext _context = null!;
     private VulkanCommands _setupCommands = null!;

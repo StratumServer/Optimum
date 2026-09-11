@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index afa4d5f..ef11c14 100644
+index afa4d5f..e5a9ad6 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -119,7 +119,7 @@ index afa4d5f..ef11c14 100644
  		GuiStyle.DecorativeFontName = ClientSettings.DecorativeFontName;
  		GuiStyle.StandardFontName = ClientSettings.DefaultFontName;
  		if (!Directory.Exists(GamePaths.AssetsPath))
-@@ -209,25 +296,10 @@ public class ClientProgram
+@@ -209,25 +296,11 @@ public class ClientProgram
  				return;
  			}
  		}
@@ -140,12 +140,13 @@ index afa4d5f..ef11c14 100644
 -			thread.IsBackground = true;
 -			thread.Start();
 -		};
++		WireClientPlatform(clientPlatformWindows);
  		WindowState val = (WindowState)(ClientSettings.GameWindowMode switch
  		{
  			3 => 3, 
  			2 => 2, 
  			1 => 3, 
-@@ -295,12 +367,50 @@ public class ClientProgram
+@@ -295,37 +368,89 @@ public class ClientProgram
  		};
  		if (RuntimeEnv.OS == OS.Mac)
  		{
@@ -160,6 +161,7 @@ index afa4d5f..ef11c14 100644
 +		}
  		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
  		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
+-		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
 +		if (optimumUseVulkan)
 +		{
 +			string optimumInstallReason;
@@ -188,15 +190,70 @@ index afa4d5f..ef11c14 100644
 +				gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
 +				clientPlatformWindows = new ClientPlatformWindows(logger);
 +				ConfigureClientPlatform(clientPlatformWindows);
++				WireClientPlatform(clientPlatformWindows);
 +				ScreenManager.Platform = clientPlatformWindows;
 +			}
 +		}
- 		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
++		// Optimum: the Run block's teardown only covers Run itself. A throw between
++		// the graphics bring-up above and Run (window setup, screenManager.Start, the
++		// platform's Start) would skip it, keeping the device alive and leaving the
++		// Vulkan crash marker for the next start to misread, so graphics shut down on
++		// that path too before the exception carries on. Empty on the OpenGL platform.
++		try
  		{
- 			try
+-			try
++			if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
  			{
- 				((NativeWindow)gameWindowNative).CenterWindow();
-@@ -337,14 +447,47 @@ public class ClientProgram
+-				((NativeWindow)gameWindowNative).CenterWindow();
++				try
++				{
++					((NativeWindow)gameWindowNative).CenterWindow();
++				}
++				catch (Exception e)
++				{
++					ScreenManager.Platform.Logger.Warning("Error trying to center the window");
++					ScreenManager.Platform.Logger.Warning(e);
++				}
+ 			}
+-			catch (Exception e)
++			clientPlatformWindows.StartAudio();
++			clientPlatformWindows.LogAndTestHardwareInfosStage2();
++			clientPlatformWindows.window = gameWindowNative;
++			clientPlatformWindows.XPlatInterface.Window = (GameWindow)(object)gameWindowNative;
++			clientPlatformWindows.SetDirectMouseMode(ClientSettings.DirectMouseMode);
++			clientPlatformWindows.WindowSize.Width = ((NativeWindow)gameWindowNative).ClientSize.X;
++			clientPlatformWindows.WindowSize.Height = ((NativeWindow)gameWindowNative).ClientSize.Y;
++			if (ClientSettings.GameWindowMode == 3)
+ 			{
+-				ScreenManager.Platform.Logger.Warning("Error trying to center the window");
+-				ScreenManager.Platform.Logger.Warning(e);
++				clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
+ 			}
++			screenManager.Start(args, rawArgs);
++			clientPlatformWindows.Start();
+ 		}
+-		clientPlatformWindows.StartAudio();
+-		clientPlatformWindows.LogAndTestHardwareInfosStage2();
+-		clientPlatformWindows.window = gameWindowNative;
+-		clientPlatformWindows.XPlatInterface.Window = (GameWindow)(object)gameWindowNative;
+-		clientPlatformWindows.SetDirectMouseMode(ClientSettings.DirectMouseMode);
+-		clientPlatformWindows.WindowSize.Width = ((NativeWindow)gameWindowNative).ClientSize.X;
+-		clientPlatformWindows.WindowSize.Height = ((NativeWindow)gameWindowNative).ClientSize.Y;
+-		if (ClientSettings.GameWindowMode == 3)
++		catch (Exception)
+ 		{
+-			clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
++			clientPlatformWindows.ShutdownGraphics();
++			throw;
+ 		}
+-		screenManager.Start(args, rawArgs);
+-		clientPlatformWindows.Start();
+ 		Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
+ 		try
+ 		{
+ 			((GameWindow)gameWindowNative).Run();
+ 		}
+@@ -337,14 +462,55 @@ public class ClientProgram
  			}
  			Thread.CurrentThread.Priority = ThreadPriority.Normal;
  			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");
@@ -211,13 +268,21 @@ index afa4d5f..ef11c14 100644
  	}
  
 +	// Optimum (Vulkan-native plan, Phase 1A): the per-platform wiring Start used to do
-+	// inline, so the OpenGL fallback can apply it to the platform that replaces a Vulkan
-+	// platform whose graphics did not come up. Lambda-free for the Cecil transplant.
++	// inline, split at the two places vanilla does it (right after construction, and
++	// after the install checks and signal handlers), so the OpenGL fallback can apply
++	// both to the platform that replaces a Vulkan platform whose graphics did not come
++	// up. Lambda-free for the Cecil transplant.
 +	private void ConfigureClientPlatform(ClientPlatformWindows clientPlatformWindows)
 +	{
 +		clientPlatformWindows.ShaderUniforms.SepiaLevel = ClientSettings.SepiaLevel;
 +		clientPlatformWindows.ShaderUniforms.ExtraContrastLevel = ClientSettings.ExtraContrastLevel;
 +		CrashReporter.SetLogger((Logger)clientPlatformWindows.Logger);
++	}
++
++	// Optimum: vanilla's second wiring block (server exit, crash reporter, dummy
++	// networks, the singleplayer server handler), at vanilla's position in Start.
++	private void WireClientPlatform(ClientPlatformWindows clientPlatformWindows)
++	{
 +		clientPlatformWindows.SetServerExitInterface(clientPlatformWindows.ServerExitState);
 +		clientPlatformWindows.crashreporter = crashreporter;
 +		clientPlatformWindows.singlePlayerServerDummyNetwork = new DummyNetwork[2];

@@ -35,7 +35,9 @@ public class TaaPipelineCoverageTests
         Assert.Contains("\"MotionAttachmentIndex\"", patcher);
         Assert.Contains("\"TaaHistory\"", patcher);
         Assert.Contains("\"DisableOptimumTaa\"", patcher);
-        Assert.Contains("\"CreateOptimumHistoryTarget\"", patcher);
+        // Phase 1A step 4: the device history target is a VulkanClientPlatform member (the
+        // renderer assembly ships as is); only the GL one is transplanted.
+        Assert.Contains("private FrameBufferRef CreateOptimumHistoryTarget(int width, int height)", VulkanPlatformSource.Read());
         Assert.Contains("\"CreateOptimumHistoryTargetGl\"", patcher);
 
         // Both new vanilla-type member-injection dictionaries exist.
@@ -62,9 +64,8 @@ public class TaaPipelineCoverageTests
     [Fact]
     public void DefaultDrawBufferMasksAreUnchangedByTaa()
     {
-        string platform = ReadPatchedOrSource(
-            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
-            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        // Phase 1A step 4: the device framebuffer setup is VulkanClientPlatform's.
+        string platform = VulkanPlatformSource.Read();
 
         // Primary's draw-buffer mask is still derived only from
         // primaryAttachments (2 or 4 colour targets), never including the new
@@ -82,20 +83,22 @@ public class TaaPipelineCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        // Device path.
-        Assert.Contains("optimumDevice.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", platform);
+        // Device path (VulkanClientPlatform.ClearFrameBufferPass since Phase 1A step 4).
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", vulkan);
         // An excluded attachment is not cleared on either backend. Checking
         // only that ClearColor exists missed Vulkan's silent masked-out no-op.
-        int enable = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", StringComparison.Ordinal);
-        int clear = platform.IndexOf("optimumDevice.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
-        int restore = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
+        int enable = vulkan.IndexOf("device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", StringComparison.Ordinal);
+        int clear = vulkan.IndexOf("device.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);", StringComparison.Ordinal);
+        int restore = vulkan.IndexOf("device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);", clear, StringComparison.Ordinal);
         Assert.True(enable >= 0 && enable < clear && restore > clear);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"ClearFrameBuffer\", 1", Read("Optimum.Patcher/Program.cs"));
         // GL path.
         Assert.Contains("GL.ClearBuffer((ClearBuffer)6144, MotionAttachmentIndex, new float[4]);", platform);
         // Both are guarded so a failed/absent motion attachment leaves the
         // clear untouched (MotionAttachmentIndex stays -1 via DisableOptimumTaa).
-        Assert.Equal(2, Count(platform, "if (MotionAttachmentIndex >= 0)"));
+        Assert.Equal(1, Count(platform, "if (MotionAttachmentIndex >= 0)"));
+        Assert.Equal(1, Count(vulkan, "if (MotionAttachmentIndex >= 0)"));
     }
 
     [Fact]
@@ -283,8 +286,10 @@ public class TaaPipelineCoverageTests
 
         // Transparent shares Primary's depth texture, so the same handle sits
         // in two FrameBufferRefs and a naive loop deletes it twice - a double
-        // free on the device path and a double count in VulkanStats.
-        Assert.Contains("transparent.DepthTextureId = primary.DepthTextureId;", platform);
+        // free on the device path and a double count in VulkanStats. Phase 1A
+        // step 4: the device setup and disposal are VulkanClientPlatform overrides.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("transparent.DepthTextureId = primary.DepthTextureId;", vulkan);
 
         // Virtual since platform substitution (VulkanClientPlatform overrides it).
         int dispose = platform.IndexOf("public virtual void DisposeFrameBuffers(", StringComparison.Ordinal);
@@ -292,15 +297,23 @@ public class TaaPipelineCoverageTests
         int end = platform.IndexOf("public override void ClearFrameBuffer(", dispose, StringComparison.Ordinal);
         string body = end > dispose ? platform.Substring(dispose, end - dispose) : platform.Substring(dispose);
 
-        Assert.Contains("HashSet<int> deletedTextures = new HashSet<int>();", body);
+        int deviceDispose = vulkan.IndexOf("public override void DisposeFrameBuffers(", StringComparison.Ordinal);
+        Assert.True(deviceDispose >= 0);
+        int deviceEnd = vulkan.IndexOf("public override void LoadFrameBuffer(", deviceDispose, StringComparison.Ordinal);
+        Assert.True(deviceEnd > deviceDispose);
+        string deviceBody = vulkan.Substring(deviceDispose, deviceEnd - deviceDispose);
+
         // Device path and GL path both gate every texture delete on the set.
-        Assert.Contains("if (deletedTextures.Add(buffers[k].DepthTextureId))", body);
+        Assert.Contains("HashSet<int> deletedTextures = new HashSet<int>();", body);
+        Assert.Contains("HashSet<int> deletedTextures = new HashSet<int>();", deviceBody);
+        Assert.Contains("if (deletedTextures.Add(buffers[k].DepthTextureId))", deviceBody);
         Assert.Contains("if (deletedTextures.Add(buffers[i].DepthTextureId))", body);
-        Assert.Contains("if (deletedTextures.Add(buffers[k].ColorTextureIds[n]))", body);
+        Assert.Contains("if (deletedTextures.Add(buffers[k].ColorTextureIds[n]))", deviceBody);
         Assert.Contains("if (deletedTextures.Add(buffers[i].ColorTextureIds[j]))", body);
         // No unguarded delete is left behind on either path.
-        Assert.Equal(4, Count(body, "deletedTextures.Add("));
-        Assert.Equal(1, Count(body, "optimumDevice.DeleteTexture(buffers[k].DepthTextureId);"));
+        Assert.Equal(2, Count(body, "deletedTextures.Add("));
+        Assert.Equal(2, Count(deviceBody, "deletedTextures.Add("));
+        Assert.Equal(1, Count(deviceBody, "device.DeleteTexture(buffers[k].DepthTextureId);"));
         Assert.Equal(1, Count(body, "GL.DeleteTexture(buffers[i].DepthTextureId);"));
     }
 
@@ -334,9 +347,13 @@ public class TaaPipelineCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        // The device path and the GL path, both guarded.
-        Assert.Equal(2, Count(platform,
+        // The device path and the GL path, both guarded. Phase 1A step 4: the device setup
+        // (VulkanClientPlatform) reads the same guard through OptimumTaaRequested.
+        Assert.Equal(1, Count(platform,
             "bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;"));
+        Assert.Equal(1, Count(platform,
+            "public bool OptimumTaaRequested => !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;"));
+        Assert.Contains("bool taaRequested = OptimumTaaRequested;", VulkanPlatformSource.Read());
         Assert.DoesNotContain(
             "bool taaRequested = Vintagestory.API.Config.OptimumConfig.EffectiveTaa;",
             platform);
@@ -397,11 +414,11 @@ public class TaaPipelineCoverageTests
         Assert.Contains("public static bool DisableTaaAtRuntime()", config);
 
         string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
-        int disable = platform.IndexOf("public void DisableOptimumTaa(string reason)", StringComparison.Ordinal);
+        int disable = platform.IndexOf("public override void DisableOptimumTaa(string reason)", StringComparison.Ordinal);
         Assert.True(disable > 0);
         Assert.Contains("OptimumConfig.DisableTaaAtRuntime()", platform.Substring(disable, 1200));
         // The reload happens outside frame buffer setup, at the resolve decision.
-        int resolve = platform.IndexOf("private bool RenderOptimumTaaResolve()", StringComparison.Ordinal);
+        int resolve = platform.IndexOf("public override bool RenderOptimumTaaResolve()", StringComparison.Ordinal);
         Assert.Contains("OptimumRunPendingTaaShaderReload();", platform.Substring(resolve, 400));
         Assert.Contains("ShaderRegistry.ReloadShaders();", platform);
 

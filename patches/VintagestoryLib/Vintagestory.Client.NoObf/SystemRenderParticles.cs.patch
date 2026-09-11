@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
-index a9db192..f59db79 100644
+index a9db192..5434211 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
 @@ -127,15 +127,65 @@ public class SystemRenderParticles : ClientSystem, IAsyncParticleManager
@@ -18,7 +18,7 @@ index a9db192..f59db79 100644
 +		// the motion attachment (a blended vector belongs to neither surface).
 +		// Everything here is a no-op with TAA off: BeginMotionWrite returns false
 +		// and the shader preprocesses back to vanilla.
-+		ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
++		ClientPlatformAbstract optimumPlatform = game.Platform;
 +		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
 +		try
 +		{

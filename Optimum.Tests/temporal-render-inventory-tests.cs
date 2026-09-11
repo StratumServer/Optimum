@@ -54,10 +54,15 @@ public class TemporalRenderInventoryTests
     public void SystemRenderOITLayersUsesSixDrawBuffers()
     {
         string oitLayers = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: the OIT pass state is the platform virtual BeginOitAccumulation;
+        // its GL body in ClientPlatformWindows holds the draw buffers.
+        Assert.Contains("ScreenManager.Platform.BeginOitAccumulation(currentTransparentfb);", oitLayers);
+        string accumulation = VulkanPlatformSource.ReadClientPlatformWindows();
+        accumulation = accumulation.Substring(accumulation.IndexOf("public override void BeginOitAccumulation(FrameBufferRef transparent)", System.StringComparison.Ordinal));
 
-        Assert.Contains("new DrawBuffersEnum[6]", oitLayers);
-        Assert.Contains("DrawBuffersEnum.ColorAttachment0", oitLayers);
-        Assert.Contains("DrawBuffersEnum.ColorAttachment5", oitLayers);
+        Assert.Contains("new DrawBuffersEnum[6]", accumulation);
+        Assert.Contains("DrawBuffersEnum.ColorAttachment0", accumulation);
+        Assert.Contains("DrawBuffersEnum.ColorAttachment5", accumulation);
     }
 
     [Fact]
@@ -142,8 +147,8 @@ public class TemporalRenderInventoryTests
         string clientMain = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
 
         // The pass exists, is registered, and is called last in the scene phase.
-        Assert.Contains("internal bool RenderOptimumSkyMotion()", platform);
-        Assert.Contains("optimumSkyMotionPlatform.RenderOptimumSkyMotion();", clientMain);
+        Assert.Contains("public override bool RenderOptimumSkyMotion()", platform);
+        Assert.Contains("Platform.RenderOptimumSkyMotion();", clientMain);
         Assert.Contains(
             "RegisterOptimumShaderProgram(\"taa-skymotion\", ShaderPrograms.TaaSkyMotion = new ShaderProgram());",
             Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs"));

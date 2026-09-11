@@ -35,7 +35,14 @@ public class ParityDumpCoverageTests
         Dictionary<string, int> constants = Constants(platform);
 
         string glBody = MethodBody(platform, "public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()");
-        string deviceBody = MethodBody(platform, "private List<FrameBufferRef> SetupOptimumFrameBuffers(");
+        // Phase 1A step 4: the device-path setup is VulkanClientPlatform's SetupDefaultFrameBuffers
+        // override, indexing the same slot constants.
+        string vulkan = VulkanPlatformSource.Read();
+        string deviceBody = MethodBody(vulkan, "public override List<FrameBufferRef> SetupDefaultFrameBuffers()");
+        foreach (string slotConstant in new[] { "OptimumFsrFramebufferIndex", "OptimumTaaHistoryIndexA", "OptimumTaaHistoryIndexB", "OptimumTaaSharpenIndex" })
+        {
+            Assert.Contains("private const int " + slotConstant + " = " + constants[slotConstant] + ";", vulkan);
+        }
         string namesBody = MethodBody(platform, "private string OptimumParitySlotName(int slot)");
 
         SortedSet<int> glSlots = AssignedSlots(glBody, constants);
@@ -80,15 +87,23 @@ public class ParityDumpCoverageTests
         string api = ReadApi();
         Assert.Equal(1, Count(api, "public const string FileNameFormat = \"{0}-{1}-{2}-{3}.{4}\";"));
         Assert.Contains("CultureInfo.InvariantCulture, FileNameFormat,", api);
-        Assert.Contains("OptimumTextureReadback ReadTextureForParity(int textureId);", api);
+        Assert.Contains("public virtual Vintagestory.API.Config.OptimumTextureReadback ReadTextureForParity(int textureId)",
+            Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs"));
 
         string platform = ReadSourceOrPatched(PlatformPatch, PlatformSource);
         string attachment = MethodBody(platform, "private int OptimumParityDumpAttachment(");
-        int deviceRead = attachment.IndexOf("readback = device.ReadTextureForParity(textureId);", StringComparison.Ordinal);
-        int glRead = attachment.IndexOf("readback = OptimumParityReadTextureGl(textureId);", StringComparison.Ordinal);
+        // Phase 1A step 4: the readback is the platform virtual ReadTextureForParity - glGetTexImage
+        // in ClientPlatformWindows, the device readback in VulkanClientPlatform.
+        int read = attachment.IndexOf("OptimumTextureReadback readback = ReadTextureForParity(textureId);", StringComparison.Ordinal);
         int write = attachment.IndexOf("OptimumParityDump.Write(directory, slot, slotName, attachment, readback)", StringComparison.Ordinal);
-        Assert.True(deviceRead >= 0 && glRead > deviceRead && write > glRead, "both backends must reach the one shared writer");
-        Assert.Equal(1, Count(platform, "ReadTextureForParity("));
+        Assert.True(read >= 0 && write > read, "both backends must reach the one shared writer");
+        Assert.Contains("return OptimumParityReadTextureGl(textureId);",
+            MethodBody(platform, "public override OptimumTextureReadback ReadTextureForParity(int textureId)"));
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("return device.ReadTextureForParity(textureId);",
+            MethodBody(vulkan, "public override OptimumTextureReadback ReadTextureForParity(int textureId)"));
+        Assert.Equal(1, Count(vulkan, "device.ReadTextureForParity("));
+        Assert.DoesNotContain("device.ReadTextureForParity(", platform);
         Assert.Equal(1, Count(platform, "OptimumParityDump.Write("));
         Assert.DoesNotContain("FileStream", MethodBody(platform, "private OptimumTextureReadback OptimumParityReadTextureGl(int textureId)"));
 
@@ -114,23 +129,22 @@ public class ParityDumpCoverageTests
 
         string platform = ReadSourceOrPatched(PlatformPatch, PlatformSource);
         string frame = MethodBody(platform, "private void window_RenderFrame(FrameEventArgs e)");
-        const string guard = "if (Vintagestory.API.Config.OptimumParityDump.Enabled)\n\t\t\t{\n\t\t\t\tOptimumRunParityDump();";
-        const string glGuard = "if (Vintagestory.API.Config.OptimumParityDump.Enabled)\n\t\t{\n\t\t\tOptimumRunParityDump();";
+        const string guard = "if (Vintagestory.API.Config.OptimumParityDump.Enabled)\n\t\t{\n\t\t\tOptimumRunParityDump();";
         string normalized = frame.Replace("\r\n", "\n");
-        Assert.Equal(2, Count(normalized, "OptimumRunParityDump();"));
-        Assert.Equal(2, Count(platform, "OptimumRunParityDump();"));
+        // Phase 1A step 4: one frame body for both backends, bracketed by the platform.
+        Assert.Equal(1, Count(normalized, "OptimumRunParityDump();"));
+        Assert.Equal(1, Count(platform, "OptimumRunParityDump();"));
 
-        // Device path: after the frame (post chain and final blit), before Present.
-        int deviceFrame = normalized.IndexOf("frameHandler.OnNewFrame(dt);", StringComparison.Ordinal);
-        int deviceGuard = normalized.IndexOf(guard, StringComparison.Ordinal);
-        int present = normalized.IndexOf("optimumDevice.Present();", StringComparison.Ordinal);
-        Assert.True(deviceFrame >= 0 && deviceGuard > deviceFrame && present > deviceGuard);
+        // After the frame (post chain and final blit), before the platform ends it.
+        int begin = normalized.IndexOf("BeginFrame();", StringComparison.Ordinal);
+        int frameCall = normalized.IndexOf("frameHandler.OnNewFrame(dt);", StringComparison.Ordinal);
+        int guardIndex = normalized.IndexOf(guard, StringComparison.Ordinal);
+        int end = normalized.IndexOf("EndFrame();", StringComparison.Ordinal);
+        Assert.True(begin >= 0 && frameCall > begin && guardIndex > frameCall && end > guardIndex);
 
-        // GL path: after the frame, before SwapBuffers.
-        int glFrame = normalized.IndexOf("frameHandler.OnNewFrame(dt);", present, StringComparison.Ordinal);
-        int glGuardIndex = normalized.IndexOf(glGuard, present, StringComparison.Ordinal);
-        int swap = normalized.IndexOf("((GameWindow)window).SwapBuffers();", present, StringComparison.Ordinal);
-        Assert.True(glFrame > present && glGuardIndex > glFrame && swap > glGuardIndex);
+        // EndFrame is SwapBuffers on OpenGL and Present on Vulkan.
+        Assert.Contains("((GameWindow)window).SwapBuffers();", MethodBody(platform, "public override void EndFrame()"));
+        Assert.Contains("device.Present();", MethodBody(VulkanPlatformSource.Read(), "public override void EndFrame()"));
 
         // The final blit happens inside OnNewFrame, so the dump sees the finished frame.
         string screenManager = ReadSourceOrPatched(

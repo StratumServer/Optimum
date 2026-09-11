@@ -360,7 +360,7 @@ public class PacingStatsTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 4;
             int texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
                 EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -422,7 +422,7 @@ public class PacingStatsTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 4;
             int texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
                 EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);

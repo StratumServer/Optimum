@@ -1,38 +1,18 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-index 0a45eb1..1315a97 100644
+index 0a45eb1..7f968bd 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-@@ -189,11 +189,34 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -189,11 +189,14 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  		if (clearPixels == null || clearPixels.Length < size * size)
  		{
  			clearPixels = new int[size * size];
  		}
  		game.guiShaderProg.SepiaLevel = task.SepiaLevel;
 -		GL.TexSubImage2D<int>((TextureTarget)3553, 0, (int)num, (int)num2, size, size, (PixelFormat)32993, (PixelType)5121, clearPixels);
-+		// Blanks this item's slot in the atlas before drawing into it. The GL
-+		// form writes to whatever CreateFrameBuffer left bound; the device takes
-+		// the atlas texture by id, which TexPos already carries. The pixels are
-+		// all zero, so channel order does not matter.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			System.Runtime.InteropServices.GCHandle optimumPin =
-+				System.Runtime.InteropServices.GCHandle.Alloc(clearPixels,
-+					System.Runtime.InteropServices.GCHandleType.Pinned);
-+			try
-+			{
-+				optimumDevice.UploadTexture2D(task.TexPos.atlasTextureId, 0, (int)num, (int)num2,
-+					size, size, EnumTexturePixelFormat.Rgba, optimumPin.AddrOfPinnedObject());
-+			}
-+			finally
-+			{
-+				optimumPin.Free();
-+			}
-+		}
-+		else
-+		{
-+			GL.TexSubImage2D<int>((TextureTarget)3553, 0, (int)num, (int)num2, size, size, (PixelFormat)32993, (PixelType)5121, clearPixels);
-+		}
++		// Blanks this item's slot in the atlas before drawing into it. The GL form
++		// writes to whatever CreateFrameBuffer left bound; the atlas texture id,
++		// which TexPos carries, is for platforms that address textures directly.
++		game.Platform.ClearTextureRegion(task.TexPos.atlasTextureId, (int)num, (int)num2, size, size, clearPixels);
  		game.api.renderapi.inventoryItemRenderer.RenderItemstackToGui(dummySlot, num + (float)size / 2f, num2 + (float)size / 2f, 500.0, (float)(size / 2) * task.Scale, task.Color, shading: true, origRotate: false, showStackSize: false);
  	}
  

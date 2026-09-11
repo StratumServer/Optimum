@@ -30,6 +30,7 @@ public class PlatformClientProgramCoverageTests
         string region = StartRegion();
 
         Assert.Contains("private void ConfigureClientPlatform(ClientPlatformWindows clientPlatformWindows)", region);
+        Assert.Contains("private void WireClientPlatform(ClientPlatformWindows clientPlatformWindows)", region);
         Assert.Contains("private void OptimumStartSinglePlayerServer(StartServerArgs serverargs)", region);
         Assert.DoesNotContain("delegate", region);
         foreach (string line in region.Split('\n'))
@@ -85,11 +86,108 @@ public class PlatformClientProgramCoverageTests
     {
         string region = StartRegion();
 
-        int finallyBlock = region.IndexOf("finally", StringComparison.Ordinal);
-        int shutdown = region.IndexOf("clientPlatformWindows.ShutdownGraphics();", StringComparison.Ordinal);
-        int dispose = region.IndexOf("((NativeWindow)gameWindowNative).Dispose();", StringComparison.Ordinal);
+        int run = region.IndexOf("((GameWindow)gameWindowNative).Run();", StringComparison.Ordinal);
+        Assert.True(run >= 0);
+        int finallyBlock = region.IndexOf("finally", run, StringComparison.Ordinal);
+        int shutdown = region.IndexOf("clientPlatformWindows.ShutdownGraphics();", run, StringComparison.Ordinal);
+        int dispose = region.IndexOf("((NativeWindow)gameWindowNative).Dispose();", run, StringComparison.Ordinal);
 
-        Assert.True(finallyBlock >= 0 && shutdown > finallyBlock && dispose > shutdown);
+        Assert.True(finallyBlock > run && shutdown > finallyBlock && dispose > shutdown);
+    }
+
+    /// <summary>
+    /// Step-1 review finding: a throw after InitializeGraphics succeeded but before the Run
+    /// block (window setup, screenManager.Start, the platform's Start) skipped the Run
+    /// finally, so the device stayed alive and the Vulkan crash marker survived a clean
+    /// failure. Everything between the bring-up and Run now sits in a try whose catch shuts
+    /// graphics down and rethrows.
+    /// </summary>
+    [Fact]
+    public void AThrowBetweenGraphicsBringUpAndRunStillShutsGraphicsDown()
+    {
+        string region = StartRegion();
+
+        int initialize = region.IndexOf("clientPlatformWindows.InitializeGraphics(", StringComparison.Ordinal);
+        int run = region.IndexOf("((GameWindow)gameWindowNative).Run();", StringComparison.Ordinal);
+        Assert.True(initialize >= 0 && run > initialize);
+        string between = region.Substring(initialize, run - initialize);
+
+        var guard = Regex.Match(between, @"try\s*\{\s*if \(\(int\)val == 0 && !RuntimeEnv\.IsWaylandSession\)");
+        Assert.True(guard.Success, "the window setup after the bring-up is not inside a try");
+        var handler = Regex.Match(between, @"catch \(Exception\)\s*\{\s*clientPlatformWindows\.ShutdownGraphics\(\);\s*throw;\s*\}");
+        Assert.True(handler.Success, "no catch shuts graphics down and rethrows before Run");
+
+        int screenStart = between.IndexOf("screenManager.Start(args, rawArgs);", StringComparison.Ordinal);
+        int platformStart = between.IndexOf("clientPlatformWindows.Start();", StringComparison.Ordinal);
+        int audio = between.IndexOf("clientPlatformWindows.StartAudio();", StringComparison.Ordinal);
+        Assert.True(audio > guard.Index && screenStart > audio && platformStart > screenStart
+            && handler.Index > platformStart, "screenManager.Start and the platform Start are guarded");
+    }
+
+    /// <summary>
+    /// Step-1 review finding: the wiring vanilla does after LogAndTestHardwareInfosStage1,
+    /// the install and message-box checks and the signal handlers had moved before all of
+    /// them on every path. Only the renderer probe and the platform construction may move
+    /// earlier; the rest keeps vanilla's order (<c>_ref/.../ClientProgram.cs</c>).
+    /// </summary>
+    [Fact]
+    public void StartKeepsVanillasOrderAroundThePlatformWiring()
+    {
+        string region = StartRegion();
+
+        string[] anchors =
+        {
+            "OptimumRenderBootstrap.ShouldTryVulkan(",
+            "clientPlatformWindows = new ClientPlatformWindows(logger);",
+            "ConfigureClientPlatform(clientPlatformWindows);",
+            "clientPlatformWindows.LogAndTestHardwareInfosStage1();",
+            "screenManager = new ScreenManager(clientPlatformWindows);",
+            "if (!Directory.Exists(GamePaths.AssetsPath))",
+            "if (!CleanInstallCheck.IsCleanInstall())",
+            "Signals[1] = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnExit);",
+            "WireClientPlatform(clientPlatformWindows);",
+            "WindowState val = ",
+            "AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);",
+        };
+        int previous = -1;
+        foreach (string anchor in anchors)
+        {
+            int at = region.IndexOf(anchor, previous + 1, StringComparison.Ordinal);
+            Assert.True(at > previous, "out of vanilla order or missing: " + anchor);
+            previous = at;
+        }
+
+        string configure = MethodBody(region, "private void ConfigureClientPlatform(ClientPlatformWindows clientPlatformWindows)");
+        Assert.Contains("clientPlatformWindows.ShaderUniforms.SepiaLevel = ClientSettings.SepiaLevel;", configure);
+        Assert.Contains("CrashReporter.SetLogger((Logger)clientPlatformWindows.Logger);", configure);
+        Assert.DoesNotContain("SetServerExitInterface", configure);
+        Assert.DoesNotContain("platform = clientPlatformWindows;", configure);
+
+        string wire = MethodBody(region, "private void WireClientPlatform(ClientPlatformWindows clientPlatformWindows)");
+        int exit = wire.IndexOf("clientPlatformWindows.SetServerExitInterface(clientPlatformWindows.ServerExitState);", StringComparison.Ordinal);
+        int reporter = wire.IndexOf("clientPlatformWindows.crashreporter = crashreporter;", StringComparison.Ordinal);
+        int assign = wire.IndexOf("platform = clientPlatformWindows;", StringComparison.Ordinal);
+        int server = wire.IndexOf("clientPlatformWindows.OnStartSinglePlayerServer = OptimumStartSinglePlayerServer;", StringComparison.Ordinal);
+        Assert.True(exit >= 0 && reporter > exit && assign > reporter && server > assign);
+
+        // The OpenGL fallback applies both halves to the platform it builds.
+        int reason = region.IndexOf("\"[Optimum] Vulkan unavailable, reopening for OpenGL: \" + optimumInstallReason", StringComparison.Ordinal);
+        int fallbackConfigure = region.IndexOf("ConfigureClientPlatform(clientPlatformWindows);", reason, StringComparison.Ordinal);
+        int fallbackWire = region.IndexOf("WireClientPlatform(clientPlatformWindows);", reason, StringComparison.Ordinal);
+        int fallbackAssign = region.IndexOf("ScreenManager.Platform = clientPlatformWindows;", reason, StringComparison.Ordinal);
+        Assert.True(reason >= 0 && fallbackConfigure > reason && fallbackWire > fallbackConfigure && fallbackAssign > fallbackWire);
+
+        // Where the vanilla reference is available, its two wiring blocks sit on the
+        // same sides of the same anchors.
+        string? vanilla = TryRead("_ref/VintagestoryLib/Vintagestory.Client/ClientProgram.cs");
+        if (vanilla != null)
+        {
+            int stage1 = vanilla.IndexOf("clientPlatformWindows.LogAndTestHardwareInfosStage1();", StringComparison.Ordinal);
+            int logger = vanilla.IndexOf("CrashReporter.SetLogger((Logger)clientPlatformWindows.Logger);", StringComparison.Ordinal);
+            int signals = vanilla.IndexOf("Signals[1] = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnExit);", StringComparison.Ordinal);
+            int vanillaExit = vanilla.IndexOf("clientPlatformWindows.SetServerExitInterface(clientPlatformWindows.ServerExitState);", StringComparison.Ordinal);
+            Assert.True(logger >= 0 && stage1 > logger && signals > stage1 && vanillaExit > signals);
+        }
     }
 
     [Fact]
@@ -133,6 +231,7 @@ public class PlatformClientProgramCoverageTests
 
         string programMembers = Block(patcher, "[\"Vintagestory.Client.ClientProgram\"] = new()");
         Assert.Contains("\"ConfigureClientPlatform\",", programMembers);
+        Assert.Contains("\"WireClientPlatform\",", programMembers);
         Assert.Contains("\"OptimumStartSinglePlayerServer\",", programMembers);
 
         Assert.Contains("new(\"Vintagestory.Client.ClientProgram\", \"Start\", 2)", patcher);
@@ -144,12 +243,13 @@ public class PlatformClientProgramCoverageTests
         string platform = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
 
         Assert.Contains("namespace Optimum.Render.Vulkan.Platform;", platform);
-        Assert.Contains("public class VulkanClientPlatform : ClientPlatformWindows", platform);
+        Assert.Contains("public partial class VulkanClientPlatform : ClientPlatformWindows", platform);
         Assert.Contains("public VulkanClientPlatform(Logger logger) : base(logger)", platform);
         Assert.Contains("public override bool InitializeGraphics(IntPtr windowHandle, int width, int height, out string reason)", platform);
         Assert.Contains("public override void ShutdownGraphics()", platform);
         Assert.Contains("\"OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE\"", platform);
-        // Step 1 overrides nothing else: the base's device branches keep rendering.
+        // The main file holds bring-up and teardown only; the graphics overrides (Phase 1A
+        // step 4) live in the VulkanClientPlatform.*.cs partial files.
         Assert.Equal(2, Regex.Matches(platform, @"^\s*(public|protected|internal)\s+override\s", RegexOptions.Multiline).Count);
     }
 
@@ -166,6 +266,32 @@ public class PlatformClientProgramCoverageTests
         Assert.DoesNotContain("$(MOD_OUT)/VintagestoryLib", makefile);
         foreach (string script in new[] { "scripts/package-linux.sh", "scripts/package-macos.sh" })
             Assert.DoesNotContain("$MOD_OUT/VintagestoryLib", Read(script));
+    }
+
+    private static string MethodBody(string source, string signature)
+    {
+        int start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, "missing: " + signature);
+        int open = source.IndexOf('{', start);
+        int depth = 0;
+        for (int i = open; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}' && --depth == 0) return source.Substring(open, i - open + 1);
+        }
+        throw new InvalidOperationException("unbalanced body: " + signature);
+    }
+
+    private static string? TryRead(string relativePath)
+    {
+        try
+        {
+            return File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static string Block(string source, string header)

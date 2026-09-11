@@ -15,7 +15,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// The Vulkan half of the per-attachment parity dump (OPTIMUM_PARITY_DUMP):
 /// known patterns rendered into the formats the framebuffer list actually uses -
 /// RGBA8, RGBA16F, R32F and depth - are read back through
-/// <see cref="IOptimumGraphicsDevice.ReadTextureForParity" />, written by the
+/// <see cref="VulkanDevice.ReadTextureForParity" />, written by the
 /// shared <see cref="OptimumParityDump" /> writer, and decoded from the files.
 ///
 /// Every value is checked against the fragment that produced it, in GL row
@@ -67,7 +67,7 @@ public class ParityDumpTests
             var files = new Dictionary<string, int>();
             using (device)
             {
-                IOptimumGraphicsDevice seam = device!;
+                VulkanDevice seam = device!;
                 int program = VulkanDeviceIntegrationTests.LinkProgram(seam, Vertex, Fragment, "parity-dump");
 
                 int rgba8 = seam.CreateTexture2D(Width, Height, EnumTextureInternalFormat.Rgba8,

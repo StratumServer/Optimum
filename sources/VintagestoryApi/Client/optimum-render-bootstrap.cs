@@ -9,8 +9,8 @@ namespace Vintagestory.API.Config;
 ///
 /// The backend lives in its own assembly and is loaded by name, so no vanilla
 /// assembly ever gains a reference to a renderer implementation - the client
-/// only ever sees <see cref="IOptimumGraphicsDevice" /> through
-/// <see cref="OptimumRender.Device" />, which is null on the OpenGL path.
+/// only ever sees the platform <see cref="CreatePlatform" /> returns, a subclass of
+/// its own ClientPlatformWindows that overrides the graphics virtuals.
 ///
 /// The order of operations is forced by the window. A window created with no
 /// graphics API cannot be handed back to OpenGL without being destroyed and

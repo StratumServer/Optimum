@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..39b7de3 100644
+index 431e51a..2e2e836 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -55,7 +55,7 @@ index 431e51a..39b7de3 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +137,74 @@ public class ChunkRenderer
+@@ -105,10 +137,57 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -96,41 +96,24 @@ index 431e51a..39b7de3 100644
 +	/// <summary>
 +	/// Optimum: applies a texture LOD bias to every block atlas.
 +	///
-+	/// The GL form binds each texture to unit 0 and sets the parameter on the
-+	/// binding; the device addresses the texture directly, so there is nothing to
-+	/// bind and nothing to restore afterwards.
++	/// The platform applies it (ClientPlatformWindows.SetTextureLodBias binds each
++	/// texture to unit 0 and sets the parameter on the binding).
 +	/// </summary>
 +	private void SetOptimumTextureLodBias(float bias)
 +	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
 +		// The chunkopaque/chunktopsoil sampler objects override the texture
 +		// parameter on the units they are bound to, so setting it here alone
 +		// would move the mip selection of every OTHER terrain pass and leave the
 +		// two that carry the bias in their name untouched until the next shader
 +		// reload. Both halves move together or neither does.
 +		ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);
-+		if (optimumDevice != null)
-+		{
-+			for (int k = 0; k < textureIds.Length; k++)
-+			{
-+				optimumDevice.SetTextureParameter(textureIds[k],
-+					Vintagestory.API.Config.OptimumGlConstants.TextureLodBias, bias);
-+			}
-+			return;
-+		}
-+		GL.ActiveTexture((TextureUnit)33984);
-+		for (int i = 0; i < textureIds.Length; i++)
-+		{
-+			GL.BindTexture((TextureTarget)3553, textureIds[i]);
-+			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);
-+		}
-+		GL.BindTexture((TextureTarget)3553, 0);
++		game.Platform.SetTextureLodBias(textureIds, bias);
  	}
  
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -142,10 +238,16 @@ public class ChunkRenderer
+@@ -142,10 +221,16 @@ public class ChunkRenderer
  		culler.CullInvisibleChunks();
  	}
  
@@ -147,7 +130,7 @@ index 431e51a..39b7de3 100644
  		subPixelPaddingX = game.BlockAtlasManager.SubPixelPaddingX;
  		subPixelPaddingY = game.BlockAtlasManager.SubPixelPaddingY;
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
-@@ -170,10 +272,11 @@ public class ChunkRenderer
+@@ -170,10 +255,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -159,7 +142,7 @@ index 431e51a..39b7de3 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,23 +311,59 @@ public class ChunkRenderer
+@@ -208,23 +294,59 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -222,7 +205,7 @@ index 431e51a..39b7de3 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
  		platform.GlDepthMask(flag: true);
-@@ -232,105 +371,145 @@ public class ChunkRenderer
+@@ -232,105 +354,132 @@ public class ChunkRenderer
  		platform.GlToggleBlend(on: true);
  		platform.GlEnableCullFace();
  		game.GlMatrixModeModelView();
@@ -284,13 +267,7 @@ index 431e51a..39b7de3 100644
 -		chunkopaque.HaxyFade = 0;
 -		platform.GlToggleBlend(on: true);
 -		for (int k = 0; k < textureIds.Length; k++)
-+		// Optimum TAA (P3): every chunk draw in this method writes motion
-+		// vectors, so the motion attachment joins Primary's draw-buffer mask for
-+		// the whole pass and leaves it again below. A no-op when TAA is off.
-+		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
-+		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
-+		try
- 		{
+-		{
 -			chunkopaque.TerrainTex2D = textureIds[k];
 -			chunkopaque.TerrainTexLinear2D = textureIds[k];
 -			poolsByRenderPass[2][k].Render(cameraPos, "origin");
@@ -299,7 +276,13 @@ index 431e51a..39b7de3 100644
 -		chunkopaque.AlphaTest = 0.42f;
 -		chunkopaque.HaxyFade = 1;
 -		for (int l = 0; l < textureIds.Length; l++)
--		{
++		// Optimum TAA (P3): every chunk draw in this method writes motion
++		// vectors, so the motion attachment joins Primary's draw-buffer mask for
++		// the whole pass and leaves it again below. A no-op when TAA is off.
++		ClientPlatformAbstract optimumPlatform = platform;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
++		try
+ 		{
 -			chunkopaque.TerrainTex2D = textureIds[l];
 -			chunkopaque.TerrainTexLinear2D = textureIds[l];
 -			poolsByRenderPass[1][l].Render(cameraPos, "origin");
@@ -428,34 +411,21 @@ index 431e51a..39b7de3 100644
 -			GL.BindSampler(6, 0);
 -			GL.BindSampler(7, 0);
 -			GL.BindSampler(8, 0);
-+			// Optimum: clears any sampler override on the nine units the chunk
-+			// passes use, so the next pass gets each texture's own filtering.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				for (int k = 0; k < 9; k++)
-+				{
-+					optimumDevice.BindSampler(k, 0);
-+				}
-+			}
-+			else
-+			{
-+				GL.BindSampler(0, 0);
-+				GL.BindSampler(1, 0);
-+				GL.BindSampler(2, 0);
-+				GL.BindSampler(3, 0);
-+				GL.BindSampler(4, 0);
-+				GL.BindSampler(5, 0);
-+				GL.BindSampler(6, 0);
-+				GL.BindSampler(7, 0);
-+				GL.BindSampler(8, 0);
-+			}
++			game.Platform.BindSampler(0, 0);
++			game.Platform.BindSampler(1, 0);
++			game.Platform.BindSampler(2, 0);
++			game.Platform.BindSampler(3, 0);
++			game.Platform.BindSampler(4, 0);
++			game.Platform.BindSampler(5, 0);
++			game.Platform.BindSampler(6, 0);
++			game.Platform.BindSampler(7, 0);
++			game.Platform.BindSampler(8, 0);
  		}
  	}
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,51 +581,187 @@ public class ChunkRenderer
+@@ -402,51 +551,187 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -508,7 +478,7 @@ index 431e51a..39b7de3 100644
 +		{
 +			return;
 +		}
-+		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		ClientPlatformAbstract optimumPlatform = platform;
 +		if (optimumPlatform == null)
 +		{
 +			return;
@@ -602,13 +572,10 @@ index 431e51a..39b7de3 100644
 +		// temporal window and draws the same chunk geometry, so it writes motion
 +		// vectors too - otherwise every decal-covered surface would fall back to
 +		// the camera-only reprojection.
-+		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
++		ClientPlatformAbstract optimumPlatform = platform;
 +		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
 +		try
- 		{
--			chunkopaque.TerrainTex2D = textureIds[i];
--			chunkopaque.TerrainTexLinear2D = textureIds[i];
--			poolsByRenderPass[7][i].Render(cameraPos, "origin");
++		{
 +			ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
 +			platform.GlDisableCullFace();
 +			platform.GlToggleBlend(on: false);
@@ -640,7 +607,10 @@ index 431e51a..39b7de3 100644
 +			chunkopaque.Stop();
 +		}
 +		finally
-+		{
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[7][i].Render(cameraPos, "origin");
 +			// Same contract as RenderOpaque: the window closes even if a shader
 +			// setup or a pool draw throws, so a failed overlay pass cannot leave
 +			// the motion attachment in the draw-buffer mask.

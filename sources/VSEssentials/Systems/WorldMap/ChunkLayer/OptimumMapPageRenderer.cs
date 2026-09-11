@@ -89,7 +89,7 @@ public sealed class OptimumMapPageRenderer : IDisposable
     {
         if (_instanceCount == 0 || !Ready) return;
 
-        IOptimumGraphicsDevice optimumDevice = OptimumRender.Device;
+        OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
 
         // The map renders inside the GUI pass which uses the 'gui' engine shader.
         // Entity/player/waypoint layers call GetEngineShader(Gui) and set uniforms
@@ -100,7 +100,7 @@ public sealed class OptimumMapPageRenderer : IDisposable
 
         // The GUI pass runs with depth testing on; only GL can be asked, so the
         // device path restores that known state rather than querying it.
-        bool depthTestWasOn = optimumDevice != null || GL.IsEnabled(EnableCap.DepthTest);
+        bool depthTestWasOn = optimumGraphics != null || GL.IsEnabled(EnableCap.DepthTest);
 
         currentShader?.Stop();
 
@@ -124,9 +124,9 @@ public sealed class OptimumMapPageRenderer : IDisposable
 
         // Bind the texture array to unit 0. The engine's BindTexture2D helper
         // binds GL_TEXTURE_2D, so the array target needs its own bind here.
-        if (optimumDevice != null)
+        if (optimumGraphics != null)
         {
-            optimumDevice.BindTexture(0, _texArray.TextureId);
+            optimumGraphics.BindTexture(0, _texArray.TextureId);
         }
         else
         {
@@ -164,9 +164,9 @@ public sealed class OptimumMapPageRenderer : IDisposable
 
         // Unbind the texture array from unit 0 so the GUI shader finds its
         // expected 2D texture on that unit.
-        if (optimumDevice != null)
+        if (optimumGraphics != null)
         {
-            optimumDevice.BindTexture(0, 0);
+            optimumGraphics.BindTexture(0, 0);
         }
         else
         {

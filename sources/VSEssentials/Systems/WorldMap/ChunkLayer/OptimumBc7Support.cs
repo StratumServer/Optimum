@@ -30,7 +30,7 @@ public static class OptimumBc7Support
     {
         // The Vulkan backend uploads pages as RGBA8 through the device and has
         // no compressed upload route, so BC7 stays off there.
-        if (OptimumRender.Device != null)
+        if (OptimumRender.IsVulkan)
         {
             OptimumConfig.MapPageCacheBc7Supported = false;
             return;
@@ -119,7 +119,7 @@ public static class OptimumBc7Support
     /// </summary>
     public static void UploadCompressedLayer(int textureId, int layer, byte[] compressedData, int width, int height)
     {
-        if (OptimumRender.Device != null)
+        if (OptimumRender.IsVulkan)
         {
             throw new InvalidOperationException("BC7 map page upload is not available on the Vulkan backend");
         }

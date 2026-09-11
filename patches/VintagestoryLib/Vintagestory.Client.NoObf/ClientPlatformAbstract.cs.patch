@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..3348258 100644
+index d6eb844..8337688 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,39 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,405 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -22,22 +22,388 @@ index d6eb844..3348258 100644
 +	{
 +	}
 +
++	// Optimum TAA/FSR (Vulkan-native plan, Phase 1A step 2): the temporal members the
++	// renderers call, declared here so callers need no cast to a concrete platform. The
++	// bodies are neutral (TAA off, no motion window, nothing resolved); the OpenGL bodies
++	// live in ClientPlatformWindows as overrides. Semantics: docs/temporal-frame-contract.md v1.
++	public virtual int MotionAttachmentIndex
++	{
++		get
++		{
++			return -1;
++		}
++	}
++
++	public virtual bool OptimumMotionWriteActive
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	public virtual bool TaaTargetsReady
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	public virtual bool TaaResolvedThisFrame
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	public virtual FrameBufferRef TaaHistory(int parity)
++	{
++		return null;
++	}
++
++	public virtual bool BeginMotionWrite()
++	{
++		return false;
++	}
++
++	public virtual void EndMotionWrite()
++	{
++	}
++
++	public virtual bool BeginMotionOnlyWrite()
++	{
++		return false;
++	}
++
++	public virtual void EndMotionOnlyWrite()
++	{
++	}
++
++	public virtual bool RenderOptimumSkyMotion()
++	{
++		return false;
++	}
++
++	public virtual bool RenderOptimumTaaResolve()
++	{
++		return false;
++	}
++
++	public virtual int RenderOptimumTaaSharpen(int resolvedScene)
++	{
++		return resolvedScene;
++	}
++
++	public virtual bool OptimumFsrBlitActive()
++	{
++		return false;
++	}
++
++	public virtual void DisableOptimumTaa(string reason)
++	{
++	}
++
++	// Optimum (Vulkan-native plan, Phase 1A step 3): the shader program, uniform and
++	// uniform-buffer operations ShaderProgramBase and UBO issue. A location is whatever
++	// GetUniformLocation handed out. Neutral bodies; ClientPlatformWindows overrides
++	// them with the OpenGL lines those two classes used to call directly.
++	public virtual void UseShaderProgram(int programId)
++	{
++	}
++
++	public virtual void DisposeShaderProgram(ShaderProgramBase program)
++	{
++	}
++
++	public virtual void BindSampler(int unit, int samplerId)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float value)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, int value)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float x, float y)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float x, float y, float z)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, float x, float y, float z, float w)
++	{
++	}
++
++	public virtual void SetUniform(int programId, int location, int x, int y, int z)
++	{
++	}
++
++	public virtual void SetUniformArray1(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformArray2(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformArray3(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformArray4(int programId, int location, int count, float[] values)
++	{
++	}
++
++	public virtual void SetUniformMatrix(int programId, int location, float[] matrix)
++	{
++	}
++
++	public virtual void SetUniformMatrix(int programId, int location, ref OpenTK.Mathematics.Matrix4 matrix)
++	{
++	}
++
++	public virtual void SetUniformMatrices(int programId, int location, int count, float[] matrices)
++	{
++	}
++
++	public virtual void SetUniformMatrices4x3(int programId, int location, int count, float[] matrices)
++	{
++	}
++
++	public virtual void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
++	{
++	}
++
++	public virtual void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
++	{
++	}
++
++	public virtual void BindUBO(UBO ubo)
++	{
++	}
++
++	public virtual void UnbindUBO(UBO ubo)
++	{
++	}
++
++	public virtual void UpdateUBO(UBO ubo, IntPtr data, int offset, int size, bool reallocate)
++	{
++	}
++
++	public virtual void DeleteUBO(UBO ubo)
++	{
++	}
++
++	// Optimum (Vulkan-native plan, Phase 1A step 4): the frame bracket, the window-size
++	// notification, the thick-line probe, and the graphics-API fragments of the
++	// framebuffer, post-chain and TAA methods whose surrounding logic reads platform state.
++	// Neutral bodies here; ClientPlatformWindows overrides each with the GL lines and
++	// VulkanClientPlatform with the device calls.
++	public virtual void BeginFrame()
++	{
++	}
++
++	public virtual void EndFrame()
++	{
++	}
++
++	public virtual bool ProbeThickLineSupport()
++	{
++		return false;
++	}
++
++	public virtual void OnWindowSizeChanged(int width, int height)
++	{
++	}
++
++	public virtual void BindCurrentFrameBuffer(FrameBufferRef frameBuffer)
++	{
++	}
++
++	public virtual void BindCurrentFrameBufferKeepViewport(FrameBufferRef frameBuffer)
++	{
++	}
++
++	public virtual void ClearBoundFrameBuffer(FrameBufferRef framebuffer, float[] clearColor, bool clearDepthBuffer, bool clearColorBuffers)
++	{
++	}
++
++	public virtual void ClearFrameBufferPass(EnumFrameBuffer framebuffer)
++	{
++	}
++
++	public virtual void ApplyTransparentPassBlendState()
++	{
++	}
++
++	public virtual void SelectBackDrawBuffer()
++	{
++	}
++
++	public virtual void SetBlendEnabled(bool enabled)
++	{
++	}
++
++	public virtual void ApplyTransparentMergeBlendState()
++	{
++	}
++
++	public virtual void ClearSsaoTarget()
++	{
++	}
++
++	public virtual void BeginFinalCompositionDrawBuffers()
++	{
++	}
++
++	public virtual void RestoreWorldDrawBuffers(bool ssaoAttachments)
++	{
++	}
++
++	public virtual void EnableMotionDrawBuffers()
++	{
++	}
++
++	public virtual void RestorePrimaryDrawBuffers()
++	{
++	}
++
++	public virtual void EnableMotionOnlyDrawBuffers()
++	{
++	}
++
++	public virtual void ApplyOptimumMotionBlendState()
++	{
++	}
++
++	public virtual void ApplyOptimumMotionAccumulateBlendState()
++	{
++	}
++
++	public virtual void SelectFsrDrawBuffer(FrameBufferRef target)
++	{
++	}
++
++	public virtual Vintagestory.API.Config.OptimumTextureReadback ReadTextureForParity(int textureId)
++	{
++		return null;
++	}
++
++	// Optimum (Vulkan-native plan, Phase 1A step 5): the graphics-API leaf operations the
++	// render systems outside the platform used to issue directly - the depth range and the
++	// GUI depth clear, mesh handle deletion, texture and sampler parameters, a texture
++	// upload and a region clear, the OIT targets and their pass state, occlusion queries,
++	// the default framebuffer readback and the backend name. Neutral bodies here;
++	// ClientPlatformWindows overrides each with the GL lines the call site issued and
++	// VulkanClientPlatform with the device calls.
++	public virtual void SetDepthRange(float near, float far)
++	{
++	}
++
++	public virtual void ClearDefaultDepth(float depth)
++	{
++	}
++
++	public virtual void DeleteMeshHandle(int bufferId)
++	{
++	}
++
++	public virtual void DeleteVertexArrayHandles(VAO vao)
++	{
++	}
++
++	public virtual void SetTextureLodBias(int[] textureIds, float bias)
++	{
++	}
++
++	public virtual void SetSamplerLodBias(int samplerId, float bias)
++	{
++	}
++
++	public virtual void SetTextureDepthCompare(int textureId, int mode)
++	{
++	}
++
++	public virtual void ClearTextureRegion(int textureId, int x, int y, int width, int height, int[] pixels)
++	{
++	}
++
++	public virtual int LoadTextureFromRgbaPointer(int width, int height, IntPtr pixels)
++	{
++		return 0;
++	}
++
++	public virtual void SetProgramSamplerUnit(int programId, string samplerName, int unit)
++	{
++	}
++
++	public virtual void CreateOitTargets(FrameBufferRef transparent, int layers, out int revealTexture, out int accumTexture)
++	{
++		revealTexture = 0;
++		accumTexture = 0;
++	}
++
++	public virtual void BeginOitAccumulation(FrameBufferRef transparent)
++	{
++	}
++
++	public virtual void BindOitTextures(int revealTexture, int accumTexture)
++	{
++	}
++
++	public virtual int GenOcclusionQuery()
++	{
++		return 0;
++	}
++
++	public virtual void BeginOcclusionQuery(int queryId)
++	{
++	}
++
++	public virtual void EndOcclusionQuery(int queryId)
++	{
++	}
++
++	public virtual bool TryGetOcclusionQueryResult(int queryId, out int samples)
++	{
++		samples = 0;
++		return false;
++	}
++
++	public virtual void DeleteOcclusionQuery(int queryId)
++	{
++	}
++
++	public virtual void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
++	{
++	}
++
++	public virtual string GraphicsBackendName
++	{
++		get
++		{
++			return null;
++		}
++	}
++
  	public static void DisposeIndexBuffer()
  	{
  		if (singleIndexBufferId != 0)
  		{
 -			GL.DeleteBuffer(singleIndexBufferId);
-+			// Mono.Cecil transplant.
-+			// Shutdown runs this after the GL binding is gone on the device path,
-+			// where the raw call throws rather than freeing anything.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
++			// Mono.Cecil transplant: the buffer is the handle of the platform that
++			// allocated it, which deletes it.
++			ClientPlatformAbstract platform = ScreenManager.Platform;
++			if (platform != null)
 +			{
-+				optimumDevice.DeleteMesh(singleIndexBufferId);
-+			}
-+			else
-+			{
-+				GL.DeleteBuffer(singleIndexBufferId);
++				platform.DeleteMeshHandle(singleIndexBufferId);
 +			}
  			singleIndexBufferId = 0;
  		}

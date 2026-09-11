@@ -70,10 +70,98 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "InitializeGraphics",
         "ShutdownGraphics",
+        // Phase 1A step 2: the TAA/FSR members the renderers call without a cast to
+        // ClientPlatformWindows. Neutral bodies; ClientPlatformWindows overrides them.
+        "MotionAttachmentIndex",
+        "OptimumMotionWriteActive",
+        "TaaTargetsReady",
+        "TaaResolvedThisFrame",
+        "TaaHistory",
+        "BeginMotionWrite",
+        "EndMotionWrite",
+        "BeginMotionOnlyWrite",
+        "EndMotionOnlyWrite",
+        "RenderOptimumSkyMotion",
+        "RenderOptimumTaaResolve",
+        "RenderOptimumTaaSharpen",
+        "OptimumFsrBlitActive",
+        "DisableOptimumTaa",
+        // Phase 1A step 3: the program, uniform and UBO operations ShaderProgramBase and
+        // UBO call. Neutral bodies; ClientPlatformWindows overrides them. SetUniform and
+        // SetUniformMatrix inject every overload the donor declares.
+        "UseShaderProgram",
+        "DisposeShaderProgram",
+        "BindSampler",
+        "SetUniform",
+        "SetUniformArray1",
+        "SetUniformArray2",
+        "SetUniformArray3",
+        "SetUniformArray4",
+        "SetUniformMatrix",
+        "SetUniformMatrices",
+        "SetUniformMatrices4x3",
+        "BindProgramTexture2D",
+        "BindProgramTextureCube",
+        "BindUBO",
+        "UnbindUBO",
+        "UpdateUBO",
+        "DeleteUBO",
+        // Phase 1A step 4: the frame bracket, window-size notification, thick-line probe
+        // and the graphics-API fragments of the framebuffer, post-chain and TAA methods.
+        // Neutral bodies; ClientPlatformWindows overrides them with the GL lines and
+        // VulkanClientPlatform with the device calls.
+        "BeginFrame",
+        "EndFrame",
+        "ProbeThickLineSupport",
+        "OnWindowSizeChanged",
+        "BindCurrentFrameBuffer",
+        "BindCurrentFrameBufferKeepViewport",
+        "ClearBoundFrameBuffer",
+        "ClearFrameBufferPass",
+        "ApplyTransparentPassBlendState",
+        "SelectBackDrawBuffer",
+        "SetBlendEnabled",
+        "ApplyTransparentMergeBlendState",
+        "ClearSsaoTarget",
+        "BeginFinalCompositionDrawBuffers",
+        "RestoreWorldDrawBuffers",
+        "EnableMotionDrawBuffers",
+        "RestorePrimaryDrawBuffers",
+        "EnableMotionOnlyDrawBuffers",
+        "ApplyOptimumMotionBlendState",
+        "ApplyOptimumMotionAccumulateBlendState",
+        "SelectFsrDrawBuffer",
+        "ReadTextureForParity",
+        // Phase 1A step 5: the leaf operations the render systems outside the platform
+        // issued (ScreenManager, ClientMain, VAO, ChunkRenderer, ShaderRegistry, the debug
+        // overlay, SvgLoader, InventoryItemRenderer, the OIT layers, the sun occlusion
+        // probe, Screenshot, ClientSystemStartup). Neutral bodies; ClientPlatformWindows
+        // overrides them with the GL lines and VulkanClientPlatform with device calls.
+        "SetDepthRange",
+        "ClearDefaultDepth",
+        "DeleteMeshHandle",
+        "DeleteVertexArrayHandles",
+        "SetTextureLodBias",
+        "SetSamplerLodBias",
+        "SetTextureDepthCompare",
+        "ClearTextureRegion",
+        "LoadTextureFromRgbaPointer",
+        "SetProgramSamplerUnit",
+        "CreateOitTargets",
+        "BeginOitAccumulation",
+        "BindOitTextures",
+        "GenOcclusionQuery",
+        "BeginOcclusionQuery",
+        "EndOcclusionQuery",
+        "TryGetOcclusionQueryResult",
+        "DeleteOcclusionQuery",
+        "ReadDefaultFramebuffer",
+        "GraphicsBackendName",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
         "ConfigureClientPlatform",
+        "WireClientPlatform",
         "OptimumStartSinglePlayerServer",
     },
     ["Vintagestory.Client.NoObf.ClientSettings"] = new()
@@ -143,31 +231,66 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumFocusLostStopwatch",
         "optimumFsrDisabled",
         "DisableOptimumFsr",
-        // Vulkan backend: the device-path framebuffer setup and its helpers.
-        "SetupOptimumFrameBuffers",
-        "CreateOptimumColorTarget",
-        "SetupOptimumTextureSampler",
-        "CreateOptimumDepthTarget",
-        "CreateOptimumPlaceholderTarget",
-        "CreateOptimumFramebuffer",
-        // Vulkan backend: GL state the device takes as call arguments instead,
-        // so the routed bodies need somewhere to remember it.
-        "optimumClearR",
-        "optimumClearG",
-        "optimumClearB",
-        "optimumClearA",
-        "optimumBoundTexture2d",
-        "optimumScissorEnabled",
         // TAA: motion attachment, history/aux/prev-depth targets, and the
         // debug-view blit path (P1).
+        // Phase 1A step 4: read by VulkanClientPlatform (GlToggleBlend, the Primary clear).
+        "OptimumRenderSsao",
+        "OptimumAdoptFrameBufferSettings",
+        "OptimumTaaRequested",
+        "OptimumSsaoKernel",
+        "SetOptimumMotionAttachmentIndex",
+        "OptimumAdoptTaaTargets",
+        "OptimumFinishDeviceFrameBufferSetup",
+        // Phase 1A step 4: GL halves of the framebuffer binding, clears and post-chain pass state.
+        "BindCurrentFrameBuffer",
+        "BindCurrentFrameBufferKeepViewport",
+        "ClearBoundFrameBuffer",
+        "ClearFrameBufferPass",
+        "ApplyTransparentPassBlendState",
+        "SelectBackDrawBuffer",
+        "SetBlendEnabled",
+        "ApplyTransparentMergeBlendState",
+        "ClearSsaoTarget",
+        "BeginFinalCompositionDrawBuffers",
+        "RestoreWorldDrawBuffers",
+        // Phase 1A step 4: the GL frame end, thick-line probe and parity readback.
+        "EndFrame",
+        "ProbeThickLineSupport",
+        "ReadTextureForParity",
+        // Phase 1A step 5: the GL halves of the leaf operations.
+        "SetDepthRange",
+        "ClearDefaultDepth",
+        "DeleteMeshHandle",
+        "DeleteVertexArrayHandles",
+        "SetTextureLodBias",
+        "SetSamplerLodBias",
+        "SetTextureDepthCompare",
+        "ClearTextureRegion",
+        "LoadTextureFromRgbaPointer",
+        "SetProgramSamplerUnit",
+        "CreateOitTargets",
+        "BeginOitAccumulation",
+        "BindOitTextures",
+        "GenOcclusionQuery",
+        "BeginOcclusionQuery",
+        "EndOcclusionQuery",
+        "TryGetOcclusionQueryResult",
+        "DeleteOcclusionQuery",
+        "ReadDefaultFramebuffer",
+        "GraphicsBackendName",
         "OptimumTaaHistoryIndexA",
         "OptimumTaaHistoryIndexB",
         "OptimumGlR32f",
         "MotionAttachmentIndex",
         "TaaTargetsReady",
+        // Phase 1A step 2: the four state members above and below are overrides of
+        // ClientPlatformAbstract's virtuals now, reading these private fields.
+        "optimumMotionAttachmentIndex",
+        "optimumTaaTargetsReady",
+        "optimumTaaResolvedThisFrame",
+        "optimumMotionWriteActive",
         "optimumTaaDisabled",
         "TaaHistory",
-        "CreateOptimumHistoryTarget",
         "CreateOptimumHistoryTargetGl",
         "DisableOptimumTaa",
         "optimumTaaShaderReloadPending",
@@ -192,6 +315,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "BeginMotionOnlyWrite",
         "EndMotionOnlyWrite",
         "optimumMotionOnlyDrawBuffers",
+        // Phase 1A step 4: the GL halves of the motion windows and the FSR target
+        // selection, overrides of ClientPlatformAbstract's virtuals.
+        "EnableMotionDrawBuffers",
+        "RestorePrimaryDrawBuffers",
+        "EnableMotionOnlyDrawBuffers",
+        "SelectFsrDrawBuffer",
         // TAA P4: additive blending on the motion attachment for the OIT merge,
         // which contributes the transparent layer's coverage to the reactive
         // channel without touching the vector or the writer depth under it.
@@ -216,6 +345,26 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
+        // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
+        // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.
+        "UseShaderProgram",
+        "DisposeShaderProgram",
+        "BindSampler",
+        "SetUniform",
+        "SetUniformArray1",
+        "SetUniformArray2",
+        "SetUniformArray3",
+        "SetUniformArray4",
+        "SetUniformMatrix",
+        "SetUniformMatrices",
+        "SetUniformMatrices4x3",
+        "BindProgramTexture2D",
+        "BindProgramTextureCube",
+        "BindUBO",
+        "UnbindUBO",
+        "UpdateUBO",
+        "DeleteUBO",
     },
     // TAA P3: the uniform block a buffer feeds and the point it is bound to.
     // Vanilla had one block per program and Bind() hard-coded binding point 0;
@@ -260,17 +409,6 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumOitFailureLogged",
         "RestoreVanillaTransparentState",
         "DisableOptimumOit",
-    },
-    // Vulkan backend: the shared sampling setup for the two OIT targets.
-    ["Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT"] = new()
-    {
-        "SetOptimumOitSampling",
-    },
-    // Vulkan backend: shadow maps are sampled as plain depth by the debug
-    // overlay, which means toggling the compare mode off and back on.
-    ["Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug"] = new()
-    {
-        "SetOptimumDepthCompare",
     },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
@@ -650,43 +788,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
     // R4: pass the configured god-rays sample limit to the post-process shader.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderPostprocessingEffects", 1),
-    // Vulkan backend: fixed-function state routes to OptimumRender.Device when a
-    // device is installed, and runs the untouched vanilla GL body when it is not.
-    // See VULKAN-BACKEND-PLAN.md section 3.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLWireframes", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlViewport", 4),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlScissor", 4),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlScissorFlag", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlEnableDepthTest", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDisableDepthTest", 0),
+    // TAA P3: GlToggleBlend re-applies the motion attachment's replace blending. The other
+    // fixed-function bodies are vanilla again (Phase 1A step 4): VulkanClientPlatform
+    // overrides them, so they are no longer transplanted.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlToggleBlend", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDisableCullFace", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlEnableCullFace", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLLineWidth", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDepthMask", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDepthFunc", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlCullFaceBack", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlCullFaceFront", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlEnableStencilTest", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlDisableStencilTest", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlStencilMask", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlStencilFunc", 3),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlStencilOp", 3),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlColorMask", 4),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlClearStencil", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGLShaderVersionString", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GenSampler", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BindTexture2d", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BindTextureCubeMap", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLDeleteTexture", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGetMaxTextureSize", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGraphicsCardRenderer", 0),
-    // Vulkan backend: shader staging and linking. CompileShader only stages a
-    // stage on the device path, because GL resolves uniforms and varyings by name
-    // across the whole program and nothing is final until link time.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetUniformLocation", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CompileShader", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateShaderProgram", 1),
     // Vulkan backend: the mod-facing uniform and texture-binding surface. A
     // uniform location here is a byte offset into the generated block rather than
     // a GL location, which callers never see.
@@ -729,17 +834,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Use", 0),
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Stop", 0),
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Dispose", 0),
-    // Vulkan backend: mesh allocation, upload and draw. VAO.VaoId carries the
-    // device's mesh handle so MeshRef, which mods hold, stays unchanged.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFullscreenTriangle", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMeshInstanced", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UploadMesh", 1),
+    // Mesh update: the params-span-free CheckGlError format (Cecil constraint). The device
+    // halves of the mesh methods live in VulkanClientPlatform (Phase 1A step 4).
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UpdateMesh", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DeleteMesh", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptyMesh", 12),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptySSBOMesh", 12),
     new("Vintagestory.Client.NoObf.VAO", "Dispose", 0),
     // Vulkan backend: the window's own clear-and-swap has no GL binding to call
     // when the window was opened with no graphics API.
@@ -749,45 +846,16 @@ var targets = new List<MethodTarget>
     // are the seam for every render target the client selects.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBuffer", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_CurrentFrameBufferKeepVw", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_GlDebugMode", 1),
     // The scissor flag is read back by the runtime atlas upload; the device
     // keeps no queryable state, so the routed setter remembers it.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "get_GlScissorFlagEnabled", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateFramebuffer", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffer", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 4),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadFrameBuffer", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadFrameBuffer", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnloadFrameBuffer", 1,
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
     // Vulkan backend: startup capability reporting, which cannot ask GL.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LogAndTestHardwareInfosStage2", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGraphicCardInfos", 0),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
-    // Vulkan backend: error reporting comes from the validation layer.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CheckGlError", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CheckGlErrorAlways", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGetError", 0),
-    // Vulkan backend: texture creation, upload and mipmapping.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadCairoTexture", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateCairoTexture", 3),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GenTexture", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadIntoTexture", 5),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadTexture", 4,
-        new[] { "Vintagestory.API.Common.IBitmap", "System.Boolean", "System.Int32", "System.Boolean" }),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BuildMipMaps", 1),
-    // The texture atlas upload path. Private, so it only reaches the shipped
-    // assembly as an explicit target - its three public wrappers delegate here
-    // and carry no GL of their own, which is how it was missed: nothing on the
-    // menu reaches it, and TextureAtlas.Upload only runs once a world loads.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateTextureFromPixels", 6),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Load3DTextureCube", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlGenerateTex2DMipmaps", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UnBindTextureCubeMap", 0),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlClearColorRgbaf", 4),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SmoothLines", 1),
     // Vulkan backend: uniform buffers, whose handles UBO carries across.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
     new("Vintagestory.Client.NoObf.UBO", "Bind", 0),
@@ -1007,6 +1075,8 @@ var methodsToVirtualize = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFullscreenTriangle", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGraphicsCardRenderer", 0),
+    // Phase 1A step 4: VulkanClientPlatform logs the device facts instead.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LogAndTestHardwareInfosStage2", 0),
 };
 
 int total = ILPatcher.PatchWithInjection(

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..38aeda2 100644
+index 6edf0c9..75f35b5 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -115,7 +115,7 @@ index 6edf0c9..38aeda2 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -93,10 +182,102 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +182,115 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<string> drawCallStacks = new List<string>();
  
@@ -150,13 +150,29 @@ index 6edf0c9..38aeda2 100644
 +	/// to allocate. Never part of the default draw-buffer mask: only a writer
 +	/// that has been ported to emit it (P3+) enables it explicitly.
 +	/// </summary>
-+	public int MotionAttachmentIndex { get; private set; } = -1;
++	public override int MotionAttachmentIndex
++	{
++		get
++		{
++			return optimumMotionAttachmentIndex;
++		}
++	}
++
++	private int optimumMotionAttachmentIndex = -1;
 +
 +	/// <summary>
 +	/// Optimum TAA (P3): whether a pass currently has the motion attachment in
 +	/// Primary's draw-buffer mask. See <see cref="BeginMotionWrite" />.
 +	/// </summary>
-+	public bool OptimumMotionWriteActive { get; private set; }
++	public override bool OptimumMotionWriteActive
++	{
++		get
++		{
++			return optimumMotionWriteActive;
++		}
++	}
++
++	private bool optimumMotionWriteActive;
 +
 +	/// <summary>
 +	/// Optimum TAA (P3): the two draw-buffer sets the motion window switches
@@ -176,7 +192,15 @@ index 6edf0c9..38aeda2 100644
 +	/// </summary>
 +	private DrawBuffersEnum[] optimumMotionOnlyDrawBuffers;
 +
-+	private bool TaaTargetsReady;
++	public override bool TaaTargetsReady
++	{
++		get
++		{
++			return optimumTaaTargetsReady;
++		}
++	}
++
++	private bool optimumTaaTargetsReady;
 +
 +	// Optimum TAA resolve state (P2): which history slot is written this frame,
 +	// whether the other slot holds a frame worth reading, and the textures the
@@ -190,35 +214,43 @@ index 6edf0c9..38aeda2 100644
 +	private int taaResolvedGlowTexture;
 +
 +	/// <summary>True once this frame's TAA resolve ran; the post chain then reads the resolved textures.</summary>
-+	public bool TaaResolvedThisFrame { get; private set; }
++	public override bool TaaResolvedThisFrame
++	{
++		get
++		{
++			return optimumTaaResolvedThisFrame;
++		}
++	}
++
++	private bool optimumTaaResolvedThisFrame;
 +
 +	private bool optimumTaaDisabled;
-+
-+	// Optimum: GL keeps the clear colour in driver state and applies it at
-+	// glClear; the device takes it as an argument, so GlClearColorRgbaf records
-+	// it here and ClearFrameBuffer passes it on. Deliberately left at the
-+	// all-zero default, which is what GL_COLOR_CLEAR_VALUE starts as - and it
-+	// has to be, because ClientPlatformWindows..ctor is not a transplant target,
-+	// so a field initializer here would never run in the shipped assembly.
-+	private float optimumClearR;
-+
-+	private float optimumClearG;
-+
-+	private float optimumClearB;
-+
-+	private float optimumClearA;
-+
-+	// Optimum: the last texture bound to unit 0 through BindTexture2d. The
-+	// mod-facing GlGenerateTex2DMipmaps acts on the bound texture and takes no
-+	// argument, so the device path needs somewhere to read the target from.
-+	private int optimumBoundTexture2d;
 +
  	private MeshRef screenQuad;
  
  	private bool serverRunning;
  
  	private bool gamepause;
-@@ -256,10 +437,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -109,10 +303,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	private bool RenderFXAA;
+ 
+ 	private bool RenderSSAO;
+ 
++	/// <summary>
++	/// Optimum (Vulkan-native plan, Phase 1A step 4): whether this frame renders SSAO,
++	/// as window_RenderFrame computed it. VulkanClientPlatform's GlToggleBlend and
++	/// Primary clear read it to override the G-buffer attachments exactly as the GL
++	/// bodies do.
++	/// </summary>
++	public bool OptimumRenderSsao => RenderSSAO;
++
+ 	private bool SetupSSAO;
+ 
+ 	private int ShadowMapQuality;
+ 
+ 	private float ssaaLevel;
+@@ -256,10 +458,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
@@ -232,7 +264,7 @@ index 6edf0c9..38aeda2 100644
 +	/// Binding for writing uses the existing <c>LoadFrameBuffer(FrameBufferRef, int)</c>
 +	/// overload; this method never binds anything itself.
 +	/// </summary>
-+	public FrameBufferRef TaaHistory(int parity)
++	public override FrameBufferRef TaaHistory(int parity)
 +	{
 +		return frameBuffers[(parity & 1) == 0 ? OptimumTaaHistoryIndexA : OptimumTaaHistoryIndexB];
 +	}
@@ -242,35 +274,7 @@ index 6edf0c9..38aeda2 100644
  		get
  		{
  			return serverRunning;
-@@ -278,11 +472,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		{
- 			return curFb;
- 		}
- 		set
- 		{
-+			// Mono.Cecil transplant.
-+			// FboId carries the device's render-target handle on this path, the
-+			// same way VAO.VaoId carries a mesh handle, so FrameBufferRef stays
-+			// the type mods already hold.
- 			curFb = value;
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				if (value == null)
-+				{
-+					optimumDevice.BindDefaultFramebuffer();
-+					return;
-+				}
-+				optimumDevice.BindFramebuffer(value.FboId);
-+				optimumDevice.SetViewport(0, 0, value.Width, value.Height);
-+				return;
-+			}
- 			if (value == null)
- 			{
- 				GL.BindFramebuffer((FramebufferTarget)36160, 0);
- 				return;
- 			}
-@@ -297,11 +507,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -278,34 +493,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -278,73 +282,62 @@ index 6edf0c9..38aeda2 100644
  		{
 +			// Mono.Cecil transplant.
  			curFb = value;
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				if (value == null)
-+				{
-+					optimumDevice.BindDefaultFramebuffer();
-+					return;
-+				}
-+				optimumDevice.BindFramebuffer(value.FboId);
-+				return;
-+			}
- 			GL.BindFramebuffer((FramebufferTarget)36160, value?.FboId ?? 0);
+-			if (value == null)
+-			{
+-				GL.BindFramebuffer((FramebufferTarget)36160, 0);
+-				return;
+-			}
+-			GL.BindFramebuffer((FramebufferTarget)36160, value.FboId);
+-			GL.Viewport(0, 0, value.Width, value.Height);
++			BindCurrentFrameBuffer(value);
  		}
  	}
  
- 	public override bool GlErrorChecking { get; set; }
-@@ -314,10 +536,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		}
- 		set
- 		{
- 			//IL_001d: Unknown result type (might be due to invalid IL or missing references)
- 			//IL_0027: Expected O, but got Unknown
-+			// Mono.Cecil transplant.
-+			// The device's equivalent is the validation layer, which it enables
-+			// itself; the supportsGlDebugMode check does not apply.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.DebugMode = value;
-+				glDebugMode = value;
-+				return;
-+			}
- 			if (value)
- 			{
- 				if (!supportsGlDebugMode)
- 				{
- 					throw new NotSupportedException("Your graphics card does not seem to support gl debug mode (neither GL_ARB_debug_output nor GL_KHR_debug was found)");
-@@ -335,11 +567,27 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			}
- 			glDebugMode = value;
- 		}
- 	}
- 
--	public override bool GlScissorFlagEnabled => GL.IsEnabled((EnableCap)3089);
-+	// Mono.Cecil transplant (member injection + get_GlScissorFlagEnabled).
-+	// The device takes the scissor flag as a call argument and keeps no
-+	// queryable state, so the routed setter remembers it here for the getter,
-+	// which the runtime atlas upload reads to restore the flag afterwards.
-+	private bool optimumScissorEnabled;
-+
-+	public override bool GlScissorFlagEnabled
++	/// <summary>
++	/// Optimum (Vulkan-native plan, Phase 1A step 4): the GL half of the
++	/// <see cref="CurrentFrameBuffer" /> setter - bind, and size the viewport to the target.
++	/// </summary>
++	public override void BindCurrentFrameBuffer(FrameBufferRef value)
 +	{
-+		get
++		if (value == null)
 +		{
-+			if (Vintagestory.API.Config.OptimumRender.Device != null)
-+			{
-+				return optimumScissorEnabled;
-+			}
-+			return GL.IsEnabled((EnableCap)3089);
++			GL.BindFramebuffer((FramebufferTarget)36160, 0);
++			return;
 +		}
++		GL.BindFramebuffer((FramebufferTarget)36160, value.FboId);
++		GL.Viewport(0, 0, value.Width, value.Height);
 +	}
- 
- 	public override string CurrentMouseCursor { get; protected set; }
- 
- 	public override bool MouseGrabbed
++
+ 	private FrameBufferRef CurrentFrameBufferKeepVw
  	{
-@@ -478,41 +726,153 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		get
+ 		{
+ 			return curFb;
+ 		}
+ 		set
+ 		{
++			// Mono.Cecil transplant.
+ 			curFb = value;
+-			GL.BindFramebuffer((FramebufferTarget)36160, value?.FboId ?? 0);
++			BindCurrentFrameBufferKeepViewport(value);
+ 		}
+ 	}
+ 
++	/// <summary>
++	/// Optimum (Phase 1A step 4): the GL half of the CurrentFrameBufferKeepVw setter -
++	/// bind only, the viewport stays.
++	/// </summary>
++	public override void BindCurrentFrameBufferKeepViewport(FrameBufferRef value)
++	{
++		GL.BindFramebuffer((FramebufferTarget)36160, value?.FboId ?? 0);
++	}
++
+ 	public override bool GlErrorChecking { get; set; }
+ 
+ 	public override bool GlDebugMode
+ 	{
+ 		get
+@@ -478,40 +713,140 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -460,127 +453,73 @@ index 6edf0c9..38aeda2 100644
  		ShadowMapQuality = ClientSettings.ShadowMapQuality;
  		ShaderProgramBase.shadowmapQuality = ShadowMapQuality;
 +
-+		// Optimum: the device brackets the frame. BeginFrame recycles the frame
-+		// slot and opens a command buffer; Present closes the rendering scope,
-+		// submits, and blits the result into the swapchain. On the OpenGL path
-+		// this is one null check and SwapBuffers, exactly as before.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.BeginFrame();
-+			frameHandler.OnNewFrame(dt);
-+			// Optimum: per-attachment parity dump (OPTIMUM_PARITY_DUMP), after the
-+			// post chain and the final blit, before presentation. Unset, this is
-+			// one static bool check.
-+			if (Vintagestory.API.Config.OptimumParityDump.Enabled)
-+			{
-+				OptimumRunParityDump();
-+			}
-+			optimumDevice.Present();
-+			ScreenManager.FrameProfiler.End();
-+			return;
-+		}
-+
++		// Optimum (Vulkan-native plan, Phase 1A step 4): the platform brackets the
++		// frame. On OpenGL BeginFrame is empty and EndFrame is SwapBuffers, exactly as
++		// before; VulkanClientPlatform recycles the frame slot and opens a command
++		// buffer in BeginFrame and submits and presents in EndFrame.
++		BeginFrame();
  		frameHandler.OnNewFrame(dt);
+-		((GameWindow)window).SwapBuffers();
++		// Optimum: per-attachment parity dump (OPTIMUM_PARITY_DUMP), after the
++		// post chain and the final blit, before presentation. Unset, this is
++		// one static bool check.
 +		if (Vintagestory.API.Config.OptimumParityDump.Enabled)
 +		{
 +			OptimumRunParityDump();
 +		}
- 		((GameWindow)window).SwapBuffers();
++		EndFrame();
  		ScreenManager.FrameProfiler.End();
  	}
  
 -	public string GetGraphicsCardRenderer()
++	/// <summary>Optimum (Phase 1A step 4): presents the frame on the OpenGL path.</summary>
++	public override void EndFrame()
++	{
++		((GameWindow)window).SwapBuffers();
++	}
++
 +	public virtual string GetGraphicsCardRenderer()
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return optimumDevice.RendererString;
-+		}
  		return GL.GetString((StringName)7937);
  	}
  
  	public void LogAndTestHardwareInfosStage1()
+@@ -531,11 +866,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
-@@ -533,10 +893,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		logger.Notification("C# Framework: " + GetFrameworkInfos());
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
  	}
  
- 	public void LogAndTestHardwareInfosStage2()
+-	public void LogAndTestHardwareInfosStage2()
++	public virtual void LogAndTestHardwareInfosStage2()
  	{
-+		// Mono.Cecil transplant.
-+		// Everything below the framework-version block is API-neutral, so the
-+		// device path logs the same facts from the device and then rejoins. The
-+		// GL extension test at the end has no meaning here: the device already
-+		// refused to initialize if it lacked what it needs.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			logger.Notification("Graphics Backend: " + optimumDevice.BackendName);
-+			logger.Notification("Graphics Card Vendor: " + optimumDevice.VendorString);
-+			logger.Notification("Graphics Card Version: " + optimumDevice.VersionString);
-+			logger.Notification("Graphics Card Renderer: " + optimumDevice.RendererString);
-+			logger.Notification("Graphics Card ShadingLanguageVersion: " + optimumDevice.ShaderVersionString);
-+			logger.Notification("Max texture size: " + optimumDevice.MaxTextureSize);
-+			if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-+			{
-+				LogFrameworkVersions();
-+			}
-+			logger.Notification("OpenAL Version: " + AL.Get((ALGetString)45058));
-+			logger.Notification("Zstd Version: " + ZstdNative.Version);
-+			// Both describe GL extensions and are only read by GL bodies that the
-+			// device path returns before reaching, so false is the honest value.
-+			supportsGlDebugMode = false;
-+			supportsPersistentMapping = false;
-+			CheckGlError("loghwinfo");
-+			return;
-+		}
  		logger.Notification("Graphics Card Vendor: " + GL.GetString((StringName)7936));
  		logger.Notification("Graphics Card Version: " + GL.GetString((StringName)7938));
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
- 		logger.Notification("GL.MaxVertexUniformComponents: " + GL.GetInteger((GetPName)35658));
-@@ -576,10 +963,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		CheckGlError("testhwinfo");
- 	}
- 
- 	public override string GetGraphicCardInfos()
- 	{
-+		// Mono.Cecil transplant.
-+		// This text goes into crash reports, so it names the backend too - a
-+		// crash on Vulkan reads very differently from the same crash on GL.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return "GC Backend: " + optimumDevice.BackendName + "\nGC Vendor: " + optimumDevice.VendorString + "\nGC Version: " + optimumDevice.VersionString + "\nGC Renderer: " + optimumDevice.RendererString + "\nGC ShaderVersion: " + optimumDevice.ShaderVersionString;
-+		}
- 		return "GC Vendor: " + GL.GetString((StringName)7936) + "\nGC Version: " + GL.GetString((StringName)7938) + "\nGC Renderer: " + GL.GetString((StringName)7937) + "\nGC ShaderVersion: " + GL.GetString((StringName)35724);
- 	}
- 
- 	public override string GetFrameworkInfos()
- 	{
-@@ -702,24 +1097,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1037,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
  		windowsize.Width = ((NativeWindow)window).ClientSize.X;
  		windowsize.Height = ((NativeWindow)window).ClientSize.Y;
 +		// Mono.Cecil transplant.
-+		// GL discovers thick-line support by setting a width and seeing whether
-+		// that raised an error; the device answers it as a capability instead.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumStartDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumStartDevice != null)
-+		{
-+			optimumStartDevice.SetLineWidth(1.5f);
-+			SupportsThickLines = optimumStartDevice.SupportsThickLines;
-+			cpuCoreCount = Environment.ProcessorCount;
-+			return;
-+		}
++		SupportsThickLines = ProbeThickLineSupport();
++		cpuCoreCount = Environment.ProcessorCount;
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): GL discovers thick-line support by setting a width and
++	/// seeing whether that raised an error; VulkanClientPlatform answers it as a device
++	/// capability instead.
++	/// </summary>
++	public override bool ProbeThickLineSupport()
++	{
  		GL.LineWidth(1.5f);
  		OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
- 		SupportsThickLines = (int)error != 1281;
- 		cpuCoreCount = Environment.ProcessorCount;
+-		SupportsThickLines = (int)error != 1281;
+-		cpuCoreCount = Environment.ProcessorCount;
++		return (int)error != 1281;
  	}
  
  	public override void RebuildFrameBuffers()
@@ -603,47 +542,27 @@ index 6edf0c9..38aeda2 100644
  
  	private void Window_FileDrop(FileDropEventArgs e)
  	{
-@@ -796,10 +1209,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1149,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
  		{
  			logger.Notification("Window was resized to {0} {1}, rebuilding framebuffers...", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
 +			// Mono.Cecil transplant.
-+			// The device owns the default render target and the swapchain, and
-+			// neither follows the window on its own. This has to happen before
-+			// RebuildFrameBuffers, because that recreates the client's own
-+			// targets against the new size and the default one has to agree with
-+			// them - a default target left at the old size silently clips every
-+			// draw to its top-left corner, since the viewport is set from the
-+			// window rather than from the target.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.Resize(((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
-+			}
++			// A platform that owns the default render target and the swapchain
++			// (VulkanClientPlatform) has to follow the window before
++			// RebuildFrameBuffers, because that recreates the client's own targets
++			// against the new size and the default one has to agree with them - a
++			// default target left at the old size silently clips every draw to its
++			// top-left corner, since the viewport is set from the window rather
++			// than from the target. Empty on OpenGL.
++			OnWindowSizeChanged(((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  			RebuildFrameBuffers();
  			windowsize.Width = ((NativeWindow)window).ClientSize.X;
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1016,20 +1442,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			{
- 				throw new ArgumentException("Fatal: Trying to render an uninitialized mesh");
- 			}
- 			throw new ArgumentException("Fatal: Trying to render a disposed mesh");
- 		}
-+		// Optimum: on the device path VaoId is the device's mesh handle rather
-+		// than a GL vertex-array name. Reusing the field keeps MeshRef - which is
-+		// public API that mods hold - unchanged.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.DrawMesh(vAO.VaoId);
-+			return;
-+		}
- 		GL.BindVertexArray(vAO.VaoId);
- 		GL.BindBuffer((BufferTarget)34963, vAO.vboIdIndex);
+@@ -1023,11 +1385,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.DrawElements(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, 0);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
@@ -653,553 +572,16 @@ index 6edf0c9..38aeda2 100644
 +	public virtual void RenderFullscreenTriangle(MeshRef modelRef)
  	{
  		RuntimeStats.drawCallsCount++;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The post passes generate their three vertices in the shader, so the
-+			// mesh carries no buffers and none are bound.
-+			optimumDevice.DrawFullscreenTriangle();
-+			return;
-+		}
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
- 	}
- 
-@@ -1042,10 +1485,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	{
- 		//IL_0075: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0043: Unknown result type (might be due to invalid IL or missing references)
- 		RuntimeStats.drawCallsCount++;
- 		VAO vAO = (VAO)modelRef;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The chunk renderer's one multidraw per pool. GL takes byte offsets
-+			// into the index buffer; the device converts them to index counts and
-+			// issues a single indirect draw.
-+			optimumDevice.DrawMeshMulti(vAO.VaoId, indices, indicesSizes, groupCount, useSSBOs);
-+			return;
-+		}
- 		GL.BindVertexArray(vAO.VaoId);
- 		if (useSSBOs)
- 		{
- 			GL.BindBuffer((BufferTarget)34963, ClientPlatformAbstract.singleIndexBufferId);
- 			GL.BindBufferBase((BufferRangeTarget)37074, 3, vAO.xyzVboId);
-@@ -1064,10 +1516,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	public override void RenderMeshInstanced(MeshRef modelRef, int quantity = 1)
- 	{
- 		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
- 		RuntimeStats.drawCallsCount++;
- 		VAO vAO = (VAO)modelRef;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.DrawMeshInstanced(vAO.VaoId, quantity);
-+			return;
-+		}
- 		GL.BindVertexArray(vAO.VaoId);
- 		GL.BindBuffer((BufferTarget)34963, vAO.vboIdIndex);
- 		GL.DrawElementsInstanced(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, (IntPtr)IntPtr.Zero, quantity);
- 		GL.BindBuffer((BufferTarget)34963, 0);
- 		GL.BindVertexArray(0);
-@@ -1103,15 +1561,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			if (frameBuffer.DepthTextureId > 0)
- 			{
- 				GLDeleteTexture(frameBuffer.DepthTextureId);
- 			}
- 		}
-+		// Mono.Cecil transplant.
-+		// GLDeleteTexture above already routes, so only the target itself is left.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.DeleteFramebuffer(frameBuffer.FboId);
-+			return;
-+		}
- 		GL.DeleteFramebuffer(frameBuffer.FboId);
- 	}
- 
- 	public override FrameBufferRef CreateFramebuffer(FramebufferAttrs fbAttrs)
- 	{
-+		// Mono.Cecil transplant.
-+		// The mod-facing framebuffer factory. Same shape as the GL body: create
-+		// the target, create or adopt a texture per attachment, attach it, then
-+		// select the colour attachments as draw buffers.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return CreateOptimumFramebuffer(optimumDevice, fbAttrs);
-+		}
- 		FrameBufferRef frameBufferRef = (CurrentFrameBufferKeepVw = new FrameBufferRef
- 		{
- 			FboId = GL.GenFramebuffer(),
- 			Width = fbAttrs.Width,
- 			Height = fbAttrs.Height
-@@ -1150,12 +1625,695 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,11 +1512,509 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
  	}
  
 -	public List<FrameBufferRef> SetupDefaultFrameBuffers()
-+	/// <summary>
-+	/// Optimum: builds the same framebuffer set as the GL path, through the
-+	/// device.
-+	///
-+	/// A separate method rather than a branch inside the GL body, because that
-+	/// body is four hundred lines of raw GL with no seam to route through - it
-+	/// generates its own names and attaches its own textures. Mirroring the
-+	/// layout keeps every index, size and format identical, which is what the
-+	/// render systems assume when they index FrameBuffers by EnumFrameBuffer.
-+	/// </summary>
-+	private List<FrameBufferRef> SetupOptimumFrameBuffers(Vintagestory.API.Config.IOptimumGraphicsDevice device)
-+	{
-+		SetupSSAO = ClientSettings.SSAOQuality > 0;
-+		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
-+		for (int i = 0; i <= 24; i++)
-+		{
-+			list.Add(null);
-+		}
-+		ShadowMapQuality = ClientSettings.ShadowMapQuality;
-+		ssaaLevel = ClientSettings.SSAA;
-+
-+		int width = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
-+		int height = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
-+		if (width == 0 || height == 0)
-+		{
-+			return list;
-+		}
-+
-+		// Optimum: TAA. Read once per (re-)build; a mid-session config change
-+		// only takes effect on the next RebuildFrameBuffers. optimumTaaDisabled
-+		// is checked as well as EffectiveTaa: DisableOptimumTaa sets both, and
-+		// the local flag keeps this platform from retrying a failed allocation
-+		// even if the process-wide config flag is ever reset.
-+		bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
-+		int motionAttachmentIndex = -1;
-+
-+		// Primary: depth, colour, glow, and the SSAO position/normal G-buffer.
-+		FrameBufferRef primary = new FrameBufferRef();
-+		primary.Width = width;
-+		primary.Height = height;
-+		primary.FboId = device.CreateFramebuffer(width, height);
-+		primary.DepthTextureId = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
-+		SetupOptimumTextureSampler(device, primary.DepthTextureId, 9728, 33071);
-+		device.AttachTexture(primary.FboId, EnumFramebufferAttachment.DepthAttachment, primary.DepthTextureId, 0);
-+
-+		int primaryAttachments = (SetupSSAO ? 4 : 2);
-+		primary.ColorTextureIds = new int[primaryAttachments];
-+		primary.ColorTextureIds[0] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		primary.ColorTextureIds[1] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		if (SetupSSAO)
-+		{
-+			primary.ColorTextureIds[2] = device.CreateTexture2D(width, height,
-+				EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+			primary.ColorTextureIds[3] = device.CreateTexture2D(width, height,
-+				EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		}
-+		// Match the GL Primary filters, including linear G-buffer sampling and
-+		// the white border used when SSAO projects a sample off screen.
-+		for (int attachment = 0; attachment < primaryAttachments; attachment++)
-+		{
-+			int textureId = primary.ColorTextureIds[attachment];
-+			SetupOptimumTextureSampler(device, textureId,
-+				attachment >= 2 || ssaaLevel > 1f ? 9729 : 9728, attachment >= 2 ? 33069 : 10497);
-+			if (attachment >= 2) device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
-+		}
-+		if (taaRequested)
-+		{
-+			// Optimum: TAA motion attachment, appended after the SSAO G-buffer
-+			// so every existing attachment index is unchanged. Deliberately not
-+			// folded into the draw-buffer mask below - it stays out of every
-+			// pass's output set until a writer opts in (P3+).
-+			try
-+			{
-+				int motionTextureId = device.CreateTexture2D(width, height,
-+					EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+				int[] extendedColorIds = new int[primary.ColorTextureIds.Length + 1];
-+				Array.Copy(primary.ColorTextureIds, extendedColorIds, primary.ColorTextureIds.Length);
-+				motionAttachmentIndex = primary.ColorTextureIds.Length;
-+				extendedColorIds[motionAttachmentIndex] = motionTextureId;
-+				primary.ColorTextureIds = extendedColorIds;
-+			}
-+			catch (Exception error)
-+			{
-+				DisableOptimumTaa("Primary motion attachment (device): " + error.Message);
-+				motionAttachmentIndex = -1;
-+			}
-+		}
-+		for (int attachment = 0; attachment < primary.ColorTextureIds.Length; attachment++)
-+		{
-+			device.AttachTexture(primary.FboId,
-+				(EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
-+				primary.ColorTextureIds[attachment], 0);
-+		}
-+		device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);
-+		list[0] = primary;
-+		MotionAttachmentIndex = motionAttachmentIndex;
-+
-+		// Transparent: OIT accumulation, revealage, glow. Shares Primary's depth.
-+		FrameBufferRef transparent = new FrameBufferRef();
-+		transparent.Width = width;
-+		transparent.Height = height;
-+		transparent.FboId = device.CreateFramebuffer(width, height);
-+		transparent.ColorTextureIds = new int[3];
-+		transparent.ColorTextureIds[0] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		transparent.ColorTextureIds[1] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.R16f, EnumTexturePixelFormat.Red, IntPtr.Zero, false);
-+		transparent.ColorTextureIds[2] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		for (int attachment = 0; attachment < 3; attachment++)
-+		{
-+			SetupOptimumTextureSampler(device, transparent.ColorTextureIds[attachment], 9729, 10497);
-+			device.AttachTexture(transparent.FboId,
-+				(EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
-+				transparent.ColorTextureIds[attachment], 0);
-+		}
-+		device.AttachTexture(transparent.FboId, EnumFramebufferAttachment.DepthAttachment, primary.DepthTextureId, 0);
-+		device.SetDrawBuffers(transparent.FboId, 7);
-+		transparent.DepthTextureId = primary.DepthTextureId;
-+		list[1] = transparent;
-+
-+		if (SetupSSAO)
-+		{
-+			int ssaoWidth = (int)((float)width * 0.5f);
-+			int ssaoHeight = (int)((float)height * 0.5f);
-+
-+			FrameBufferRef ssao = new FrameBufferRef();
-+			ssao.Width = ssaoWidth;
-+			ssao.Height = ssaoHeight;
-+			ssao.FboId = device.CreateFramebuffer(ssaoWidth, ssaoHeight);
-+			ssao.ColorTextureIds = new int[2];
-+			// GL_RGB in the vanilla path; the device promotes it, because RGB is
-+			// not a guaranteed colour-attachment format in Vulkan.
-+			ssao.ColorTextureIds[0] = device.CreateTexture2DRaw(ssaoWidth, ssaoHeight, 6407, IntPtr.Zero, 0);
-+			device.AttachTexture(ssao.FboId, EnumFramebufferAttachment.ColorAttachment0, ssao.ColorTextureIds[0], 0);
-+			device.SetDrawBuffers(ssao.FboId, 1);
-+
-+			// Rotation noise, and the sample kernel that goes with it. Same seed
-+			// and draw order as the GL path, so the pattern matches exactly.
-+			Random random = new Random(5);
-+			int noiseSize = 16;
-+			float[] noise = new float[noiseSize * noiseSize * 4];
-+			Vec3f direction = new Vec3f();
-+			for (int texel = 0; texel < noiseSize * noiseSize; texel++)
-+			{
-+				direction.Set((float)random.NextDouble() * 2f - 1f, (float)random.NextDouble() * 2f - 1f, 0f).Normalize();
-+				noise[texel * 4] = direction.X;
-+				noise[texel * 4 + 1] = direction.Y;
-+				noise[texel * 4 + 2] = direction.Z;
-+				noise[texel * 4 + 3] = 0f;
-+			}
-+			GCHandle noiseHandle = GCHandle.Alloc(noise, GCHandleType.Pinned);
-+			// RGBA32F rather than the GL path's RGB32F: the fourth channel is
-+			// padding, and a three-channel float format is not guaranteed.
-+			ssao.ColorTextureIds[1] = device.CreateTexture2DRaw(
-+				noiseSize, noiseSize, 34836, noiseHandle.AddrOfPinnedObject(), 16);
-+			noiseHandle.Free();
-+			device.SetTextureParameter(ssao.ColorTextureIds[1],
-+				Vintagestory.API.Config.OptimumGlConstants.TextureWrapS,
-+				Vintagestory.API.Config.OptimumGlConstants.Repeat);
-+			device.SetTextureParameter(ssao.ColorTextureIds[1],
-+				Vintagestory.API.Config.OptimumGlConstants.TextureWrapT,
-+				Vintagestory.API.Config.OptimumGlConstants.Repeat);
-+
-+			for (int sample = 0; sample < 64; sample++)
-+			{
-+				Vec3f kernel = new Vec3f((float)random.NextDouble() * 2f - 1f, (float)random.NextDouble() * 2f - 1f, (float)random.NextDouble());
-+				kernel.Normalize();
-+				kernel *= (float)random.NextDouble();
-+				float scale = (float)sample / 64f;
-+				scale = GameMath.Lerp(0.1f, 1f, scale * scale);
-+				kernel *= scale;
-+				ssaoKernel[sample * 3] = kernel.X;
-+				ssaoKernel[sample * 3 + 1] = kernel.Y;
-+				ssaoKernel[sample * 3 + 2] = kernel.Z;
-+			}
-+			list[13] = ssao;
-+
-+			list[14] = CreateOptimumColorTarget(device, ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8);
-+			list[15] = CreateOptimumColorTarget(device, ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8);
-+		}
-+
-+		list[2] = CreateOptimumColorTarget(device, width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
-+		list[3] = CreateOptimumColorTarget(device, width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
-+		list[9] = CreateOptimumColorTarget(device, width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
-+		list[8] = CreateOptimumColorTarget(device, width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
-+		list[4] = CreateOptimumColorTarget(device, width, height, EnumTextureInternalFormat.Rgba16f);
-+		list[7] = CreateOptimumColorTarget(device, width / 2, height / 2, EnumTextureInternalFormat.Rgba16f);
-+		list[10] = CreateOptimumColorTarget(device, width, height, EnumTextureInternalFormat.Rgba16f);
-+
-+		// Optimum: TAA history, render-resolution like Primary. Two slots so the
-+		// resolve reads last frame's parity while writing this frame's; never
-+		// cleared per frame (ClearFrameBuffer(Primary) only touches Primary).
-+		if (taaRequested)
-+		{
-+			try
-+			{
-+				list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTarget(device, width, height);
-+				list[OptimumTaaHistoryIndexB] = CreateOptimumHistoryTarget(device, width, height);
-+			}
-+			catch (Exception error)
-+			{
-+				DisableOptimumTaa("history targets (device): " + error.Message);
-+				list[OptimumTaaHistoryIndexA] = null;
-+				list[OptimumTaaHistoryIndexB] = null;
-+			}
-+			// Optimum TAA (P5): the sharpen target. Its own try - a sharpen
-+			// target that cannot be allocated costs the sharpening, not TAA,
-+			// so it nulls the slot instead of calling DisableOptimumTaa.
-+			try
-+			{
-+				list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(device, width, height,
-+					EnumTextureInternalFormat.Rgba16f);
-+			}
-+			catch (Exception error)
-+			{
-+				logger.Error("Optimum disabled the TAA sharpen pass: {0}", error.Message);
-+				list[OptimumTaaSharpenIndex] = null;
-+			}
-+		}
-+		TaaTargetsReady = taaRequested && MotionAttachmentIndex >= 0
-+			&& list[OptimumTaaHistoryIndexA] != null && list[OptimumTaaHistoryIndexB] != null;
-+		InstallOptimumMotionWriteHooks();
-+
-+		// FSR renders at a reduced scale and resolves into a native-sized target.
-+		if (ClientSettings.OptimumRenderScale < 1.0f)
-+		{
-+			list[OptimumFsrFramebufferIndex] = CreateOptimumColorTarget(device,
-+				((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y,
-+				EnumTextureInternalFormat.Rgba8);
-+		}
-+
-+		list[5] = CreateOptimumDepthTarget(device, width / 4, height / 4);
-+
-+		// Both shadow slots always hold a FrameBufferRef, exactly as the GL path
-+		// does: vanilla constructs the objects unconditionally and only allocates
-+		// their textures when the quality setting reaches each level.
-+		//
-+		// The distinction matters because ShaderProgramBase.Use dereferences both
-+		// FrameBuffers[11] and FrameBuffers[12] whenever shadowmapQuality > 0,
-+		// and every shader including fogandlight.fsh - sky.fsh among them - takes
-+		// that branch. Leaving slot 12 null at quality 1 is a null reference on
-+		// the first sky draw, which is what it was.
-+		int shadowSize = Math.Max(4, ShadowMapQuality + 2) * 1024;
-+		list[11] = ShadowMapQuality > 0
-+			? CreateOptimumDepthTarget(device, shadowSize, shadowSize)
-+			: CreateOptimumPlaceholderTarget(shadowSize, shadowSize);
-+		list[12] = ShadowMapQuality > 1
-+			? CreateOptimumDepthTarget(device, shadowSize, shadowSize)
-+			: CreateOptimumPlaceholderTarget(shadowSize, shadowSize);
-+
-+		for (int shadow = 11; shadow <= 12; shadow++)
-+		{
-+			int textureId = list[shadow].DepthTextureId;
-+			if (textureId == 0) continue;
-+			SetupOptimumTextureSampler(device, textureId, 9729, 33069);
-+			device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
-+			device.SetTextureParameter(textureId, OptimumGlConstants.TextureCompareMode, OptimumGlConstants.CompareRefToTexture);
-+		}
-+
-+		// The fullscreen quad. The device generates its three vertices in the
-+		// shader and binds nothing, but the field is public enough that other
-+		// code holds it, so it is kept in step with the GL path.
-+		MeshData quadData = QuadMeshUtil.GetCustomQuadModelData(-1f, -1f, 0f, 2f, 2f);
-+		quadData.Normals = null;
-+		quadData.Rgba = null;
-+		quadData.Uv = null;
-+		if (screenQuad != null)
-+		{
-+			screenQuad.Dispose();
-+		}
-+		screenQuad = UploadMesh(quadData);
-+
-+		CurrentFrameBufferKeepVw = (OffscreenBuffer ? list[0] : null);
-+		// Optimum TAA: the history slots this build just allocated hold
-+		// undefined contents, and the old ones are about to be disposed. Both
-+		// the local flag and the temporal contract have to know, because the
-+		// flag only guards our own resolve while the reset reason is what every
-+		// other temporal consumer (vendor upscalers later) reads.
-+		_taaHistoryValid = false;
-+		OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
-+		logger.Notification("(Re-)loaded frame buffers on the Optimum device");
-+		return list;
-+	}
-+
-+	/// <summary>Optimum: a single-colour-attachment target, as the post chain uses.</summary>
-+	/// <summary>
-+	/// Optimum: the device-path body of <see cref="CreateFramebuffer" />.
-+	///
-+	/// Split out for the same reason as SetupOptimumFrameBuffers - the GL body
-+	/// interleaves texture creation with framebuffer attachment through the bound
-+	/// texture unit, and there is no seam to route call-by-call. The attachment
-+	/// order is preserved because the draw-buffer mask is positional: bit N means
-+	/// ColorAttachmentN, and the shaders' output locations depend on it.
-+	/// </summary>
-+	private FrameBufferRef CreateOptimumFramebuffer(
-+		Vintagestory.API.Config.IOptimumGraphicsDevice device, FramebufferAttrs fbAttrs)
-+	{
-+		FrameBufferRef target = new FrameBufferRef();
-+		target.Width = fbAttrs.Width;
-+		target.Height = fbAttrs.Height;
-+		target.FboId = device.CreateFramebuffer(fbAttrs.Width, fbAttrs.Height);
-+
-+		List<int> colorTextureIds = new List<int>();
-+		int drawBufferMask = 0;
-+		FramebufferAttrsAttachment[] attachments = fbAttrs.Attachments;
-+		for (int i = 0; i < attachments.Length; i++)
-+		{
-+			FramebufferAttrsAttachment attachment = attachments[i];
-+			RawTexture texture = attachment.Texture;
-+			int textureId = texture.TextureId;
-+			if (textureId == 0)
-+			{
-+				textureId = device.CreateTexture2D(texture.Width, texture.Height,
-+					texture.PixelInternalFormat, texture.PixelFormat, IntPtr.Zero, false);
-+				// EnumTextureFilter and EnumTextureWrap carry the GL token values,
-+				// which is exactly what SetTextureParameter expects.
-+				device.SetTextureParameter(textureId, OptimumGlConstants.TextureMinFilter, (int)texture.MinFilter);
-+				device.SetTextureParameter(textureId, OptimumGlConstants.TextureMagFilter, (int)texture.MagFilter);
-+				device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapS, (int)texture.WrapS);
-+				device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapT, (int)texture.WrapT);
-+				texture.TextureId = textureId;
-+			}
-+			device.AttachTexture(target.FboId, attachment.AttachmentType, textureId, 0);
-+			if (attachment.AttachmentType == EnumFramebufferAttachment.DepthAttachment)
-+			{
-+				target.DepthTextureId = textureId;
-+			}
-+			else
-+			{
-+				colorTextureIds.Add(textureId);
-+				drawBufferMask |= 1 << ((int)attachment.AttachmentType - (int)EnumFramebufferAttachment.ColorAttachment0);
-+			}
-+		}
-+
-+		target.ColorTextureIds = colorTextureIds.ToArray();
-+		device.SetDrawBuffers(target.FboId, drawBufferMask);
-+
-+		string status;
-+		if (!device.CheckFramebufferComplete(target.FboId, out status))
-+		{
-+			throw new Exception("FBO " + fbAttrs.Name + ": " + status);
-+		}
-+		return target;
-+	}
-+
-+	/// <summary>Mirror the GL framebuffer texture's filtering and edge policy.</summary>
-+	private void SetupOptimumTextureSampler(
-+		Vintagestory.API.Config.IOptimumGraphicsDevice device, int textureId, int filter, int wrap)
-+	{
-+		device.SetTextureParameter(textureId, OptimumGlConstants.TextureMinFilter, filter);
-+		device.SetTextureParameter(textureId, OptimumGlConstants.TextureMagFilter, filter);
-+		device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapS, wrap);
-+		device.SetTextureParameter(textureId, OptimumGlConstants.TextureWrapT, wrap);
-+	}
-+
-+	private FrameBufferRef CreateOptimumColorTarget(
-+		Vintagestory.API.Config.IOptimumGraphicsDevice device, int width, int height,
-+		EnumTextureInternalFormat format)
-+	{
-+		FrameBufferRef target = new FrameBufferRef();
-+		target.Width = width;
-+		target.Height = height;
-+		target.FboId = device.CreateFramebuffer(width, height);
-+		target.ColorTextureIds = new int[1];
-+		target.ColorTextureIds[0] = device.CreateTexture2D(width, height, format,
-+			EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		// setupAttachment uses linear filtering and edge clamping. FXAA and
-+		// the reduced-resolution blur passes require fractional texel samples.
-+		SetupOptimumTextureSampler(device, target.ColorTextureIds[0], 9729, 33071);
-+		device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
-+		device.SetDrawBuffers(target.FboId, 1);
-+		return target;
-+	}
-+
-+	/// <summary>Optimum: a depth-only target, as the shadow maps and liquid depth use.</summary>
-+	private FrameBufferRef CreateOptimumDepthTarget(
-+		Vintagestory.API.Config.IOptimumGraphicsDevice device, int width, int height)
-+	{
-+		FrameBufferRef target = new FrameBufferRef();
-+		target.Width = width;
-+		target.Height = height;
-+		target.FboId = device.CreateFramebuffer(width, height);
-+		target.ColorTextureIds = new int[0];
-+		target.DepthTextureId = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
-+		SetupOptimumTextureSampler(device, target.DepthTextureId, 9729, 33071);
-+		device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
-+		device.SetDrawBuffers(target.FboId, 0);
-+		return target;
-+	}
-+
-+	/// <summary>
-+	/// Optimum: a TAA history slot - colour (RGBA16F), aux (RGBA8: glow.rg,
-+	/// ssao.b) and linear depth (R32F), MRT-written by the resolve pass and
-+	/// read back next frame. R32F has no <see cref="EnumTextureInternalFormat" />
-+	/// entry, so it goes through <c>CreateTexture2DRaw</c> with the raw GL token,
-+	/// the same way the SSAO noise texture does above.
-+	/// </summary>
-+	private FrameBufferRef CreateOptimumHistoryTarget(
-+		Vintagestory.API.Config.IOptimumGraphicsDevice device, int width, int height)
-+	{
-+		FrameBufferRef target = new FrameBufferRef();
-+		target.Width = width;
-+		target.Height = height;
-+		target.FboId = device.CreateFramebuffer(width, height);
-+		target.ColorTextureIds = new int[3];
-+		target.ColorTextureIds[0] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.Rgba16f, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		target.ColorTextureIds[1] = device.CreateTexture2D(width, height,
-+			EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
-+		target.ColorTextureIds[2] = device.CreateTexture2DRaw(width, height, OptimumGlR32f, IntPtr.Zero, 4);
-+		// Optimum TAA: the resolve reprojects the history by a fractional pixel
-+		// offset, so colour (Catmull-Rom taps) and glow (a plain bilinear fetch)
-+		// must filter LINEAR; sampling them NEAREST snaps the reprojection to
-+		// whole pixels and the history never converges. Linear depth stays
-+		// NEAREST - interpolating across a silhouette invents a depth that is on
-+		// neither surface and defeats the disocclusion test. Clamp to edge on
-+		// all three, matching CreateOptimumHistoryTargetGl.
-+		SetupOptimumTextureSampler(device, target.ColorTextureIds[0], 9729, 33071);
-+		SetupOptimumTextureSampler(device, target.ColorTextureIds[1], 9729, 33071);
-+		SetupOptimumTextureSampler(device, target.ColorTextureIds[2], 9728, 33071);
-+		for (int attachment = 0; attachment < 3; attachment++)
-+		{
-+			device.AttachTexture(target.FboId,
-+				(EnumFramebufferAttachment)((int)EnumFramebufferAttachment.ColorAttachment0 + attachment),
-+				target.ColorTextureIds[attachment], 0);
-+		}
-+		device.SetDrawBuffers(target.FboId, 7);
-+		if (!device.CheckFramebufferComplete(target.FboId, out string status))
-+		{
-+			throw new Exception("Optimum TAA history FBO: " + status);
-+		}
-+		return target;
-+	}
-+
-+	/// <summary>
-+	/// A framebuffer slot that exists but owns nothing, for a quality level whose
-+	/// resources are not allocated.
-+	///
-+	/// The GL path leaves such a slot holding a FrameBufferRef whose ids are zero;
-+	/// callers read its Width and Height and bind its texture id, and binding zero
-+	/// is a no-op there. The device treats texture 0 as unbound and substitutes
-+	/// its placeholder, so the same read is equally harmless here.
-+	/// </summary>
-+	private FrameBufferRef CreateOptimumPlaceholderTarget(int width, int height)
-+	{
-+		FrameBufferRef target = new FrameBufferRef();
-+		target.Width = width;
-+		target.Height = height;
-+		target.ColorTextureIds = new int[0];
-+		return target;
-+	}
-+
 +	/// <summary>
 +	/// Optimum: frames rendered while the player is in the world, counted for the
 +	/// parity dump. No initializer: an injected field starts at the CLR default.
@@ -1338,16 +720,7 @@ index 6edf0c9..38aeda2 100644
 +		string where = slot + " " + attachment;
 +		try
 +		{
-+			OptimumTextureReadback readback;
-+			Vintagestory.API.Config.IOptimumGraphicsDevice device = Vintagestory.API.Config.OptimumRender.Device;
-+			if (device != null)
-+			{
-+				readback = device.ReadTextureForParity(textureId);
-+			}
-+			else
-+			{
-+				readback = OptimumParityReadTextureGl(textureId);
-+			}
++			OptimumTextureReadback readback = ReadTextureForParity(textureId);
 +			if (readback == null)
 +			{
 +				logger.Warning("[Optimum] parity dump: slot " + where + " could not be read");
@@ -1359,6 +732,224 @@ index 6edf0c9..38aeda2 100644
 +		{
 +			logger.Error("[Optimum] parity dump: slot " + where + " failed: " + error.Message);
 +			return 0;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): the parity dump's readback on the OpenGL path;
++	/// VulkanClientPlatform overrides it with the device readback.
++	/// </summary>
++	public override OptimumTextureReadback ReadTextureForParity(int textureId)
++	{
++		return OptimumParityReadTextureGl(textureId);
++	}
++
++	// Optimum (Vulkan-native plan, Phase 1A step 5): the GL lines ScreenManager, ClientMain,
++	// VAO, the shared index buffer, ChunkRenderer, ShaderRegistry, the framebuffer debug
++	// overlay, SvgLoader, InventoryItemRenderer, the OIT layers, the sun occlusion probe,
++	// Screenshot and ClientSystemStartup issued directly, verbatim; VulkanClientPlatform
++	// overrides each with device calls.
++	public override void SetDepthRange(float near, float far)
++	{
++		GL.DepthRange(near, far);
++	}
++
++	public override void ClearDefaultDepth(float depth)
++	{
++		GL.ClearBuffer((ClearBuffer)6145, 0, ref depth);
++	}
++
++	public override void DeleteMeshHandle(int bufferId)
++	{
++		GL.DeleteBuffer(bufferId);
++	}
++
++	public override void DeleteVertexArrayHandles(VAO vao)
++	{
++		if (vao.xyzVboId != 0)
++		{
++			GL.DeleteBuffer(vao.xyzVboId);
++		}
++		if (vao.normalsVboId != 0)
++		{
++			GL.DeleteBuffer(vao.normalsVboId);
++		}
++		if (vao.uvVboId != 0)
++		{
++			GL.DeleteBuffer(vao.uvVboId);
++		}
++		if (vao.rgbaVboId != 0)
++		{
++			GL.DeleteBuffer(vao.rgbaVboId);
++		}
++		if (vao.customDataFloatVboId != 0)
++		{
++			GL.DeleteBuffer(vao.customDataFloatVboId);
++		}
++		if (vao.customDataShortVboId != 0)
++		{
++			GL.DeleteBuffer(vao.customDataShortVboId);
++		}
++		if (vao.customDataIntVboId != 0)
++		{
++			GL.DeleteBuffer(vao.customDataIntVboId);
++		}
++		if (vao.customDataByteVboId != 0)
++		{
++			GL.DeleteBuffer(vao.customDataByteVboId);
++		}
++		if (vao.vboIdIndex != 0 && vao.vboIdIndex != ClientPlatformAbstract.singleIndexBufferId)
++		{
++			GL.DeleteBuffer(vao.vboIdIndex);
++		}
++		if (vao.flagsVboId != 0)
++		{
++			GL.DeleteBuffer(vao.flagsVboId);
++		}
++		GL.DeleteVertexArray(vao.VaoId);
++	}
++
++	public override void SetTextureLodBias(int[] textureIds, float bias)
++	{
++		GL.ActiveTexture((TextureUnit)33984);
++		for (int i = 0; i < textureIds.Length; i++)
++		{
++			GL.BindTexture((TextureTarget)3553, textureIds[i]);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);
++		}
++		GL.BindTexture((TextureTarget)3553, 0);
++	}
++
++	public override void SetSamplerLodBias(int samplerId, float bias)
++	{
++		GL.SamplerParameter(samplerId, (SamplerParameterName)34049, bias);
++	}
++
++	/// <summary>GL sets the parameter on the texture bound to GL_TEXTURE_2D, as the overlay left it.</summary>
++	public override void SetTextureDepthCompare(int textureId, int mode)
++	{
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, mode);
++	}
++
++	/// <summary>GL writes into the texture bound to GL_TEXTURE_2D, as CreateFrameBuffer left it.</summary>
++	public override void ClearTextureRegion(int textureId, int x, int y, int width, int height, int[] pixels)
++	{
++		GL.TexSubImage2D<int>((TextureTarget)3553, 0, x, y, width, height, (PixelFormat)32993, (PixelType)5121, pixels);
++	}
++
++	/// <summary>An RGBA8 texture with linear filtering from straight RGBA bytes.</summary>
++	public override int LoadTextureFromRgbaPointer(int width, int height, IntPtr pixels)
++	{
++		int num = GL.GenTexture();
++		GL.BindTexture((TextureTarget)3553, num);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, width, height, 0, (PixelFormat)6408, (PixelType)5121, pixels);
++		return num;
++	}
++
++	public override void SetProgramSamplerUnit(int programId, string samplerName, int unit)
++	{
++		GL.Uniform1(GL.GetUniformLocation(programId, samplerName), unit);
++	}
++
++	public override void CreateOitTargets(FrameBufferRef transparent, int layers, out int revealTexture, out int accumTexture)
++	{
++		int width = transparent.Width;
++		int height = transparent.Height;
++		GL.BindFramebuffer((FramebufferTarget)36160, transparent.FboId);
++		revealTexture = GL.GenTexture();
++		GL.BindTexture((TextureTarget)3553, revealTexture);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32849, width, height, 0, (PixelFormat)6407, (PixelType)5121, (IntPtr)0);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
++		accumTexture = GL.GenTexture();
++		GL.BindTexture((TextureTarget)35866, accumTexture);
++		GL.TexImage3D((TextureTarget)35866, 0, (PixelInternalFormat)34842, width, height, layers, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)0);
++		GL.TexParameter((TextureTarget)35866, (TextureParameterName)10241, 9728);
++		GL.TexParameter((TextureTarget)35866, (TextureParameterName)10240, 9728);
++		GL.TexParameter((TextureTarget)35866, (TextureParameterName)10242, 33071);
++		GL.TexParameter((TextureTarget)35866, (TextureParameterName)10243, 33071);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, revealTexture, 0);
++		GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36067, accumTexture, 0, 0);
++		GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36068, accumTexture, 0, 1);
++		GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36069, accumTexture, 0, 2);
++	}
++
++	public override void BeginOitAccumulation(FrameBufferRef transparent)
++	{
++		DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
++		GL.DrawBuffers(array2.Length, array2);
++		GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0);
++		GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0);
++		GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++		GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++		GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++		float[] array3 = new float[4];
++		float[] array4 = new float[4] { 1f, 1f, 1f, 1f };
++		GL.ClearBuffer((ClearBuffer)6144, 0, array4);
++		GL.ClearBuffer((ClearBuffer)6144, 1, array4);
++		GL.ClearBuffer((ClearBuffer)6144, 3, array3);
++		GL.ClearBuffer((ClearBuffer)6144, 4, array3);
++		GL.ClearBuffer((ClearBuffer)6144, 5, array3);
++	}
++
++	public override void BindOitTextures(int revealTexture, int accumTexture)
++	{
++		GL.ActiveTexture((TextureUnit)33990);
++		GL.BindTexture((TextureTarget)3553, revealTexture);
++		GL.ActiveTexture((TextureUnit)33991);
++		GL.BindTexture((TextureTarget)35866, accumTexture);
++		GL.ActiveTexture((TextureUnit)33984);
++	}
++
++	public override int GenOcclusionQuery()
++	{
++		int queryId;
++		GL.GenQueries(1, out queryId);
++		return queryId;
++	}
++
++	public override void BeginOcclusionQuery(int queryId)
++	{
++		GL.BeginQuery((QueryTarget)35092, queryId);
++	}
++
++	public override void EndOcclusionQuery(int queryId)
++	{
++		GL.EndQuery((QueryTarget)35092);
++	}
++
++	public override bool TryGetOcclusionQueryResult(int queryId, out int samples)
++	{
++		int num = default(int);
++		GL.GetQueryObject(queryId, (GetQueryObjectParam)34919, out num);
++		if (num > 0)
++		{
++			GL.GetQueryObject(queryId, (GetQueryObjectParam)34918, out samples);
++			return true;
++		}
++		samples = 0;
++		return false;
++	}
++
++	public override void DeleteOcclusionQuery(int queryId)
++	{
++		GL.DeleteQuery(queryId);
++	}
++
++	public override void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
++	{
++		GL.ReadPixels(x, y, width, height, (PixelFormat)32993, (PixelType)5121, destination);
++	}
++
++	public override string GraphicsBackendName
++	{
++		get
++		{
++			return "OpenGL";
 +		}
 +	}
 +
@@ -1421,19 +1012,81 @@ index 6edf0c9..38aeda2 100644
 +		return readback;
 +	}
 +
++	/// <summary>
++	/// Optimum (Vulkan-native plan, Phase 1A step 4): the platform state
++	/// VulkanClientPlatform.SetupDefaultFrameBuffers reads and writes at the points the
++	/// device-path setup used to touch these private fields directly. Called by nothing
++	/// on the OpenGL path.
++	/// </summary>
++	public void OptimumAdoptFrameBufferSettings()
++	{
++		SetupSSAO = ClientSettings.SSAOQuality > 0;
++		ShadowMapQuality = ClientSettings.ShadowMapQuality;
++		ssaaLevel = ClientSettings.SSAA;
++	}
++
++	/// <summary>
++	/// Optimum TAA: read once per (re-)build; a mid-session config change only takes
++	/// effect on the next RebuildFrameBuffers. optimumTaaDisabled is checked as well as
++	/// EffectiveTaa: DisableOptimumTaa sets both, and the local flag keeps this platform
++	/// from retrying a failed allocation even if the process-wide config flag is ever reset.
++	/// </summary>
++	public bool OptimumTaaRequested => !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
++
++	/// <summary>Optimum: the SSAO sample kernel the setup fills and the SSAO pass uploads.</summary>
++	public float[] OptimumSsaoKernel => ssaoKernel;
++
++	/// <summary>Optimum TAA: publishes Primary's motion attachment index as soon as Primary exists.</summary>
++	public void SetOptimumMotionAttachmentIndex(int index)
++	{
++		optimumMotionAttachmentIndex = index;
++	}
++
++	/// <summary>Optimum TAA: the targets are ready once the motion attachment and both history slots exist.</summary>
++	public void OptimumAdoptTaaTargets(List<FrameBufferRef> list, bool taaRequested)
++	{
++		optimumTaaTargetsReady = taaRequested && MotionAttachmentIndex >= 0
++			&& list[OptimumTaaHistoryIndexA] != null && list[OptimumTaaHistoryIndexB] != null;
++		InstallOptimumMotionWriteHooks();
++	}
++
++	/// <summary>
++	/// Optimum: the tail of the device-path framebuffer setup - the fullscreen quad, the
++	/// bound target, the TAA history reset and the log line.
++	/// </summary>
++	public void OptimumFinishDeviceFrameBufferSetup(List<FrameBufferRef> list)
++	{
++		// The fullscreen quad. The device generates its three vertices in the
++		// shader and binds nothing, but the field is public enough that other
++		// code holds it, so it is kept in step with the GL path.
++		MeshData quadData = QuadMeshUtil.GetCustomQuadModelData(-1f, -1f, 0f, 2f, 2f);
++		quadData.Normals = null;
++		quadData.Rgba = null;
++		quadData.Uv = null;
++		if (screenQuad != null)
++		{
++			screenQuad.Dispose();
++		}
++		screenQuad = UploadMesh(quadData);
++
++		CurrentFrameBufferKeepVw = (OffscreenBuffer ? list[0] : null);
++		// Optimum TAA: the history slots this build just allocated hold
++		// undefined contents, and the old ones are about to be disposed. Both
++		// the local flag and the temporal contract have to know, because the
++		// flag only guards our own resolve while the reset reason is what every
++		// other temporal consumer (vendor upscalers later) reads.
++		_taaHistoryValid = false;
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
++		logger.Notification("(Re-)loaded frame buffers on the Optimum device");
++	}
++
 +	public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumSetupDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumSetupDevice != null)
-+		{
-+			return SetupOptimumFrameBuffers(optimumSetupDevice);
-+		}
  		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
  		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
  		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0211: Unknown result type (might be due to invalid IL or missing references)
-@@ -1187,10 +2345,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1187,10 +2047,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
  		if (num == 0 || num2 == 0)
  		{
@@ -1451,7 +1104,7 @@ index 6edf0c9..38aeda2 100644
  		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
-@@ -1210,11 +2375,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1210,11 +2077,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -1468,7 +1121,7 @@ index 6edf0c9..38aeda2 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1251,10 +2420,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1251,10 +2122,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
@@ -1501,13 +1154,13 @@ index 6edf0c9..38aeda2 100644
 +				motionAttachmentIndex = -1;
 +			}
 +		}
-+		MotionAttachmentIndex = motionAttachmentIndex;
++		optimumMotionAttachmentIndex = motionAttachmentIndex;
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Primary);
  		frameBufferRef = (list[1] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1436,10 +2633,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +2335,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
@@ -1552,7 +1205,7 @@ index 6edf0c9..38aeda2 100644
 +				list[OptimumTaaSharpenIndex] = null;
 +			}
 +		}
-+		TaaTargetsReady = taaRequested && MotionAttachmentIndex >= 0
++		optimumTaaTargetsReady = taaRequested && MotionAttachmentIndex >= 0
 +			&& list[OptimumTaaHistoryIndexA] != null && list[OptimumTaaHistoryIndexB] != null;
 +		InstallOptimumMotionWriteHooks();
 +		if (ClientSettings.OptimumRenderScale < 1.0f)
@@ -1583,7 +1236,7 @@ index 6edf0c9..38aeda2 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +2810,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +2512,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -1598,7 +1251,7 @@ index 6edf0c9..38aeda2 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +2833,115 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +2535,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1612,7 +1265,7 @@ index 6edf0c9..38aeda2 100644
 +	/// member for it) attachments.
 +	/// </summary>
 +	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
- 	{
++	{
 +		FrameBufferRef target = new FrameBufferRef
 +		{
 +			FboId = GL.GenFramebuffer(),
@@ -1664,37 +1317,13 @@ index 6edf0c9..38aeda2 100644
 +	}
 +
 +	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
-+	{
+ 	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
 +		// Transparent, so the same handle appears in more than one FrameBufferRef.
 +		// Deleting it twice double-frees on the device path and makes
 +		// VulkanStats.NoteTextureDeleted over-count, so every handle is deleted once.
 +		HashSet<int> deletedTextures = new HashSet<int>();
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			for (int k = 0; k < buffers.Count; k++)
-+			{
-+				if (buffers[k] != null)
-+				{
-+					optimumDevice.DeleteFramebuffer(buffers[k].FboId);
-+					if (deletedTextures.Add(buffers[k].DepthTextureId))
-+					{
-+						optimumDevice.DeleteTexture(buffers[k].DepthTextureId);
-+					}
-+					for (int n = 0; n < buffers[k].ColorTextureIds.Length; n++)
-+					{
-+						if (deletedTextures.Add(buffers[k].ColorTextureIds[n]))
-+						{
-+							optimumDevice.DeleteTexture(buffers[k].ColorTextureIds[n]);
-+						}
-+					}
-+					buffers[k].Disposed = true;
-+				}
-+			}
-+			return;
-+		}
  		for (int i = 0; i < buffers.Count; i++)
  		{
  			if (buffers[i] != null)
@@ -1717,7 +1346,7 @@ index 6edf0c9..38aeda2 100644
  			}
  		}
  	}
-@@ -1591,11 +2951,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +2629,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1725,125 +1354,66 @@ index 6edf0c9..38aeda2 100644
  	{
 +		// Mono.Cecil transplant.
  		CurrentFrameBufferKeepVw = framebuffer;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			if (clearColorBuffers)
-+			{
-+				for (int k = 0; k < framebuffer.ColorTextureIds.Length; k++)
-+				{
-+					optimumDevice.ClearColor(k, clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
-+				}
-+			}
-+			if (clearDepthBuffer)
-+			{
-+				optimumDevice.ClearDepth(1f);
-+			}
-+			return;
-+		}
++		ClearBoundFrameBuffer(framebuffer, clearColor, clearDepthBuffer, clearColorBuffers);
++	}
++
++	/// <summary>Optimum (Phase 1A step 4): the GL half of ClearFrameBuffer(FrameBufferRef, float[], bool, bool).</summary>
++	public override void ClearBoundFrameBuffer(FrameBufferRef framebuffer, float[] clearColor, bool clearDepthBuffer, bool clearColorBuffers)
++	{
  		if (clearColorBuffers)
  		{
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1608,38 +2985,135 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		}
- 	}
- 
- 	public override void LoadFrameBuffer(FrameBufferRef frameBuffer, int textureId)
- 	{
-+		// Mono.Cecil transplant.
-+		// Swaps the colour attachment on an already-created target, which mods
-+		// use to render into a texture they own.
- 		CurrentFrameBuffer = frameBuffer;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.AttachTexture(frameBuffer.FboId, EnumFramebufferAttachment.ColorAttachment0, textureId, 0);
-+			return;
-+		}
- 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, textureId, 0);
- 	}
- 
- 	public override void UnloadFrameBuffer(FrameBufferRef frameBuffer)
- 	{
+@@ -1619,27 +2664,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
  	public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)
  	{
 +		// Mono.Cecil transplant.
-+		// Same clear values per pass as the GL body. Default clears the swapchain
-+		// image with the colour GlClearColorRgbaf recorded, since the device has
-+		// no GL clear-colour state of its own.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			switch (framebuffer)
-+			{
-+			case EnumFrameBuffer.Default:
-+				CurrentFrameBufferKeepVw = null;
-+				optimumDevice.ClearColor(0, optimumClearR, optimumClearG, optimumClearB, optimumClearA);
-+				optimumDevice.ClearDepth(1f);
-+				CurrentFrameBufferKeepVw = frameBuffers[0];
-+				break;
-+			case EnumFrameBuffer.Primary:
-+				// Optimum TAA (P3): the frame starts with no motion window open.
-+				// Primary is cleared exactly once per frame (ScreenManager), and
-+				// the draw-buffer set is restored below, so this makes a pass that
-+				// failed to reach EndMotionWrite heal at the next frame instead of
-+				// leaving the attachment enabled for every later pass.
-+				OptimumMotionWriteActive = false;
-+				optimumDevice.ClearColor(0, 0f, 0f, 0f, 1f);
-+				optimumDevice.ClearColor(1, 0f, 0f, 0f, 1f);
-+				if (RenderSSAO)
-+				{
-+					optimumDevice.ClearColor(2, 0f, 0f, 0f, 1f);
-+					optimumDevice.ClearColor(3, 0f, 0f, 0f, 1f);
-+				}
-+				if (MotionAttachmentIndex >= 0)
-+				{
-+					// ClearColor honours the draw-buffer mask on the device too.
-+					// Motion is excluded until a writer opts in, so temporarily
-+					// enable it just as the GL branch does below. Otherwise stale
-+					// motion/reactivity survives and can reject all TAA history.
-+					optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
-+					optimumDevice.ClearColor(MotionAttachmentIndex, 0f, 0f, 0f, 0f);
-+					optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
-+				}
-+				optimumDevice.ClearDepth(1f);
-+				break;
-+			case EnumFrameBuffer.LiquidDepth:
-+			case EnumFrameBuffer.ShadowmapFar:
-+			case EnumFrameBuffer.ShadowmapNear:
-+			{
-+				FrameBufferRef optimumTarget = FrameBuffers[(int)framebuffer];
-+				optimumDevice.SetViewport(0, 0, optimumTarget.Width, optimumTarget.Height);
-+				optimumDevice.ClearDepth(1f);
-+				break;
-+			}
-+			case EnumFrameBuffer.Transparent:
-+				// Weighted-blended OIT: accumulation starts at zero, revealage at
-+				// one, and the third attachment is the opaque-depth copy.
-+				optimumDevice.ClearColor(0, 0f, 0f, 0f, 0f);
-+				optimumDevice.ClearColor(1, 1f, 0f, 0f, 0f);
-+				optimumDevice.ClearColor(2, 0f, 0f, 0f, 0f);
-+				break;
-+			}
-+			return;
-+		}
++		// The clears themselves are ClearFrameBufferPass (GL below, the device in
++		// VulkanClientPlatform); the target selection and the TAA window state stay here.
  		switch (framebuffer)
  		{
  		case EnumFrameBuffer.Default:
  			CurrentFrameBufferKeepVw = null;
++			ClearFrameBufferPass(framebuffer);
++			CurrentFrameBufferKeepVw = frameBuffers[0];
++			break;
++		case EnumFrameBuffer.Primary:
++			// Optimum TAA (P3): the frame starts with no motion window open.
++			// Primary is cleared exactly once per frame (ScreenManager), and
++			// the draw-buffer set is restored by the clear, so this makes a pass
++			// that failed to reach EndMotionWrite heal at the next frame instead of
++			// leaving the attachment enabled for every later pass.
++			optimumMotionWriteActive = false;
++			ClearFrameBufferPass(framebuffer);
++			break;
++		case EnumFrameBuffer.LiquidDepth:
++		case EnumFrameBuffer.ShadowmapFar:
++		case EnumFrameBuffer.ShadowmapNear:
++		case EnumFrameBuffer.Transparent:
++			ClearFrameBufferPass(framebuffer);
++			break;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): the GL calls of <see cref="ClearFrameBuffer(EnumFrameBuffer)" />,
++	/// per pass. The target is already bound by the caller.
++	/// </summary>
++	public override void ClearFrameBufferPass(EnumFrameBuffer framebuffer)
++	{
++		switch (framebuffer)
++		{
++		case EnumFrameBuffer.Default:
  			GL.DrawBuffer((DrawBufferMode)1029);
  			GL.Clear((ClearBufferMask)16640);
- 			CurrentFrameBufferKeepVw = frameBuffers[0];
+-			CurrentFrameBufferKeepVw = frameBuffers[0];
  			break;
  		case EnumFrameBuffer.Primary:
  		{
-+			// Optimum TAA (P3): see the device branch above.
-+			OptimumMotionWriteActive = false;
  			GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 0f, 0f, 0f, 1f });
  			GL.ClearBuffer((ClearBuffer)6144, 1, new float[4] { 0f, 0f, 0f, 1f });
  			if (RenderSSAO)
@@ -1882,18 +1452,17 @@ index 6edf0c9..38aeda2 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,20 +3144,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +2773,68 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0351: Unknown result type (might be due to invalid IL or missing references)
  		//IL_036a: Unknown result type (might be due to invalid IL or missing references)
 +		// Mono.Cecil transplant.
-+		// Viewport, blend and draw-buffer selection go through the routed helpers
-+		// so both backends share this switch. Only the calls with no routed
-+		// equivalent - the multi-attachment blend setup for OIT and the
-+		// GL_BACK draw-buffer selection - branch on the device.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		// Viewport, blend and draw-buffer selection go through platform virtuals
++		// so both backends share this switch: the multi-attachment blend setup for
++		// OIT, the GL_BACK draw-buffer selection and the Luma blend toggle are
++		// overridden by VulkanClientPlatform.
  		switch (framebuffer)
  		{
  		case EnumFrameBuffer.Transparent:
@@ -1904,27 +1473,16 @@ index 6edf0c9..38aeda2 100644
  			GlDepthMask(flag: false);
  			GlEnableDepthTest();
  			ScreenManager.FrameProfiler.Mark("rendTransp-dbset");
-+			if (optimumDevice != null)
-+			{
-+				// Weighted-blended OIT: accumulation adds, revealage multiplies,
-+				// and the third attachment uses ordinary source-alpha blending.
-+				optimumDevice.SetDrawBuffers(frameBuffers[1].FboId, 7);
-+				optimumDevice.SetBlend(true, EnumBlendMode.Standard);
-+				optimumDevice.SetBlendEquation(0, 32774);
-+				optimumDevice.SetBlendFuncSeparate(0, 1, 1, 1, 1);
-+				optimumDevice.SetBlendEquation(1, 32774);
-+				optimumDevice.SetBlendFuncSeparate(1, 0, 769, 0, 769);
-+				optimumDevice.SetBlendEquation(2, 32774);
-+				optimumDevice.SetBlendFuncSeparate(2, 770, 771, 770, 771);
-+				break;
-+			}
- 			DrawBuffersEnum[] array2 = new DrawBuffersEnum[3] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2 };
- 			GL.DrawBuffers(3, array2);
- 			GL.Enable((EnableCap)3042);
- 			GL.BlendEquation(0, (BlendEquationMode)32774);
- 			GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-@@ -1693,48 +3187,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
+-			DrawBuffersEnum[] array2 = new DrawBuffersEnum[3] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2 };
+-			GL.DrawBuffers(3, array2);
+-			GL.Enable((EnableCap)3042);
+-			GL.BlendEquation(0, (BlendEquationMode)32774);
+-			GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
+-			GL.BlendEquation(1, (BlendEquationMode)32774);
+-			GL.BlendFunc(1, (BlendingFactorSrc)0, (BlendingFactorDest)769);
+-			GL.BlendEquation(2, (BlendEquationMode)32774);
+-			GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
++			ApplyTransparentPassBlendState();
  			break;
  		}
  		case EnumFrameBuffer.Default:
@@ -1932,10 +1490,7 @@ index 6edf0c9..38aeda2 100644
 -			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
 -			GL.DrawBuffer((DrawBufferMode)1029);
 +			GlViewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
-+			if (optimumDevice == null)
-+			{
-+				GL.DrawBuffer((DrawBufferMode)1029);
-+			}
++			SelectBackDrawBuffer();
  			break;
  		case EnumFrameBuffer.BlurHorizontalMedRes:
  		case EnumFrameBuffer.BlurVerticalMedRes:
@@ -1970,14 +1525,7 @@ index 6edf0c9..38aeda2 100644
  			break;
  		case EnumFrameBuffer.Luma:
 -			GL.Disable((EnableCap)3042);
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.SetBlendEnabled(false);
-+			}
-+			else
-+			{
-+				GL.Disable((EnableCap)3042);
-+			}
++			SetBlendEnabled(false);
  			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.SSAO:
@@ -1990,7 +1538,7 @@ index 6edf0c9..38aeda2 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,16 +3257,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1753,39 +2853,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
@@ -2003,16 +1551,58 @@ index 6edf0c9..38aeda2 100644
  			{
  				CurrentFrameBufferKeepVw = null;
 -				GL.DrawBuffer((DrawBufferMode)1029);
-+				if (optimumDevice == null)
-+				{
-+					GL.DrawBuffer((DrawBufferMode)1029);
-+				}
++				SelectBackDrawBuffer();
  			}
  			break;
  		case (EnumFrameBuffer)6:
  			break;
  		}
-@@ -1774,18 +3281,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	}
+ 
++	/// <summary>
++	/// Optimum (Phase 1A step 4): the GL half of LoadFrameBuffer(Transparent) -
++	/// weighted-blended OIT: accumulation adds, revealage multiplies, and the third
++	/// attachment uses ordinary source-alpha blending.
++	/// </summary>
++	public override void ApplyTransparentPassBlendState()
++	{
++		DrawBuffersEnum[] array2 = new DrawBuffersEnum[3] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2 };
++		GL.DrawBuffers(3, array2);
++		GL.Enable((EnableCap)3042);
++		GL.BlendEquation(0, (BlendEquationMode)32774);
++		GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
++		GL.BlendEquation(1, (BlendEquationMode)32774);
++		GL.BlendFunc(1, (BlendingFactorSrc)0, (BlendingFactorDest)769);
++		GL.BlendEquation(2, (BlendEquationMode)32774);
++		GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): selecting GL_BACK on the default framebuffer.
++	/// VulkanClientPlatform has nothing to do: binding the default target already
++	/// means the swapchain image.
++	/// </summary>
++	public override void SelectBackDrawBuffer()
++	{
++		GL.DrawBuffer((DrawBufferMode)1029);
++	}
++
++	/// <summary>Optimum (Phase 1A step 4): glEnable/glDisable(GL_BLEND) without touching the mode.</summary>
++	public override void SetBlendEnabled(bool enabled)
++	{
++		if (enabled)
++		{
++			GL.Enable((EnableCap)3042);
++		}
++		else
++		{
++			GL.Disable((EnableCap)3042);
++		}
++	}
++
+ 	public override void UnloadFrameBuffer(EnumFrameBuffer framebuffer)
+ 	{
+ 		//IL_0013: Unknown result type (might be due to invalid IL or missing references)
  		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
  		if (framebuffer == EnumFrameBuffer.Transparent)
  		{
@@ -2028,18 +1618,13 @@ index 6edf0c9..38aeda2 100644
  		}
  		CurrentFrameBufferKeepVw = null;
 -		GL.DrawBuffer((DrawBufferMode)1029);
-+		// Selecting GL_BACK has no device equivalent: binding the default target
-+		// already means the swapchain image.
-+		if (Vintagestory.API.Config.OptimumRender.Device == null)
-+		{
-+			GL.DrawBuffer((DrawBufferMode)1029);
-+		}
++		SelectBackDrawBuffer();
  	}
  
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,22 +3306,269 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +2935,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -2047,29 +1632,12 @@ index 6edf0c9..38aeda2 100644
  			CurrentFrameBufferKeepVw = null;
 -			GL.DrawBuffer((DrawBufferMode)1029);
 +			// Mono.Cecil transplant.
-+			// Selecting GL_BACK has no device counterpart - the default target is
-+			// already the swapchain image.
-+			if (Vintagestory.API.Config.OptimumRender.Device == null)
-+			{
-+				GL.DrawBuffer((DrawBufferMode)1029);
-+			}
++			SelectBackDrawBuffer();
 +		}
-+		// The three state calls are spelled out on the device rather than routed
-+		// through GlToggleBlend, because that helper also overrides the SSAO
-+		// attachments and this pass deliberately sets only the global mode.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumMergeDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumMergeDevice != null)
-+		{
-+			optimumMergeDevice.SetDepthTest(false);
-+			optimumMergeDevice.SetBlend(true, EnumBlendMode.Standard);
-+			optimumMergeDevice.SetBlendFuncSeparate(0, 770, 771, 770, 771);
-+		}
-+		else
-+		{
-+			GL.Disable((EnableCap)2929);
-+			GL.Enable((EnableCap)3042);
-+			GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
-+		}
++		// The three state calls are spelled out rather than routed through
++		// GlToggleBlend, because that helper also overrides the SSAO attachments
++		// and this pass deliberately sets only the global mode.
++		ApplyTransparentMergeBlendState();
 +		// Optimum TAA (P4): everything drawn into the Transparent target - quad
 +		// particles, OIT entities, liquid shading, the cloud layers - writes six
 +		// oit.fsh outputs and cannot reach Primary's motion attachment. The plan
@@ -2109,6 +1677,17 @@ index 6edf0c9..38aeda2 100644
 +	}
 +
 +	/// <summary>
++	/// Optimum (Phase 1A step 4): the GL half of the OIT merge's state - depth test off,
++	/// blending on with the global source-alpha mode.
++	/// </summary>
++	public override void ApplyTransparentMergeBlendState()
++	{
++		GL.Disable((EnableCap)2929);
++		GL.Enable((EnableCap)3042);
++		GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
++	}
++
++	/// <summary>
 +	/// Optimum TAA (P4): additive blending on the motion attachment alone, for
 +	/// the one pass that contributes to a channel of it rather than owning the
 +	/// pixel - the OIT merge, which adds the transparent layer's coverage into
@@ -2120,16 +1699,9 @@ index 6edf0c9..38aeda2 100644
 +	/// the same thing, but the per-attachment blend seam already exists on both
 +	/// backends and a per-attachment colour mask does not.
 +	/// </summary>
-+	private void ApplyOptimumMotionAccumulateBlendState()
++	public override void ApplyOptimumMotionAccumulateBlendState()
 +	{
 +		if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetBlendEquation(MotionAttachmentIndex, 32774);
-+			optimumDevice.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 1, 1, 1);
-+			return;
-+		}
 +		GL.BlendEquation(MotionAttachmentIndex, (BlendEquationMode)32774);
 +		GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)1);
 +	}
@@ -2140,10 +1712,10 @@ index 6edf0c9..38aeda2 100644
 +	/// and depth. Returns false when TAA is off or not ready, in which case the
 +	/// post chain runs exactly as it does today.
 +	/// </summary>
-+	private bool RenderOptimumTaaResolve()
++	public override bool RenderOptimumTaaResolve()
 +	{
 +		OptimumRunPendingTaaShaderReload();
-+		TaaResolvedThisFrame = false;
++		optimumTaaResolvedThisFrame = false;
 +		if (!TaaTargetsReady || !Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
 +		{
 +			_taaHistoryValid = false;
@@ -2218,7 +1790,7 @@ index 6edf0c9..38aeda2 100644
 +		taaResolvedGlowTexture = write.ColorTextureIds[1];
 +		_taaHistoryValid = true;
 +		_taaFrameParity ^= 1;
-+		TaaResolvedThisFrame = true;
++		optimumTaaResolvedThisFrame = true;
 +		// Restore everything this pass changed, symmetrically: the rest of
 +		// RenderPostprocessingEffects runs with blend on, the depth test on and
 +		// Primary bound, and it is this pass's job to hand that back rather than
@@ -2238,7 +1810,7 @@ index 6edf0c9..38aeda2 100644
 +	/// RCAS is about to sharpen again. One shared condition is the only way the
 +	/// two cannot drift apart.
 +	/// </summary>
-+	private bool OptimumFsrBlitActive()
++	public override bool OptimumFsrBlitActive()
 +	{
 +		ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
 +		ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
@@ -2271,7 +1843,7 @@ index 6edf0c9..38aeda2 100644
 +	///   at native resolution after the upscale, which is where a spatial
 +	///   sharpener belongs.
 +	/// </summary>
-+	private int RenderOptimumTaaSharpen(int resolvedScene)
++	public override int RenderOptimumTaaSharpen(int resolvedScene)
 +	{
 +		if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)
 +		{
@@ -2313,7 +1885,7 @@ index 6edf0c9..38aeda2 100644
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,20 +3583,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,20 +3199,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -2321,9 +1893,9 @@ index 6edf0c9..38aeda2 100644
  		}
 +		// Mono.Cecil transplant.
 +		// The pass structure is API-neutral - it is framebuffer selection, a
-+		// fullscreen triangle and uniforms, all of which route already. Only the
-+		// handful of direct GL calls left in this body branch on the device.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumPostDevice = Vintagestory.API.Config.OptimumRender.Device;
++		// fullscreen triangle and uniforms, all of which are platform virtuals.
++		// The SSAO clear and the final blend enable are too (ClearSsaoTarget,
++		// SetBlendEnabled).
  		int x = ((NativeWindow)window).ClientSize.X;
  		int y = ((NativeWindow)window).ClientSize.Y;
 +		// Optimum TAA: resolve first, so bloom, god rays and the final input read
@@ -2350,7 +1922,7 @@ index 6edf0c9..38aeda2 100644
  			RenderFullscreenTriangle(screenQuad);
  			findbright.Stop();
  			ShaderProgramBlur blur = ShaderPrograms.Blur;
-@@ -1848,45 +3622,55 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1848,45 +3238,48 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			RenderFullscreenTriangle(screenQuad);
  			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
  			blur.IsVertical = 1;
@@ -2399,20 +1971,13 @@ index 6edf0c9..38aeda2 100644
  			GlToggleBlend(on: false);
  			LoadFrameBuffer(EnumFrameBuffer.SSAO);
 -			GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 1f, 1f, 1f, 1f });
-+			if (optimumPostDevice != null)
-+			{
-+				optimumPostDevice.ClearColor(0, 1f, 1f, 1f, 1f);
-+			}
-+			else
-+			{
-+				GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 1f, 1f, 1f, 1f });
-+			}
++			ClearSsaoTarget();
  			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
  			ssao.Use();
  			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
  			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
  			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-@@ -1915,31 +3699,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,35 +3308,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -2445,45 +2010,38 @@ index 6edf0c9..38aeda2 100644
  			blit.Stop();
  		}
 -		GL.Enable((EnableCap)3042);
-+		if (optimumPostDevice != null)
-+		{
-+			// Re-enabling blend only; the mode is whatever the last GlToggleBlend
-+			// left, which is what glEnable(GL_BLEND) does here too.
-+			optimumPostDevice.SetBlendEnabled(true);
-+		}
-+		else
-+		{
-+			GL.Enable((EnableCap)3042);
-+		}
++		// Re-enabling blend only; the mode is whatever the last GlToggleBlend
++		// left, which is what glEnable(GL_BLEND) does here too.
++		SetBlendEnabled(true);
  		LoadFrameBuffer(EnumFrameBuffer.Primary);
  		ScreenManager.Platform.CheckGlError();
  	}
  
++	/// <summary>Optimum (Phase 1A step 4): the GL half of the SSAO target's white clear.</summary>
++	public override void ClearSsaoTarget()
++	{
++		GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 1f, 1f, 1f, 1f });
++	}
++
  	public override void RenderFinalComposition()
-@@ -1953,19 +3749,32 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	{
+ 		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
+ 		if (OffscreenBuffer)
+@@ -1953,19 +3357,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
  				_ = frameBuffers[8].ColorTextureIds[0];
  			}
-+			// Mono.Cecil transplant.
-+			// glDrawBuffers applies to whatever framebuffer is bound, which here
-+			// is Primary; the device takes the target explicitly, and its mask is
-+			// positional - bit N selects ColorAttachmentN.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
- 			DrawBuffersEnum[] array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[1] { (DrawBuffersEnum)36064 };
+-			DrawBuffersEnum[] array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[1] { (DrawBuffersEnum)36064 };
 -			GL.DrawBuffers(1, array);
 -			GL.Disable((EnableCap)2929);
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 1);
-+				optimumDevice.SetDepthTest(false);
-+			}
-+			else
-+			{
-+				GL.DrawBuffers(1, array);
-+				GL.Disable((EnableCap)2929);
-+			}
++			// Mono.Cecil transplant.
++			// The draw-buffer selection on both sides of the pass is a platform
++			// virtual: glDrawBuffers applies to whatever framebuffer is bound, which
++			// here is Primary, while the device takes the target explicitly.
++			BeginFinalCompositionDrawBuffers();
  			GlToggleBlend(on: true);
  			ShaderProgramFinal final = ShaderPrograms.Final;
  			final.Use();
@@ -2496,65 +2054,69 @@ index 6edf0c9..38aeda2 100644
  			if (RenderSSAO)
  			{
  				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
-@@ -1987,23 +3796,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +3393,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
  			RenderFullscreenTriangle(screenQuad);
  			final.Stop();
-+			// Restores the multi-attachment selection the world passes expect.
- 			if (RenderSSAO)
- 			{
- 				array = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
+-			if (RenderSSAO)
+-			{
+-				array = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
 -				GL.DrawBuffers(4, array);
-+				if (optimumDevice != null)
-+				{
-+					optimumDevice.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 15);
-+				}
-+				else
-+				{
-+					GL.DrawBuffers(4, array);
-+				}
- 			}
- 			else
+-			}
+-			else
++			// Restores the multi-attachment selection the world passes expect.
++			RestoreWorldDrawBuffers(RenderSSAO);
++		}
++	}
++
++	/// <summary>Optimum (Phase 1A step 4): the GL half of the final composition's pass state.</summary>
++	public override void BeginFinalCompositionDrawBuffers()
++	{
++		DrawBuffersEnum[] array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[1] { (DrawBuffersEnum)36064 };
++		GL.DrawBuffers(1, array);
++		GL.Disable((EnableCap)2929);
++	}
++
++	/// <summary>
++	/// Optimum (Phase 1A step 4): the GL half of the draw-buffer restore after the final
++	/// composition - four attachments with the SSAO G-buffer, two without.
++	/// </summary>
++	public override void RestoreWorldDrawBuffers(bool ssaoAttachments)
++	{
++		DrawBuffersEnum[] array;
++		if (ssaoAttachments)
++		{
++			array = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
++			GL.DrawBuffers(4, array);
++		}
++		else
++		{
++			array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
  			{
- 				array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
- 				{
- 					(DrawBuffersEnum)36064,
- 					(DrawBuffersEnum)36065
- 				};
+-				array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
+-				{
+-					(DrawBuffersEnum)36064,
+-					(DrawBuffersEnum)36065
+-				};
 -				GL.DrawBuffers(2, array);
-+				if (optimumDevice != null)
-+				{
-+					optimumDevice.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 3);
-+				}
-+				else
-+				{
-+					GL.DrawBuffers(2, array);
-+				}
- 			}
+-			}
++				(DrawBuffersEnum)36064,
++				(DrawBuffersEnum)36065
++			};
++			GL.DrawBuffers(2, array);
  		}
  	}
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
-@@ -2014,28 +3838,485 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_0030: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0040: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0046: Invalid comparison between Unknown and I4
- 		if ((int)type != 33361)
- 		{
--			string text = Marshal.PtrToStringAnsi(message, length);
--			Logger.Notification("{0} {1} | {2}", severity, type, text);
--			if ((int)type == 33356)
-+			string text = Marshal.PtrToStringAnsi(message, length);
-+			Logger.Notification("{0} {1} | {2}", severity, type, text);
-+			if ((int)type == 33356)
-+			{
-+				throw new Exception(text);
-+			}
-+		}
-+	}
-+
+ 	{
+@@ -2023,27 +3448,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 				throw new Exception(text);
+ 			}
+ 		}
+ 	}
+ 
 +	private void DisableOptimumFsr(Exception error)
 +	{
 +		if (!optimumFsrDisabled)
@@ -2572,15 +2134,15 @@ index 6edf0c9..38aeda2 100644
 +	/// <see cref="TaaTargetsReady" /> and <see cref="MotionAttachmentIndex" />
 +	/// (reset to -1 here too).
 +	/// </summary>
-+	public void DisableOptimumTaa(string reason)
++	public override void DisableOptimumTaa(string reason)
 +	{
 +		if (!optimumTaaDisabled)
 +		{
 +			logger.Error("Optimum TAA disabled after frame buffer setup failure: {0}", reason);
 +		}
 +		optimumTaaDisabled = true;
-+		TaaTargetsReady = false;
-+		MotionAttachmentIndex = -1;
++		optimumTaaTargetsReady = false;
++		optimumMotionAttachmentIndex = -1;
 +		// final.fsh is compiled with FXAA 0 whenever EffectiveTaa is true, so
 +		// without this the fallback path has no anti-aliasing at all. The
 +		// runtime flag makes EffectiveTaa false for the rest of the session
@@ -2641,7 +2203,7 @@ index 6edf0c9..38aeda2 100644
 +	/// unconditionally.
 +	/// </summary>
 +	/// <returns>Whether the motion attachment is now enabled.</returns>
-+	public bool BeginMotionWrite()
++	public override bool BeginMotionWrite()
 +	{
 +		if (OptimumMotionWriteActive) return false;
 +		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
@@ -2668,24 +2230,8 @@ index 6edf0c9..38aeda2 100644
 +		// pass outside Primary has to do anyway.
 +		if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;
 +
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);
-+		}
-+		else
-+		{
-+			if (optimumMotionDrawBuffersOn == null || optimumMotionDrawBuffersOn.Length != MotionAttachmentIndex + 1)
-+			{
-+				optimumMotionDrawBuffersOn = new DrawBuffersEnum[MotionAttachmentIndex + 1];
-+				for (int optimumDb = 0; optimumDb <= MotionAttachmentIndex; optimumDb++)
-+				{
-+					optimumMotionDrawBuffersOn[optimumDb] = (DrawBuffersEnum)(36064 + optimumDb);
-+				}
-+			}
-+			GL.DrawBuffers(optimumMotionDrawBuffersOn.Length, optimumMotionDrawBuffersOn);
-+		}
-+		OptimumMotionWriteActive = true;
++		EnableMotionDrawBuffers();
++		optimumMotionWriteActive = true;
 +		// Blending is per-attachment state that GlToggleBlend re-applies whenever
 +		// a pass turns blending on; motion must never blend, so the mask change
 +		// has to be paired with it right away for a pass that is already blending.
@@ -2694,26 +2240,46 @@ index 6edf0c9..38aeda2 100644
 +	}
 +
 +	/// <summary>
++	/// Optimum TAA (P3): the GL half of <see cref="BeginMotionWrite" /> - Primary's
++	/// default colour set plus the motion attachment. VulkanClientPlatform sets the
++	/// same set as a device mask.
++	/// </summary>
++	public override void EnableMotionDrawBuffers()
++	{
++		if (optimumMotionDrawBuffersOn == null || optimumMotionDrawBuffersOn.Length != MotionAttachmentIndex + 1)
++		{
++			optimumMotionDrawBuffersOn = new DrawBuffersEnum[MotionAttachmentIndex + 1];
++			for (int optimumDb = 0; optimumDb <= MotionAttachmentIndex; optimumDb++)
++			{
++				optimumMotionDrawBuffersOn[optimumDb] = (DrawBuffersEnum)(36064 + optimumDb);
++			}
++		}
++		GL.DrawBuffers(optimumMotionDrawBuffersOn.Length, optimumMotionDrawBuffersOn);
++	}
++
++	/// <summary>
 +	/// Optimum TAA (P3): restores Primary's default draw-buffer set (the 2 or 4
 +	/// colour attachments the setup left bound), taking the motion attachment
 +	/// back out. Safe to call when <see cref="BeginMotionWrite" /> returned false.
 +	/// </summary>
-+	public void EndMotionWrite()
++	public override void EndMotionWrite()
 +	{
 +		if (!OptimumMotionWriteActive) return;
-+		OptimumMotionWriteActive = false;
++		optimumMotionWriteActive = false;
 +		if (MotionAttachmentIndex < 0) return;
 +		if (frameBuffers == null || frameBuffers.Count == 0 || frameBuffers[0] == null) return;
 +
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// MotionAttachmentIndex is also the size of the default set (2 without
-+			// the SSAO G-buffer, 4 with it), because the attachment was appended
-+			// after it.
-+			optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);
-+			return;
-+		}
++		RestorePrimaryDrawBuffers();
++	}
++
++	/// <summary>
++	/// Optimum TAA (P3): the GL half of <see cref="EndMotionWrite" /> - Primary's
++	/// default colour set, whose size is <see cref="MotionAttachmentIndex" /> (2
++	/// without the SSAO G-buffer, 4 with it), because the attachment was appended
++	/// after it.
++	/// </summary>
++	public override void RestorePrimaryDrawBuffers()
++	{
 +		if (optimumMotionDrawBuffersOff == null || optimumMotionDrawBuffersOff.Length != MotionAttachmentIndex)
 +		{
 +			optimumMotionDrawBuffersOff = new DrawBuffersEnum[MotionAttachmentIndex];
@@ -2731,16 +2297,9 @@ index 6edf0c9..38aeda2 100644
 +	/// is a weighted average of two surfaces' displacements, which belongs to
 +	/// neither. Mirrors what the GL path already does for the SSAO G-buffer.
 +	/// </summary>
-+	private void ApplyOptimumMotionBlendState()
++	public override void ApplyOptimumMotionBlendState()
 +	{
 +		if (!OptimumMotionWriteActive || MotionAttachmentIndex < 0) return;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetBlendEquation(MotionAttachmentIndex, 32774);
-+			optimumDevice.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 0, 1, 0);
-+			return;
-+		}
 +		GL.BlendEquation(MotionAttachmentIndex, (BlendEquationMode)32774);
 +		GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)0);
 +	}
@@ -2767,7 +2326,7 @@ index 6edf0c9..38aeda2 100644
 +	/// disagree.
 +	/// </summary>
 +	/// <returns>Whether the motion attachment is now the only enabled one.</returns>
-+	public bool BeginMotionOnlyWrite()
++	public override bool BeginMotionOnlyWrite()
 +	{
 +		if (OptimumMotionWriteActive) return false;
 +		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
@@ -2786,30 +2345,30 @@ index 6edf0c9..38aeda2 100644
 +		if (frameBuffers == null || frameBuffers.Count == 0 || frameBuffers[0] == null) return false;
 +		if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;
 +
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, 1 << MotionAttachmentIndex);
-+		}
-+		else
-+		{
-+			if (optimumMotionOnlyDrawBuffers == null || optimumMotionOnlyDrawBuffers.Length != MotionAttachmentIndex + 1)
- 			{
--				throw new Exception(text);
-+				optimumMotionOnlyDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex + 1];
-+				for (int optimumDb = 0; optimumDb < MotionAttachmentIndex; optimumDb++)
-+				{
-+					// GL_NONE: a fragment output bound to this draw buffer is
-+					// discarded, which is what keeps the shaded image intact.
-+					optimumMotionOnlyDrawBuffers[optimumDb] = (DrawBuffersEnum)0;
-+				}
-+				optimumMotionOnlyDrawBuffers[MotionAttachmentIndex] = (DrawBuffersEnum)(36064 + MotionAttachmentIndex);
- 			}
-+			GL.DrawBuffers(optimumMotionOnlyDrawBuffers.Length, optimumMotionOnlyDrawBuffers);
-+		}
-+		OptimumMotionWriteActive = true;
++		EnableMotionOnlyDrawBuffers();
++		optimumMotionWriteActive = true;
 +		ApplyOptimumMotionBlendState();
 +		return true;
++	}
++
++	/// <summary>
++	/// Optimum TAA (P4): the GL half of <see cref="BeginMotionOnlyWrite" /> - the
++	/// motion attachment alone, GL_NONE in every other slot.
++	/// </summary>
++	public override void EnableMotionOnlyDrawBuffers()
++	{
++		if (optimumMotionOnlyDrawBuffers == null || optimumMotionOnlyDrawBuffers.Length != MotionAttachmentIndex + 1)
++		{
++			optimumMotionOnlyDrawBuffers = new DrawBuffersEnum[MotionAttachmentIndex + 1];
++			for (int optimumDb = 0; optimumDb < MotionAttachmentIndex; optimumDb++)
++			{
++				// GL_NONE: a fragment output bound to this draw buffer is
++				// discarded, which is what keeps the shaded image intact.
++				optimumMotionOnlyDrawBuffers[optimumDb] = (DrawBuffersEnum)0;
++			}
++			optimumMotionOnlyDrawBuffers[MotionAttachmentIndex] = (DrawBuffersEnum)(36064 + MotionAttachmentIndex);
++		}
++		GL.DrawBuffers(optimumMotionOnlyDrawBuffers.Length, optimumMotionOnlyDrawBuffers);
 +	}
 +
 +	/// <summary>
@@ -2818,7 +2377,7 @@ index 6edf0c9..38aeda2 100644
 +	/// Primary's default colour set, motion back out - so this is that method
 +	/// under the name that pairs with the Begin the caller used.
 +	/// </summary>
-+	public void EndMotionOnlyWrite()
++	public override void EndMotionOnlyWrite()
 +	{
 +		EndMotionWrite();
 +	}
@@ -2850,7 +2409,7 @@ index 6edf0c9..38aeda2 100644
 +	/// A no-op with TAA off, and it never runs unless Primary is the bound
 +	/// target - <see cref="BeginMotionOnlyWrite" /> refuses otherwise.
 +	/// </summary>
-+	internal bool RenderOptimumSkyMotion()
++	public override bool RenderOptimumSkyMotion()
 +	{
 +		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
 +		if (!TaaTargetsReady || MotionAttachmentIndex < 0) return false;
@@ -2930,11 +2489,11 @@ index 6edf0c9..38aeda2 100644
 +			GlDepthMask(flag: true);
 +			GlToggleBlend(on: true);
 +			GlEnableCullFace();
- 		}
++		}
 +		ScreenManager.FrameProfiler.Mark("rend3D-ret-skymv");
 +		return true;
- 	}
- 
++	}
++
 +	/// <summary>
 +	/// Optimum TAA (P4): the reactive value a fully cloud-covered sky pixel gets
 +	/// from <see cref="RenderOptimumSkyMotion" />. 1 = do not trust the history
@@ -2989,14 +2548,7 @@ index 6edf0c9..38aeda2 100644
 +					CurrentFrameBufferKeepVw = optimumFsrFramebuffer;
 +					// Mono.Cecil transplant.
 +					GlViewport(0, 0, optimumFsrFramebuffer.Width, optimumFsrFramebuffer.Height);
-+					if (Vintagestory.API.Config.OptimumRender.Device != null)
-+					{
-+						Vintagestory.API.Config.OptimumRender.Device.SetDrawBuffers(optimumFsrFramebuffer.FboId, 1);
-+					}
-+					else
-+					{
-+						GL.DrawBuffer((DrawBufferMode)36064);
-+					}
++					SelectFsrDrawBuffer(optimumFsrFramebuffer);
 +					fsrEasu.Use();
 +					fsrEasu.BindTexture2D("inputScene", scene2D, 0);
 +					fsrEasu.Uniform("inputTexelSize", 1f / (float)frameBuffers[0].Width, 1f / (float)frameBuffers[0].Height);
@@ -3028,246 +2580,24 @@ index 6edf0c9..38aeda2 100644
  			blit.Scene2D = scene2D;
  			RenderFullscreenTriangle(screenQuad);
  			blit.Stop();
-@@ -2083,10 +4364,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	{
- 		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_000e: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_002c: Unknown result type (might be due to invalid IL or missing references)
-+		// Mono.Cecil transplant.
-+		// The device drains validation-layer messages instead of a GL error code.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			if (GlErrorChecking)
-+			{
-+				string optimumError = optimumDevice.GetError();
-+				if (optimumError != null)
-+				{
-+					throw new Exception(((errmsg == null) ? "" : (errmsg + " ")) + "- the graphics backend reported: " + optimumError);
-+				}
-+			}
-+			return;
-+		}
- 		if (GlErrorChecking)
- 		{
- 			OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
- 			if ((int)error != 0)
- 			{
-@@ -2101,10 +4397,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0050: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0056: Invalid comparison between Unknown and I4
- 		//IL_0037: Unknown result type (might be due to invalid IL or missing references)
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			string optimumError = optimumDevice.GetError();
-+			if (optimumError != null)
-+			{
-+				Logger.Error(((errmsg == null) ? "" : (errmsg + " ")) + "- the graphics backend reported: " + optimumError);
-+			}
-+			return;
-+		}
- 		OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
- 		if ((int)error != 0)
- 		{
- 			string arg = (ClientSettings.GlDebugMode ? "" : ". Enable Gl Debug Mode in the settings or clientsettings.json to track this error");
- 			string message = string.Format("{0} - OpenGL threw an error: {1}{2}", (errmsg == null) ? "" : (errmsg + " "), error, arg);
-@@ -2119,48 +4426,97 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	public unsafe override string GlGetError()
- 	{
- 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return optimumDevice.GetError();
-+		}
- 		OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
- 		if ((int)error != 0)
- 		{
- 			return ((object)(*(OpenTK.Graphics.OpenGL.ErrorCode*)(&error))/*cast due to constrained. prefix*/).ToString();
- 		}
- 		return null;
- 	}
- 
- 	public override string GetGLShaderVersionString()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The client parses this to decide whether a shader's #version is
-+			// supported, so it has to keep reading as a GLSL version number.
-+			return optimumDevice.ShaderVersionString;
-+		}
- 		return GL.GetString((StringName)35724);
- 	}
- 
- 	public override int GenSampler(bool linear)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return optimumDevice.CreateSampler(linear);
-+		}
- 		int num = GL.GenSampler();
- 		GL.SamplerParameter(num, (SamplerParameterName)10240, linear ? 9729 : 9728);
- 		GL.SamplerParameter(num, (SamplerParameterName)10241, 9986);
- 		return num;
- 	}
- 
-+	// Optimum: every graphics method takes the same shape - if a device is
-+	// installed, route to it and return; otherwise run the untouched vanilla GL
-+	// body below. OptimumRender.Device is null on the OpenGL path, so an OpenGL
-+	// session pays one null check and executes exactly what it always did.
-+	//
-+	// These bodies are Cecil transplant targets, so they stay lambda-free.
- 	public override void GLWireframes(bool toggle)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetWireframe(toggle);
-+			return;
-+		}
- 		GL.PolygonMode((TriangleFace)1032, (PolygonMode)(toggle ? 6913 : 6914));
- 	}
- 
- 	public override void GlViewport(int x, int y, int width, int height)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetViewport(x, y, width, height);
-+			return;
-+		}
- 		GL.Viewport(x, y, width, height);
- 	}
- 
- 	public override void GlScissor(int x, int y, int width, int height)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetScissor(x, y, width, height);
-+			return;
-+		}
- 		GL.Scissor(x, y, width, height);
- 	}
- 
- 	public override void GlScissorFlag(bool enable)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumScissorEnabled = enable;
-+			optimumDevice.SetScissorEnabled(enable);
-+			return;
-+		}
- 		if (enable)
- 		{
- 			GL.Enable((EnableCap)3089);
- 		}
- 		else
-@@ -2169,97 +4525,202 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
- 	public override void GlEnableDepthTest()
++	/// <summary>
++	/// Optimum FSR: the GL half of the EASU pass's target selection in
++	/// <see cref="BlitPrimaryToDefault" />; glDrawBuffer applies to the bound target.
++	/// </summary>
++	public override void SelectFsrDrawBuffer(FrameBufferRef target)
++	{
++		GL.DrawBuffer((DrawBufferMode)36064);
++	}
++
+ 	private void CheckFboStatus(FramebufferTarget target, EnumFrameBuffer fbtype)
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetDepthTest(true);
-+			return;
-+		}
- 		GL.Enable((EnableCap)2929);
+ 		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
+ 		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
- 
- 	public override void GlDisableDepthTest()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetDepthTest(false);
-+			return;
-+		}
- 		GL.Disable((EnableCap)2929);
- 	}
- 
- 	public override void BindTexture2d(int texture)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The GL body activates unit 0 first, so this binds to unit 0 too.
-+			optimumDevice.BindTexture(0, texture);
-+			// Remembered for GlGenerateTex2DMipmaps, whose GL form acts on
-+			// whatever is bound and so has no argument to route.
-+			optimumBoundTexture2d = texture;
-+			return;
-+		}
- 		GL.ActiveTexture((TextureUnit)33984);
- 		GL.BindTexture((TextureTarget)3553, texture);
- 	}
- 
- 	public override void BindTextureCubeMap(int texture)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.BindTextureCube(0, texture);
-+			return;
-+		}
- 		GL.BindTexture((TextureTarget)34067, texture);
- 	}
- 
- 	public override void UnBindTextureCubeMap()
- 	{
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// Mirrors BindTextureCubeMap above, which binds to unit 0.
-+			optimumDevice.BindTextureCube(0, 0);
-+			return;
-+		}
- 		GL.BindTexture((TextureTarget)34067, 0);
- 	}
- 
- 	public override void GlToggleBlend(bool on, EnumBlendMode blendMode = EnumBlendMode.Standard)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetBlend(on, blendMode);
-+			if (on && RenderSSAO)
-+			{
-+				// SSAO writes its position and normal attachments unblended, and
-+				// the GL path expresses that by overriding attachments 2 and 3
-+				// after the global mode is set.
-+				optimumDevice.SetBlendEquation(2, 32774);
-+				optimumDevice.SetBlendFuncSeparate(2, 1, 0, 1, 0);
-+				optimumDevice.SetBlendEquation(3, 32774);
-+				optimumDevice.SetBlendFuncSeparate(3, 1, 0, 1, 0);
-+			}
-+			// Optimum TAA (P3): the motion attachment never blends. A blended
-+			// motion vector averages two surfaces' displacements and belongs to
-+			// neither; the per-attachment override has to be re-applied after
-+			// every global blend change, exactly like the SSAO one above.
-+			if (on)
-+			{
-+				ApplyOptimumMotionBlendState();
-+			}
-+			return;
-+		}
- 		if (on)
- 		{
+@@ -2202,32 +4084,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3307,603 +2637,7 @@ index 6edf0c9..38aeda2 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
- 	}
- 
- 	public override void GlDisableCullFace()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetCullFace(false);
-+			return;
-+		}
- 		GL.Disable((EnableCap)2884);
- 	}
- 
- 	public override void GlEnableCullFace()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetCullFace(true);
-+			return;
-+		}
- 		GL.Enable((EnableCap)2884);
- 	}
- 
- 	public override void GlClearColorRgbaf(float r, float g, float b, float a)
- 	{
-+		// Mono.Cecil transplant.
-+		// GL keeps a clear colour in its state; the device takes it at clear time,
-+		// so this only records what the next clear should use.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumClearR = r;
-+			optimumClearG = g;
-+			optimumClearB = b;
-+			optimumClearA = a;
-+			return;
-+		}
- 		GL.ClearColor(r, g, b, a);
- 	}
- 
- 	public override void GLLineWidth(float width)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetLineWidth(width);
-+			return;
-+		}
- 		if (RuntimeEnv.OS != OS.Mac)
- 		{
- 			GL.LineWidth(width);
- 		}
- 	}
- 
- 	public override void SmoothLines(bool on)
- 	{
-+		// Mono.Cecil transplant.
-+		// GL_LINE_SMOOTH has no Vulkan equivalent - smooth lines there are a
-+		// rasterization-mode on the pipeline, not toggleable state - and it is
-+		// purely cosmetic, so the device path ignores it rather than pretending.
-+		if (Vintagestory.API.Config.OptimumRender.Device != null)
-+		{
-+			return;
-+		}
- 		if (RuntimeEnv.OS != OS.Mac)
- 		{
- 			if (on)
- 			{
- 				GL.Enable((EnableCap)2848);
-@@ -2273,74 +4734,166 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		}
- 	}
- 
- 	public override void GlDepthMask(bool flag)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetDepthMask(flag);
-+			return;
-+		}
- 		GL.DepthMask(flag);
- 	}
- 
- 	public override void GlDepthFunc(EnumDepthFunction depthFunc)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// EnumDepthFunction's values are the GL constants, which is the form
-+			// the seam takes: it cannot reference this enum, since it lives in
-+			// VintagestoryLib and the contracts assembly does not depend on it.
-+			optimumDevice.SetDepthFunc((int)depthFunc);
-+			return;
-+		}
- 		GL.DepthFunc((DepthFunction)depthFunc);
- 	}
- 
- 	public override void GlCullFaceBack()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetCullFaceMode(true);
-+			return;
-+		}
- 		GL.CullFace((TriangleFace)1029);
- 	}
- 
- 	public override void GlCullFaceFront()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetCullFaceMode(false);
-+			return;
-+		}
- 		GL.CullFace((TriangleFace)1028);
- 	}
- 
- 	public override void GlEnableStencilTest()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetStencilTest(true);
-+			return;
-+		}
- 		GL.Enable((EnableCap)2960);
- 	}
- 
- 	public override void GlDisableStencilTest()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetStencilTest(false);
-+			return;
-+		}
- 		GL.Disable((EnableCap)2960);
- 	}
- 
- 	public override void GlStencilMask(int mask)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetStencilMask(mask);
-+			return;
-+		}
- 		GL.StencilMask(mask);
- 	}
- 
- 	public override void GlStencilFunc(int func, int refVal, int mask)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetStencilFunc(func, refVal, mask);
-+			return;
-+		}
- 		GL.StencilFunc((StencilFunction)func, refVal, mask);
- 	}
- 
- 	public override void GlStencilOp(int sfail, int dpfail, int dppass)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetStencilOp(sfail, dpfail, dppass);
-+			return;
-+		}
- 		GL.StencilOp((StencilOp)sfail, (StencilOp)dpfail, (StencilOp)dppass);
- 	}
- 
- 	public override void GlColorMask(bool r, bool g, bool b, bool a)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.SetColorMask(r, g, b, a);
-+			return;
-+		}
- 		GL.ColorMask(r, g, b, a);
- 	}
- 
- 	public override void GlClearStencil()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			optimumDevice.ClearStencil();
-+			return;
-+		}
- 		GL.Clear((ClearBufferMask)1024);
- 	}
- 
- 	public override void GlGenerateTex2DMipmaps()
- 	{
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			if (optimumBoundTexture2d != 0)
-+			{
-+				optimumDevice.GenerateMipmaps(optimumBoundTexture2d);
-+			}
-+			return;
-+		}
- 		GL.GenerateMipmap((GenerateMipmapTarget)3553);
- 	}
- 
- 	public override int LoadCairoTexture(ImageSurface surface, bool linearMag)
- 	{
- 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
- 		{
- 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
- 		}
-+		// Mono.Cecil transplant.
-+		// Cairo hands over premultiplied BGRA bytes, which is why the GL body
-+		// asks for GL_BGRA rather than GL_RGBA; CreateTexture2DRaw takes the same
-+		// GL internal format token so the device makes the identical image.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			int optimumTextureId = optimumDevice.CreateTexture2DRaw(surface.Width, surface.Height,
-+				OptimumGlConstants.Bgra, surface.DataPtr, 4);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureMinFilter, 9729);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureMagFilter, linearMag ? 9729 : 9728);
-+			return optimumTextureId;
-+		}
- 		int num = GL.GenTexture();
- 		GL.BindTexture((TextureTarget)3553, num);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, linearMag ? 9729 : 9728);
- 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, surface.Width, surface.Height, 0, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
-@@ -2351,10 +4904,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	{
- 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
- 		{
- 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
- 		}
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			int optimumTextureId = optimumDevice.CreateTexture2D(tex.Width, tex.Height,
-+				tex.PixelInternalFormat, tex.PixelFormat, IntPtr.Zero, false);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureMinFilter, (int)tex.MinFilter);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureMagFilter, (int)tex.MagFilter);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureWrapS, (int)tex.WrapS);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureWrapT, (int)tex.WrapT);
-+			tex.TextureId = optimumTextureId;
-+			return;
-+		}
- 		int num = GL.GenTexture();
- 		GL.BindTexture((TextureTarget)3553, num);
- 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)tex.PixelInternalFormat, tex.Width, tex.Height, 0, (PixelFormat)tex.PixelFormat, (PixelType)5126, (IntPtr)IntPtr.Zero);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (int)tex.MinFilter);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (int)tex.MagFilter);
-@@ -2367,10 +4933,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	{
- 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
- 		{
- 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
- 		}
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			if (intoTexture.TextureId == 0 || intoTexture.Width != surface.Width || intoTexture.Height != surface.Height)
-+			{
-+				if (intoTexture.TextureId != 0)
-+				{
-+					optimumDevice.DeleteTexture(intoTexture.TextureId);
-+				}
-+				intoTexture.TextureId = optimumDevice.CreateTexture2DRaw(surface.Width, surface.Height,
-+					OptimumGlConstants.Bgra, surface.DataPtr, 4);
-+				intoTexture.Width = surface.Width;
-+				intoTexture.Height = surface.Height;
-+				optimumDevice.SetTextureParameter(intoTexture.TextureId, OptimumGlConstants.TextureMinFilter, 9729);
-+				optimumDevice.SetTextureParameter(intoTexture.TextureId, OptimumGlConstants.TextureMagFilter, linearMag ? 9729 : 9728);
-+			}
-+			else
-+			{
-+				// The image is BGRA-ordered; the upload is a byte copy at four
-+				// bytes per pixel, which is what Rgba selects here.
-+				optimumDevice.UploadTexture2D(intoTexture.TextureId, 0, 0, 0,
-+					surface.Width, surface.Height, EnumTexturePixelFormat.Rgba, surface.DataPtr);
-+			}
-+			CheckGlError("LoadOrUpdateCairoTexture");
-+			return;
-+		}
- 		if (intoTexture.TextureId == 0 || intoTexture.Width != surface.Width || intoTexture.Height != surface.Height)
- 		{
- 			if (intoTexture.TextureId != 0)
- 			{
- 				GL.DeleteTexture(intoTexture.TextureId);
-@@ -2400,10 +4993,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return LoadTexture((IBitmap)new BitmapExternal(bmp), linearMag, clampMode, generateMipmaps);
- 	}
- 
- 	public override void LoadIntoTexture(IBitmap srcBmp, int targetTextureId, int destX, int destY, bool generateMipmaps = false)
- 	{
-+		// Mono.Cecil transplant.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			if (srcBmp is BitmapExternal optimumExternal)
-+			{
-+				optimumDevice.UploadTexture2D(targetTextureId, 0, destX, destY,
-+					srcBmp.Width, srcBmp.Height, EnumTexturePixelFormat.Rgba,
-+					(IntPtr)optimumExternal.PixelsPtrAndLock);
-+			}
-+			else
-+			{
-+				// A managed pixel array has to be pinned before the device can
-+				// read it; the GL body relied on the overload doing that.
-+				GCHandle optimumPin = GCHandle.Alloc(srcBmp.Pixels, GCHandleType.Pinned);
-+				try
-+				{
-+					optimumDevice.UploadTexture2D(targetTextureId, 0, destX, destY,
-+						srcBmp.Width, srcBmp.Height, EnumTexturePixelFormat.Rgba,
-+						optimumPin.AddrOfPinnedObject());
-+				}
-+				finally
-+				{
-+					optimumPin.Free();
-+				}
-+			}
-+			if (ENABLE_MIPMAPS && generateMipmaps)
-+			{
-+				BuildMipMaps(targetTextureId);
-+			}
-+			return;
-+		}
- 		GL.BindTexture((TextureTarget)3553, targetTextureId);
- 		if (srcBmp is BitmapExternal bitmapExternal)
- 		{
- 			GL.TexSubImage2D((TextureTarget)3553, 0, destX, destY, srcBmp.Width, srcBmp.Height, (PixelFormat)32993, (PixelType)5121, (IntPtr)bitmapExternal.PixelsPtrAndLock);
- 		}
-@@ -2421,10 +5046,58 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 	{
- 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
- 		{
- 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
- 		}
-+		// Mono.Cecil transplant.
-+		// The GL body uploads BGRA bytes into a GL_RGBA image; the device gets a
-+		// BGRA-ordered image instead, which samples the same way without a
-+		// per-pixel swizzle. Anisotropy is a sampler property the device sets
-+		// from its own limit, so there is nothing to query here.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			int optimumTextureId;
-+			if (bmp is BitmapExternal optimumExternal)
-+			{
-+				optimumTextureId = optimumDevice.CreateTexture2DRaw(bmp.Width, bmp.Height,
-+					OptimumGlConstants.Bgra, (IntPtr)optimumExternal.PixelsPtrAndLock, 4,
-+					ENABLE_MIPMAPS && generateMipmaps);
-+			}
-+			else
-+			{
-+				GCHandle optimumPin = GCHandle.Alloc(bmp.Pixels, GCHandleType.Pinned);
-+				try
-+				{
-+					optimumTextureId = optimumDevice.CreateTexture2DRaw(bmp.Width, bmp.Height,
-+						OptimumGlConstants.Bgra, optimumPin.AddrOfPinnedObject(), 4,
-+						ENABLE_MIPMAPS && generateMipmaps);
-+				}
-+				finally
-+				{
-+					optimumPin.Free();
-+				}
-+			}
-+			switch (clampMode)
-+			{
-+			case 1:
-+				optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureWrapS, 33071);
-+				optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureWrapT, 33071);
-+				break;
-+			case 2:
-+				optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureWrapS, 10497);
-+				optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureWrapT, 10497);
-+				break;
-+			}
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureMinFilter, 9729);
-+			optimumDevice.SetTextureParameter(optimumTextureId, OptimumGlConstants.TextureMagFilter, linearMag ? 9729 : 9728);
-+			if (ENABLE_MIPMAPS && generateMipmaps)
-+			{
-+				BuildMipMaps(optimumTextureId);
-+			}
-+			return optimumTextureId;
-+		}
- 		int num = GL.GenTexture();
- 		GL.BindTexture((TextureTarget)3553, num);
- 		if (ENABLE_ANISOTROPICFILTERING)
- 		{
- 			float num2 = GL.GetFloat((GetPName)34047);
-@@ -2488,10 +5161,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_00db: Unknown result type (might be due to invalid IL or missing references)
- 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
- 		{
- 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
- 		}
-+		// Mono.Cecil transplant.
-+		// This is the texture atlas upload path: TextureAtlas.Upload reaches it
-+		// through LoadOrUpdateTextureFromBgra_DeferMipMap, which is why it only
-+		// runs once a world starts loading and never on the menu. The pixels are
-+		// BGRA when format says so and RGBA otherwise, matching the two public
-+		// wrappers.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			int optimumGlFormat = (int)format == 32993
-+				? Vintagestory.API.Config.OptimumGlConstants.Bgra
-+				: Vintagestory.API.Config.OptimumGlConstants.Rgba8;
-+
-+			GCHandle optimumPin = GCHandle.Alloc(rgbaPixels, GCHandleType.Pinned);
-+			try
-+			{
-+				if (intoTexture.TextureId == 0 || intoTexture.Width * intoTexture.Height != rgbaPixels.Length)
-+				{
-+					if (intoTexture.TextureId != 0)
-+					{
-+						optimumDevice.DeleteTexture(intoTexture.TextureId);
-+					}
-+					// The mip chain has to be requested at creation; asking for
-+					// mipmaps afterwards on a one-level image does nothing. GL
-+					// can grow one at any time, which is what the deferred
-+					// variant relies on: it uploads with makeMipMap false and
-+					// the atlas manager calls BuildMipMaps later, in StageB. So
-+					// the chain is sized whenever mipmapping is on at all, and
-+					// makeMipMap only decides whether to fill it here.
-+					intoTexture.TextureId = optimumDevice.CreateTexture2DRaw(
-+						intoTexture.Width, intoTexture.Height, optimumGlFormat,
-+						optimumPin.AddrOfPinnedObject(), 4, ENABLE_MIPMAPS);
-+
-+					if (clampMode == 1)
-+					{
-+						optimumDevice.SetTextureParameter(intoTexture.TextureId,
-+							Vintagestory.API.Config.OptimumGlConstants.TextureWrapS, 33071);
-+						optimumDevice.SetTextureParameter(intoTexture.TextureId,
-+							Vintagestory.API.Config.OptimumGlConstants.TextureWrapT, 33071);
-+					}
-+					optimumDevice.SetTextureParameter(intoTexture.TextureId,
-+						Vintagestory.API.Config.OptimumGlConstants.TextureMinFilter, 9729);
-+					optimumDevice.SetTextureParameter(intoTexture.TextureId,
-+						Vintagestory.API.Config.OptimumGlConstants.TextureMagFilter, linearMag ? 9729 : 9728);
-+
-+					if (makeMipMap)
-+					{
-+						BuildMipMaps(intoTexture.TextureId);
-+					}
-+				}
-+				else
-+				{
-+					optimumDevice.UploadTexture2D(intoTexture.TextureId, 0, 0, 0,
-+						intoTexture.Width, intoTexture.Height,
-+						EnumTexturePixelFormat.Rgba, optimumPin.AddrOfPinnedObject());
-+				}
-+			}
-+			finally
-+			{
-+				optimumPin.Free();
-+			}
-+			return;
-+		}
- 		if (intoTexture.TextureId == 0 || intoTexture.Width * intoTexture.Height != rgbaPixels.Length)
- 		{
- 			if (intoTexture.TextureId != 0)
- 			{
- 				GL.DeleteTexture(intoTexture.TextureId);
-@@ -2523,10 +5259,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		}
- 	}
- 
- 	public override void BuildMipMaps(int textureId)
- 	{
-+		// Mono.Cecil transplant.
-+		// The device sizes the mip chain when the image is created, so the
-+		// generate carries over as it is. The two glTexParameter calls carry
-+		// over as well, and they are not decoration: GL_LINEAR means "level 0
-+		// only" whatever the chain holds, so a texture that is never moved to a
-+		// MIPMAP filter is never minified through one. Vulkan has no such
-+		// filter, and the device turns these two into the sampler's LOD clamp.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			if (ENABLE_MIPMAPS)
-+			{
-+				optimumDevice.GenerateMipmaps(textureId);
-+				optimumDevice.SetTextureParameter(textureId,
-+					Vintagestory.API.Config.OptimumGlConstants.TextureMinFilter, 9986);
-+				optimumDevice.SetTextureParameter(textureId,
-+					Vintagestory.API.Config.OptimumGlConstants.TextureMaxLevel, ClientSettings.MipMapLevel);
-+			}
-+			return;
-+		}
- 		if (ENABLE_MIPMAPS)
- 		{
- 			GL.BindTexture((TextureTarget)3553, textureId);
- 			int num = default(int);
- 			GL.GetTexParameter((TextureTarget)3553, (GetTextureParameter)33085, out num);
-@@ -2540,10 +5296,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		}
- 	}
- 
- 	public override int Load3DTextureCube(BitmapRef[] bmps)
- 	{
-+		// Mono.Cecil transplant.
-+		// The skybox cubemap. CreateTextureCube takes all six faces at once, so
-+		// the per-side helper the GL body calls has no counterpart here.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			IntPtr[] optimumFaces = new IntPtr[6];
-+			int optimumSize = 0;
-+			for (int k = 0; k < 6; k++)
-+			{
-+				BitmapExternal optimumFace = (BitmapExternal)bmps[k];
-+				optimumSize = optimumFace.Width;
-+				optimumFaces[k] = (IntPtr)optimumFace.PixelsPtrAndLock;
-+			}
-+			// BGRA like the other bitmap uploads, so the raw overload rather than
-+			// the EnumTextureInternalFormat one.
-+			int optimumCubeId = optimumDevice.CreateTextureCubeRaw(optimumSize,
-+				OptimumGlConstants.Bgra, optimumFaces, 4);
-+			optimumDevice.SetTextureParameter(optimumCubeId, OptimumGlConstants.TextureMinFilter, 9729);
-+			optimumDevice.SetTextureParameter(optimumCubeId, OptimumGlConstants.TextureMagFilter, 9729);
-+			optimumDevice.SetTextureParameter(optimumCubeId, OptimumGlConstants.TextureWrapS, 33071);
-+			optimumDevice.SetTextureParameter(optimumCubeId, OptimumGlConstants.TextureWrapT, 33071);
-+			return optimumCubeId;
-+		}
- 		GL.ActiveTexture((TextureUnit)33984);
- 		int num = GL.GenTexture();
- 		GL.BindTexture((TextureTarget)34067, num);
- 		for (int i = 0; i < 6; i++)
- 		{
-@@ -2563,15 +5343,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		GL.TexImage2D(target, 0, (PixelInternalFormat)6408, bmp.Width, bmp.Height, 0, (PixelFormat)32993, (PixelType)5121, (IntPtr)bmp.PixelsPtrAndLock);
- 	}
- 
- 	public override void GLDeleteTexture(int id)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The device defers the destruction until the GPU is finished with
-+			// the frame that referenced it; GL left that to the driver.
-+			optimumDevice.DeleteTexture(id);
-+			return;
-+		}
- 		GL.DeleteTexture(id);
- 	}
- 
- 	public override int GlGetMaxTextureSize()
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return optimumDevice.MaxTextureSize;
-+		}
- 		int result = 1024;
- 		try
- 		{
- 			GL.GetInteger((GetPName)3379, out result);
- 		}
-@@ -2581,10 +5374,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return result;
- 	}
- 
- 	public override UBORef CreateUBO(int shaderProgramId, int bindingPoint, string blockName, int size)
- 	{
-+		// Mono.Cecil transplant.
-+		// The device resolves the block by name against the program's reflected
-+		// interface and binds it to the same point, so the four GL steps -
-+		// allocate, look up the block index, bind the index, bind the buffer -
-+		// collapse into one call. UBO.Handle then carries the device's handle.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			UBO optimumUbo = new UBO();
-+			optimumUbo.Handle = optimumDevice.CreateUniformBuffer(shaderProgramId, bindingPoint, blockName, size);
-+			optimumUbo.Size = size;
-+			optimumUbo.BlockName = blockName;
-+			optimumUbo.BindingPoint = bindingPoint;
-+			return optimumUbo;
-+		}
- 		int num = GL.GenBuffer();
- 		GL.BindBuffer((BufferTarget)35345, num);
- 		GL.BufferData((BufferTarget)35345, size, (IntPtr)IntPtr.Zero, (BufferUsageHint)35048);
- 		ScreenManager.Platform.CheckGlError();
- 		int uniformBlockIndex = GL.GetUniformBlockIndex(shaderProgramId, blockName);
-@@ -2593,10 +5401,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +4482,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3916,24 +2650,47 @@ index 6edf0c9..38aeda2 100644
  		return uBO;
  	}
  
-@@ -2605,10 +5415,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
++	// Optimum (Vulkan-native plan, Phase 1A step 3): the uniform-buffer GL lines UBO used
++	// to hold, moved here unchanged; VulkanClientPlatform overrides them with the device
++	// calls (step 4). The binding point survives from CreateUBO.
++	public override void BindUBO(UBO ubo)
++	{
++		GL.BindBuffer((BufferTarget)35345, ubo.Handle);
++		GL.BindBufferBase((BufferRangeTarget)35345, ubo.BindingPoint, ubo.Handle);
++	}
++
++	public override void UnbindUBO(UBO ubo)
++	{
++		GL.BindBuffer((BufferTarget)35345, 0);
++	}
++
++	// reallocate: UBO.Update<T>(data) replaces the whole buffer (glBufferData); the
++	// ranged updates write into it (glBufferSubData). The device writes a range either way.
++	public override void UpdateUBO(UBO ubo, IntPtr data, int offset, int size, bool reallocate)
++	{
++		ubo.Bind();
++		if (reallocate)
++		{
++			GL.BufferData((BufferTarget)35345, size, data, (BufferUsageHint)35048);
++		}
++		else
++		{
++			GL.BufferSubData((BufferTarget)35345, (IntPtr)offset, size, data);
++		}
++		ubo.Unbind();
++	}
++
++	public override void DeleteUBO(UBO ubo)
++	{
++		GL.DeleteBuffers(1, ref ubo.Handle);
++	}
++
+ 	public override void UpdateMesh(MeshRef modelRef, MeshData data)
+ 	{
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0016: Unknown result type (might be due to invalid IL or missing references)
- 		VAO vAO = (VAO)modelRef;
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumUpdateDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumUpdateDevice != null)
-+		{
-+			optimumUpdateDevice.UpdateMesh(vAO.VaoId, data);
-+			return;
-+		}
- 		BufferAccessMask val = (BufferAccessMask)34;
- 		if (vAO.Persistent)
- 		{
- 			val = (BufferAccessMask)((int)val | 0x50);
- 		}
-@@ -2651,29 +5467,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +4577,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3978,7 +2735,7 @@ index 6edf0c9..38aeda2 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5504,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +4614,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3999,7 +2756,7 @@ index 6edf0c9..38aeda2 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5523,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +4633,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -4020,7 +2777,7 @@ index 6edf0c9..38aeda2 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5542,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +4652,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -4041,7 +2798,7 @@ index 6edf0c9..38aeda2 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5561,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +4671,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -4062,7 +2819,7 @@ index 6edf0c9..38aeda2 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5584,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +4694,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -4083,137 +2840,9 @@ index 6edf0c9..38aeda2 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -2801,10 +5627,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_0199: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_01ad: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0255: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_025a: Unknown result type (might be due to invalid IL or missing references)
- 		VAO vAO = new VAO();
-+		// Optimum: the device allocates the per-attribute buffers and derives the
-+		// vertex layout from which parts are present, matching the slot ordering
-+		// the GL body below assigns.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumAllocDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumAllocDevice != null)
-+		{
-+			vAO.VaoId = optimumAllocDevice.CreateEmptyMesh(
-+				xyzSize, normalsSize, uvSize, rgbaSize, flagsSize, indicesSize,
-+				customFloats, customShorts, customBytes, customInts,
-+				drawMode, staticDraw, ssbo: false);
-+			vAO.IndicesCount = indicesSize;
-+			vAO.drawMode = DrawModeToPrimiteType(drawMode);
-+			vAO.Persistent = !staticDraw;
-+			return vAO;
-+		}
- 		int num = GL.GenVertexArray();
- 		int vaoSlotNumber = 0;
- 		GL.BindVertexArray(num);
- 		int xyzVboId = 0;
- 		int normalsVboId = 0;
-@@ -3028,10 +5869,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_0471: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_04f9: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0529: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_06d5: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_06da: Unknown result type (might be due to invalid IL or missing references)
-+		// Optimum: the device builds the buffers and returns its own handle. VAO
-+		// still carries it, because MeshRef is public API that mods hold.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumUploadDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumUploadDevice != null)
-+		{
-+			VAO optimumUploadVao = new VAO();
-+			optimumUploadVao.VaoId = optimumUploadDevice.CreateMesh(data, true);
-+			optimumUploadVao.IndicesCount = data.IndicesCount;
-+			optimumUploadVao.drawMode = DrawModeToPrimiteType(data.mode);
-+			return optimumUploadVao;
-+		}
- 		int num = GL.GenVertexArray();
- 		int num2 = 0;
- 		GL.BindVertexArray(num);
- 		int num3 = 0;
- 		int num4 = 0;
-@@ -3215,10 +6067,22 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		};
- 	}
- 
- 	public override void DeleteMesh(MeshRef modelref)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDeleteDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDeleteDevice != null)
-+		{
-+			if (modelref != null)
-+			{
-+				// Deferred until the GPU is done with the frame that used it;
-+				// GL left that to the driver.
-+				optimumDeleteDevice.DeleteMesh(((VAO)modelref).VaoId);
-+				((VAO)modelref).Dispose();
-+			}
-+			return;
-+		}
- 		if (modelref != null)
- 		{
- 			((VAO)modelref).Dispose();
+@@ -3320,16 +5256,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
- 	}
-@@ -3277,14 +6141,45 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 					rotateUV = false;
- 				}
- 			}
- 			array2[i / 4] = new FaceData(xyz, i * 3, num2, num3, num5 - num2, num6 - num3, flags, i, (array != null) ? array[i * num] : 0, rotateUV);
- 		}
-+		// Mono.Cecil transplant.
-+		// The face records go to the same storage buffer on both paths; only the
-+		// way to reach it differs. VaoId is the device's mesh handle, whereas the
-+		// GL body addresses the buffer object directly.
- 		int num8 = data.XyzOffset / 12 * 16;
--		GL.BindBuffer((BufferTarget)37074, vAO.xyzVboId);
--		GL.BufferSubData<FaceData>((BufferTarget)37074, (IntPtr)num8, 16 * verticesCount, facedataBuffer);
--		GL.BindBuffer((BufferTarget)37074, 0);
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumSsboDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumSsboDevice != null)
-+		{
-+			// Everything the mesh carries as ordinary vertex data goes first, the
-+			// same call UpdateMesh makes. The packed face records follow, because
-+			// they occupy the xyz slot and have to be what remains there.
-+			//
-+			// The device path returns here rather than falling through: the
-+			// updateVAO calls below address VBO names directly and would reach
-+			// OpenGL, which is not bound on this backend.
-+			optimumSsboDevice.UpdateMesh(vAO.VaoId, data);
-+
-+			GCHandle optimumFacePin = GCHandle.Alloc(facedataBuffer, GCHandleType.Pinned);
-+			try
-+			{
-+				optimumSsboDevice.UpdateMeshStorageBuffer(vAO.VaoId,
-+					optimumFacePin.AddrOfPinnedObject(), num8, 16 * verticesCount);
-+			}
-+			finally
-+			{
-+				optimumFacePin.Free();
-+			}
-+			return;
-+		}
-+		else
-+		{
-+			GL.BindBuffer((BufferTarget)37074, vAO.xyzVboId);
-+			GL.BufferSubData<FaceData>((BufferTarget)37074, (IntPtr)num8, 16 * verticesCount, facedataBuffer);
-+			GL.BindBuffer((BufferTarget)37074, 0);
-+		}
- 		if (data.Rgba != null && data.RgbaCount > 0)
- 		{
- 			updateVAO(data.Rgba, data.RgbaOffset, data.RgbaCount, vAO.rgbaVboId, vAO.rgbaPtr, persistent);
- 		}
- 		if (data.CustomFloats != null && data.CustomFloats.Count > 0)
-@@ -3316,20 +6211,24 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		}
- 		if (data.CustomBytes != null && data.CustomBytes.Count > 0)
- 		{
- 			updateVAO(data.CustomBytes.Values, data.CustomBytes.BaseOffset, data.CustomBytes.Count, vAO.customDataByteVboId, vAO.customDataBytePtr, persistent);
- 		}
--		GL.BindBuffer((BufferTarget)34962, 0);
-+		if (optimumSsboDevice == null)
-+		{
-+			GL.BindBuffer((BufferTarget)34962, 0);
-+		}
+ 		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
  		if (GlErrorChecking && GlDebugMode)
  		{
@@ -4235,88 +2864,147 @@ index 6edf0c9..38aeda2 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3342,10 +6241,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		//IL_0085: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_01fc: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0201: Unknown result type (might be due to invalid IL or missing references)
- 		VAO vAO = new VAO();
-+		// Optimum: the device allocates the per-attribute buffers and derives the
-+		// vertex layout from which parts are present, matching the slot ordering
-+		// the GL body below assigns.
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumAllocDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumAllocDevice != null)
-+		{
-+			vAO.VaoId = optimumAllocDevice.CreateEmptyMesh(
-+				xyzSize, normalsSize, uvSize, rgbaSize, flagsSize, indicesSize,
-+				customFloats, customShorts, customBytes, customInts,
-+				drawMode, staticDraw, ssbo: true);
-+			vAO.IndicesCount = indicesSize;
-+			vAO.drawMode = DrawModeToPrimiteType(drawMode);
-+			vAO.Persistent = !staticDraw;
-+			return vAO;
-+		}
- 		int num = GL.GenVertexArray();
- 		int vaoSlotNumber = 0;
- 		GL.BindVertexArray(num);
- 		int num2 = 0;
- 		int rgbaVboId = 0;
-@@ -3675,15 +6589,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return new MouseEvent((int)mouseX, (int)mouseY, button, 0);
- 	}
- 
+@@ -3678,10 +5615,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			return optimumDevice.GetUniformLocation(program.ProgramId, name);
-+		}
  		return GL.GetUniformLocation(program.ProgramId, name);
  	}
  
++	// Optimum (Vulkan-native plan, Phase 1A step 3): the program, uniform and texture
++	// binding GL lines ShaderProgramBase used to hold, moved here unchanged;
++	// VulkanClientPlatform overrides them with the device calls (step 4).
++	public override void UseShaderProgram(int programId)
++	{
++		GL.UseProgram(programId);
++	}
++
++	public override void DisposeShaderProgram(ShaderProgramBase program)
++	{
++		if (program.VertexShader != null)
++		{
++			GL.DetachShader(program.ProgramId, program.VertexShader.ShaderId);
++			GL.DeleteShader(program.VertexShader.ShaderId);
++		}
++		if (program.FragmentShader != null)
++		{
++			GL.DetachShader(program.ProgramId, program.FragmentShader.ShaderId);
++			GL.DeleteShader(program.FragmentShader.ShaderId);
++		}
++		if (program.GeometryShader != null)
++		{
++			GL.DetachShader(program.ProgramId, program.GeometryShader.ShaderId);
++			GL.DeleteShader(program.GeometryShader.ShaderId);
++		}
++		foreach (KeyValuePair<string, int> customSampler in program.customSamplers)
++		{
++			GL.DeleteSampler(customSampler.Value);
++		}
++		GL.DeleteProgram(program.ProgramId);
++	}
++
++	public override void BindSampler(int unit, int samplerId)
++	{
++		GL.BindSampler(unit, samplerId);
++	}
++
++	public override void SetUniform(int programId, int location, float value)
++	{
++		GL.Uniform1(location, value);
++	}
++
++	public override void SetUniform(int programId, int location, int value)
++	{
++		GL.Uniform1(location, value);
++	}
++
++	public override void SetUniform(int programId, int location, float x, float y)
++	{
++		GL.Uniform2(location, x, y);
++	}
++
++	public override void SetUniform(int programId, int location, float x, float y, float z)
++	{
++		GL.Uniform3(location, x, y, z);
++	}
++
++	public override void SetUniform(int programId, int location, float x, float y, float z, float w)
++	{
++		GL.Uniform4(location, x, y, z, w);
++	}
++
++	public override void SetUniform(int programId, int location, int x, int y, int z)
++	{
++		GL.Uniform3(location, x, y, z);
++	}
++
++	public override void SetUniformArray1(int programId, int location, int count, float[] values)
++	{
++		GL.Uniform1(location, count, values);
++	}
++
++	public override void SetUniformArray2(int programId, int location, int count, float[] values)
++	{
++		GL.Uniform2(location, count, values);
++	}
++
++	public override void SetUniformArray3(int programId, int location, int count, float[] values)
++	{
++		GL.Uniform3(location, count, values);
++	}
++
++	public override void SetUniformArray4(int programId, int location, int count, float[] values)
++	{
++		GL.Uniform4(location, count, values);
++	}
++
++	public override void SetUniformMatrix(int programId, int location, float[] matrix)
++	{
++		GL.UniformMatrix4(location, 1, false, matrix);
++	}
++
++	public override void SetUniformMatrix(int programId, int location, ref Matrix4 matrix)
++	{
++		GL.UniformMatrix4(location, false, ref matrix);
++	}
++
++	public override void SetUniformMatrices(int programId, int location, int count, float[] matrices)
++	{
++		GL.UniformMatrix4(location, count, false, matrices);
++	}
++
++	public override void SetUniformMatrices4x3(int programId, int location, int count, float[] matrices)
++	{
++		GL.UniformMatrix4x3(location, count, false, matrices);
++	}
++
++	public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
++	{
++		GL.Uniform1(program.uniformLocations[samplerName], textureNumber);
++		GL.ActiveTexture((TextureUnit)(33984 + textureNumber));
++		GL.BindTexture((TextureTarget)3553, textureId);
++		if (program.customSamplers.TryGetValue(samplerName, out var value))
++		{
++			GL.BindSampler(textureNumber, value);
++		}
++		if (program.clampTToEdge)
++		{
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
++		}
++	}
++
++	public override void BindProgramTextureCube(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)
++	{
++		GL.Uniform1(program.uniformLocations[samplerName], textureNumber);
++		GL.ActiveTexture((TextureUnit)(33984 + textureNumber));
++		GL.BindTexture((TextureTarget)34067, textureId);
++		if (program.clampTToEdge)
++		{
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
++		}
++	}
++
  	public override bool CompileShader(Shader shader)
  	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The device only stages the stage here. GL resolves uniforms and
-+			// varyings by name across the whole program, so nothing about a stage
-+			// is final until its siblings are known, and the real translation
-+			// happens at link time.
-+			return optimumDevice.CompileShader(shader);
-+		}
  		int num = (shader.ShaderId = GL.CreateShader((ShaderType)shader.shaderType));
  		string text = shader.Code;
  		if (text != null)
- 		{
- 			if (text.IndexOfOrdinal("#version") == -1)
-@@ -3715,10 +6643,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		return true;
- 	}
- 
- 	public override bool CreateShaderProgram(ShaderProgram program)
- 	{
-+		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+		if (optimumDevice != null)
-+		{
-+			// The device assigns the id, exactly as glCreateProgram did, and the
-+			// caller stores it - IShaderProgram.ProgramId is read-only on the
-+			// interface, so it comes back as a return value.
-+			int optimumProgramId = optimumDevice.LinkProgram(program);
-+			if (optimumProgramId == 0)
-+			{
-+				string optimumLinkError = optimumDevice.GetError();
-+				logger.Error("Link error in shader program for pass {0}: {1}",
-+					program.PassName, optimumLinkError == null ? "unknown" : optimumLinkError);
-+				return false;
-+			}
-+			program.ProgramId = optimumProgramId;
-+			logger.Notification("Loaded Shaderprogramm for render pass {0}.", program.PassName);
-+			return true;
-+		}
- 		bool result = true;
- 		int num = (program.ProgramId = GL.CreateProgram());
- 		GL.AttachShader(num, program.VertexShader.ShaderId);
- 		GL.AttachShader(num, program.FragmentShader.ShaderId);
- 		if (program.GeometryShader != null)

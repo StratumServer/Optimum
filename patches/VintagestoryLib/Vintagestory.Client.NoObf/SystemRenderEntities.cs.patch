@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..4b3b3d3 100644
+index 374f827..5d7448d 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 @@ -1,15 +1,36 @@
@@ -295,7 +295,7 @@ index 374f827..4b3b3d3 100644
 +		// pass whose shader has no motion output must stay outside it, or the
 +		// attachment keeps whatever was there and the resolve reprojects a pixel
 +		// by a vector that belongs to another surface. A no-op when TAA is off.
-+		ClientPlatformWindows optimumPlatform = game.Platform as ClientPlatformWindows;
++		ClientPlatformAbstract optimumPlatform = game.Platform;
 +		// The window is opened per renderer, only around the game's own
 +		// EntityShapeRenderer family (the entityanimated writers). A mod
 +		// renderer with its own shader stays outside it, so it cannot leave
