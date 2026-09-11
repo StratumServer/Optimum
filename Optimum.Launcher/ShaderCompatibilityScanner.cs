@@ -469,6 +469,7 @@ public static class ShaderCompatibilityScanner
         string normalized = path.Replace('\\', '/');
         int marker = normalized.IndexOf("assets/game/shaders/", StringComparison.OrdinalIgnoreCase);
         string shader;
+        bool isInclude = false;
         if (marker >= 0)
         {
             shader = normalized[marker..];
@@ -495,10 +496,12 @@ public static class ShaderCompatibilityScanner
                 if (marker >= 0)
                 {
                     shader = normalized[(marker + 1)..];
+                    isInclude = true;
                 }
                 else if (normalized.StartsWith("shaderincludes/", StringComparison.OrdinalIgnoreCase))
                 {
                     shader = normalized;
+                    isInclude = true;
                 }
                 else
                 {
@@ -507,8 +510,22 @@ public static class ShaderCompatibilityScanner
             }
         }
 
+        // Optimum: the stage-extension filter is only meaningful for shaders/,
+        // where a file is a vertex, fragment or geometry stage. ShaderRegistry
+        // loads every shaderinclude regardless of extension - vanilla ships five
+        // .ash includes next to the .fsh/.vsh ones - so an external .ash override
+        // replaces a helper the motion writers compile against just the same.
         string extension = Path.GetExtension(shader);
-        if (extension is not ".fsh" and not ".vsh" and not ".gsh") return null;
+        if (isInclude)
+        {
+            // Any real file counts; a directory entry (no extension) does not.
+            if (extension.Length == 0) return null;
+        }
+        else if (extension is not ".fsh" and not ".vsh" and not ".gsh")
+        {
+            return null;
+        }
+
         return shader.ToLowerInvariant();
     }
 

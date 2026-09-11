@@ -404,13 +404,16 @@ after the resolve had already read the attachment. It is now refused on
 plane draws nothing at all under the default. The pass sets and restores the depth func through
 `GlDepthFunc`; anything else that ever wants to draw at exactly the far plane has the same problem.
 
-(n) **The cloud vector is camera-only.** `taa-skymotion` reprojects the view direction, not the
-cloud: a cloud scrolling across a still camera has mv 0 and is carried entirely by the reactive
-value. That is correct for the resolve (reactive 1 discards the history) but it is wrong data for
-the later consumers the plan is built for - FSR/XeSS reactive+mv, and frame generation especially.
-A real cloud vector needs `cloudOffset`'s previous value and the ray-marched hit position, i.e. a
+(n) **The cloud vector is camera-only, and cloud pixels are UNSUPPORTED for external motion
+consumers.** `taa-skymotion` reprojects the view direction, not the cloud: a cloud scrolling across
+a still camera has mv 0 and is carried entirely by the reactive value. That is correct for the
+resolve (`taaCloudReactive` discards the history there) but it is wrong data for the later
+consumers the plan is built for - FSR/XeSS reactive+mv, and frame generation especially. Contract
+term, recorded in `docs/temporal-frame-contract.md` section 6.1: **downstream consumers must reject
+cloud pixels through the reactive mask (`motion.b`) and must not treat their `rg` as motion.** A
+real cloud vector needs `cloudOffset`'s previous value and the ray-marched hit position, i.e. a
 motion output from `cloudvolumetric.fsh` itself, which cannot reach Primary's attachment without a
-second pass over the cloud volume.
+second pass over the cloud volume - future work, not a v1 guarantee.
 
 (o) **Decals near the camera were the actual bug.** With the block's vector left in place, the
 decal's z-offset moves the depth buffer by ~1.3e-3 in window depth at one block's distance against
@@ -422,8 +425,16 @@ correct until you measure it.
 GPU harness; the sky pass's GL branch is the shared `GlDepthFunc`/`GlToggleBlend` helpers plus
 `BeginMotionOnlyWrite`'s existing GL branch, all of which are still unproven on OpenGL.
 
-P4 status, movers (the P3 carry-over) (2026-09-10): landed on `feat/taa`.
-**Not verified in game on either backend** - no phase of P4 ran `make deploy` or the client.
+P4 status, movers (the P3 carry-over) (2026-09-10, verification updated 2026-09-11): landed on
+`feat/taa`. **No phase of P4 itself ran `make deploy` or the client**, and the per-class mover
+behaviour in the table below is still **unverified in game** - nobody has looked at a helve hammer
+or a firepit's contents on either backend. What has since been verified in game, on the later
+build that contains this code: the per-renderer entity motion-writer gate, whose lazily created
+type cache threw a `NullReferenceException` on the first entity frame and was fixed and confirmed
+on Vulkan and OpenGL (2830577), and the P5 run (7b0168d, deployed c9758ce+5b952da) in which both
+backends start, log their renderer, load the temporal stages and produce clean frames with no
+exceptions and no Vulkan synchronization/best-practices hazards. That is a smoke pass over the
+pipeline, not the acceptance matrix: the 18 rows of `docs/taa-acceptance.md` have not been run.
 Every standard-shader user in the mod forks now either writes motion or is on an explicit
 exemption list with a reason, enumerated by scan in
 `Optimum.Tests/taa-mover-motion-coverage-tests.cs` rather than listed by hand.
@@ -455,17 +466,29 @@ use, the NDC shear `P[8] -= 2*jx/W` is a no-op on a quad at z = 0, so a jittered
 have asserted nothing. Zeroing `taaJitterPx` while leaving the projection sheared fails 7 of the 8
 new cases, which is what makes them evidence.
 
-(t) **P3 finding (f) is unchanged and now covers eight more methods.** `mod-patcher` `Methods`
-entries were added for every mover, but `patches/runtime/**` still has no donor for any of them,
-so the installed runtime keeps the vanilla bodies and every one of these renderers ghosts there
-while the build tree is correct. `check-patches.sh` reports 0 problems either way.
+(t) **P3 finding (f) covered eight more methods, and P5 closed it.** `mod-patcher` `Methods`
+entries were added for every mover in P4 while `patches/runtime/**` still had no donor for any of
+them, so the installed runtime kept the vanilla bodies and every one of these renderers ghosted
+there while the build tree was correct. **Closed in P5** (c897e23, merged as 0120422): donors for
+all eight movers now live under `patches/runtime/VSSurvivalMod/Vintagestory/GameContent/`
+(`HelveHammerRenderer`, `FruitpressContentsRenderer`, `ResonatorRenderer`,
+`BloomeryContentsRenderer`, `ForgeContentsRenderer`, `FirepitContentsRenderer`,
+`PotInFirepitRenderer`, and `MechNetworkRenderer` under `.../GameContent/Mechanics/`), with
+`check-patches.sh` reporting 43 runtime patches applied and exact donors compiled.
+`Optimum.Tests/taa-runtime-donor-coverage-tests.cs` and
+`Optimum.Tests/mod-patcher-manifest-consistency-tests.cs` guard them from regressing.
 
 P4 status, whole phase, after the adversarial review (2026-09-10): landed on `feat/taa`
 (8f64e11 liquid, 13d9eb3 particles, 957f4e0 sky/clouds/decals/late overlays, 8d09ef1 movers,
-b1c293f review fixes). **Not verified in game on either backend** - no phase of P4 ran
-`make deploy` or the client, so by rule 3 none of it is done. GPU proof is Vulkan-only
-(`Optimum.Render.Vulkan.Tests` is the only GPU harness), and every GL branch added in this phase
-has never executed.
+b1c293f review fixes). **P4 itself ran neither `make deploy` nor the client**, so by rule 3 none
+of its per-class visual claims is done; the 18-row acceptance matrix in `docs/taa-acceptance.md`
+is still unrun. Verified in game since, on later builds carrying this code: the entity
+motion-writer gate on both backends (2830577) and the P5 smoke run (7b0168d, deployed
+c9758ce+5b952da) - both backends start, log their renderer, render the temporal stages without
+exceptions, Vulkan clean under synchronization + best-practices validation. GL branches added in
+this phase are therefore no longer wholly unexecuted (the OpenGL P5 run drove the frame), but they
+still have **no GPU proof**: `Optimum.Render.Vulkan.Tests` remains the only GPU harness, so every
+GL branch is unasserted.
 
 Exact vs fallback vs reactive, per class (the inventory table above is the ships-with-it form):
 
