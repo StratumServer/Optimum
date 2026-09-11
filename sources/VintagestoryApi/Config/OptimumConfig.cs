@@ -498,6 +498,37 @@ public static class OptimumConfig
     public static bool EffectiveGodRaysSampleCap => GodRaysSampleCapEnabled &&
         !IsShaderFeatureDisabled("GodRaysSampleCap");
 
+    /// <summary>
+    /// The terrain texture LOD bias every atlas sampler runs with: the render
+    /// scale's own bias (log2 of the scale, so a half-resolution frame samples
+    /// one mip sharper) plus <see cref="TaaMipBias" /> while TAA is on.
+    ///
+    /// Both terms live here because two call sites apply them and must agree:
+    /// ChunkRenderer sets the parameter on each atlas texture, and ShaderRegistry
+    /// sets it on the chunkopaque/chunktopsoil sampler objects, which override
+    /// the texture parameter for the units they are bound to.
+    ///
+    /// 0 with TAA off and render scale 1.0 - the value that means "do not touch
+    /// the parameter at all", which is what keeps TAA off byte-identical.
+    /// </summary>
+    public static float EffectiveTerrainLodBias
+    {
+        get
+        {
+            float bias = 0f;
+            float scale = EffectiveRenderScale;
+            if (scale < 1.0f)
+            {
+                bias += MathF.Log2(Math.Clamp(scale, 0.5f, 1.0f));
+            }
+            if (EffectiveTaa)
+            {
+                bias += Math.Clamp(TaaMipBias, -2.0f, 1.0f);
+            }
+            return bias;
+        }
+    }
+
     // Like the Vulkan renderer selection, TAA is a renderer-level feature: a
     // missing launcher scan must not disable it (IsShaderFeatureDisabled reports
     // everything disabled without a scan), only an explicit scan verdict does.

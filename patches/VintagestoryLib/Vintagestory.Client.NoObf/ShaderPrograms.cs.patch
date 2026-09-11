@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-index f19d524..63dd560 100644
+index f19d524..1e3972a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-@@ -40,10 +40,28 @@ public static class ShaderPrograms
+@@ -40,10 +40,33 @@ public static class ShaderPrograms
  
  	public static ShaderProgramEntityanimated Entityanimated;
  
@@ -15,6 +15,11 @@ index f19d524..63dd560 100644
 +	public static ShaderProgram TaaDebug;
 +
 +	public static ShaderProgram TaaResolve;
++
++	// Optimum TAA (P5): the post-resolve sharpen pass (taa-sharpen). Registered
++	// like the other Optimum-only programs, so a failed compile marks LoadError
++	// and the post chain simply keeps reading the unsharpened resolve.
++	public static ShaderProgram TaaSharpen;
 +
 +	// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
 +	// Registered like the other Optimum-only programs, so a failed compile marks

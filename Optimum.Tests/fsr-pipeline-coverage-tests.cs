@@ -73,18 +73,25 @@ public class FsrPipelineCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
 
-        // Bias must be skipped entirely at native res (RenderScale >= 1.0) so
-        // rendering matches vanilla exactly - vanilla never sets these
-        // TexParameter/SamplerParameter calls at all.
-        Assert.Contains("if (ClientSettings.OptimumRenderScale >= 1.0f)", chunkRenderer);
-        Assert.Contains("MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f))", chunkRenderer);
+        // Bias must be skipped entirely when nothing asks for one (native res
+        // with TAA off, which is the only configuration that made a bias before
+        // P5 added TaaMipBias to the same value) so rendering matches vanilla
+        // exactly - vanilla never sets these TexParameter/SamplerParameter
+        // calls at all.
+        Assert.Contains("float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;", chunkRenderer);
+        Assert.Contains("if (textureLodBias == 0f)", chunkRenderer);
+        // The render-scale term itself still is log2 of the clamped scale; it
+        // now lives in OptimumConfig so both call sites share it.
+        string optimumConfig = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("bias += MathF.Log2(Math.Clamp(scale, 0.5f, 1.0f));", optimumConfig);
         // The bias reaches every block atlas through SetOptimumTextureLodBias,
         // which routes to the device and keeps the GL call as its fallback. The
         // caller still computes the value; only the application moved.
         Assert.Contains("SetOptimumTextureLodBias(textureLodBias)", chunkRenderer);
         Assert.Contains("(TextureParameterName)34049, bias", chunkRenderer);
         Assert.Contains("OptimumGlConstants.TextureLodBias, bias", chunkRenderer);
-        Assert.Contains("if (OptimumConfig.EffectiveRenderScale < 1.0f)", shaderRegistry);
+        Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;", shaderRegistry);
+        Assert.Contains("if (terrainLodBias != 0f)", shaderRegistry);
         Assert.Contains("(SamplerParameterName)34049, terrainLodBias", shaderRegistry);
         Assert.Contains("OptimumGlConstants.TextureLodBias, terrainLodBias", shaderRegistry);
         Assert.Contains("terrainTexLinear", shaderRegistry);

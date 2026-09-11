@@ -355,7 +355,15 @@ public static class ShaderCompatibilityScanner
             // policy for every cloud pixel in the frame.
             HasExternalShader(report, "decals.vsh") || HasExternalShader(report, "decals.fsh") ||
             HasExternalShader(report, "taa-skymotion.vsh") || HasExternalShader(report, "taa-skymotion.fsh") ||
-            HasExternalShader(report, "vertexwarp.vsh");
+            HasExternalShader(report, "vertexwarp.vsh") ||
+            // TAA's own passes. An external copy of the resolve is the whole
+            // feature replaced by something with unknown history semantics; of
+            // the debug view, a debug mode that lies; of the sharpen pass, a
+            // filter running on the resolved colour that Optimum no longer
+            // controls the strength or the bypass of.
+            HasExternalShader(report, "taa-resolve.vsh") || HasExternalShader(report, "taa-resolve.fsh") ||
+            HasExternalShader(report, "taa-debug.vsh") || HasExternalShader(report, "taa-debug.fsh") ||
+            HasExternalShader(report, "taa-sharpen.vsh") || HasExternalShader(report, "taa-sharpen.fsh");
         AddFeatureDecision(report, "Taa", externalMotionShader,
             "external shader owns a motion-vector writer contract");
 
