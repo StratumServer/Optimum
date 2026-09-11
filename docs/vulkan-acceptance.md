@@ -145,6 +145,40 @@ history colour 0.968/0.969). Vulkan-vs-GL (V0.2) attachments clearly below their
 | 0-Primary color4 (motion) | 0.979 | 0.907 | |
 | 0-Primary color2 alpha, color1 alpha | 0.984 / 0.978 | 0.950 / 0.923 | |
 
+### Phase 1 exit results (2026-09-11)
+
+Deployed `f373c4a` (Phase 1A and 1B merged and reviewed). NVIDIA GeForce RTX 4070 Laptop GPU, driver
+615.71.09, same settings as Phase 0, section 0's scene commands not applied. Logs in
+`docs/gpu-verification-2026-09-11/phase1/` (local).
+
+- Both renderers start; renderer and GPU lines confirmed from each client log.
+- Forced install failure (`OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE=1`): "[Optimum] Vulkan unavailable,
+  reopening for OpenGL: forced by OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE", then OpenGL on the RTX 4070
+  rendered the world and wrote its parity dump.
+- Validation with `sync,best` from load through in-world frame 300: 0 error lines.
+- Pacing, same session, medians of per-second windows:
+
+| | OpenGL | Vulkan (Phase 0 Vulkan) |
+|---|---|---|
+| mean | 8.97 ms | 8.21 ms (9.90) |
+| p99 | 19.76 ms | 18.07 ms (20.08) |
+| stddev | 4.62 ms | 3.74 ms (4.96) |
+| blocking uploads per sample | - | 0 in all 90 samples (up to 193) |
+| gate | - | pass: stddev vs baseline, blocking uploads, dropped mesh writes, uniform overflows; fail: p99 <= 1.5 x mean |
+
+- **The OpenGL pacing state is bimodal between launches, independent of the build.** A/B/A in one
+  session, OpenGL, 60 s each: current build 6.08 ms mean / 6.74 p99 / 0.28 stddev; Phase 0 build
+  (`7685fcc`) 8.79 / 18.00 / 4.16; current build again 9.11 / 18.48 / 4.43. The same build produced
+  both states, so the Phase 1 OpenGL numbers above are the slow state, not a regression. Pacing
+  comparisons therefore interleave runs (see M1.1).
+- Parity, Vulkan vs OpenGL, tracks Phase 0 except: far shadow map 0.845 (0.940); `0-Primary color2`
+  reads SSIM 0 because some foliage writes NaN normals, on both backends (OpenGL 7992 texels, Vulkan
+  1914, the OpenGL fallback run 177, same screen region; none in Phase 0), recorded for Phase 3's native
+  shaders; the SSAO colour1 alpha gap (OpenGL 1.0, Vulkan 0.0) is unchanged and belongs to Phase 2.
+- Not done at this exit, carried to the Milestone 1 session: a 10-minute session, a resize, alt-tab and
+  minimise loop in a real window, the sun glare and the fork bridge (clouds, world map, boat water mask)
+  judged on screen.
+
 ### Milestone 1 (Phase 2 exit): stable frame delivery with TAA
 
 All numbers first, then eyes. Each row names the plan's definition of done verbatim.
@@ -152,6 +186,9 @@ All numbers first, then eyes. Each row names the plan's definition of done verba
 #### M1.1 Pacing gate
 - Commands: `scripts/dev/perf-capture.sh` once per backend on the same scene and settings (V0.3, V0.4),
   then `scripts/dev/pacing-gate.sh --renderer vulkan --fps <vk fps.log> --stats <vulkan-stats.log> --baseline <gl fps.log>`.
+- Protocol: OpenGL pacing on this machine is bimodal between launches (Phase 1 exit, A/B/A). Run at
+  least OpenGL, Vulkan, OpenGL, Vulkan in one session and judge each Vulkan run against its neighbouring
+  OpenGL run; a pair whose two OpenGL runs disagree by more than 1 ms stddev is re-run.
 - Pass: exit 0 - blocking uploads 0 in every sample, median window stddev <= baseline x 1.25,
   median window p99 <= 1.5 x median mean, dropped mesh writes 0, uniform overflows 0.
 - Record: renderer and GPU lines, the gate output, both log paths.
@@ -268,6 +305,7 @@ One entry per phase exit or milestone, appended, never edited after the fact.
 | date | phase / milestone | commit | rows passed | rows failed or deferred (with reason) | evidence paths | decision |
 |---|---|---|---|---|---|---|
 | 2026-09-11 | Phase 0 exit | 906b40f deployed (Phase 0 merged at cdd7412) | V0.1 and V0.2 recorded, V0.3 and V0.4 recorded, V0.5 pass (build 0 errors, Optimum.Tests 1056, GPU 386 with sync,best, check-patches 0 conflicts) | section 0 fixed scene not applied; Vulkan fails the pacing gate on p99, stddev and blocking uploads (the Milestone 1 target, not a Phase 0 gate) | `docs/gpu-verification-2026-09-11/phase0/` | Phase 0 accepted; Phase 1A and 1B start. M1.6 changed to a noise-floor rule. User observed no Vulkan jitter on these runs (driver 615.71.09, sky-direction fix not deployed). |
+| 2026-09-11 | Phase 1 exit (1A + 1B) | f373c4a deployed | both renderers start; forced-install-failure fallback renders on OpenGL; sync,best validation 0 errors; Vulkan blocking uploads 0 in all samples; Vulkan pacing better than Phase 0 on mean, p99 and stddev; build 0 errors, Optimum.Tests 1128, GPU 494 | Vulkan p99 fails 1.5 x mean; 10-minute session, window resize/alt-tab/minimise loop, sun glare and fork bridge on screen carried to Milestone 1; OpenGL pacing found bimodal between launches (A/B/A), not a regression | `docs/gpu-verification-2026-09-11/phase1/` | Phase 1 accepted; Phase 2 (frame graph) starts; M1.1 now interleaves runs |
 
 ## 6. Vendor matrix
 

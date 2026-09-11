@@ -128,6 +128,15 @@ if [[ -n "$VSYNC_ARG" ]]; then
   echo "clientsettings: vsyncMode=$WANT (was $VSYNC_SAVED)"
 fi
 
+# Renderer is rewritten by run-client.sh; restore the user's value on every exit path.
+SAVED_RENDERER="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("Renderer",""))' "$CONFIG")" || exit 1
+restore_renderer() {
+  [[ -n "$SAVED_RENDERER" ]] || return 0
+  python3 -c 'import json,sys; p,v=sys.argv[1],sys.argv[2]; d=json.load(open(p)); d["Renderer"]=v; json.dump(d,open(p,"w"),indent=2)' "$CONFIG" "$SAVED_RENDERER" || true
+}
+restore_all() { restore_vsync; restore_renderer; }
+trap restore_all EXIT
+
 # 2. Launch. The client writes both logs itself; run-client.sh rewrites Renderer.
 export OPTIMUM_FPS_LOG="$FPS_LOG"
 if [[ "$RENDERER_ARG" == "vulkan" ]]; then
