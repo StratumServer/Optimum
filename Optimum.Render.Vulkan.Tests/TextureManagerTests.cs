@@ -43,8 +43,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             int first = textures.Create(16, 16, Format.R8G8B8A8Unorm);
             int second = textures.Create(16, 16, Format.R8G8B8A8Unorm);
@@ -75,8 +75,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             int id = textures.Create(16, 16, Format.R8G8B8A8Unorm);
 
@@ -118,8 +118,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             int id = textures.Create(16, 16, Format.R8G8B8A8Unorm, generateMipmaps: true);
             Assert.True(textures.Get(id)!.MipLevels > 1, "the texture should own a chain to sample");
@@ -184,8 +184,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             const uint size = 8;
             int id = textures.Create(size, size, Format.R8G8B8A8Unorm);
@@ -238,8 +238,8 @@ public class TextureManagerTests
 
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             const uint size = 64;
             int id = textures.Create(size, size, Format.R8G8B8A8Unorm, generateMipmaps: true);
@@ -281,8 +281,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             int cube = textures.Create(32, 32, Format.R8G8B8A8Unorm, cube: true);
             Assert.Equal(6u, textures.Get(cube)!.Layers);
@@ -299,8 +299,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             int depth = textures.Create(64, 64, Format.D32Sfloat);
             Assert.Equal(ImageAspectFlags.DepthBit, textures.Get(depth)!.Aspect);
@@ -320,8 +320,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
 
             int id = textures.Create(4, 4, Format.R8G8B8A8Unorm);
 
@@ -346,8 +346,8 @@ public class TextureManagerTests
         Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             using var ring = new FrameRing(context!, framesInFlight: 2, uniformRingSize: 1 << 20);
 
             int id = textures.Create(16, 16, Format.R8G8B8A8Unorm);

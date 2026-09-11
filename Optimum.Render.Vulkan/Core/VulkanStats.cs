@@ -19,7 +19,11 @@ internal enum WaitSite
     /// start of frame n; exactly one per frame start, the ring's only steady-state wait.
     /// </summary>
     FramePacing = 0,
-    /// <summary>A setup command buffer that uploads data and waits for its fence.</summary>
+    /// <summary>
+    /// An upload that waited for the GPU. Retired in Phase 1B step 3: uploads ride
+    /// the next frame submission (UploadManager) and never wait, so this stays
+    /// zero; the token stays for log compatibility and the pacing gate.
+    /// </summary>
     UploadSubmit = 1,
     /// <summary>
     /// The Frame timeline wait inside a mid-frame flush. Retired in Phase 1B:
@@ -158,6 +162,26 @@ internal static class VulkanStats
 
     public static long BlockingUploads => Interlocked.Read(ref _blockingUploads);
     public static long UploadRequests => Interlocked.Read(ref _uploadRequests);
+
+    private static long _inlineUploads;
+    private static long _stagingOverflows;
+    private static long _uploadBatchGrowths;
+
+    /// <summary>
+    /// An upload recorded into the frame command buffer because that command
+    /// buffer already used its destination (GL order), instead of the upload batch.
+    /// </summary>
+    public static void NoteInlineUpload() => Interlocked.Increment(ref _inlineUploads);
+
+    /// <summary>An upload that did not fit its batch's staging region and took a dedicated staging buffer.</summary>
+    public static void NoteStagingOverflow() => Interlocked.Increment(ref _stagingOverflows);
+
+    /// <summary>An upload batch created beyond the staging ring's regions (more batches in flight than frames).</summary>
+    public static void NoteUploadBatchGrowth() => Interlocked.Increment(ref _uploadBatchGrowths);
+
+    public static long InlineUploads => Interlocked.Read(ref _inlineUploads);
+    public static long StagingOverflows => Interlocked.Read(ref _stagingOverflows);
+    public static long UploadBatchGrowths => Interlocked.Read(ref _uploadBatchGrowths);
 
     /// <summary>One vkCmdBeginRendering.</summary>
     public static void NoteScopeOpened() => Interlocked.Increment(ref _scopesOpened);

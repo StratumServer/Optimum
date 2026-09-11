@@ -114,10 +114,15 @@ internal sealed unsafe class FrameTimeline : ITimelineClock, IDisposable
     /// unwinding past the caller's own idle wait must not turn into a driver crash
     /// on destroying objects a queued command buffer still uses).
     /// </summary>
-    public void WaitForSignalledFramesAtTeardown()
+    public void WaitForSignalledFramesAtTeardown() => WaitAtTeardown(Frame, FrameSignalled);
+
+    /// <summary>The Transfer timeline's counterpart of <see cref="WaitForSignalledFramesAtTeardown" />.</summary>
+    public void WaitForSignalledTransfersAtTeardown() => WaitAtTeardown(Transfer, TransferSignalled);
+
+    private void WaitAtTeardown(Semaphore semaphore, ulong signalled)
     {
-        Semaphore handle = Frame;
-        ulong target = FrameSignalled;
+        Semaphore handle = semaphore;
+        ulong target = signalled;
         var info = new SemaphoreWaitInfo
         {
             SType = StructureType.SemaphoreWaitInfo,

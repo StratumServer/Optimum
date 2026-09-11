@@ -53,8 +53,8 @@ public class RenderTargetTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -113,8 +113,8 @@ public class RenderTargetTests
         using (context)
         {
             const uint size = 16;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
             using var pipelines = new GraphicsPipelineCache(context!);
@@ -174,8 +174,8 @@ public class RenderTargetTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
 
@@ -223,8 +223,8 @@ public class RenderTargetTests
 
         using (context)
         {
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
 
@@ -258,7 +258,7 @@ public class RenderTargetTests
         }, compiler);
 
     private static unsafe void RenderFullscreen(
-        VulkanContext context, VulkanCommands commands, RenderTargetManager targets,
+        VulkanContext context, SetupQueue commands, RenderTargetManager targets,
         GraphicsPipelineCache pipelines, GlStateTracker state, ShaderProgramResources program,
         int framebuffer, uint size)
     {
@@ -315,7 +315,7 @@ public class RenderTargetTests
     }
 
     private static unsafe void FillTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, byte value)
     {
         var pixels = new byte[size * size * 4];
@@ -327,7 +327,7 @@ public class RenderTargetTests
     }
 
     private static unsafe byte[] ReadTexture(
-        VulkanContext context, VulkanCommands commands, TextureManager textures, int textureId, uint size)
+        VulkanContext context, SetupQueue commands, TextureManager textures, int textureId, uint size)
     {
         VulkanTexture texture = textures.Get(textureId)!;
         ulong bytes = (ulong)size * size * 4;

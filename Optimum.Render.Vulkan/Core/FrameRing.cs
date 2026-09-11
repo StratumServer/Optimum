@@ -18,6 +18,11 @@ internal readonly record struct RingAllocation(Buffer Buffer, uint Offset, IntPt
 /// slot is only reused once the Frame timeline says the GPU has finished the
 /// last submission that used it (<see cref="FrameRing.BeginFrame" /> waits for that).
 ///
+/// The slot's frame command buffer is submitted together with the open upload
+/// batch (<see cref="UploadManager" />), batch first, in one SubmitInfo that
+/// signals both timelines: uploads recorded since the last submission run before
+/// the frame that uses them, and nothing waits for them.
+///
 /// A frame may be submitted in parts (<see cref="SubmitPartial" />, for a
 /// readback that has to see the frame's work so far). Every command buffer
 /// carries its own Frame timeline value, and all of them stay in this slot: the
@@ -28,6 +33,7 @@ internal sealed unsafe class FrameSlot : IDisposable
 {
     private readonly VulkanContext _context;
     private readonly FrameTimeline _timeline;
+    private readonly UploadManager _uploads;
     private readonly ulong _alignment;
     private readonly ulong _regionStart;
     private readonly ulong _regionSize;
@@ -57,11 +63,12 @@ internal sealed unsafe class FrameSlot : IDisposable
     /// <summary>Partial submissions in the current frame.</summary>
     public int PartialSubmits { get; private set; }
 
-    public FrameSlot(VulkanContext context, FrameTimeline timeline, VulkanBuffer uniformRing,
+    public FrameSlot(VulkanContext context, FrameTimeline timeline, UploadManager uploads, VulkanBuffer uniformRing,
         ulong regionStart, ulong regionSize, int index = 0)
     {
         _context = context;
         _timeline = timeline;
+        _uploads = uploads;
         _uniformRing = uniformRing;
         _regionStart = regionStart;
         _regionSize = regionSize;
@@ -124,6 +131,7 @@ internal sealed unsafe class FrameSlot : IDisposable
         VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
             "vkBeginCommandBuffer for a frame slot");
         CommandBuffer = commandBuffer;
+        _uploads.OnFrameCommandsStarted(commandBuffer);
     }
 
     /// <summary>
@@ -194,50 +202,77 @@ internal sealed unsafe class FrameSlot : IDisposable
         PipelineStageFlags stage = waitStage;
         uint waitCount = wait.Handle == 0 ? 0u : 1u;
 
-        // Binary present semaphore first (its value is ignored), then the timeline.
-        Semaphore* signals = stackalloc Semaphore[2];
-        ulong* signalValues = stackalloc ulong[2];
-        uint signalCount = 0;
-        if (signalSemaphore.Handle != 0)
-        {
-            signals[signalCount] = signalSemaphore;
-            signalValues[signalCount] = 0;
-            signalCount++;
-        }
-        signals[signalCount] = _timeline.Frame;
-        signalValues[signalCount] = FrameValue;
-        signalCount++;
+        // Binary present semaphore first (its value is ignored), then the Frame
+        // timeline, then the Transfer timeline when an upload batch rides along.
+        Semaphore* signals = stackalloc Semaphore[3];
+        ulong* signalValues = stackalloc ulong[3];
+        CommandBuffer* commandBuffers = stackalloc CommandBuffer[2];
 
-        var timelineInfo = new TimelineSemaphoreSubmitInfo
-        {
-            SType = StructureType.TimelineSemaphoreSubmitInfo,
-            WaitSemaphoreValueCount = waitCount,
-            PWaitSemaphoreValues = waitCount == 0 ? null : &waitValue,
-            SignalSemaphoreValueCount = signalCount,
-            PSignalSemaphoreValues = signalValues,
-        };
-
-        var submit = new SubmitInfo
-        {
-            SType = StructureType.SubmitInfo,
-            PNext = &timelineInfo,
-            CommandBufferCount = 1,
-            PCommandBuffers = &commandBuffer,
-            WaitSemaphoreCount = waitCount,
-            PWaitSemaphores = waitCount == 0 ? null : &wait,
-            PWaitDstStageMask = waitCount == 0 ? null : &stage,
-            SignalSemaphoreCount = signalCount,
-            PSignalSemaphores = signals,
-        };
-
-        // Shares the queue with off-thread setup submissions; see QueueLock. A
-        // worker's synchronous upload holds that lock through its fence wait, so
-        // this is a CPU wait on the GPU like any other and is counted as one.
+        // The queue is shared with the swapchain's present and between-frames
+        // upload submissions; see QueueLock. Counted as a wait like any other.
         long submitStart = VulkanStats.WaitStart();
-        lock (_context.QueueLock)
+        // The upload lock is held from taking the batch to the submit, so no
+        // upload can land in a batch that is already closed, and Transfer values
+        // reach the queue in the order they were reserved.
+        _uploads.EnterSubmit();
+        try
         {
-            VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, default(Fence)),
-                "vkQueueSubmit for a frame");
+            uint signalCount = 0;
+            if (signalSemaphore.Handle != 0)
+            {
+                signals[signalCount] = signalSemaphore;
+                signalValues[signalCount] = 0;
+                signalCount++;
+            }
+            signals[signalCount] = _timeline.Frame;
+            signalValues[signalCount] = FrameValue;
+            signalCount++;
+
+            uint commandBufferCount = 0;
+            bool uploads = _uploads.TakeOpenBatchLocked(out CommandBuffer uploadCommands, out ulong transferValue);
+            if (uploads)
+            {
+                // First: it runs before the frame command buffer that samples what it wrote.
+                commandBuffers[commandBufferCount++] = uploadCommands;
+                signals[signalCount] = _timeline.Transfer;
+                signalValues[signalCount] = transferValue;
+                signalCount++;
+            }
+            commandBuffers[commandBufferCount++] = commandBuffer;
+
+            var timelineInfo = new TimelineSemaphoreSubmitInfo
+            {
+                SType = StructureType.TimelineSemaphoreSubmitInfo,
+                WaitSemaphoreValueCount = waitCount,
+                PWaitSemaphoreValues = waitCount == 0 ? null : &waitValue,
+                SignalSemaphoreValueCount = signalCount,
+                PSignalSemaphoreValues = signalValues,
+            };
+
+            var submit = new SubmitInfo
+            {
+                SType = StructureType.SubmitInfo,
+                PNext = &timelineInfo,
+                CommandBufferCount = commandBufferCount,
+                PCommandBuffers = commandBuffers,
+                WaitSemaphoreCount = waitCount,
+                PWaitSemaphores = waitCount == 0 ? null : &wait,
+                PWaitDstStageMask = waitCount == 0 ? null : &stage,
+                SignalSemaphoreCount = signalCount,
+                PSignalSemaphores = signals,
+            };
+
+            lock (_context.QueueLock)
+            {
+                VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, default(Fence)),
+                    "vkQueueSubmit for a frame");
+            }
+            if (uploads) _timeline.NoteTransferSubmitted(transferValue);
+            _uploads.OnFrameCommandsSubmittedLocked();
+        }
+        finally
+        {
+            _uploads.ExitSubmit();
         }
         VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);
         _timeline.NoteFrameSubmitted(FrameValue);
@@ -281,13 +316,16 @@ internal sealed class FrameRing : IDisposable
     private readonly VulkanBuffer _uniformRing;
     private readonly FrameTimeline _timeline;
     private readonly RetireQueue _retired;
+    private readonly UploadManager _uploads;
     private int _index = -1;
     private bool _disposed;
 
-    public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 32 * 1024 * 1024)
+    public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 32 * 1024 * 1024,
+        ulong stagingPerSlot = UploadManager.DefaultStagingPerSlot)
     {
         _timeline = new FrameTimeline(context);
         _retired = new RetireQueue(_timeline);
+        _uploads = new UploadManager(context, _timeline, _retired, framesInFlight, stagingPerSlot);
         _uniformRing = new VulkanBuffer(context, uniformRingSize,
             BufferUsageFlags.UniformBufferBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
@@ -299,7 +337,7 @@ internal sealed class FrameRing : IDisposable
         _slots = new FrameSlot[framesInFlight];
         for (int i = 0; i < framesInFlight; i++)
         {
-            _slots[i] = new FrameSlot(context, _timeline, _uniformRing, regionSize * (ulong)i, regionSize, i);
+            _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i);
         }
     }
 
@@ -307,6 +345,9 @@ internal sealed class FrameRing : IDisposable
 
     /// <summary>The Frame and Transfer timelines every submission signals.</summary>
     public FrameTimeline Timeline => _timeline;
+
+    /// <summary>The upload batches every submission of this ring carries first.</summary>
+    public UploadManager Uploads => _uploads;
 
     /// <summary>The buffer every uniform descriptor points at.</summary>
     public Buffer UniformBuffer => _uniformRing.Handle;
@@ -370,6 +411,7 @@ internal sealed class FrameRing : IDisposable
         // does); this covers the ones that did not, such as a test unwinding from a
         // failed assert. The last submission may still name everything below.
         _timeline.WaitForSignalledFramesAtTeardown();
+        _uploads.Dispose();
         _retired.DisposeAll();
         foreach (FrameSlot slot in _slots) slot.Dispose();
         _uniformRing.Dispose();

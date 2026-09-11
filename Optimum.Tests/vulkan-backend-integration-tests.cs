@@ -488,7 +488,7 @@ public class VulkanBackendIntegrationTests
         string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
         Assert.DoesNotContain("FlushFrame", device);
         Assert.DoesNotContain("Thread.Yield", device);
-        Assert.Contains("if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) SubmitPartial();", device);
+        Assert.DoesNotContain("BeforeSynchronousSubmit", device);
         Assert.Contains("ReadbackTicket ticket = _readbacks.CopyToHost(", device);
         Assert.Contains("_queryRing.BeginSlot(slot.Index, slot.CommandBuffer);", device);
         Assert.Contains("public int GetQueryResult(int queryId) => _queryRing.GetResult(queryId);", device);
@@ -509,6 +509,57 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("CmdCopyImageToBuffer(", readbacks);
         Assert.Contains("WaitSite.Readback", readbacks);
         Assert.DoesNotContain("WaitDeviceIdle", readbacks);
+    }
+
+    /// <summary>
+    /// Phase 1B step 3: no upload waits. Texture uploads, mip chains, poison
+    /// clears and staged buffer writes record into an upload batch that the next
+    /// frame submission carries first (one SubmitInfo, Frame and Transfer
+    /// timelines signalled together), or inline into the frame command buffer when
+    /// that already used the destination; the synchronous setup submit is deleted.
+    /// </summary>
+    [Fact]
+    public void UploadsRideTheFrameSubmissionAndNeverWait()
+    {
+        string resources = Read("Optimum.Render.Vulkan/Core/VulkanResources.cs");
+        Assert.DoesNotContain("class VulkanCommands", resources);
+        Assert.DoesNotContain("SubmitAndWait", resources);
+
+        string uploads = Read("Optimum.Render.Vulkan/Transfer/UploadManager.cs");
+        Assert.Contains("free.TransferValue = _timeline.ReserveTransfer();", uploads);
+        Assert.Contains("if (completed >= candidate.TransferValue)", uploads);
+        Assert.Contains("_retired.Retire(dedicated);", uploads);
+        Assert.Contains("VulkanStats.NoteStagingOverflow();", uploads);
+        Assert.Contains("_timeline.NoteTransferSubmitted(transferValue);", uploads);
+        Assert.Contains("CloseRenderingScope?.Invoke(frameCommands);", uploads);
+        Assert.DoesNotContain("WaitForFences(", uploads);
+        Assert.DoesNotContain("WaitSemaphores(", uploads);
+        // A staged buffer copy is ordered against the draws around it by buffer barriers.
+        Assert.Contains("SType = StructureType.BufferMemoryBarrier2,", uploads);
+        Assert.Contains("PipelineStageFlags2.CopyBit, AccessFlags2.TransferWriteBit);", uploads);
+
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        Assert.Contains("_uploads.TakeOpenBatchLocked(out CommandBuffer uploadCommands, out ulong transferValue);", ring);
+        Assert.Contains("signals[signalCount] = _timeline.Transfer;", ring);
+        Assert.Contains("if (uploads) _timeline.NoteTransferSubmitted(transferValue);", ring);
+        Assert.Contains("_uploads.OnFrameCommandsStarted(commandBuffer);", ring);
+
+        string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
+        Assert.Contains("_uploads.BeginRecording(_uploads.UsedByPendingFrame(texture.FrameUse));", textures);
+        Assert.Contains("_uploads.NoteUse(commandBuffer, texture);", textures);
+        Assert.Contains("_uploads.BeginRecording(inlineInFrame: false);", textures);
+        // A worker's upload and a delete on the render thread are ordered by the upload lock.
+        Assert.Contains("if (!ReferenceEquals(Get(textureId), texture)) return;", textures);
+        Assert.Contains("_uploads.EnterLock();", textures);
+
+        string meshes = Read("Optimum.Render.Vulkan/Core/MeshManager.cs");
+        Assert.Contains("_uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);", meshes);
+
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.DoesNotContain("_setupCommands", device);
+        Assert.Contains("_uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);", device);
+        Assert.Contains("ulong transferValue = _uploads.SubmitStandalone();", device);
+        Assert.Contains("_frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);", device);
     }
 
     [Fact]

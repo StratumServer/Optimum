@@ -78,8 +78,8 @@ public class PoisonModeTests
         {
             Assert.True(context!.PoisonFreshResources);
             const uint size = 8;
-            using var commands = new VulkanCommands(context);
-            using var textures = new TextureManager(context, commands);
+            using var commands = new SetupQueue(context);
+            using var textures = new TextureManager(context, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context, textures, state);
 
@@ -153,8 +153,8 @@ public class PoisonModeTests
         using (context)
         {
             const uint size = 8;
-            using var commands = new VulkanCommands(context!);
-            using var textures = new TextureManager(context!, commands);
+            using var commands = new SetupQueue(context!);
+            using var textures = new TextureManager(context!, commands.Uploads);
             var state = new GlStateTracker();
             using var targets = new RenderTargetManager(context!, textures, state);
 
@@ -218,7 +218,7 @@ public class PoisonModeTests
     }
 
     private static unsafe byte[] Read(
-        VulkanContext context, VulkanCommands commands, TextureManager textures,
+        VulkanContext context, SetupQueue commands, TextureManager textures,
         int textureId, uint size, int bytesPerTexel, ImageAspectFlags aspect)
     {
         VulkanTexture texture = textures.Get(textureId)!;

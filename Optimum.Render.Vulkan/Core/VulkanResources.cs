@@ -47,6 +47,12 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     /// <summary>Non-zero when the allocation is host visible and mapped.</summary>
     public IntPtr Mapped { get; private set; }
 
+    /// <summary>
+    /// The frame command buffer generation that last used this buffer; see
+    /// <see cref="UploadManager.NoteUse(CommandBuffer, VulkanBuffer)" />.
+    /// </summary>
+    internal long FrameUse;
+
     public VulkanBuffer(VulkanContext context, ulong size, BufferUsageFlags usage, MemoryPropertyFlags properties)
     {
         _context = context;
@@ -293,172 +299,5 @@ internal static unsafe class VulkanMemory
         }
 
         throw new InvalidOperationException($"no memory type with {properties}");
-    }
-}
-
-/// <summary>
-/// A command pool plus a synchronous submit helper.
-///
-/// The renderer records into per-frame buffers, but setup work - uploads, layout
-/// transitions, readback - wants a one-shot submit that waits. Keeping that in
-/// one place stops each call site from inventing its own fence handling.
-/// </summary>
-internal sealed unsafe class VulkanCommands : IDisposable
-{
-    private readonly VulkanContext _context;
-    private bool _disposed;
-
-    public CommandPool Pool { get; }
-
-    public VulkanCommands(VulkanContext context)
-    {
-        _context = context;
-
-        var createInfo = new CommandPoolCreateInfo
-        {
-            SType = StructureType.CommandPoolCreateInfo,
-            QueueFamilyIndex = context.GraphicsQueueFamily,
-            Flags = CommandPoolCreateFlags.ResetCommandBufferBit,
-        };
-
-        if (context.Api.CreateCommandPool(context.Device, &createInfo, null, out CommandPool pool) != Result.Success)
-        {
-            throw new InvalidOperationException("vkCreateCommandPool failed");
-        }
-        Pool = pool;
-    }
-
-    public CommandBuffer Allocate()
-    {
-        var allocateInfo = new CommandBufferAllocateInfo
-        {
-            SType = StructureType.CommandBufferAllocateInfo,
-            CommandPool = Pool,
-            Level = CommandBufferLevel.Primary,
-            CommandBufferCount = 1,
-        };
-
-        CommandBuffer buffer;
-        _context.Api.AllocateCommandBuffers(_context.Device, &allocateInfo, &buffer);
-        return buffer;
-    }
-
-    /// <summary>
-    /// Runs before every synchronous submit, outside the queue lock. The device
-    /// uses it to flush a frame it is in the middle of recording: a synchronous
-    /// submit executes before that frame does, so any layout transition the
-    /// frame has already recorded is not yet true on the GPU, and a setup
-    /// command that assumed it would corrupt the image or fail the submit.
-    /// </summary>
-    public Action? BeforeSynchronousSubmit;
-
-    /// <summary>
-    /// Records, submits and waits. For setup and readback, not frames.
-    ///
-    /// The whole body is serialised, not just the submit: the command pool is
-    /// shared, and Vulkan requires external synchronisation for allocating from
-    /// and freeing to a pool as much as for submitting to a queue. Texture
-    /// uploads reach this from asset-loading worker threads while the render
-    /// thread is submitting frames.
-    /// </summary>
-    public void SubmitAndWait(Action<CommandBuffer> record, WaitSite site = WaitSite.UploadSubmit)
-    {
-        BeforeSynchronousSubmit?.Invoke();
-
-        // Timed from before the lock: waiting for the render thread to release
-        // the queue is as much a part of an upload's cost as the GPU work.
-        long start = System.Diagnostics.Stopwatch.GetTimestamp();
-        lock (_context.QueueLock)
-        {
-            SubmitAndWaitLocked(record);
-        }
-        VulkanStats.NoteUpload(System.Diagnostics.Stopwatch.GetTimestamp() - start);
-        // Uploads and readbacks are told apart by the caller: only an upload
-        // that waited here is a blocking upload (the pacing gate's first rule).
-        VulkanStats.NoteWait(site, start);
-        if (site == WaitSite.UploadSubmit) VulkanStats.NoteBlockingUpload();
-    }
-
-    private void SubmitAndWaitLocked(Action<CommandBuffer> record)
-    {
-        Vk api = _context.Api;
-        CommandBuffer commandBuffer = Allocate();
-
-        Fence fence = default;
-        bool fenceCreated = false;
-        try
-        {
-            var begin = new CommandBufferBeginInfo
-            {
-                SType = StructureType.CommandBufferBeginInfo,
-                Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
-            };
-            VulkanResult.Check(api.BeginCommandBuffer(commandBuffer, &begin),
-                "vkBeginCommandBuffer for a setup command buffer");
-            record(commandBuffer);
-            VulkanResult.Check(api.EndCommandBuffer(commandBuffer),
-                "vkEndCommandBuffer for a setup command buffer");
-
-            var fenceInfo = new FenceCreateInfo { SType = StructureType.FenceCreateInfo };
-            VulkanResult.Check(api.CreateFence(_context.Device, &fenceInfo, null, out fence),
-                "vkCreateFence for a setup command buffer");
-            fenceCreated = true;
-
-            var submit = new SubmitInfo
-            {
-                SType = StructureType.SubmitInfo,
-                CommandBufferCount = 1,
-                PCommandBuffers = &commandBuffer,
-            };
-            VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, fence),
-                "vkQueueSubmit for a setup command buffer");
-            VulkanResult.Check(api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue),
-                "vkWaitForFences for a setup command buffer");
-        }
-        finally
-        {
-            if (fenceCreated) api.DestroyFence(_context.Device, fence, null);
-            api.FreeCommandBuffers(_context.Device, Pool, 1, &commandBuffer);
-        }
-    }
-
-    /// <summary>
-    /// Moves an image between layouts with a synchronization2 barrier, widening
-    /// the stage and access masks to "all commands" rather than deriving tight
-    /// ones. Setup paths are not hot, and a correct broad barrier beats a clever
-    /// narrow one that is subtly wrong.
-    /// </summary>
-    public void TransitionImage(CommandBuffer commandBuffer, VulkanImage image, ImageLayout target, ImageAspectFlags aspect)
-    {
-        var barrier = new ImageMemoryBarrier2
-        {
-            SType = StructureType.ImageMemoryBarrier2,
-            SrcStageMask = PipelineStageFlags2.AllCommandsBit,
-            SrcAccessMask = AccessFlags2.MemoryWriteBit,
-            DstStageMask = PipelineStageFlags2.AllCommandsBit,
-            DstAccessMask = AccessFlags2.MemoryReadBit | AccessFlags2.MemoryWriteBit,
-            OldLayout = image.Layout,
-            NewLayout = target,
-            Image = image.Handle,
-            SubresourceRange = new ImageSubresourceRange(aspect, 0, 1, 0, 1),
-        };
-
-        var dependency = new DependencyInfo
-        {
-            SType = StructureType.DependencyInfo,
-            ImageMemoryBarrierCount = 1,
-            PImageMemoryBarriers = &barrier,
-        };
-
-        _context.Api.CmdPipelineBarrier2(commandBuffer, &dependency);
-        VulkanStats.NoteImageBarriers(1);
-        image.Layout = target;
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _context.Api.DestroyCommandPool(_context.Device, Pool, null);
     }
 }

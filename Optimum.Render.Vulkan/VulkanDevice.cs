@@ -26,7 +26,7 @@ namespace Optimum.Render.Vulkan;
 public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 {
     private VulkanContext _context = null!;
-    private VulkanCommands _setupCommands = null!;
+    private UploadManager _uploads = null!;
     private GlStateTracker _state = null!;
     private TextureManager _textures = null!;
     private MeshManager _meshes = null!;
@@ -49,7 +49,6 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
-    private int _renderThreadId = -1;
     private readonly Dictionary<IShader, StagedStage> _stagedStages = new();
     private readonly List<string> _diagnostics = new();
 
@@ -319,22 +318,20 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off"));
-        _setupCommands = new VulkanCommands(_context);
-        // Only the render thread records frames, so only its synchronous submits
-        // can race one; a worker's upload is ordered by the queue lock alone. The
-        // frame's recorded part is submitted first and recording continues in the
-        // same slot: queue order is all the setup command needs, so nothing waits.
-        _setupCommands.BeforeSynchronousSubmit = () =>
-        {
-            if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) SubmitPartial();
-        };
         _state = new GlStateTracker();
-        _textures = new TextureManager(_context, _setupCommands);
-        _meshes = new MeshManager(_context, _state);
+        // Uploads never wait: they ride the next frame submission, recorded from
+        // any thread into the ring's upload batch (or inline into the frame when
+        // it already used the destination; see UploadManager).
+        _frames = new FrameRing(_context);
+        _uploads = _frames.Uploads;
+        _textures = new TextureManager(_context, _uploads);
+        _meshes = new MeshManager(_context, _state, _uploads);
         _targets = new RenderTargetManager(_context, _textures, _state);
+        // An inline upload records transfer commands into the frame command
+        // buffer, which no rendering scope may enclose.
+        _uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);
         _pipelines = new GraphicsPipelineCache(_context);
         _descriptors = new DescriptorCache(_context);
-        _frames = new FrameRing(_context);
         _queryRing = new QueryRing(_context, _frames.Timeline, _frames.FramesInFlight);
         _readbacks = new ReadbackManager(_context, _textures, _frames);
         _shaderCompiler = new ShaderCompiler();
@@ -618,7 +615,6 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         FrameSlot slot = _frames.BeginFrame();
         _frameActive = true;
-        _renderThreadId = Environment.CurrentManagedThreadId;
         _frameCounter++;
         _indirectFrameUsage = 0;
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
@@ -657,6 +653,15 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     /// <summary>The frame ring's timelines. Tests only.</summary>
     internal FrameTimeline TimelineForTests => _frames.Timeline;
+
+    /// <summary>The frame ring's upload manager. Tests only.</summary>
+    internal UploadManager UploadsForTests => _uploads;
+
+    /// <summary>Static meshes on device-local memory through staging (Phase 1B step 5's default). Tests only.</summary>
+    internal bool DeviceLocalStaticMeshesForTests
+    {
+        set => _meshes.DeviceLocalStaticBuffers = value;
+    }
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
@@ -1940,6 +1945,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 continue;
             }
 
+            // Sampled by this frame command buffer: a later upload to it this
+            // frame must go inline, after this draw, as it would on GL.
+            _uploads.NoteUse(commandBuffer, texture);
+
             // The bound depth attachment read with writes off: EnsureRendering
             // puts it in the read-only layout, which serves both uses at once.
             if (_targets.DepthReadOnly && _targets.IsBoundDepth(_boundTextures[unit])) continue;
@@ -2501,9 +2510,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     /// <summary>
     /// Submits everything the frame has recorded so far and keeps recording it in
-    /// the same slot, so a readback or a synchronous setup command queued next
-    /// sees work the frame already issued. No wait, no new slot, no frame counter
-    /// increment: arena cursors and uniform snapshots carry on.
+    /// the same slot, so a readback queued next sees work the frame already issued.
+    /// The open upload batch rides along, first. No wait, no new slot, no frame
+    /// counter increment: arena cursors and uniform snapshots carry on.
     /// </summary>
     private ulong SubmitPartial()
     {
@@ -2575,9 +2584,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// itself (into the slot's readback arena), the recorded part is submitted
     /// with <see cref="SubmitPartial" /> and the caller waits on that single Frame
     /// timeline value; the frame carries on in the same slot, so every draw after
-    /// the read still reaches the screen. Between frames a setup submission
-    /// serves: the queue runs it after every frame already submitted, so its own
-    /// fence wait is enough. Neither path waits for the whole device.
+    /// the read still reaches the screen. Between frames the copy is appended to
+    /// the open upload batch (after every upload recorded so far), which is
+    /// submitted on its own; the queue runs it after every frame already submitted,
+    /// so waiting on its Transfer value is enough. Neither path waits for the
+    /// whole device.
     /// </summary>
     private void ReadBack(VulkanTexture texture, int x, int y, uint width, uint height,
         ImageAspectFlags aspect, ulong bytes, IntPtr destination)
@@ -2596,7 +2607,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
 
         ImageLayout restore = texture.Layout;
-        _setupCommands.SubmitAndWait(commandBuffer =>
+        CommandBuffer commandBuffer = _uploads.BeginRecording(inlineInFrame: false);
+        try
         {
             _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
 
@@ -2610,7 +2622,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
 
             if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
-        }, WaitSite.Readback);
+        }
+        finally
+        {
+            _uploads.EndRecording();
+        }
+        ulong transferValue = _uploads.SubmitStandalone();
+        _frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);
 
         System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)bytes);
     }
@@ -2705,7 +2723,6 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _targets?.Dispose();
         _meshes?.Dispose();
         _textures?.Dispose();
-        _setupCommands?.Dispose();
         _context?.Dispose();
     }
 }

@@ -79,6 +79,7 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private readonly VulkanContext _context;
     private readonly GlStateTracker _state;
+    private readonly UploadManager? _uploads;
     private readonly Interner<VertexLayoutDescription> _layouts = new();
     private readonly List<VulkanMesh?> _meshes = new();
     private readonly Stack<int> _freeIds = new();
@@ -94,10 +95,18 @@ internal sealed unsafe class MeshManager : IDisposable
     /// </summary>
     public const int EmptyLayoutId = 0;
 
-    public MeshManager(VulkanContext context, GlStateTracker state)
+    /// <summary>
+    /// Static meshes on device-local memory, filled through the upload manager's
+    /// staging instead of a host mapping. Off until Phase 1B step 5 moves static
+    /// meshes off ReBAR; tests turn it on to drive the staged path.
+    /// </summary>
+    internal bool DeviceLocalStaticBuffers { get; set; }
+
+    public MeshManager(VulkanContext context, GlStateTracker state, UploadManager? uploads = null)
     {
         _context = context;
         _state = state;
+        _uploads = uploads;
         _meshes.Add(null);   // 0 is never a real mesh
 
         int emptyId = _layouts.Intern(VertexLayoutDescription.Empty);
@@ -298,6 +307,12 @@ internal sealed unsafe class MeshManager : IDisposable
         // writes straight through the pointer while the GPU may still be
         // reading - the same lack of synchronisation GL allowed and the chunk
         // tesselator relies on.
+        if (!persistent && DeviceLocalStaticBuffers && _uploads != null)
+        {
+            return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
+                MemoryPropertyFlags.DeviceLocalBit);
+        }
+
         MemoryPropertyFlags properties = persistent
             ? MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit
             : MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit
@@ -341,12 +356,26 @@ internal sealed unsafe class MeshManager : IDisposable
     /// on that route, so this fill is the only source of them here, as it is
     /// there.
     /// </summary>
-    private static void FillQuadIndices(VulkanBuffer indices)
+    private void FillQuadIndices(VulkanBuffer indices)
     {
-        if (indices.Mapped == IntPtr.Zero) return;
-
         int count = (int)(indices.Size / sizeof(int));
-        int* destination = (int*)indices.Mapped;
+        if (indices.Mapped == IntPtr.Zero)
+        {
+            if (_uploads == null) return;
+            var pattern = new int[count];
+            fixed (int* source = pattern)
+            {
+                FillQuadPattern(source, count);
+                _uploads.UploadToBuffer(indices, 0, (IntPtr)source, (ulong)count * sizeof(int));
+            }
+            return;
+        }
+
+        FillQuadPattern((int*)indices.Mapped, count);
+    }
+
+    private static void FillQuadPattern(int* destination, int count)
+    {
         for (int i = 0; i + 5 < count; i += 6)
         {
             int quad = i / 6 * 4;
@@ -395,7 +424,7 @@ internal sealed unsafe class MeshManager : IDisposable
         string? problem =
             mesh == null ? "no such mesh" :
             buffer == null ? "mesh has no buffer in that slot" :
-            buffer.Mapped == IntPtr.Zero ? "buffer is not host mapped" :
+            buffer.Mapped == IntPtr.Zero && _uploads == null ? "buffer is not host mapped" :
             byteOffset < 0 ? "negative offset" :
             (ulong)byteOffset + (ulong)byteCount > buffer.Size
                 ? "write ends past the buffer (" + buffer.Size + " bytes)"
@@ -412,8 +441,15 @@ internal sealed unsafe class MeshManager : IDisposable
             return;
         }
 
+        if (buffer!.Mapped == IntPtr.Zero)
+        {
+            // Device-local: staged and copied, never waited on.
+            _uploads!.UploadToBuffer(buffer, (ulong)byteOffset, source, (ulong)byteCount);
+            return;
+        }
+
         System.Buffer.MemoryCopy(
-            (void*)source, (void*)(buffer!.Mapped + byteOffset), byteCount, byteCount);
+            (void*)source, (void*)(buffer.Mapped + byteOffset), byteCount, byteCount);
     }
 
     public void Delete(int meshId, FrameRing? ring = null)
@@ -434,6 +470,17 @@ internal sealed unsafe class MeshManager : IDisposable
     public void Bind(CommandBuffer commandBuffer, VulkanMesh mesh)
     {
         Vk api = _context.Api;
+
+        // A staged write to a buffer this frame command buffer already drew from
+        // has to go inline to keep GL's order; see UploadManager.
+        if (_uploads != null)
+        {
+            foreach (VulkanBuffer? buffer in mesh.Buffers)
+            {
+                if (buffer != null) _uploads.NoteUse(commandBuffer, buffer);
+            }
+            if (mesh.Indices != null) _uploads.NoteUse(commandBuffer, mesh.Indices);
+        }
 
         if (mesh.BindingOrder.Count > 0)
         {

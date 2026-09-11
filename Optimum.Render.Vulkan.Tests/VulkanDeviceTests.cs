@@ -176,7 +176,7 @@ public class VulkanDeviceTests
             Assert.True(program.Success, string.Join("; ", program.Errors));
 
             Vk api = context!.Api;
-            using var commands = new VulkanCommands(context);
+            using var commands = new SetupQueue(context);
             using var target = new VulkanImage(context, width, height, format,
                 ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.TransferSrcBit,
                 ImageAspectFlags.ColorBit);
