@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..96ac74a 100644
+index 431e51a..df5d592 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -303,7 +303,7 @@ index 431e51a..96ac74a 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,15 +556,124 @@ public class ChunkRenderer
+@@ -402,15 +556,134 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -370,11 +370,17 @@ index 431e51a..96ac74a 100644
 +		{
 +			return;
 +		}
++		// The liquid pool has no SSBO layout (RenderOIT and the LiquidDepth
++		// prepass both turn it off for exactly this pass's geometry). Captured
++		// before the try so the finally can always hand it back.
++		bool useSSBOs = game.api.renderapi.useSSBOs;
++		bool pushedMatrix = false;
 +		try
 +		{
 +			Vec3d cameraPos = game.EntityPlayer.CameraPos;
 +			game.GlMatrixModeModelView();
 +			game.GlPushMatrix();
++			pushedMatrix = true;
 +			game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
 +			platform.GlToggleBlend(on: false);
 +			platform.GlEnableDepthTest();
@@ -388,26 +394,30 @@ index 431e51a..96ac74a 100644
 +			liquidMotion.UniformMatrix("modelViewMatrix", game.CurrentModelViewMatrix);
 +			liquidMotion.Uniform("taaLiquidReactive", OptimumLiquidReactive);
 +			SetOptimumMotionUniforms(liquidMotion);
-+			// The liquid pool has no SSBO layout (RenderOIT and the LiquidDepth
-+			// prepass both turn it off for exactly this pass's geometry).
-+			bool useSSBOs = game.api.renderapi.useSSBOs;
 +			game.api.renderapi.useSSBOs = false;
 +			for (int i = 0; i < textureIds.Length; i++)
 +			{
 +				poolsByRenderPass[4][i].Render(cameraPos, "origin");
 +			}
-+			game.api.renderapi.useSSBOs = useSSBOs;
 +			liquidMotion.Stop();
-+			game.GlPopMatrix();
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-lqmv");
++		}
++		finally
++		{
++			// Every restore lives here: a throwing pool draw must not leave the
++			// renderer with SSBOs off, an unbalanced matrix stack, blending off
++			// or the motion window still open for the rest of the frame.
++			game.api.renderapi.useSSBOs = useSSBOs;
++			if (pushedMatrix)
++			{
++				game.GlMatrixModeModelView();
++				game.GlPopMatrix();
++			}
 +			// Hand back the state the AfterOIT stage left, since this pass runs
 +			// after it: the last AfterOIT renderer (SystemRenderEntities) leaves
 +			// culling disabled and blending on, and the post chain that follows
 +			// has always started from that.
 +			platform.GlToggleBlend(on: true);
-+			ScreenManager.FrameProfiler.Mark("rend3D-ret-lqmv");
-+		}
-+		finally
-+		{
 +			optimumPlatform.EndMotionOnlyWrite();
 +		}
 +	}
@@ -428,7 +438,7 @@ index 431e51a..96ac74a 100644
  		platform.GlToggleBlend(on: false);
  		platform.GlEnableDepthTest();
  		chunkopaque.Use();
-@@ -425,28 +688,36 @@ public class ChunkRenderer
+@@ -425,28 +698,36 @@ public class ChunkRenderer
  		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
  		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
  		chunkopaque.HaxyFade = 1;

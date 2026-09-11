@@ -155,6 +155,41 @@ public class TaaSkyDecalMotionCoverageTests
         Assert.Contains("shaderProgram == ShaderPrograms.TaaSkyMotion", registry);
     }
 
+    /// <summary>
+    /// Review finding: GlDisableCullFace() runs BEFORE BeginMotionOnlyWrite(),
+    /// so it is not covered by the try at all. Both the early return (the window
+    /// refused to open) and the finally restored depth and blend but left
+    /// culling disabled for everything that followed in the frame. Both paths
+    /// now re-enable it.
+    /// </summary>
+    [Fact]
+    public void TheSkyPassRestoresCullingOnBothPaths()
+    {
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string pass = MethodBodyAfter(platform, "internal bool RenderOptimumSkyMotion()");
+
+        // The disable that has to be undone, and it is outside the try.
+        int disable = pass.IndexOf("GlDisableCullFace();", StringComparison.Ordinal);
+        int begin = pass.IndexOf("if (!BeginMotionOnlyWrite())", StringComparison.Ordinal);
+        Assert.True(disable >= 0 && begin > disable,
+            "culling is no longer disabled before the window opens; revisit the restores");
+
+        // Path 1: the window refused to open.
+        string earlyReturn = pass.Substring(begin, pass.IndexOf("return false;", begin, StringComparison.Ordinal) - begin);
+        Assert.Contains("GlDepthFunc(EnumDepthFunction.Less);", earlyReturn);
+        Assert.Contains("GlDepthMask(flag: true);", earlyReturn);
+        Assert.Contains("GlToggleBlend(on: true);", earlyReturn);
+        Assert.Contains("GlEnableCullFace();", earlyReturn);
+
+        // Path 2: the pass ran, threw or not.
+        string restores = FinallyBlock(pass);
+        Assert.Contains("EndMotionOnlyWrite();", restores);
+        Assert.Contains("GlDepthFunc(EnumDepthFunction.Less);", restores);
+        Assert.Contains("GlDepthMask(flag: true);", restores);
+        Assert.Contains("GlToggleBlend(on: true);", restores);
+        Assert.Contains("GlEnableCullFace();", restores);
+    }
+
     // ---------------------------------------------------------- (b) decals
 
     /// <summary>
@@ -240,6 +275,49 @@ public class TaaSkyDecalMotionCoverageTests
         string? patch = TryFind("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs.patch");
         Assert.True(patch != null, "SystemRenderDecals has no patch, so the change never ships");
         Assert.Contains("BeginMotionWrite()", PatchReader.ReadPatchedContent(patch!));
+    }
+
+    /// <summary>
+    /// Review finding: only decalPool.Draw sat inside the try. The GL setup, the
+    /// shader activation and the uniform setup ran between BeginMotionWrite()
+    /// and the try, so a throw in any of them left the motion attachment in
+    /// Primary's draw-buffer mask - and replace blending on it - for the rest of
+    /// the frame. Everything the open window covers is inside the try now.
+    /// </summary>
+    [Fact]
+    public void TheDecalMotionWindowCoversEverythingItOpened()
+    {
+        string decals = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs");
+        string pass = MethodBodyAfter(decals, "public void OnRenderFrame3D(float deltaTime)");
+
+        int begin = pass.IndexOf("optimumPlatform.BeginMotionWrite();", StringComparison.Ordinal);
+        Assert.True(begin >= 0);
+        var tryMatch = System.Text.RegularExpressions.Regex.Match(pass.Substring(begin), @"try\s*\{");
+        Assert.True(tryMatch.Success, "the window opens outside any try");
+        int tryStart = begin + tryMatch.Index;
+
+        string restores = FinallyBlock(pass);
+        Assert.Contains("optimumPlatform.EndMotionWrite();", restores);
+
+        // Nothing but the window's own bookkeeping happens between the open and
+        // the try: every statement below runs guarded.
+        string guarded = pass.Substring(tryStart, pass.IndexOf(restores, StringComparison.Ordinal) - tryStart);
+        foreach (string statement in new[]
+        {
+            "game.Platform.GlToggleBlend(on: true);",
+            "game.Platform.GlDisableCullFace();",
+            "shaderProgramDecals.Use();",
+            "shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;",
+            "SetOptimumMotionUniforms(shaderProgramDecals);",
+            "decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);",
+        })
+        {
+            Assert.Contains(statement, guarded);
+        }
+
+        string unguarded = pass.Substring(begin, tryStart - begin);
+        Assert.DoesNotContain("GlToggleBlend", unguarded);
+        Assert.DoesNotContain("shaderProgramDecals", unguarded);
     }
 
     // ------------------------------- (c) AfterFinalComposition / AfterBlit
@@ -443,6 +521,25 @@ public class TaaSkyDecalMotionCoverageTests
             kept.Add(line);
         }
         return string.Join("\n", kept);
+    }
+
+    /// <summary>The braced block of the method's finally clause.</summary>
+    private static string FinallyBlock(string body)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(body, @"finally\s*\{");
+        Assert.True(match.Success, "no finally block");
+        int open = body.IndexOf('{', match.Index);
+        int depth = 0;
+        for (int i = open; i < body.Length; i++)
+        {
+            if (body[i] == '{') depth++;
+            else if (body[i] == '}')
+            {
+                depth--;
+                if (depth == 0) return body.Substring(open, i - open + 1);
+            }
+        }
+        throw new InvalidOperationException("unterminated finally block");
     }
 
     private static string MethodBodyAfter(string source, string signature)
