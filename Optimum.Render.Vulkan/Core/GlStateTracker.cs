@@ -309,8 +309,7 @@ internal sealed class GlStateTracker
         _colorWriteMask = mask;
 
         for (int i = 0; i < _blend.Length; i++) _blend[i].WriteMask = mask;
-        _cachedBlendId = -1;
-        _cachedBlendCount = -1;
+        InvalidateBlend();
     }
 
     /// <summary>
@@ -345,16 +344,14 @@ internal sealed class GlStateTracker
             _blend[i].DstAlpha = dstAlpha;
             _blend[i].AlphaOp = BlendOp.Add;
         }
-        _cachedBlendId = -1;
-        _cachedBlendCount = -1;
+        InvalidateBlend();
     }
 
     /// <summary>glEnable/glDisable(GL_BLEND) preserve the indexed blend functions.</summary>
     public void SetBlendEnabled(bool enabled)
     {
         for (int i = 0; i < _blend.Length; i++) _blend[i].Enabled = enabled;
-        _cachedBlendId = -1;
-        _cachedBlendCount = -1;
+        InvalidateBlend();
     }
 
     /// <summary>
@@ -369,8 +366,7 @@ internal sealed class GlStateTracker
         _blend[attachment].DstColor = GlEnums.BlendFactorFrom(dstColor);
         _blend[attachment].SrcAlpha = GlEnums.BlendFactorFrom(srcAlpha);
         _blend[attachment].DstAlpha = GlEnums.BlendFactorFrom(dstAlpha);
-        _cachedBlendId = -1;
-        _cachedBlendCount = -1;
+        InvalidateBlend();
     }
 
     public void SetAttachmentBlendEquation(int attachment, int equation)
@@ -380,8 +376,7 @@ internal sealed class GlStateTracker
         BlendOp op = GlEnums.BlendOpFrom(equation);
         _blend[attachment].ColorOp = op;
         _blend[attachment].AlphaOp = op;
-        _cachedBlendId = -1;
-        _cachedBlendCount = -1;
+        InvalidateBlend();
     }
 
     // ---------------------------------------------------------------------- keys
@@ -406,13 +401,126 @@ internal sealed class GlStateTracker
     /// <summary>Blend state for one attachment, for pipeline creation.</summary>
     public AttachmentBlend BlendFor(int attachment) => _blend[attachment];
 
-    public PipelineKey BuildKey(int vertexLayoutId, int targetFormatsId, int attachmentCount) => new(
+    public PipelineKey BuildKey(int vertexLayoutId, int targetFormatsId, int attachmentCount) =>
+        BuildKey(vertexLayoutId, targetFormatsId, attachmentCount, uint.MaxValue);
+
+    /// <summary>The key under the current <see cref="ColorWriteTier" /> for a target with these draw buffers.</summary>
+    public PipelineKey BuildKey(int vertexLayoutId, int targetFormatsId, int attachmentCount, uint drawBufferMask) => new(
         ProgramId: CurrentProgram,
         VertexLayoutId: vertexLayoutId,
         TargetFormatsId: targetFormatsId,
-        BlendId: BlendId(attachmentCount),
+        BlendId: PipelineBlendId(attachmentCount, drawBufferMask),
         PolygonMode: PolygonMode,
         TopologyClass: GlEnums.TopologyClassOf(Topology));
+
+    // ------------------------------------------------------- colour write masks
+
+    private const ColorComponentFlags AllChannels =
+        ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
+
+    private int _cachedPipelineBlendId = -1;
+    private int _cachedPipelineBlendCount = -1;
+    private uint _cachedPipelineDrawBuffers;
+
+    /// <summary>
+    /// How draw-buffer and colour-mask changes reach the GPU (Phase 2, C4). The
+    /// device sets it from the context's selected tier; component tests keep the
+    /// default, which bakes everything into the pipeline key.
+    /// </summary>
+    public ColorWriteTier ColorWriteTier { get; set; } = ColorWriteTier.PipelineKey;
+
+    /// <summary>With the mask tier: blend enable and equation are dynamic too, so the blend set leaves the key.</summary>
+    public bool DynamicBlend { get; set; }
+
+    /// <summary>The global glColorMask.</summary>
+    public ColorComponentFlags ColorMask => _colorWriteMask;
+
+    private void InvalidateBlend()
+    {
+        _cachedBlendId = -1;
+        _cachedBlendCount = -1;
+        _cachedPipelineBlendId = -1;
+        _cachedPipelineBlendCount = -1;
+    }
+
+    /// <summary>Bit i set when the program statically writes fragment output i.</summary>
+    public static uint OutputBits(HashSet<int> writtenOutputs)
+    {
+        uint bits = 0;
+        for (int i = 0; i < MaxColorAttachments; i++)
+        {
+            if (writtenOutputs.Contains(i)) bits |= 1u << i;
+        }
+        return bits;
+    }
+
+    /// <summary>
+    /// The effective write mask of one attachment: <c>drawBufferEnabled ? colorMask : 0</c>,
+    /// then masked by the outputs the program writes (an unwritten output keeps
+    /// the attachment's contents, as GL does; Vulkan would store undefined values).
+    /// </summary>
+    public ColorComponentFlags EffectiveWriteMask(int attachment, uint drawBufferMask, uint writtenOutputs)
+    {
+        if ((uint)attachment >= MaxColorAttachments) return 0;
+        if (((drawBufferMask >> attachment) & 1) == 0) return 0;
+        if (((writtenOutputs >> attachment) & 1) == 0) return 0;
+        return _colorWriteMask;
+    }
+
+    /// <summary>
+    /// The blend state of one attachment as the pipeline bakes it under the tier:
+    /// the draw-buffer-masked write mask in the key tier, glColorMask alone in the
+    /// enable tier (draw buffers are the dynamic enable), and a canonical mask in
+    /// the mask tier (the dynamic mask replaces it; with dynamic blend the whole
+    /// attachment state is canonical).
+    /// </summary>
+    public AttachmentBlend PipelineBlendFor(int attachment, uint drawBufferMask)
+    {
+        AttachmentBlend blend = _blend[attachment];
+        switch (ColorWriteTier)
+        {
+        case ColorWriteTier.PipelineKey:
+            if (((drawBufferMask >> attachment) & 1) == 0) blend.WriteMask = 0;
+            break;
+        case ColorWriteTier.DynamicMask:
+            if (DynamicBlend) blend = AttachmentBlend.Default;
+            blend.WriteMask = AllChannels;
+            break;
+        }
+        return blend;
+    }
+
+    /// <summary>
+    /// The interned blend set a pipeline is keyed on under the tier. Equal to
+    /// <see cref="BlendId" /> whenever the tier leaves the state unchanged, so the
+    /// key tier with every draw buffer selected keys exactly as before.
+    /// </summary>
+    public int PipelineBlendId(int attachmentCount, uint drawBufferMask)
+    {
+        int count = Math.Clamp(attachmentCount, 0, MaxColorAttachments);
+        uint selectable = count == 32 ? uint.MaxValue : (1u << count) - 1;
+        uint relevant = drawBufferMask & selectable;
+
+        if (ColorWriteTier == ColorWriteTier.DynamicEnable ||
+            (ColorWriteTier == ColorWriteTier.PipelineKey && relevant == selectable))
+        {
+            return BlendId(count);
+        }
+
+        if (ColorWriteTier == ColorWriteTier.DynamicMask) relevant = 0;
+        if (_cachedPipelineBlendId >= 0 && _cachedPipelineBlendCount == count && _cachedPipelineDrawBuffers == relevant)
+        {
+            return _cachedPipelineBlendId;
+        }
+
+        Span<AttachmentBlend> baked = stackalloc AttachmentBlend[count];
+        for (int i = 0; i < count; i++) baked[i] = PipelineBlendFor(i, drawBufferMask);
+
+        _cachedPipelineBlendCount = count;
+        _cachedPipelineDrawBuffers = relevant;
+        _cachedPipelineBlendId = _blendSignatures.Intern(new BlendSignature(baked));
+        return _cachedPipelineBlendId;
+    }
 
     /// <summary>
     /// Restores the defaults a fresh GL context would have. Called when the
@@ -421,8 +529,7 @@ internal sealed class GlStateTracker
     public void Reset()
     {
         for (int i = 0; i < _blend.Length; i++) _blend[i] = AttachmentBlend.Default;
-        _cachedBlendId = -1;
-        _cachedBlendCount = -1;
+        InvalidateBlend();
         _colorWriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit
             | ColorComponentFlags.BBit | ColorComponentFlags.ABit;
 
