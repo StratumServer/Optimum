@@ -56,25 +56,10 @@ public class ParityDumpTests
         }
         """;
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
-
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
-
     [SkippableFact]
     public void RenderedPatternsDumpAndDecodeBackInGlRowOrder()
     {
-        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
 
         string directory = Path.Combine(Path.GetTempPath(), "optimum-parity-dump-tests-" + Guid.NewGuid().ToString("N"));
         try
@@ -125,6 +110,7 @@ public class ParityDumpTests
                     files[label] = OptimumParityDump.Write(directory, 0, "Primary", label, readback!);
                 }
                 seam.Present();
+                GpuTest.AssertClean(seam);
             }
 
             Assert.Equal(2, files["color0"]);

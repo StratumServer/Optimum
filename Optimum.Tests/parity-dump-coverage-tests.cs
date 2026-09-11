@@ -34,7 +34,7 @@ public class ParityDumpCoverageTests
         string platform = ReadSourceOrPatched(PlatformPatch, PlatformSource);
         Dictionary<string, int> constants = Constants(platform);
 
-        string glBody = MethodBody(platform, "public List<FrameBufferRef> SetupDefaultFrameBuffers()");
+        string glBody = MethodBody(platform, "public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()");
         string deviceBody = MethodBody(platform, "private List<FrameBufferRef> SetupOptimumFrameBuffers(");
         string namesBody = MethodBody(platform, "private string OptimumParitySlotName(int slot)");
 

@@ -312,21 +312,6 @@ public class PacingStatsTests
 
     // ------------------------------------------------------------------ GPU
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
-
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
-
     /// <summary>
     /// Today a texture upload inside a frame submits a setup command buffer and
     /// waits for its fence: one blocking upload, one wait at the upload site.
@@ -338,7 +323,7 @@ public class PacingStatsTests
     [SkippableFact]
     public unsafe void TextureUploadInsideAFrameBlocksOnTheUploadSiteUntilPhase1B()
     {
-        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
             IOptimumGraphicsDevice seam = device!;
@@ -388,11 +373,7 @@ public class PacingStatsTests
             Assert.Equal(0, VulkanStats.BlockingUploads - blockingBeforeReadback);
             Assert.True(VulkanStats.WaitCount(WaitSite.Readback) - readbackWaitsBefore >= 1);
 
-            string? diagnostics = seam.GetError();
-            Assert.True(diagnostics == null
-                        || !(diagnostics.Contains("Error", StringComparison.OrdinalIgnoreCase)
-                             || diagnostics.Contains("VUID", StringComparison.Ordinal)),
-                "validation errors:\n" + diagnostics);
+            GpuTest.AssertClean(seam);
         }
     }
 }
