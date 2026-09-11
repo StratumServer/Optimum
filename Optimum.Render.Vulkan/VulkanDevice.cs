@@ -123,6 +123,14 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         !string.IsNullOrEmpty(ValidationSetting);
 
     /// <summary>
+    /// Where a bare OPTIMUM_VULKAN_VALIDATION=1 mirrors the layer's messages.
+    /// Before this default the messages only surfaced when the client happened
+    /// to poll the error channel, and a whole class of hazards went unlogged.
+    /// </summary>
+    private static readonly string DefaultValidationLogPath =
+        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-vulkan-validation.log");
+
+    /// <summary>
     /// Where validation messages are mirrored, when the variable names a path
     /// rather than just switching the layers on.
     ///
@@ -131,17 +139,19 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// the message that preceded the loss.
     /// </summary>
     private static readonly string? ValidationLogPath =
-        ValidationSetting == null ? null
-        : ValidationSetting.Contains('/') ? ValidationSetting
-        : DefaultValidationLogPath;
+        ResolveValidationLogPath(ValidationSetting, DefaultValidationLogPath);
 
     /// <summary>
-    /// Where a bare OPTIMUM_VULKAN_VALIDATION=1 mirrors the layer's messages.
-    /// Before this default the messages only surfaced when the client happened
-    /// to poll the error channel, and a whole class of hazards went unlogged.
+    /// A setting that names a path is used as one; anything else (the bare "1")
+    /// only switches the layers on and mirrors to <paramref name="fallback" />.
+    /// Windows separators count as a path too, so "C:\logs\vulkan.log" is not
+    /// silently redirected to the temp file.
     /// </summary>
-    private static readonly string DefaultValidationLogPath =
-        System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-vulkan-validation.log");
+    internal static string? ResolveValidationLogPath(string? setting, string fallback)
+    {
+        if (setting == null) return null;
+        return setting.Contains('/') || setting.Contains('\\') ? setting : fallback;
+    }
 
     /// <summary>
     /// OPTIMUM_VULKAN_VALIDATION_FEATURES: comma list of "sync" (synchronization
@@ -168,8 +178,14 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             System.IO.File.AppendAllText(ValidationLogPath, message + "\n");
         }
-        catch (System.IO.IOException)
+        catch (Exception error) when (
+            error is System.IO.IOException
+                or UnauthorizedAccessException
+                or NotSupportedException
+                or ArgumentException)
         {
+            // A diagnostic write must never take the device down: a read-only
+            // directory or a malformed path is a lost log line, nothing more.
         }
     }
 
@@ -1088,27 +1104,23 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// snapshots them into the frame's uniform ring, exactly as the generated
     /// block does.
     ///
-    /// <see cref="Buffer" /> is only reached when the ring has no room left, and
-    /// carries the shadow's contents from that moment on.
+    /// There is deliberately no GPU buffer per block: the snapshot goes in the
+    /// ring, and the ring-exhausted path allocates its own transient copy for
+    /// that one draw, so a persistent buffer would only ever sit unbound.
     /// </summary>
-    private sealed class ClientUniformBuffer : IDisposable
+    private sealed class ClientUniformBuffer
     {
-        public ClientUniformBuffer(VulkanBuffer buffer, byte[] shadow, string blockName)
+        public ClientUniformBuffer(byte[] shadow, string blockName)
         {
-            Buffer = buffer;
             Shadow = shadow;
             BlockName = blockName;
         }
 
-        public VulkanBuffer Buffer { get; }
         public byte[] Shadow { get; }
         public string BlockName { get; }
 
         /// <summary>Bumped by every write, so an unchanged block reuses its snapshot.</summary>
         public uint Version { get; private set; } = 1;
-
-        /// <summary>The version <see cref="Buffer" /> holds, for the fallback path.</summary>
-        private uint _uploadedVersion;
 
         /// <summary>Which frame's ring the snapshot below lives in, and what it holds.</summary>
         public uint SnapshotFrame { get; private set; }
@@ -1134,21 +1146,6 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         }
 
         public bool HasSnapshotFor(uint frame) => SnapshotFrame == frame && SnapshotVersion == Version;
-
-        /// <summary>
-        /// Brings the persistent buffer up to date for the ring-exhausted path.
-        /// Deliberately lazy: in a healthy frame it never runs, so the common
-        /// path writes host memory once and never touches the GPU.
-        /// </summary>
-        public void SyncBuffer()
-        {
-            if (_uploadedVersion == Version || Buffer.Mapped == IntPtr.Zero) return;
-
-            Shadow.AsSpan().CopyTo(new Span<byte>((void*)Buffer.Mapped, Shadow.Length));
-            _uploadedVersion = Version;
-        }
-
-        public void Dispose() => Buffer.Dispose();
     }
 
     private readonly Dictionary<int, ClientUniformBuffer> _uniformBuffers = new();
@@ -1169,12 +1166,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public int CreateUniformBuffer(int programId, int bindingPoint, string blockName, int size)
     {
         int bytes = Math.Max(size, 4);
-        var buffer = new VulkanBuffer(_context, (ulong)bytes,
-            BufferUsageFlags.UniformBufferBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-
         int id = _nextUniformBufferId++;
-        _uniformBuffers[id] = new ClientUniformBuffer(buffer, new byte[bytes], blockName ?? "");
+        _uniformBuffers[id] = new ClientUniformBuffer(new byte[bytes], blockName ?? "");
 
         // GL's glBindBufferBase in the client's constructor takes effect at once,
         // and a buffer is only ever created to be used.
@@ -1218,12 +1211,6 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             _boundUniformBuffers.Remove(ubo.BlockName);
         }
-
-        // Same hazard as a texture: a set naming this buffer must not survive to
-        // be served for a successor with the same handle. Only the ring-exhausted
-        // fallback ever names it, but that set is cached like any other.
-        _descriptors.Release(ubo.Buffer.Id);
-        _frames.DeferDeletion(ubo);
     }
 
     // -------------------------------------------------------------------- textures
@@ -2688,7 +2675,6 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         foreach (ShaderProgramResources program in _programs.Values) program.Dispose();
         _programs.Clear();
 
-        foreach (ClientUniformBuffer ubo in _uniformBuffers.Values) ubo.Dispose();
         _uniformBuffers.Clear();
 
         foreach (QueryPool pool in _queries.Values)
