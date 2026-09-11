@@ -59,6 +59,34 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "ApplyOptimumMotionBlendState", Array.Empty<string>()),
         new(true, "ApplyOptimumMotionAccumulateBlendState", Array.Empty<string>()),
         new(true, "SelectFsrDrawBuffer", new[] { "FrameBufferRef" }),
+        // Phase 1A step 4: framebuffer binding, clears and post-chain pass state.
+        new(true, "BindCurrentFrameBuffer", new[] { "FrameBufferRef" }),
+        new(true, "BindCurrentFrameBufferKeepViewport", new[] { "FrameBufferRef" }),
+        new(true, "ClearBoundFrameBuffer", new[] { "FrameBufferRef", "Single[]", "Boolean", "Boolean" }),
+        new(true, "ClearFrameBufferPass", new[] { "EnumFrameBuffer" }),
+        new(true, "ApplyTransparentPassBlendState", Array.Empty<string>()),
+        new(true, "SelectBackDrawBuffer", Array.Empty<string>()),
+        new(true, "SetBlendEnabled", new[] { "Boolean" }),
+        new(true, "ApplyTransparentMergeBlendState", Array.Empty<string>()),
+        new(true, "ClearSsaoTarget", Array.Empty<string>()),
+        new(true, "BeginFinalCompositionDrawBuffers", Array.Empty<string>()),
+        new(true, "RestoreWorldDrawBuffers", new[] { "Boolean" }),
+    };
+
+    /// <summary>
+    /// Non-virtual members injected into <see cref="ClientPlatformWindows" /> that the
+    /// overrides read or call (the platform state behind the device framebuffer setup and
+    /// the SSAO flag). A lib without them would fail with MissingMethodException mid-frame.
+    /// </summary>
+    internal static readonly string[] ExpectedWindowsMembers =
+    {
+        "OptimumRenderSsao",
+        "OptimumAdoptFrameBufferSettings",
+        "OptimumTaaRequested",
+        "OptimumSsaoKernel",
+        "SetOptimumMotionAttachmentIndex",
+        "OptimumAdoptTaaTargets",
+        "OptimumFinishDeviceFrameBufferSetup",
     };
 
     /// <summary>Test seam: the device to bring up (tests add validation capture).</summary>
@@ -97,6 +125,17 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
                 if (method == null || !method.IsVirtual || method.IsFinal)
                 {
                     reason = "the loaded VintagestoryLib lacks the virtual " + owner.Name + "." + expected.Name +
+                        " (not patched for this renderer)";
+                    return false;
+                }
+            }
+
+            const BindingFlags memberFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+            foreach (string name in ExpectedWindowsMembers)
+            {
+                if (windowsType.GetMember(name, memberFlags).Length == 0)
+                {
+                    reason = "the loaded VintagestoryLib lacks " + windowsType.Name + "." + name +
                         " (not patched for this renderer)";
                     return false;
                 }

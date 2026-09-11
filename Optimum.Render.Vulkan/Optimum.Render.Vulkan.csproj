@@ -68,6 +68,22 @@
       <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Audio.OpenAL.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="OpenTK.Windowing.Desktop">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Desktop.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Windowing.Common">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Mathematics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Graphics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Graphics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
