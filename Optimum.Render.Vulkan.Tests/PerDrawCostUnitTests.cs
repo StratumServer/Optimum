@@ -270,7 +270,8 @@ public class GetErrorCounterTests
     [Fact]
     public void OnlyErrorsAreReportedOnceInOrder()
     {
-        using var device = new VulkanDevice();
+        // Never initialised: no context, no GPU; only the diagnostics queue is exercised.
+        using VulkanDevice device = GpuTest.NewDevice();
         Assert.Null(device.GetError());
 
         device.AddDiagnosticForTests("a warning the layers raised");
@@ -286,7 +287,8 @@ public class GetErrorCounterTests
     [Fact]
     public void ErrorsFromManyThreadsAreAllKept()
     {
-        using var device = new VulkanDevice();
+        // Never initialised: no context, no GPU; only the diagnostics queue is exercised.
+        using VulkanDevice device = GpuTest.NewDevice();
         Parallel.For(0, 4, thread =>
         {
             for (int i = 0; i < 200; i++) device.AddDiagnosticForTests(VulkanContext.ErrorPrefix + thread + ":" + i);
