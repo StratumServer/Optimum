@@ -334,6 +334,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _descriptors = new DescriptorCache(_context);
         _queryRing = new QueryRing(_context, _frames.Timeline, _frames.FramesInFlight);
         _readbacks = new ReadbackManager(_context, _textures, _frames);
+        // A GL query counts across scope ends; a Vulkan one must not be active
+        // across vkCmdEndRendering, so the ring suspends and resumes it.
+        _targets.ScopeClosing = _queryRing.OnScopeClosing;
+        _targets.ScopeClosed = _queryRing.OnScopeClosed;
+        _targets.ScopeOpened = _queryRing.OnScopeOpened;
         _shaderCompiler = new ShaderCompiler();
         CreateDefaultAttributeBuffer();
         CreatePlaceholderTexture();
@@ -2467,31 +2472,27 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     public void BeginOcclusionQuery(int queryId)
     {
-        if (!_frameActive || !_queryRing.TryBegin(queryId, out QueryPool pool, out uint index, out bool freshPool)) return;
+        if (!_frameActive || !_queryRing.CanBegin(queryId)) return;
 
         // The slot's pools are reset at frame start, before any scope opens, so
         // the query begins inside the scope the covered draw uses. Only a pool
         // created just now needs a reset here, and a reset has to happen outside
-        // a scope: one restart per pool ever, never in steady state.
+        // a scope: one restart per pool ever, never in steady state. If the
+        // scope later closes before the query ends, the ring's scope hooks
+        // suspend it and resume it in the next scope.
         CommandBuffer commandBuffer = Commands;
-        if (freshPool)
+        if (_queryRing.NextNeedsPool)
         {
             _targets.EndRendering(commandBuffer);
-            _context.Api.CmdResetQueryPool(commandBuffer, pool, 0, QueryRing.QueriesPerPool);
+            _queryRing.AddPool(commandBuffer);
         }
         _targets.EnsureRendering(commandBuffer);
-        // GL_SAMPLES_PASSED is an exact count (sun glare divides it by 1500).
-        _context.Api.CmdBeginQuery(commandBuffer, pool, index,
-            _context.Capabilities.OcclusionQueryPrecise ? QueryControlFlags.PreciseBit : default(QueryControlFlags));
+        _queryRing.Begin(queryId, commandBuffer, _targets.RenderingActive);
     }
 
     public void EndOcclusionQuery(int queryId)
     {
-        if (_frameActive &&
-            _queryRing.TryEnd(queryId, _frames.Current.FrameValue, out QueryPool pool, out uint index))
-        {
-            _context.Api.CmdEndQuery(Commands, pool, index);
-        }
+        if (_frameActive) _queryRing.End(queryId, _frames.Current.FrameValue, Commands);
     }
 
     /// <summary>
@@ -2560,6 +2561,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// a frame it goes through <see cref="ReadBack" />, so the frame stays open.
     /// Depth images are copied through their depth aspect.
     /// </summary>
+    /// <summary>Level 0 of a texture through the dump path's readback. Tests only.</summary>
+    internal byte[] ReadBackLevel0ForTests(int textureId) =>
+        ReadBackLevel0(_textures.Get(textureId) ?? throw new ArgumentException("no texture " + textureId));
+
     private byte[] ReadBackLevel0(VulkanTexture texture)
     {
         int width = (int)texture.Width;
@@ -2602,7 +2607,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             return;
         }
 
-        using var readback = new VulkanBuffer(_context, bytes,
+        // The copy writes whole texels of the image's format whatever the caller
+        // sized its destination for; the buffer holds them all, the caller gets its bytes.
+        ulong copied = (ulong)width * height * (ulong)BytesPerPixel(texture.Format);
+        ulong handed = Math.Min(bytes, copied);
+        using var readback = new VulkanBuffer(_context, Math.Max(bytes, copied),
             BufferUsageFlags.TransferDstBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
 
@@ -2630,7 +2639,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         ulong transferValue = _uploads.SubmitStandalone();
         _frames.Timeline.WaitForTransfer(transferValue, WaitSite.Readback);
 
-        System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)bytes);
+        System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)handed);
     }
 
     private void RecordGlInternalFormat(int textureId, int glInternalFormat)

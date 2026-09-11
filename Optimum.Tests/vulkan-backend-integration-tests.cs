@@ -505,7 +505,21 @@ public class VulkanBackendIntegrationTests
         Assert.DoesNotContain("ResultWaitBit", queries);
         Assert.DoesNotContain("WaitForFrame(", queries);
 
+        // Review fix: a query survives scope ends (suspend before vkCmdEndRendering,
+        // resume after vkCmdBeginRendering), so no query is active across a
+        // restart, a partial submit or present.
+        string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
+        Assert.Contains("ScopeClosing?.Invoke(commandBuffer);", targets);
+        Assert.Contains("ScopeClosed?.Invoke(commandBuffer);", targets);
+        Assert.Contains("ScopeOpened?.Invoke(commandBuffer);", targets);
+        Assert.Contains("_targets.ScopeClosing = _queryRing.OnScopeClosing;", device);
+        Assert.Contains("_targets.ScopeClosed = _queryRing.OnScopeClosed;", device);
+        Assert.Contains("_targets.ScopeOpened = _queryRing.OnScopeOpened;", device);
+        Assert.Contains("public void OnScopeClosing(CommandBuffer commandBuffer)", queries);
+
         string readbacks = Read("Optimum.Render.Vulkan/Transfer/ReadbackManager.cs");
+        // Review fix: buffer offsets are multiples of the texel size (RGBA32F needs 16).
+        Assert.Contains("OffsetAlignmentFor(texel)", readbacks);
         Assert.Contains("CmdCopyImageToBuffer(", readbacks);
         Assert.Contains("WaitSite.Readback", readbacks);
         Assert.DoesNotContain("WaitDeviceIdle", readbacks);

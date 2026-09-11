@@ -227,6 +227,79 @@ public class QueryRingTests
         }
     }
 
+    /// <summary>
+    /// Review fix: a GL query counts across framebuffer binds and mid-frame
+    /// readbacks, a Vulkan query only inside one scope and one command buffer.
+    /// Thirty-one one-sample probes fill the first pool up to its last index, then
+    /// one query spans a draw into A, a bind to B (scope end; its continuation
+    /// needs a second pool, reset between the scopes), a draw into B, a readback
+    /// (partial submit) and a third draw. It reports the sum of all three draws,
+    /// every probe still reports its own sample, and validation stays clean
+    /// (before the fix: vkCmdEndRendering and vkEndCommandBuffer with an active query).
+    /// </summary>
+    [SkippableFact]
+    public unsafe void AQuerySpanningScopeEndsAndAPartialSubmitCountsEveryDraw()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
+            int targetA = CreateTarget(seam);
+            int targetB = CreateTarget(seam);
+            bool precise = device!.PreciseOcclusionForTests;
+
+            var probes = new int[QueryRing.QueriesPerPool - 1];
+            for (int i = 0; i < probes.Length; i++) probes[i] = seam.CreateOcclusionQuery();
+            int spanning = seam.CreateOcclusionQuery();
+
+            seam.BeginFrame();
+            seam.Present();
+
+            seam.BeginFrame();
+            foreach (int probe in probes) Probe(seam, targetA, program, probe, 1);
+
+            seam.BindFramebuffer(targetA);
+            seam.UseProgram(program);
+            seam.SetViewport(0, 0, 4, 4);
+            seam.SetColorMask(false, false, false, false);
+            seam.BeginOcclusionQuery(spanning);
+            seam.DrawFullscreenTriangle();
+            seam.BindFramebuffer(targetB);
+            seam.DrawFullscreenTriangle();
+            var pixel = new byte[4];
+            fixed (byte* destination = pixel) seam.ReadDefaultFramebuffer(0, 0, 1, 1, (IntPtr)destination);
+            seam.BindFramebuffer(targetB);
+            seam.DrawFullscreenTriangle();
+            seam.EndOcclusionQuery(spanning);
+            seam.SetColorMask(true, true, true, true);
+            seam.Present();
+
+            for (int frame = 0; frame < 4 && !seam.IsQueryResultAvailable(spanning); frame++)
+            {
+                seam.BeginFrame();
+                seam.Present();
+            }
+
+            Assert.True(seam.IsQueryResultAvailable(spanning), "the spanning query never became available");
+            int samples = seam.GetQueryResult(spanning);
+            _output.WriteLine("spanning samples " + samples + ", precise " + precise + ", pools " +
+                device.OcclusionQueryPoolsForTests);
+            Assert.NotEqual(int.MaxValue, samples);
+            if (precise) Assert.Equal(3 * 16, samples);
+            else Assert.True(samples > 0);
+
+            foreach (int probe in probes)
+            {
+                Assert.True(seam.IsQueryResultAvailable(probe));
+                if (precise) Assert.Equal(1, seam.GetQueryResult(probe));
+                else Assert.True(seam.GetQueryResult(probe) > 0);
+            }
+
+            GpuTest.AssertClean(seam);
+        }
+    }
+
     private static int Coverage(int round, int index) =>
         round == 0 ? index % Size + 1 : Size - index % Size;
 }
