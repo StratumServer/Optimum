@@ -212,7 +212,8 @@ scripts/dev/perf-capture.sh --renderer opengl --taa on  --label gl-on
   the resolve's allocation log lines.
 - Pass: the measured TAA footprint matches the plan's budget: motion 15.8 MiB + two colour
   histories 31.6 MiB + aux 7.9 MiB + prev-depth 15.8 MiB + the slot-21 sharpen target 15.8 MiB
-  = **~86.9 MiB**. The sharpen target is an RGBA8 colour target the size of Primary, allocated
+  = **~86.9 MiB**. The sharpen target is an RGBA16F colour target the size of Primary (both paths
+  allocate `EnumTextureInternalFormat.Rgba16f`; RGBA8 would be 7.9 MiB), allocated
   whenever TAA is on (`OptimumTaaSharpenIndex = 21` in
   `patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch`), so it
   belongs in the budget and was missing from the earlier 71.1 MiB figure.

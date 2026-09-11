@@ -72,6 +72,34 @@ public class ValidationFeaturesTests
     }
 
     /// <summary>
+    /// The features struct is only chained when the layer really advertises
+    /// VK_EXT_validation_features. Naming an extension the layer does not have
+    /// fails vkCreateInstance with ErrorExtensionNotPresent, and the bootstrap
+    /// answers a failed context by falling back to OpenGL without a word - so a
+    /// deprecated extension would turn OPTIMUM_VULKAN_VALIDATION_FEATURES into
+    /// "Vulkan silently stopped working".
+    /// </summary>
+    [SkippableFact]
+    public void TheFeaturesExtensionIsCheckedAgainstTheLayer()
+    {
+        using var api = Vk.GetApi();
+        const string layer = "VK_LAYER_KHRONOS_validation";
+
+        Skip.IfNot(
+            VulkanContext.LayerAdvertisesExtension(api, layer, "VK_EXT_debug_utils")
+                || VulkanContext.LayerAdvertisesExtension(api, layer, VulkanContext.ValidationFeaturesExtensionName),
+            "Validation layer not installed.");
+
+        // Whatever the installed layer answers for the real extension, an
+        // invented one must be answered with false rather than optimistically
+        // enabled - that is the whole point of the guard.
+        Assert.False(VulkanContext.LayerAdvertisesExtension(api, layer, "VK_EXT_optimum_not_a_real_extension"));
+        // And a layer that is not installed advertises nothing.
+        Assert.False(VulkanContext.LayerAdvertisesExtension(
+            api, "VK_LAYER_OPTIMUM_not_installed", VulkanContext.ValidationFeaturesExtensionName));
+    }
+
+    /// <summary>
     /// OPTIMUM_VULKAN_VALIDATION doubles as a log path. A Windows path has no
     /// forward slash in it and used to be mistaken for the bare "on" switch,
     /// which silently redirected the log to the temp file.

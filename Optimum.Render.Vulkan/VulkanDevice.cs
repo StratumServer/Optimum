@@ -2141,8 +2141,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                         overflow.Handle, 0, overflow.Size, overflow.Id));
                     offsetBindings[offsetCount] = (uint)block.Binding;
                     offsetValues[offsetCount++] = 0;
-                    // Same order as DeleteUniformBuffer: the set naming this
-                    // buffer must not outlive it under a reused handle.
+                    // Released and deferred in that order: the cached set naming
+                    // this buffer must not outlive it under a reused handle.
+                    // (This is the only VulkanBuffer a client UBO ever owns -
+                    // the block itself is host-side shadow plus a ring snapshot.)
                     _descriptors.Release(overflow.Id);
                     _frames.DeferDeletion(overflow);
                 }
