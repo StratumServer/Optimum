@@ -155,13 +155,13 @@ public class VulkanBackendIntegrationTests
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch";
 
     /// <summary>
-    /// The guarantee the whole design rests on: with no device installed, the
-    /// client runs the vanilla GL body. Each branch is added <em>in front of</em>
-    /// the original code rather than replacing it, so an OpenGL session costs one
-    /// null check and behaves exactly as it always did.
+    /// The guarantee the whole design rests on: an OpenGL session runs the vanilla GL
+    /// body. Since Phase 1A step 4 the device call is not a branch in front of that body
+    /// any more but VulkanClientPlatform's override of the same method, so the GL body is
+    /// untouched vanilla and an OpenGL session pays nothing at all.
     ///
-    /// Checked by confirming the vanilla GL call is still present alongside the
-    /// device call for a representative spread of the routed methods.
+    /// Checked for a representative spread of the routed methods: the vanilla GL call is
+    /// in ClientPlatformWindows, the device call in VulkanClientPlatform.
     /// </summary>
     [Theory]
     [InlineData("SetViewport", "GL.Viewport(x, y, width, height);")]
@@ -173,23 +173,21 @@ public class VulkanBackendIntegrationTests
     [InlineData("DeleteTexture", "GL.DeleteTexture(id);")]
     public void RoutedMethodsKeepTheirVanillaOpenGlBody(string deviceCall, string vanillaCall)
     {
-        string patch = Read(PlatformPatch);
-
-        Assert.Contains("optimumDevice." + deviceCall, patch);
-        // The vanilla line survives, either as untouched context or as an added
-        // line where the branch was inserted above it.
-        Assert.Contains(vanillaCall, patch);
+        Assert.Contains("device." + deviceCall + "(", VulkanPlatformSource.Read());
+        Assert.Contains(vanillaCall, VulkanPlatformSource.ReadClientPlatformWindows());
     }
 
     /// <summary>
-    /// A branch that is not registered as a transplant target compiles into the
-    /// donor and then ships nothing, because Optimum patches the vanilla
-    /// assembly rather than replacing it. That failure is silent.
+    /// Phase 1A step 4: the fixed-function methods VulkanClientPlatform overrides have
+    /// vanilla bodies again, so they are no longer transplant targets - only GlToggleBlend
+    /// (TAA's motion-attachment blend override) still is. Each must be overridden, or a
+    /// Vulkan session would reach a GL call with no context.
     /// </summary>
     [Fact]
-    public void EveryRoutedPlatformMethodIsRegisteredAsATransplantTarget()
+    public void EveryRoutedPlatformMethodIsOverriddenByTheVulkanPlatform()
     {
         string patcher = Read("Optimum.Patcher/Program.cs");
+        string vulkan = VulkanPlatformSource.Read();
 
         string[] routed =
         {
@@ -206,31 +204,40 @@ public class VulkanBackendIntegrationTests
         foreach (string method in routed)
         {
             Assert.True(
-                patcher.Contains($"\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"{method}\"",
-                    StringComparison.Ordinal),
-                $"{method} is routed to the device but is not a Cecil transplant target");
+                System.Text.RegularExpressions.Regex.IsMatch(vulkan, @"public override \w+ " + method + @"\("),
+                $"{method} is not overridden by VulkanClientPlatform");
+            bool target = patcher.Contains($"new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"{method}\"", StringComparison.Ordinal);
+            Assert.True(target == (method == "GlToggleBlend") || method == "GetGraphicsCardRenderer",
+                $"{method}: only GlToggleBlend keeps a non-vanilla body and a transplant target");
         }
+        // GetGraphicsCardRenderer is virtualized in place, not transplanted.
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"GlToggleBlend\", 2)", patcher);
     }
 
     /// <summary>
-    /// The frame is bracketed by the device, and the OpenGL path still reaches
-    /// SwapBuffers. Losing either end would either never present or present
-    /// twice.
+    /// The frame is bracketed by the platform, and the OpenGL path still reaches
+    /// SwapBuffers. Losing either end would either never present or present twice.
     /// </summary>
     [Fact]
     public void TheDeviceBracketsTheFrameAndOpenGlStillSwaps()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string platform = VulkanPlatformSource.ReadClientPlatformWindows();
+        int frame = platform.IndexOf("private void window_RenderFrame(FrameEventArgs e)", StringComparison.Ordinal);
+        Assert.True(frame >= 0);
+        int begin = platform.IndexOf("BeginFrame();", frame, StringComparison.Ordinal);
+        int onNewFrame = platform.IndexOf("frameHandler.OnNewFrame(dt);", frame, StringComparison.Ordinal);
+        int end = platform.IndexOf("EndFrame();", frame, StringComparison.Ordinal);
+        Assert.True(begin > frame && onNewFrame > begin && end > onNewFrame,
+            "the frame must be opened before the frame handler runs and ended after it");
 
-        Assert.Contains("optimumDevice.BeginFrame();", added);
-        Assert.Contains("optimumDevice.Present();", added);
+        // The vanilla swap survives for the OpenGL path, as the EndFrame override.
+        int swapOverride = platform.IndexOf("public override void EndFrame()", StringComparison.Ordinal);
+        Assert.True(swapOverride >= 0);
+        Assert.Contains("((GameWindow)window).SwapBuffers();", platform.Substring(swapOverride, 200));
 
-        int begin = added.IndexOf("optimumDevice.BeginFrame();", StringComparison.Ordinal);
-        int present = added.IndexOf("optimumDevice.Present();", StringComparison.Ordinal);
-        Assert.True(begin < present, "the frame must be opened before it is presented");
-
-        // The vanilla swap survives for the OpenGL path.
-        Assert.Contains("SwapBuffers();", Read(PlatformPatch));
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("device.BeginFrame();", vulkan);
+        Assert.Contains("device.Present();", vulkan);
     }
 
     /// <summary>
@@ -269,11 +276,12 @@ public class VulkanBackendIntegrationTests
         Assert.Contains("ScreenManager.Platform.SetUniformArray1(ProgramId, uniformLocations[uniformName]", added);
         Assert.Contains("ScreenManager.Platform.SetUniformMatrix(ProgramId, uniformLocations[uniformName]", added);
 
-        string platform = AddedLines(Read(PlatformPatch));
-        Assert.Contains("optimumDevice.SetUniform(programId, location, value)", platform);
-        Assert.Contains("optimumDevice.SetUniformArray1(programId, location, count, values)", platform);
-        Assert.Contains("optimumDevice.SetUniformMatrix(programId, location, matrix)", platform);
-        Assert.Contains("optimumDevice.GetUniformLocation(program.ProgramId, name)", platform);
+        // Phase 1A step 4: the device calls are VulkanClientPlatform's overrides.
+        string platform = VulkanPlatformSource.Read();
+        Assert.Contains("device.SetUniform(programId, location, value)", platform);
+        Assert.Contains("device.SetUniformArray1(programId, location, count, values)", platform);
+        Assert.Contains("device.SetUniformMatrix(programId, location, matrix)", platform);
+        Assert.Contains("device.GetUniformLocation(program.ProgramId, name)", platform);
     }
 
     /// <summary>
@@ -302,12 +310,12 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void TextureBindingAimsTheSamplerAndClearsAnyStaleOverride()
     {
-        // Phase 1A step 3: the body lives in ClientPlatformWindows.BindProgramTexture2D.
-        string added = AddedLines(Read(PlatformPatch));
+        // Phase 1A step 4: the device body is VulkanClientPlatform.BindProgramTexture2D.
+        string added = VulkanPlatformSource.Read();
 
-        Assert.Contains("optimumDevice.SetSamplerUnit(program.ProgramId, samplerName, textureNumber)", added);
-        Assert.Contains("optimumDevice.BindTexture(textureNumber, textureId)", added);
-        Assert.Contains("optimumDevice.BindSampler(textureNumber, 0)", added);
+        Assert.Contains("device.SetSamplerUnit(program.ProgramId, samplerName, textureNumber)", added);
+        Assert.Contains("device.BindTexture(textureNumber, textureId)", added);
+        Assert.Contains("device.BindSampler(textureNumber, 0)", added);
     }
 
     /// <summary>
@@ -319,10 +327,11 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void ShaderStagesAreStagedAtCompileAndTranslatedAtLink()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        // Phase 1A step 4: VulkanClientPlatform.CompileShader / CreateShaderProgram.
+        string added = VulkanPlatformSource.Read();
 
-        Assert.Contains("optimumDevice.CompileShader(shader)", added);
-        Assert.Contains("optimumDevice.LinkProgram(program)", added);
+        Assert.Contains("device.CompileShader(shader)", added);
+        Assert.Contains("device.LinkProgram(program)", added);
         Assert.Contains("program.ProgramId = optimumProgramId;", added);
         // A link failure is reported the same way the GL path reports one.
         Assert.Contains("Link error in shader program for pass", added);
@@ -363,7 +372,8 @@ public class VulkanBackendIntegrationTests
     [InlineData("list[13]", "SSAO")]
     public void TheDevicePathPopulatesEveryFramebufferSlot(string slot, string name)
     {
-        string added = AddedLines(Read(PlatformPatch));
+        // Phase 1A step 4: VulkanClientPlatform.SetupDefaultFrameBuffers.
+        string added = VulkanPlatformSource.Read();
         Assert.True(added.Contains(slot + " =", StringComparison.Ordinal),
             $"the device framebuffer setup never assigns {slot} ({name})");
     }
@@ -376,7 +386,7 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void TheTransparentTargetSharesPrimaryDepth()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string added = VulkanPlatformSource.Read();
 
         Assert.Contains("transparent.DepthTextureId = primary.DepthTextureId;", added);
         Assert.Contains(
@@ -392,9 +402,10 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void SsaoWidensPrimaryToFourAttachments()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string added = VulkanPlatformSource.Read();
 
-        Assert.Contains("int primaryAttachments = (SetupSSAO ? 4 : 2);", added);
+        Assert.Contains("bool setupSsao = ClientSettings.SSAOQuality > 0;", added);
+        Assert.Contains("int primaryAttachments = (setupSsao ? 4 : 2);", added);
         Assert.Contains("device.SetDrawBuffers(primary.FboId, (1 << primaryAttachments) - 1);", added);
     }
 
@@ -406,7 +417,7 @@ public class VulkanBackendIntegrationTests
     [Fact]
     public void SsaoNoiseAndKernelKeepTheirSeedAndOrder()
     {
-        string added = AddedLines(Read(PlatformPatch));
+        string added = VulkanPlatformSource.Read();
 
         Assert.Contains("new Random(5)", added);
 
@@ -417,18 +428,31 @@ public class VulkanBackendIntegrationTests
     }
 
     /// <summary>
-    /// The device path's helpers are injected members, not just donor code. An
-    /// unregistered one compiles and then is missing at runtime.
+    /// Phase 1A step 4: the device path's framebuffer helpers are private members of
+    /// VulkanClientPlatform, which ships in the renderer assembly as is - so they are not
+    /// patcher entries any more. The platform state they need is reached through members
+    /// injected into ClientPlatformWindows, and those have to be registered, or they
+    /// compile into the donor and are missing at runtime.
     /// </summary>
     [Fact]
-    public void TheFramebufferHelpersAreInjectedMembers()
+    public void TheFramebufferHelpersLiveInTheVulkanPlatformAndTheirStateAccessorsAreInjected()
     {
         string patcher = Read("Optimum.Patcher/Program.cs");
+        string vulkan = VulkanPlatformSource.Read();
 
-        Assert.Contains("\"SetupOptimumFrameBuffers\"", patcher);
-        Assert.Contains("\"CreateOptimumColorTarget\"", patcher);
-        Assert.Contains("\"SetupOptimumTextureSampler\"", patcher);
-        Assert.Contains("\"CreateOptimumDepthTarget\"", patcher);
+        foreach (string helper in new[] { "SetupOptimumFrameBuffers", "CreateOptimumColorTarget", "SetupOptimumTextureSampler", "CreateOptimumDepthTarget", "CreateOptimumFramebuffer" })
+        {
+            Assert.DoesNotContain("\"" + helper + "\"", patcher);
+        }
+        Assert.Contains("private void SetupOptimumTextureSampler(int textureId, int filter, int wrap)", vulkan);
+        Assert.Contains("private FrameBufferRef CreateOptimumColorTarget(int width, int height, EnumTextureInternalFormat format)", vulkan);
+        Assert.Contains("private FrameBufferRef CreateOptimumDepthTarget(int width, int height)", vulkan);
+
+        foreach (string accessor in new[] { "OptimumAdoptFrameBufferSettings", "OptimumTaaRequested", "OptimumSsaoKernel", "SetOptimumMotionAttachmentIndex", "OptimumAdoptTaaTargets", "OptimumFinishDeviceFrameBufferSetup", "OptimumRenderSsao" })
+        {
+            Assert.Contains("\"" + accessor + "\",", patcher);
+            Assert.Contains("\"" + accessor + "\",", vulkan);
+        }
     }
 
     private static string AddedLines(string patch) =>

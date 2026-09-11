@@ -243,12 +243,13 @@ public class PlatformClientProgramCoverageTests
         string platform = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.cs");
 
         Assert.Contains("namespace Optimum.Render.Vulkan.Platform;", platform);
-        Assert.Contains("public class VulkanClientPlatform : ClientPlatformWindows", platform);
+        Assert.Contains("public partial class VulkanClientPlatform : ClientPlatformWindows", platform);
         Assert.Contains("public VulkanClientPlatform(Logger logger) : base(logger)", platform);
         Assert.Contains("public override bool InitializeGraphics(IntPtr windowHandle, int width, int height, out string reason)", platform);
         Assert.Contains("public override void ShutdownGraphics()", platform);
         Assert.Contains("\"OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE\"", platform);
-        // Step 1 overrides nothing else: the base's device branches keep rendering.
+        // The main file holds bring-up and teardown only; the graphics overrides (Phase 1A
+        // step 4) live in the VulkanClientPlatform.*.cs partial files.
         Assert.Equal(2, Regex.Matches(platform, @"^\s*(public|protected|internal)\s+override\s", RegexOptions.Multiline).Count);
     }
 

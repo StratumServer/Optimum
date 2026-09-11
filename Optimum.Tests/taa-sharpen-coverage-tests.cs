@@ -94,17 +94,19 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
         Assert.Contains("private const int OptimumTaaSharpenIndex = 21;", platform);
-        // Device path: RGBA16F, render resolution.
+        // Device path (VulkanClientPlatform since Phase 1A step 4): RGBA16F, render resolution.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("private const int OptimumTaaSharpenIndex = 21;", vulkan);
         Assert.Contains(
-            "list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(device, width, height,",
-            platform);
-        Assert.Contains("EnumTextureInternalFormat.Rgba16f);", platform);
+            "list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(width, height,",
+            vulkan);
+        Assert.Contains("EnumTextureInternalFormat.Rgba16f);", vulkan);
         // GL path: the same format token (GL_RGBA16F) through setupAttachment.
         Assert.Contains("setupAttachment(optimumSharpen, num, num2, 0, val, (PixelInternalFormat)34842);", platform);
         // Both live inside the taaRequested block, i.e. they are allocated and
         // released with the history slots (DisposeFrameBuffers walks the list).
-        int historyDevice = platform.IndexOf("list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTarget(", StringComparison.Ordinal);
-        int sharpenDevice = platform.IndexOf("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(", StringComparison.Ordinal);
+        int historyDevice = vulkan.IndexOf("list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTarget(", StringComparison.Ordinal);
+        int sharpenDevice = vulkan.IndexOf("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(", StringComparison.Ordinal);
         Assert.True(historyDevice >= 0 && sharpenDevice > historyDevice);
         int historyGl = platform.IndexOf("list[OptimumTaaHistoryIndexA] = CreateOptimumHistoryTargetGl(", StringComparison.Ordinal);
         int sharpenGl = platform.IndexOf("FrameBufferRef optimumSharpen = (list[OptimumTaaSharpenIndex]", StringComparison.Ordinal);
@@ -119,9 +121,12 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
         // Neither failure path may call DisableOptimumTaa - TAA without the
-        // sharpen pass is a working configuration.
-        Assert.Equal(2, Count(platform, "Optimum disabled the TAA sharpen pass"));
-        Assert.Equal(2, Count(platform, "list[OptimumTaaSharpenIndex] = null;"));
+        // sharpen pass is a working configuration. GL here, device in VulkanClientPlatform.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Equal(1, Count(platform, "Optimum disabled the TAA sharpen pass"));
+        Assert.Equal(1, Count(platform, "list[OptimumTaaSharpenIndex] = null;"));
+        Assert.Equal(1, Count(vulkan, "Optimum disabled the TAA sharpen pass"));
+        Assert.Equal(1, Count(vulkan, "list[OptimumTaaSharpenIndex] = null;"));
     }
 
     // --- the pass -----------------------------------------------------------

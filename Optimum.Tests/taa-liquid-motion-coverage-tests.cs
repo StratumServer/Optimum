@@ -144,8 +144,11 @@ public class TaaLiquidMotionCoverageTests
         Assert.Contains("public override bool BeginMotionOnlyWrite()", platform);
         Assert.Contains("public override void EndMotionOnlyWrite()", platform);
 
-        // Device path: the mask is the single motion bit, not the prefix mask.
-        Assert.Contains("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, 1 << MotionAttachmentIndex);", platform);
+        // Device path (VulkanClientPlatform since Phase 1A step 4): the mask is the single
+        // motion bit, not the prefix mask.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("device.SetDrawBuffers(FrameBuffers[0].FboId, 1 << MotionAttachmentIndex);",
+            vulkan.Substring(vulkan.IndexOf("public override void EnableMotionOnlyDrawBuffers()", StringComparison.Ordinal)));
 
         // GL path: GL_NONE in every slot below the motion attachment, and a
         // cached array - the pass runs once a frame, but the P3 window's rule
@@ -160,9 +163,7 @@ public class TaaLiquidMotionCoverageTests
         // The same guards as the P3 window, including the one that keeps the two
         // backends from disagreeing about which framebuffer the mask belongs to.
         int begin = platform.IndexOf("public override bool BeginMotionOnlyWrite()", StringComparison.Ordinal);
-        int drawBuffers = platform.IndexOf(
-            "optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, 1 << MotionAttachmentIndex);",
-            begin, StringComparison.Ordinal);
+        int drawBuffers = platform.IndexOf("EnableMotionOnlyDrawBuffers();", begin, StringComparison.Ordinal);
         Assert.True(drawBuffers > begin);
         string guards = platform.Substring(begin, drawBuffers - begin);
         Assert.Contains("if (OptimumMotionWriteActive) return false;", guards);

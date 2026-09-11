@@ -134,31 +134,37 @@ public class PlatformProgramUboVirtualsCoverageTests
         }
     }
 
+    /// <summary>
+    /// Phase 1A step 4: ClientPlatformWindows overrides every operation with the GL lines only,
+    /// and VulkanClientPlatform overrides the same operation with the device call that used
+    /// to be the branch in front of them.
+    /// </summary>
     [Fact]
-    public void ClientPlatformWindowsOverridesEveryOperationWithTheDeviceBranchThenTheGlLines()
+    public void ClientPlatformWindowsOverridesEveryOperationWithTheGlLinesAndVulkanClientPlatformWithTheDeviceCall()
     {
         string platform = ReadLib(WindowsPath);
+        string vulkan = VulkanPlatformSource.Read();
 
         foreach ((string name, string parameters, string device, string gl) in Members)
         {
             string signature = "public override void " + name + "(" + parameters + ")";
             Assert.Single(Regex.Matches(platform, Regex.Escape(signature)));
             string body = Body(platform, signature);
+            Assert.True(body.Contains(gl, StringComparison.Ordinal), signature + " does not issue " + gl);
+            Assert.False(body.Contains("optimumDevice", StringComparison.Ordinal), signature + " still has a device branch");
 
-            int branch = body.IndexOf("if (optimumDevice != null)", StringComparison.Ordinal);
-            int deviceCall = body.IndexOf(device, StringComparison.Ordinal);
-            int glCall = body.IndexOf(gl, StringComparison.Ordinal);
-            Assert.True(branch >= 0, signature + " has no device branch");
-            Assert.True(deviceCall > branch, signature + " does not call " + device + " in its device branch");
-            Assert.True(glCall > deviceCall, signature + " does not issue " + gl + " after the device branch");
+            Assert.Single(Regex.Matches(vulkan, Regex.Escape(signature)));
+            string deviceCall = device.Replace("optimumDevice.", "device.");
+            Assert.True(Body(vulkan, signature).Contains(deviceCall, StringComparison.Ordinal),
+                "VulkanClientPlatform." + name + " does not call " + deviceCall);
         }
 
         // The whole-buffer update keeps glBufferData on GL.
         Assert.Contains("GL.BufferData((BufferTarget)35345, size, data, (BufferUsageHint)35048);",
             Body(platform, "public override void UpdateUBO(UBO ubo, IntPtr data, int offset, int size, bool reallocate)"));
         // A unit with no custom sampler has any override cleared on the device path.
-        Assert.Contains("optimumDevice.BindSampler(textureNumber, 0);",
-            Body(platform, "public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)"));
+        Assert.Contains("device.BindSampler(textureNumber, 0);",
+            Body(vulkan, "public override void BindProgramTexture2D(ShaderProgramBase program, string samplerName, int textureId, int textureNumber)"));
     }
 
     [Fact]

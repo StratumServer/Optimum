@@ -158,9 +158,13 @@ public class TaaEntityMotionCoverageTests
 
         Assert.Contains("GL.BindBufferBase((BufferRangeTarget)35345, ubo.BindingPoint, ubo.Handle);", platform);
 
-        // Both backends record it, or the GL path binds to point 0 regardless.
-        Assert.Equal(2, Count(platform, "BlockName = blockName;"));
-        Assert.Equal(2, Count(platform, "BindingPoint = bindingPoint;"));
+        // Both backends record it, or the GL path binds to point 0 regardless. Phase 1A
+        // step 4: the device CreateUBO is VulkanClientPlatform's override.
+        Assert.Equal(1, Count(platform, "BlockName = blockName;"));
+        Assert.Equal(1, Count(platform, "BindingPoint = bindingPoint;"));
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Equal(1, Count(vulkan, "optimumUbo.BlockName = blockName;"));
+        Assert.Equal(1, Count(vulkan, "optimumUbo.BindingPoint = bindingPoint;"));
     }
 
     // ---------------------------------------------------- the per-draw history

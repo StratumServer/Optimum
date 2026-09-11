@@ -221,14 +221,18 @@ public class TaaTerrainMotionCoverageTests
         Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;", platform);
         Assert.Contains("if (OptimumMotionWriteActive) return false;", platform);
 
-        // Device path: mask including the motion attachment, then back to the
-        // default set (whose size is the attachment's own index).
+        // Device path (VulkanClientPlatform since Phase 1A step 4): mask including the
+        // motion attachment, then back to the default set (whose size is the attachment's
+        // own index).
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("EnableMotionDrawBuffers();", platform);
+        Assert.Contains("RestorePrimaryDrawBuffers();", platform);
         Assert.Contains(
-            "optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);",
-            platform);
+            "device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);",
+            vulkan);
         Assert.Contains(
-            "optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);",
-            platform);
+            "device.SetDrawBuffers(FrameBuffers[0].FboId, (1 << MotionAttachmentIndex) - 1);",
+            vulkan);
 
         // GL path: the same two sets, as DrawBuffers arrays - built once and
         // kept, not allocated per window. The narrow windows open per draw (every
@@ -247,7 +251,7 @@ public class TaaTerrainMotionCoverageTests
 
         // And nothing inside the window allocates.
         int begin = platform.IndexOf("public override bool BeginMotionWrite()", StringComparison.Ordinal);
-        int end = platform.IndexOf("private void ApplyOptimumMotionBlendState()", begin, StringComparison.Ordinal);
+        int end = platform.IndexOf("public override void ApplyOptimumMotionBlendState()", begin, StringComparison.Ordinal);
         Assert.True(begin >= 0 && end > begin);
         string window = platform.Substring(begin, end - begin);
         Assert.Equal(2, Count(window, "new DrawBuffersEnum["));
@@ -276,7 +280,7 @@ public class TaaTerrainMotionCoverageTests
 
         int begin = platform.IndexOf("public override bool BeginMotionWrite()", StringComparison.Ordinal);
         Assert.True(begin >= 0);
-        int drawBuffers = platform.IndexOf("optimumDevice.SetDrawBuffers(frameBuffers[0].FboId, (1 << (MotionAttachmentIndex + 1)) - 1);", begin, StringComparison.Ordinal);
+        int drawBuffers = platform.IndexOf("EnableMotionDrawBuffers();", begin, StringComparison.Ordinal);
         Assert.True(drawBuffers > begin);
 
         string guards = platform.Substring(begin, drawBuffers - begin);
@@ -296,15 +300,26 @@ public class TaaTerrainMotionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
 
-        Assert.Contains("private void ApplyOptimumMotionBlendState()", platform);
-        Assert.Contains("optimumDevice.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 0, 1, 0);", platform);
+        // Phase 1A step 4: a platform virtual - GL override here, device override in
+        // VulkanClientPlatform, whose GlToggleBlend re-applies it the same way.
+        string vulkan = VulkanPlatformSource.Read();
+        Assert.Contains("public override void ApplyOptimumMotionBlendState()", platform);
+        Assert.Contains("device.SetBlendFuncSeparate(MotionAttachmentIndex, 1, 0, 1, 0);", vulkan);
         Assert.Contains("GL.BlendFunc(MotionAttachmentIndex, (BlendingFactorSrc)1, (BlendingFactorDest)0);", platform);
+        int deviceToggle = vulkan.IndexOf("public override void GlToggleBlend(bool on, EnumBlendMode blendMode", StringComparison.Ordinal);
+        Assert.True(deviceToggle >= 0);
+        Assert.Contains("ApplyOptimumMotionBlendState();", vulkan.Substring(deviceToggle, vulkan.IndexOf("public override void GlDisableCullFace()", deviceToggle, StringComparison.Ordinal) - deviceToggle));
 
         // GlToggleBlend re-applies it, including on the early-returning blend
-        // modes, because glBlendFunc resets every attachment's function.
-        int toggle = platform.IndexOf("public override void GlToggleBlend(bool on, EnumBlendMode blendMode", StringComparison.Ordinal);
+        // modes, because glBlendFunc resets every attachment's function. Read from the
+        // full source: with the device branch gone the patch hunks no longer carry the
+        // signature line.
+        string source = VulkanPlatformSource.ReadClientPlatformWindows();
+        int toggle = source.IndexOf("public override void GlToggleBlend(bool on, EnumBlendMode blendMode", StringComparison.Ordinal);
         Assert.True(toggle >= 0);
-        string body = platform.Substring(toggle);
+        int toggleEnd = source.IndexOf("public override void GlDisableCullFace()", toggle, StringComparison.Ordinal);
+        Assert.True(toggleEnd > toggle);
+        string body = source.Substring(toggle, toggleEnd - toggle);
         Assert.True(Count(body, "ApplyOptimumMotionBlendState();") >= 6,
             "every blend-mode branch has to re-apply the motion attachment's replace blending");
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"GlToggleBlend\", 2", Read("Optimum.Patcher/Program.cs"));
