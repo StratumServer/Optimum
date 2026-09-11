@@ -603,7 +603,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public void BeginFrame()
     {
         // CPU frame interval: start of one frame to the start of the next, so it
-        // includes the pacing fence wait below and everything the client did.
+        // includes the Frame timeline pacing wait below and everything the client did.
         long frameStart = System.Diagnostics.Stopwatch.GetTimestamp();
         if (_lastFrameStart != 0)
         {
@@ -620,8 +620,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
 
         // Sets naming resources deleted since last frame leave the cache now and
-        // are freed once the ring has cycled past every frame that could have
-        // bound them.
+        // are freed once the Frame timeline has passed every frame that could
+        // have bound them.
         IDisposable? freedSets = _descriptors.CollectReleases();
         if (freedSets != null) _frames.DeferDeletion(freedSets);
 
@@ -642,6 +642,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     /// <summary>Stopwatch timestamp of the last BeginFrame, 0 before the first.</summary>
     private long _lastFrameStart;
+
+    /// <summary>Deferred destructions still waiting on the timelines. Tests only.</summary>
+    internal int PendingRetirementsForTests => _frames.PendingDeletionCount;
+
+    /// <summary>The frame ring's timelines. Tests only.</summary>
+    internal FrameTimeline TimelineForTests => _frames.Timeline;
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
@@ -1334,8 +1340,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// <summary>
     /// Deletes a texture and evicts every descriptor set that names it.
     ///
-    /// The eviction is the important half. The texture itself is destroyed a
-    /// ring cycle later, but a cached set would outlive it and, once the driver
+    /// The eviction is the important half. The texture itself is destroyed once
+    /// the Frame timeline passed every frame that could name it, but a cached set would outlive it and, once the driver
     /// reused the view handle for a new texture, be served to draws of that new
     /// texture - which is a GPU read of freed memory. The GUI re-renders its text
     /// into fresh textures constantly, so this was the loading-screen crash.

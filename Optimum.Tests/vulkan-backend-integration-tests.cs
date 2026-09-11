@@ -446,6 +446,37 @@ public class VulkanBackendIntegrationTests
         Assert.DoesNotContain("signalSemaphore = _renderFinished[_semaphoreIndex];", swapchain);
     }
 
+    /// <summary>
+    /// Phase 1B step 1: timeline semaphores are the frame clock. The ring paces on
+    /// the Frame timeline and never on a fence, every frame submit signals it, and
+    /// deferred destruction is keyed on recorded timeline values.
+    /// </summary>
+    [Fact]
+    public void TheFrameRingPacesOnTheFrameTimelineAndRetiresOnTimelineValues()
+    {
+        string timeline = Read("Optimum.Render.Vulkan/Frame/FrameTimeline.cs");
+        Assert.Contains("SemaphoreType = SemaphoreType.Timeline", timeline);
+        Assert.Contains("WaitSemaphores(", timeline);
+        Assert.Contains("GetSemaphoreCounterValue(", timeline);
+
+        string retire = Read("Optimum.Render.Vulkan/Frame/RetireQueue.cs");
+        Assert.Contains("entry.Frame <= frameCompleted && entry.Transfer <= transferCompleted", retire);
+
+        string ring = Read("Optimum.Render.Vulkan/Core/FrameRing.cs");
+        Assert.DoesNotContain("WaitForFences", ring);
+        Assert.DoesNotContain("CreateFence", ring);
+        Assert.DoesNotContain("ConcurrentQueue", ring);
+        Assert.Contains("StructureType.TimelineSemaphoreSubmitInfo", ring);
+        Assert.Contains("signals[signalCount] = _timeline.Frame;", ring);
+        Assert.Contains("_timeline.NoteFrameSubmitted(FrameValue);", ring);
+
+        // Every deferred destroy in the renderer goes through the ring's retire queue.
+        string device = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        Assert.DoesNotContain("_frames.Current.DeferDeletion(", device);
+        Assert.Contains("ring.DeferDeletion(texture)", Read("Optimum.Render.Vulkan/Core/TextureManager.cs"));
+        Assert.Contains("ring.DeferDeletion(mesh)", Read("Optimum.Render.Vulkan/Core/MeshManager.cs"));
+    }
+
     [Fact]
     public void ValidationMessagesAlwaysReachAFileAndExtraFeaturesCanBeRequested()
     {

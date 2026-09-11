@@ -73,25 +73,28 @@ public class FrameRingTests
             using var ring = new FrameRing(context!, framesInFlight: 2, uniformRingSize: 1 << 20);
             var resource = new TrackedResource();
 
-            ring.BeginFrame();
+            // The slot object is reused by later frames, so its value is captured now.
+            ulong queuedAt = ring.BeginFrame().FrameValue;
             ring.DeferDeletion(resource);
             ring.EndFrame();
             Assert.False(resource.Disposed, "must not be freed during the frame that queued it");
 
-            // The next frame drains the queue and adopts the resource.
-            ring.BeginFrame();
-            ring.EndFrame();
-            Assert.False(resource.Disposed, "must not be freed while the adopting slot is in flight");
+            // Keyed on the queuing frame's value: freed only once the Frame
+            // timeline passed it. Completion is monotonic, so a resource seen
+            // freed implies the counter is at or past that value now.
+            for (int frame = 0; frame < 3; frame++)
+            {
+                ring.BeginFrame();
+                ring.EndFrame();
+                Assert.True(!resource.Disposed || ring.Timeline.FrameCompleted >= queuedAt,
+                    "freed before the Frame timeline passed the frame that queued it");
+            }
 
+            // Once the timeline demonstrably passed it, the next frame start frees it.
+            ring.Timeline.WaitForFrame(ring.Timeline.FrameSignalled, WaitSite.DeviceWaitIdle);
             ring.BeginFrame();
             ring.EndFrame();
-            Assert.False(resource.Disposed, "the adopting slot has not come round yet");
-
-            // Back to the adopting slot: its fence has signalled, so the GPU is
-            // demonstrably finished with everything that frame referenced.
-            ring.BeginFrame();
-            ring.EndFrame();
-            Assert.True(resource.Disposed, "should be freed once the adopting slot's fence signalled");
+            Assert.True(resource.Disposed, "should be freed once the Frame timeline passed the queuing frame");
 
             context!.Api.DeviceWaitIdle(context.Device);
         }

@@ -1,9 +1,8 @@
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using Silk.NET.Vulkan;
 
 using Buffer = Silk.NET.Vulkan.Buffer;
+using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -15,12 +14,13 @@ internal readonly record struct RingAllocation(Buffer Buffer, uint Offset, IntPt
 ///
 /// Everything here is reset wholesale rather than freed piecemeal: the command
 /// pool, and the bump cursor into this slot's slice of the shared uniform ring. A
-/// slot is only reused once its fence says the GPU has finished with it, which is
-/// also what makes deferred deletion safe.
+/// slot is only reused once the Frame timeline says the GPU has finished the
+/// frame that last used it (<see cref="FrameRing.BeginFrame" /> waits for that).
 /// </summary>
 internal sealed unsafe class FrameSlot : IDisposable
 {
     private readonly VulkanContext _context;
+    private readonly FrameTimeline _timeline;
     private readonly ulong _alignment;
     private readonly ulong _regionStart;
     private readonly ulong _regionSize;
@@ -30,23 +30,19 @@ internal sealed unsafe class FrameSlot : IDisposable
 
     public CommandPool CommandPool { get; }
     public CommandBuffer CommandBuffer { get; private set; }
-    public Fence Fence { get; }
 
-    /// <summary>
-    /// Resources the GPU may still be reading. They are destroyed when this
-    /// slot's fence signals, never at the moment the game asks.
-    /// </summary>
-    private readonly List<IDisposable> _pendingDeletions = new();
+    /// <summary>The Frame timeline value this slot's current frame signals when submitted.</summary>
+    public ulong FrameValue { get; private set; }
 
-    public FrameSlot(VulkanContext context, VulkanBuffer uniformRing, ulong regionStart, ulong regionSize)
+    public FrameSlot(VulkanContext context, FrameTimeline timeline, VulkanBuffer uniformRing,
+        ulong regionStart, ulong regionSize)
     {
         _context = context;
+        _timeline = timeline;
         _uniformRing = uniformRing;
         _regionStart = regionStart;
         _regionSize = regionSize;
         _alignment = Math.Max(1, context.Capabilities.MinUniformBufferOffsetAlignment);
-
-        Vk api = context.Api;
 
         var poolInfo = new CommandPoolCreateInfo
         {
@@ -54,45 +50,18 @@ internal sealed unsafe class FrameSlot : IDisposable
             QueueFamilyIndex = context.GraphicsQueueFamily,
             Flags = CommandPoolCreateFlags.TransientBit,
         };
-        api.CreateCommandPool(context.Device, &poolInfo, null, out CommandPool commandPool);
+        context.Api.CreateCommandPool(context.Device, &poolInfo, null, out CommandPool commandPool);
         CommandPool = commandPool;
-
-        // Created signalled so the first frame does not wait on a fence that
-        // will never be submitted.
-        var fenceInfo = new FenceCreateInfo
-        {
-            SType = StructureType.FenceCreateInfo,
-            Flags = FenceCreateFlags.SignaledBit,
-        };
-        api.CreateFence(context.Device, &fenceInfo, null, out Fence fence);
-        Fence = fence;
     }
 
     /// <summary>
-    /// Waits for the GPU to finish with this slot, then recycles it. This is the
-    /// only point where deferred deletions actually happen.
+    /// Recycles the slot for frame <paramref name="frameValue" />. The caller has
+    /// already waited for the frame that last used it, so resetting the pool is legal.
     /// </summary>
-    public void BeginFrame(ConcurrentQueue<IDisposable> incomingDeletions, WaitSite site = WaitSite.FramePacing)
+    public void Begin(ulong frameValue)
     {
         Vk api = _context.Api;
-        Fence fence = Fence;
-
-        long waitStart = VulkanStats.WaitStart();
-        VulkanResult.Check(api.WaitForFences(_context.Device, 1, &fence, true, ulong.MaxValue),
-            "vkWaitForFences at the start of a frame");
-        VulkanStats.NoteWait(site, waitStart);
-        VulkanResult.Check(api.ResetFences(_context.Device, 1, &fence),
-            "vkResetFences at the start of a frame");
-
-        foreach (IDisposable pending in _pendingDeletions) pending.Dispose();
-        _pendingDeletions.Clear();
-
-        // Deletions queued from a finalizer thread join this slot, so they too
-        // wait a full frame cycle before the resource is destroyed.
-        while (incomingDeletions.TryDequeue(out IDisposable? deletion))
-        {
-            _pendingDeletions.Add(deletion);
-        }
+        FrameValue = frameValue;
 
         api.ResetCommandPool(_context.Device, CommandPool, 0);
         _cursor = 0;
@@ -138,11 +107,11 @@ internal sealed unsafe class FrameSlot : IDisposable
     }
 
     /// <summary>
-    /// Closes the command buffer and submits it against this slot's fence.
+    /// Closes the command buffer and submits it, signalling the Frame timeline to
+    /// <see cref="FrameValue" /> (and the binary present semaphore when given).
     ///
-    /// Every frame that begins must end here. <see cref="BeginFrame" /> resets the
-    /// fence, so a slot that is begun and never submitted would leave the fence
-    /// unsignalled and deadlock the next time the ring came round to it.
+    /// Every frame that begins must end here: a reserved Frame value that is never
+    /// signalled holds back every deferred destruction recorded at or after it.
     /// </summary>
     public void EndFrameAndSubmit(
         Semaphore waitSemaphore = default,
@@ -159,19 +128,44 @@ internal sealed unsafe class FrameSlot : IDisposable
         VulkanStats.NoteUniformRingUse(_cursor, _regionSize);
 
         Semaphore wait = waitSemaphore;
-        Semaphore signal = signalSemaphore;
+        ulong waitValue = 0;
         PipelineStageFlags stage = waitStage;
+        uint waitCount = wait.Handle == 0 ? 0u : 1u;
+
+        // Binary present semaphore first (its value is ignored), then the timeline.
+        Semaphore* signals = stackalloc Semaphore[2];
+        ulong* signalValues = stackalloc ulong[2];
+        uint signalCount = 0;
+        if (signalSemaphore.Handle != 0)
+        {
+            signals[signalCount] = signalSemaphore;
+            signalValues[signalCount] = 0;
+            signalCount++;
+        }
+        signals[signalCount] = _timeline.Frame;
+        signalValues[signalCount] = FrameValue;
+        signalCount++;
+
+        var timelineInfo = new TimelineSemaphoreSubmitInfo
+        {
+            SType = StructureType.TimelineSemaphoreSubmitInfo,
+            WaitSemaphoreValueCount = waitCount,
+            PWaitSemaphoreValues = waitCount == 0 ? null : &waitValue,
+            SignalSemaphoreValueCount = signalCount,
+            PSignalSemaphoreValues = signalValues,
+        };
 
         var submit = new SubmitInfo
         {
             SType = StructureType.SubmitInfo,
+            PNext = &timelineInfo,
             CommandBufferCount = 1,
             PCommandBuffers = &commandBuffer,
-            WaitSemaphoreCount = wait.Handle == 0 ? 0u : 1u,
-            PWaitSemaphores = wait.Handle == 0 ? null : &wait,
-            PWaitDstStageMask = wait.Handle == 0 ? null : &stage,
-            SignalSemaphoreCount = signal.Handle == 0 ? 0u : 1u,
-            PSignalSemaphores = signal.Handle == 0 ? null : &signal,
+            WaitSemaphoreCount = waitCount,
+            PWaitSemaphores = waitCount == 0 ? null : &wait,
+            PWaitDstStageMask = waitCount == 0 ? null : &stage,
+            SignalSemaphoreCount = signalCount,
+            PSignalSemaphores = signals,
         };
 
         // Shares the queue with off-thread setup submissions; see QueueLock. A
@@ -180,13 +174,12 @@ internal sealed unsafe class FrameSlot : IDisposable
         long submitStart = VulkanStats.WaitStart();
         lock (_context.QueueLock)
         {
-            VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, Fence),
+            VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, default(Fence)),
                 "vkQueueSubmit for a frame");
         }
         VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);
+        _timeline.NoteFrameSubmitted(FrameValue);
     }
-
-    public void DeferDeletion(IDisposable resource) => _pendingDeletions.Add(resource);
 
     public ulong UniformBytesUsed => _cursor;
     public ulong UniformCapacity => _regionSize;
@@ -195,22 +188,20 @@ internal sealed unsafe class FrameSlot : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-
-        foreach (IDisposable pending in _pendingDeletions) pending.Dispose();
-        _pendingDeletions.Clear();
-
-        Vk api = _context.Api;
-        api.DestroyFence(_context.Device, Fence, null);
-        api.DestroyCommandPool(_context.Device, CommandPool, null);
+        _context.Api.DestroyCommandPool(_context.Device, CommandPool, null);
     }
 }
 
 /// <summary>
-/// Rotates through a small number of frame slots.
+/// Rotates through a small number of frame slots, paced by the Frame timeline.
 ///
 /// Two in flight is the default: enough to keep the GPU fed while the CPU records
 /// the next frame, few enough that input latency stays close to what the OpenGL
 /// path had. Frame generation will want a third later.
+///
+/// Frame <c>n</c> uses slot <c>(n - 1) % FramesInFlight</c> and, before it
+/// starts, waits for Frame value <c>n - FramesInFlight</c>: the frame that last
+/// used that slot. That wait is the only CPU wait the ring makes in steady state.
 ///
 /// The uniform ring is one buffer for the whole ring rather than one per slot,
 /// with each slot bump-allocating inside its own slice. That is what lets
@@ -223,12 +214,15 @@ internal sealed class FrameRing : IDisposable
 {
     private readonly FrameSlot[] _slots;
     private readonly VulkanBuffer _uniformRing;
-    private readonly ConcurrentQueue<IDisposable> _incomingDeletions = new();
+    private readonly FrameTimeline _timeline;
+    private readonly RetireQueue _retired;
     private int _index = -1;
     private bool _disposed;
 
     public FrameRing(VulkanContext context, int framesInFlight = 2, ulong uniformRingSize = 32 * 1024 * 1024)
     {
+        _timeline = new FrameTimeline(context);
+        _retired = new RetireQueue(_timeline);
         _uniformRing = new VulkanBuffer(context, uniformRingSize,
             BufferUsageFlags.UniformBufferBit,
             MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
@@ -240,11 +234,14 @@ internal sealed class FrameRing : IDisposable
         _slots = new FrameSlot[framesInFlight];
         for (int i = 0; i < framesInFlight; i++)
         {
-            _slots[i] = new FrameSlot(context, _uniformRing, regionSize * (ulong)i, regionSize);
+            _slots[i] = new FrameSlot(context, _timeline, _uniformRing, regionSize * (ulong)i, regionSize);
         }
     }
 
     public int FramesInFlight => _slots.Length;
+
+    /// <summary>The Frame and Transfer timelines every submission signals.</summary>
+    public FrameTimeline Timeline => _timeline;
 
     /// <summary>The buffer every uniform descriptor points at.</summary>
     public Buffer UniformBuffer => _uniformRing.Handle;
@@ -253,15 +250,24 @@ internal sealed class FrameRing : IDisposable
         ? throw new InvalidOperationException("BeginFrame has not been called yet")
         : _slots[_index];
 
+    /// <summary>
+    /// Starts the next frame: reserves its Frame value, waits for the frame that
+    /// last used its slot, destroys whatever the timelines say is no longer
+    /// referenced, and recycles the slot.
+    /// </summary>
     /// <param name="site">
-    /// Which wait the slot fence counts as: frame pacing at a real frame start,
+    /// Which wait the timeline wait counts as: frame pacing at a real frame start,
     /// <see cref="WaitSite.FlushFrame" /> when a mid-frame flush continues the frame.
     /// </param>
     public FrameSlot BeginFrame(WaitSite site = WaitSite.FramePacing)
     {
-        _index = (_index + 1) % _slots.Length;
+        ulong frameValue = _timeline.ReserveFrame();
+        _timeline.WaitForFrame(FrameTimeline.PacingTarget(frameValue, _slots.Length), site);
+        _retired.Collect();
+
+        _index = (int)((frameValue - 1) % (ulong)_slots.Length);
         FrameSlot slot = _slots[_index];
-        slot.BeginFrame(_incomingDeletions, site);
+        slot.Begin(frameValue);
         return slot;
     }
 
@@ -276,25 +282,28 @@ internal sealed class FrameRing : IDisposable
     ///
     /// Safe from any thread. The game's VAO and UBO finalizers call Dispose from
     /// the finalizer thread, so this cannot assume it is on the render thread;
-    /// the queue is drained at the next BeginFrame, which is.
+    /// destruction happens at a later BeginFrame, which is.
     ///
-    /// The resource is adopted by the slot that drains the queue and destroyed
-    /// when that slot next comes round, so it survives up to two full ring cycles
-    /// rather than one. That is deliberately conservative: the alternative is to
-    /// know which frames referenced it, which the GL-shaped API this backend sits
-    /// behind never tells us.
+    /// The resource is keyed on the newest Frame and Transfer values reserved so
+    /// far (every command that could still name it carries one of them or an
+    /// older one) and destroyed at the first frame start after both completed.
     /// </summary>
-    public void DeferDeletion(IDisposable resource) => _incomingDeletions.Enqueue(resource);
+    public void DeferDeletion(IDisposable resource) => _retired.Retire(resource);
 
-    public int PendingDeletionCount => _incomingDeletions.Count;
+    public int PendingDeletionCount => _retired.PendingCount;
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
-        while (_incomingDeletions.TryDequeue(out IDisposable? deletion)) deletion.Dispose();
+        // Callers normally wait for the device to go idle first (VulkanDevice.Dispose
+        // does); this covers the ones that did not, such as a test unwinding from a
+        // failed assert. The last submission may still name everything below.
+        _timeline.WaitForSignalledFramesAtTeardown();
+        _retired.DisposeAll();
         foreach (FrameSlot slot in _slots) slot.Dispose();
         _uniformRing.Dispose();
+        _timeline.Dispose();
     }
 }
