@@ -51,6 +51,13 @@ public class MotionWindowTests
     /// <summary>The OPTIMUM_VULKAN_COLOR_WRITE_TIER tokens.</summary>
     public static TheoryData<string> Tiers => new() { "enable", "mask", "pipeline" };
 
+    /// <summary>Every tier with the frame graph on and off (OPTIMUM_VULKAN_FRAMEGRAPH).</summary>
+    public static TheoryData<string, bool> TiersWithFrameGraph => new()
+    {
+        { "enable", true }, { "mask", true }, { "pipeline", true },
+        { "enable", false }, { "mask", false }, { "pipeline", false },
+    };
+
     private static ColorWriteTier Tier(string token) =>
         DeviceCaps.ParseColorWriteTier(token) ?? throw new ArgumentException("unknown tier " + token);
 
@@ -310,19 +317,23 @@ public class MotionWindowTests
 
     /// <summary>
     /// The final composition shape: draw buffers select Primary 0 only while the
-    /// program samples Primary 1. The sampled slot leaves the scope (one feedback
-    /// split), colour receives glow's texels exactly, glow keeps them; selecting
-    /// glow again lets it rejoin and a write lands. Validation stays clean.
+    /// program samples Primary 1. The sampled slot leaves the scope, colour receives
+    /// glow's texels exactly, glow keeps them; selecting glow again lets it rejoin and
+    /// a write lands. Validation stays clean. With scope inference the clear opens the
+    /// scope with glow in it, so the sample splits it (one feedback split); on the
+    /// frame graph the clear is promoted into the scope the draw opens, which already
+    /// leaves glow out, so nothing splits.
     /// </summary>
     [SkippableTheory]
-    [MemberData(nameof(Tiers))]
-    public void CompositionSamplesAnAttachmentItsDrawBuffersExclude(string tierToken)
+    [MemberData(nameof(TiersWithFrameGraph))]
+    public void CompositionSamplesAnAttachmentItsDrawBuffersExclude(string tierToken, bool frameGraph)
     {
         ColorWriteTier tier = Tier(tierToken);
         Skip.IfNot(TryCreateDevice(tier, out VulkanDevice? device), "Vulkan or tier " + tier + " unavailable.");
         using (device)
         {
             VulkanDevice seam = device!;
+            seam.FrameGraphEnabled = frameGraph;
             int compose = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, """
                 #version 330 core
                 uniform sampler2D glowTex;
@@ -340,7 +351,7 @@ public class MotionWindowTests
             seam.BindFramebuffer(scene.Framebuffer);
             BaseState(seam);
             seam.SetDrawBuffers(scene.Framebuffer, 0b0001);
-            seam.ClearColor(0, 0f, 0f, 0f, 1f); // opens the scope with glow in it, masked
+            seam.ClearColor(0, 0f, 0f, 0f, 1f); // inference: opens the scope with glow in it, masked
             seam.UseProgram(compose);
             seam.SetSamplerUnit(compose, "glowTex", 0);
             seam.BindTexture(0, scene.Glow);
@@ -358,8 +369,8 @@ public class MotionWindowTests
             byte[] glowAfterWrite = device.ReadBackLevel0ForTests(scene.Glow);
             seam.Present();
 
-            _output.WriteLine($"tier={tier} splits_after_compose={splitsAfterCompose} mask_restarts={maskRestarts}");
-            Assert.Equal(1, splitsAfterCompose);
+            _output.WriteLine($"tier={tier} frameGraph={frameGraph} splits_after_compose={splitsAfterCompose} mask_restarts={maskRestarts}");
+            Assert.Equal(frameGraph ? 0 : 1, splitsAfterCompose);
             Assert.Equal(0, maskRestarts);
             AssertEveryPixel(composed, 4, new byte[] { 51, 102, 153, 255 }, "colour = sampled glow");
             AssertEveryPixel(glowAfterCompose, 4, new byte[] { 51, 102, 153, 255 }, "glow untouched by composition");
