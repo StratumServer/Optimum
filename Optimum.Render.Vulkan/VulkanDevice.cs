@@ -321,10 +321,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off"));
         _setupCommands = new VulkanCommands(_context);
         // Only the render thread records frames, so only its synchronous submits
-        // can race one; a worker's upload is ordered by the queue lock alone.
+        // can race one; a worker's upload is ordered by the queue lock alone. The
+        // frame's recorded part is submitted first and recording continues in the
+        // same slot: queue order is all the setup command needs, so nothing waits.
         _setupCommands.BeforeSynchronousSubmit = () =>
         {
-            if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) FlushFrame();
+            if (_frameActive && Environment.CurrentManagedThreadId == _renderThreadId) SubmitPartial();
         };
         _state = new GlStateTracker();
         _textures = new TextureManager(_context, _setupCommands);
@@ -333,6 +335,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _pipelines = new GraphicsPipelineCache(_context);
         _descriptors = new DescriptorCache(_context);
         _frames = new FrameRing(_context);
+        _queryRing = new QueryRing(_context, _frames.Timeline, _frames.FramesInFlight);
+        _readbacks = new ReadbackManager(_context, _textures, _frames);
         _shaderCompiler = new ShaderCompiler();
         CreateDefaultAttributeBuffer();
         CreatePlaceholderTexture();
@@ -612,12 +616,17 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         }
         _lastFrameStart = frameStart;
 
-        _frames.BeginFrame(WaitSite.FramePacing);
+        FrameSlot slot = _frames.BeginFrame();
         _frameActive = true;
         _renderThreadId = Environment.CurrentManagedThreadId;
         _frameCounter++;
         _indirectFrameUsage = 0;
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
+
+        // The slot's previous frame has finished: its query results move to the
+        // host buffer before the pools reset, and its readback arena is free again.
+        _queryRing.BeginSlot(slot.Index, slot.CommandBuffer);
+        _readbacks.BeginSlot(slot.Index);
 
         // Sets naming resources deleted since last frame leave the cache now and
         // are freed once the Frame timeline has passed every frame that could
@@ -2018,8 +2027,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// One snapshot serves every draw that follows with the block unchanged: the
     /// pairing of frame and version is what makes a thousand chunk draws sharing
     /// one block cost one copy rather than a thousand. A new frame invalidates it
-    /// because the ring's cursor is reset, and so does a mid-frame flush, which
-    /// bumps the frame counter for exactly that reason.
+    /// because the ring's cursor is reset. A partial submit does not: the frame
+    /// stays in the same slot, the cursor keeps counting, and the snapshot's bytes
+    /// are untouched until that slot starts its next frame.
     /// </summary>
     private bool TrySnapshotClientBlock(
         ClientUniformBuffer ubo, ShaderProgramResources program, out uint offset)
@@ -2435,165 +2445,78 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     // -------------------------------------------------------------------- queries
 
-    private readonly Dictionary<int, QueryPool> _queries = new();
-    private int _nextQueryId = 1;
+    private QueryRing _queryRing = null!;
+    private ReadbackManager _readbacks = null!;
 
-    public int CreateOcclusionQuery()
-    {
-        var createInfo = new QueryPoolCreateInfo
-        {
-            SType = StructureType.QueryPoolCreateInfo,
-            QueryType = QueryType.Occlusion,
-            QueryCount = 1,
-        };
-        _context.Api.CreateQueryPool(_context.Device, &createInfo, null, out QueryPool pool);
+    /// <summary>Whether occlusion queries count samples exactly. Tests only.</summary>
+    internal bool PreciseOcclusionForTests => _context.Capabilities.OcclusionQueryPrecise;
 
-        int id = _nextQueryId++;
-        _queries[id] = pool;
-        return id;
-    }
+    /// <summary>Occlusion query pools across every frame slot. Tests only.</summary>
+    internal int OcclusionQueryPoolsForTests => _queryRing.PoolCount;
+
+    public int CreateOcclusionQuery() => _queryRing.Create();
 
     public void BeginOcclusionQuery(int queryId)
     {
-        if (!_frameActive || !_queries.TryGetValue(queryId, out QueryPool pool)) return;
+        if (!_frameActive || !_queryRing.TryBegin(queryId, out QueryPool pool, out uint index, out bool freshPool)) return;
 
-        // A query pool can only be reset outside a rendering scope, and a query
-        // begun inside one has to end inside that same one. So the scope closes
-        // for the reset and reopens before the query begins; the draw the query
-        // covers then finds it already open. glBeginQuery resets implicitly, so
-        // the per-query reset is the same cost GL pays - the scope restart is
-        // the extra. Batching resets at frame start would be cheaper but would
-        // erase results the game may still be about to read.
+        // The slot's pools are reset at frame start, before any scope opens, so
+        // the query begins inside the scope the covered draw uses. Only a pool
+        // created just now needs a reset here, and a reset has to happen outside
+        // a scope: one restart per pool ever, never in steady state.
         CommandBuffer commandBuffer = Commands;
-        _targets.EndRendering(commandBuffer);
-        _context.Api.CmdResetQueryPool(commandBuffer, pool, 0, 1);
+        if (freshPool)
+        {
+            _targets.EndRendering(commandBuffer);
+            _context.Api.CmdResetQueryPool(commandBuffer, pool, 0, QueryRing.QueriesPerPool);
+        }
         _targets.EnsureRendering(commandBuffer);
-        _context.Api.CmdBeginQuery(commandBuffer, pool, 0, 0);
+        // GL_SAMPLES_PASSED is an exact count (sun glare divides it by 1500).
+        _context.Api.CmdBeginQuery(commandBuffer, pool, index,
+            _context.Capabilities.OcclusionQueryPrecise ? QueryControlFlags.PreciseBit : default(QueryControlFlags));
     }
 
     public void EndOcclusionQuery(int queryId)
     {
-        if (_frameActive && _queries.TryGetValue(queryId, out QueryPool pool))
+        if (_frameActive &&
+            _queryRing.TryEnd(queryId, _frames.Current.FrameValue, out QueryPool pool, out uint index))
         {
-            _context.Api.CmdEndQuery(Commands, pool, 0);
-        }
-    }
-
-    public bool IsQueryResultAvailable(int queryId)
-    {
-        if (!_queries.TryGetValue(queryId, out QueryPool pool)) return false;
-
-        ulong result = 0;
-        Result status = _context.Api.GetQueryPoolResults(
-            _context.Device, pool, 0, 1, sizeof(ulong), &result, sizeof(ulong), QueryResultFlags.Result64Bit);
-        return status == Result.Success;
-    }
-
-    /// <summary>
-    /// The samples an occlusion query counted, waiting for it like
-    /// glGetQueryObject does - but never forever.
-    ///
-    /// A query recorded in the current frame has not been submitted yet, and a
-    /// wait on it would block the very thread that will submit it. The frame is
-    /// flushed first, so the wait is on work the GPU actually has. If the result
-    /// still does not arrive, the wait gives up, says so, and reports every
-    /// sample as passed: for a query that gates culling, "visible" is the
-    /// failure that costs a few draws, and "hidden" the one that removes the
-    /// world.
-    /// </summary>
-    public int GetQueryResult(int queryId)
-    {
-        if (!_queries.TryGetValue(queryId, out QueryPool pool)) return 0;
-
-        FlushFrame();
-
-        long deadline = System.Diagnostics.Stopwatch.GetTimestamp() + System.Diagnostics.Stopwatch.Frequency * 2;
-        long waitStart = VulkanStats.WaitStart();
-        ulong result = 0;
-        try
-        {
-        while (true)
-        {
-            Result status = _context.Api.GetQueryPoolResults(
-                _context.Device, pool, 0, 1, sizeof(ulong), &result, sizeof(ulong),
-                QueryResultFlags.Result64Bit);
-            if (status == Result.Success) return (int)Math.Min(result, int.MaxValue);
-            if (status != Result.NotReady) VulkanResult.Check(status, "vkGetQueryPoolResults");
-
-            if (System.Diagnostics.Stopwatch.GetTimestamp() > deadline)
-            {
-                string message = VulkanContext.ErrorPrefix + "occlusion query " + queryId +
-                    " produced no result within two seconds of being flushed; reporting it as visible";
-                _diagnostics.Add(SanitiseForClientLog(message));
-                MirrorValidationMessage(message);
-                return int.MaxValue;
-            }
-            System.Threading.Thread.Yield();
-        }
-        }
-        finally
-        {
-            VulkanStats.NoteWait(WaitSite.OcclusionQuery, waitStart);
+            _context.Api.CmdEndQuery(Commands, pool, index);
         }
     }
 
     /// <summary>
-    /// Submits everything the frame has recorded so far and continues it in the
-    /// next slot, so a result read on the CPU - a query, a pixel readback - can
-    /// see work the frame already issued. Presenting instead would end the frame,
-    /// and every draw after the read would be dropped.
+    /// GL_QUERY_RESULT_AVAILABLE without any wait: true once the Frame timeline
+    /// passed the command buffer that ended the query, a frame or two later.
     /// </summary>
-    private void FlushFrame()
-    {
-        if (!_frameActive) return;
+    public bool IsQueryResultAvailable(int queryId) => _queryRing.IsResultAvailable(queryId);
 
+    /// <summary>
+    /// The samples the latest query counted. Never waits and never submits: the
+    /// client polls availability first (sun glare does), and a result asked for
+    /// early returns the previous query's count, or "all visible" if there was
+    /// none - for a query that gates culling or glare, the cheap failure.
+    /// </summary>
+    public int GetQueryResult(int queryId) => _queryRing.GetResult(queryId);
+
+    /// <summary>
+    /// Submits everything the frame has recorded so far and keeps recording it in
+    /// the same slot, so a readback or a synchronous setup command queued next
+    /// sees work the frame already issued. No wait, no new slot, no frame counter
+    /// increment: arena cursors and uniform snapshots carry on.
+    /// </summary>
+    private ulong SubmitPartial()
+    {
         _targets.EndRendering(Commands);
-        _frames.EndFrame();
-        _frames.BeginFrame(WaitSite.FlushFrame);
-        _frameCounter++;
+        ulong submitted = _frames.SubmitPartial();
         Checkpoint(Commands, CheckpointMarker.FrameBegin(_frameCounter));
+        return submitted;
     }
 
-    public void DeleteQuery(int queryId)
-    {
-        if (_queries.Remove(queryId, out QueryPool pool))
-        {
-            // A frame still executing may be writing this pool; it goes through
-            // the ring like any other resource a recorded command can name.
-            _frames.DeferDeletion(new QueryPoolRelease(_context, pool));
-        }
-    }
-
-    private sealed class QueryPoolRelease : IDisposable
-    {
-        private readonly VulkanContext _context;
-        private QueryPool _pool;
-
-        public QueryPoolRelease(VulkanContext context, QueryPool pool)
-        {
-            _context = context;
-            _pool = pool;
-        }
-
-        public void Dispose()
-        {
-            if (_pool.Handle == 0) return;
-            _context.Api.DestroyQueryPool(_context.Device, _pool, null);
-            _pool = default;
-        }
-    }
+    public void DeleteQuery(int queryId) => _queryRing.Delete(queryId);
 
     // ------------------------------------------------------------------- readback
 
-    /// <summary>
-    /// Reads back the bound target's first colour attachment as BGRA8, rows
-    /// bottom-up.
-    ///
-    /// Bottom-up is not an accident: it is what <c>glReadPixels</c> produces, and
-    /// the existing screenshot and AVI paths already expect it. Because the
-    /// backend never flips Y, the image in memory is laid out exactly as GL laid
-    /// it out, so those paths keep working untouched.
-    /// </summary>
     /// <summary>
     /// Reads back every texture OPTIMUM_DUMP_TEXTURES asked for. Debug only; see
     /// <see cref="TextureDump" /> for why it exists.
@@ -2624,10 +2547,9 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
     /// <summary>
     /// Copies level 0 of a texture into host memory, raw texels in the image's own
-    /// format, rows in memory order (GL order: the backend never flips Y). Submits
-    /// what the frame has recorded first and waits, the way a mid-frame
-    /// <see cref="ReadDefaultFramebuffer" /> does, so the frame stays open. Depth
-    /// images are copied through their depth aspect.
+    /// format, rows in memory order (GL order: the backend never flips Y). Inside
+    /// a frame it goes through <see cref="ReadBack" />, so the frame stays open.
+    /// Depth images are copied through their depth aspect.
     /// </summary>
     private byte[] ReadBackLevel0(VulkanTexture texture)
     {
@@ -2638,8 +2560,36 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             ? ImageAspectFlags.DepthBit
             : ImageAspectFlags.ColorBit;
 
-        FlushFrame();
-        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
+        byte[] data = new byte[bytes];
+        fixed (byte* destination = data)
+        {
+            ReadBack(texture, 0, 0, (uint)width, (uint)height, aspect, bytes, (IntPtr)destination);
+        }
+        return data;
+    }
+
+    /// <summary>
+    /// The one readback path: screenshots, the texture dump and the parity dump.
+    ///
+    /// Inside a frame the open scope closes, the copy is recorded into the frame
+    /// itself (into the slot's readback arena), the recorded part is submitted
+    /// with <see cref="SubmitPartial" /> and the caller waits on that single Frame
+    /// timeline value; the frame carries on in the same slot, so every draw after
+    /// the read still reaches the screen. Between frames a setup submission
+    /// serves: the queue runs it after every frame already submitted, so its own
+    /// fence wait is enough. Neither path waits for the whole device.
+    /// </summary>
+    private void ReadBack(VulkanTexture texture, int x, int y, uint width, uint height,
+        ImageAspectFlags aspect, ulong bytes, IntPtr destination)
+    {
+        if (_frameActive)
+        {
+            _targets.EndRendering(Commands);
+            ReadbackTicket ticket = _readbacks.CopyToHost(texture, x, y, width, height, aspect, bytes);
+            SubmitPartial();
+            _readbacks.WaitAndCopy(ticket, destination);
+            return;
+        }
 
         using var readback = new VulkanBuffer(_context, bytes,
             BufferUsageFlags.TransferDstBit,
@@ -2653,21 +2603,16 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             var region = new BufferImageCopy
             {
                 ImageSubresource = new ImageSubresourceLayers(aspect, 0, 0, 1),
-                ImageOffset = new Offset3D(0, 0, 0),
-                ImageExtent = new Extent3D((uint)width, (uint)height, 1),
+                ImageOffset = new Offset3D(x, y, 0),
+                ImageExtent = new Extent3D(width, height, 1),
             };
             _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
                 ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
+
+            if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
         }, WaitSite.Readback);
 
-        byte[] data = new ReadOnlySpan<byte>((void*)readback.Mapped, (int)bytes).ToArray();
-
-        if (restore != ImageLayout.Undefined)
-        {
-            _setupCommands.SubmitAndWait(commandBuffer =>
-                _textures.TransitionTexture(commandBuffer, texture, restore), WaitSite.Readback);
-        }
-        return data;
+        System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)bytes);
     }
 
     private void RecordGlInternalFormat(int textureId, int glInternalFormat)
@@ -2705,6 +2650,16 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     /// </summary>
     private static int BytesPerPixel(Format format) => TextureDump.BytesPerTexel(format);
 
+    /// <summary>
+    /// Reads back the bound target's first colour attachment, four bytes per
+    /// pixel, rows bottom-up.
+    ///
+    /// Bottom-up is not an accident: it is what <c>glReadPixels</c> produces, and
+    /// the existing screenshot and AVI paths already expect it. Because the
+    /// backend never flips Y, the image in memory is laid out exactly as GL laid
+    /// it out, so those paths keep working untouched. The game reads pixels
+    /// mid-frame and carries on drawing; <see cref="ReadBack" /> keeps the frame open.
+    /// </summary>
     public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
         if (destination == IntPtr.Zero || width <= 0 || height <= 0) return;
@@ -2715,40 +2670,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         VulkanTexture? texture = _textures.Get(target.Color[0].TextureId);
         if (texture == null) return;
 
-        // Readback has to see finished work, so what the frame has recorded is
-        // submitted first. Flushing rather than presenting keeps the frame open:
-        // the game reads pixels mid-frame and carries on drawing, and a present
-        // here silently dropped everything it drew afterwards.
-        FlushFrame();
-        VulkanStats.WaitDeviceIdle(_context.Api, _context.Device);
-
-        ulong bytes = (ulong)width * (ulong)height * 4;
-        using var readback = new VulkanBuffer(_context, bytes,
-            BufferUsageFlags.TransferDstBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-
-        ImageLayout restore = texture.Layout;
-        _setupCommands.SubmitAndWait(commandBuffer =>
-        {
-            _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
-
-            var region = new BufferImageCopy
-            {
-                ImageSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
-                ImageOffset = new Offset3D(x, y, 0),
-                ImageExtent = new Extent3D((uint)width, (uint)height, 1),
-            };
-            _context.Api.CmdCopyImageToBuffer(commandBuffer, texture.Image,
-                ImageLayout.TransferSrcOptimal, readback.Handle, 1, &region);
-        }, WaitSite.Readback);
-
-        System.Buffer.MemoryCopy((void*)readback.Mapped, (void*)destination, (long)bytes, (long)bytes);
-
-        if (restore != ImageLayout.Undefined)
-        {
-            _setupCommands.SubmitAndWait(commandBuffer =>
-                _textures.TransitionTexture(commandBuffer, texture, restore), WaitSite.Readback);
-        }
+        ReadBack(texture, x, y, (uint)width, (uint)height, ImageAspectFlags.ColorBit,
+            (ulong)width * (ulong)height * 4, destination);
     }
 
     // ------------------------------------------------------------------- teardown
@@ -2768,11 +2691,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
 
         _uniformBuffers.Clear();
 
-        foreach (QueryPool pool in _queries.Values)
-        {
-            _context?.Api.DestroyQueryPool(_context.Device, pool, null);
-        }
-        _queries.Clear();
+        _queryRing?.Dispose();
+        _readbacks?.Dispose();
 
         _indirectScratch?.Dispose();
         _defaultAttributes?.Dispose();

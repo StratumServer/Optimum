@@ -233,15 +233,6 @@ public class TimelineLifetimeTests
     }
 
     [Theory]
-    [InlineData(1UL, 2, 0UL)]
-    [InlineData(2UL, 2, 0UL)]
-    [InlineData(3UL, 2, 1UL)]
-    [InlineData(100UL, 2, 98UL)]
-    [InlineData(4UL, 3, 1UL)]
-    public void FrameNWaitsForTheFrameThatLastUsedItsSlot(ulong frame, int framesInFlight, ulong expected) =>
-        Assert.Equal(expected, FrameTimeline.PacingTarget(frame, framesInFlight));
-
-    [Theory]
     [InlineData(5UL, 7UL, 5UL)]
     [InlineData(9UL, 7UL, 7UL)]
     [InlineData(0UL, 0UL, 0UL)]
