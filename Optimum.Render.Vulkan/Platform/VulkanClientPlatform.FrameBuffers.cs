@@ -531,10 +531,12 @@ public partial class VulkanClientPlatform
         if (value == null)
         {
             device.BindDefaultFramebuffer();
+            DeclareBoundPass();
             return;
         }
         device.BindFramebuffer(value.FboId);
         device.SetViewport(0, 0, value.Width, value.Height);
+        DeclareBoundPass();
     }
 
     public override void BindCurrentFrameBufferKeepViewport(FrameBufferRef value)
@@ -542,9 +544,11 @@ public partial class VulkanClientPlatform
         if (value == null)
         {
             device.BindDefaultFramebuffer();
+            DeclareBoundPass();
             return;
         }
         device.BindFramebuffer(value.FboId);
+        DeclareBoundPass();
     }
 
     public override void ClearBoundFrameBuffer(FrameBufferRef framebuffer, float[] clearColor, bool clearDepthBuffer, bool clearColorBuffers)
@@ -691,12 +695,15 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override void BeginFinalCompositionDrawBuffers()
     {
+        DeclareFinalCompositionPass();
         device.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 1);
         device.SetDepthTest(false);
     }
 
     public override void RestoreWorldDrawBuffers(bool ssaoAttachments)
     {
+        // The attachment-subset pass ends before Primary 1 rejoins the draw buffers.
+        device.EndPass();
         if (ssaoAttachments)
         {
             device.SetDrawBuffers(CurrentFrameBuffer != null ? CurrentFrameBuffer.FboId : 0, 15);

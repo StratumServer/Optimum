@@ -13,6 +13,9 @@ public partial class VulkanClientPlatform
     public override void BeginFrame()
     {
         device.BeginFrame();
+        // Until a stage or a post method says otherwise, passes are named after the frame.
+        passContext = "Frame";
+        passContextFlags = Graph.PassFlags.AllowSplit;
     }
 
     /// <summary>

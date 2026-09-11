@@ -32,6 +32,12 @@ public sealed unsafe class VulkanDevice : IDisposable
     private TextureManager _textures = null!;
     private MeshManager _meshes = null!;
     private RenderTargetManager _targets = null!;
+
+    /// <summary>
+    /// The streaming frame graph (Phase 2 step 2). On unless OPTIMUM_VULKAN_FRAMEGRAPH=0;
+    /// off, declarations only bind and every scope comes from inference as before.
+    /// </summary>
+    private readonly Graph.FrameGraph _graph = new();
     private GraphicsPipelineCache _pipelines = null!;
     private DescriptorCache _descriptors = null!;
 
@@ -365,7 +371,7 @@ public sealed unsafe class VulkanDevice : IDisposable
         _uploads = _frames.Uploads;
         _textures = new TextureManager(_context, _uploads);
         _meshes = new MeshManager(_context, _state, _uploads);
-        _targets = new RenderTargetManager(_context, _textures, _state);
+        _targets = new RenderTargetManager(_context, _textures, _state, _graph);
         // An inline upload records transfer commands into the frame command
         // buffer, which no rendering scope may enclose.
         _uploads.CloseRenderingScope = commandBuffer => _targets.EndRendering(commandBuffer);
@@ -845,6 +851,11 @@ public sealed unsafe class VulkanDevice : IDisposable
 
         TextureDump.NoteFrame();
         if (TextureDump.Wanted) DumpRequestedTextures();
+
+        // Clears no pass consumed land now: the image keeps them into the next frame.
+        _targets.FlushAllPendingClears(_frames.Current.CommandBuffer);
+        _targets.EndPass(_frames.Current.CommandBuffer);
+        if (_graph.Enabled) _graph.EndFrame();
 
         // Any open rendering scope has to close before the command buffer ends.
         _targets.EndRendering(_frames.Current.CommandBuffer);
@@ -1401,18 +1412,26 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     public void UploadTexture2D(
         int textureId, int level, int x, int y, int width, int height,
-        EnumTexturePixelFormat pixelFormat, IntPtr pixels) =>
+        EnumTexturePixelFormat pixelFormat, IntPtr pixels)
+    {
+        FlushPendingClears(textureId);
         _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels,
             pixelFormat == EnumTexturePixelFormat.Red ? 1 : 4);
+    }
 
     public void UploadTexture2DRaw(
         int textureId, int level, int x, int y, int width, int height, IntPtr pixels, int bytesPerPixel)
     {
         if (bytesPerPixel <= 0) return;
+        FlushPendingClears(textureId);
         _textures.Upload(textureId, level, x, y, (uint)width, (uint)height, pixels, bytesPerPixel);
     }
 
-    public void GenerateMipmaps(int textureId) => _textures.GenerateMipmaps(textureId);
+    public void GenerateMipmaps(int textureId)
+    {
+        FlushPendingClears(textureId);
+        _textures.GenerateMipmaps(textureId);
+    }
 
     public void DeleteTexture(int textureId) => ReleaseTexture(textureId);
 
@@ -1430,7 +1449,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         if (_feedbackCopies.Remove(textureId, out int copy)) ReleaseTexture(copy);
         _sampledTextureOverrides.Remove(textureId);
         VulkanTexture? texture = _textures.Get(textureId);
-        if (texture != null) _descriptors.Release(texture.Id);
+        if (texture != null)
+        {
+            _descriptors.Release(texture.Id);
+            _targets.DropPendingClears(texture);
+        }
         _textures.Delete(textureId, _frames);
         // Only a delete that found something is a delete. Deleting an id twice
         // (framebuffers share a depth texture) otherwise inflated the counter
@@ -1465,12 +1488,18 @@ public sealed unsafe class VulkanDevice : IDisposable
     }
 
     public void UploadTexture2DArrayLayer(int textureId, int layer, int x, int y,
-        int width, int height, IntPtr pixels) =>
+        int width, int height, IntPtr pixels)
+    {
+        FlushPendingClears(textureId);
         _textures.Upload(textureId, 0, x, y, (uint)width, (uint)height, pixels, 4, (uint)layer);
+    }
 
     public void UploadTexture2DNormalizedShorts(int textureId, int level, int x, int y,
-        int width, int height, short[] pixels) =>
+        int width, int height, short[] pixels)
+    {
+        FlushPendingClears(textureId);
         _textures.UploadNormalizedShorts(textureId, level, x, y, width, height, pixels);
+    }
 
     public void BindTextureCube(int unit, int textureId) => BindTexture(unit, textureId);
 
@@ -1562,6 +1591,55 @@ public sealed unsafe class VulkanDevice : IDisposable
     }
 
     public void DeleteFramebuffer(int framebufferId) => _targets.Delete(framebufferId);
+
+    /// <summary>Whether the frame graph records this device's frames. Change only between frames.</summary>
+    internal bool FrameGraphEnabled
+    {
+        get => _graph.Enabled;
+        set => _graph.Enabled = value;
+    }
+
+    /// <summary>The frame graph's totals. Tests only.</summary>
+    internal Graph.FrameGraph FrameGraphForTests => _graph;
+
+    /// <summary>The bound render target's id (0 before any bind).</summary>
+    internal int BoundFramebufferId => _targets.Bound?.Id ?? 0;
+
+    /// <summary>The render target standing for the default framebuffer (0 when headless).</summary>
+    internal int DefaultFramebufferId => _defaultFramebuffer;
+
+    /// <summary>
+    /// Declares the next frame-graph pass and binds its target
+    /// (<see cref="Graph.PassDeclaration.FramebufferId" />: 0 the bound target, -1 the
+    /// default one). With the frame graph off it only binds.
+    /// </summary>
+    internal void DeclarePass(Graph.PassDeclaration declaration)
+    {
+        if (!_frameActive) return;
+        int id = declaration.FramebufferId == Graph.PassDeclaration.DefaultFramebuffer
+            ? _defaultFramebuffer
+            : declaration.FramebufferId;
+        if (id == 0 && declaration.FramebufferId == Graph.PassDeclaration.DefaultFramebuffer)
+        {
+            _targets.EndPass(Commands);
+            return;
+        }
+        _targets.DeclarePass(Commands, declaration, id);
+    }
+
+    /// <summary>Ends the current pass (closes its scope). No-op with the frame graph off.</summary>
+    internal void EndPass()
+    {
+        if (_frameActive) _targets.EndPass(Commands);
+    }
+
+    /// <summary>Lands the clears promoted into a texture before it is written some other way.</summary>
+    private void FlushPendingClears(int textureId)
+    {
+        if (!_frameActive || !_graph.HasPendingClears) return;
+        VulkanTexture? texture = _textures.Get(textureId);
+        if (texture != null) _targets.FlushPendingClears(Commands, texture);
+    }
 
     public void ClearColor(int attachment, float r, float g, float b, float a)
     {
@@ -2018,6 +2096,9 @@ public sealed unsafe class VulkanDevice : IDisposable
                 placeholderNeeded = true;
                 continue;
             }
+
+            // A clear promoted into it has to land before the read (frame graph).
+            _targets.FlushPendingClears(commandBuffer, texture);
 
             // Sampled by this frame command buffer: a later upload to it this
             // frame must go inline, after this draw, as it would on GL.
@@ -2604,6 +2685,10 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// <summary>vkCmdBeginRendering calls of this device. Tests only.</summary>
     internal long ScopesOpenedForTests => _targets.ScopesOpened;
 
+    /// <summary>A texture's current layout. Tests only.</summary>
+    internal ImageLayout TextureLayoutForTests(int textureId) =>
+        _textures.Get(textureId)?.Layout ?? ImageLayout.Undefined;
+
     /// <summary>Restarts that reopened an identical attachment set; must stay 0. Tests only.</summary>
     internal long MaskRestartsForTests => _targets.MaskRestarts;
 
@@ -2879,6 +2964,7 @@ public sealed unsafe class VulkanDevice : IDisposable
     {
         if (_frameActive)
         {
+            _targets.FlushPendingClears(Commands, texture);
             _targets.EndRendering(Commands);
             ReadbackTicket ticket = _readbacks.CopyToHost(texture, x, y, width, height, aspect, bytes);
             SubmitPartial();
