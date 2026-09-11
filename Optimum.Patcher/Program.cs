@@ -269,6 +269,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumEntityShaderCacheChanged",
         "onOptimumRenderScaleChanged",
         "onOptimumGodRaysCapChanged",
+        "onOptimumTaaChanged",
+        "onOptimumTaaSharpnessChanged",
+        "onOptimumTaaMipBiasChanged",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",

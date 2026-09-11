@@ -463,7 +463,11 @@ public class TaaTerrainMotionCoverageTests
     public void DeployAndEveryPackagerShipTheShaderIncludes()
     {
         Assert.Contains("sources/shaderincludes", Read("Makefile"));
-        Assert.Equal(2, Count(Read("Makefile"), "assets/game/shaderincludes"));
+        // Two deploy destinations (the .vanilla run tree and an installed
+        // runtime), each naming the directory twice since P5: a mkdir -p before
+        // the copy, because a vanilla tree that has no shaderincludes directory
+        // turns "cp sources/shaderincludes/*" into a file of that name.
+        Assert.Equal(4, Count(Read("Makefile"), "assets/game/shaderincludes"));
 
         // Derived, never a hand-kept list: any script that overlays
         // sources/shaders is a packaging path a user can install from, so it has
