@@ -14,11 +14,14 @@ namespace Optimum.Render.Vulkan.Core;
 /// </summary>
 internal enum WaitSite
 {
-    /// <summary>vkWaitForFences on the next frame slot at the start of a frame.</summary>
+    /// <summary>
+    /// vkWaitSemaphores on the Frame timeline for value n - FramesInFlight at the
+    /// start of frame n; exactly one per frame start, the ring's only steady-state wait.
+    /// </summary>
     FramePacing = 0,
     /// <summary>A setup command buffer that uploads data and waits for its fence.</summary>
     UploadSubmit = 1,
-    /// <summary>The slot fence wait inside a mid-frame flush (queries, readbacks, dumps).</summary>
+    /// <summary>The Frame timeline wait inside a mid-frame flush (queries, readbacks, dumps).</summary>
     FlushFrame = 2,
     /// <summary>vkDeviceWaitIdle, wherever it is called.</summary>
     DeviceWaitIdle = 3,

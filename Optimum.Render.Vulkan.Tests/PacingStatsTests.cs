@@ -281,12 +281,26 @@ public class PacingStatsTests
             if (name != "VulkanStats.cs") Assert.DoesNotContain(".DeviceWaitIdle(", text);
             // Every fence wait lives in a file that notes the wait.
             if (text.Contains("WaitForFences(")) Assert.Contains("VulkanStats.NoteWait(", text);
+            // So does every timeline semaphore wait.
+            if (text.Contains("WaitSemaphores(")) Assert.Contains("VulkanStats.NoteWait(", text);
             // So does every queue submission (the queue lock is held through upload fence waits).
             if (text.Contains("QueueSubmit(")) Assert.Contains("VulkanStats.NoteWait(", text);
         }
 
+        // Phase 1B step 1: the frame ring paces on the Frame timeline, never on a fence.
+        string timeline = Source("Frame/FrameTimeline.cs");
+        string wait = Body(timeline, "private void Wait(");
+        Assert.True(wait.IndexOf("WaitSemaphores(", StringComparison.Ordinal) <
+                    wait.IndexOf("VulkanStats.NoteWait(site, waitStart);", StringComparison.Ordinal),
+            "the timeline wait must be counted after it returns");
         string frameRing = Source("Core/FrameRing.cs");
-        Assert.Contains("VulkanStats.NoteWait(site, waitStart);", Body(frameRing, "public void BeginFrame(ConcurrentQueue<IDisposable>"));
+        Assert.DoesNotContain("WaitForFences(", frameRing);
+        Assert.DoesNotContain("Fence Fence", frameRing);
+        string ringBegin = Body(frameRing, "public FrameSlot BeginFrame(WaitSite site");
+        Assert.Equal(1, Count(ringBegin, "_timeline.WaitForFrame("));
+        Assert.Contains("FrameTimeline.PacingTarget(frameValue, _slots.Length), site);", ringBegin);
+        Assert.Contains("_retired.Collect();", ringBegin);
+        Assert.Contains("_retired.Retire(resource)", frameRing);
         string frameSubmit = Body(frameRing, "public void EndFrameAndSubmit(");
         int submitStart = frameSubmit.IndexOf("long submitStart = VulkanStats.WaitStart();", StringComparison.Ordinal);
         int queueLock = frameSubmit.IndexOf("lock (_context.QueueLock)", StringComparison.Ordinal);
