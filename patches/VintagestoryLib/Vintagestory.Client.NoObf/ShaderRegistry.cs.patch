@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..c7a61c8 100644
+index 4a24e75..a16bc58 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..c7a61c8 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,166 @@ public class ShaderRegistry
+@@ -181,39 +183,200 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -133,25 +133,59 @@ index 4a24e75..c7a61c8 100644
 +		float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;
 +		if (terrainLodBias != 0f)
 +		{
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
-+			{
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+				optimumDevice.SetSamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], OptimumGlConstants.TextureLodBias, terrainLodBias);
-+			}
-+			else
-+			{
-+				GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
-+				GL.SamplerParameter(ShaderPrograms.Chunkopaque.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
-+				GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTex"], (SamplerParameterName)34049, terrainLodBias);
-+				GL.SamplerParameter(ShaderPrograms.Chunktopsoil.customSamplers["terrainTexLinear"], (SamplerParameterName)34049, terrainLodBias);
-+			}
++			ApplyOptimumTerrainSamplerLodBias(terrainLodBias);
 +		}
  		return flag;
  	}
  
++	/// <summary>
++	/// Optimum: writes a texture LOD bias into the chunkopaque/chunktopsoil
++	/// terrain sampler objects.
++	///
++	/// This is the only place those two programs' mip selection can be changed.
++	/// A sampler object bound to a unit overrides the texture object's own
++	/// parameters on that unit for every state it carries, LOD bias included, so
++	/// the atlas TexParameter that ChunkRenderer.SetOptimumTextureLodBias sets is
++	/// invisible to them - it only reaches the terrain passes that sample the
++	/// atlas without a custom sampler (liquid, transparent, shadow map).
++	///
++	/// Called once from the shader load above and again from
++	/// ChunkRenderer.SetOptimumTextureLodBias whenever
++	/// OptimumConfig.EffectiveTerrainLodBias moves. Without that second caller the
++	/// TAA mip-bias row would need a shader reload to do anything, while the atlas
++	/// parameter moved immediately - opaque terrain and liquid would then select
++	/// different mips of the same atlas until the next reload.
++	/// </summary>
++	public static void ApplyOptimumTerrainSamplerLodBias(float bias)
++	{
++		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunkopaque, "terrainTex", optimumDevice, bias);
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunkopaque, "terrainTexLinear", optimumDevice, bias);
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunktopsoil, "terrainTex", optimumDevice, bias);
++		ApplyOptimumSamplerLodBias(ShaderPrograms.Chunktopsoil, "terrainTexLinear", optimumDevice, bias);
++	}
++
++	/// <summary>
++	/// Optimum: one terrain sampler object's LOD bias, or nothing when it does
++	/// not exist yet. Both misses are reachable - ChunkRenderer runs its
++	/// per-frame check before the first shader load has created the samplers, and
++	/// a failed program load leaves the dictionary empty - and neither is an
++	/// error: the next load applies the bias from OptimumConfig anyway.
++	/// </summary>
++	private static void ApplyOptimumSamplerLodBias(ShaderProgramBase program, string samplerName, Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice, float bias)
++	{
++		if (program == null || !program.customSamplers.TryGetValue(samplerName, out var sampler))
++		{
++			return;
++		}
++		if (optimumDevice != null)
++		{
++			optimumDevice.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, bias);
++			return;
++		}
++		GL.SamplerParameter(sampler, (SamplerParameterName)34049, bias);
++	}
++
 +	// Optimum: shared per-program post-compile handling used by both the
 +	// parallel-preprocess and vanilla single-threaded load paths.
 +	private static void CompileAndTrackShaderProgram(ShaderProgram shaderProgram, ref bool flag)
@@ -190,7 +224,7 @@ index 4a24e75..c7a61c8 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +425,11 @@ public class ShaderRegistry
+@@ -296,11 +459,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -203,7 +237,7 @@ index 4a24e75..c7a61c8 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +462,48 @@ public class ShaderRegistry
+@@ -333,10 +496,48 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";

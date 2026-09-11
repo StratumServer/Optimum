@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..df65338 100644
+index 431e51a..c59096a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -14,7 +14,7 @@ index 431e51a..df65338 100644
  namespace Vintagestory.Client.NoObf;
  
  public class ChunkRenderer
-@@ -40,10 +42,36 @@ public class ChunkRenderer
+@@ -40,10 +42,40 @@ public class ChunkRenderer
  
  	private float lastSetRainFall;
  
@@ -34,7 +34,11 @@ index 431e51a..df65338 100644
 +	internal List<ModelDataPoolLocation> centerPoolLocationsScratch;
 +	internal List<ModelDataPoolLocation> edgePoolLocationsScratch;
 +
-+	private float optimumTextureLodBias;
++	// NaN means "Optimum has never touched the atlas LOD bias", which is what
++	// keeps the TAA-off, native-scale configuration from making a single
++	// TexParameter/SamplerParameter call: a 0f initialiser would make the first
++	// frame write an explicit bias of 0 over the driver default.
++	private float optimumTextureLodBias = float.NaN;
 +
 +	/// <summary>
 +	/// Optimum TAA (P4): the reactive value the liquid velocity pass stamps into
@@ -51,7 +55,7 @@ index 431e51a..df65338 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +133,68 @@ public class ChunkRenderer
+@@ -105,10 +137,74 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -99,6 +103,12 @@ index 431e51a..df65338 100644
 +	private void SetOptimumTextureLodBias(float bias)
 +	{
 +		Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
++		// The chunkopaque/chunktopsoil sampler objects override the texture
++		// parameter on the units they are bound to, so setting it here alone
++		// would move the mip selection of every OTHER terrain pass and leave the
++		// two that carry the bias in their name untouched until the next shader
++		// reload. Both halves move together or neither does.
++		ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);
 +		if (optimumDevice != null)
 +		{
 +			for (int k = 0; k < textureIds.Length; k++)
@@ -120,7 +130,7 @@ index 431e51a..df65338 100644
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -142,10 +228,16 @@ public class ChunkRenderer
+@@ -142,10 +238,16 @@ public class ChunkRenderer
  		culler.CullInvisibleChunks();
  	}
  
@@ -137,7 +147,7 @@ index 431e51a..df65338 100644
  		subPixelPaddingX = game.BlockAtlasManager.SubPixelPaddingX;
  		subPixelPaddingY = game.BlockAtlasManager.SubPixelPaddingY;
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
-@@ -170,10 +262,11 @@ public class ChunkRenderer
+@@ -170,10 +272,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -149,7 +159,7 @@ index 431e51a..df65338 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,23 +301,59 @@ public class ChunkRenderer
+@@ -208,23 +311,59 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -212,7 +222,7 @@ index 431e51a..df65338 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
  		platform.GlDepthMask(flag: true);
-@@ -232,10 +361,15 @@ public class ChunkRenderer
+@@ -232,10 +371,15 @@ public class ChunkRenderer
  		platform.GlToggleBlend(on: true);
  		platform.GlEnableCullFace();
  		game.GlMatrixModeModelView();
@@ -228,7 +238,7 @@ index 431e51a..df65338 100644
  		chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
  		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
  		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
-@@ -249,10 +383,14 @@ public class ChunkRenderer
+@@ -249,10 +393,14 @@ public class ChunkRenderer
  		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
  		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
  		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
@@ -243,7 +253,7 @@ index 431e51a..df65338 100644
  			chunkopaque.TerrainTex2D = textureIds[i];
  			chunkopaque.TerrainTexLinear2D = textureIds[i];
  			poolsByRenderPass[0][i].Render(cameraPos, "origin");
-@@ -268,10 +406,14 @@ public class ChunkRenderer
+@@ -268,10 +416,14 @@ public class ChunkRenderer
  		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
  		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
  		chunktopsoil.BlockTextureSize = blockTextureSize;
@@ -258,7 +268,7 @@ index 431e51a..df65338 100644
  			chunktopsoil.TerrainTex2D = textureIds[j];
  			chunktopsoil.TerrainTexLinear2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin");
-@@ -314,23 +456,42 @@ public class ChunkRenderer
+@@ -314,23 +466,42 @@ public class ChunkRenderer
  			chunkopaque.TerrainTexLinear2D = textureIds[m];
  			poolsByRenderPass[8][m].Render(cameraPos, "origin");
  		}
@@ -310,7 +320,7 @@ index 431e51a..df65338 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,15 +563,134 @@ public class ChunkRenderer
+@@ -402,15 +573,134 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -445,7 +455,7 @@ index 431e51a..df65338 100644
  		platform.GlToggleBlend(on: false);
  		platform.GlEnableDepthTest();
  		chunkopaque.Use();
-@@ -425,28 +705,36 @@ public class ChunkRenderer
+@@ -425,28 +715,36 @@ public class ChunkRenderer
  		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
  		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
  		chunkopaque.HaxyFade = 1;

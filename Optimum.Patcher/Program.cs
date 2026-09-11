@@ -225,6 +225,12 @@ var membersToInject = new Dictionary<string, List<string>>
         // vanilla single-threaded paths call it); treats taa-debug as
         // optional exactly like the two FSR programs.
         "CompileAndTrackShaderProgram",
+        // TAA P5 review: the terrain sampler objects' LOD bias, reachable from
+        // ChunkRenderer so the TAA mip-bias row applies without a shader reload.
+        // A bound sampler object overrides the atlas texture parameter, so this
+        // is the only place chunkopaque/chunktopsoil mip selection changes.
+        "ApplyOptimumTerrainSamplerLodBias",
+        "ApplyOptimumSamplerLodBias",
     },
     ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
     {

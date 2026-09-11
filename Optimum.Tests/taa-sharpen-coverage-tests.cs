@@ -280,6 +280,66 @@ public class TaaSharpenCoverageTests
         Assert.Contains("if (terrainLodBias != 0f)", registry);
     }
 
+    /// <summary>
+    /// P5 review: the mip-bias row claims to apply live, and for the two programs
+    /// the setting exists for it did not. chunkopaque and chunktopsoil sample the
+    /// atlas through sampler OBJECTS, and a bound sampler object overrides the
+    /// texture object's parameters on that unit - LOD bias included. So
+    /// ChunkRenderer's per-frame TexParameter moved the mip selection of liquid,
+    /// transparent and shadow terrain while the two opaque passes kept whatever
+    /// bias the last shader load compiled in. Both halves now move together.
+    /// </summary>
+    [Fact]
+    public void ALiveMipBiasChangeReachesTheTerrainSamplerObjectsAsWell()
+    {
+        string registry = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
+        // The sampler write is a reusable entry point, not inlined into the load.
+        Assert.Contains("public static void ApplyOptimumTerrainSamplerLodBias(float bias)", registry);
+        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", registry);
+        // Both backends, through the same per-sampler helper.
+        Assert.Contains(
+            "optimumDevice.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, bias);",
+            registry);
+        Assert.Contains("GL.SamplerParameter(sampler, (SamplerParameterName)34049, bias);", registry);
+        // Callable before the samplers exist: ChunkRenderer runs a frame before
+        // the first shader load has created them.
+        Assert.Contains("program == null || !program.customSamplers.TryGetValue(samplerName, out var sampler)", registry);
+
+        string chunkRenderer = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+        string setter = MethodBody(chunkRenderer, "private void SetOptimumTextureLodBias(float bias)");
+        Assert.Contains("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", setter);
+        // Before the device/GL split, so both paths reach it.
+        Assert.True(
+            setter.IndexOf("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", StringComparison.Ordinal)
+            < setter.IndexOf("if (optimumDevice != null)", StringComparison.Ordinal));
+
+        // And the Cecil transplant carries both new members.
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"ApplyOptimumTerrainSamplerLodBias\"", patcher);
+        Assert.Contains("\"ApplyOptimumSamplerLodBias\"", patcher);
+    }
+
+    /// <summary>
+    /// P5 review: with a 0f initialiser the very first OnBeforeRenderOpaque of a
+    /// TAA-off, native-scale session sees "0 wanted, not-NaN cached" and writes an
+    /// explicit LOD bias of 0 over the driver default on every atlas - and, since
+    /// the fix above, on every terrain sampler too. NaN is what "Optimum has never
+    /// touched this" has to mean for that configuration to make no call at all.
+    /// </summary>
+    [Fact]
+    public void TheCachedLodBiasStartsAtNanSoTaaOffTouchesNothing()
+    {
+        string chunkRenderer = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+        Assert.Contains("private float optimumTextureLodBias = float.NaN;", chunkRenderer);
+        Assert.DoesNotContain("private float optimumTextureLodBias;", chunkRenderer);
+    }
+
     // --- manifests and scanner ---------------------------------------------
 
     [Fact]

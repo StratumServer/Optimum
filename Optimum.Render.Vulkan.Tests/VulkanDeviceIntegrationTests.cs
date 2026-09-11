@@ -431,6 +431,111 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
+    /// <summary>
+    /// TAA P5 review: the mip-bias row applies live, which means a LOD bias
+    /// written into a sampler object that is ALREADY bound to a unit has to reach
+    /// the next draw without anything rebinding it.
+    ///
+    /// That is not obvious on this backend. GL keeps sampler state in the object
+    /// the driver dereferences at draw time; here the bias is a field of an
+    /// immutable SamplerState that interns into a VkSampler, and the descriptor
+    /// set is cached. If the unit's binding were resolved once at BindSampler
+    /// time, or the descriptor keyed on the sampler id rather than the resolved
+    /// VkSampler, the slider would move OptimumConfig and change nothing on
+    /// screen until the next shader reload - the exact failure this pass fixes on
+    /// the engine side.
+    ///
+    /// The source is a 4x4 mip chain with one flat colour per level and the quad
+    /// is drawn at exactly one texel per pixel, so lambda is 0 and the level the
+    /// GPU reads is the bias alone.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void ALodBiasWrittenToAnAlreadyBoundSamplerChangesTheMipTheGpuReads()
+    {
+        Skip.IfNot(TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 4;
+            int program = LinkProgram(seam, """
+                #version 330 core
+                void main() {
+                    gl_Position = vec4(-1 + ((gl_VertexID & 1) << 2),
+                                       -1 + ((gl_VertexID & 2) << 1), 0, 1);
+                }
+                """, """
+                #version 330 core
+                uniform sampler2D source;
+                out vec4 color;
+                void main() {
+                    // One texel per pixel on a 4x4 source drawn into a 4x4 target:
+                    // the implicit derivative gives lambda = 0, so every level the
+                    // readback sees comes from the sampler's LOD bias.
+                    color = texture(source, gl_FragCoord.xy / 4.0);
+                }
+                """);
+            int source = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, true);
+            byte[] level0 = new byte[size * size * 4];
+            byte[] level1 = new byte[2 * 2 * 4];
+            byte[] level2 = new byte[4];
+            for (int i = 0; i < level0.Length; i += 4) { level0[i] = 255; level0[i + 3] = 255; }
+            for (int i = 0; i < level1.Length; i += 4) { level1[i + 1] = 255; level1[i + 3] = 255; }
+            level2[2] = 255; level2[3] = 255;
+            fixed (byte* data = level0)
+                seam.UploadTexture2D(source, 0, 0, 0, size, size, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+            fixed (byte* data = level1)
+                seam.UploadTexture2D(source, 1, 0, 0, 2, 2, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+            fixed (byte* data = level2)
+                seam.UploadTexture2D(source, 2, 0, 0, 1, 1, EnumTexturePixelFormat.Rgba, (IntPtr)data);
+
+            int target = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(size, size);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, target, 0);
+            seam.SetDrawBuffers(framebuffer, 1);
+
+            // GenSampler's own state, as ShaderRegistry.SetCustomSampler creates
+            // it for terrainTex; bound once and never rebound below.
+            int sampler = seam.CreateSampler(linear: false);
+
+            byte[] pixels = new byte[size * size * 4];
+            byte[] Draw()
+            {
+                seam.BeginFrame();
+                seam.BindFramebuffer(framebuffer);
+                seam.SetViewport(0, 0, size, size);
+                seam.SetDepthTest(false);
+                seam.SetCullFace(false);
+                seam.SetBlend(false, EnumBlendMode.Standard);
+                seam.UseProgram(program);
+                seam.SetSamplerUnit(program, "source", 0);
+                seam.BindTexture(0, source);
+                seam.DrawFullscreenTriangle();
+                seam.Present();
+                fixed (byte* data = pixels)
+                    seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)data);
+                return pixels;
+            }
+
+            seam.BindSampler(0, sampler);
+            byte[] unbiased = (byte[])Draw().Clone();
+            Assert.Equal(new byte[] { 255, 0, 0, 255 }, unbiased[..4]);
+
+            // The slider's move: the sampler object is already bound to unit 0
+            // and nothing rebinds it.
+            seam.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, 1f);
+            byte[] biased = (byte[])Draw().Clone();
+            Assert.Equal(new byte[] { 0, 255, 0, 255 }, biased[..4]);
+
+            // And back, so the effect is the bias and not a one-way cache miss.
+            seam.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, 0f);
+            Assert.Equal(new byte[] { 255, 0, 0, 255 }, Draw()[..4]);
+
+            AssertClean(seam);
+        }
+    }
+
     [SkippableTheory]
     [InlineData(EnumDrawMode.Lines)]
     [InlineData(EnumDrawMode.LineStrip)]

@@ -92,8 +92,14 @@ public class FsrPipelineCoverageTests
         Assert.Contains("OptimumGlConstants.TextureLodBias, bias", chunkRenderer);
         Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;", shaderRegistry);
         Assert.Contains("if (terrainLodBias != 0f)", shaderRegistry);
-        Assert.Contains("(SamplerParameterName)34049, terrainLodBias", shaderRegistry);
-        Assert.Contains("OptimumGlConstants.TextureLodBias, terrainLodBias", shaderRegistry);
+        // P5 review: the four SamplerParameter calls moved behind
+        // ApplyOptimumTerrainSamplerLodBias so ChunkRenderer can reach them too
+        // (a bound sampler object overrides the atlas TexParameter, so a live
+        // bias change has to write both). The load still passes the same value
+        // and still only when it is non-zero.
+        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", shaderRegistry);
+        Assert.Contains("(SamplerParameterName)34049, bias", shaderRegistry);
+        Assert.Contains("OptimumGlConstants.TextureLodBias, bias", shaderRegistry);
         Assert.Contains("terrainTexLinear", shaderRegistry);
     }
 
