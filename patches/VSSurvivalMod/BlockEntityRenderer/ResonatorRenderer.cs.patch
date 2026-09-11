@@ -1,8 +1,8 @@
 diff --git a/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs
-index 8d5b972..256c7e1 100644
+index 8d5b972..30b7ecd 100644
 --- a/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs
 +++ b/VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs
-@@ -91,11 +91,25 @@ namespace Vintagestory.GameContent
+@@ -91,11 +91,30 @@ namespace Vintagestory.GameContent
                  .Rotate(discRotRad)
                  .Scale(0.9f, 0.9f, 0.9f)
                  .Translate(origx, origy, origz)
@@ -13,9 +13,14 @@ index 8d5b972..256c7e1 100644
 +            // time - so the camera fallback would ghost it. This renderer also
 +            // registers on AfterFinalComposition and runs the same body there; the
 +            // window refuses outside the temporal jitter window, so that draw writes
-+            // nothing. No-op when TAA is off.
-+            OptimumStandardMotion.Apply(prog, this, cylinderMeshRef, ModelMat.Values);
++            // nothing - and the transform history must not roll there either, or the
++            // next frame's previous transform would be a sub-frame too late. Hence
++            // Apply sits inside the window. No-op when TAA is off.
 +            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            if (optimumMotionWrite)
++            {
++                OptimumStandardMotion.Apply(prog, this, cylinderMeshRef, ModelMat.Values);
++            }
 +            try
 +            {
 +                rpi.RenderMesh(cylinderMeshRef);

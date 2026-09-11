@@ -1,7 +1,7 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs
 --- a/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs
-@@ -73,7 +73,24 @@ public class ResonatorRenderer : IRender
+@@ -73,7 +73,29 @@ public class ResonatorRenderer : IRender
  				.Scale(0.9f, 0.9f, 0.9f)
  				.Translate(num, y, num2)
  				.Values;
@@ -10,9 +10,14 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/ResonatorRenderer.cs b/VSSur
 +			// time - so the camera fallback would ghost it. This renderer also
 +			// registers on AfterFinalComposition and runs the same body there; the
 +			// window refuses outside the temporal jitter window, so that draw writes
-+			// nothing. No-op when TAA is off.
-+			OptimumStandardMotion.Apply(standardShader, this, cylinderMeshRef, ModelMat.Values);
++			// nothing - and the transform history must not roll there either, or the
++			// next frame's previous transform would be a sub-frame too late. Hence
++			// Apply sits inside the window. No-op when TAA is off.
 +			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			if (optimumMotionWrite)
++			{
++				OptimumStandardMotion.Apply(standardShader, this, cylinderMeshRef, ModelMat.Values);
++			}
 +			try
 +			{
 +				render.RenderMesh(cylinderMeshRef);

@@ -214,11 +214,56 @@ public class TaaMoverMotionCoverageTests
         Assert.Contains("OptimumMotionWrite.End();", renderer);
 
         // Paired, and closed on the exception path: a window left open would put
-        // the motion attachment in every later draw's mask.
+        // the motion attachment in every later draw's mask. A file-wide search for
+        // "finally" would pass on a renderer whose window is closed by a bare call
+        // while some unrelated method has the keyword, so check it per window.
         Assert.Equal(
             Count(renderer, "OptimumMotionWrite.Begin();"),
             Count(renderer, "OptimumMotionWrite.End();"));
-        Assert.Contains("finally", renderer);
+        AssertEveryWindowClosesInAFinally(source, renderer);
+    }
+
+    /// <summary>
+    /// For every <c>OptimumMotionWrite.Begin();</c>, the <c>End();</c> that closes it
+    /// must sit in a <c>finally</c> that opens after that Begin.
+    /// </summary>
+    private static void AssertEveryWindowClosesInAFinally(string source, string renderer)
+    {
+        const string beginCall = "OptimumMotionWrite.Begin();";
+        const string endCall = "OptimumMotionWrite.End();";
+
+        for (int begin = renderer.IndexOf(beginCall, StringComparison.Ordinal); begin >= 0;
+             begin = renderer.IndexOf(beginCall, begin + beginCall.Length, StringComparison.Ordinal))
+        {
+            int end = renderer.IndexOf(endCall, begin, StringComparison.Ordinal);
+            Assert.True(end > begin, source + ": a motion window opens and is never closed");
+
+            int keyword = renderer.IndexOf("finally", begin, StringComparison.Ordinal);
+            Assert.True(keyword > begin && keyword < end,
+                source + ": the motion window opened at offset " + begin +
+                " is not closed inside a finally block");
+        }
+    }
+
+    /// <summary>
+    /// The resonator runs the same body again on AfterFinalComposition, where
+    /// Begin() refuses because the temporal window is closed. Rolling the transform
+    /// history there would overwrite the identity's current transform with a later,
+    /// time-driven ModelMat, so next frame's previous transform would be off by a
+    /// sub-frame delta. Apply must therefore sit inside the window.
+    /// </summary>
+    [Fact]
+    public void TheResonatorRollsItsHistoryOnlyInsideTheWindow()
+    {
+        string renderer = ReadRepositoryFile("VSSurvivalMod/BlockEntityRenderer/ResonatorRenderer.cs");
+
+        int begin = renderer.IndexOf("OptimumMotionWrite.Begin();", StringComparison.Ordinal);
+        int apply = renderer.IndexOf("OptimumStandardMotion.Apply(", StringComparison.Ordinal);
+        int end = renderer.IndexOf("OptimumMotionWrite.End();", StringComparison.Ordinal);
+
+        Assert.True(begin >= 0 && apply > begin && apply < end,
+            "the resonator must roll its transform history inside the motion window");
+        Assert.Contains("if (optimumMotionWrite)", renderer);
     }
 
     /// <summary>
