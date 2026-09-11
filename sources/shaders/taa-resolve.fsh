@@ -157,7 +157,16 @@ void main(void)
 		// "infinite-direction reprojection where depth == 1"). Finite surfaces
 		// translate by cameraDelta into the previous camera's frame.
 		bool sky = depth >= 0.999999;
-		vec4 prevClip = sky ? prevViewProj * vec4(world, 0.0)
+		// The sky direction is far point minus near point, never the far point's
+		// position alone: the view matrix's eye sits ~1.7 blocks above the origin
+		// (CameraMatrixOrigin is a look-at from LocalEyePos), and that offset in a
+		// "direction" is a fixed ~0.6 px error at 3000 blocks. Homogeneous
+		// difference with the sign of worldH.w * nearH.w, w == 0 counting as
+		// positive, exactly as taa-skymotion.fsh does.
+		vec4 nearH = invViewProjJittered * vec4(ndc, -1.0, 1.0);
+		vec3 skyDirection = worldH.xyz * nearH.w - nearH.xyz * worldH.w;
+		if ((worldH.w < 0.0) != (nearH.w < 0.0)) skyDirection = -skyDirection;
+		vec4 prevClip = sky ? prevViewProj * vec4(skyDirection, 0.0)
 		                    : prevViewProj * vec4(world + cameraDelta, 1.0);
 		if (prevClip.w <= 1e-6) { outColor = current; outGlow = glow; outDepth = vec4(linearDepth); return; }
 		vec2 prevPixel = (prevClip.xy / prevClip.w * 0.5 + 0.5) * renderSize;
