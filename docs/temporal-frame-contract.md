@@ -296,7 +296,7 @@ sky (`depth >= 0.999999`) as a **direction** with `w = 0`, so camera translation
 |---|---|
 | `WorldLoad` | a world is loaded |
 | `Dimension` | dimension change |
-| `Teleport` | `|CameraPosDelta| > TeleportThresholdBlocks` (8.0 blocks in one frame), detected in `CaptureCameraPosition` |
+| `Teleport` | `\|CameraPosDelta\| > TeleportThresholdBlocks` (8.0 blocks in one frame), detected in `CaptureCameraPosition` |
 | `Rebase` | `DefaultShaderUniforms.playerReferencePos` changed — the reference the warp noise and `playerpos` are relative to moved under the world |
 | `Resize` | the render size changed, or a framebuffer rebuild invalidated the history (raised by `RebuildFrameBuffers`); also detected inside `Advance` by comparing the previous render size |
 | `ShaderReload` | SSAO or shader reload |
@@ -358,6 +358,25 @@ Two classes are known-wrong data for a **vendor** consumer even though they are 
 in-house resolve: cube particles (camera-only vector at reactive 1) and volumetric clouds
 (camera-rotation-only vector). Both are listed here so an upscaler or frame generator adapter does
 not discover them by looking at smeared output.
+
+### 6.1 Cloud pixels are UNSUPPORTED for external motion consumers
+
+This is a contract term, not a caveat. `taa-skymotion` writes a **camera-rotation-only** vector on
+cloud pixels: it reprojects the view direction, never the cloud. A cloud scrolling across a still
+camera therefore carries `mv = 0`, which is indistinguishable from static geometry in the motion
+attachment. The in-house resolve is unaffected because `taaCloudReactive` raises `b` on those
+pixels and the resolve discards the history there.
+
+Consequently, for every external consumer (FSR, XeSS, DLSS, any frame generator):
+
+- **Cloud pixels must be rejected using the reactive mask** (`motion.b`, section 3.2). Treating
+  their `rg` as a valid motion vector produces a static cloud layer under a moving camera and
+  duplicated/stuttering clouds in generated frames.
+- A **real** cloud vector is future work and requires the previous frame's `cloudOffset` together
+  with the ray-marched hit position from `cloudvolumetric.fsh`, i.e. a motion output from the cloud
+  volume itself; it cannot reach Primary's attachment without a second pass over that volume.
+- Until that exists, no adapter may claim cloud motion support, and a v1 adapter that needs correct
+  cloud motion is out of contract rather than a bug in this document.
 
 ---
 

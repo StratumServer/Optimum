@@ -138,6 +138,11 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
     // a helper they call - not only the vertexwarp include named in the rules.
     [InlineData("assets/mymodshaders/shaderincludes/vertexwarp.vsh")]
     [InlineData("assets/mymodshaders/shaderincludes/somehelper.vsh")]
+    // Vanilla's shaderincludes/ also carries .ash files, and ShaderRegistry loads
+    // every include regardless of extension - so the stage-extension filter must
+    // not apply here or an external .ash helper is invisible to the scanner.
+    [InlineData("assets/mymodshaders/shaderincludes/foo.ash")]
+    [InlineData("assets/mymodshaders/shaderincludes/vertexflagbits.ash")]
     public void AnExternalCopyOfAnyTaaShaderDisablesTaa(string entryPath)
     {
         string dataPath = Path.Combine(_root, "data");
@@ -160,16 +165,19 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
             report.FeatureReasons["Taa"]);
     }
 
-    [Fact]
-    public void AnUnrelatedExternalShaderLeavesTaaAlone()
+    [Theory]
+    [InlineData("assets/mymodshaders/shaders/gui.fsh")]
+    // Under shaders/ a non-stage extension is not a shader at all: the relaxed
+    // extension rule belongs to shaderincludes/ only.
+    [InlineData("assets/mymodshaders/shaders/readme.ash")]
+    public void AnUnrelatedExternalShaderLeavesTaaAlone(string entryPath)
     {
         string dataPath = Path.Combine(_root, "data");
         string archivePath = Path.Combine(dataPath, "Mods", "SomeShaderPack.zip");
         Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
         using (ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
         {
-            using StreamWriter writer = new(archive.CreateEntry(
-                "assets/mymodshaders/shaders/gui.fsh").Open());
+            using StreamWriter writer = new(archive.CreateEntry(entryPath).Open());
             writer.Write("void main() { }");
         }
 

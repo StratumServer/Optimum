@@ -65,6 +65,12 @@ case "$TAA_ARG" in
   ""|on|off) ;;
   *) echo "--taa takes on or off (got '${TAA_ARG}')" >&2; exit 2;;
 esac
+# Same check for --vsync: without it "--vsync 0" or "--vsync fals" silently means
+# vsync ON, and a vsync-capped run measures the monitor, not the renderer.
+case "$VSYNC_ARG" in
+  ""|on|off) ;;
+  *) echo "--vsync takes on or off (got '${VSYNC_ARG}')" >&2; exit 2;;
+esac
 
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 DATA_PATH="${DATA_PATH:-$HOME/.config/OptimumVintagestoryData}"

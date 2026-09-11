@@ -47,7 +47,9 @@ for i in 1 2 3 4 5 6 7; do
   scripts/dev/screenshot.sh /tmp/taa-shots/a$i.png; sleep 1
   scripts/dev/screenshot.sh /tmp/taa-shots/b$i.png; sleep 1
 done
-scripts/dev/luma-diff.py --median /tmp/taa-shots/*.png
+# pair order matters: a1 b1 a2 b2 ... - a flat glob sorts a1..a7 before b1..b7
+# and would compare unrelated frames.
+scripts/dev/luma-diff.py --median $(for i in 1 2 3 4 5 6 7; do echo /tmp/taa-shots/a$i.png /tmp/taa-shots/b$i.png; done)
 ```
 
 Reference from the TAA round: Vulkan 1.84 vs OpenGL 1.87 (medians 1.74 / 1.72). **Above ~3 on
@@ -209,7 +211,11 @@ scripts/dev/perf-capture.sh --renderer opengl --taa on  --label gl-on
   allocation counters from `/tmp/optimum-perf/<label>/vulkan-stats.log` and the target sizes from
   the resolve's allocation log lines.
 - Pass: the measured TAA footprint matches the plan's budget: motion 15.8 MiB + two colour
-  histories 31.6 MiB + aux 7.9 MiB + prev-depth 15.8 MiB.
+  histories 31.6 MiB + aux 7.9 MiB + prev-depth 15.8 MiB + the slot-21 sharpen target 15.8 MiB
+  = **~86.9 MiB**. The sharpen target is an RGBA8 colour target the size of Primary, allocated
+  whenever TAA is on (`OptimumTaaSharpenIndex = 21` in
+  `patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch`), so it
+  belongs in the budget and was missing from the earlier 71.1 MiB figure.
 - Record: the measured MiB per target and the total, per backend.
 
 ## 4. Still owed from P4, to be closed in this matrix
