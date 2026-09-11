@@ -261,7 +261,7 @@ unchanged from earlier builds; the other four carry stable `key=value` tokens:
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
 stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
 stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
-stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n>
+stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> barrier_commands=<n> barriers_per_frame=<n.n> mask_restarts=<n> feedback_splits=<n> passes=<n> plan_hits=<n> plan_misses=<n> in_pass_clears=<n> promoted_clears=<n> standalone_clears=<n> pass_splits=<n>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
 ```
 
@@ -289,7 +289,14 @@ stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar
   reopened an identical attachment set; draw buffers and motion windows are write masks since
   Phase 2 contract C4, so this must be 0) and `feedback_splits` (restarts that took a sampled,
   draw-buffer-excluded slot out of the scope, as the final composition does with Primary 1, or
-  let it rejoin). The colour write tier is on the device-up validation log line;
+  let it rejoin). Frame graph (Phase 2 step 2, `OPTIMUM_VULKAN_FRAMEGRAPH=0` turns it off):
+  `passes` (passes that opened their scope, declared or not), `pass_splits` (extra scopes
+  inside one declared pass; `scopes` = `passes` + `pass_splits`), `plan_hits` and
+  `plan_misses` (frames that did or did not match the load/store plan solved from the previous
+  frame), `in_pass_clears` (clears recorded as vkCmdClearAttachments inside an open pass),
+  `promoted_clears` (clears issued with no pass open that became LOAD_OP_CLEAR) and
+  `standalone_clears` (promoted clears whose image was used before a pass attached it, recorded
+  as a clear-image command). The colour write tier is on the device-up validation log line;
   `OPTIMUM_VULKAN_COLOR_WRITE_TIER=enable|mask|pipeline` forces one.
 - `stats.memory`, a snapshot at sample time (Phase 1B step 5): `blocks` (live device
   allocations the allocator holds), `dedicated` (of them, one-resource blocks), `rebar_used` and

@@ -44,6 +44,12 @@ internal sealed class VulkanFramebuffer
     /// reset when the framebuffer is bound again.
     /// </summary>
     public uint SampledExclusion;
+
+    /// <summary>
+    /// Bound colour slots the declared frame-graph pass leaves out of its scope (the
+    /// final composition writes Primary 0 and samples Primary 1). Cleared when the pass ends.
+    /// </summary>
+    public uint PassExclusion;
 }
 
 /// <summary>
@@ -110,18 +116,32 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// <summary>Runs right after <c>vkCmdEndRendering</c>, outside any scope (where a query pool may be reset).</summary>
     public Action<CommandBuffer>? ScopeClosed;
 
-    public RenderTargetManager(VulkanContext context, TextureManager textures, GlStateTracker state)
+    /// <summary>The frame graph: declared passes, the plan and promoted clears (Phase 2 step 2).</summary>
+    private readonly FrameGraph _graph;
+
+    /// <summary>Opens the one scope of each pass on the frame-graph path.</summary>
+    private readonly PassRecorder _recorder;
+
+    public RenderTargetManager(VulkanContext context, TextureManager textures, GlStateTracker state,
+        FrameGraph? graph = null)
     {
         _context = context;
         _textures = textures;
         _state = state;
         _barriers = textures.CreateBatcher();
+        _graph = graph ?? new FrameGraph { Enabled = false };
+        _recorder = new PassRecorder(context, textures, _barriers, _graph);
 
         // Index 0 is the default framebuffer, installed separately.
         _framebuffers.Add(null);
     }
 
     public VulkanFramebuffer? Bound => _bound;
+
+    public FrameGraph Graph => _graph;
+
+    /// <summary>The declared pass, while one is current (frame-graph path only).</summary>
+    public PassDeclaration? DeclaredPass => _recorder.Declared;
     public bool RenderingActive => _renderingActive;
 
     public VulkanFramebuffer? Get(int id) =>
@@ -233,7 +253,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
     /// <summary>Whether colour slot <paramref name="index" /> is part of the scope the framebuffer opens.</summary>
     private static bool InScope(VulkanFramebuffer framebuffer, int index) =>
-        framebuffer.Color[index].IsBound && ((framebuffer.SampledExclusion >> index) & 1) == 0;
+        framebuffer.Color[index].IsBound &&
+        (((framebuffer.SampledExclusion | framebuffer.PassExclusion) >> index) & 1) == 0;
 
     private bool _needsRestart;
 
@@ -293,6 +314,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if (ReferenceEquals(framebuffer, _bound)) return;
 
         EndRendering(commandBuffer);
+        // A pass is declared on one target; binding another ends it.
+        if (_recorder.Declared != null) ClearPassDeclaration();
         _bound = framebuffer;
         _needsRestart = false;
 
@@ -310,9 +333,103 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if (framebuffer == null) return;
 
         if (ReferenceEquals(framebuffer, _bound)) _bound = null;
+        if (ReferenceEquals(framebuffer, _recorder.DeclaredOn)) ClearPassDeclaration();
         _framebuffers[framebufferId] = null;
         _freeIds.Push(framebufferId);
     }
+
+    // ------------------------------------------------------------------- passes
+
+    /// <summary>
+    /// Declares a frame-graph pass on <paramref name="framebufferId" /> (0: the bound
+    /// target), binding it. The pass's scope opens lazily at its first draw or in-pass
+    /// clear, exactly once unless something forces a split. Re-declaring the current
+    /// pass (same name, target and slots) changes nothing. With the frame graph off this
+    /// only binds, so the same frame code drives both paths.
+    /// </summary>
+    public void DeclarePass(CommandBuffer commandBuffer, PassDeclaration declaration, int framebufferId)
+    {
+        if (!_graph.Enabled)
+        {
+            if (framebufferId > 0) Bind(commandBuffer, framebufferId);
+            return;
+        }
+
+        VulkanFramebuffer? target = framebufferId > 0 ? Get(framebufferId) : _bound;
+        if (target == null)
+        {
+            EndPass(commandBuffer);
+            return;
+        }
+
+        PassDeclaration? current = _recorder.Declared;
+        if (current != null && ReferenceEquals(_recorder.DeclaredOn, target) && ReferenceEquals(_bound, target) &&
+            current.Name == declaration.Name && current.ColorSlots == declaration.ColorSlots)
+        {
+            return;
+        }
+
+        EndPass(commandBuffer);
+        Bind(commandBuffer, target.Id);
+
+        // A new pass is a new use of the target: every bound slot is back in, except
+        // the slots the pass leaves out so they can be sampled.
+        uint exclusion = 0;
+        for (int i = 0; i < target.Color.Length; i++)
+        {
+            if (target.Color[i].IsBound && ((declaration.ColorSlots >> i) & 1) == 0) exclusion |= 1u << i;
+        }
+        if (target.SampledExclusion != 0 || target.PassExclusion != exclusion)
+        {
+            target.SampledExclusion = 0;
+            target.PassExclusion = exclusion;
+            target.FormatsId = -1;
+        }
+        _recorder.Declare(declaration, target);
+    }
+
+    /// <summary>Ends the current pass, declared or not: closes its scope. No-op with the frame graph off.</summary>
+    public void EndPass(CommandBuffer commandBuffer)
+    {
+        if (!_graph.Enabled) return;
+        EndRendering(commandBuffer);
+        ClearPassDeclaration();
+    }
+
+    private void ClearPassDeclaration()
+    {
+        VulkanFramebuffer? target = _recorder.DeclaredOn;
+        if (target != null && target.PassExclusion != 0)
+        {
+            target.PassExclusion = 0;
+            target.FormatsId = -1;
+            if (ReferenceEquals(target, _bound) && _renderingActive) _needsRestart = true;
+        }
+        _recorder.ClearDeclaration();
+    }
+
+    /// <summary>
+    /// Records the clears promoted into <paramref name="texture" /> as clear-image commands,
+    /// closing an open scope first: the texture is about to be used some other way (sampled,
+    /// copied, read back, uploaded to) before any pass attached it.
+    /// </summary>
+    public void FlushPendingClears(CommandBuffer commandBuffer, VulkanTexture texture)
+    {
+        if (!_graph.HasPendingClears || !_graph.HasPendingClear(texture)) return;
+        EndRendering(commandBuffer);
+        _recorder.FlushClears(commandBuffer, texture);
+    }
+
+    /// <summary>Every clear still pending at the end of the frame lands as a clear-image command.</summary>
+    public void FlushAllPendingClears(CommandBuffer commandBuffer)
+    {
+        if (!_graph.HasPendingClears) return;
+        EndRendering(commandBuffer);
+        _recorder.FlushClears(commandBuffer, null);
+    }
+
+    /// <summary>A deleted texture's pending clears are dropped.</summary>
+    public void DropPendingClears(VulkanTexture texture) => _graph.Drop(texture);
 
     // ------------------------------------------------------------------- scopes
 
@@ -334,8 +451,12 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         VulkanFramebuffer framebuffer = _bound;
         int highest = HighestScopeAttachment(framebuffer);
         int count = highest + 1;
+        bool graph = _graph.Enabled;
 
         var attachments = new RenderingAttachmentInfo[Math.Max(count, 0)];
+        // Frame-graph path: the pass recorder queues the barriers and picks the load ops.
+        VulkanTexture?[]? scopeColour = graph ? new VulkanTexture?[attachments.Length] : null;
+        VulkanTexture? scopeDepth = null;
 
         for (int i = 0; i < count; i++)
         {
@@ -365,7 +486,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
 
             // Blend state can change inside the scope, so the attachment is
             // declared for the widest colour use (read and write).
-            _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.ColorBlend);
+            if (graph) scopeColour![i] = texture;
+            else _textures.Require(_barriers, commandBuffer, texture, ResourceUsage.ColorBlend);
 
             attachments[i] = new RenderingAttachmentInfo
             {
@@ -392,7 +514,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                     ? ImageLayout.DepthReadOnlyOptimal
                     : ImageLayout.DepthAttachmentOptimal;
                 // Read-only depth may be sampled by the draws of this scope.
-                _textures.Require(_barriers, commandBuffer, depth,
+                if (graph) scopeDepth = depth;
+                else _textures.Require(_barriers, commandBuffer, depth,
                     DepthReadOnly ? ResourceUsage.DepthReadOnlySampled : ResourceUsage.DepthWrite);
                 depthAttachment = new RenderingAttachmentInfo
                 {
@@ -404,6 +527,12 @@ internal sealed unsafe class RenderTargetManager : IDisposable
                 };
                 hasDepth = true;
             }
+        }
+
+        if (graph)
+        {
+            _recorder.Prepare(commandBuffer, framebuffer, scopeColour!, scopeDepth, DepthReadOnly,
+                FormatsIdOf(framebuffer), _framebuffers, attachments, ref depthAttachment);
         }
 
         _barriers.Flush(commandBuffer);
@@ -479,7 +608,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         if ((_bound.DrawBufferMask & (1u << attachment)) == 0) return;
         if (_state.ColorMask == 0) return;
 
-        EnsureRendering(commandBuffer);
+        if (_graph.Enabled && !ClearColorOnGraph(commandBuffer, attachment, r, g, b, a)) return;
+        if (!_graph.Enabled) EnsureRendering(commandBuffer);
         if (!_renderingActive) return;
 
         var clear = new ClearAttachment
@@ -497,13 +627,61 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         _context.Api.CmdClearAttachments(commandBuffer, 1, &clear, 1, &rect);
     }
 
+    /// <summary>
+    /// The frame-graph half of a colour clear. A slot outside the scope (sampled or left
+    /// out by the pass) is not cleared, as the null attachment it opens with would not be.
+    /// Inside an open pass the clear stays vkCmdClearAttachments and is counted (returns
+    /// true with the scope open). With no pass open a full-mask clear is promoted into the
+    /// next scope attaching the image (returns false); a partial glColorMask clear opens
+    /// the scope and clears in it, as before.
+    /// </summary>
+    private bool ClearColorOnGraph(CommandBuffer commandBuffer, int attachment, float r, float g, float b, float a)
+    {
+        VulkanFramebuffer target = _bound!;
+        if (!InScope(target, attachment)) return false;
+
+        if (!_renderingActive || _needsRestart)
+        {
+            const ColorComponentFlags all = ColorComponentFlags.RBit | ColorComponentFlags.GBit |
+                                            ColorComponentFlags.BBit | ColorComponentFlags.ABit;
+            if (_state.ColorMask == all)
+            {
+                VulkanTexture? texture = _textures.Get(target.Color[attachment].TextureId);
+                if (texture == null) return false;
+                EndRendering(commandBuffer);
+                _graph.PromoteColorClear(texture, target.Color[attachment].Layer, r, g, b, a);
+                return false;
+            }
+            EnsureRendering(commandBuffer);
+            if (!_renderingActive) return false;
+        }
+
+        _graph.NoteInPassClear();
+        return true;
+    }
+
     public void ClearDepth(CommandBuffer commandBuffer, float depth)
     {
         if (_bound == null || _bound.DepthTextureId <= 0) return;
 
+        if (_graph.Enabled)
+        {
+            VulkanTexture? texture = _textures.Get(_bound.DepthTextureId);
+            if (texture == null) return;
+            if (!_renderingActive || _needsRestart || DepthReadOnly)
+            {
+                // No pass open (or the scope is about to change): LOAD_OP_CLEAR on the next scope.
+                EndRendering(commandBuffer);
+                SetDepthReadOnly(false);
+                _graph.PromoteDepthClear(texture, depth);
+                return;
+            }
+            _graph.NoteInPassClear();
+        }
+
         // A read-only depth attachment cannot be cleared; a clear is a write.
         SetDepthReadOnly(false);
-        EnsureRendering(commandBuffer);
+        if (!_graph.Enabled) EnsureRendering(commandBuffer);
         if (!_renderingActive) return;
 
         var clear = new ClearAttachment

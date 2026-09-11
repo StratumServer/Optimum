@@ -208,6 +208,35 @@ internal static class VulkanStats
     /// </summary>
     public static void NoteFeedbackSplit() => Interlocked.Increment(ref _feedbackSplits);
 
+    private static long _passes;
+    private static long _planHits;
+    private static long _planMisses;
+    private static long _inPassClears;
+    private static long _promotedClears;
+    private static long _standaloneClears;
+    private static long _passSplits;
+
+    /// <summary>A frame-graph pass opened its scope (a declared pass, or a scope no declaration covered).</summary>
+    public static void NotePass() => Interlocked.Increment(ref _passes);
+
+    /// <summary>A frame whose passes matched the plan solved from the previous frame exactly.</summary>
+    public static void NotePlanHit() => Interlocked.Increment(ref _planHits);
+
+    /// <summary>A frame recorded conservatively because it did not match the plan.</summary>
+    public static void NotePlanMiss() => Interlocked.Increment(ref _planMisses);
+
+    /// <summary>A clear recorded as vkCmdClearAttachments inside an open pass.</summary>
+    public static void NoteInPassClear() => Interlocked.Increment(ref _inPassClears);
+
+    /// <summary>A clear issued with no pass open that became LOAD_OP_CLEAR.</summary>
+    public static void NotePromotedClear() => Interlocked.Increment(ref _promotedClears);
+
+    /// <summary>A promoted clear recorded as a clear-image command (its image was used before a pass attached it).</summary>
+    public static void NoteStandaloneClear() => Interlocked.Increment(ref _standaloneClears);
+
+    /// <summary>A second rendering scope inside one declared pass.</summary>
+    public static void NotePassSplit() => Interlocked.Increment(ref _passSplits);
+
     public static long MaskRestarts => Interlocked.Read(ref _maskRestarts);
     public static long FeedbackSplits => Interlocked.Read(ref _feedbackSplits);
 
@@ -332,7 +361,14 @@ internal static class VulkanStats
             BarrierCommands: Interlocked.Exchange(ref _barrierCommands, 0),
             Frames: frames,
             MaskRestarts: Interlocked.Exchange(ref _maskRestarts, 0),
-            FeedbackSplits: Interlocked.Exchange(ref _feedbackSplits, 0));
+            FeedbackSplits: Interlocked.Exchange(ref _feedbackSplits, 0),
+            Passes: Interlocked.Exchange(ref _passes, 0),
+            PlanHits: Interlocked.Exchange(ref _planHits, 0),
+            PlanMisses: Interlocked.Exchange(ref _planMisses, 0),
+            InPassClears: Interlocked.Exchange(ref _inPassClears, 0),
+            PromotedClears: Interlocked.Exchange(ref _promotedClears, 0),
+            StandaloneClears: Interlocked.Exchange(ref _standaloneClears, 0),
+            PassSplits: Interlocked.Exchange(ref _passSplits, 0));
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
@@ -390,11 +426,14 @@ internal static class VulkanStats
         string.Format(CultureInfo.InvariantCulture,
             "stats.counters blocking_uploads={0} uploads={1} scopes={2} barriers={3} rebar_fallbacks={4} " +
             "dynamic_state={5} uniform_ring_used={6} uniform_ring_capacity={7} " +
-            "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11}",
+            "barrier_commands={8} barriers_per_frame={9:F1} mask_restarts={10} feedback_splits={11} " +
+            "passes={12} plan_hits={13} plan_misses={14} in_pass_clears={15} promoted_clears={16} " +
+            "standalone_clears={17} pass_splits={18}",
             counters.BlockingUploads, counters.Uploads, counters.Scopes, counters.Barriers,
             counters.RebarFallbacks, counters.DynamicState, counters.UniformRingUsed, counters.UniformRingCapacity,
             counters.BarrierCommands, counters.Frames > 0 ? counters.Barriers / (double)counters.Frames : 0.0,
-            counters.MaskRestarts, counters.FeedbackSplits);
+            counters.MaskRestarts, counters.FeedbackSplits, counters.Passes, counters.PlanHits, counters.PlanMisses,
+            counters.InPassClears, counters.PromotedClears, counters.StandaloneClears, counters.PassSplits);
 
     private static long _lastSample;
 }
@@ -412,7 +451,14 @@ internal readonly record struct CounterSample(
     long BarrierCommands = 0,
     long Frames = 0,
     long MaskRestarts = 0,
-    long FeedbackSplits = 0);
+    long FeedbackSplits = 0,
+    long Passes = 0,
+    long PlanHits = 0,
+    long PlanMisses = 0,
+    long InPassClears = 0,
+    long PromotedClears = 0,
+    long StandaloneClears = 0,
+    long PassSplits = 0);
 
 /// <summary>Percentiles and spread of the frame-interval ring at one moment.</summary>
 internal readonly record struct FramePacingSnapshot(
