@@ -753,7 +753,6 @@ var targets = new List<MethodTarget>
     // fixed-function bodies are vanilla again (Phase 1A step 4): VulkanClientPlatform
     // overrides them, so they are no longer transplanted.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlToggleBlend", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GLDeleteTexture", 1),
     // Vulkan backend: shader staging and linking. CompileShader only stages a
     // stage on the device path, because GL resolves uniforms and varyings by name
     // across the whole program and nothing is final until link time.
@@ -802,17 +801,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Use", 0),
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Stop", 0),
     new("Vintagestory.Client.NoObf.ShaderProgramBase", "Dispose", 0),
-    // Vulkan backend: mesh allocation, upload and draw. VAO.VaoId carries the
-    // device's mesh handle so MeshRef, which mods hold, stays unchanged.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFullscreenTriangle", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMeshInstanced", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UploadMesh", 1),
+    // Mesh update: the params-span-free CheckGlError format (Cecil constraint). The device
+    // halves of the mesh methods live in VulkanClientPlatform (Phase 1A step 4).
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "UpdateMesh", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DeleteMesh", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptyMesh", 12),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptySSBOMesh", 12),
     new("Vintagestory.Client.NoObf.VAO", "Dispose", 0),
     // Vulkan backend: the window's own clear-and-swap has no GL binding to call
     // when the window was opened with no graphics API.
@@ -832,20 +823,6 @@ var targets = new List<MethodTarget>
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
     // Vulkan backend: startup capability reporting, which cannot ask GL.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
-    // Vulkan backend: texture creation, upload and mipmapping.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadCairoTexture", 2),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateCairoTexture", 3),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GenTexture", 1),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadIntoTexture", 5),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadTexture", 4,
-        new[] { "Vintagestory.API.Common.IBitmap", "System.Boolean", "System.Int32", "System.Boolean" }),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "BuildMipMaps", 1),
-    // The texture atlas upload path. Private, so it only reaches the shipped
-    // assembly as an explicit target - its three public wrappers delegate here
-    // and carry no GL of their own, which is how it was missed: nothing on the
-    // menu reaches it, and TextureAtlas.Upload only runs once a world loads.
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateTextureFromPixels", 6),
-    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Load3DTextureCube", 1),
     // Vulkan backend: uniform buffers, whose handles UBO carries across.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
     new("Vintagestory.Client.NoObf.UBO", "Bind", 0),
