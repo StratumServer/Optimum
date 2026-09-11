@@ -233,7 +233,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
             slots |= 1u << i;
         }
 
-        uint newlyExcluded = slots & ~framebuffer.SampledExclusion;
+        // A slot the declared pass already leaves out is not in the scope: nothing to exclude, no split.
+        uint newlyExcluded = slots & ~(framebuffer.SampledExclusion | framebuffer.PassExclusion);
         if (newlyExcluded == 0) return;
 
         framebuffer.SampledExclusion |= newlyExcluded;
@@ -298,6 +299,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         for (int i = 0; i < _bound.Color.Length; i++)
         {
             if (_bound.Color[i].TextureId != textureId) continue;
+            // Left out of the declared pass's scope: sampled directly, not feedback.
+            if (((_bound.PassExclusion >> i) & 1) != 0) continue;
             if ((_bound.DrawBufferMask & (1u << i)) != 0) return true;
         }
         return false;
@@ -628,8 +631,8 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     }
 
     /// <summary>
-    /// The frame-graph half of a colour clear. A slot outside the scope (sampled or left
-    /// out by the pass) is not cleared, as the null attachment it opens with would not be.
+    /// The frame-graph half of a colour clear. A slot left out by the declared pass is not in
+    /// the scope, but its draw buffer is on, so its texture is cleared through a promoted clear.
     /// Inside an open pass the clear stays vkCmdClearAttachments and is counted (returns
     /// true with the scope open). With no pass open a full-mask clear is promoted into the
     /// next scope attaching the image (returns false); a partial glColorMask clear opens
@@ -638,7 +641,20 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     private bool ClearColorOnGraph(CommandBuffer commandBuffer, int attachment, float r, float g, float b, float a)
     {
         VulkanFramebuffer target = _bound!;
-        if (!InScope(target, attachment)) return false;
+        if (!InScope(target, attachment))
+        {
+            // Left out by the declared pass while its draw buffer is on: GL clears the
+            // texture, so the clear is promoted and lands before the texture's next use.
+            if (((target.PassExclusion >> attachment) & 1) != 0)
+            {
+                VulkanTexture? excluded = _textures.Get(target.Color[attachment].TextureId);
+                if (excluded != null)
+                {
+                    _graph.PromoteColorClear(excluded, target.Color[attachment].Layer, r, g, b, a);
+                }
+            }
+            return false;
+        }
 
         if (!_renderingActive || _needsRestart)
         {

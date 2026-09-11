@@ -49,6 +49,18 @@ public class FrameGraphCoverageTests
     }
 
     [Fact]
+    public void ASlotTheDeclaredPassLeavesOutIsTreatedAsOutsideTheScope()
+    {
+        // Phase 2 review: sampling a left-out slot neither splits nor takes a ReadSelf copy,
+        // and a clear on it (draw buffer on) is promoted instead of dropped.
+        // GPU proof: Optimum.Render.Vulkan.Tests/PassExclusionTests.cs.
+        string targets = Read("Optimum.Render.Vulkan/Core/RenderTargetManager.cs");
+        Assert.Contains("uint newlyExcluded = slots & ~(framebuffer.SampledExclusion | framebuffer.PassExclusion);", targets);
+        Assert.Contains("if (((_bound.PassExclusion >> i) & 1) != 0) continue;", targets);
+        Assert.Contains("if (((target.PassExclusion >> attachment) & 1) != 0)", targets);
+    }
+
+    [Fact]
     public void ThePlatformDeclaresThePassesOfTheFrame()
     {
         string graph = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Graph.cs");
