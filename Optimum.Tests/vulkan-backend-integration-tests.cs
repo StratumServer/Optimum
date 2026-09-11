@@ -37,10 +37,10 @@ public class VulkanBackendIntegrationTests
 
         int decision = added.IndexOf("ShouldTryVulkan", StringComparison.Ordinal);
         int noApi = added.IndexOf("ContextAPI.NoAPI", StringComparison.Ordinal);
-        int install = added.IndexOf("OptimumRenderBootstrap.Install", StringComparison.Ordinal);
+        int install = added.IndexOf("clientPlatformWindows.InitializeGraphics(", StringComparison.Ordinal);
 
         Assert.True(decision < noApi, "the backend decision must precede the API choice");
-        Assert.True(noApi < install, "the window must be configured before the device is installed");
+        Assert.True(noApi < install, "the window must be configured before the graphics are initialized");
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public class VulkanBackendIntegrationTests
     {
         string added = AddedLines(Read(ClientProgramPatch));
 
-        Assert.Contains("OptimumRenderBootstrap.Install", added);
+        Assert.Contains("clientPlatformWindows.InitializeGraphics(", added);
         Assert.Contains("OptimumRender.FallBackToOpenGL", added);
         Assert.Contains("ContextAPI.OpenGL", added);
         Assert.Contains("AttemptToOpenWindow", added);

@@ -18,10 +18,24 @@
          referencing project's graph. Without this the backend loads and then
          fails on the first Silk.NET type. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+    <!-- The donor lib (Vulkan-native plan, Phase 1A): VulkanClientPlatform derives from
+         ClientPlatformWindows, which only the donor declares unsealed with the injected
+         virtuals. Compile-time only: at runtime the renderer binds to the Cecil-patched
+         VintagestoryLib.dll already loaded by the client (same unsigned identity), so
+         neither the lib nor anything it references is copied beside the renderer.
+         ExcludeAssets and DisableTransitiveProjectReferences keep the lib's NuGet and
+         project graph (fork VintagestoryAPI, OpenTK, SkiaSharp, Sqlite, ...) from flowing
+         in: CopyLocalLockFileAssemblies above would otherwise copy all of it into the
+         shared output that make deploy and the packagers read. -->
+    <ProjectReference Include="..\build\VintagestoryLib\VintagestoryLib.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>

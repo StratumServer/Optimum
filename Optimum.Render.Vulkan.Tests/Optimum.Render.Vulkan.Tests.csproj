@@ -18,6 +18,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Optimum.Render.Vulkan\Optimum.Render.Vulkan.csproj" />
+    <!-- The renderer references the donor lib compile-only; PlatformSubstitutionTests
+         load VulkanClientPlatform, so the test host needs the donor at runtime. -->
+    <ProjectReference Include="..\build\VintagestoryLib\VintagestoryLib.csproj" />
   </ItemGroup>
 
   <ItemGroup>

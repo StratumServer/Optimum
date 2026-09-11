@@ -63,6 +63,19 @@ var typesToInject = new List<string>
 // --- Phase 2b: Members to inject into existing types ---
 var membersToInject = new Dictionary<string, List<string>>
 {
+    // Vulkan-native plan, Phase 1A: graphics bring-up virtuals VulkanClientPlatform overrides
+    // (injected with their flags, so they arrive virtual), and the ClientProgram.Start helpers
+    // that wire a platform and let the OpenGL fallback rebuild one.
+    ["Vintagestory.Client.NoObf.ClientPlatformAbstract"] = new()
+    {
+        "InitializeGraphics",
+        "ShutdownGraphics",
+    },
+    ["Vintagestory.Client.ClientProgram"] = new()
+    {
+        "ConfigureClientPlatform",
+        "OptimumStartSinglePlayerServer",
+    },
     ["Vintagestory.Client.NoObf.ClientSettings"] = new()
     {
         "OptimumEntityShadowCull",

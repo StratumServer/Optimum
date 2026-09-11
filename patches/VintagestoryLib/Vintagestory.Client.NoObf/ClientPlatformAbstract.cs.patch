@@ -1,9 +1,27 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..1482393 100644
+index d6eb844..3348258 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -331,10 +331,21 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,39 @@ public abstract class ClientPlatformAbstract
  
+ 	public abstract void ResetGamePauseAndUptimeState();
+ 
+ 	public abstract DummyNetwork[] GetSinglePlayerServerNetwork();
+ 
++	// Optimum (Vulkan-native plan, Phase 1A): graphics bring-up and teardown for the window
++	// ClientProgram.Start opened. The OpenGL context comes with the window, so the base has
++	// nothing to do; VulkanClientPlatform overrides both. A false return makes the caller
++	// reopen the window for OpenGL and swap in a plain ClientPlatformWindows.
++	public virtual bool InitializeGraphics(IntPtr windowHandle, int width, int height, out string reason)
++	{
++		reason = null;
++		return true;
++	}
++
++	public virtual void ShutdownGraphics()
++	{
++	}
++
  	public static void DisposeIndexBuffer()
  	{
  		if (singleIndexBufferId != 0)
