@@ -28,7 +28,7 @@
 # Log formats: docs/taa-acceptance.md, section 3. perf-capture.sh writes both files
 # to /tmp/optimum-perf/<label>/. The fps line parser below must stay equal to the one
 # in perf-capture.sh (Optimum.Tests/pacing-log-format-coverage-tests.cs).
-set -u
+set -euo pipefail
 
 exec python3 - "$@" <<'PY'
 import argparse, os, re, statistics, sys
@@ -193,11 +193,11 @@ SELF_TEST_BASELINE = [
 SELF_TEST_STATS = [
     "stats 1.0s: 120 frames (8.4 ms/frame), 3 allocations (812 live), 0 blocking uploads costing 0 ms (0% of the interval), textures +0/-0, mesh writes dropped 0, uniform overflows 0",
     "stats.pacing samples=512 p50_ms=8.301 p95_ms=9.870 p99_ms=10.790 stddev_ms=0.604 stutters=0",
-    "stats.waits frame_pacing_n=120 frame_pacing_ms=402.1 upload_submit_n=0 upload_submit_ms=0.0 flush_frame_n=0 flush_frame_ms=0.0 device_wait_idle_n=0 device_wait_idle_ms=0.0 readback_n=0 readback_ms=0.0 occlusion_query_n=0 occlusion_query_ms=0.0 swapchain_acquire_n=120 swapchain_acquire_ms=3.2 present_n=120 present_ms=6.8",
+    "stats.waits frame_pacing_n=120 frame_pacing_ms=402.1 upload_submit_n=0 upload_submit_ms=0.0 flush_frame_n=0 flush_frame_ms=0.0 device_wait_idle_n=0 device_wait_idle_ms=0.0 readback_n=0 readback_ms=0.0 occlusion_query_n=0 occlusion_query_ms=0.0 swapchain_acquire_n=120 swapchain_acquire_ms=3.2 present_n=120 present_ms=6.8 queue_submit_n=120 queue_submit_ms=1.4",
     "stats.counters blocking_uploads=0 uploads=0 scopes=2640 barriers=240 rebar_fallbacks=0 dynamic_state=168000 uniform_ring_used=402112 uniform_ring_capacity=16777216",
     "stats 1.0s: 121 frames (8.3 ms/frame), 0 allocations (812 live), 0 blocking uploads costing 0 ms (0% of the interval), textures +0/-0, mesh writes dropped 0, uniform overflows 0",
     "stats.pacing samples=512 p50_ms=8.296 p95_ms=9.850 p99_ms=10.770 stddev_ms=0.601 stutters=0",
-    "stats.waits frame_pacing_n=121 frame_pacing_ms=399.8 upload_submit_n=0 upload_submit_ms=0.0 flush_frame_n=0 flush_frame_ms=0.0 device_wait_idle_n=0 device_wait_idle_ms=0.0 readback_n=0 readback_ms=0.0 occlusion_query_n=0 occlusion_query_ms=0.0 swapchain_acquire_n=121 swapchain_acquire_ms=3.1 present_n=121 present_ms=6.9",
+    "stats.waits frame_pacing_n=121 frame_pacing_ms=399.8 upload_submit_n=0 upload_submit_ms=0.0 flush_frame_n=0 flush_frame_ms=0.0 device_wait_idle_n=0 device_wait_idle_ms=0.0 readback_n=0 readback_ms=0.0 occlusion_query_n=0 occlusion_query_ms=0.0 swapchain_acquire_n=121 swapchain_acquire_ms=3.1 present_n=121 present_ms=6.9 queue_submit_n=121 queue_submit_ms=1.5",
     "stats.counters blocking_uploads=0 uploads=0 scopes=2662 barriers=242 rebar_fallbacks=0 dynamic_state=169400 uniform_ring_used=401600 uniform_ring_capacity=16777216",
 ]
 

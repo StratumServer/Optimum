@@ -244,6 +244,21 @@ public class ParityDumpCoverageTests
         Assert.DoesNotContain("pgrep", script);
         Assert.DoesNotContain("xdotool", script); // no chat commands
         Assert.DoesNotContain("sleep \"$", script); // polls, never a blind sleep on a configured delay
+
+        // Errors stop the script (the EXIT trap still restores the config), the restore
+        // waits for the client process to be gone (kill-client.sh does not wait), and a
+        // client that exited is re-checked at once, not after a delay.
+        Assert.Contains("\nset -euo pipefail\n", script);
+        string cleanup = script.Substring(script.IndexOf("cleanup() {", StringComparison.Ordinal));
+        cleanup = cleanup.Substring(0, cleanup.IndexOf("\n}\n", StringComparison.Ordinal));
+        int waitExit = cleanup.IndexOf("wait_for_exit ", StringComparison.Ordinal);
+        int restore = cleanup.IndexOf("set_renderer \"$SAVED_RENDERER\"", StringComparison.Ordinal);
+        Assert.True(waitExit >= 0 && restore > waitExit, "the config restore must wait for the client to exit");
+        Assert.True(script.IndexOf("wait_for_exit() {", StringComparison.Ordinal) < script.IndexOf("cleanup() {", StringComparison.Ordinal));
+        Assert.Contains("grep -m1 -F \"[Optimum] parity dump:\" \"$LOG\" || true", script);
+        string waitFor = script.Substring(script.IndexOf("wait_for() {", StringComparison.Ordinal));
+        waitFor = waitFor.Substring(0, waitFor.IndexOf("\n}\n", StringComparison.Ordinal));
+        Assert.DoesNotContain("sleep 1", waitFor);
     }
 
     [Fact]

@@ -34,7 +34,7 @@
 #
 # This script never pattern-kills anything (rule 5): closing goes through
 # scripts/dev/kill-client.sh, which is the only place that owns that pattern.
-set -u
+set -euo pipefail
 
 RENDERER_ARG=""
 TAA_ARG=""
@@ -151,7 +151,9 @@ if (( ready == 0 )); then
   exit 1
 fi
 
-ACTUAL_RENDERER="$(grep -m1 -oE "\[Optimum\] (Vulkan|OpenGL) renderer" "$LOG" | awk '{print $2}')"
+# "|| true": with pipefail a missing line must reach the refusal below, not end the
+# script with the client still running.
+ACTUAL_RENDERER="$(grep -m1 -oE "\[Optimum\] (Vulkan|OpenGL) renderer" "$LOG" | awk '{print $2}' || true)"
 if [[ -z "$ACTUAL_RENDERER" ]]; then
   echo "no '[Optimum] <backend> renderer' line in $LOG; refusing to report numbers" >&2
   bash "$REPO/scripts/dev/kill-client.sh" >/dev/null 2>&1

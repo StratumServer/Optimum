@@ -30,6 +30,12 @@ internal enum WaitSite
     SwapchainAcquire = 6,
     /// <summary>vkQueuePresentKHR, including the queue lock.</summary>
     Present = 7,
+    /// <summary>
+    /// vkQueueSubmit of a frame slot, including the queue lock. A worker's
+    /// synchronous upload holds that lock through its fence wait, so the render
+    /// thread can stall here on GPU work it did not issue.
+    /// </summary>
+    QueueSubmit = 8,
 }
 
 /// <summary>
@@ -52,7 +58,7 @@ internal enum WaitSite
 /// <code>
 /// stats 1.0s: 60 frames (16.7 ms/frame), ...
 /// stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=0
-/// stats.waits frame_pacing_n=60 frame_pacing_ms=812.4 upload_submit_n=0 upload_submit_ms=0.0 ...
+/// stats.waits frame_pacing_n=60 frame_pacing_ms=812.4 upload_submit_n=0 upload_submit_ms=0.0 ... queue_submit_n=60 queue_submit_ms=1.9
 /// stats.counters blocking_uploads=0 uploads=0 scopes=900 barriers=12 rebar_fallbacks=0 dynamic_state=12600 uniform_ring_used=412800 uniform_ring_capacity=16777216
 /// </code>
 /// </summary>
@@ -69,9 +75,10 @@ internal static class VulkanStats
         "occlusion_query",
         "swapchain_acquire",
         "present",
+        "queue_submit",
     };
 
-    public const int WaitSiteCount = 8;
+    public const int WaitSiteCount = 9;
 
     /// <summary>
     /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> records per

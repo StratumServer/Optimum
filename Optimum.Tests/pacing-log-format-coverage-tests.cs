@@ -175,6 +175,12 @@ public class PacingLogFormatCoverageTests
         string script = Read("scripts/dev/pacing-gate.sh");
         Assert.DoesNotContain("pkill", script);
         Assert.DoesNotContain("pgrep", script);
+        Assert.Contains("\nset -euo pipefail\n", script);
+
+        string capture = Read("scripts/dev/perf-capture.sh");
+        Assert.Contains("\nset -euo pipefail\n", capture);
+        // Under pipefail a missing renderer line must reach the refusal, not end the script.
+        Assert.Contains("awk '{print $2}' || true)\"", capture);
     }
 
     private static (int Code, string Output) RunGate(params string[] arguments)

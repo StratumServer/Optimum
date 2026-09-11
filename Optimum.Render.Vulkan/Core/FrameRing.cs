@@ -174,12 +174,16 @@ internal sealed unsafe class FrameSlot : IDisposable
             PSignalSemaphores = signal.Handle == 0 ? null : &signal,
         };
 
-        // Shares the queue with off-thread setup submissions; see QueueLock.
+        // Shares the queue with off-thread setup submissions; see QueueLock. A
+        // worker's synchronous upload holds that lock through its fence wait, so
+        // this is a CPU wait on the GPU like any other and is counted as one.
+        long submitStart = VulkanStats.WaitStart();
         lock (_context.QueueLock)
         {
             VulkanResult.Check(api.QueueSubmit(_context.GraphicsQueue, 1, &submit, Fence),
                 "vkQueueSubmit for a frame");
         }
+        VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);
     }
 
     public void DeferDeletion(IDisposable resource) => _pendingDeletions.Add(resource);

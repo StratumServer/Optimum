@@ -119,14 +119,15 @@ public class PacingStatsTests
             "stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=3",
             VulkanStats.FormatPacingLine(new FramePacingSnapshot(512, 16.66666, 17.1, 18.3, 0.42, 3)));
 
-        var counts = new long[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        var counts = new long[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
         // No midpoints: F1 rounding of an exact x.x5 is not something to pin.
-        var ms = new double[] { 1.21, 2.4, 3.6, 4.8, 6.0, 7.2, 8.4, 9.66 };
+        var ms = new double[] { 1.21, 2.4, 3.6, 4.8, 6.0, 7.2, 8.4, 9.66, 10.83 };
         Assert.Equal(
             "stats.waits frame_pacing_n=1 frame_pacing_ms=1.2 upload_submit_n=2 upload_submit_ms=2.4 " +
             "flush_frame_n=3 flush_frame_ms=3.6 device_wait_idle_n=4 device_wait_idle_ms=4.8 " +
             "readback_n=5 readback_ms=6.0 occlusion_query_n=6 occlusion_query_ms=7.2 " +
-            "swapchain_acquire_n=7 swapchain_acquire_ms=8.4 present_n=8 present_ms=9.7",
+            "swapchain_acquire_n=7 swapchain_acquire_ms=8.4 present_n=8 present_ms=9.7 " +
+            "queue_submit_n=9 queue_submit_ms=10.8",
             VulkanStats.FormatWaitsLine(counts, ms));
 
         Assert.Equal(
@@ -139,6 +140,7 @@ public class PacingStatsTests
         Assert.Equal(VulkanStats.WaitSiteCount, VulkanStats.WaitSiteTokens.Length);
         Assert.Equal("swapchain_acquire", VulkanStats.WaitSiteTokens[(int)WaitSite.SwapchainAcquire]);
         Assert.Equal("present", VulkanStats.WaitSiteTokens[(int)WaitSite.Present]);
+        Assert.Equal("queue_submit", VulkanStats.WaitSiteTokens[(int)WaitSite.QueueSubmit]);
     }
 
     [Fact]
@@ -279,10 +281,18 @@ public class PacingStatsTests
             if (name != "VulkanStats.cs") Assert.DoesNotContain(".DeviceWaitIdle(", text);
             // Every fence wait lives in a file that notes the wait.
             if (text.Contains("WaitForFences(")) Assert.Contains("VulkanStats.NoteWait(", text);
+            // So does every queue submission (the queue lock is held through upload fence waits).
+            if (text.Contains("QueueSubmit(")) Assert.Contains("VulkanStats.NoteWait(", text);
         }
 
         string frameRing = Source("Core/FrameRing.cs");
         Assert.Contains("VulkanStats.NoteWait(site, waitStart);", Body(frameRing, "public void BeginFrame(ConcurrentQueue<IDisposable>"));
+        string frameSubmit = Body(frameRing, "public void EndFrameAndSubmit(");
+        int submitStart = frameSubmit.IndexOf("long submitStart = VulkanStats.WaitStart();", StringComparison.Ordinal);
+        int queueLock = frameSubmit.IndexOf("lock (_context.QueueLock)", StringComparison.Ordinal);
+        int submitNoted = frameSubmit.IndexOf("VulkanStats.NoteWait(WaitSite.QueueSubmit, submitStart);", StringComparison.Ordinal);
+        Assert.True(submitStart >= 0 && queueLock > submitStart && submitNoted > queueLock,
+            "the frame submit must be timed from before the queue lock to after the submit");
 
         string resources = Source("Core/VulkanResources.cs");
         string submit = Body(resources, "public void SubmitAndWait(");
@@ -372,6 +382,47 @@ public class PacingStatsTests
 
             Assert.Equal(0, VulkanStats.BlockingUploads - blockingBeforeReadback);
             Assert.True(VulkanStats.WaitCount(WaitSite.Readback) - readbackWaitsBefore >= 1);
+
+            GpuTest.AssertClean(seam);
+        }
+    }
+    /// <summary>
+    /// A frame's vkQueueSubmit is a counted wait: it takes the queue lock that a
+    /// worker's synchronous upload holds through its fence wait. One frame, one
+    /// submit at the queue_submit site; the readback that checks the frame's
+    /// pixels goes through the setup queue path and adds none.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void AFrameSubmitIsCountedAtTheQueueSubmitSite()
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            const int size = 4;
+            int texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+            int framebuffer = seam.CreateFramebuffer(size, size);
+            seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, texture, 0);
+            seam.SetDrawBuffers(framebuffer, 1);
+
+            long submitsBefore = VulkanStats.WaitCount(WaitSite.QueueSubmit);
+            seam.BeginFrame();
+            seam.BindFramebuffer(framebuffer);
+            seam.ClearColor(0, 0.25f, 0.5f, 0.75f, 1f);
+            seam.Present();
+            long submitsAfterFrame = VulkanStats.WaitCount(WaitSite.QueueSubmit);
+
+            var pixelsOut = new byte[size * size * 4];
+            fixed (byte* destination = pixelsOut)
+                seam.ReadDefaultFramebuffer(0, 0, size, size, (IntPtr)destination);
+
+            for (int i = 0; i < pixelsOut.Length; i += 4)
+            {
+                Assert.Equal(new byte[] { 64, 128, 191, 255 }, pixelsOut[i..(i + 4)]);
+            }
+            Assert.Equal(1, submitsAfterFrame - submitsBefore);
+            Assert.Equal(submitsAfterFrame, VulkanStats.WaitCount(WaitSite.QueueSubmit));
 
             GpuTest.AssertClean(seam);
         }

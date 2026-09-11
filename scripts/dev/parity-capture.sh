@@ -27,7 +27,7 @@
 # Exit: 0 dump written on the requested renderer, 1 failure, 2 usage.
 # This script never pattern-kills anything (CLAUDE.md rule 5): closing goes
 # through scripts/dev/kill-client.sh, which is the only place that owns that pattern.
-set -u
+set -euo pipefail
 
 RENDERER_ARG=""
 WORLD=""
@@ -88,12 +88,33 @@ else:
     data["Renderer"] = value
 json.dump(data, open(path, "w"), indent=2)' "$CONFIG" "$1"
 }
+client_alive() {
+  # No -q: grep reads all of ps's output, so pipefail never sees ps die of SIGPIPE.
+  ps -eo cmd | grep "dotnet [V]intagestory.dll" >/dev/null
+}
+
+# wait_for_exit <seconds>: polls until no client process is left. kill-client.sh
+# returns without waiting for the process to go.
+wait_for_exit() {
+  local deadline=$((SECONDS + $1))
+  while client_alive; do
+    if (( SECONDS >= deadline )); then return 1; fi
+    sleep 1
+  done
+  return 0
+}
+
 LAUNCHED=0
 CLOSED=0
 cleanup() {
   if (( LAUNCHED == 1 && CLOSED == 0 )); then
-    bash "$REPO/scripts/dev/kill-client.sh" >/dev/null 2>&1
+    bash "$REPO/scripts/dev/kill-client.sh" >/dev/null 2>&1 || true
     CLOSED=1
+  fi
+  # The restore waits for the process to be gone, so nothing the client still
+  # does on its way out can rewrite the config after it.
+  if (( LAUNCHED == 1 )); then
+    wait_for_exit 60 || echo "the client is still running after 60 s; restoring Renderer anyway" >&2
   fi
   set_renderer "$SAVED_RENDERER" || echo "failed to restore Renderer=$SAVED_RENDERER in $CONFIG" >&2
 }
@@ -107,12 +128,10 @@ echo "config: Renderer=$RENDERER_ARG (was $SAVED_RENDERER)"
 #    rewrite the config a second time.
 export OPTIMUM_PARITY_DUMP="$OUT_DIR"
 export OPTIMUM_PARITY_FRAME="$FRAME"
-env -u RENDERER CLIENT_LOG="$LOG" bash "$REPO/scripts/dev/run-client.sh" "$WORLD" || exit 1
+# LAUNCHED is set first: if the launch itself fails half-way, cleanup still closes
+# whatever started (kill-client.sh is a no-op when nothing runs).
 LAUNCHED=1
-
-client_alive() {
-  ps -eo cmd | grep -q "dotnet [V]intagestory.dll"
-}
+env -u RENDERER CLIENT_LOG="$LOG" bash "$REPO/scripts/dev/run-client.sh" "$WORLD" || exit 1
 
 # wait_for <fixed string> <seconds>: polls the log, fails early when the client exits.
 wait_for() {
@@ -120,7 +139,7 @@ wait_for() {
   while (( SECONDS < deadline )); do
     if grep -qF -- "$needle" "$LOG" 2>/dev/null; then return 0; fi
     if ! client_alive; then
-      sleep 1
+      # The process is gone, so the log is complete: one last look, no delay.
       grep -qF -- "$needle" "$LOG" 2>/dev/null && return 0
       echo "the client exited before '$needle' appeared; see $LOG" >&2
       return 1
@@ -134,7 +153,7 @@ wait_for() {
 # 3. The world, then the renderer. A launch is not a verification (rule 1).
 wait_for "[Client Chat] Welcome" "$WAIT_FOR_WORLD" || exit 1
 
-RENDERER_LINE="$(grep -m1 -E "\[Optimum\] (Vulkan renderer|OpenGL renderer:)" "$LOG")"
+RENDERER_LINE="$(grep -m1 -E "\[Optimum\] (Vulkan renderer|OpenGL renderer:)" "$LOG" || true)"
 if [[ -z "$RENDERER_LINE" ]]; then
   echo "no '[Optimum] <backend> renderer' line in $LOG; refusing to report a capture" >&2
   exit 1
@@ -146,7 +165,7 @@ fi
 
 # 4. The dump line.
 wait_for "[Optimum] parity dump:" "$WAIT_FOR_DUMP" || exit 1
-DUMP_LINE="$(grep -m1 -F "[Optimum] parity dump:" "$LOG")"
+DUMP_LINE="$(grep -m1 -F "[Optimum] parity dump:" "$LOG" || true)"
 
 # 5. Close the client before reporting: never leave the game running (rule 5).
 bash "$REPO/scripts/dev/kill-client.sh"

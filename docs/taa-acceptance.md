@@ -260,7 +260,7 @@ unchanged from earlier builds; the other three carry stable `key=value` tokens:
 ```
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
 stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
-stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms>
+stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
 stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes>
 ```
 
@@ -273,7 +273,9 @@ stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fa
   `frame_pacing` (slot fence at frame start), `upload_submit` (upload setup fence),
   `flush_frame` (slot fence inside a mid-frame flush), `device_wait_idle`, `readback`
   (readback setup fence), `occlusion_query` (polling a query result), `swapchain_acquire`,
-  `present` (vkQueuePresentKHR including the queue lock).
+  `present` (vkQueuePresentKHR including the queue lock), `queue_submit` (vkQueueSubmit of a
+  frame including the queue lock, which a worker's synchronous upload holds through its fence
+  wait).
 - `stats.counters`, per interval: `scopes` (vkCmdBeginRendering), `barriers` (image barriers
   recorded), `rebar_fallbacks` (static mesh buffers that asked for ReBAR and got plain host
   memory), `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame

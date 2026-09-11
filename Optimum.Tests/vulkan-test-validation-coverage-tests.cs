@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -22,12 +23,41 @@ public class VulkanTestValidationCoverageTests
         {
             string name = Path.GetFileName(file);
             if (name == "GpuTest.cs") continue;
-            string source = File.ReadAllText(file);
-            Assert.False(source.Contains("new VulkanContextOptions", StringComparison.Ordinal),
-                name + " builds its own VulkanContextOptions; use GpuTest.ContextOptions");
-            Assert.False(source.Contains("new VulkanDevice", StringComparison.Ordinal),
-                name + " creates its own VulkanDevice; use GpuTest.NewDevice or GpuTest.TryCreateDevice");
+            string? bypass = HelperBypass(File.ReadAllText(file));
+            Assert.True(bypass == null, name + " " + bypass);
         }
+    }
+
+    /// <summary>
+    /// The ways a test file can get a context or device past the helper, including
+    /// the target-typed <c>new()</c> the plain "new VulkanDevice" check missed, and
+    /// switching the helper's validation off after the fact.
+    /// </summary>
+    internal static string? HelperBypass(string source)
+    {
+        if (source.Contains("new VulkanContextOptions", StringComparison.Ordinal) ||
+            Regex.IsMatch(source, @"\bVulkanContextOptions\??\s+\w+\s*=\s*new\s*\("))
+            return "builds its own VulkanContextOptions; use GpuTest.ContextOptions";
+        if (source.Contains("new VulkanDevice", StringComparison.Ordinal) ||
+            Regex.IsMatch(source, @"\bVulkanDevice\??\s+\w+\s*=\s*new\s*\("))
+            return "creates its own VulkanDevice; use GpuTest.NewDevice or GpuTest.TryCreateDevice";
+        if (Regex.IsMatch(source, @"\bEnableValidation\s*=\s*false\b"))
+            return "turns validation off; the suite runs every context validated";
+        return null;
+    }
+
+    [Theory]
+    [InlineData("var options = new VulkanContextOptions { Headless = true };", true)]
+    [InlineData("VulkanContextOptions options = new() { Headless = true };", true)]
+    [InlineData("VulkanDevice device = new();", true)]
+    [InlineData("VulkanDevice? device = new() { DebugMode = true };", true)]
+    [InlineData("var device = new VulkanDevice();", true)]
+    [InlineData("options.EnableValidation = false;", true)]
+    [InlineData("VulkanContextOptions options = GpuTest.ContextOptions(messages);", false)]
+    [InlineData("Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), \"No GPU\");", false)]
+    public void TheBypassCheckCatchesTargetTypedConstruction(string source, bool bypass)
+    {
+        Assert.Equal(bypass, HelperBypass(source) != null);
     }
 
     [Fact]
