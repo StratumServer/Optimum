@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..5ca0cbf 100644
+index 4d08f84..5a760a7 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..5ca0cbf 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,225 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,232 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -283,7 +283,14 @@ index 4d08f84..5ca0cbf 100644
 +	// OptimumConfig.EffectiveTaa).
 +	private void onOptimumTaaChanged(bool on)
 +	{
-+		if (Vintagestory.API.Config.OptimumConfig.IsFeatureExplicitlyDisabled("Taa")) return;
++		if (Vintagestory.API.Config.OptimumConfig.IsFeatureExplicitlyDisabled("Taa"))
++		{
++			// The switch has already flipped by the time the handler runs, so
++			// bail-out has to put it back: otherwise the UI claims TAA is on
++			// while EffectiveTaa stays false for the rest of the session.
++			composer?.GetSwitch("optTaa")?.SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);
++			return;
++		}
 +		Vintagestory.API.Config.OptimumConfig.Taa = on;
 +		Vintagestory.API.Config.OptimumConfig.Save();
 +		ScreenManager.Platform.RebuildFrameBuffers();
@@ -325,7 +332,7 @@ index 4d08f84..5ca0cbf 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2043,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2050,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

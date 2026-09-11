@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..c59096a 100644
+index 431e51a..39b7de3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -222,64 +222,199 @@ index 431e51a..c59096a 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
  		platform.GlDepthMask(flag: true);
-@@ -232,10 +371,15 @@ public class ChunkRenderer
+@@ -232,105 +371,145 @@ public class ChunkRenderer
  		platform.GlToggleBlend(on: true);
  		platform.GlEnableCullFace();
  		game.GlMatrixModeModelView();
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+-		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
+-		chunkopaque.Use();
+-		chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.AlphaTest = 0.001f;
+-		chunkopaque.HaxyFade = 0;
+-		chunkopaque.LiquidDepth2D = game.Platform.FrameBuffers[5].DepthTextureId;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
+-		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+-		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
+-		for (int i = 0; i < textureIds.Length; i++)
+-		{
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[0][i].Render(cameraPos, "origin");
+-		}
+-		ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
+-		chunkopaque.Stop();
+-		ShaderProgramChunktopsoil chunktopsoil = ShaderPrograms.Chunktopsoil;
+-		chunktopsoil.Use();
+-		chunktopsoil.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunktopsoil.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunktopsoil.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunktopsoil.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunktopsoil.BlockTextureSize = blockTextureSize;
+-		chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		for (int j = 0; j < textureIds.Length; j++)
+-		{
+-			chunktopsoil.TerrainTex2D = textureIds[j];
+-			chunktopsoil.TerrainTexLinear2D = textureIds[j];
+-			poolsByRenderPass[5][j].Render(cameraPos, "origin");
+-		}
+-		ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
+-		chunktopsoil.Stop();
+-		platform.GlDisableCullFace();
+-		chunkopaque.Use();
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.AlphaTest = 0.25f;
+-		chunkopaque.HaxyFade = 0;
+-		platform.GlToggleBlend(on: true);
+-		for (int k = 0; k < textureIds.Length; k++)
 +		// Optimum TAA (P3): every chunk draw in this method writes motion
 +		// vectors, so the motion attachment joins Primary's draw-buffer mask for
 +		// the whole pass and leaves it again below. A no-op when TAA is off.
 +		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
 +		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
- 		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
- 		chunkopaque.Use();
- 		chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
- 		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
- 		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
-@@ -249,10 +393,14 @@ public class ChunkRenderer
- 		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
- 		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
- 		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
- 		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
- 		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
-+		if (optimumMotionWrite)
-+		{
-+			SetOptimumMotionUniforms(chunkopaque);
-+		}
- 		for (int i = 0; i < textureIds.Length; i++)
++		try
  		{
- 			chunkopaque.TerrainTex2D = textureIds[i];
- 			chunkopaque.TerrainTexLinear2D = textureIds[i];
- 			poolsByRenderPass[0][i].Render(cameraPos, "origin");
-@@ -268,10 +416,14 @@ public class ChunkRenderer
- 		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
- 		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
- 		chunktopsoil.BlockTextureSize = blockTextureSize;
- 		chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
- 		chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
-+		if (optimumMotionWrite)
-+		{
-+			SetOptimumMotionUniforms(chunktopsoil);
-+		}
- 		for (int j = 0; j < textureIds.Length; j++)
- 		{
- 			chunktopsoil.TerrainTex2D = textureIds[j];
- 			chunktopsoil.TerrainTexLinear2D = textureIds[j];
- 			poolsByRenderPass[5][j].Render(cameraPos, "origin");
-@@ -314,23 +466,42 @@ public class ChunkRenderer
- 			chunkopaque.TerrainTexLinear2D = textureIds[m];
- 			poolsByRenderPass[8][m].Render(cameraPos, "origin");
+-			chunkopaque.TerrainTex2D = textureIds[k];
+-			chunkopaque.TerrainTexLinear2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin");
+-		}
+-		platform.GlToggleBlend(on: false);
+-		chunkopaque.AlphaTest = 0.42f;
+-		chunkopaque.HaxyFade = 1;
+-		for (int l = 0; l < textureIds.Length; l++)
+-		{
+-			chunkopaque.TerrainTex2D = textureIds[l];
+-			chunkopaque.TerrainTexLinear2D = textureIds[l];
+-			poolsByRenderPass[1][l].Render(cameraPos, "origin");
++			ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
++			chunkopaque.Use();
++			chunkopaque.CameraUnderwater = game.shUniforms.CameraUnderwater;
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.AlphaTest = 0.001f;
++			chunkopaque.HaxyFade = 0;
++			chunkopaque.LiquidDepth2D = game.Platform.FrameBuffers[5].DepthTextureId;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
++			chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
++			chunkopaque.DayLight = game.shUniforms.SkyDaylight;
++			chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(chunkopaque);
++			}
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[i];
++				chunkopaque.TerrainTexLinear2D = textureIds[i];
++				poolsByRenderPass[0][i].Render(cameraPos, "origin");
++			}
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
++			chunkopaque.Stop();
++			ShaderProgramChunktopsoil chunktopsoil = ShaderPrograms.Chunktopsoil;
++			chunktopsoil.Use();
++			chunktopsoil.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunktopsoil.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunktopsoil.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunktopsoil.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunktopsoil.BlockTextureSize = blockTextureSize;
++			chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(chunktopsoil);
++			}
++			for (int j = 0; j < textureIds.Length; j++)
++			{
++				chunktopsoil.TerrainTex2D = textureIds[j];
++				chunktopsoil.TerrainTexLinear2D = textureIds[j];
++				poolsByRenderPass[5][j].Render(cameraPos, "origin");
++			}
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
++			chunktopsoil.Stop();
++			platform.GlDisableCullFace();
++			chunkopaque.Use();
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.AlphaTest = 0.25f;
++			chunkopaque.HaxyFade = 0;
++			platform.GlToggleBlend(on: true);
++			for (int k = 0; k < textureIds.Length; k++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[k];
++				chunkopaque.TerrainTexLinear2D = textureIds[k];
++				poolsByRenderPass[2][k].Render(cameraPos, "origin");
++			}
++			platform.GlToggleBlend(on: false);
++			chunkopaque.AlphaTest = 0.42f;
++			chunkopaque.HaxyFade = 1;
++			for (int l = 0; l < textureIds.Length; l++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[l];
++				chunkopaque.TerrainTexLinear2D = textureIds[l];
++				poolsByRenderPass[1][l].Render(cameraPos, "origin");
++			}
++			platform.GlEnableCullFace();
++			platform.GlToggleBlend(on: true);
++			chunkopaque.AlphaTest = 0.2f;
++			chunkopaque.HaxyFade = 0;
++			for (int m = 0; m < textureIds.Length; m++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[m];
++				chunkopaque.TerrainTexLinear2D = textureIds[m];
++				poolsByRenderPass[8][m].Render(cameraPos, "origin");
++			}
++			platform.GlToggleBlend(on: false);
++			chunkopaque.Stop();
  		}
- 		platform.GlToggleBlend(on: false);
- 		chunkopaque.Stop();
-+		// Optimum TAA (P3): the motion attachment leaves the draw-buffer mask
-+		// again, so no later pass can write it by accident.
-+		if (optimumMotionWrite)
-+		{
-+			optimumPlatform.EndMotionWrite();
-+		}
+-		platform.GlEnableCullFace();
+-		platform.GlToggleBlend(on: true);
+-		chunkopaque.AlphaTest = 0.2f;
+-		chunkopaque.HaxyFade = 0;
+-		for (int m = 0; m < textureIds.Length; m++)
++		finally
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[m];
+-			chunkopaque.TerrainTexLinear2D = textureIds[m];
+-			poolsByRenderPass[8][m].Render(cameraPos, "origin");
++			// Optimum TAA (P3): the motion attachment leaves the draw-buffer mask
++			// again, so no later pass can write it by accident - including when a
++			// shader setup or a pool draw above throws, which would otherwise leak
++			// the expanded mask into every later draw for the rest of the session.
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
++			}
+ 		}
+-		platform.GlToggleBlend(on: false);
+-		chunkopaque.Stop();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-opnc");
  		game.GlPopMatrix();
  		if (game.unbindSamplers)
@@ -320,7 +455,7 @@ index 431e51a..c59096a 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,15 +573,134 @@ public class ChunkRenderer
+@@ -402,51 +581,187 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -444,38 +579,77 @@ index 431e51a..c59096a 100644
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+-		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
+-		platform.GlDisableCullFace();
+-		platform.GlToggleBlend(on: false);
+-		platform.GlEnableDepthTest();
+-		chunkopaque.Use();
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.AlphaTest = 0.42f;
+-		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
+-		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+-		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
+-		chunkopaque.HaxyFade = 1;
+-		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		for (int i = 0; i < textureIds.Length; i++)
 +		// Optimum TAA (P3): the terrain overlay pass (render pass 7) is inside the
 +		// temporal window and draws the same chunk geometry, so it writes motion
 +		// vectors too - otherwise every decal-covered surface would fall back to
 +		// the camera-only reprojection.
 +		ClientPlatformWindows optimumPlatform = platform as ClientPlatformWindows;
 +		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
- 		ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
- 		platform.GlDisableCullFace();
- 		platform.GlToggleBlend(on: false);
- 		platform.GlEnableDepthTest();
- 		chunkopaque.Use();
-@@ -425,28 +715,36 @@ public class ChunkRenderer
- 		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
- 		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
- 		chunkopaque.HaxyFade = 1;
- 		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
- 		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
-+		if (optimumMotionWrite)
-+		{
-+			SetOptimumMotionUniforms(chunkopaque);
-+		}
- 		for (int i = 0; i < textureIds.Length; i++)
++		try
  		{
- 			chunkopaque.TerrainTex2D = textureIds[i];
- 			chunkopaque.TerrainTexLinear2D = textureIds[i];
- 			poolsByRenderPass[7][i].Render(cameraPos, "origin");
- 		}
- 		chunkopaque.Stop();
-+		if (optimumMotionWrite)
-+		{
-+			optimumPlatform.EndMotionWrite();
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[7][i].Render(cameraPos, "origin");
++			ShaderProgramChunkopaque chunkopaque = ShaderPrograms.Chunkopaque;
++			platform.GlDisableCullFace();
++			platform.GlToggleBlend(on: false);
++			platform.GlEnableDepthTest();
++			chunkopaque.Use();
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.AlphaTest = 0.42f;
++			chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
++			chunkopaque.DayLight = game.shUniforms.SkyDaylight;
++			chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
++			chunkopaque.HaxyFade = 1;
++			chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(chunkopaque);
++			}
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[i];
++				chunkopaque.TerrainTexLinear2D = textureIds[i];
++				poolsByRenderPass[7][i].Render(cameraPos, "origin");
++			}
++			chunkopaque.Stop();
 +		}
++		finally
++		{
++			// Same contract as RenderOpaque: the window closes even if a shader
++			// setup or a pool draw throws, so a failed overlay pass cannot leave
++			// the motion attachment in the draw-buffer mask.
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
++			}
+ 		}
+-		chunkopaque.Stop();
  		game.GlPopMatrix();
  	}
  

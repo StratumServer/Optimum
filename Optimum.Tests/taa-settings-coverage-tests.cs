@@ -89,6 +89,37 @@ public class TaaSettingsCoverageTests
         Assert.Contains("OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);", handler);
     }
 
+    /// <summary>
+    /// The GUI switch has already flipped by the time the handler runs, so the
+    /// "TAA is explicitly disabled" bail-out has to put it back. Without the
+    /// reset the row shows TAA on for the rest of the session while
+    /// EffectiveTaa stays false.
+    /// </summary>
+    [Fact]
+    public void TheToggleResetsTheSwitchWhenTaaIsExplicitlyDisabled()
+    {
+        string gui = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
+
+        string handler = Between(gui, "private void onOptimumTaaChanged(bool on)", "\n\t}");
+
+        // The reset targets the same switch key the row is built with, and
+        // takes its value from EffectiveTaa - the only truth the rest of the
+        // chain reads.
+        Assert.Contains("AddSwitch(onOptimumTaaChanged", gui);
+        Assert.Contains("\"optTaa\")", gui);
+        Assert.Contains(
+            "composer?.GetSwitch(\"optTaa\")?.SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);",
+            handler);
+
+        // And it happens before the bail-out, not after it.
+        int reset = handler.IndexOf("GetSwitch(\"optTaa\")", StringComparison.Ordinal);
+        int giveUp = handler.IndexOf("return;", StringComparison.Ordinal);
+        Assert.True(reset >= 0, "the explicit-disable bail-out never resets the switch");
+        Assert.True(reset < giveUp, "the switch has to be reset before the handler returns");
+    }
+
     [Fact]
     public void BothSlidersApplyLiveAndNeverRebuildOrResetAnything()
     {

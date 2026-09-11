@@ -318,6 +318,32 @@ public class TaaPipelineCoverageTests
         Assert.DoesNotContain("abs(motion.a - sceneDepth) < 1e-4", debug);
     }
 
+    /// <summary>
+    /// Once DisableOptimumTaa has run, no later frame-buffer rebuild may retry
+    /// the allocation that just failed. OptimumConfig.TaaRuntimeDisabled already
+    /// makes EffectiveTaa false, but the platform's own optimumTaaDisabled flag
+    /// is the authority for this platform instance, so both setup paths gate on
+    /// it as well - a belt-and-braces guard that costs one field read per
+    /// rebuild.
+    /// </summary>
+    [Fact]
+    public void BothFrameBufferSetupPathsHonourTheRuntimeTaaDisable()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        // The device path and the GL path, both guarded.
+        Assert.Equal(2, Count(platform,
+            "bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;"));
+        Assert.DoesNotContain(
+            "bool taaRequested = Vintagestory.API.Config.OptimumConfig.EffectiveTaa;",
+            platform);
+
+        // And the flag really is set by the failure path.
+        Assert.Contains("optimumTaaDisabled = true;", platform);
+    }
+
     /// <summary>The depth-match tolerance expression, with the depth variable normalised.</summary>
     private static string Tolerance(string shader, string depthName)
     {

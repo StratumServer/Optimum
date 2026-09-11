@@ -336,6 +336,51 @@ public class TaaTerrainMotionCoverageTests
     }
 
     /// <summary>
+    /// Both motion windows are exception-safe. BeginMotionWrite expands the
+    /// draw-buffer mask and refuses to open a second window; if a shader setup
+    /// or a pool draw throws, an End outside a finally never runs and the
+    /// expanded mask leaks into every later draw while every later window is
+    /// refused. The liquid pass already closes its window in a finally; these
+    /// two now match it.
+    /// </summary>
+    [Fact]
+    public void BothTerrainMotionWindowsCloseInAFinally()
+    {
+        string chunk = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
+
+        foreach (string signature in new[]
+        {
+            "public void RenderOpaque(float dt)",
+            "internal void RenderAfterOIT(float deltaTime)",
+        })
+        {
+            string body = MethodBodyAfter(chunk, signature);
+
+            int begin = body.IndexOf("optimumPlatform.BeginMotionWrite();", StringComparison.Ordinal);
+            Assert.True(begin >= 0, signature + " no longer opens a motion window");
+
+            // The window is opened, then immediately entered with try, and the
+            // only End in the method sits inside the following finally block.
+            int tryStart = body.IndexOf("try", begin, StringComparison.Ordinal);
+            int finallyStart = body.IndexOf("finally", begin, StringComparison.Ordinal);
+            int end = body.IndexOf("optimumPlatform.EndMotionWrite();", begin, StringComparison.Ordinal);
+
+            Assert.True(tryStart > begin, signature + " does not open a try after BeginMotionWrite");
+            Assert.True(finallyStart > tryStart, signature + " has no finally for the motion window");
+            Assert.True(end > finallyStart, signature + " closes the motion window outside the finally");
+            Assert.Equal(1, Count(body, "optimumPlatform.EndMotionWrite();"));
+        }
+
+        // The liquid pass keeps its own finally-closed window (the pattern these
+        // two copy).
+        string liquid = MethodBodyAfter(chunk, "internal void RenderLiquidMotion(float deltaTime)");
+        Assert.Contains("finally", liquid);
+        Assert.Contains("optimumPlatform.EndMotionOnlyWrite();", liquid);
+    }
+
+    /// <summary>
     /// The LiquidDepth prepass keeps the jittered projection (its depth is
     /// compared against the jittered scene) and writes no motion: it renders into
     /// its own framebuffer and never opens the window.
