@@ -244,6 +244,49 @@ All numbers first, then eyes. Each row names the plan's definition of done verba
 - Pass: the user judges it in game on both backends.
 - Record: both renderer lines, the user's verdict and date.
 
+### Milestone 1 exit results (2026-09-11, commit 6568556 deployed)
+
+RTX 4070 Laptop, driver 615.71.09, X11. Section 0's fixed scene was applied to the save for the first
+time (creative, 12:00, clear sky, precipitation -1, wind still) and it removed the pacing noise: the two
+OpenGL runs came out identical (6.075 ms mean / 0.115 stddev and 6.075 / 0.108), so the bimodal OpenGL
+pacing seen in Phase 0 and Phase 1 was the moving world, not the build. Evidence under
+`docs/gpu-verification-2026-09-11/m1/` (local).
+
+| | OpenGL | Vulkan 60 s | Vulkan 10 min |
+|---|---|---|---|
+| mean | 6.075 ms | 7.594 ms | 7.700 ms |
+| 1% low | 6.43 ms | 8.94 ms | 9.44 ms |
+| stddev | 0.115 ms | 0.333 ms | 0.372 ms |
+| worst | 10.5 ms | 47.5 ms | 102.2 ms |
+
+- **M1.1 pacing gate: FAIL on one rule, both pairs.** `p99_vs_mean` 8.78 ≤ 11.38 PASS;
+  `stddev_vs_baseline` 0.365 vs 0.151 FAIL (0.375 vs 0.143 on the second pair); blocking uploads,
+  dropped mesh writes and uniform overflows PASS. Vulkan costs about 25 % more frame time than OpenGL
+  on this scene.
+- **M1.2 PASS.** Blocking uploads 0 in every sample (87 and 626 samples); frame-pacing waits about one
+  per frame.
+- **M1.3 PASS** (Phase 1 design, unchanged): acquire after the render submit, wait stage TRANSFER.
+- **M1.4 PASS.** Per second at ~130 fps: passes 2904 and scopes 2904 (equal), pass splits 0, motion-mask
+  restarts 0, frame-plan hits 133 with 0 misses. Per frame: 22.3 passes, 69.6 barriers in 37.2 barrier
+  commands, 67.3 dynamic-state commands, 3.45 uploads, 18.2 promoted clears.
+- **Where the time goes:** the frame-pacing wait is 5.43 ms of the 7.67 ms frame, so the Vulkan frame is
+  GPU-bound on this scene, not CPU-bound; Phase 0's flush-per-frame and 1400 dynamic-state commands per
+  frame are gone. Reducing the gap is Phase 4 work (per-pass timestamps first).
+- **M1.5 validation:** the GPU suite (620 tests) runs `sync,best` with zero hazards. In game, the 10
+  `[error]` lines were MangoHud's overlay render pass (`vkCmdBeginRenderPass`, `loadOp LOAD` on the
+  swapchain image); Optimum creates no render pass. **Validation runs set `MANGOHUD=0`.**
+- **M1.7 PASS** (frame 300 dumps): `taa-rejection.py` distant-leaf history rejection 1.05 % on both
+  backends against the 1.5 % limit; the pre-fix single-sample test would reject 3.69-3.73 %.
+- **SSAO alpha gap closed:** `13-SSAO-color1` alpha is 1.0000 on both backends (was 1.0 GL / 0.0 VK).
+- **M1.6 per-attachment parity: not gated, dropped as a routine row.** Two OpenGL launches of one save
+  differ at SSIM 0.864 on the primary colour, so the matrix cannot separate a backend gap from chunk
+  streaming, weather and entities; the frame-1800 retry was lost to a shutdown race (the previous run's
+  kill caught the next launch two seconds in). Parity returns in Phase 3, where the shaders change
+  pixels, as a targeted comparison rather than a 39-attachment matrix.
+- **Testing policy (user, 2026-09-11): the matrix is too heavy.** Milestone rows are the pacing gate on
+  one 60 s run per backend, the Vulkan stats counters, one `taa-rejection.py` dump per backend and the
+  GPU suite's validation. No 10-minute sessions, no multi-launch SSIM matrices.
+
 ## 3. Methods
 
 ### Parity dump and SSIM

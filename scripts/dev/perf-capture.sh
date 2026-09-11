@@ -87,6 +87,12 @@ FPS_LOG="$OUT_DIR/fps.log"
 VK_STATS="$OUT_DIR/vulkan-stats.log"
 
 mkdir -p "$OUT_DIR" || exit 1
+# run-client.sh changes into the client directory before it opens CLIENT_LOG, so a relative
+# --out would put the log (and the fps and stats logs the client writes) somewhere else.
+OUT_DIR="$(cd -- "$OUT_DIR" && pwd)" || exit 1
+LOG="$OUT_DIR/client.log"
+FPS_LOG="$OUT_DIR/fps.log"
+VK_STATS="$OUT_DIR/vulkan-stats.log"
 rm -f "$LOG" "$FPS_LOG" "$VK_STATS"
 
 # 1. TAA on/off through the config file, before the launch rewrites Renderer.
