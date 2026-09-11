@@ -374,7 +374,38 @@ internal sealed unsafe class TextureManager : IDisposable
             Aspect = aspect,
         };
 
+        if (_context.PoisonFreshResources) Poison(texture);
+
         return Register(texture);
+    }
+
+    /// <summary>
+    /// Poison mode: fills every level and layer of a new image with
+    /// <see cref="VulkanPoison" />'s value for its format, so a read of content
+    /// nobody wrote is loud instead of whatever the allocator's memory held.
+    /// Synchronous on purpose; poison mode is a diagnostic, not a fast path.
+    /// </summary>
+    private void Poison(VulkanTexture texture)
+    {
+        if (VulkanPoison.IsCompressed(texture.Format)) return;
+
+        _commands.SubmitAndWait(commandBuffer =>
+        {
+            TransitionTexture(commandBuffer, texture, ImageLayout.TransferDstOptimal);
+            var range = new ImageSubresourceRange(texture.Aspect, 0, texture.MipLevels, 0, texture.Layers);
+            if (texture.Aspect == ImageAspectFlags.DepthBit)
+            {
+                var depth = new ClearDepthStencilValue(VulkanPoison.Depth, 0);
+                _context.Api.CmdClearDepthStencilImage(commandBuffer, texture.Image,
+                    ImageLayout.TransferDstOptimal, &depth, 1, &range);
+            }
+            else
+            {
+                ClearColorValue color = VulkanPoison.ColorFor(texture.Format);
+                _context.Api.CmdClearColorImage(commandBuffer, texture.Image,
+                    ImageLayout.TransferDstOptimal, &color, 1, &range);
+            }
+        });
     }
 
     /// <summary>

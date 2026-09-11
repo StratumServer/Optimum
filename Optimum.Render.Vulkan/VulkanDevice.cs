@@ -295,6 +295,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
                 : WindowSurface.RequiredInstanceExtensions(),
         };
 
+        ConfigureContextOptions?.Invoke(options);
+
         if (!VulkanContext.TryCreate(options, out VulkanContext? context, out failureReason))
         {
             return false;
@@ -315,7 +317,8 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         MirrorValidationMessage("--- device up on " + _context.Capabilities.DeviceName +
             "; validation layers " + (_context.ValidationEnabled ? "ENABLED" : "NOT AVAILABLE") +
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
-            "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE"));
+            "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
+            "; poison " + (_context.PoisonFreshResources ? "ON" : "off"));
         _setupCommands = new VulkanCommands(_context);
         // Only the render thread records frames, so only its synchronous submits
         // can race one; a worker's upload is ordered by the queue lock alone.
@@ -561,6 +564,13 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     public bool SupportsSSBOs => true;
 
     public bool DebugMode { get; set; }
+
+    /// <summary>
+    /// Test seam: adjusts the context options <see cref="Initialize" /> builds,
+    /// just before the context is created (validation features, a message
+    /// recorder, poison mode). Null in the client.
+    /// </summary>
+    internal Action<VulkanContextOptions>? ConfigureContextOptions { get; set; }
 
     /// <summary>
     /// Drains queued diagnostics, reporting only what the layers called an

@@ -34,13 +34,8 @@ public class TextureManagerTests
 
     public TextureManagerTests(ITestOutputHelper output) => _output = output;
 
-    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions { Headless = true, EnableValidation = true };
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created) output.WriteLine("Vulkan unavailable: " + failureReason);
-        return created;
-    }
+    private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, null, out context);
 
     [SkippableFact]
     public void TextureIdsBehaveLikeGlNamesIncludingReuse()
@@ -238,12 +233,7 @@ public class TextureManagerTests
     public unsafe void MipmapGenerationBuildsTheWholeChainCleanly()
     {
         var messages = new System.Collections.Generic.List<string>();
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
+        var options = GpuTest.ContextOptions(messages);
         Skip.IfNot(VulkanContext.TryCreate(options, out VulkanContext? context, out string? reason), reason ?? "");
 
         using (context)
@@ -269,6 +259,8 @@ public class TextureManagerTests
             Assert.Equal(ImageLayout.ShaderReadOnlyOptimal, texture.Layout);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 

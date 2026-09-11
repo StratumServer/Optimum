@@ -23,20 +23,8 @@ public class VulkanDeviceIntegrationTests
 
     public VulkanDeviceIntegrationTests(ITestOutputHelper output) => _output = output;
 
-    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device)
-    {
-        var created = new VulkanDevice { DebugMode = true };
-        if (created.Initialize(IntPtr.Zero, 0, 0, out string failureReason))
-        {
-            device = created;
-            return true;
-        }
-
-        output.WriteLine("Vulkan unavailable: " + failureReason);
-        created.Dispose();
-        device = null;
-        return false;
-    }
+    private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device) =>
+        GpuTest.TryCreateDevice(output, out device);
 
     // Unlike the lower-level TaaResolveTests, allocate through the same raw GL
     // format API as ClientPlatformWindows.CreateOptimumHistoryTarget. A missing
@@ -1557,15 +1545,9 @@ public class VulkanDeviceIntegrationTests
 
     /// <summary>
     /// Drains the device's diagnostics and fails on anything the layers reported
-    /// at error severity.
+    /// at error severity, or on an unpinned synchronization hazard.
     /// </summary>
-    private static void AssertNoValidationErrors(IOptimumGraphicsDevice device)
-    {
-        string? diagnostics = device.GetError();
-        ValidationAssert.NoErrors(diagnostics == null
-            ? Array.Empty<string>()
-            : diagnostics.Split('\n'));
-    }
+    private static void AssertNoValidationErrors(IOptimumGraphicsDevice device) => GpuTest.AssertClean(device);
 
     /// <summary>
     /// The loading-screen crash. A texture is deleted and a new one takes its
@@ -1783,14 +1765,5 @@ public class VulkanDeviceIntegrationTests
         }
     }
 
-    private static void AssertClean(IOptimumGraphicsDevice device)
-    {
-        string? diagnostics = device.GetError();
-        if (diagnostics == null) return;
-
-        Assert.False(
-            diagnostics.Contains("Error", StringComparison.OrdinalIgnoreCase)
-            || diagnostics.Contains("VUID", StringComparison.Ordinal),
-            "validation errors:\n" + diagnostics);
-    }
+    private static void AssertClean(IOptimumGraphicsDevice device) => GpuTest.AssertClean(device);
 }

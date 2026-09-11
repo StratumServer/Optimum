@@ -32,22 +32,8 @@ public class ChunkRenderPathTests
     public ChunkRenderPathTests(ITestOutputHelper output) => _output = output;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created)
-        {
-            output.WriteLine("Vulkan unavailable: " + failureReason);
-        }
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     /// <summary>
     /// The real chunkopaque program, compiled the way the client compiles it,
@@ -162,6 +148,7 @@ public class ChunkRenderPathTests
             // silently turn this into a weaker assertion.
             Assert.Equal(ShaderCorpus.Variants().Count(), built);
             ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -260,6 +247,7 @@ public class ChunkRenderPathTests
 
             Assert.NotEqual((ulong)0, pipeline.Handle);
             ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -424,6 +412,8 @@ public class ChunkRenderPathTests
             Assert.Equal(0, uncovered[2]);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -555,6 +545,8 @@ public class ChunkRenderPathTests
             Assert.Equal(255, PixelAt(pixels, size, 9, 9)[2]);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 

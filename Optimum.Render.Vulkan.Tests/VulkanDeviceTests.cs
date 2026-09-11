@@ -29,12 +29,7 @@ public class VulkanDeviceTests
     private static bool TryCreateContext(ITestOutputHelper output, out VulkanContext? context)
     {
         var messages = new List<string>();
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
+        var options = GpuTest.ContextOptions(messages);
 
         bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
         if (!created)
@@ -100,7 +95,8 @@ public class VulkanDeviceTests
         int usable = 0;
         for (int index = 0; index < 8; index++)
         {
-            var options = new VulkanContextOptions { Headless = true, PreferredDeviceIndex = index };
+            var options = GpuTest.ContextOptions();
+            options.PreferredDeviceIndex = index;
             if (!VulkanContext.TryCreate(options, out VulkanContext? context, out string? failureReason))
             {
                 if (failureReason != null && failureReason.Contains("out of range", StringComparison.Ordinal))

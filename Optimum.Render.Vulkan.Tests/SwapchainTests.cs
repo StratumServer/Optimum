@@ -75,7 +75,7 @@ public class SwapchainTests
 
         try
         {
-            var device = new VulkanDevice { DebugMode = true };
+            var device = GpuTest.NewDevice();
             if (!device.Initialize((IntPtr)window, width, height, out string failureReason))
             {
                 device.Dispose();
@@ -131,7 +131,7 @@ public class SwapchainTests
 
         try
         {
-            var device = new VulkanDevice { DebugMode = true };
+            var device = GpuTest.NewDevice();
             if (!device.Initialize((IntPtr)window, width, height, out string failureReason))
             {
                 device.Dispose();
@@ -190,7 +190,7 @@ public class SwapchainTests
 
         try
         {
-            var device = new VulkanDevice { DebugMode = true };
+            var device = GpuTest.NewDevice();
             if (!device.Initialize((IntPtr)window, width, height, out string failureReason))
             {
                 device.Dispose();
@@ -311,14 +311,5 @@ public class SwapchainTests
         public bool HasUniform(string uniformName) => false;
     }
 
-    private static void AssertClean(IOptimumGraphicsDevice device)
-    {
-        string? diagnostics = device.GetError();
-        if (diagnostics == null) return;
-
-        Assert.False(
-            diagnostics.Contains("Error", StringComparison.OrdinalIgnoreCase)
-            || diagnostics.Contains("VUID", StringComparison.Ordinal),
-            "validation errors:\n" + diagnostics);
-    }
+    private static void AssertClean(IOptimumGraphicsDevice device) => GpuTest.AssertClean(device);
 }

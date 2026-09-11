@@ -54,7 +54,7 @@ public class GpuCheckpointTests
     [SkippableFact]
     public void CheckpointsCanBeReadFromAHealthyQueue()
     {
-        var options = new VulkanContextOptions { Headless = true };
+        var options = GpuTest.ContextOptions();
         Skip.IfNot(VulkanContext.TryCreate(options, out VulkanContext? context, out string? reason),
             "No usable Vulkan device: " + reason);
 

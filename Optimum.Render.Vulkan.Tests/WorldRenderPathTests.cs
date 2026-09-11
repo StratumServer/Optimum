@@ -38,22 +38,8 @@ public class WorldRenderPathTests
         """;
 
     private static bool TryCreateContext(
-        ITestOutputHelper output, List<string> messages, out VulkanContext? context)
-    {
-        var options = new VulkanContextOptions
-        {
-            Headless = true,
-            EnableValidation = true,
-            DebugCallback = messages.Add,
-        };
-
-        bool created = VulkanContext.TryCreate(options, out context, out string? failureReason);
-        if (!created)
-        {
-            output.WriteLine("Vulkan unavailable: " + failureReason);
-        }
-        return created;
-    }
+        ITestOutputHelper output, List<string> messages, out VulkanContext? context) =>
+        GpuTest.TryCreateContext(output, messages, out context);
 
     /// <summary>
     /// OIT accumulates into three layers of one 2D array texture, attached a
@@ -112,6 +98,8 @@ public class WorldRenderPathTests
             Assert.Equal(new byte[] { 0, 0, 255 }, FirstPixel(context!, commands, textures, accumulation, size, 2));
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -183,6 +171,8 @@ public class WorldRenderPathTests
             Assert.InRange(accumPixels[0], 56, 72);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -255,6 +245,8 @@ public class WorldRenderPathTests
             Assert.InRange(stored, 0.74f, 0.76f);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
@@ -323,6 +315,8 @@ public class WorldRenderPathTests
             Assert.Equal((ulong)(size * size), passed);
 
             ValidationAssert.NoErrors(messages);
+
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
