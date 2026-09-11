@@ -738,6 +738,25 @@ the user's; TAA stays default-off until then.
   and the adapter tests; reserve backend-native execution, presentation lifetime and extra ray
   signals for the vendor plan.
 
+**Contract** (2026-09-11): frozen as **v1** in **`docs/temporal-frame-contract.md`**. That document,
+not this plan, is what every temporal consumer is written against - the in-house resolve today,
+FSR 3.1 / XeSS 2 / DLSS next, frame generation and ray reconstruction after that. It specifies the
+per-frame input record member by member (type, units, coordinate convention, the point in the frame
+after which each value is this frame's), every resource with its format, resolution, sampler state
+and channel semantics (the motion attachment's `rg`/`b`/`a` including the writer-depth validity
+tolerance, the history colour/glow/linear-depth slots, the sharpen target), the jitter definition
+and sequence, the reset reasons and their triggers, the per-class exact/fallback/reactive status,
+and the adapter formulas for FSR 3.1, XeSS 2 and DLSS. Native handles, extension negotiation,
+presentation lifetime and ray-reconstruction guides are explicitly reserved for the vendor plan.
+
+`Optimum.Tests/temporal-contract-tests.cs` is the stability test: it pins the public surface of
+`IOptimumTemporalContext` and `OptimumTemporalFrame` against a checked-in list, and pins the
+conventions the document states - the shear formula, the motion-vector scale and sign per adapter,
+the writer-depth tolerance expression in `taa-resolve.fsh`, the history slot indices and the
+attachment formats in `ClientPlatformWindows` - so a change to any of them fails a test that names
+the document. Changing the contract means changing the code, the document, its version, that list,
+and this section, in that order.
+
 ## Verification (end to end)
 1. `dotnet build VintageStory.slnx -c Release`; `dotnet test Optimum.Tests`;
    `dotnet test Optimum.Render.Vulkan.Tests`; `scripts/check-patches.sh`; patcher run.
