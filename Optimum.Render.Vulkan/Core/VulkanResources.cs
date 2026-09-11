@@ -54,6 +54,13 @@ internal sealed unsafe class VulkanBuffer : IDisposable
     internal long FrameUse;
 
     public VulkanBuffer(VulkanContext context, ulong size, BufferUsageFlags usage, MemoryPropertyFlags properties)
+        : this(context, size, usage, properties, VulkanAllocator.InferClass(properties, linear: true))
+    {
+    }
+
+    /// <summary>A buffer in an explicit pool class; see <see cref="MemoryPoolClass" />.</summary>
+    public VulkanBuffer(VulkanContext context, ulong size, BufferUsageFlags usage, MemoryPropertyFlags properties,
+        MemoryPoolClass poolClass)
     {
         _context = context;
         Size = size;
@@ -73,11 +80,11 @@ internal sealed unsafe class VulkanBuffer : IDisposable
         }
         Handle = buffer;
 
-        api.GetBufferMemoryRequirements(context.Device, buffer, out MemoryRequirements requirements);
+        MemoryRequirements requirements = VulkanAllocator.BufferRequirements(context, buffer, out bool dedicated);
 
         // A buffer is linear, so it shares blocks only with other buffers.
         _allocation = context.Allocator.Allocate(
-            requirements, properties, linear: true, $"a {size} byte buffer");
+            requirements, properties, linear: true, $"a {size} byte buffer", poolClass, dedicated, buffer, default);
 
         api.BindBufferMemory(context.Device, buffer, _allocation.Memory, _allocation.Offset);
         Mapped = _allocation.Mapped;
@@ -151,11 +158,12 @@ internal sealed unsafe class VulkanImage : IDisposable
         }
         Handle = image;
 
-        api.GetImageMemoryRequirements(context.Device, image, out MemoryRequirements requirements);
+        MemoryRequirements requirements = VulkanAllocator.ImageRequirements(context, image, out bool dedicated);
 
         // Optimally tiled, so it never shares a block with a buffer.
         _allocation = context.Allocator.Allocate(
-            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false, "an image");
+            requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false, "an image",
+            MemoryPoolClass.DeviceImages, dedicated, default, image);
         api.BindImageMemory(context.Device, image, _allocation.Memory, _allocation.Offset);
 
         var viewInfo = new ImageViewCreateInfo

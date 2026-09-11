@@ -144,7 +144,7 @@ public class PacingStatsTests
     }
 
     [Fact]
-    public void SampleIsTheOriginalLineFollowedByThreeTokenLines()
+    public void SampleIsTheOriginalLineFollowedByFourTokenLines()
     {
         // The first call may only arm the interval clock.
         VulkanStats.SampleIfDue(TimeSpan.Zero);
@@ -152,7 +152,9 @@ public class PacingStatsTests
 
         Assert.NotNull(sample);
         string[] lines = sample!.Split('\n');
-        Assert.Equal(4, lines.Length);
+        Assert.Equal(5, lines.Length);
+        // Phase 1B step 5: pool classes, ReBAR use and misses, used/budget per heap.
+        Assert.StartsWith("stats.memory blocks=", lines[4]);
         Assert.Matches(new Regex(
             @"^stats [\d.]+s: \d+ frames \([\d.]+ ms/frame\), \d+ allocations \(\d+ live\), " +
             @"\d+ blocking uploads costing \d+ ms \(\S+% of the interval\), textures \+\d+/-\d+, " +
@@ -171,6 +173,7 @@ public class PacingStatsTests
                  {
                      VulkanStats.FormatPacingLine(default),
                      VulkanStats.FormatCountersLine(default),
+                     VulkanAllocator.FormatMemoryLine(default),
                  })
         {
             foreach (Match token in Regex.Matches(line, @"([a-z0-9_]+)="))
@@ -185,6 +188,7 @@ public class PacingStatsTests
         Assert.Contains("stats.pacing", doc);
         Assert.Contains("stats.waits", doc);
         Assert.Contains("stats.counters", doc);
+        Assert.Contains("stats.memory", doc);
     }
 
     [Fact]
@@ -355,7 +359,13 @@ public class PacingStatsTests
         Assert.Contains("VulkanStats.NoteDynamicStateCommands(VulkanStats.DynamicStateCommandsPerDraw);", dynamicState);
 
         Assert.Contains("VulkanStats.NoteScopeOpened();", Source("Core/RenderTargetManager.cs"));
-        Assert.Contains("VulkanStats.NoteRebarFallback();", Source("Core/MeshManager.cs"));
+        // Phase 1B step 5: ReBAR misses are counted where the ReBAR class falls
+        // through, and a static mesh never asks for ReBAR.
+        Assert.Contains("VulkanStats.NoteRebarFallback();", Body(Source("Core/VulkanAllocator.cs"), "private MemoryAllocation AllocateReBarLocked("));
+        string meshCreateBuffer = Body(Source("Core/MeshManager.cs"), "private VulkanBuffer CreateBuffer(");
+        Assert.DoesNotContain("MemoryPoolClass.ReBar", meshCreateBuffer);
+        Assert.DoesNotContain("MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit", meshCreateBuffer);
+        Assert.Contains("_allocator.AdvanceFrame();", ringBegin);
         Assert.Equal(Count(device, "CmdPipelineBarrier2("), Count(device, "VulkanStats.NoteImageBarriers(1);"));
     }
 

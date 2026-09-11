@@ -130,7 +130,7 @@ internal sealed unsafe class ReadbackManager : IDisposable
             // still name it; the timeline retires it after both.
             if (arena != null) _frames.DeferDeletion(arena);
             arena = new VulkanBuffer(_context, size, BufferUsageFlags.TransferDstBit,
-                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
             _arenas[slotIndex] = arena;
             aligned = 0;
         }

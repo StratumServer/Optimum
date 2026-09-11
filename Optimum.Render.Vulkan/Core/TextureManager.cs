@@ -357,10 +357,10 @@ internal sealed unsafe class TextureManager : IDisposable
             throw new InvalidOperationException("vkCreateImage failed");
         }
 
-        api.GetImageMemoryRequirements(_context.Device, image, out MemoryRequirements requirements);
+        MemoryRequirements requirements = VulkanAllocator.ImageRequirements(_context, image, out bool dedicated);
         MemoryAllocation allocation = _context.Allocator.Allocate(
             requirements, MemoryPropertyFlags.DeviceLocalBit, linear: false,
-            $"a {width}x{height} {format} image");
+            $"a {width}x{height} {format} image", MemoryPoolClass.DeviceImages, dedicated, default, image);
         if (api.BindImageMemory(_context.Device, image, allocation.Memory, allocation.Offset) != Result.Success)
         {
             api.DestroyImage(_context.Device, image, null);

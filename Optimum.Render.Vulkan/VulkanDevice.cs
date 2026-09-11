@@ -318,6 +318,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
             "; GPU checkpoints " + (_context.CheckpointsAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off"));
+        // A ReBAR miss is logged, not an error: the validation mirror and the
+        // trace, never GetError. The stats sample reads this allocator's heaps.
+        _context.Allocator.Log = MirrorValidationMessage;
+        VulkanStats.MemorySource = _context.Allocator;
         _state = new GlStateTracker();
         // Uploads never wait: they ride the next frame submission, recorded from
         // any thread into the ring's upload batch (or inline into the frame when
@@ -674,6 +678,12 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
     {
         set => _meshes.DeviceLocalStaticBuffers = value;
     }
+
+    /// <summary>The mesh store. Tests only.</summary>
+    internal MeshManager MeshesForTests => _meshes;
+
+    /// <summary>The context (and its allocator). Tests only.</summary>
+    internal VulkanContext ContextForTests => _context;
 
     /// <summary>Where per-second backend counters go, when asked for.</summary>
     private static readonly string? StatsLogPath = Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_STATS");
@@ -2421,9 +2431,11 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         {
             if (_indirectScratch != null) _frames.DeferDeletion(_indirectScratch);
 
+            // Per-frame dynamic data, so the ReBAR class (a miss falls through, counted).
             _indirectScratch = new VulkanBuffer(_context, required,
                 BufferUsageFlags.IndirectBufferBit,
-                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+                MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+                MemoryPoolClass.ReBar);
             _indirectCursor = 0;
         }
 
@@ -2590,7 +2602,7 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         ulong handed = Math.Min(bytes, copied);
         using var readback = new VulkanBuffer(_context, Math.Max(bytes, copied),
             BufferUsageFlags.TransferDstBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
 
         ImageLayout restore = texture.Layout;
         CommandBuffer commandBuffer = _uploads.BeginRecording(inlineInFrame: false);
@@ -2709,6 +2721,10 @@ public sealed unsafe class VulkanDevice : IOptimumGraphicsDevice
         _targets?.Dispose();
         _meshes?.Dispose();
         _textures?.Dispose();
+        if (_context != null && ReferenceEquals(VulkanStats.MemorySource, _context.Allocator))
+        {
+            VulkanStats.MemorySource = null;
+        }
         _context?.Dispose();
     }
 }

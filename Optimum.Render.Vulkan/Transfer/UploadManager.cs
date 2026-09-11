@@ -211,7 +211,7 @@ internal sealed unsafe class UploadManager : IDisposable
         // open batch's Transfer value (and the newest Frame value, for an inline
         // copy) is what the retire entry is keyed on, so it outlives the copy.
         var dedicated = new VulkanBuffer(_context, Math.Max(size, 1), BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
         _retired.Retire(dedicated);
         VulkanStats.NoteStagingOverflow();
         return new StagingSlice(dedicated.Handle, 0, dedicated.Mapped);
@@ -285,7 +285,7 @@ internal sealed unsafe class UploadManager : IDisposable
         // Allocated on first use: most frame rings in tests never stage anything.
         _stagingRing ??= new VulkanBuffer(_context, _stagingPerSlot * (ulong)_ringBatches,
             BufferUsageFlags.TransferSrcBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.Staging);
 
     private Batch EnsureOpenLocked()
     {

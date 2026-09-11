@@ -362,6 +362,7 @@ internal sealed class FrameRing : IDisposable
     private readonly FrameTimeline _timeline;
     private readonly RetireQueue _retired;
     private readonly UploadManager _uploads;
+    private readonly VulkanAllocator _allocator;
     private int _index = -1;
     private bool _disposed;
 
@@ -371,9 +372,13 @@ internal sealed class FrameRing : IDisposable
         _timeline = new FrameTimeline(context);
         _retired = new RetireQueue(_timeline);
         _uploads = new UploadManager(context, _timeline, _retired, framesInFlight, stagingPerSlot);
+        _allocator = context.Allocator;
+        // Per-frame dynamic data: the ReBAR class, falling through to host memory
+        // (counted and logged) when the cap or the device says no.
         _uniformRing = new VulkanBuffer(context, uniformRingSize,
             BufferUsageFlags.UniformBufferBit,
-            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
+            MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+            MemoryPoolClass.ReBar);
 
         // Each region must start on a uniform-offset boundary, otherwise every
         // dynamic offset handed out from slot 1 onwards inherits the misalignment.
@@ -414,6 +419,8 @@ internal sealed class FrameRing : IDisposable
         ulong frameValue = _timeline.ReserveFrame();
         _timeline.WaitForFrame(slot.LastSignalledValue, WaitSite.FramePacing);
         _retired.Collect();
+        // After the retirements: blocks they emptied start their empty-frame count.
+        _allocator.AdvanceFrame();
 
         _index = index;
         slot.Begin(frameValue);

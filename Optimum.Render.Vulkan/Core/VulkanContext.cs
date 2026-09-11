@@ -107,6 +107,13 @@ internal sealed unsafe class VulkanContext : IDisposable
     /// an option.
     /// </summary>
     public VulkanAllocator Allocator { get; private set; } = null!;
+
+    /// <summary>
+    /// VK_EXT_memory_budget is enabled, so the allocator reads per-heap budgets
+    /// from the driver. Off when the device lacks it or OPTIMUM_VULKAN_NO_MEMORY_BUDGET=1
+    /// forces the heap x 0.7 fallback.
+    /// </summary>
+    public bool MemoryBudgetAvailable { get; private set; }
     public VulkanCapabilities Capabilities { get; private set; } = new();
 
     /// <summary>
@@ -700,6 +707,12 @@ internal sealed unsafe class VulkanContext : IDisposable
         if (wantCheckpoints) deviceExtensions.Add("VK_NV_device_diagnostic_checkpoints");
         if (wantDeviceFault) deviceExtensions.Add("VK_EXT_device_fault");
 
+        // Optional tier: per-heap budgets from the driver; without it the
+        // allocator budgets heap x 0.7. The env override forces the fallback.
+        bool wantMemoryBudget = deviceExtensionsAvailable.Contains("VK_EXT_memory_budget")
+            && Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_NO_MEMORY_BUDGET") != "1";
+        if (wantMemoryBudget) deviceExtensions.Add("VK_EXT_memory_budget");
+
         nint extensionsPtr = deviceExtensions.Count > 0
             ? SilkMarshal.StringArrayToPtr(deviceExtensions)
             : 0;
@@ -732,6 +745,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         GraphicsQueue = Api.GetDeviceQueue(Device, family, 0);
         LoadDiagnosticExtensions(wantCheckpoints, wantDeviceFault);
         Capabilities = ReadCapabilities();
+        MemoryBudgetAvailable = wantMemoryBudget;
         Allocator = new VulkanAllocator(this);
         return true;
     }

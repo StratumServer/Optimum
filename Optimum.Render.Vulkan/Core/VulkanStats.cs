@@ -297,12 +297,22 @@ internal static class VulkanStats
 
         double uploadMs = uploadTicks * 1000.0 / Stopwatch.Frequency;
 
+        VulkanAllocator? memory = MemorySource;
+        MemorySnapshot memorySnapshot = memory == null ? default : memory.Snapshot();
+
         return FormatIntervalLine(elapsed, frames, allocations, VulkanMemory.LiveAllocations,
                    uploads, uploadMs, created, deleted, dropped, overflows) + "\n" +
                FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
-               FormatCountersLine(counters);
+               FormatCountersLine(counters) + "\n" +
+               VulkanAllocator.FormatMemoryLine(memorySnapshot);
     }
+
+    /// <summary>
+    /// The allocator whose pool classes and heaps the <c>stats.memory</c> line
+    /// reports; the device sets it at init and clears it at dispose.
+    /// </summary>
+    public static volatile VulkanAllocator? MemorySource;
 
     /// <summary>The original stats line. Its format must not change.</summary>
     public static string FormatIntervalLine(double elapsed, long frames, long allocations, int liveAllocations,

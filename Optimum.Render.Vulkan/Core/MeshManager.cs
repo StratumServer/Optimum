@@ -97,10 +97,10 @@ internal sealed unsafe class MeshManager : IDisposable
 
     /// <summary>
     /// Static meshes on device-local memory, filled through the upload manager's
-    /// staging instead of a host mapping. Off until Phase 1B step 5 moves static
-    /// meshes off ReBAR; tests turn it on to drive the staged path.
+    /// staging instead of a host mapping. On since Phase 1B step 5 moved static
+    /// meshes off ReBAR; it only takes effect with an upload manager.
     /// </summary>
-    internal bool DeviceLocalStaticBuffers { get; set; }
+    internal bool DeviceLocalStaticBuffers { get; set; } = true;
 
     public MeshManager(VulkanContext context, GlStateTracker state, UploadManager? uploads = null)
     {
@@ -303,32 +303,23 @@ internal sealed unsafe class MeshManager : IDisposable
 
     private VulkanBuffer CreateBuffer(int byteSize, BufferUsageFlags usage, bool persistent)
     {
-        // A dynamic mesh is host visible and stays mapped, because the game
-        // writes straight through the pointer while the GPU may still be
-        // reading - the same lack of synchronisation GL allowed and the chunk
-        // tesselator relies on.
+        // Phase 1B step 5: a static mesh lives in device-local memory (a type
+        // that is not host visible, when the device has one), filled through the
+        // upload manager's staging. It never takes ReBAR, which holds only
+        // per-frame dynamic data.
         if (!persistent && DeviceLocalStaticBuffers && _uploads != null)
         {
             return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
-                MemoryPropertyFlags.DeviceLocalBit);
+                MemoryPropertyFlags.DeviceLocalBit, MemoryPoolClass.DeviceBuffers);
         }
 
-        MemoryPropertyFlags properties = persistent
-            ? MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit
-            : MemoryPropertyFlags.DeviceLocalBit | MemoryPropertyFlags.HostVisibleBit
-              | MemoryPropertyFlags.HostCoherentBit;
-
-        try
-        {
-            return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit, properties);
-        }
-        catch (InvalidOperationException)
-        {
-            // No resizable BAR: fall back to a plain host-visible allocation.
-            if (!persistent) VulkanStats.NoteRebarFallback();
-            return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
-                MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit);
-        }
+        // A dynamic mesh is host visible and stays mapped, because the game
+        // writes straight through the pointer while the GPU may still be
+        // reading - the same lack of synchronisation GL allowed and the chunk
+        // tesselator relies on. A static mesh with no upload manager to stage
+        // through (component tests) is host visible too, still off ReBAR.
+        return new VulkanBuffer(_context, (ulong)byteSize, usage | BufferUsageFlags.TransferDstBit,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit, MemoryPoolClass.DeviceBuffers);
     }
 
     private int Register(VulkanMesh mesh)
