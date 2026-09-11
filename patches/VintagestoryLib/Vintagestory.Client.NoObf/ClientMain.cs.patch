@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..633e268 100644
+index 67feafa..ec3a19c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -457,9 +457,9 @@ index 67feafa..633e268 100644
 +		// so every writer that could claim a pixel has to have run first. Still
 +		// inside the temporal window; a no-op with TAA off, and skipped when the
 +		// transparent pass that produced the revealage did not run.
-+		if (doTransparentRenderPass && Platform is ClientPlatformWindows optimumSkyMotionPlatform)
++		if (doTransparentRenderPass)
 +		{
-+			optimumSkyMotionPlatform.RenderOptimumSkyMotion();
++			Platform.RenderOptimumSkyMotion();
 +		}
  	}
  

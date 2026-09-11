@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..3348258 100644
+index d6eb844..a8d3383 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,39 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,122 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -19,6 +19,89 @@ index d6eb844..3348258 100644
 +	}
 +
 +	public virtual void ShutdownGraphics()
++	{
++	}
++
++	// Optimum TAA/FSR (Vulkan-native plan, Phase 1A step 2): the temporal members the
++	// renderers call, declared here so callers need no cast to a concrete platform. The
++	// bodies are neutral (TAA off, no motion window, nothing resolved); the OpenGL bodies
++	// live in ClientPlatformWindows as overrides. Semantics: docs/temporal-frame-contract.md v1.
++	public virtual int MotionAttachmentIndex
++	{
++		get
++		{
++			return -1;
++		}
++	}
++
++	public virtual bool OptimumMotionWriteActive
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	public virtual bool TaaTargetsReady
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	public virtual bool TaaResolvedThisFrame
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	public virtual FrameBufferRef TaaHistory(int parity)
++	{
++		return null;
++	}
++
++	public virtual bool BeginMotionWrite()
++	{
++		return false;
++	}
++
++	public virtual void EndMotionWrite()
++	{
++	}
++
++	public virtual bool BeginMotionOnlyWrite()
++	{
++		return false;
++	}
++
++	public virtual void EndMotionOnlyWrite()
++	{
++	}
++
++	public virtual bool RenderOptimumSkyMotion()
++	{
++		return false;
++	}
++
++	public virtual bool RenderOptimumTaaResolve()
++	{
++		return false;
++	}
++
++	public virtual int RenderOptimumTaaSharpen(int resolvedScene)
++	{
++		return resolvedScene;
++	}
++
++	public virtual bool OptimumFsrBlitActive()
++	{
++		return false;
++	}
++
++	public virtual void DisableOptimumTaa(string reason)
 +	{
 +	}
 +

@@ -70,6 +70,22 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "InitializeGraphics",
         "ShutdownGraphics",
+        // Phase 1A step 2: the TAA/FSR members the renderers call without a cast to
+        // ClientPlatformWindows. Neutral bodies; ClientPlatformWindows overrides them.
+        "MotionAttachmentIndex",
+        "OptimumMotionWriteActive",
+        "TaaTargetsReady",
+        "TaaResolvedThisFrame",
+        "TaaHistory",
+        "BeginMotionWrite",
+        "EndMotionWrite",
+        "BeginMotionOnlyWrite",
+        "EndMotionOnlyWrite",
+        "RenderOptimumSkyMotion",
+        "RenderOptimumTaaResolve",
+        "RenderOptimumTaaSharpen",
+        "OptimumFsrBlitActive",
+        "DisableOptimumTaa",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -166,6 +182,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumGlR32f",
         "MotionAttachmentIndex",
         "TaaTargetsReady",
+        // Phase 1A step 2: the four state members above and below are overrides of
+        // ClientPlatformAbstract's virtuals now, reading these private fields.
+        "optimumMotionAttachmentIndex",
+        "optimumTaaTargetsReady",
+        "optimumTaaResolvedThisFrame",
+        "optimumMotionWriteActive",
         "optimumTaaDisabled",
         "TaaHistory",
         "CreateOptimumHistoryTarget",

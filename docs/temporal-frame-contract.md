@@ -172,6 +172,9 @@ attachment so no existing index moves, and it is **never in the default draw-buf
 that writes it opens a window explicitly (`BeginMotionWrite` / `EndMotionWrite`, or
 `BeginMotionOnlyWrite` for the liquid velocity pass). A window is refused unless Primary is bound
 and `JitterActive` is true.
+Since 2026-09-11 (Vulkan-native plan, Phase 1A step 2) these members are declared virtual on
+`ClientPlatformAbstract` with neutral bodies and `ClientPlatformWindows` overrides them with the
+bodies described here; the move changes no semantics of v1.
 
 Cleared to `vec4(0)` each frame — which is what makes `a == 0` mean "nothing wrote here".
 
