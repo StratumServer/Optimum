@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..8337688 100644
+index d6eb844..49a9a11 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,405 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,416 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -391,6 +391,17 @@ index d6eb844..8337688 100644
 +		{
 +			return null;
 +		}
++	}
++
++	// Vulkan-native plan, Phase 2: ClientMain.TriggerRenderStage brackets each render
++	// stage's renderers with these, so the Vulkan platform can map stages to frame-graph
++	// passes. Neutral bodies; the OpenGL path does not override them.
++	public virtual void BeginRenderStage(EnumRenderStage stage)
++	{
++	}
++
++	public virtual void EndRenderStage(EnumRenderStage stage)
++	{
 +	}
 +
  	public static void DisposeIndexBuffer()
