@@ -162,7 +162,7 @@ public class DynamicStateCacheTests
         var cache = new DynamicStateCache();
         DynamicStateValues values = Values();
 
-        Assert.Equal(DynamicStateDirty.All, cache.Update(1, values));
+        Assert.Equal(DynamicStateDirty.Everything, cache.Update(1, values));
         for (int i = 0; i < 10; i++) Assert.Equal(DynamicStateDirty.None, cache.Update(1, values));
     }
 
@@ -199,16 +199,16 @@ public class DynamicStateCacheTests
         DynamicStateValues values = Values();
         cache.Update(1, values);
 
-        Assert.Equal(DynamicStateDirty.All, cache.Update(2, values));
-        Assert.Equal(DynamicStateDirty.All, cache.Update(0, values));
-        Assert.Equal(DynamicStateDirty.All, cache.Update(0, values));
+        Assert.Equal(DynamicStateDirty.Everything, cache.Update(2, values));
+        Assert.Equal(DynamicStateDirty.Everything, cache.Update(0, values));
+        Assert.Equal(DynamicStateDirty.Everything, cache.Update(0, values));
 
         cache.Update(3, values);
         cache.Invalidate();
-        Assert.Equal(DynamicStateDirty.All, cache.Update(3, values));
+        Assert.Equal(DynamicStateDirty.Everything, cache.Update(3, values));
 
         cache.Enabled = false;
-        Assert.Equal(DynamicStateDirty.All, cache.Update(3, values));
+        Assert.Equal(DynamicStateDirty.Everything, cache.Update(3, values));
     }
 }
 
