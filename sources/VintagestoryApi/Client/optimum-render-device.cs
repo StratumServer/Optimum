@@ -350,6 +350,239 @@ public interface IOptimumGraphicsDevice : IDisposable
     /// screenshot and AVI paths already expect.
     /// </summary>
     void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination);
+
+    /// <summary>
+    /// Reads level 0 of a texture back for the per-attachment parity dump
+    /// (<see cref="OptimumParityDump" />), or returns null when the texture does
+    /// not exist or its format cannot be decoded. Rows come back bottom-up in GL
+    /// order - row 0 is texture coordinate t = 0 - exactly as
+    /// <c>glGetTexImage</c> returns them. Debug only: it waits for the device and
+    /// is called at most once per process, between the final blit and
+    /// presentation.
+    /// </summary>
+    OptimumTextureReadback ReadTextureForParity(int textureId);
+}
+
+/// <summary>
+/// One texture's level-0 contents in the representation both backends agree on
+/// for the parity dump: <c>glGetTexImage(GL_RGBA, GL_UNSIGNED_BYTE)</c> for 8-bit
+/// unsigned-normalised formats, <c>glGetTexImage(GL_RGBA, GL_FLOAT)</c> for every
+/// other colour format and <c>glGetTexImage(GL_DEPTH_COMPONENT, GL_FLOAT)</c> for
+/// depth. A plain data holder, so the patched client can fill it without any
+/// generated helper types.
+/// </summary>
+public sealed class OptimumTextureReadback
+{
+    /// <summary>The sized GL internal format the texture was created with (Vulkan) or reports (GL).</summary>
+    public int GlInternalFormat;
+
+    public int Width;
+
+    public int Height;
+
+    /// <summary>RGBA8, four bytes per texel, rows bottom-up. Null for float and depth formats.</summary>
+    public byte[] Bytes;
+
+    /// <summary>
+    /// Four floats per texel (RGBA) for colour formats, one per texel for depth,
+    /// rows bottom-up. Null for 8-bit unsigned-normalised formats.
+    /// </summary>
+    public float[] Floats;
+}
+
+/// <summary>
+/// Per-attachment parity dump, shared by both backends so the two write the same
+/// file names in the same encodings.
+///
+/// Off unless <c>OPTIMUM_PARITY_DUMP</c> names an absolute directory. With it
+/// unset the client pays one static bool check per frame and makes no GL or
+/// Vulkan call. With it set, the platform counts frames rendered while the player
+/// is in the world (the first is frame 0) and on frame <c>OPTIMUM_PARITY_FRAME</c>
+/// (default 0), after the post chain and the final FSR or plain blit and before
+/// presentation, dumps every attachment of every framebuffer slot once.
+///
+/// Encodings, rows always bottom-up in GL order (the first row in the file is GL
+/// row 0, so a PPM opened in an image viewer appears upside down; PFM is
+/// bottom-up by convention already):
+/// - 8-bit unsigned-normalised formats: binary PPM (P6) of RGB, plus a PGM (P5)
+///   of alpha when the format has alpha. Single-channel 8-bit formats are one PGM.
+/// - Every other colour format and depth: PFM, little-endian float32, negative
+///   scale. Three and four channel formats write "PF" (RGB) and, with alpha, a
+///   second "Pf" file with the extension <c>alpha.pfm</c>; one-channel formats
+///   and depth write "Pf".
+/// </summary>
+public static class OptimumParityDump
+{
+    /// <summary>The absolute dump directory, or null when the dump is off.</summary>
+    public static readonly string Directory = ResolveDirectory();
+
+    /// <summary>True when <c>OPTIMUM_PARITY_DUMP</c> names an absolute directory.</summary>
+    public static readonly bool Enabled = Directory != null;
+
+    /// <summary>The in-world frame to dump, counted from 0.</summary>
+    public static readonly long Frame = ResolveFrame();
+
+    /// <summary>
+    /// The one file-name format both backends use:
+    /// <c>&lt;slotIndex&gt;-&lt;slotName&gt;-&lt;color&lt;i&gt;|depth&gt;-&lt;format&gt;.&lt;ext&gt;</c>.
+    /// </summary>
+    public const string FileNameFormat = "{0}-{1}-{2}-{3}.{4}";
+
+    private static string ResolveDirectory()
+    {
+        string value = Environment.GetEnvironmentVariable("OPTIMUM_PARITY_DUMP");
+        if (string.IsNullOrWhiteSpace(value) || !System.IO.Path.IsPathRooted(value)) return null;
+        return System.IO.Path.GetFullPath(value);
+    }
+
+    private static long ResolveFrame()
+    {
+        string value = Environment.GetEnvironmentVariable("OPTIMUM_PARITY_FRAME");
+        return long.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out long frame) && frame >= 0 ? frame : 0;
+    }
+
+    public static string FileName(int slotIndex, string slotName, string attachment, string format, string extension)
+    {
+        return string.Format(System.Globalization.CultureInfo.InvariantCulture, FileNameFormat,
+            slotIndex, slotName, attachment, format, extension);
+    }
+
+    /// <summary>
+    /// The backend-neutral format name. Aliases that denote the same storage
+    /// collapse to one name (GL reports GL_RGB8 for a texture requested as
+    /// GL_RGB; the Vulkan device promotes it to RGBA8 storage but reports the
+    /// requested token), so the two dumps pair by file name.
+    /// </summary>
+    public static string FormatName(int glInternalFormat)
+    {
+        switch (glInternalFormat)
+        {
+            case 0x8058: case 0x1908: return "rgba8";      // GL_RGBA8, GL_RGBA
+            case 0x8051: case 0x1907: return "rgb8";       // GL_RGB8, GL_RGB
+            case 0x8229: case 0x1903: return "r8";         // GL_R8, GL_RED
+            case 0x881A: return "rgba16f";
+            case 0x881B: return "rgb16f";
+            case 0x822D: return "r16f";
+            case 0x822E: return "r32f";
+            case 0x8814: return "rgba32f";
+            case 0x8815: return "rgb32f";
+            case 0x8C3A: return "r11g11b10f";
+            case 0x805B: return "rgba16";
+            case 0x1902: case 0x81A5: case 0x81A6: case 0x81A7: case 0x8CAC: return "depth";
+            default: return "gl" + glInternalFormat.ToString("x4", System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
+
+    public static bool IsDepthFormat(int glInternalFormat) => FormatName(glInternalFormat) == "depth";
+
+    /// <summary>True for the 8-bit unsigned-normalised formats, which dump as PPM/PGM.</summary>
+    public static bool IsUnorm8Format(int glInternalFormat)
+    {
+        string name = FormatName(glInternalFormat);
+        return name == "rgba8" || name == "rgb8" || name == "r8";
+    }
+
+    /// <summary>Stored channels: 4, 3 or 1.</summary>
+    public static int ChannelsOf(int glInternalFormat)
+    {
+        string name = FormatName(glInternalFormat);
+        if (name == "depth" || name == "r8" || name == "r16f" || name == "r32f") return 1;
+        if (name.StartsWith("rgba", StringComparison.Ordinal)) return 4;
+        if (name.StartsWith("rgb", StringComparison.Ordinal) || name == "r11g11b10f") return 3;
+        return 4;
+    }
+
+    /// <summary>
+    /// Writes one attachment's files and returns how many were written (0 when the
+    /// readback is malformed).
+    /// </summary>
+    public static int Write(string directory, int slotIndex, string slotName, string attachment,
+        OptimumTextureReadback readback)
+    {
+        if (directory == null || readback == null || readback.Width <= 0 || readback.Height <= 0) return 0;
+        int texels = readback.Width * readback.Height;
+        string format = FormatName(readback.GlInternalFormat);
+        int channels = ChannelsOf(readback.GlInternalFormat);
+        System.IO.Directory.CreateDirectory(directory);
+
+        if (readback.Bytes != null)
+        {
+            if (readback.Bytes.Length < texels * 4) return 0;
+            if (channels == 1)
+            {
+                WriteNetpbm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pgm")),
+                    readback.Width, readback.Height, readback.Bytes, 0, 1);
+                return 1;
+            }
+            WriteNetpbm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "ppm")),
+                readback.Width, readback.Height, readback.Bytes, 0, 3);
+            if (channels < 4) return 1;
+            WriteNetpbm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pgm")),
+                readback.Width, readback.Height, readback.Bytes, 3, 1);
+            return 2;
+        }
+
+        if (readback.Floats == null) return 0;
+        int stride = readback.Floats.Length >= texels * 4 ? 4 : 1;
+        if (readback.Floats.Length < texels * stride) return 0;
+        if (stride == 1 || channels == 1)
+        {
+            WritePfm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pfm")),
+                readback.Width, readback.Height, readback.Floats, stride, 0, 1);
+            return 1;
+        }
+        WritePfm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "pfm")),
+            readback.Width, readback.Height, readback.Floats, 4, 0, 3);
+        if (channels < 4) return 1;
+        WritePfm(System.IO.Path.Combine(directory, FileName(slotIndex, slotName, attachment, format, "alpha.pfm")),
+            readback.Width, readback.Height, readback.Floats, 4, 3, 1);
+        return 2;
+    }
+
+    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels)
+    {
+        using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);
+        byte[] header = System.Text.Encoding.ASCII.GetBytes(
+            (channels == 3 ? "P6\n" : "P5\n") + width + " " + height + "\n255\n");
+        file.Write(header, 0, header.Length);
+        byte[] row = new byte[width * channels];
+        for (int y = 0; y < height; y++)
+        {
+            int source = y * width * 4;
+            for (int x = 0; x < width; x++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    row[x * channels + c] = rgba[source + x * 4 + firstChannel + c];
+                }
+            }
+            file.Write(row, 0, row.Length);
+        }
+    }
+
+    private static void WritePfm(string path, int width, int height, float[] data, int stride,
+        int firstChannel, int channels)
+    {
+        using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);
+        byte[] header = System.Text.Encoding.ASCII.GetBytes(
+            (channels == 3 ? "PF\n" : "Pf\n") + width + " " + height + "\n-1.0\n");
+        file.Write(header, 0, header.Length);
+        byte[] row = new byte[width * channels * 4];
+        for (int y = 0; y < height; y++)
+        {
+            int source = y * width * stride;
+            for (int x = 0; x < width; x++)
+            {
+                for (int c = 0; c < channels; c++)
+                {
+                    System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(
+                        row.AsSpan((x * channels + c) * 4, 4), data[source + x * stride + firstChannel + c]);
+                }
+            }
+            file.Write(row, 0, row.Length);
+        }
+    }
 }
 
 /// <summary>

@@ -727,7 +727,7 @@ public class VulkanDeviceIntegrationTests
     /// IShaderProgram implementations across the seam, so the device must work
     /// against the interfaces rather than any concrete type.
     /// </summary>
-    private sealed class TestShader : IShader
+    internal sealed class TestShader : IShader
     {
         public EnumShaderType Type { get; set; }
         public string Code { get; set; } = "";
@@ -735,7 +735,7 @@ public class VulkanDeviceIntegrationTests
         public bool Compile() => true;
     }
 
-    private sealed class TestProgram : IShaderProgram
+    internal sealed class TestProgram : IShaderProgram
     {
         public int ProgramId { get; set; }
         public string AssetDomain { get; set; } = "game";
@@ -772,7 +772,7 @@ public class VulkanDeviceIntegrationTests
         public bool HasUniform(string uniformName) => false;
     }
 
-    private static int LinkProgram(
+    internal static int LinkProgram(
         IOptimumGraphicsDevice device, string vertexCode, string fragmentCode, string name = "test")
     {
         var vertex = new TestShader { Type = EnumShaderType.VertexShader, Code = vertexCode };

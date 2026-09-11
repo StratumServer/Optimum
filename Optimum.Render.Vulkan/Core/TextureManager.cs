@@ -68,6 +68,15 @@ internal sealed unsafe class VulkanTexture : IDisposable
     public ulong Id { get; } = ResourceIds.Next();
 
     public Format Format { get; init; }
+
+    /// <summary>
+    /// The GL internal format token the client asked for, or 0 when the texture
+    /// was not created through a GL-token entry point. Kept because the Vulkan
+    /// format can be a promotion (GL_RGB lands in RGBA8 storage), and the parity
+    /// dump names files by what was requested so both backends pair.
+    /// </summary>
+    public int GlInternalFormat { get; set; }
+
     public uint Width { get; init; }
     public uint Height { get; init; }
     public uint MipLevels { get; init; }
