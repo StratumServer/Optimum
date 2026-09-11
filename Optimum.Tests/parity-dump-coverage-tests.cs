@@ -283,10 +283,10 @@ public class ParityDumpCoverageTests
         }
         foreach (string needle in new[]
                  {
-                     "### Phase 0 exit", "GL-vs-GL parity identity", "Pacing baseline, OpenGL", "Pacing baseline, Vulkan",
+                     "### Phase 0 exit", "GL-vs-GL noise floor", "Pacing baseline, OpenGL", "Pacing baseline, Vulkan",
                      "### Milestone 1", "scripts/dev/pacing-gate.sh", "scripts/dev/ssim.py", "sync,best",
                      "luma-diff", "Screenshot pairs are\n  never evidence", "Intel Arc 140V",
-                     "`ScopesOpened == PassCount`", "SSIM >= 0.98",
+                     "`ScopesOpened == PassCount`", "SSIM >= min(0.98",
                  })
         {
             Assert.Contains(needle, acceptance);
