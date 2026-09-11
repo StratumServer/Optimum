@@ -113,6 +113,18 @@ internal static class SwapchainPolicy
         return wanted;
     }
 
+    /// <summary>
+    /// The Frame value a replaced slot retires on. Completing the present submission
+    /// (Submit B, <paramref name="lastPresentValue" />) only proves the present semaphore
+    /// was signalled; vkQueuePresentKHR on that image is queued after it and may still be
+    /// pending in the WSI (VUID-vkDestroySwapchainKHR-swapchain-01282). The next Frame
+    /// value is reserved only by the following frame, whose submission is queued after that
+    /// vkQueuePresentKHR, so its completion is the first timeline proof the present was
+    /// processed. Without present fences (VK_EXT_swapchain_maintenance) the Khronos
+    /// swapchain_recreation sample likewise waits for a later operation. 0: never presented.
+    /// </summary>
+    public static ulong RetireAfter(ulong lastPresentValue) => lastPresentValue == 0 ? 0 : lastPresentValue + 1;
+
     /// <summary>A minimised window reports a zero extent; presentation parks until it grows again.</summary>
     public static bool IsParked(Extent2D extent) => extent.Width == 0 || extent.Height == 0;
 

@@ -38,12 +38,19 @@ public partial class VulkanClientPlatform
 
     /// <summary>
     /// On this path VaoId is the device's mesh handle and the per-attribute buffer fields
-    /// are zero: <see cref="DeleteMesh" /> released the mesh through the device's deferred
-    /// deletion before disposing the VAO, so there is nothing left to free here. VAO.Dispose
-    /// can also run from a finalizer, which is why nothing is destroyed inline.
+    /// are zero. VAO.Dispose is the one place a mesh is released, as on GL: the client and
+    /// mods call MeshRef.Dispose directly at least as often as DeleteMesh (which only
+    /// disposes the VAO), so the device mesh is released here, through the device's
+    /// deferred deletion (destroyed once the timelines pass every frame that drew it).
+    /// VAO.Dispose runs once per VAO (its Disposed guard) and never from the finalizer.
+    /// After ShutdownGraphics the device is gone and took every mesh with it.
     /// </summary>
     public override void DeleteVertexArrayHandles(VAO vao)
     {
+        if (device != null && vao.VaoId != 0)
+        {
+            device.DeleteMesh(vao.VaoId);
+        }
     }
 
     /// <summary>The device addresses each texture directly; nothing to bind or restore.</summary>

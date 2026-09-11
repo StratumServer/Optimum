@@ -344,7 +344,7 @@ internal sealed unsafe class Swapchain : IDisposable
         // Passing oldSwapchain retires it even when creation fails.
         if (old != null)
         {
-            _retirement.Retire(old, old.LastPresentValue);
+            _retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));
             _current = null;
         }
 

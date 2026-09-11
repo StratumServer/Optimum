@@ -498,7 +498,9 @@ public class VulkanBackendIntegrationTests
 
         string swapchain = Read("Optimum.Render.Vulkan/Present/Swapchain.cs");
         Assert.Contains("OldSwapchain = old?.Handle ?? default,", swapchain);
-        Assert.Contains("_retirement.Retire(old, old.LastPresentValue);", swapchain);
+        // Keyed on the frame after the last present submission (Phase 1 review): only a
+        // submission queued after vkQueuePresentKHR proves the present was processed.
+        Assert.Contains("_retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));", swapchain);
         Assert.Contains("public Semaphore PresentSemaphoreFor(uint imageIndex) => _presentSemaphores[imageIndex];", swapchain);
         // vkDeviceWaitIdle only at teardown (Dispose), never in a rebuild.
         Assert.Equal(1, swapchain.Split("WaitDeviceIdle").Length - 1);

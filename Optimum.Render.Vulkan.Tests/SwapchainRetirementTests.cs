@@ -70,6 +70,32 @@ public class SwapchainRetirementTests
         Assert.Equal(1, slot.DisposeCount);
     }
 
+    /// <summary>
+    /// Phase 1 review regression: a replaced slot is keyed on the frame after its last present
+    /// submission. That submission completing only signals the present semaphore; the
+    /// vkQueuePresentKHR queued after it may still be pending, and only the next frame's
+    /// submission (queued after the present) completing proves it was processed.
+    /// </summary>
+    [Fact]
+    public void AReplacedSlotOutlivesItsLastPresentSubmissionByOneFrame()
+    {
+        Assert.Equal(0UL, SwapchainPolicy.RetireAfter(0));
+        Assert.Equal(8UL, SwapchainPolicy.RetireAfter(7));
+
+        var clock = new FakeClock();
+        var retirement = new SwapchainRetirement(clock);
+        var slot = new Slot("old");
+        retirement.Retire(slot, SwapchainPolicy.RetireAfter(7));
+
+        clock.FrameCompleted = 7;
+        Assert.Equal(0, retirement.Collect());
+        Assert.Equal(0, slot.DisposeCount);
+
+        clock.FrameCompleted = 8;
+        Assert.Equal(1, retirement.Collect());
+        Assert.Equal(1, slot.DisposeCount);
+    }
+
     [Fact]
     public void ASlotThatNeverPresentedGoesAtTheNextCollect()
     {

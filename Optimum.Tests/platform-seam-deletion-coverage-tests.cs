@@ -140,6 +140,25 @@ public class PlatformSeamDeletionCoverageTests
         Assert.DoesNotContain("GL.", body);
     }
 
+    /// <summary>
+    /// Phase 1 review: VAO.Dispose is the single release point on both backends, as vanilla's
+    /// DeleteMesh is only a Dispose. The Vulkan DeleteMesh override must not release the
+    /// device mesh itself (a double free of a reusable id), and the Vulkan
+    /// DeleteVertexArrayHandles must (MeshRef.Dispose is called directly everywhere).
+    /// </summary>
+    [Fact]
+    public void AMeshIsReleasedOnlyThroughVaoDispose()
+    {
+        string vulkan = StripComments(VulkanPlatformSource.Read());
+        string deleteMesh = Body(vulkan, "public override void DeleteMesh(MeshRef modelref)");
+        Assert.Contains("((VAO)modelref).Dispose();", deleteMesh);
+        Assert.DoesNotContain("device.DeleteMesh", deleteMesh);
+        Assert.Contains("device.DeleteMesh(vao.VaoId);", Body(vulkan, "public override void DeleteVertexArrayHandles(VAO vao)"));
+
+        string swapchain = Read("Optimum.Render.Vulkan/Present/Swapchain.cs");
+        Assert.Contains("_retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));", swapchain);
+    }
+
     [Fact]
     public void TheOitLayersKeepOnlyTheirFailurePathUnitReset()
     {
@@ -155,7 +174,7 @@ public class PlatformSeamDeletionCoverageTests
         yield return new object?[] { "SetDepthRange", "public override void SetDepthRange(float near, float far)", "GL.DepthRange(near, far);", null };
         yield return new object?[] { "ClearDefaultDepth", "public override void ClearDefaultDepth(float depth)", "GL.ClearBuffer((ClearBuffer)6145, 0, ref depth);", "device.ClearDepth(Math.Clamp(depth, 0f, 1f));" };
         yield return new object?[] { "DeleteMeshHandle", "public override void DeleteMeshHandle(int bufferId)", "GL.DeleteBuffer(bufferId);", "device.DeleteMesh(bufferId);" };
-        yield return new object?[] { "DeleteVertexArrayHandles", "public override void DeleteVertexArrayHandles(VAO vao)", "GL.DeleteVertexArray(vao.VaoId);", null };
+        yield return new object?[] { "DeleteVertexArrayHandles", "public override void DeleteVertexArrayHandles(VAO vao)", "GL.DeleteVertexArray(vao.VaoId);", "device.DeleteMesh(vao.VaoId);" };
         yield return new object?[] { "SetTextureLodBias", "public override void SetTextureLodBias(int[] textureIds, float bias)", "GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", "device.SetTextureParameter(textureIds[k], OptimumGlConstants.TextureLodBias, bias);" };
         yield return new object?[] { "SetSamplerLodBias", "public override void SetSamplerLodBias(int samplerId, float bias)", "GL.SamplerParameter(samplerId, (SamplerParameterName)34049, bias);", "device.SetSamplerParameter(samplerId, OptimumGlConstants.TextureLodBias, bias);" };
         yield return new object?[] { "SetTextureDepthCompare", "public override void SetTextureDepthCompare(int textureId, int mode)", "GL.TexParameter((TextureTarget)3553, (TextureParameterName)34892, mode);", "device.SetTextureParameter(textureId, OptimumGlConstants.TextureCompareMode, mode);" };

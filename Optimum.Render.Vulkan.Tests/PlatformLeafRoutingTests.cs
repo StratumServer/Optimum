@@ -3,6 +3,7 @@ using System.IO;
 using Optimum.Render.Vulkan.Platform;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
+using Vintagestory.Client;
 using Vintagestory.Client.NoObf;
 using Xunit;
 using Xunit.Abstractions;
@@ -370,6 +371,70 @@ public class PlatformLeafRoutingTests
         platform.GLDeleteTexture(reveal);
         platform.DisposeFrameBuffer(transparent);
         seam.DeleteProgram(oitProgram);
+        GpuTest.AssertClean(seam);
+    }
+
+    private static MeshData Quad() => new MeshData(4, 6, withNormals: false, withUv: false, withRgba: false, withFlags: false)
+    {
+        xyz = new[] { -1f, -1f, 0f, 1f, -1f, 0f, 1f, 1f, 0f, -1f, 1f, 0f },
+        VerticesCount = 4,
+        Indices = new[] { 0, 1, 2, 0, 2, 3 },
+        IndicesCount = 6,
+    };
+
+    /// <summary>
+    /// Phase 1 review regression: MeshRef.Dispose (which the client and mods call directly as
+    /// often as DeleteMesh) releases the device mesh, exactly once. Before the fix VAO.Dispose
+    /// reached an empty DeleteVertexArrayHandles override and every directly disposed mesh
+    /// leaked its device buffers for the rest of the session.
+    /// </summary>
+    [SkippableFact]
+    public void DisposingAMeshRefReleasesTheDeviceMeshOnce()
+    {
+        using Session? session = Session.TryOpen(_output);
+        Skip.If(session == null, "No usable Vulkan device.");
+        VulkanClientPlatform platform = session!.Platform;
+        VulkanDevice seam = session.Seam;
+        ClientPlatformAbstract previous = ScreenManager.Platform;
+        ScreenManager.Platform = platform;
+        try
+        {
+            MeshRef direct = platform.UploadMesh(Quad());
+            int directId = ((VAO)direct).VaoId;
+            Assert.NotNull(seam.MeshesForTests.Get(directId));
+            direct.Dispose();
+            Assert.True(direct.Disposed);
+            Assert.Null(seam.MeshesForTests.Get(directId));
+
+            MeshRef viaPlatform = platform.UploadMesh(Quad());
+            int viaId = ((VAO)viaPlatform).VaoId;
+            platform.DeleteMesh(viaPlatform);
+            Assert.True(viaPlatform.Disposed);
+            Assert.Null(seam.MeshesForTests.Get(viaId));
+
+            // The freed ids are reused; disposing the released VAOs again must not free the
+            // mesh that now holds one of them.
+            MeshRef survivor = platform.UploadMesh(Quad());
+            int survivorId = ((VAO)survivor).VaoId;
+            direct.Dispose();
+            viaPlatform.Dispose();
+            platform.DeleteMesh(viaPlatform);
+            Assert.NotNull(seam.MeshesForTests.Get(survivorId));
+
+            // The released meshes are destroyed on the timelines like any other resource.
+            for (int frame = 0; frame < 4; frame++)
+            {
+                platform.BeginFrame();
+                platform.EndFrame();
+            }
+            Assert.NotNull(seam.MeshesForTests.Get(survivorId));
+            survivor.Dispose();
+            Assert.Null(seam.MeshesForTests.Get(survivorId));
+        }
+        finally
+        {
+            ScreenManager.Platform = previous;
+        }
         GpuTest.AssertClean(seam);
     }
 }

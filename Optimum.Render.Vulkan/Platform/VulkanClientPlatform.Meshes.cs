@@ -128,9 +128,9 @@ public partial class VulkanClientPlatform
     {
         if (modelref != null)
         {
-            // Deferred until the GPU is done with the frame that used it;
-            // GL left that to the driver.
-            device.DeleteMesh(((VAO)modelref).VaoId);
+            // The GL body's shape: VAO.Dispose reaches DeleteVertexArrayHandles, which
+            // releases the device mesh (deferred until the GPU is done with the frames
+            // that drew it). Releasing it here as well would free the id twice.
             ((VAO)modelref).Dispose();
         }
     }
