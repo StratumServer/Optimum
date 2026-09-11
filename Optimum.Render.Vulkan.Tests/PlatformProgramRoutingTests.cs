@@ -47,7 +47,7 @@ public class PlatformProgramRoutingTests
         private readonly string _dataPath;
 
         public VulkanClientPlatform Platform { get; }
-        public IOptimumGraphicsDevice Seam => OptimumRender.Device!;
+        public VulkanDevice Seam => Platform.GraphicsDevice!;
 
         private Session(VulkanClientPlatform platform, ClientPlatformAbstract? previous, string dataPath)
         {
@@ -97,7 +97,7 @@ public class PlatformProgramRoutingTests
         }
     }
 
-    private static int ColourTarget(IOptimumGraphicsDevice seam, int size)
+    private static int ColourTarget(VulkanDevice seam, int size)
     {
         int texture = seam.CreateTexture2D(size, size,
             EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -107,7 +107,7 @@ public class PlatformProgramRoutingTests
         return framebuffer;
     }
 
-    private static void BeginDraw(IOptimumGraphicsDevice seam, int framebuffer, int size)
+    private static void BeginDraw(VulkanDevice seam, int framebuffer, int size)
     {
         seam.BeginFrame();
         seam.BindFramebuffer(framebuffer);
@@ -118,7 +118,7 @@ public class PlatformProgramRoutingTests
         seam.SetBlend(false, EnumBlendMode.Standard);
     }
 
-    private static unsafe byte[] ReadCentre(IOptimumGraphicsDevice seam, int framebuffer, int size, bool openFrame)
+    private static unsafe byte[] ReadCentre(VulkanDevice seam, int framebuffer, int size, bool openFrame)
     {
         var pixels = new byte[size * size * 4];
         if (openFrame) seam.BeginFrame();
@@ -142,7 +142,7 @@ public class PlatformProgramRoutingTests
     {
         using Session? session = Session.TryOpen(_output);
         Skip.If(session == null, "No usable Vulkan device.");
-        IOptimumGraphicsDevice seam = session!.Seam;
+        VulkanDevice seam = session!.Seam;
         const int size = 16;
 
         var program = new RoutedProgram { PassName = "routed-uniforms" };
@@ -207,7 +207,7 @@ public class PlatformProgramRoutingTests
     {
         using Session? session = Session.TryOpen(_output);
         Skip.If(session == null, "No usable Vulkan device.");
-        IOptimumGraphicsDevice seam = session!.Seam;
+        VulkanDevice seam = session!.Seam;
         const int size = 16;
 
         var program = new RoutedProgram { PassName = "routed-ubo" };
@@ -271,7 +271,7 @@ public class PlatformProgramRoutingTests
     {
         using Session? session = Session.TryOpen(_output);
         Skip.If(session == null, "No usable Vulkan device.");
-        IOptimumGraphicsDevice seam = session!.Seam;
+        VulkanDevice seam = session!.Seam;
         const int size = 16;
 
         var program = new RoutedProgram { PassName = "routed-texture" };

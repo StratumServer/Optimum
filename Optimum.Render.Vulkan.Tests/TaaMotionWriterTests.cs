@@ -207,7 +207,7 @@ public class TaaMotionWriterTests
         float previousGlobalWarp,
         bool sampleCorner = false)
     {
-        IOptimumGraphicsDevice seam = device;
+        VulkanDevice seam = device;
 
         var files = ShaderCorpus.LoadShaderFiles();
         var includes = ShaderCorpus.LoadIncludes();
@@ -307,7 +307,7 @@ public class TaaMotionWriterTests
     /// Reads the RGBA16F motion attachment through an RGBA8 decode pass, because
     /// the seam's readback is fixed at four bytes per pixel from attachment 0.
     /// </summary>
-    private unsafe byte[] DecodeMotion(IOptimumGraphicsDevice seam, int motionTexture)
+    private unsafe byte[] DecodeMotion(VulkanDevice seam, int motionTexture)
     {
         const string decodeVertex = @"#version 330 core
 layout(location = 0) in vec3 xyz;
@@ -407,7 +407,7 @@ void main(void)
     /// to be in the block on the device path, and this test's whole point is the
     /// difference between the two states.
     /// </summary>
-    private static void SetWarpUniforms(IOptimumGraphicsDevice seam, int program, float previousGlobalWarp)
+    private static void SetWarpUniforms(VulkanDevice seam, int program, float previousGlobalWarp)
     {
         SetFloat(seam, program, "timeCounter", 0f);
         SetFloat(seam, program, "windWaveCounter", 0f);
@@ -437,7 +437,7 @@ void main(void)
         SetFloat3(seam, program, "prevPlayerpos", 0f, 0f, 0f);
     }
 
-    private static void SetViewUniforms(IOptimumGraphicsDevice seam, int program)
+    private static void SetViewUniforms(VulkanDevice seam, int program)
     {
         SetFloat(seam, program, "viewDistance", 1024f);
         SetFloat(seam, program, "viewDistanceLod0", 1024f);
@@ -455,37 +455,37 @@ void main(void)
         SetFloat2(seam, program, "frameSize", Size, Size);
     }
 
-    private static void SetFloat(IOptimumGraphicsDevice seam, int program, string name, float value)
+    private static void SetFloat(VulkanDevice seam, int program, string name, float value)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, value);
     }
 
-    private static void SetInt(IOptimumGraphicsDevice seam, int program, string name, int value)
+    private static void SetInt(VulkanDevice seam, int program, string name, int value)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, value);
     }
 
-    private static void SetFloat2(IOptimumGraphicsDevice seam, int program, string name, float x, float y)
+    private static void SetFloat2(VulkanDevice seam, int program, string name, float x, float y)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, x, y);
     }
 
-    private static void SetFloat3(IOptimumGraphicsDevice seam, int program, string name, float x, float y, float z)
+    private static void SetFloat3(VulkanDevice seam, int program, string name, float x, float y, float z)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniform(program, location, x, y, z);
     }
 
-    private static void SetMatrix(IOptimumGraphicsDevice seam, int program, string name, float[] matrix)
+    private static void SetMatrix(VulkanDevice seam, int program, string name, float[] matrix)
     {
         int location = seam.GetUniformLocation(program, name);
         if (location >= 0) seam.SetUniformMatrix(program, location, matrix);
     }
 
-    private static unsafe int CreateWhiteTexture(IOptimumGraphicsDevice seam)
+    private static unsafe int CreateWhiteTexture(VulkanDevice seam)
     {
         var white = new byte[] { 255, 255, 255, 255 };
         fixed (byte* pixels = white)
@@ -496,7 +496,7 @@ void main(void)
     }
 
     private static unsafe int BindEveryDeclaredSampler(
-        VulkanDevice device, IOptimumGraphicsDevice seam, int programId)
+        VulkanDevice device, VulkanDevice seam, int programId)
     {
         int unit = 0;
         foreach (string samplerName in device.SamplerNamesOf(programId))
@@ -510,7 +510,7 @@ void main(void)
     }
 
     private static int LinkFromCorpus(
-        IOptimumGraphicsDevice seam, List<ShaderStageSource> stages, string name)
+        VulkanDevice seam, List<ShaderStageSource> stages, string name)
     {
         var program = new CorpusProgram { PassName = name };
 
@@ -537,7 +537,7 @@ void main(void)
     private static bool TryCreateDevice(ITestOutputHelper output, out VulkanDevice? device) =>
         GpuTest.TryCreateDevice(output, out device);
 
-    private static void AssertClean(IOptimumGraphicsDevice seam) => GpuTest.AssertClean(seam);
+    private static void AssertClean(VulkanDevice seam) => GpuTest.AssertClean(seam);
 
     private sealed class CorpusShader : IShader
     {

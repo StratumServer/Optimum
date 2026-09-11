@@ -103,6 +103,27 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "ProbeThickLineSupport", Array.Empty<string>()),
         new(true, "OnWindowSizeChanged", new[] { "Int32", "Int32" }),
         new(true, "ReadTextureForParity", new[] { "Int32" }),
+        // Phase 1A step 5: the leaf operations the render systems outside the platform issued.
+        new(true, "SetDepthRange", new[] { "Single", "Single" }),
+        new(true, "ClearDefaultDepth", new[] { "Single" }),
+        new(true, "DeleteMeshHandle", new[] { "Int32" }),
+        new(true, "DeleteVertexArrayHandles", new[] { "VAO" }),
+        new(true, "SetTextureLodBias", new[] { "Int32[]", "Single" }),
+        new(true, "SetSamplerLodBias", new[] { "Int32", "Single" }),
+        new(true, "SetTextureDepthCompare", new[] { "Int32", "Int32" }),
+        new(true, "ClearTextureRegion", new[] { "Int32", "Int32", "Int32", "Int32", "Int32", "Int32[]" }),
+        new(true, "LoadTextureFromRgbaPointer", new[] { "Int32", "Int32", "IntPtr" }),
+        new(true, "SetProgramSamplerUnit", new[] { "Int32", "String", "Int32" }),
+        new(true, "CreateOitTargets", new[] { "FrameBufferRef", "Int32", "Int32&", "Int32&" }),
+        new(true, "BeginOitAccumulation", new[] { "FrameBufferRef" }),
+        new(true, "BindOitTextures", new[] { "Int32", "Int32" }),
+        new(true, "GenOcclusionQuery", Array.Empty<string>()),
+        new(true, "BeginOcclusionQuery", new[] { "Int32" }),
+        new(true, "EndOcclusionQuery", new[] { "Int32" }),
+        new(true, "TryGetOcclusionQueryResult", new[] { "Int32", "Int32&" }),
+        new(true, "DeleteOcclusionQuery", new[] { "Int32" }),
+        new(true, "ReadDefaultFramebuffer", new[] { "Int32", "Int32", "Int32", "Int32", "IntPtr" }),
+        new(true, "get_GraphicsBackendName", Array.Empty<string>()),
     };
 
     /// <summary>
@@ -203,9 +224,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         Environment.GetEnvironmentVariable(ForceInstallFailureVariable) == "1";
 
     /// <summary>
-    /// Creates the Vulkan device for the window and publishes it as
-    /// <see cref="OptimumRender.Device" />. False leaves the caller holding a window
-    /// with no graphics API, which it reopens for OpenGL with a base platform.
+    /// Creates the Vulkan device for the window, marks the backend Vulkan and publishes
+    /// the fork graphics bridge. False leaves the caller holding a window with no graphics
+    /// API, which it reopens for OpenGL with a base platform.
     /// </summary>
     public override bool InitializeGraphics(IntPtr windowHandle, int width, int height, out string reason)
     {
@@ -224,12 +245,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
 
         reason = null!;
 
-        // Installing is a single transition: a device that is already published
-        // stays, so a second call cannot displace and leak the one the client
-        // is drawing with.
-        if (OptimumRender.Device != null)
+        // Installing is a single transition: a device this platform already brought
+        // up stays, so a second call cannot displace and leak the one the client is
+        // drawing with.
+        if (this.device != null)
         {
-            this.device ??= OptimumRender.Device as VulkanDevice;
             return true;
         }
 
@@ -253,8 +273,8 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
-            OptimumRender.Device = device;
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
+            OptimumForkGraphics.Active = new VulkanForkGraphics(device);
             return true;
         }
         catch (Exception error)
@@ -279,9 +299,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// </summary>
     public override void ShutdownGraphics()
     {
+        // The bridge goes first: nothing may reach a device that is being torn down.
+        OptimumForkGraphics.Active = null;
         try
         {
-            OptimumRender.Device?.Dispose();
+            device?.Dispose();
         }
         catch (Exception)
         {
@@ -289,7 +311,6 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         }
 
         device = null;
-        OptimumRender.Device = null;
         OptimumRender.ActiveBackend = EnumRenderBackend.OpenGL;
         OptimumRender.NoGraphicsApiWindow = false;
         OptimumRenderBootstrap.ClearCrashMarker();

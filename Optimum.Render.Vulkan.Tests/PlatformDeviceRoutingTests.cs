@@ -90,8 +90,7 @@ public class PlatformDeviceRoutingTests
             bool installed = platform.InitializeGraphics(IntPtr.Zero, 0, 0, out string reason);
             if (!installed) _output.WriteLine("Vulkan unavailable: " + reason);
             Skip.IfNot(installed, "No usable Vulkan device.");
-            IOptimumGraphicsDevice seam = OptimumRender.Device!;
-            Assert.Same(seam, platform.GraphicsDevice);
+            VulkanDevice seam = platform.GraphicsDevice!;
             const int size = 16;
 
             var attrs = new FramebufferAttrs("routed", size, size)

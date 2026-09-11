@@ -103,8 +103,10 @@ public class FsrPipelineCoverageTests
         // which routes to the device and keeps the GL call as its fallback. The
         // caller still computes the value; only the application moved.
         Assert.Contains("SetOptimumTextureLodBias(textureLodBias)", chunkRenderer);
-        Assert.Contains("(TextureParameterName)34049, bias", chunkRenderer);
-        Assert.Contains("OptimumGlConstants.TextureLodBias, bias", chunkRenderer);
+        // Phase 1A step 5: applied by the platform virtual SetTextureLodBias.
+        Assert.Contains("game.Platform.SetTextureLodBias(textureIds, bias);", chunkRenderer);
+        Assert.Contains("(TextureParameterName)34049, bias", VulkanPlatformSource.ReadClientPlatformWindows());
+        Assert.Contains("OptimumGlConstants.TextureLodBias, bias", VulkanPlatformSource.Read());
         Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;", shaderRegistry);
         Assert.Contains("if (terrainLodBias != 0f)", shaderRegistry);
         // P5 review: the four SamplerParameter calls moved behind
@@ -120,8 +122,9 @@ public class FsrPipelineCoverageTests
         Assert.DoesNotContain("!= 0f", samplerEntry);
         Assert.Equal(4, Count(samplerEntry, "ApplyOptimumSamplerLodBias("));
         Assert.Equal(4, Count(samplerEntry, ", bias);"));
-        Assert.Contains("(SamplerParameterName)34049, bias", shaderRegistry);
-        Assert.Contains("OptimumGlConstants.TextureLodBias, bias", shaderRegistry);
+        Assert.Contains("platform.SetSamplerLodBias(sampler, bias);", shaderRegistry);
+        Assert.Contains("(SamplerParameterName)34049, bias", VulkanPlatformSource.ReadClientPlatformWindows());
+        Assert.Contains("OptimumGlConstants.TextureLodBias, bias", VulkanPlatformSource.Read());
         Assert.Contains("terrainTexLinear", shaderRegistry);
     }
 

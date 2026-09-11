@@ -21,7 +21,7 @@ namespace Optimum.Render.Vulkan.Tests;
 /// MRT framebuffer (colour history RGBA16F, aux/glow RGBA8, linear depth R32F),
 /// draw the fullscreen triangle and read back inside the frame.
 ///
-/// This goes one level lower than the seam (<c>IOptimumGraphicsDevice</c>): the
+/// This goes one level lower than the device (<c>VulkanDevice</c>): the
 /// public seam's <c>EnumTextureInternalFormat</c> has no R32F, and
 /// <c>ReadDefaultFramebuffer</c> always assumes 4 bytes per pixel, neither of
 /// which fits an HDR history or a float depth target. So this talks to

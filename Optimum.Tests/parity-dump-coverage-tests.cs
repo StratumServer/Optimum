@@ -87,7 +87,8 @@ public class ParityDumpCoverageTests
         string api = ReadApi();
         Assert.Equal(1, Count(api, "public const string FileNameFormat = \"{0}-{1}-{2}-{3}.{4}\";"));
         Assert.Contains("CultureInfo.InvariantCulture, FileNameFormat,", api);
-        Assert.Contains("OptimumTextureReadback ReadTextureForParity(int textureId);", api);
+        Assert.Contains("public virtual Vintagestory.API.Config.OptimumTextureReadback ReadTextureForParity(int textureId)",
+            Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs"));
 
         string platform = ReadSourceOrPatched(PlatformPatch, PlatformSource);
         string attachment = MethodBody(platform, "private int OptimumParityDumpAttachment(");

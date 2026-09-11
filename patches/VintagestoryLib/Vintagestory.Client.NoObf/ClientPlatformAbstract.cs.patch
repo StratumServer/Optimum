@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..150ea7f 100644
+index d6eb844..8337688 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,313 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,405 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -296,22 +296,114 @@ index d6eb844..150ea7f 100644
 +		return null;
 +	}
 +
++	// Optimum (Vulkan-native plan, Phase 1A step 5): the graphics-API leaf operations the
++	// render systems outside the platform used to issue directly - the depth range and the
++	// GUI depth clear, mesh handle deletion, texture and sampler parameters, a texture
++	// upload and a region clear, the OIT targets and their pass state, occlusion queries,
++	// the default framebuffer readback and the backend name. Neutral bodies here;
++	// ClientPlatformWindows overrides each with the GL lines the call site issued and
++	// VulkanClientPlatform with the device calls.
++	public virtual void SetDepthRange(float near, float far)
++	{
++	}
++
++	public virtual void ClearDefaultDepth(float depth)
++	{
++	}
++
++	public virtual void DeleteMeshHandle(int bufferId)
++	{
++	}
++
++	public virtual void DeleteVertexArrayHandles(VAO vao)
++	{
++	}
++
++	public virtual void SetTextureLodBias(int[] textureIds, float bias)
++	{
++	}
++
++	public virtual void SetSamplerLodBias(int samplerId, float bias)
++	{
++	}
++
++	public virtual void SetTextureDepthCompare(int textureId, int mode)
++	{
++	}
++
++	public virtual void ClearTextureRegion(int textureId, int x, int y, int width, int height, int[] pixels)
++	{
++	}
++
++	public virtual int LoadTextureFromRgbaPointer(int width, int height, IntPtr pixels)
++	{
++		return 0;
++	}
++
++	public virtual void SetProgramSamplerUnit(int programId, string samplerName, int unit)
++	{
++	}
++
++	public virtual void CreateOitTargets(FrameBufferRef transparent, int layers, out int revealTexture, out int accumTexture)
++	{
++		revealTexture = 0;
++		accumTexture = 0;
++	}
++
++	public virtual void BeginOitAccumulation(FrameBufferRef transparent)
++	{
++	}
++
++	public virtual void BindOitTextures(int revealTexture, int accumTexture)
++	{
++	}
++
++	public virtual int GenOcclusionQuery()
++	{
++		return 0;
++	}
++
++	public virtual void BeginOcclusionQuery(int queryId)
++	{
++	}
++
++	public virtual void EndOcclusionQuery(int queryId)
++	{
++	}
++
++	public virtual bool TryGetOcclusionQueryResult(int queryId, out int samples)
++	{
++		samples = 0;
++		return false;
++	}
++
++	public virtual void DeleteOcclusionQuery(int queryId)
++	{
++	}
++
++	public virtual void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
++	{
++	}
++
++	public virtual string GraphicsBackendName
++	{
++		get
++		{
++			return null;
++		}
++	}
++
  	public static void DisposeIndexBuffer()
  	{
  		if (singleIndexBufferId != 0)
  		{
 -			GL.DeleteBuffer(singleIndexBufferId);
-+			// Mono.Cecil transplant.
-+			// Shutdown runs this after the GL binding is gone on the device path,
-+			// where the raw call throws rather than freeing anything.
-+			Vintagestory.API.Config.IOptimumGraphicsDevice optimumDevice = Vintagestory.API.Config.OptimumRender.Device;
-+			if (optimumDevice != null)
++			// Mono.Cecil transplant: the buffer is the handle of the platform that
++			// allocated it, which deletes it.
++			ClientPlatformAbstract platform = ScreenManager.Platform;
++			if (platform != null)
 +			{
-+				optimumDevice.DeleteMesh(singleIndexBufferId);
-+			}
-+			else
-+			{
-+				GL.DeleteBuffer(singleIndexBufferId);
++				platform.DeleteMeshHandle(singleIndexBufferId);
 +			}
  			singleIndexBufferId = 0;
  		}

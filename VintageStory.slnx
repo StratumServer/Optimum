@@ -20,7 +20,7 @@
   </Folder>
   <Folder Name="/Renderer/">
     <!-- The Vulkan backend. Nothing in the game references it: the launcher
-         loads it reflectively and installs it through OptimumRender.Device, so
+         loads it reflectively and substitutes its VulkanClientPlatform, so
          no vanilla assembly gains a reference to a renderer implementation.
          See VULKAN-BACKEND-PLAN.md. -->
     <Project Path="Optimum.Render.Vulkan/Optimum.Render.Vulkan.csproj" />

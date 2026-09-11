@@ -132,6 +132,31 @@ var membersToInject = new Dictionary<string, List<string>>
         "ApplyOptimumMotionAccumulateBlendState",
         "SelectFsrDrawBuffer",
         "ReadTextureForParity",
+        // Phase 1A step 5: the leaf operations the render systems outside the platform
+        // issued (ScreenManager, ClientMain, VAO, ChunkRenderer, ShaderRegistry, the debug
+        // overlay, SvgLoader, InventoryItemRenderer, the OIT layers, the sun occlusion
+        // probe, Screenshot, ClientSystemStartup). Neutral bodies; ClientPlatformWindows
+        // overrides them with the GL lines and VulkanClientPlatform with device calls.
+        "SetDepthRange",
+        "ClearDefaultDepth",
+        "DeleteMeshHandle",
+        "DeleteVertexArrayHandles",
+        "SetTextureLodBias",
+        "SetSamplerLodBias",
+        "SetTextureDepthCompare",
+        "ClearTextureRegion",
+        "LoadTextureFromRgbaPointer",
+        "SetProgramSamplerUnit",
+        "CreateOitTargets",
+        "BeginOitAccumulation",
+        "BindOitTextures",
+        "GenOcclusionQuery",
+        "BeginOcclusionQuery",
+        "EndOcclusionQuery",
+        "TryGetOcclusionQueryResult",
+        "DeleteOcclusionQuery",
+        "ReadDefaultFramebuffer",
+        "GraphicsBackendName",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -232,6 +257,27 @@ var membersToInject = new Dictionary<string, List<string>>
         "EndFrame",
         "ProbeThickLineSupport",
         "ReadTextureForParity",
+        // Phase 1A step 5: the GL halves of the leaf operations.
+        "SetDepthRange",
+        "ClearDefaultDepth",
+        "DeleteMeshHandle",
+        "DeleteVertexArrayHandles",
+        "SetTextureLodBias",
+        "SetSamplerLodBias",
+        "SetTextureDepthCompare",
+        "ClearTextureRegion",
+        "LoadTextureFromRgbaPointer",
+        "SetProgramSamplerUnit",
+        "CreateOitTargets",
+        "BeginOitAccumulation",
+        "BindOitTextures",
+        "GenOcclusionQuery",
+        "BeginOcclusionQuery",
+        "EndOcclusionQuery",
+        "TryGetOcclusionQueryResult",
+        "DeleteOcclusionQuery",
+        "ReadDefaultFramebuffer",
+        "GraphicsBackendName",
         "OptimumTaaHistoryIndexA",
         "OptimumTaaHistoryIndexB",
         "OptimumGlR32f",
@@ -363,17 +409,6 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumOitFailureLogged",
         "RestoreVanillaTransparentState",
         "DisableOptimumOit",
-    },
-    // Vulkan backend: the shared sampling setup for the two OIT targets.
-    ["Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT"] = new()
-    {
-        "SetOptimumOitSampling",
-    },
-    // Vulkan backend: shadow maps are sampled as plain depth by the debug
-    // overlay, which means toggling the compare mode off and back on.
-    ["Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug"] = new()
-    {
-        "SetOptimumDepthCompare",
     },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()

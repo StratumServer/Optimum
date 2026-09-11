@@ -89,7 +89,7 @@ public class PlatformSubstitutionTests
             Assert.False(installed);
             Assert.Equal("forced by OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE", reason);
             Assert.Equal(0, created);
-            Assert.Null(OptimumRender.Device);
+            Assert.Null(platform.GraphicsDevice);
         }
         finally
         {
@@ -119,7 +119,7 @@ public class PlatformSubstitutionTests
             if (!installed) _output.WriteLine("Vulkan unavailable: " + reason);
             Skip.IfNot(installed, "No usable Vulkan device.");
 
-            IOptimumGraphicsDevice? seam = OptimumRender.Device;
+            VulkanDevice? seam = platform.GraphicsDevice;
             Assert.IsType<VulkanDevice>(seam);
             Assert.Equal(EnumRenderBackend.Vulkan, OptimumRender.ActiveBackend);
             Assert.True(File.Exists(marker), "the crash marker is written before the driver is touched");
@@ -147,7 +147,7 @@ public class PlatformSubstitutionTests
             GpuTest.AssertClean(seam);
 
             platform.ShutdownGraphics();
-            Assert.Null(OptimumRender.Device);
+            Assert.Null(platform.GraphicsDevice);
             Assert.Equal(EnumRenderBackend.OpenGL, OptimumRender.ActiveBackend);
             Assert.False(File.Exists(marker), "a clean shutdown clears the crash marker");
         }

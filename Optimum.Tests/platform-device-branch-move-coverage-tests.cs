@@ -58,7 +58,8 @@ public class PlatformDeviceBranchMoveCoverageTests
             {
                 Assert.True(injectedAbstract.Contains("\"" + name + "\",", StringComparison.Ordinal),
                     name + " is an injected ClientPlatformAbstract virtual the patcher does not inject");
-                Assert.True(selfCheck.Contains("new(true, \"" + name + "\"", StringComparison.Ordinal),
+                Assert.True(selfCheck.Contains("new(true, \"" + name + "\"", StringComparison.Ordinal)
+                    || selfCheck.Contains("new(true, \"get_" + name + "\"", StringComparison.Ordinal),
                     name + " is missing from VulkanClientPlatform.ExpectedVirtuals");
             }
             if (virtualizedInPlace && !abstractMember && !injectedVirtual)

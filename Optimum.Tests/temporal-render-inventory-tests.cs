@@ -54,10 +54,15 @@ public class TemporalRenderInventoryTests
     public void SystemRenderOITLayersUsesSixDrawBuffers()
     {
         string oitLayers = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: the OIT pass state is the platform virtual BeginOitAccumulation;
+        // its GL body in ClientPlatformWindows holds the draw buffers.
+        Assert.Contains("ScreenManager.Platform.BeginOitAccumulation(currentTransparentfb);", oitLayers);
+        string accumulation = VulkanPlatformSource.ReadClientPlatformWindows();
+        accumulation = accumulation.Substring(accumulation.IndexOf("public override void BeginOitAccumulation(FrameBufferRef transparent)", System.StringComparison.Ordinal));
 
-        Assert.Contains("new DrawBuffersEnum[6]", oitLayers);
-        Assert.Contains("DrawBuffersEnum.ColorAttachment0", oitLayers);
-        Assert.Contains("DrawBuffersEnum.ColorAttachment5", oitLayers);
+        Assert.Contains("new DrawBuffersEnum[6]", accumulation);
+        Assert.Contains("DrawBuffersEnum.ColorAttachment0", accumulation);
+        Assert.Contains("DrawBuffersEnum.ColorAttachment5", accumulation);
     }
 
     [Fact]

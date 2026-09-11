@@ -85,7 +85,7 @@ public class SwapchainTests
 
             using (device)
             {
-                IOptimumGraphicsDevice seam = device;
+                VulkanDevice seam = device;
                 _output.WriteLine($"presenting on {seam.RendererString}");
 
                 int programId = LinkFullscreenProgram(seam);
@@ -141,7 +141,7 @@ public class SwapchainTests
 
             using (device)
             {
-                IOptimumGraphicsDevice seam = device;
+                VulkanDevice seam = device;
                 int programId = LinkFullscreenProgram(seam);
 
                 void RenderFrames(int count, int w, int h)
@@ -200,7 +200,7 @@ public class SwapchainTests
 
             using (device)
             {
-                IOptimumGraphicsDevice seam = device;
+                VulkanDevice seam = device;
                 int programId = LinkFullscreenProgram(seam);
 
                 foreach (bool vsync in new[] { false, true, false })
@@ -236,7 +236,7 @@ public class SwapchainTests
         public bool Compile() => true;
     }
 
-    private static int LinkFullscreenProgram(IOptimumGraphicsDevice device)
+    private static int LinkFullscreenProgram(VulkanDevice device)
     {
         var vertex = new TestShader
         {
@@ -311,5 +311,5 @@ public class SwapchainTests
         public bool HasUniform(string uniformName) => false;
     }
 
-    private static void AssertClean(IOptimumGraphicsDevice device) => GpuTest.AssertClean(device);
+    private static void AssertClean(VulkanDevice device) => GpuTest.AssertClean(device);
 }

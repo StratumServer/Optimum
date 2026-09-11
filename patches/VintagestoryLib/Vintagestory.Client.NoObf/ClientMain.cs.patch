@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..ec3a19c 100644
+index 67feafa..8cb33a8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -490,20 +490,14 @@ index 67feafa..ec3a19c 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1818,30 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1818,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
  		GlPushMatrix();
  		GlLoadIdentity();
 -		GL.DepthRange(0f, 20000f);
-+		// glDepthRange clamps both bounds to [0, 1], so 20000 means 1 and this is
-+		// the default range restated. The device has no equivalent call and needs
-+		// none; PerspectiveMode's restore to (0, 1) is the same no-op.
-+		if (Vintagestory.API.Config.OptimumRender.Device == null)
-+		{
-+			GL.DepthRange(0f, 20000f);
-+		}
++		Platform.SetDepthRange(0f, 20000f);
  		GlTranslate(0.0, 0.0, -19849.0);
  	}
  
@@ -514,16 +508,13 @@ index 67feafa..ec3a19c 100644
  		GlMatrixModeModelView();
  		GlPopMatrix();
 -		GL.DepthRange(0f, 1f);
-+		if (Vintagestory.API.Config.OptimumRender.Device == null)
-+		{
-+			GL.DepthRange(0f, 1f);
-+		}
++		Platform.SetDepthRange(0f, 1f);
  	}
  
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2386,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2377,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -548,7 +539,7 @@ index 67feafa..ec3a19c 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2815,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2543,10 +2806,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -562,7 +553,7 @@ index 67feafa..ec3a19c 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3806,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3797,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

@@ -286,9 +286,11 @@ public class TaaSharpenCoverageTests
         // ...and the branch really is just that branch: the nonzero path below
         // it is outside it.
         Assert.DoesNotContain("SetOptimumTextureLodBias(textureLodBias)", zeroBranch);
-        // Both backends keep getting the same value through the same setter.
-        Assert.Contains("optimumDevice.SetTextureParameter(textureIds[k],", chunkRenderer);
-        Assert.Contains("GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", chunkRenderer);
+        // Both backends keep getting the same value through the same setter: the platform
+        // virtual SetTextureLodBias (Phase 1A step 5).
+        Assert.Contains("game.Platform.SetTextureLodBias(textureIds, bias);", chunkRenderer);
+        Assert.Contains("device.SetTextureParameter(textureIds[k], OptimumGlConstants.TextureLodBias, bias);", VulkanPlatformSource.Read());
+        Assert.Contains("GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", VulkanPlatformSource.ReadClientPlatformWindows());
 
         string registry = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
@@ -323,11 +325,12 @@ public class TaaSharpenCoverageTests
         // The sampler write is a reusable entry point, not inlined into the load.
         Assert.Contains("public static void ApplyOptimumTerrainSamplerLodBias(float bias)", registry);
         Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", registry);
-        // Both backends, through the same per-sampler helper.
+        // Both backends, through the same per-sampler helper and the platform virtual.
+        Assert.Contains("platform.SetSamplerLodBias(sampler, bias);", registry);
         Assert.Contains(
-            "optimumDevice.SetSamplerParameter(sampler, OptimumGlConstants.TextureLodBias, bias);",
-            registry);
-        Assert.Contains("GL.SamplerParameter(sampler, (SamplerParameterName)34049, bias);", registry);
+            "device.SetSamplerParameter(samplerId, OptimumGlConstants.TextureLodBias, bias);",
+            VulkanPlatformSource.Read());
+        Assert.Contains("GL.SamplerParameter(samplerId, (SamplerParameterName)34049, bias);", VulkanPlatformSource.ReadClientPlatformWindows());
         // Callable before the samplers exist: ChunkRenderer runs a frame before
         // the first shader load has created them.
         Assert.Contains("program == null || !program.customSamplers.TryGetValue(samplerName, out var sampler)", registry);
@@ -337,10 +340,10 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
         string setter = MethodBody(chunkRenderer, "private void SetOptimumTextureLodBias(float bias)");
         Assert.Contains("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", setter);
-        // Before the device/GL split, so both paths reach it.
+        // Before the texture half, and on every backend: both go through the platform.
         Assert.True(
             setter.IndexOf("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", StringComparison.Ordinal)
-            < setter.IndexOf("if (optimumDevice != null)", StringComparison.Ordinal));
+            < setter.IndexOf("game.Platform.SetTextureLodBias(textureIds, bias);", StringComparison.Ordinal));
 
         // And the Cecil transplant carries both new members.
         string patcher = Read("Optimum.Patcher/Program.cs");

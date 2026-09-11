@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!-- The Vulkan renderer backend. Referenced by nothing in the game: the
-       launcher loads it reflectively and hands the device to the client through
-       OptimumRender.Device, so no vanilla assembly ever gains an assembly
-       reference to a renderer implementation. -->
+       launcher loads it reflectively and OptimumRenderBootstrap.CreatePlatform
+       hands the client a VulkanClientPlatform, so no vanilla assembly ever gains
+       an assembly reference to a renderer implementation. -->
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

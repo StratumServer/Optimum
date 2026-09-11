@@ -95,7 +95,7 @@ internal static class GpuTest
     }
 
     /// <summary>The layer messages a device from <see cref="NewDevice" /> has recorded so far.</summary>
-    public static List<string> MessagesOf(IOptimumGraphicsDevice seam) =>
+    public static List<string> MessagesOf(VulkanDevice seam) =>
         seam is VulkanDevice device && DeviceMessages.TryGetValue(device, out List<string>? messages)
             ? messages
             : new List<string>();
@@ -107,7 +107,7 @@ internal static class GpuTest
     /// reports as an error through GetError (failed Vulkan calls, rejected
     /// shaders) fails too.
     /// </summary>
-    public static void AssertClean(IOptimumGraphicsDevice seam, [CallerFilePath] string callerFile = "")
+    public static void AssertClean(VulkanDevice seam, [CallerFilePath] string callerFile = "")
     {
         List<string> messages = MessagesOf(seam);
         ValidationAssert.NoErrors(messages);
