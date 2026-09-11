@@ -409,7 +409,9 @@ public class PacingStatsTests
             long submitsBefore = VulkanStats.WaitCount(WaitSite.QueueSubmit);
             seam.BeginFrame();
             seam.BindFramebuffer(framebuffer);
-            seam.ClearColor(0, 0.25f, 0.5f, 0.75f, 1f);
+            // No channel lands on x.5 in UNORM8: the spec lets 0.5 quantise to 127 or
+            // 128, and the RTX 4070 driver reads 127 (0.2 -> 51 is exact either way).
+            seam.ClearColor(0, 0.25f, 0.2f, 0.75f, 1f);
             seam.Present();
             long submitsAfterFrame = VulkanStats.WaitCount(WaitSite.QueueSubmit);
 
@@ -419,7 +421,7 @@ public class PacingStatsTests
 
             for (int i = 0; i < pixelsOut.Length; i += 4)
             {
-                Assert.Equal(new byte[] { 64, 128, 191, 255 }, pixelsOut[i..(i + 4)]);
+                Assert.Equal(new byte[] { 64, 51, 191, 255 }, pixelsOut[i..(i + 4)]);
             }
             Assert.Equal(1, submitsAfterFrame - submitsBefore);
             Assert.Equal(submitsAfterFrame, VulkanStats.WaitCount(WaitSite.QueueSubmit));

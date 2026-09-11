@@ -167,7 +167,8 @@ public class PoisonModeTests
             commands.SubmitAndWait(commandBuffer =>
             {
                 targets.Bind(commandBuffer, framebuffer);
-                targets.ClearColor(commandBuffer, 0, 0.25f, 0.5f, 0.75f, 1f);
+                // No channel on x.5 in UNORM8 (0.5 may legally read 127 or 128).
+                targets.ClearColor(commandBuffer, 0, 0.25f, 0.2f, 0.75f, 1f);
                 targets.ClearDepth(commandBuffer, 1f);
                 targets.EndRendering(commandBuffer);
             });
@@ -175,7 +176,7 @@ public class PoisonModeTests
             byte[] colorBytes = Read(context!, commands, textures, color, size, 4, ImageAspectFlags.ColorBit);
             for (int i = 0; i < colorBytes.Length; i += 4)
             {
-                Assert.Equal(new byte[] { 64, 128, 191, 255 }, colorBytes[i..(i + 4)]);
+                Assert.Equal(new byte[] { 64, 51, 191, 255 }, colorBytes[i..(i + 4)]);
             }
 
             byte[] depthBytes = Read(context!, commands, textures, depth, size, 4, ImageAspectFlags.DepthBit);
