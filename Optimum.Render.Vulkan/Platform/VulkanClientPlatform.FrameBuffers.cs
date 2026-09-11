@@ -202,17 +202,17 @@ public partial class VulkanClientPlatform
             }
             list[13] = ssao;
 
-            list[14] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8, 14);
-            list[15] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8, 15);
+            list[14] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8);
+            list[15] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8);
         }
 
-        list[2] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8, 2);
-        list[3] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8, 3);
-        list[9] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8, 9);
-        list[8] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8, 8);
-        list[4] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f, 4);
-        list[7] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba16f, 7);
-        list[10] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f, 10);
+        list[2] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
+        list[3] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
+        list[9] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
+        list[8] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
+        list[4] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f);
+        list[7] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba16f);
+        list[10] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f);
 
         // Optimum: TAA history, render-resolution like Primary. Two slots so the
         // resolve reads last frame's parity while writing this frame's; never
@@ -236,7 +236,7 @@ public partial class VulkanClientPlatform
             try
             {
                 list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(width, height,
-                    EnumTextureInternalFormat.Rgba16f, OptimumTaaSharpenIndex);
+                    EnumTextureInternalFormat.Rgba16f);
             }
             catch (Exception error)
             {
@@ -251,7 +251,7 @@ public partial class VulkanClientPlatform
         {
             list[OptimumFsrFramebufferIndex] = CreateOptimumColorTarget(
                 ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y,
-                EnumTextureInternalFormat.Rgba8, OptimumFsrFramebufferIndex);
+                EnumTextureInternalFormat.Rgba8);
         }
 
         list[5] = CreateOptimumDepthTarget(width / 4, height / 4);
@@ -280,6 +280,15 @@ public partial class VulkanClientPlatform
             SetupOptimumTextureSampler(textureId, 9729, 33069);
             device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
             device.SetTextureParameter(textureId, OptimumGlConstants.TextureCompareMode, OptimumGlConstants.CompareRefToTexture);
+        }
+
+        // The post chain's colour textures are transients; record the slot each one serves.
+        foreach (int transientSlot in Graph.TransientAllocator.PostChainSlots)
+        {
+            FrameBufferRef transientTarget = list[transientSlot];
+            if (transientTarget == null || transientTarget.ColorTextureIds == null ||
+                transientTarget.ColorTextureIds.Length == 0) continue;
+            device.OptInTransient(transientTarget.ColorTextureIds[0], transientSlot);
         }
 
         OptimumFinishDeviceFrameBufferSetup(list);
@@ -358,16 +367,16 @@ public partial class VulkanClientPlatform
     /// <summary>
     /// A single-colour-attachment target, as the post chain uses. Every caller is a post-chain
     /// slot, so the colour texture is a transient (Transient pool class, registered with the
-    /// device's transient allocator under <paramref name="slot" />).
+    /// device's transient allocator; SetupDefaultFrameBuffers tags its slot number).
     /// </summary>
-    private FrameBufferRef CreateOptimumColorTarget(int width, int height, EnumTextureInternalFormat format, int slot)
+    private FrameBufferRef CreateOptimumColorTarget(int width, int height, EnumTextureInternalFormat format)
     {
         FrameBufferRef target = new FrameBufferRef();
         target.Width = width;
         target.Height = height;
         target.FboId = device.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[1];
-        target.ColorTextureIds[0] = device.CreateTransientTexture2D(width, height, format, slot);
+        target.ColorTextureIds[0] = device.CreateTransientTexture2D(width, height, format, -1);
         // setupAttachment uses linear filtering and edge clamping. FXAA and
         // the reduced-resolution blur passes require fractional texel samples.
         SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);

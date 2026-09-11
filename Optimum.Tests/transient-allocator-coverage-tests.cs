@@ -17,13 +17,18 @@ public class TransientAllocatorCoverageTests
     {
         string platform = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
         Assert.Contains("device.CreateTransientTexture2DRaw(ssaoWidth, ssaoHeight, 6407, 13);", platform);
-        foreach (int slot in new[] { 14, 15 })
-            Assert.Contains("list[" + slot + "] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8, " + slot + ");", platform);
-        foreach (int slot in new[] { 2, 3, 8, 9, 4, 7, 10 })
+        // Every other post-chain slot is built by CreateOptimumColorTarget, whose texture is transient.
+        foreach (int slot in new[] { 2, 3, 4, 7, 8, 9, 10, 14, 15 })
             Assert.Contains("list[" + slot + "] = CreateOptimumColorTarget(", platform);
-        Assert.Contains("EnumTextureInternalFormat.Rgba16f, OptimumTaaSharpenIndex);", platform);
-        Assert.Contains("EnumTextureInternalFormat.Rgba8, OptimumFsrFramebufferIndex);", platform);
-        Assert.Contains("target.ColorTextureIds[0] = device.CreateTransientTexture2D(width, height, format, slot);", platform);
+        Assert.Contains("list[OptimumTaaSharpenIndex] = CreateOptimumColorTarget(", platform);
+        Assert.Contains("list[OptimumFsrFramebufferIndex] = CreateOptimumColorTarget(", platform);
+        Assert.Contains("target.ColorTextureIds[0] = device.CreateTransientTexture2D(width, height, format, -1);", platform);
+        Assert.Contains("foreach (int transientSlot in Graph.TransientAllocator.PostChainSlots)", platform);
+        Assert.Contains("device.OptInTransient(transientTarget.ColorTextureIds[0], transientSlot);", platform);
+        int helper = platform.IndexOf("private FrameBufferRef CreateOptimumColorTarget(", StringComparison.Ordinal);
+        Assert.True(helper >= 0);
+        int helperEnd = platform.IndexOf("return target;", helper, StringComparison.Ordinal);
+        Assert.DoesNotContain("device.CreateTexture2D(", platform.Substring(helper, helperEnd - helper));
 
         string allocator = Read("Optimum.Render.Vulkan/Graph/TransientAllocator.cs");
         Assert.Contains("PostChainSlots = { 2, 3, 4, 7, 8, 9, 10, 13, 14, 15, 18, 21 };", allocator);

@@ -1398,6 +1398,9 @@ public sealed unsafe class VulkanDevice : IDisposable
         return id;
     }
 
+    /// <summary>Registers (or re-tags) a texture as the transient of client framebuffer slot <paramref name="framebufferSlot" />.</summary>
+    public void OptInTransient(int textureId, int framebufferSlot) => _transients.OptIn(textureId, framebufferSlot);
+
     /// <summary><see cref="CreateTransientTexture2D" /> with a raw GL internal format token, no pixels.</summary>
     public int CreateTransientTexture2DRaw(int width, int height, int glInternalFormat, int framebufferSlot)
     {
