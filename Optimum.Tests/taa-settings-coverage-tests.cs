@@ -371,14 +371,26 @@ public class TaaSettingsCoverageTests
     {
         string makefile = Read("Makefile");
 
-        // Not "*.fsh plus *.vsh": the packagers copy the whole directory, and a
-        // stage that ships on only one of the two paths is exactly the bug the
-        // completeness check catches.
-        Assert.Contains("find sources/shaders -maxdepth 1 -type f -exec cp -f {}", makefile);
+        // Not "*.fsh plus *.vsh": both deploy paths copy the whole directory, and
+        // a stage that ships on only one of the two paths is exactly the bug the
+        // completeness check catches. The copy is a per-file loop whose cp failure
+        // aborts the target, so a copy error cannot be swallowed the way
+        // "find -exec cp" swallowed it.
+        Assert.Equal(2, Occurrences(makefile, "for f in sources/shaders/*;"));
+        Assert.Equal(2, Occurrences(makefile, "for f in sources/shaderincludes/*;"));
+        Assert.Contains("cp -f \"$$f\" \"$(VANILLA_DIR)/assets/game/shaders/$$(basename $$f)\" || exit 1", makefile);
+        Assert.Contains("cp -f \"$$f\" \"$(INSTALL_DIR)/assets/game/shaders/$$(basename $$f)\" || exit 1", makefile);
         Assert.DoesNotContain("cp sources/shaders/*.fsh sources/shaders/*.vsh", makefile);
+        Assert.DoesNotContain("find sources/shaders", makefile);
         Assert.Contains("mkdir -p $(VANILLA_DIR)/assets/game/shaderincludes", makefile);
         Assert.Contains("mkdir -p $(INSTALL_DIR)/assets/game/shaderincludes", makefile);
+
+        // The completeness check compares CONTENT, not mere existence: a vanilla
+        // file of the same name that was never overwritten used to satisfy
+        // [ -f "$$d" ] and pass.
         Assert.Equal(2, Occurrences(makefile, "did not reach"));
+        Assert.Equal(2, Occurrences(makefile, "cmp -s \"$$f\" \"$$d\""));
+        Assert.DoesNotContain("[ -f \"$$d\" ] ||", makefile);
     }
 
     // ---- helpers -----------------------------------------------------------
