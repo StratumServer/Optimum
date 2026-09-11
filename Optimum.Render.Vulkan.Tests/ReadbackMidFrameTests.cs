@@ -280,6 +280,52 @@ public class ReadbackMidFrameTests
     }
 
     /// <summary>
+    /// Review fix: an RGBA8 readback leaves the arena cursor at 4, which the old
+    /// 8-byte alignment rounded to 8, an illegal offset for the RGBA32F copy that
+    /// follows (a multiple of the 16-byte texel is required). Both reads are
+    /// exact, the second one lands on a legal offset and validation stays clean.
+    /// </summary>
+    [SkippableFact]
+    public unsafe void ReadbacksOfDifferentTexelSizesInOneFrameUseLegalOffsets()
+    {
+        Assert.Equal(8UL, ReadbackManager.OffsetAlignmentFor(1));
+        Assert.Equal(8UL, ReadbackManager.OffsetAlignmentFor(4));
+        Assert.Equal(16UL, ReadbackManager.OffsetAlignmentFor(16));
+        Assert.Equal(24UL, ReadbackManager.OffsetAlignmentFor(12));
+
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            IOptimumGraphicsDevice seam = device!;
+            byte[] rgba = { 11, 22, 33, 44 };
+            var floats = new float[2 * 2 * 4];
+            for (int i = 0; i < floats.Length; i++) floats[i] = i * 0.25f - 1.5f;
+            var floatBytes = new byte[floats.Length * sizeof(float)];
+            System.Buffer.BlockCopy(floats, 0, floatBytes, 0, floatBytes.Length);
+
+            int small;
+            fixed (byte* pixels = rgba)
+                small = seam.CreateTexture2D(1, 1, EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba,
+                    (IntPtr)pixels, false);
+            int wide;
+            fixed (byte* pixels = floatBytes)
+                wide = seam.CreateTexture2DRaw(2, 2, 0x8814, (IntPtr)pixels, 16);
+
+            seam.BeginFrame();
+            seam.Present();
+
+            seam.BeginFrame();
+            byte[] first = device!.ReadBackLevel0ForTests(small);
+            byte[] second = device.ReadBackLevel0ForTests(wide);
+            seam.Present();
+
+            Assert.Equal(rgba, first);
+            Assert.Equal(floatBytes, second);
+            GpuTest.AssertClean(seam);
+        }
+    }
+
+    /// <summary>
     /// A texture upload on the render thread in the middle of a frame submits
     /// the frame's recorded part first (the clear of A) and recording continues
     /// (the clear of B): both clears and the uploaded texels land, with two

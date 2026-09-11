@@ -65,6 +65,19 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     /// <summary>How many rendering scopes have been opened, for diagnostics.</summary>
     public long ScopesOpened { get; private set; }
 
+    /// <summary>
+    /// Runs right after <c>vkCmdBeginRendering</c>, inside the new scope. The
+    /// occlusion query ring resumes a query the previous scope's end suspended:
+    /// GL counts samples across framebuffer changes, Vulkan only within a scope.
+    /// </summary>
+    public Action<CommandBuffer>? ScopeOpened;
+
+    /// <summary>Runs right before <c>vkCmdEndRendering</c>, still inside the scope (ends a running query).</summary>
+    public Action<CommandBuffer>? ScopeClosing;
+
+    /// <summary>Runs right after <c>vkCmdEndRendering</c>, outside any scope (where a query pool may be reset).</summary>
+    public Action<CommandBuffer>? ScopeClosed;
+
     public RenderTargetManager(VulkanContext context, TextureManager textures, GlStateTracker state)
     {
         _context = context;
@@ -328,6 +341,7 @@ internal sealed unsafe class RenderTargetManager : IDisposable
         _needsRestart = false;
         ScopesOpened++;
         VulkanStats.NoteScopeOpened();
+        ScopeOpened?.Invoke(commandBuffer);
     }
 
     /// <summary>
@@ -337,8 +351,10 @@ internal sealed unsafe class RenderTargetManager : IDisposable
     public void EndRendering(CommandBuffer commandBuffer)
     {
         if (!_renderingActive) return;
+        ScopeClosing?.Invoke(commandBuffer);
         _context.Api.CmdEndRendering(commandBuffer);
         _renderingActive = false;
+        ScopeClosed?.Invoke(commandBuffer);
     }
 
     // ------------------------------------------------------------------- clears

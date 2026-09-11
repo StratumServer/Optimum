@@ -64,7 +64,11 @@ internal sealed unsafe class ReadbackManager : IDisposable
     {
         FrameSlot slot = _frames.Current;
         CommandBuffer commandBuffer = slot.CommandBuffer;
-        VulkanBuffer arena = Reserve(slot.Index, bytes, out ulong offset);
+        // The copy writes whole texels whatever the caller asked for, so the
+        // reservation covers them all; only the requested bytes are handed out.
+        ulong texel = (ulong)TextureDump.BytesPerTexel(texture.Format);
+        ulong copied = (ulong)width * height * texel;
+        VulkanBuffer arena = Reserve(slot.Index, Math.Max(bytes, copied), OffsetAlignmentFor(texel), out ulong offset);
 
         ImageLayout restore = texture.Layout;
         _textures.TransitionTexture(commandBuffer, texture, ImageLayout.TransferSrcOptimal);
@@ -81,7 +85,21 @@ internal sealed unsafe class ReadbackManager : IDisposable
 
         if (restore != ImageLayout.Undefined) _textures.TransitionTexture(commandBuffer, texture, restore);
 
-        return new ReadbackTicket(arena, offset, bytes, slot.FrameValue);
+        return new ReadbackTicket(arena, offset, Math.Min(bytes, copied), slot.FrameValue);
+    }
+
+    /// <summary>
+    /// A buffer offset legal for a copy of texels of <paramref name="texelBytes" />:
+    /// a multiple of the texel size (VUID-vkCmdCopyImageToBuffer-srcImage-07975,
+    /// 16 for RGBA32F) and of 4 for depth (-04053). Eight alone put an RGBA32F copy
+    /// that followed an RGBA8 one at an illegal offset.
+    /// </summary>
+    internal static ulong OffsetAlignmentFor(ulong texelBytes)
+    {
+        ulong alignment = OffsetAlignment;
+        if (texelBytes == 0) return alignment;
+        while (alignment % texelBytes != 0) alignment += OffsetAlignment;
+        return alignment;
     }
 
     /// <summary>Whether the copy has run, without waiting.</summary>
@@ -98,10 +116,10 @@ internal sealed unsafe class ReadbackManager : IDisposable
             (void*)destination, (long)ticket.Size, (long)ticket.Size);
     }
 
-    private VulkanBuffer Reserve(int slotIndex, ulong bytes, out ulong offset)
+    private VulkanBuffer Reserve(int slotIndex, ulong bytes, ulong alignment, out ulong offset)
     {
         VulkanBuffer? arena = _arenas[slotIndex];
-        ulong aligned = (_cursors[slotIndex] + OffsetAlignment - 1) / OffsetAlignment * OffsetAlignment;
+        ulong aligned = (_cursors[slotIndex] + alignment - 1) / alignment * alignment;
 
         if (arena == null || aligned + bytes > arena.Size)
         {
