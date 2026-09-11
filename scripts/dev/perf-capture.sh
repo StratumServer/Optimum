@@ -139,10 +139,21 @@ CLIENT_LOG="$LOG" RENDERER="$RENDERER_ARG" bash "$REPO/scripts/dev/run-client.sh
 
 # 3. Wait for the world. A launch is not a verification (rule 1): the renderer is
 #    confirmed from the log below, never assumed from the argument.
+client_alive() {
+  # No -q: grep reads all of ps's output, so pipefail never sees ps die of SIGPIPE.
+  ps -eo cmd | grep "dotnet [V]intagestory.dll" >/dev/null
+}
 deadline=$((SECONDS + WAIT_FOR_WORLD))
 ready=0
 while (( SECONDS < deadline )); do
   if grep -q "\[Client Chat\] Welcome" "$LOG" 2>/dev/null; then ready=1; break; fi
+  if ! client_alive; then
+    # The process is gone, so the log is complete: one last look, then stop waiting.
+    if grep -q "\[Client Chat\] Welcome" "$LOG" 2>/dev/null; then ready=1; break; fi
+    echo "the client exited before '[Client Chat] Welcome' appeared; see $LOG" >&2
+    grep -m1 -E "Exception|Fatal" "$LOG" >&2 || true
+    exit 1
+  fi
   sleep 2
 done
 if (( ready == 0 )); then
