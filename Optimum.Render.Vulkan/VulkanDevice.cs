@@ -2570,6 +2570,15 @@ public sealed unsafe class VulkanDevice : IDisposable
         VulkanStats.NoteDynamicStateCommands(emitted);
     }
 
+    /// <summary>
+    /// Commands the first draw of a recording emits: the core set plus the colour
+    /// write state of the tier (one command; two more with dynamic blend). Tests only.
+    /// </summary>
+    internal int DynamicStateCommandsPerDrawForTests =>
+        VulkanStats.DynamicStateCommandsPerDraw +
+        (_context.Capabilities.ColorWriteTier == ColorWriteTier.PipelineKey ? 0 : 1) +
+        (_context.Capabilities.DynamicColorBlend ? 2 : 0);
+
     /// <summary>The colour write tier this device's draws use. Tests only.</summary>
     internal ColorWriteTier ColorWriteTierForTests => _context.Capabilities.ColorWriteTier;
 

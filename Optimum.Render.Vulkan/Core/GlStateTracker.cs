@@ -427,10 +427,29 @@ internal sealed class GlStateTracker
     /// device sets it from the context's selected tier; component tests keep the
     /// default, which bakes everything into the pipeline key.
     /// </summary>
-    public ColorWriteTier ColorWriteTier { get; set; } = ColorWriteTier.PipelineKey;
+    public ColorWriteTier ColorWriteTier
+    {
+        get => _colorWriteTier;
+        set
+        {
+            _colorWriteTier = value;
+            InvalidateBlend();
+        }
+    }
+
+    private ColorWriteTier _colorWriteTier = ColorWriteTier.PipelineKey;
+    private bool _dynamicBlend;
 
     /// <summary>With the mask tier: blend enable and equation are dynamic too, so the blend set leaves the key.</summary>
-    public bool DynamicBlend { get; set; }
+    public bool DynamicBlend
+    {
+        get => _dynamicBlend;
+        set
+        {
+            _dynamicBlend = value;
+            InvalidateBlend();
+        }
+    }
 
     /// <summary>The global glColorMask.</summary>
     public ColorComponentFlags ColorMask => _colorWriteMask;

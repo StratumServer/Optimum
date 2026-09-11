@@ -261,7 +261,7 @@ unchanged from earlier builds; the other four carry stable `key=value` tokens:
 stats <s>s: <n> frames (<ms> ms/frame), <n> allocations (<n> live), <n> blocking uploads costing <ms> ms (<pct>% of the interval), textures +<n>/-<n>, mesh writes dropped <n>, uniform overflows <n>
 stats.pacing samples=<n> p50_ms=<ms> p95_ms=<ms> p99_ms=<ms> stddev_ms=<ms> stutters=<n>
 stats.waits frame_pacing_n=<n> frame_pacing_ms=<ms> upload_submit_n=<n> upload_submit_ms=<ms> ... present_n=<n> present_ms=<ms> queue_submit_n=<n> queue_submit_ms=<ms>
-stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes>
+stats.counters blocking_uploads=<n> uploads=<n> scopes=<n> barriers=<n> rebar_fallbacks=<n> dynamic_state=<n> uniform_ring_used=<bytes> uniform_ring_capacity=<bytes> mask_restarts=<n> feedback_splits=<n>
 stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar_misses=<n> empty_blocks_freed=<n> budget_ext=<0|1> class_bytes=<images>,<buffers>,<staging>,<rebar>,<transient>,<dedicated> heaps=<used>/<budget>,...
 ```
 
@@ -282,7 +282,12 @@ stats.memory blocks=<n> dedicated=<n> rebar_used=<bytes> rebar_cap=<bytes> rebar
   asked for the ReBAR pool class and fell through to host staging memory because no ReBAR type
   exists, the cap was reached or `OPTIMUM_VULKAN_NO_REBAR=1`; each is also logged),
   `dynamic_state` (dynamic-state commands), `uniform_ring_used` (peak bytes one frame
-  slot used) and `uniform_ring_capacity` (bytes per slot).
+  slot used), `uniform_ring_capacity` (bytes per slot), `mask_restarts` (scope restarts that
+  reopened an identical attachment set; draw buffers and motion windows are write masks since
+  Phase 2 contract C4, so this must be 0) and `feedback_splits` (restarts that took a sampled,
+  draw-buffer-excluded slot out of the scope, as the final composition does with Primary 1, or
+  let it rejoin). The colour write tier is on the device-up validation log line;
+  `OPTIMUM_VULKAN_COLOR_WRITE_TIER=enable|mask|pipeline` forces one.
 - `stats.memory`, a snapshot at sample time (Phase 1B step 5): `blocks` (live device
   allocations the allocator holds), `dedicated` (of them, one-resource blocks), `rebar_used` and
   `rebar_cap` (ReBAR class bytes and its cap, min(192 MiB, heap budget x 0.25)), `rebar_misses`
