@@ -61,7 +61,7 @@ public class QueryRingTests
         }
     }
 
-    private static int CreateTarget(IOptimumGraphicsDevice seam)
+    private static int CreateTarget(VulkanDevice seam)
     {
         int texture = seam.CreateTexture2D(Size, Size, EnumTextureInternalFormat.Rgba8,
             EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -75,7 +75,7 @@ public class QueryRingTests
     /// SystemRenderSunMoon's probe: colour writes off, a query around one draw
     /// covering <paramref name="coverage" /> squared pixels.
     /// </summary>
-    private static void Probe(IOptimumGraphicsDevice seam, int framebuffer, int program, int query, int coverage)
+    private static void Probe(VulkanDevice seam, int framebuffer, int program, int query, int coverage)
     {
         seam.BindFramebuffer(framebuffer);
         seam.UseProgram(program);
@@ -105,7 +105,7 @@ public class QueryRingTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
             int framebuffer = CreateTarget(seam);
             int query = seam.CreateOcclusionQuery();
@@ -180,7 +180,7 @@ public class QueryRingTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
             int framebuffer = CreateTarget(seam);
             bool precise = device!.PreciseOcclusionForTests;
@@ -243,7 +243,7 @@ public class QueryRingTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             int program = VulkanDeviceIntegrationTests.LinkProgram(seam, FullscreenVertex, WhiteFragment, "query-probe");
             int targetA = CreateTarget(seam);
             int targetB = CreateTarget(seam);

@@ -41,7 +41,7 @@ public class ReadbackMidFrameTests
         }
     }
 
-    private static int CreateTarget(IOptimumGraphicsDevice seam, int size, out int texture)
+    private static int CreateTarget(VulkanDevice seam, int size, out int texture)
     {
         texture = seam.CreateTexture2D(size, size, EnumTextureInternalFormat.Rgba8,
             EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
@@ -56,7 +56,7 @@ public class ReadbackMidFrameTests
     /// target: between frames BindFramebuffer is a no-op and the read sees
     /// whichever target the last frame bound.
     /// </summary>
-    private static byte[] Read(IOptimumGraphicsDevice seam, int framebuffer, int width, int height)
+    private static byte[] Read(VulkanDevice seam, int framebuffer, int width, int height)
     {
         var pixels = new byte[width * height * 4];
         unsafe
@@ -80,7 +80,7 @@ public class ReadbackMidFrameTests
         }
     }
 
-    private static unsafe void SetTint(IOptimumGraphicsDevice seam, int ubo, byte r, byte g, byte b)
+    private static unsafe void SetTint(VulkanDevice seam, int ubo, byte r, byte g, byte b)
     {
         var tint = new float[] { r / 255f, g / 255f, b / 255f, 1f };
         fixed (float* values = tint)
@@ -104,7 +104,7 @@ public class ReadbackMidFrameTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 16;
 
             int program = VulkanDeviceIntegrationTests.LinkProgram(seam, """
@@ -194,7 +194,7 @@ public class ReadbackMidFrameTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 4;
             const int frames = 12;
             int target = CreateTarget(seam, size, out _);
@@ -255,7 +255,7 @@ public class ReadbackMidFrameTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 1024;
             Assert.True((ulong)size * size * 4 > ReadbackManager.MinimumArenaSize);
             int target = CreateTarget(seam, size, out _);
@@ -296,7 +296,7 @@ public class ReadbackMidFrameTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             byte[] rgba = { 11, 22, 33, 44 };
             var floats = new float[2 * 2 * 4];
             for (int i = 0; i < floats.Length; i++) floats[i] = i * 0.25f - 1.5f;
@@ -337,7 +337,7 @@ public class ReadbackMidFrameTests
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
-            IOptimumGraphicsDevice seam = device!;
+            VulkanDevice seam = device!;
             const int size = 4;
             int targetA = CreateTarget(seam, size, out _);
             int targetB = CreateTarget(seam, size, out _);
