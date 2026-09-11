@@ -286,7 +286,8 @@ public class TaaPipelineCoverageTests
         // free on the device path and a double count in VulkanStats.
         Assert.Contains("transparent.DepthTextureId = primary.DepthTextureId;", platform);
 
-        int dispose = platform.IndexOf("public void DisposeFrameBuffers(", StringComparison.Ordinal);
+        // Virtual since platform substitution (VulkanClientPlatform overrides it).
+        int dispose = platform.IndexOf("public virtual void DisposeFrameBuffers(", StringComparison.Ordinal);
         Assert.True(dispose >= 0);
         int end = platform.IndexOf("public override void ClearFrameBuffer(", dispose, StringComparison.Ordinal);
         string body = end > dispose ? platform.Substring(dispose, end - dispose) : platform.Substring(dispose);

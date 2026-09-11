@@ -967,6 +967,26 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityDebugAttributesPacket", 1),
 };
 
+// --- Platform substitution (Vulkan-native plan, Phase 0) ---
+// Optimum.Render.Vulkan ships VulkanClientPlatform : ClientPlatformWindows and overrides
+// these members. ILPatcher applies both lists after every body transplant and hook, so a
+// transplant of the same methods cannot drop the flags, then fails the patch if any body
+// still reaches a virtualized method with `call`/`ldftn` (a caller that would bypass the
+// override). Entries must be public or protected: a private virtual cannot be overridden
+// from another assembly.
+var typesToUnseal = new List<string>
+{
+    "Vintagestory.Client.NoObf.ClientPlatformWindows",
+};
+
+var methodsToVirtualize = new List<MethodTarget>
+{
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SetupDefaultFrameBuffers", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisposeFrameBuffers", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFullscreenTriangle", 1),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GetGraphicsCardRenderer", 0),
+};
+
 int total = ILPatcher.PatchWithInjection(
     vanillaPath, compiledPath, outputPath,
     typesToInject, membersToInject, targets,
@@ -1004,7 +1024,9 @@ int total = ILPatcher.PatchWithInjection(
             TargetGenericArity: 0,
             InsertBeforeTarget: true),
     },
-    fieldsToRetype: fieldsToRetype);
+    fieldsToRetype: fieldsToRetype,
+    typesToUnseal: typesToUnseal,
+    methodsToVirtualize: methodsToVirtualize);
 
 Console.WriteLine($"\nDone.");
 return total > 0 ? 0 : 1;
