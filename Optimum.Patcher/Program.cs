@@ -74,6 +74,7 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Client.ClientProgram"] = new()
     {
         "ConfigureClientPlatform",
+        "WireClientPlatform",
         "OptimumStartSinglePlayerServer",
     },
     ["Vintagestory.Client.NoObf.ClientSettings"] = new()
