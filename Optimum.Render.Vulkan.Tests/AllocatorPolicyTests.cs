@@ -232,6 +232,7 @@ public class AllocatorPolicyTests
             }
 
             ValidationAssert.NoErrors(messages);
+            ValidationAssert.NoSyncHazards(messages);
         }
     }
 
