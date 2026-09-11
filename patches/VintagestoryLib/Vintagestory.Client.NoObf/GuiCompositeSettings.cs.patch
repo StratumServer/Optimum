@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..f46ccc4 100644
+index 4d08f84..5ca0cbf 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..f46ccc4 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,170 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,225 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -107,9 +107,15 @@ index 4d08f84..f46ccc4 100644
  
 +	private void OnOptimumOptions(bool on)
 +	{
-+		// The feature-flag build uses 23 rows inside the fixed 740px dialog.
-+		// The 28px interval places the last row at 703px.
++		// The stock build uses 22 rows inside the fixed 740px dialog: the 28px
++		// interval places the last row (TAA mip bias) at 675px. The feature-flag
++		// build stacks the four greedy-mesh rows on top of the three TAA ones,
++		// and 26 rows only fit at a 24px interval (last row at 687px).
++#if OPTIMUM_GREEDY_MESH
++		double rowH = 24.0;
++#else
 +		double rowH = 28.0;
++#endif
 +		double y0 = 87.0;
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
@@ -166,19 +172,28 @@ index 4d08f84..f46ccc4 100644
 +			.AddStaticText(Lang.Get("optimum-godrayscap"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-godrayscap-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
 +			.AddSwitch(onOptimumGodRaysCapChanged, ElementBounds.Fixed(450, y0 + rowH * 18 - 3, 200, 20), "optGodRaysCap")
++			.AddStaticText(Lang.Get("optimum-taa"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
++			.AddHoverText(Lang.Get("optimum-taa-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
++			.AddSwitch(onOptimumTaaChanged, ElementBounds.Fixed(450, y0 + rowH * 19 - 3, 200, 20), "optTaa")
++			.AddStaticText(Lang.Get("optimum-taasharpness"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
++			.AddHoverText(Lang.Get("optimum-taasharpness-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
++			.AddSlider(onOptimumTaaSharpnessChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 20), "optTaaSharpness")
++			.AddStaticText(Lang.Get("optimum-taamipbias"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 21, 400, 30))
++			.AddHoverText(Lang.Get("optimum-taamipbias-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 21, 400, 25))
++			.AddSlider(onOptimumTaaMipBiasChanged, ElementBounds.Fixed(450, y0 + rowH * 21 + 2, 200, 20), "optTaaMipBias")
 +#if OPTIMUM_GREEDY_MESH
-+			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
-+			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 19 - 3, 200, 20), "optGreedyMesh")
-+			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
-+			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 20), "optGreedySpan")
-+			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 21, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 21, 400, 25))
-+			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 21 + 2, 200, 20), "optGreedyLightTol")
-+			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 22, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 22, 400, 25))
-+			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 22 + 2, 200, 20), "optGreedyFarDist")
++			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 22, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 22, 400, 25))
++			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 22 - 3, 200, 20), "optGreedyMesh")
++			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 23, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 23, 400, 25))
++			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 23 + 2, 200, 20), "optGreedySpan")
++			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 24, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 24, 400, 25))
++			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 24 + 2, 200, 20), "optGreedyLightTol")
++			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 25, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 25, 400, 25))
++			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 25 + 2, 200, 20), "optGreedyFarDist")
 +#endif
 +			.EndChildElements()
 +			.Compose();
@@ -204,6 +219,11 @@ index 4d08f84..f46ccc4 100644
 +		int renderScaleIdx = ClientSettings.OptimumRenderScale >= 1.0f ? 0 : ClientSettings.OptimumRenderScale >= 0.85f ? 1 : ClientSettings.OptimumRenderScale >= 0.77f ? 2 : 3;
 +		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
 +		composer.GetSwitch("optGodRaysCap").SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
++		composer.GetSwitch("optTaa").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);
++		// The two sliders are ints; TaaSharpness (0..1) and TaaMipBias (-1..0)
++		// are carried in hundredths so the row still has usable granularity.
++		composer.GetSlider("optTaaSharpness").SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.TaaSharpness * 100f), 0, 100, 5, "%");
++		composer.GetSlider("optTaaMipBias").SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.TaaMipBias * 100f), -100, 0, 5, "/100");
 +#if OPTIMUM_GREEDY_MESH
 +		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveGreedyMesh);
 +		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
@@ -252,6 +272,41 @@ index 4d08f84..f46ccc4 100644
 +		handler.ReloadShaders();
 +	}
 +	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++
++	// TAA is a whole-chain switch, not a per-frame flag: the resolve's history
++	// targets and the motion attachment only exist while it is on, and final.fsh
++	// compiles its FXAA branch against EffectiveTaa. So the toggle rebuilds the
++	// frame buffers, reloads the shaders and drops the temporal history - a
++	// history captured under the other configuration would be reprojected into a
++	// frame that never produced it. IsFeatureExplicitlyDisabled, not
++	// IsShaderFeatureDisabled: a missing launcher scan must not veto TAA (see
++	// OptimumConfig.EffectiveTaa).
++	private void onOptimumTaaChanged(bool on)
++	{
++		if (Vintagestory.API.Config.OptimumConfig.IsFeatureExplicitlyDisabled("Taa")) return;
++		Vintagestory.API.Config.OptimumConfig.Taa = on;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		ScreenManager.Platform.RebuildFrameBuffers();
++		handler.ReloadShaders();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++	}
++
++	// Both sliders are read per frame by the sharpen pass and the LOD-bias
++	// application, so they take effect live: no frame buffer rebuild, no shader
++	// reload, no temporal reset.
++	private bool onOptimumTaaSharpnessChanged(int val)
++	{
++		Vintagestory.API.Config.OptimumConfig.TaaSharpness = GameMath.Clamp(val / 100f, 0f, 1f);
++		Vintagestory.API.Config.OptimumConfig.Save();
++		return true;
++	}
++
++	private bool onOptimumTaaMipBiasChanged(int val)
++	{
++		Vintagestory.API.Config.OptimumConfig.TaaMipBias = GameMath.Clamp(val / 100f, -1f, 0f);
++		Vintagestory.API.Config.OptimumConfig.Save();
++		return true;
++	}
 +	private void onOptimumEntityLightBatchChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
@@ -270,7 +325,7 @@ index 4d08f84..f46ccc4 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +1988,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2043,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

@@ -117,6 +117,72 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
         }
     }
 
+    [Theory]
+    // Optimum's own temporal stages: an external copy of any of them is not a
+    // writer that stops emitting, it is a second resolve compiled against an MRT
+    // layout, history format and reactive convention it cannot know.
+    [InlineData("assets/mymodshaders/shaders/taa-resolve.fsh")]
+    [InlineData("assets/mymodshaders/shaders/taa-debug.vsh")]
+    [InlineData("assets/mymodshaders/shaders/taa-skymotion.fsh")]
+    [InlineData("assets/mymodshaders/shaders/taa-sharpen.fsh")]
+    // A stage Optimum has not written yet: the "taa-" prefix rule has to cover
+    // it, or every future stage ships without a scanner verdict.
+    [InlineData("assets/mymodshaders/shaders/taa-somethingnew.fsh")]
+    // The liquid velocity pass and the FSR pair the post-resolve sharpen shares
+    // its vertex stage and lobe maths with.
+    [InlineData("assets/mymodshaders/shaders/chunkliquidmotion.vsh")]
+    [InlineData("assets/mymodshaders/shaders/fsr-rcas.fsh")]
+    [InlineData("assets/mymodshaders/shaders/fsr-easu.vsh")]
+    // ShaderRegistry merges every shaderinclude into one dictionary that all the
+    // motion writers compile against, so any file in that directory can redefine
+    // a helper they call - not only the vertexwarp include named in the rules.
+    [InlineData("assets/mymodshaders/shaderincludes/vertexwarp.vsh")]
+    [InlineData("assets/mymodshaders/shaderincludes/somehelper.vsh")]
+    public void AnExternalCopyOfAnyTaaShaderDisablesTaa(string entryPath)
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string archivePath = Path.Combine(dataPath, "Mods", "SomeShaderPack.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+        using (ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            using StreamWriter writer = new(archive.CreateEntry(entryPath).Open());
+            writer.Write("void main() { }");
+        }
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.Contains("Taa", report.DisabledFeatures);
+        Assert.Contains(
+            "external shader owns a motion-vector writer contract",
+            report.FeatureReasons["Taa"]);
+    }
+
+    [Fact]
+    public void AnUnrelatedExternalShaderLeavesTaaAlone()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string archivePath = Path.Combine(dataPath, "Mods", "SomeShaderPack.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+        using (ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            using StreamWriter writer = new(archive.CreateEntry(
+                "assets/mymodshaders/shaders/gui.fsh").Open());
+            writer.Write("void main() { }");
+        }
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        // The veto is explicit, not a blanket "some mod ships shaders" reaction:
+        // TAA stays available and only an owned contract turns it off.
+        Assert.DoesNotContain("Taa", report.DisabledFeatures);
+    }
+
     private static void WriteHookAssembly(string path)
     {
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(

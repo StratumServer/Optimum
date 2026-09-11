@@ -354,8 +354,31 @@ public static class ShaderCompatibilityScanner
             // rejects; and an external sky-motion pass would decide the reactive
             // policy for every cloud pixel in the frame.
             HasExternalShader(report, "decals.vsh") || HasExternalShader(report, "decals.fsh") ||
+            // Every stage Optimum owns outright: the resolve itself, the debug
+            // views, the sky-motion pass and the post-resolve sharpen. An
+            // external copy of any of them is not a writer that emits nothing,
+            // it is a replacement resolve running against a contract (MRT
+            // layout, history formats, jitter and reactive semantics) it cannot
+            // know. The prefix rule covers taa-* files added after this line was
+            // written, so a new stage cannot ship without a scanner rule.
+            HasExternalShader(report, "taa-resolve.vsh") || HasExternalShader(report, "taa-resolve.fsh") ||
+            HasExternalShader(report, "taa-debug.vsh") || HasExternalShader(report, "taa-debug.fsh") ||
             HasExternalShader(report, "taa-skymotion.vsh") || HasExternalShader(report, "taa-skymotion.fsh") ||
-            HasExternalShader(report, "vertexwarp.vsh");
+            HasExternalShader(report, "taa-sharpen.vsh") || HasExternalShader(report, "taa-sharpen.fsh") ||
+            HasExternalShaderPrefix(report, "taa-") ||
+            // The sharpen pass is an RCAS variant and shares its vertex stage and
+            // lobe maths with the FSR1 pair, which is also what render scale
+            // resolves through: an external copy leaves TAA sharpening either
+            // doubled with FSR's own tap or gone.
+            HasExternalShader(report, "fsr-rcas.vsh") || HasExternalShader(report, "fsr-rcas.fsh") ||
+            HasExternalShader(report, "fsr-easu.vsh") || HasExternalShader(report, "fsr-easu.fsh") ||
+            // Not just vertexwarp.vsh: ShaderRegistry merges every shaderinclude
+            // into one dictionary that all the motion writers compile against, so
+            // an external file anywhere in that directory can redefine a helper
+            // the writers call - and unlike a shader, an include has no program
+            // of its own to point the blame at.
+            HasExternalShader(report, "vertexwarp.vsh") ||
+            HasExternalShaderInclude(report);
         AddFeatureDecision(report, "Taa", externalMotionShader,
             "external shader owns a motion-vector writer contract");
 
@@ -384,6 +407,27 @@ public static class ShaderCompatibilityScanner
     {
         return report.ShaderOwners.Keys.Any(path =>
             string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// True when any external shader file name starts with <paramref name="prefix" />.
+    /// Optimum's own stages share the "taa-" prefix, so a stage added later is
+    /// covered without touching the feature decision.
+    /// </summary>
+    private static bool HasExternalShaderPrefix(ShaderCompatibilityReport report, string prefix)
+    {
+        return report.ShaderOwners.Keys.Any(path =>
+            Path.GetFileName(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// True when any external file lands in the shaderincludes directory.
+    /// NormalizeShaderPath keeps those under a "shaderincludes/" prefix.
+    /// </summary>
+    private static bool HasExternalShaderInclude(ShaderCompatibilityReport report)
+    {
+        return report.ShaderOwners.Keys.Any(path =>
+            path.Replace('\\', '/').Contains("shaderincludes/", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsShaderHookIndicator(string indicator) =>

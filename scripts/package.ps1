@@ -355,6 +355,26 @@ try {
         Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
     }
 
+    # 5b-3. Verify the overlay actually landed. Both copies above are wildcards,
+    # so what fails is never "a file is missing from a list" but a source path
+    # that moved or a destination directory that does not exist - and the symptom
+    # in game is silent: vanilla's shader runs instead of Optimum's. TAA is the
+    # worst case, because its own stages (taa-resolve, taa-debug, taa-skymotion,
+    # taa-sharpen), the liquid velocity pass (chunkliquidmotion), the FSR pair the
+    # sharpen shares its maths with and every shaderinclude the motion writers
+    # compile against all have to ship together or the resolve reads vectors
+    # nobody wrote. Fail the package instead.
+    $missingShaders = @()
+    foreach ($pair in @(@($shaderSrc, $shaderDst), @($shaderIncSrc, $shaderIncDst))) {
+        if (-not (Test-Path $pair[0])) { continue }
+        foreach ($srcShader in (Get-ChildItem $pair[0] -File)) {
+            if (-not (Test-Path (Join-Path $pair[1] $srcShader.Name))) { $missingShaders += $srcShader.FullName }
+        }
+    }
+    if ($missingShaders.Count -gt 0) {
+        throw "Shader source file(s) never reached the staged assets: $($missingShaders -join ', ')"
+    }
+
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
     # Read/write explicitly as UTF-8 via .NET, not Get-Content/Set-Content:
     # Windows PowerShell 5.1 (what the Windows installer launches) defaults
@@ -422,7 +442,24 @@ try {
         '.optimum/vanilla/Mods/VSEssentials.dll',
         '.optimum/vanilla/Mods/VSSurvivalMod.dll',
         '.optimum/standalone-install',
-        'assets/game/shaderincludes/vertexwarp.vsh'
+        'assets/game/shaderincludes/vertexwarp.vsh',
+        # TAA: the resolve and its debug views, the sky-motion pass, the liquid
+        # velocity pass and the FSR pair the post-resolve sharpen shares its
+        # vertex stage and lobe maths with. Named one by one rather than left to
+        # the wildcard overlay because this list is what a reviewer reads to see
+        # what a release is supposed to contain.
+        'assets/game/shaders/taa-resolve.vsh',
+        'assets/game/shaders/taa-resolve.fsh',
+        'assets/game/shaders/taa-debug.vsh',
+        'assets/game/shaders/taa-debug.fsh',
+        'assets/game/shaders/taa-skymotion.vsh',
+        'assets/game/shaders/taa-skymotion.fsh',
+        'assets/game/shaders/chunkliquidmotion.vsh',
+        'assets/game/shaders/chunkliquidmotion.fsh',
+        'assets/game/shaders/fsr-easu.vsh',
+        'assets/game/shaders/fsr-easu.fsh',
+        'assets/game/shaders/fsr-rcas.vsh',
+        'assets/game/shaders/fsr-rcas.fsh'
     )) {
         if (-not (Test-Path (Join-Path $stageDir $requiredStageFile))) {
             throw "Required package file not found: $requiredStageFile"
