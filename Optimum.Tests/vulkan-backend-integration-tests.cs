@@ -471,4 +471,13 @@ public class VulkanBackendIntegrationTests
         string textures = Read("Optimum.Render.Vulkan/Core/TextureManager.cs");
         Assert.Contains("internal static AccessFlags2 AccessForLayout(ImageLayout layout, bool writer)", textures);
     }
+
+    [Fact]
+    public void TheBootstrapAlwaysLogsWhichRendererItChose()
+    {
+        string program = Read("patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch");
+        Assert.Contains("\"[Optimum] OpenGL renderer: selected by config\"", program);
+        Assert.Contains("(OptimumRenderBootstrap.Advisory ?? \"selected by config\")", program);
+        Assert.Contains("\"[Optimum] OpenGL renderer: \" + optimumRendererReason", program);
+    }
 }
