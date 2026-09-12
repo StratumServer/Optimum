@@ -34,6 +34,15 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// <summary>Test seam: the device the overrides draw with.</summary>
     internal VulkanDevice? GraphicsDevice => device;
 
+    /// <summary>
+    /// Test seam: binds this platform to a device somebody else brought up, so a
+    /// test can drive the client's own code paths (which go through
+    /// <c>ScreenManager.Platform</c>) against a shared device - the NGX fixture's,
+    /// which may not be created twice in a process. Never called by the client:
+    /// <see cref="InitializeGraphics" /> is the only place the device is set.
+    /// </summary>
+    internal void AdoptDeviceForTests(VulkanDevice adopted) => device = adopted;
+
     public const string ForceInstallFailureVariable = "OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE";
     public const string ForcedInstallFailureReason = "forced by " + ForceInstallFailureVariable;
 

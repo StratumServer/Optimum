@@ -449,6 +449,10 @@ var membersToInject = new Dictionary<string, List<string>>
         // is the only place chunkopaque/chunktopsoil mip selection changes.
         "ApplyOptimumTerrainSamplerLodBias",
         "ApplyOptimumSamplerLodBias",
+        // DLSS plan, Phase 6: the single applier both call sites go through, so
+        // an upscaler publishing its plan moves the atlas parameter and the
+        // terrain samplers together, with no shader reload.
+        "ApplyOptimumLodBias",
     },
     ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
     {
@@ -532,9 +536,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "chunkOriginScratch",
         "centerPoolLocationsScratch",
         "edgePoolLocationsScratch",
-        "optimumTextureLodBias",
         "ApplyOptimumTextureLodBias",
-        "SetOptimumTextureLodBias",
+        "CollectOptimumLodBiasedAtlases",
         // TAA P3: previous-frame transforms for the terrain motion writers.
         "SetOptimumMotionUniforms",
         // TAA P4: the liquid velocity pass and its reactive constant.
@@ -811,6 +814,9 @@ var targets = new List<MethodTarget>
     // the tesselation worker thread. See
     // docs/implementation-plans/chunk-tesselator-worker-pool-wiring-plan-2026-08-10.md.
     new("Vintagestory.Client.NoObf.ClientMain", "Start", 0),
+    // DLSS plan, Phase 6: recomposed atlases carry the driver default again, so
+    // the applied LOD bias is forgotten here and written afresh.
+    new("Vintagestory.Client.NoObf.ClientMain", "ReloadTextures", 0),
     // SystemRenderPlayerEffects: dynamic light radius (lambda-free rewrite)
     new("Vintagestory.Client.NoObf.SystemRenderPlayerEffects", "onBeforeRender", 1),
     // ClientPlatformWindows: persistent mapped VBO and index uploads. ParameterTypes

@@ -4,6 +4,7 @@ using System.IO;
 using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
+using Vintagestory.Client.NoObf;
 
 namespace Optimum.Render.Vulkan.Platform;
 
@@ -97,6 +98,10 @@ public partial class VulkanClientPlatform
         }
         upscaler = null;
         OptimumConfig.ClearUpscalerPlan();
+        // No upscaler owns the resolve any more, so the bias goes back to whatever
+        // the render scale and TAA ask for - 0, and the parameter off the atlases
+        // and samplers entirely, in the common case.
+        ShaderRegistry.ApplyOptimumLodBias();
     }
 
     // ------------------------------------------------------- the placement
@@ -161,6 +166,11 @@ public partial class VulkanClientPlatform
     {
         if (upscaler != null) upscaler.RetireFeature();
         base.ApplyOptimumUpscalerSettings();
+        // Retiring the feature cleared the published plan, so the bias the samplers
+        // carry is now the one the old preset asked for. A preset change does not
+        // reload shaders by design, which is exactly why it has to be written here;
+        // the next frame's feature publishes the new plan and writes it again.
+        ShaderRegistry.ApplyOptimumLodBias();
     }
 
     /// <summary>
@@ -239,6 +249,14 @@ public partial class VulkanClientPlatform
             primary.Width, primary.Height, target.Width, target.Height,
             DlssUpscaler.QualityOf(OptimumConfig.UpscalerQuality));
         if (!upscaler.EnsureFeature(plan)) return false;
+        // The feature that was just created published its own ratio, so the texture
+        // LOD bias moved with it (OptimumConfig.EffectiveTerrainLodBias). Applied
+        // here rather than left to the chunk renderer's per-frame poll: the poll is
+        // a backstop, and the two places the bias reaches the GPU - the atlas
+        // textures and the terrain sampler objects - have to follow the plan
+        // whether or not a chunk pass ran. Nothing is rebuilt and no shader is
+        // reloaded; a bias that did not move makes no call at all.
+        ShaderRegistry.ApplyOptimumLodBias();
 
         IOptimumTemporalContext frame = OptimumTemporal.Context;
         NgxDlssEvaluation evaluation = new NgxDlssEvaluation

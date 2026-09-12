@@ -266,42 +266,36 @@ public class TaaSharpenCoverageTests
         string chunkRenderer = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
-        Assert.Contains(
-            "float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;",
-            chunkRenderer);
-        // A total of zero still makes no TexParameter call at all, which is what
-        // keeps TAA off at native scale identical to vanilla.
-        Assert.Contains("if (textureLodBias == 0f)", chunkRenderer);
-        // The zero branch is not a plain guard: it restores. optimumTextureLodBias
-        // caches the last applied value starting at NaN, so a nonzero -> zero
-        // transition (TAA switched off, render scale back to 1.0) writes 0 back
-        // through SetOptimumTextureLodBias - which resets the atlas texture
-        // parameter AND, through ShaderRegistry.ApplyOptimumTerrainSamplerLodBias,
-        // the two terrain sampler objects - before returning.
-        Assert.Contains("private float optimumTextureLodBias = float.NaN;", chunkRenderer);
-        string zeroBranch = BranchAfter(chunkRenderer, "if (textureLodBias == 0f)");
-        Assert.Contains("if (!float.IsNaN(optimumTextureLodBias))", zeroBranch);
-        Assert.Contains("SetOptimumTextureLodBias(0f);", zeroBranch);
-        Assert.Contains("optimumTextureLodBias = float.NaN;", zeroBranch);
-        // ...and the branch really is just that branch: the nonzero path below
-        // it is outside it.
-        Assert.DoesNotContain("SetOptimumTextureLodBias(textureLodBias)", zeroBranch);
+        // The per-frame poll asks the shared rule whether anything moved and then
+        // delegates to the one applier; a total of zero still makes no
+        // TexParameter call at all, which is what keeps TAA off at native scale
+        // identical to vanilla.
+        Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.TerrainLodBiasPending())", chunkRenderer);
+        Assert.Contains("ShaderRegistry.ApplyOptimumLodBias();", chunkRenderer);
+        // The zero case is not a plain guard: it restores. AppliedTerrainLodBias
+        // starts at NaN, so a nonzero -> zero transition (TAA switched off, render
+        // scale back to 1.0, the upscaler standing down) is still pending and
+        // writes 0 back to the atlas textures AND the two terrain sampler
+        // objects before it records NaN again.
+        string optimumConfig = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("if (bias == 0f) return !float.IsNaN(AppliedTerrainLodBias);", optimumConfig);
+        Assert.Contains("AppliedTerrainLodBias = bias == 0f ? float.NaN : bias;", optimumConfig);
         // Both backends keep getting the same value through the same setter: the platform
         // virtual SetTextureLodBias (Phase 1A step 5).
-        Assert.Contains("game.Platform.SetTextureLodBias(textureIds, bias);", chunkRenderer);
         Assert.Contains("device.SetTextureParameter(textureIds[k], OptimumGlConstants.TextureLodBias, bias);", VulkanPlatformSource.Read());
         Assert.Contains("GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, bias);", VulkanPlatformSource.ReadClientPlatformWindows());
 
         string registry = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
-        // The sampler objects override the texture parameter on the units they
-        // are bound to, so they must carry the same bias.
-        Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;", registry);
-        Assert.Contains("if (terrainLodBias != 0f)", registry);
-        // The load-time call skips zero (vanilla makes no such call), but the
-        // shared entry point applies whatever it is handed - the restore above
-        // hands it 0f and must reach the samplers.
+        // One applier writes both halves from the one shared value: the sampler
+        // objects override the texture parameter on the units they are bound to,
+        // so they must carry the same bias.
+        Assert.Contains("float bias = OptimumConfig.EffectiveTerrainLodBias;", registry);
+        Assert.Contains("platform.SetTextureLodBias(atlases, bias);", registry);
+        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(bias);", registry);
+        // The shared entry point applies whatever it is handed - the restore
+        // above hands it 0f and must reach the samplers.
         string samplerEntry = BranchAfter(registry, "public static void ApplyOptimumTerrainSamplerLodBias(float bias)");
         Assert.DoesNotContain("!= 0f", samplerEntry);
         Assert.Equal(4, Count(samplerEntry, ", bias);"));
@@ -324,7 +318,7 @@ public class TaaSharpenCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
         // The sampler write is a reusable entry point, not inlined into the load.
         Assert.Contains("public static void ApplyOptimumTerrainSamplerLodBias(float bias)", registry);
-        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", registry);
+        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(bias);", registry);
         // Both backends, through the same per-sampler helper and the platform virtual.
         Assert.Contains("platform.SetSamplerLodBias(sampler, bias);", registry);
         Assert.Contains(
@@ -338,12 +332,11 @@ public class TaaSharpenCoverageTests
         string chunkRenderer = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
-        string setter = MethodBody(chunkRenderer, "private void SetOptimumTextureLodBias(float bias)");
-        Assert.Contains("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", setter);
-        // Before the texture half, and on every backend: both go through the platform.
-        Assert.True(
-            setter.IndexOf("ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);", StringComparison.Ordinal)
-            < setter.IndexOf("game.Platform.SetTextureLodBias(textureIds, bias);", StringComparison.Ordinal));
+        Assert.Contains("ShaderRegistry.ApplyOptimumLodBias();", chunkRenderer);
+        // Both halves are written by the one applier, so neither can move alone.
+        string applier = MethodBody(registry, "public static void ApplyOptimumLodBias()");
+        Assert.Contains("platform.SetTextureLodBias(atlases, bias);", applier);
+        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(bias);", applier);
 
         // And the Cecil transplant carries both new members.
         string patcher = Read("Optimum.Patcher/Program.cs");
@@ -353,19 +346,24 @@ public class TaaSharpenCoverageTests
 
     /// <summary>
     /// P5 review: with a 0f initialiser the very first OnBeforeRenderOpaque of a
-    /// TAA-off, native-scale session sees "0 wanted, not-NaN cached" and writes an
-    /// explicit LOD bias of 0 over the driver default on every atlas - and, since
-    /// the fix above, on every terrain sampler too. NaN is what "Optimum has never
-    /// touched this" has to mean for that configuration to make no call at all.
+    /// TAA-off, native-scale session would see "0 wanted, not-NaN applied" and
+    /// write an explicit LOD bias of 0 over the driver default on every atlas -
+    /// and on every terrain sampler too. NaN is what "Optimum has never touched
+    /// this" has to mean for that configuration to make no call at all; since the
+    /// DLSS plan's Phase 6 the value lives in OptimumConfig, where the renderer
+    /// and the shader load share it with the per-frame poll.
     /// </summary>
     [Fact]
-    public void TheCachedLodBiasStartsAtNanSoTaaOffTouchesNothing()
+    public void TheAppliedLodBiasStartsAtNanSoTaaOffTouchesNothing()
     {
+        string optimumConfig = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("public static float AppliedTerrainLodBias { get; private set; } = float.NaN;", optimumConfig);
+        Assert.Contains("AppliedTerrainLodBias = float.NaN;", optimumConfig);
+
         string chunkRenderer = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs");
-        Assert.Contains("private float optimumTextureLodBias = float.NaN;", chunkRenderer);
-        Assert.DoesNotContain("private float optimumTextureLodBias;", chunkRenderer);
+        Assert.DoesNotContain("optimumTextureLodBias", chunkRenderer);
     }
 
     // --- manifests and scanner ---------------------------------------------

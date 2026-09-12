@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..c60529f 100644
+index 67feafa..e0e934e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -556,7 +556,23 @@ index 67feafa..c60529f 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2816,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2296,10 +2569,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		EntityAtlasManager.ResumeRegenMipmaps();
+ 		foreach (Block block in Blocks)
+ 		{
+ 			block.LoadTextureSubIdForBlockColor();
+ 		}
++		// Optimum: the atlases were just recomposed, so whatever LOD bias their
++		// textures carried went with them. Forgetting the applied value makes the
++		// next apply write it again (ChunkRenderer's per-frame poll, one frame
++		// later); at a bias of 0 it still writes nothing.
++		Vintagestory.API.Config.OptimumConfig.InvalidateTerrainLodBias();
+ 	}
+ 
+ 	public int WhiteTexture()
+ 	{
+ 		if (whitetexture == -1)
+@@ -2543,10 +2821,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -570,7 +586,7 @@ index 67feafa..c60529f 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3807,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3812,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

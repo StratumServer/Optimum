@@ -659,6 +659,68 @@ public static class OptimumConfig
     }
 
     /// <summary>
+    /// The atlas textures the LOD bias is applied to, registered by the client
+    /// (ChunkRenderer knows them; nothing else does) so that every caller of
+    /// <c>ShaderRegistry.ApplyOptimumLodBias</c> - the per-frame poll, the shader
+    /// load and the renderer, the moment an upscaler publishes a plan - biases
+    /// the same set. Empty until the client has registered one, which is why
+    /// <see cref="NoteTerrainLodBiasApplied" /> refuses to record an application
+    /// that reached no atlas.
+    /// </summary>
+    public static int[] LodBiasedAtlases { get; private set; } = Array.Empty<int>();
+
+    /// <summary>Registers the atlas textures the bias applies to. Null is empty.</summary>
+    public static void RegisterLodBiasedAtlases(int[] textureIds)
+    {
+        LodBiasedAtlases = textureIds ?? Array.Empty<int>();
+    }
+
+    /// <summary>
+    /// The bias the atlas textures and the terrain sampler objects are really
+    /// carrying, or NaN for "Optimum has never touched the parameter" - which is
+    /// the state that keeps the upscaler-off, TAA-off, native-scale configuration
+    /// from making a single TexParameter/SamplerParameter call.
+    /// </summary>
+    public static float AppliedTerrainLodBias { get; private set; } = float.NaN;
+
+    /// <summary>
+    /// Whether <see cref="EffectiveTerrainLodBias" /> has moved away from what the
+    /// samplers carry. A bias of 0 is pending only when something non-zero was
+    /// applied before and has to be taken back off.
+    /// </summary>
+    public static bool TerrainLodBiasPending()
+    {
+        float bias = EffectiveTerrainLodBias;
+        if (bias == 0f) return !float.IsNaN(AppliedTerrainLodBias);
+        return float.IsNaN(AppliedTerrainLodBias) ||
+            Math.Abs(bias - AppliedTerrainLodBias) >= 0.0001f;
+    }
+
+    /// <summary>
+    /// Records what the two call sites just wrote. 0 records NaN again: the
+    /// parameter is back at the driver default and must not be written a second
+    /// time. <paramref name="reachedAtlases" /> false leaves the value pending, so
+    /// a re-apply that ran before the client registered its atlases (the renderer
+    /// publishing a plan on the first frame) is finished by the next per-frame
+    /// poll rather than silently skipped.
+    /// </summary>
+    public static void NoteTerrainLodBiasApplied(float bias, bool reachedAtlases)
+    {
+        if (!reachedAtlases && bias != 0f) return;
+        AppliedTerrainLodBias = bias == 0f ? float.NaN : bias;
+    }
+
+    /// <summary>
+    /// Forgets what the samplers carry, so the next apply writes the parameter
+    /// again: new sampler objects after a shader reload, a new atlas texture, or
+    /// a test that wants the first application back.
+    /// </summary>
+    public static void InvalidateTerrainLodBias()
+    {
+        AppliedTerrainLodBias = float.NaN;
+    }
+
+    /// <summary>
     /// The texture LOD bias the active upscaler asks for, published by the
     /// renderer when it creates the feature, and 0 whenever no upscaler is
     /// running. Not persisted: it is derived from the render and display sizes

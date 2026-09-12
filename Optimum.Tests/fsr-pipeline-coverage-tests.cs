@@ -74,47 +74,30 @@ public class FsrPipelineCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
 
         // Bias must be skipped entirely when nothing asks for one (native res
-        // with TAA off, which is the only configuration that made a bias before
-        // P5 added TaaMipBias to the same value) so rendering matches vanilla
-        // exactly - vanilla never sets these TexParameter/SamplerParameter
-        // calls at all.
-        Assert.Contains("float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;", chunkRenderer);
-        Assert.Contains("if (textureLodBias == 0f)", chunkRenderer);
-        // ... but "no call" only holds once the bias has been cleared again. The
-        // cache starts at NaN and the zero branch is a RESTORE path: after a
-        // nonzero bias it writes 0 back through SetOptimumTextureLodBias (atlas
-        // TexParameter and, via ShaderRegistry, the terrain sampler objects)
-        // before it returns and resets the cache to NaN. Without that a user who
-        // turns TAA off, or leaves FSR, would keep the last bias until the next
-        // shader reload.
-        Assert.Contains("private float optimumTextureLodBias = float.NaN;", chunkRenderer);
-        string zeroBranch = BranchAfter(chunkRenderer, "if (textureLodBias == 0f)");
-        Assert.Contains("if (!float.IsNaN(optimumTextureLodBias))", zeroBranch);
-        Assert.Contains("SetOptimumTextureLodBias(0f);", zeroBranch);
-        Assert.Contains("optimumTextureLodBias = float.NaN;", zeroBranch);
-        // ...and the branch really is just that branch: the nonzero path below
-        // it is outside it.
-        Assert.DoesNotContain("SetOptimumTextureLodBias(textureLodBias)", zeroBranch);
-        // The render-scale term itself still is log2 of the clamped scale; it
-        // now lives in OptimumConfig so both call sites share it.
+        // with TAA off and no upscaler) so rendering matches vanilla exactly -
+        // vanilla never sets these TexParameter/SamplerParameter calls at all.
+        // That rule now lives in OptimumConfig, where every caller of the one
+        // applier shares it.
         string optimumConfig = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("if (bias == 0f) return !float.IsNaN(AppliedTerrainLodBias);", optimumConfig);
+        Assert.Contains("AppliedTerrainLodBias = bias == 0f ? float.NaN : bias;", optimumConfig);
+        // The render-scale term itself still is log2 of the clamped scale.
         Assert.Contains("bias += MathF.Log2(Math.Clamp(scale, 0.5f, 1.0f));", optimumConfig);
-        // The bias reaches every block atlas through SetOptimumTextureLodBias,
-        // which routes to the device and keeps the GL call as its fallback. The
-        // caller still computes the value; only the application moved.
-        Assert.Contains("SetOptimumTextureLodBias(textureLodBias)", chunkRenderer);
+        // The per-frame poll registers the atlases and delegates; it no longer
+        // owns a cache of its own.
+        Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.TerrainLodBiasPending())", chunkRenderer);
+        Assert.Contains("ShaderRegistry.ApplyOptimumLodBias();", chunkRenderer);
+        Assert.DoesNotContain("optimumTextureLodBias", chunkRenderer);
         // Phase 1A step 5: applied by the platform virtual SetTextureLodBias.
-        Assert.Contains("game.Platform.SetTextureLodBias(textureIds, bias);", chunkRenderer);
+        Assert.Contains("platform.SetTextureLodBias(atlases, bias);", shaderRegistry);
         Assert.Contains("(TextureParameterName)34049, bias", VulkanPlatformSource.ReadClientPlatformWindows());
         Assert.Contains("OptimumGlConstants.TextureLodBias, bias", VulkanPlatformSource.Read());
-        Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;", shaderRegistry);
-        Assert.Contains("if (terrainLodBias != 0f)", shaderRegistry);
-        // P5 review: the four SamplerParameter calls moved behind
-        // ApplyOptimumTerrainSamplerLodBias so ChunkRenderer can reach them too
+        Assert.Contains("float bias = OptimumConfig.EffectiveTerrainLodBias;", shaderRegistry);
+        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(bias);", shaderRegistry);
+        // P5 review: the four SamplerParameter calls live behind
+        // ApplyOptimumTerrainSamplerLodBias so every caller reaches them too
         // (a bound sampler object overrides the atlas TexParameter, so a live
-        // bias change has to write both). The load still passes the same value
-        // and still only when it is non-zero.
-        Assert.Contains("ApplyOptimumTerrainSamplerLodBias(terrainLodBias);", shaderRegistry);
+        // bias change has to write both).
         // The sampler entry point itself applies the RAW value: no "!= 0f"
         // short-circuit inside it, or the restore path above would reach the
         // atlas parameter and leave the two sampler objects biased.

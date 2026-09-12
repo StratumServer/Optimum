@@ -1842,6 +1842,24 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             : state;
     }
 
+    /// <summary>
+    /// Test seam: the LOD bias a draw would sample this texture with when no
+    /// sampler object overrides it, or NaN when the id names no texture. This is
+    /// the state the sampler cache keys on, so it is what the GPU sees.
+    /// </summary>
+    internal float TextureLodBias(int textureId)
+    {
+        VulkanTexture? texture = _textures.Get(textureId);
+        return texture == null ? float.NaN : texture.State.LodBias;
+    }
+
+    /// <summary>
+    /// Test seam: the LOD bias a sampler object carries - the value that wins on
+    /// every unit it is bound to - or NaN when the id names no sampler.
+    /// </summary>
+    internal float SamplerLodBias(int samplerId) =>
+        _standaloneSamplers.TryGetValue(samplerId, out SamplerState state) ? state.LodBias : float.NaN;
+
     public void BindSampler(int unit, int samplerId)
     {
         if ((uint)unit >= GlStateTracker.MaxTextureUnits) return;
