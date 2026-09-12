@@ -253,6 +253,46 @@ public class HeadlessHarnessCoverageTests
     }
 
     [Fact]
+    public void AnAbsurdFrameCountIsClampedInsteadOfAllocated()
+    {
+        // PlanFrames runs inside a static initialiser, so an unbounded count from
+        // the environment does not produce a bad capture, it takes the client down
+        // with an OutOfMemoryException wrapped in a TypeInitializationException.
+        const long max = Vintagestory.API.Config.OptimumHeadless.MaxFrames;
+        long[] clamped = Vintagestory.API.Config.OptimumHeadless.PlanFrames(0, long.MaxValue, 1);
+        Assert.Equal(max, clamped.LongLength);
+        Assert.Equal(0L, clamped[0]);
+
+        // A clamped stride and first still produce an ascending, non-overflowing
+        // list: long.MaxValue anywhere must not wrap into negative frame indices.
+        long[] wild = Vintagestory.API.Config.OptimumHeadless.PlanFrames(long.MaxValue, 4, long.MaxValue);
+        Assert.Equal(4, wild.Length);
+        for (int i = 0; i < wild.Length; i++)
+        {
+            Assert.True(wild[i] >= 0L, "frame " + i + " overflowed to " + wild[i]);
+            if (i > 0) Assert.True(wild[i] > wild[i - 1], "frames stopped ascending at " + i);
+        }
+    }
+
+    [Fact]
+    public void TheRendererRewriteInTheCaptureScriptIsAtomic()
+    {
+        // The script edits the user's live ModConfig/optimum.json. Truncating it in
+        // place leaves a broken config behind if anything dies mid-write, so the new
+        // file is written beside it and renamed over it - on both the set and the
+        // restore, which share this one function.
+        string script = Read("scripts/dev/headless-capture.sh");
+        int start = script.IndexOf("set_renderer() {", StringComparison.Ordinal);
+        Assert.True(start >= 0, "headless-capture.sh no longer has a set_renderer function");
+        int end = script.IndexOf("\n}", start, StringComparison.Ordinal);
+        string body = script.Substring(start, end - start);
+        Assert.Contains("os.replace(", body);
+        Assert.DoesNotContain("open(path, \"w\")", body);
+        // And the restore on exit goes through the same function.
+        Assert.Contains("set_renderer \"$SAVED_RENDERER\"", script);
+    }
+
+    [Fact]
     public void TheHarnessIsDocumentedWhereItWouldBeLookedFor()
     {
         // CLAUDE.md is deliberately not asserted on: it is git-excluded, so it does
@@ -264,6 +304,10 @@ public class HeadlessHarnessCoverageTests
         int harness = roadmap.IndexOf("headless render harness", StringComparison.OrdinalIgnoreCase);
         Assert.True(harness > done && harness < planned,
             "the headless harness is not in the Done section of the roadmap");
+        // The planned shimmer number is only comparable between runs if the roadmap
+        // says what is pinned and how a drifted run is rejected.
+        Assert.Contains("determinism guard", roadmap, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("rejected, not reported", roadmap);
 
         string script = Read("scripts/dev/headless-capture.sh");
         // It must refuse to report a capture it cannot attribute to a backend.
@@ -286,6 +330,7 @@ public class HeadlessHarnessCoverageTests
         // A nonsense stride still produces consecutive frames rather than nothing.
         Assert.Equal(new long[] { 5, 6, 7 }, Vintagestory.API.Config.OptimumHeadless.PlanFrames(5, 3, 0));
         Assert.Empty(Vintagestory.API.Config.OptimumHeadless.PlanFrames(0, 0, 1));
+        Assert.Empty(Vintagestory.API.Config.OptimumHeadless.PlanFrames(0, -5, 1));
 
         foreach (long[] frames in new[] { list, cadence })
         {
