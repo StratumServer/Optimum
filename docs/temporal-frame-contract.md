@@ -150,6 +150,23 @@ At native resolution that is 8 phases; at render scale 0.5 it is 32.
 > motion attachment is allocated for either consumer, while the history slots (§3.3) and the sharpen
 > target (§3.4) stay the in-house resolve's alone.
 
+> **Note (2026-09-12, not a v1 change): where an upscaler sits in the frame.** The DLSS plan's
+> Phase 3 places the vendor evaluate exactly where the in-house resolve runs (DLSS Programming
+> Guide §3.1: during post processing, before tone mapping, as early in it as possible). What that
+> means for this contract's producers is nothing at all - the world, its G-buffer, the motion
+> attachment, SSAO and the LiquidDepth prepass are still render-resolution, the jitter is still one
+> NDC shear on the world projection, and §3.1/§3.2 describe the same images. What changes is
+> downstream of the resolve: the evaluate writes a **display-resolution** scene colour into its own
+> framebuffer slot (22, `OptimumUpscaledScene`, storage-usage colour plus a depth attachment), and
+> FindBright, the blur chain, god rays, luma, the final composition, the AfterFinalComposition
+> overlays, the blit and the screenshots all work at the display size from there on. The late
+> overlays depth-test against a **nearest-neighbour upscale** of Primary's depth, produced once per
+> frame, so their silhouettes are quantised to the render grid by up to one render pixel; that is the
+> accepted cost of keeping the evaluate early, and it is measured by
+> `UpscalePlacementTests.TheOverlayDepthIsAPointUpscaleAndItsEdgeErrorIsOneRenderPixel`.
+> Colour mode: Primary colour 0 is 8-bit LDR and already perceptually encoded, so the feature runs
+> with `IsHDR = 0` (guide §3.1.2), which is what §7.5's "no exposure path" implies.
+
 **Scope.** The jitter reaches **only** the perspective matrix `Set3DProjection` last loaded, and
 only while `JitterActive`. `ClientMain.CurrentProjectionMatrix` compares the top of the projection
 stack element-by-element against that matrix and hands back the sheared copy only on an exact match,
