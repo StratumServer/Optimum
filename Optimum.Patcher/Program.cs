@@ -491,6 +491,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumTaaMipBiasChanged",
         "onOptimumUpscalerChanged",
         "onOptimumUpscalerQualityChanged",
+        "onOptimumUpscalerSharpnessChanged",
+        "optimumUpscalerLodBiasText",
         "onOptimumLatencyChanged",
         "optimumUpdateUpscalerRows",
 #if OPTIMUM_GREEDY_MESH

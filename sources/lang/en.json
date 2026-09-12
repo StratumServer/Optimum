@@ -64,6 +64,8 @@
 	"optimum-upscalerquality-balanced": "Balanced",
 	"optimum-upscalerquality-performance": "Performance",
 	"optimum-upscalerquality-ultraperformance": "Ultra Performance",
+	"optimum-upscalersharpness": "Upscaler Texture Sharpness",
+	"optimum-upscalersharpness-tooltip": "How sharp the upscaler samples block and entity textures, in hundredths of the vendor recommendation. 100 is what NVIDIA recommends and is the default; lower values trade sharpness for temporal stability, which is what high-frequency textures like the pixel-art block atlas and alpha-tested foliage shimmer on at the aggressive presets. The resulting mip-map bias for the current preset is shown beside the value. Applies immediately; only does anything while an upscaler is on.",
 	"optimum-latency": "Latency Reduction",
 	"optimum-latency-tooltip": "Makes the frame wait for the GPU before it reads your mouse instead of after, which cuts input lag when the GPU is the limit. Vulkan renderer only; Boost also keeps the GPU clocks up at low frame rates.",
 	"optimum-latency-off": "Off",

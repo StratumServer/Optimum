@@ -472,6 +472,38 @@ public static class OptimumConfig
         { "dlaa", "quality", "balanced", "performance", "ultraperformance" };
 
     /// <summary>
+    /// How much sharper than the upscale ratio itself the atlases are sampled:
+    /// the term subtracted from <c>log2(render / display)</c> in
+    /// <see cref="RecommendedUpscalerLodBias(int, int)" />.
+    ///
+    /// 1.0 is the DLSS Programming Guide's recommendation (section 3.5) and the
+    /// default, so nothing moves unless the player moves it. The guide also says
+    /// that recommendation "can sometimes lead to increased temporal instability,
+    /// in the form of flickering and/or moire" and names high-frequency textures
+    /// (3.5.1) as the case - which is what Vintage Story's 32px pixel-art block
+    /// atlas with alpha-tested foliage is, and why the term is a setting here
+    /// rather than a constant: the magnitude grows with the ratio, so the
+    /// shimmer the player sees grows as the preset gets more aggressive.
+    ///
+    /// 0 leaves the bias at exactly <c>log2(render / display)</c>, which the same
+    /// section gives as the upper bound a bias must never exceed. Values are
+    /// clamped to [0, 1] on load and again where the bias is computed, so no
+    /// config file and no rounding can put the sampler above that bound.
+    /// </summary>
+    public static float UpscalerLodBiasOffset = 1.0f;
+
+    /// <summary>
+    /// The render scale each preset nominally asks the vendor for, in the order
+    /// of <see cref="UpscalerQualityNames" /> (DLAA 1, Quality 1/1.5, Balanced
+    /// 1/1.7, Performance 1/2, Ultra Performance 1/3). Only used to describe a
+    /// preset before a feature exists - the real number always comes from the
+    /// vendor's own optimal-settings query, published as
+    /// <see cref="UpscalerRenderScale" />.
+    /// </summary>
+    private static readonly float[] UpscalerQualityRenderScales =
+        { 1.0f, 1.0f / 1.5f, 1.0f / 1.7f, 0.5f, 1.0f / 3.0f };
+
+    /// <summary>
     /// Set by the renderer when the selected upscaler cannot come up - no native
     /// shim, no NGX, no supported GPU, a feature that refused to create. The
     /// upscaler stays off for the rest of the session and the frame runs exactly
@@ -730,15 +762,76 @@ public static class OptimumConfig
 
     /// <summary>
     /// The bias every current vendor SDK recommends for an upscaled frame:
-    /// <c>log2(renderWidth / displayWidth) - 1</c> (DLSS Programming Guide
-    /// §3.5, and the same formula in the FSR and XeSS guides). 0 when the two
+    /// <c>log2(renderWidth / displayWidth) - <see cref="UpscalerLodBiasOffset" /></c>
+    /// (DLSS Programming Guide §3.5, and the same formula in the FSR and XeSS
+    /// guides, whose recommended offset is the default 1). 0 when the two
     /// sizes are equal (DLAA), which is also the value that means "leave the
     /// sampler parameter alone".
     /// </summary>
     public static float RecommendedUpscalerLodBias(int renderWidth, int displayWidth)
     {
         if (renderWidth <= 0 || displayWidth <= 0 || renderWidth >= displayWidth) return 0f;
-        return MathF.Log2((float)renderWidth / displayWidth) - 1.0f;
+        return RecommendedUpscalerLodBiasForScale((float)renderWidth / displayWidth);
+    }
+
+    /// <summary>
+    /// The same bias from a ratio rather than a pair of widths, which is what the
+    /// published plan (<see cref="UpscalerRenderScale" />) and the settings row
+    /// have. <c>log2(scale)</c> is the guide's hard upper bound for the bias, so
+    /// the offset is clamped into [0, 1] and the result is capped at the bound
+    /// itself: neither a hand-edited config nor a rounded slider value can make
+    /// the samplers select a sharper mip than the ratio allows.
+    /// </summary>
+    public static float RecommendedUpscalerLodBiasForScale(float renderScale)
+    {
+        if (!(renderScale > 0f) || renderScale >= 1.0f) return 0f;
+        float bound = MathF.Log2(renderScale);
+        float offset = Math.Clamp(UpscalerLodBiasOffset, 0f, 1.0f);
+        return MathF.Min(bound - offset, bound);
+    }
+
+    /// <summary>
+    /// The bias the current preset would end up with, for the settings row to
+    /// show: the live plan's own ratio while an upscaler is running, and the
+    /// preset's nominal ratio before one is. 0 for DLAA and for "no upscaler".
+    /// </summary>
+    public static float PreviewUpscalerLodBias()
+    {
+        float scale = UpscalerRenderScale;
+        if (!(scale > 0f))
+        {
+            scale = NominalUpscalerRenderScale(UpscalerQuality);
+        }
+        return RecommendedUpscalerLodBiasForScale(scale);
+    }
+
+    /// <summary>The ratio a preset name nominally renders at; 1 for an unknown one.</summary>
+    public static float NominalUpscalerRenderScale(string quality)
+    {
+        for (int i = 0; i < UpscalerQualityNames.Length; i++)
+        {
+            if (string.Equals(UpscalerQualityNames[i], quality, StringComparison.OrdinalIgnoreCase))
+            {
+                return UpscalerQualityRenderScales[i];
+            }
+        }
+        return 1.0f;
+    }
+
+    /// <summary>
+    /// Re-derives the published plan's bias after <see cref="UpscalerLodBiasOffset" />
+    /// moved. The plan's ratio is unchanged - the render size, the vendor feature
+    /// and the temporal history are all untouched by this - so only the number the
+    /// samplers carry moves, and the caller finishes it with one
+    /// <c>ShaderRegistry.ApplyOptimumLodBias</c>. False when no plan is published,
+    /// or when the value did not move.
+    /// </summary>
+    public static bool RepublishUpscalerLodBias()
+    {
+        float bias = RecommendedUpscalerLodBiasForScale(UpscalerRenderScale);
+        if (bias == UpscalerLodBias) return false;
+        UpscalerLodBias = bias;
+        return true;
     }
 
     /// <summary>
@@ -1020,6 +1113,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
         (nameof(OptimumConfigData.Upscaler), Upscaler),
         (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
+        (nameof(OptimumConfigData.UpscalerLodBiasOffset), UpscalerLodBiasOffset.ToString("F2")),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -1149,6 +1243,10 @@ public static class OptimumConfig
                 string.Equals(requestedUpscalerQuality, "performance", StringComparison.OrdinalIgnoreCase) ? "performance" :
                 string.Equals(requestedUpscalerQuality, "ultraperformance", StringComparison.OrdinalIgnoreCase) ? "ultraperformance" :
                 "quality";
+            // The guide's bound is log2(render / display); the offset may only make
+            // the bias less aggressive, never more, so a hand-edited file is clamped
+            // into [0, 1] here and the bias computation caps it again.
+            UpscalerLodBiasOffset = Math.Clamp(data.UpscalerLodBiasOffset, 0f, 1.0f);
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -1226,6 +1324,7 @@ public static class OptimumConfig
             TaaJitterDev = TaaJitterDev,
             Upscaler = Upscaler,
             UpscalerQuality = UpscalerQuality,
+            UpscalerLodBiasOffset = UpscalerLodBiasOffset,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1311,6 +1410,7 @@ internal sealed class OptimumConfigData
     public bool TaaJitterDev { get; set; } = false;
     public string Upscaler { get; set; } = "off";
     public string UpscalerQuality { get; set; } = "quality";
+    public float UpscalerLodBiasOffset { get; set; } = 1.0f;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

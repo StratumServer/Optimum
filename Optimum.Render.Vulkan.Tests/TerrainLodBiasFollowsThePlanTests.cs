@@ -167,6 +167,113 @@ public class TerrainLodBiasFollowsThePlanTests
     }
 
     /// <summary>
+    /// DLSS plan, Phase 6 follow-up: the sharpness row reaches the samplers.
+    ///
+    /// The user's report is that the bias itself is the shimmer ("the lower the
+    /// Quality, the more jitter comes back"), which is the caveat the DLSS
+    /// Programming Guide section 3.5 gives for its own recommendation on
+    /// high-frequency textures. The row that lets him judge it is only worth
+    /// anything if moving it moves what the GPU samples with, so this drives it
+    /// the way the handler does - change the offset, re-derive the published
+    /// plan's bias, one applier, no shader reload, no rebuild, no feature change -
+    /// and measures the value on the atlas textures and on both terrain sampler
+    /// objects at two offsets of one preset.
+    ///
+    /// Skips, never fails, without the shim, the driver library or the NGX feature
+    /// libraries.
+    /// </summary>
+    [SkippableFact]
+    public void TheBiasInEffectFollowsTheSharpnessSetting()
+    {
+        _ngx.Require();
+        int mark = _ngx.MessageMark();
+        VulkanDevice seam = _ngx.Device;
+
+        string upscaler = OptimumConfig.Upscaler;
+        string preset = OptimumConfig.UpscalerQuality;
+        bool taa = OptimumConfig.Taa;
+        float renderScale = OptimumConfig.RenderScale;
+        float offset = OptimumConfig.UpscalerLodBiasOffset;
+        OptimumConfig.Taa = false;
+        OptimumConfig.RenderScale = 1.0f;
+        var host = new DlssUpscaler(Log);
+        using var terrain = new TerrainSamplers(seam);
+        try
+        {
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            OptimumConfig.Upscaler = "dlss";
+            OptimumConfig.UpscalerQuality = "performance";
+            OptimumConfig.UpscalerLodBiasOffset = 1.0f;
+            Assert.True(host.AdoptSession(_ngx.Session, seam, _ngx.VkDevice));
+            Assert.True(host.Active);
+
+            Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan plan));
+            seam.BeginFrame();
+            Assert.True(host.EnsureFeature(plan));
+            ShaderRegistry.ApplyOptimumLodBias();
+            seam.Present();
+
+            float bound = MathF.Log2((float)plan.RenderWidth / DisplayWidth);
+            float sharp = OptimumConfig.EffectiveTerrainLodBias;
+            Assert.Equal(bound - 1.0f, sharp, 3);
+            float sharpAtlas = terrain.AtlasBias();
+            float sharpSampler = terrain.SamplerBias();
+            Assert.Equal(sharp, sharpAtlas, 3);
+            Assert.Equal(sharp, sharpSampler, 3);
+
+            // The slider moves to a quarter of the recommendation. Nothing else
+            // does: the feature the frame evaluates and the size it renders at are
+            // the ones created above.
+            int featuresBefore = host.FeaturesCreated;
+            OptimumConfig.UpscalerLodBiasOffset = 0.25f;
+            Assert.True(OptimumConfig.RepublishUpscalerLodBias());
+            ShaderRegistry.ApplyOptimumLodBias();
+
+            float soft = OptimumConfig.EffectiveTerrainLodBias;
+            Log("performance: " + plan.RenderWidth + "x" + plan.RenderHeight + " -> " +
+                DisplayWidth + "x" + DisplayHeight +
+                ", guide bound " + bound.ToString("0.###") +
+                ", offset 1.00 -> bias " + sharp.ToString("0.###") +
+                " (atlases " + sharpAtlas.ToString("0.###") +
+                ", samplers " + sharpSampler.ToString("0.###") + ")" +
+                ", offset 0.25 -> bias " + soft.ToString("0.###") +
+                " (atlases " + terrain.AtlasBias().ToString("0.###") +
+                ", samplers " + terrain.SamplerBias().ToString("0.###") + ")");
+
+            Assert.Equal(bound - 0.25f, soft, 3);
+            Assert.True(soft > sharp, "a smaller offset must select a blurrier mip");
+            // What the GPU would sample with, at both call sites.
+            Assert.Equal(soft, terrain.AtlasBias(), 3);
+            Assert.Equal(soft, terrain.SamplerBias(), 3);
+            Assert.Equal(featuresBefore, host.FeaturesCreated);
+
+            // 0 is the guide's bound itself, and nothing may go past it.
+            OptimumConfig.UpscalerLodBiasOffset = 0f;
+            Assert.True(OptimumConfig.RepublishUpscalerLodBias());
+            ShaderRegistry.ApplyOptimumLodBias();
+            Assert.Equal(bound, terrain.AtlasBias(), 3);
+            Assert.Equal(bound, terrain.SamplerBias(), 3);
+            Assert.True(terrain.SamplerBias() <= bound + 0.0001f);
+            Assert.Equal(featuresBefore, host.FeaturesCreated);
+        }
+        finally
+        {
+            host.Shutdown();
+            OptimumConfig.Upscaler = upscaler;
+            OptimumConfig.UpscalerQuality = preset;
+            OptimumConfig.Taa = taa;
+            OptimumConfig.RenderScale = renderScale;
+            OptimumConfig.UpscalerLodBiasOffset = offset;
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            OptimumConfig.ClearUpscalerPlan();
+            OptimumConfig.RegisterLodBiasedAtlases(Array.Empty<int>());
+            OptimumConfig.InvalidateTerrainLodBias();
+        }
+
+        GpuTest.AssertCleanSince(seam, mark);
+    }
+
+    /// <summary>
     /// The atlas textures and the two terrain programs' sampler objects, on the
     /// fixture's device, reachable through the client's own statics: a platform
     /// bound to that device as <c>ScreenManager.Platform</c>, and
