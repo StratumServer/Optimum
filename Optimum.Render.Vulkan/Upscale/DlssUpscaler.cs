@@ -301,7 +301,15 @@ internal sealed class DlssUpscaler : IDisposable
         renderWidth = displayWidth;
         renderHeight = displayHeight;
         plan = default;
-        if (!OptimumConfig.UpscalerReplacesTaa) return false;
+        // Requested, not UpscalerReplacesTaa: the slot has more than one upscaler in
+        // it now, and they own the resolve alike. A host asked with the slot on
+        // "passthrough" would otherwise plan a render size and, one step later,
+        // create a vendor feature for a frame that is never going to evaluate it -
+        // today only the order of the two branches in OptimumTryPlanUpscaleRenderSize
+        // prevents it. Requested is the narrower question and the right one, and it
+        // still goes false on a runtime stand-down, which is what the rule above is
+        // about.
+        if (!Requested) return false;
         if (host == null || !host.Active) return false;
         if (!host.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out plan)) return false;
         renderWidth = plan.RenderWidth;

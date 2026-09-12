@@ -122,9 +122,13 @@ public class Pr3ReviewBatchCoverageTests
         Assert.Contains("return SetupDefaultFrameBuffers();", rollback);
 
         // The retry terminates because the stand-down clears the setting the sizing
-        // rule reads first; the rule is pinned by UpscalerRenderSizeRuleCoverageTests.
-        string upscaler = Read(Upscaler);
-        Assert.Contains("if (!OptimumConfig.UpscalerReplacesTaa) return false;", upscaler);
+        // rule reads first - for either upscaler in the slot, since both read the
+        // effective setting and a stand-down makes that "off". The rules themselves
+        // are pinned by UpscalerRenderSizeRuleCoverageTests.
+        Assert.Contains("if (!Requested) return false;", Read(Upscaler));
+        Assert.Contains(
+            "if (!Requested) return false;",
+            Read("Optimum.Render.Vulkan/Upscale/PassthroughUpscaler.cs"));
 
         // And the target creation is all-or-nothing: nothing it made reaches the
         // caller's list until the last line, so a partial build is the one thing

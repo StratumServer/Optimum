@@ -43,7 +43,11 @@ public class UpscalerRenderSizeRuleCoverageTests
         Assert.Contains("renderWidth = displayWidth;", rule);
         Assert.Contains("renderHeight = displayHeight;", rule);
 
-        int setting = rule.IndexOf("if (!OptimumConfig.UpscalerReplacesTaa) return false;", StringComparison.Ordinal);
+        // Requested, not UpscalerReplacesTaa: the slot holds more than one upscaler
+        // and they own the resolve alike, so the DLSS host must answer no while
+        // another of them is selected. Requested still goes false on a runtime
+        // stand-down, which is the property this rule is really about.
+        int setting = rule.IndexOf("if (!Requested) return false;", StringComparison.Ordinal);
         int host = rule.IndexOf("if (host == null || !host.Active) return false;", StringComparison.Ordinal);
         int plan = rule.IndexOf("host.TryPlan(", StringComparison.Ordinal);
         Assert.True(setting >= 0, "the setting in force must decide the render size");
