@@ -461,7 +461,13 @@ try {
         'assets/game/shaders/fsr-easu.vsh',
         'assets/game/shaders/fsr-easu.fsh',
         'assets/game/shaders/fsr-rcas.vsh',
-        'assets/game/shaders/fsr-rcas.fsh'
+        'assets/game/shaders/fsr-rcas.fsh',
+        # SSAO: Optimum's override only adds the temporally varying dither
+        # (GTAO roadmap step 2) and preprocesses back to vanilla without a
+        # temporal consumer - but if it never ships, vanilla's screen-locked
+        # dither runs under a jittered camera, which is the failure the
+        # override exists to remove and is silent on screen.
+        'assets/game/shaders/ssao.fsh'
     )) {
         if (-not (Test-Path (Join-Path $stageDir $requiredStageFile))) {
             throw "Required package file not found: $requiredStageFile"
