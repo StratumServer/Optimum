@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..af4b616 100644
+index d6eb844..c667521 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,559 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,574 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -64,6 +64,21 @@ index d6eb844..af4b616 100644
 +		get
 +		{
 +			return WindowSize.Height;
++		}
++	}
++
++	// Optimum (headless render harness): the channel order ReadDefaultFramebuffer
++	// leaves in the caller's buffer. The OpenGL path reads GL_BGRA, because that is
++	// what the screenshot path's SKBitmap wants; the Vulkan device's default colour
++	// target is R8G8B8A8_UNORM and its readback hands the texels back untouched, so
++	// VulkanClientPlatform overrides this to false. The headless frame writer is the
++	// only reader that has to know, and it has to, or the two backends' PPMs would
++	// differ by a red/blue swap and every comparison between them would be noise.
++	public virtual bool OptimumDefaultFramebufferIsBgra
++	{
++		get
++		{
++			return true;
 +		}
 +	}
 +

@@ -92,6 +92,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumTaaSharpen",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
+        // Headless render harness: the channel order ReadDefaultFramebuffer leaves
+        // in the caller's buffer (GL_BGRA on the OpenGL path, RGBA on the device's
+        // R8G8B8A8 default target, which VulkanClientPlatform overrides).
+        "OptimumDefaultFramebufferIsBgra",
         // Phase 1A step 3: the program, uniform and UBO operations ShaderProgramBase and
         // UBO call. Neutral bodies; ClientPlatformWindows overrides them. SetUniform and
         // SetUniformMatrix inject every overload the donor declares.
@@ -399,6 +403,17 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Headless render harness: the per-frame hook window_RenderFrame calls next
+        // to the parity dump, its own in-world frame counter, the chat-command
+        // script dispatch and the presented-frame readback.
+        "optimumHeadlessWorldFrames",
+        "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone",
+        "optimumHeadlessFramesWritten",
+        "OptimumHeadlessTick",
+        "OptimumHeadlessRunCommands",
+        "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame",
         // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
         // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
         // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.

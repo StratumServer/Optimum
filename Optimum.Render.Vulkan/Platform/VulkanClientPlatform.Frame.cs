@@ -143,4 +143,12 @@ public partial class VulkanClientPlatform
     {
         return device.ReadTextureForParity(textureId);
     }
+
+    /// <summary>
+    /// The device's default colour target is R8G8B8A8_UNORM and
+    /// <c>ReadDefaultFramebuffer</c> copies its texels back untouched, so what the
+    /// caller gets is RGBA - where the OpenGL path reads GL_BGRA. The headless
+    /// frame writer asks, so its PPMs match across the two backends.
+    /// </summary>
+    public override bool OptimumDefaultFramebufferIsBgra => false;
 }

@@ -73,6 +73,11 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "optimumMotionWriteActive", "optimumParityDumpDone", "optimumParityWorldFrames",
         "optimumTaaDisabled", "optimumTaaResolvedThisFrame", "optimumTaaShaderReloadPending",
         "optimumTaaTargetsReady", "taaResolvedColorTexture", "taaResolvedGlowTexture",
+        // Headless render harness: the per-frame hook, its own in-world frame counter,
+        // the chat-command script dispatch and the presented-frame readback.
+        "OptimumHeadlessTick", "OptimumHeadlessRunCommands", "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame", "optimumHeadlessWorldFrames", "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone", "optimumHeadlessFramesWritten",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),
