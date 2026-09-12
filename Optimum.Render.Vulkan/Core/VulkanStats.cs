@@ -466,6 +466,15 @@ internal static class VulkanStats
     public static volatile ILatencyBackend? LatencySource;
 
     /// <summary>
+    /// The vendor extension revision behind the active backend, for the
+    /// <c>rev=</c> token of the line (plan seam S7): VK_NV_low_latency2's
+    /// specVersion, which decides whether submits carry per-submit attribution.
+    /// 0 when the device advertises no such extension, which is every device
+    /// running the None or Native backend.
+    /// </summary>
+    public static volatile uint LatencyRevision;
+
+    /// <summary>
     /// The eight intervals of <see cref="LatencyFrameReport" />, in the order they
     /// appear on the <c>stats.latency</c> line.
     /// </summary>
@@ -540,11 +549,12 @@ internal static class VulkanStats
     /// it, the sleep it made in the interval, and each report interval reduced to
     /// a mean and a p99. Always emitted, so "off" is as visible as "on".
     /// </summary>
-    public static string FormatLatencyLine(string backend, string mode, long sleepCount, double sleepMs,
+    public static string FormatLatencyLine(string backend, string mode, uint rev, long sleepCount, double sleepMs,
         int frames, double[] meanMs, double[] p99Ms)
     {
         var line = new StringBuilder("stats.latency backend=");
         line.Append(backend).Append(" mode=").Append(mode);
+        line.Append(" rev=").Append(rev.ToString(CultureInfo.InvariantCulture));
         line.Append(" sleep_n=").Append(sleepCount.ToString(CultureInfo.InvariantCulture));
         line.Append(" sleep_ms=").Append(sleepMs.ToString("F1", CultureInfo.InvariantCulture));
         line.Append(" frames=").Append(frames.ToString(CultureInfo.InvariantCulture));
@@ -572,7 +582,7 @@ internal static class VulkanStats
 
         string backend = LatencyBackends.Token(latency == null ? LatencyBackendKind.None : latency.Kind);
         string mode = latency == null ? "off" : ModeToken(latency.Settings.Mode);
-        return FormatLatencyLine(backend, mode, sleepCount, sleepMs, reports.Length, meanMs, p99Ms);
+        return FormatLatencyLine(backend, mode, LatencyRevision, sleepCount, sleepMs, reports.Length, meanMs, p99Ms);
     }
 
     /// <summary>The token of one <see cref="LatencyMode" /> on the stats line.</summary>

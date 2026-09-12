@@ -58,10 +58,11 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     private int[] _prunedCustomInts = [];
 
     /// <summary>
-    /// The active latency backend (plan section "Latency seams"). The None
-    /// backend until a later stage selects one from the device's capabilities and
-    /// the OPTIMUM_VULKAN_LATENCY override; never null, so every call site is a
-    /// plain virtual call with no branch.
+    /// The active latency backend (plan section "Latency seams"). Replaced while
+    /// the device comes up by whatever <c>LatencyDeviceRequirements</c> selected
+    /// from the device's capabilities and the OPTIMUM_VULKAN_LATENCY override
+    /// (see <see cref="InstallSelectedLatencyBackend" />); never null, so every
+    /// call site is a plain virtual call with no branch.
     /// </summary>
     internal ILatencyBackend Latency { get; private set; } = new NoneLatencyBackend();
 
@@ -74,9 +75,77 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     internal void SetLatencyBackend(ILatencyBackend backend)
     {
         Latency = backend ?? throw new ArgumentNullException(nameof(backend));
+        _latencyBackendInstalled = true;
         VulkanStats.LatencySource = Latency;
         if (_frames != null) _frames.Latency.Backend = Latency;
         if (_swapchain != null) _swapchain.Latency = Latency;
+    }
+
+    /// <summary>
+    /// Installs the backend the capabilities stage selected for this device
+    /// (<c>VulkanCapabilities.LatencyBackend</c>) and hands it the client's
+    /// persisted <c>LatencyMode</c> setting. Called once, right after the context
+    /// exists and before the frame ring and the first swapchain, so the ring's
+    /// submit tag, the stats source and every swapchain creation see the same
+    /// instance.
+    ///
+    /// Until the vendor backends land (plan wave 3) every selection resolves to
+    /// <see cref="NoneLatencyBackend" />, which sleeps nowhere and owns no frame
+    /// cap: the shipped frame is byte-for-byte the one Milestone 1 delivered, and
+    /// the selection is still exercised, logged and testable.
+    /// </summary>
+    private void InstallSelectedLatencyBackend()
+    {
+        VulkanStats.LatencyRevision = _context.Capabilities.LatencySupport.NvLowLatency2SpecVersion;
+
+        // A backend installed before the device came up was a deliberate choice
+        // (the GPU tests' recording backend, and later a caller that builds its
+        // own): it wins over the selection, and only the settings are re-applied.
+        if (_latencyBackendInstalled)
+        {
+            Latency.Apply(LatencySettingsFromConfig());
+            return;
+        }
+
+        LatencyBackendKind selected = _context.Capabilities.LatencyBackend;
+        ILatencyBackend backend = CreateLatencyBackend(selected);
+        if (backend.Kind != selected)
+        {
+            MirrorValidationMessage("latency: " + LatencyBackends.Token(selected) +
+                " was selected but is not implemented yet; using " + LatencyBackends.Token(backend.Kind));
+        }
+
+        SetLatencyBackend(backend);
+        backend.Apply(LatencySettingsFromConfig());
+    }
+
+    /// <summary>Someone has installed a backend, so the selection must not overwrite it.</summary>
+    private bool _latencyBackendInstalled;
+
+    /// <summary>
+    /// The implementation of one selected backend kind. Only
+    /// <see cref="LatencyBackendKind.None" /> has one today; Native, NV and AMD
+    /// arrive in wave 3 and this is the single place that learns about them.
+    /// </summary>
+    private ILatencyBackend CreateLatencyBackend(LatencyBackendKind kind)
+    {
+        switch (kind)
+        {
+            default:
+                return new NoneLatencyBackend(MirrorValidationMessage);
+        }
+    }
+
+    /// <summary>
+    /// The client's persisted latency setting as the backend's own settings. The
+    /// frame cap is not part of the setting: the client's own limiter keeps it
+    /// while no backend owns the cap, and a backend that does own it is handed
+    /// the cap from the client's MaxFps at that point.
+    /// </summary>
+    private static LatencySettings LatencySettingsFromConfig()
+    {
+        if (!OptimumConfig.LatencyEnabled) return LatencySettings.Disabled;
+        return new LatencySettings(OptimumConfig.LatencyBoost ? LatencyMode.Boost : LatencyMode.On, 0);
     }
 
     /// <summary>
@@ -436,7 +505,12 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off") +
             "; color write tier " + DeviceCaps.Token(_context.Capabilities.ColorWriteTier) +
-            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : ""));
+            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : "") +
+            "; " + _context.Capabilities.LatencySummary);
+        // Seams S1-S5: the backend the capabilities stage selected is installed
+        // before the frame ring and the first swapchain exist, so nothing in the
+        // frame ever sees a different instance than the one that was announced.
+        InstallSelectedLatencyBackend();
         // A ReBAR miss is logged, not an error: the validation mirror and the
         // trace, never GetError. The stats sample reads this allocator's heaps.
         _context.Allocator.Log = MirrorValidationMessage;
@@ -506,6 +580,10 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
             }
 
             _swapchain = swapchain;
+            // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id
+            // and its feature were actually enabled, which is what the capability
+            // says; chaining it otherwise is a validation error.
+            _swapchain.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
             _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
             CreateDefaultFramebuffer((uint)width, (uint)height);
         }
@@ -3281,7 +3359,11 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
         {
             VulkanStats.MemorySource = null;
         }
-        if (ReferenceEquals(VulkanStats.LatencySource, Latency)) VulkanStats.LatencySource = null;
+        if (ReferenceEquals(VulkanStats.LatencySource, Latency))
+        {
+            VulkanStats.LatencySource = null;
+            VulkanStats.LatencyRevision = 0;
+        }
         // The device installed it, so the device ends it; the None backend and
         // the test fake have nothing to release.
         Latency.Dispose();

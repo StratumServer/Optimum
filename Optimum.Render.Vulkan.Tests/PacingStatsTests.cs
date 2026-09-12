@@ -145,12 +145,12 @@ public class PacingStatsTests
         Assert.Equal(18.0, mean[7], 3);
         Assert.Equal(20.0, p99[7], 3);
         Assert.Equal(
-            "stats.latency backend=native mode=boost sleep_n=10 sleep_ms=12.0 frames=2 " +
+            "stats.latency backend=native mode=boost rev=2 sleep_n=10 sleep_ms=12.0 frames=2 " +
             "input_mean_ms=2.00 input_p99_ms=3.00 sim_mean_ms=3.00 sim_p99_ms=4.00 " +
             "render_submit_mean_ms=4.00 render_submit_p99_ms=5.00 present_mean_ms=0.50 present_p99_ms=0.60 " +
             "driver_mean_ms=0.00 driver_p99_ms=0.00 os_queue_mean_ms=0.00 os_queue_p99_ms=0.00 " +
             "gpu_mean_ms=0.00 gpu_p99_ms=0.00 total_mean_ms=18.00 total_p99_ms=20.00",
-            VulkanStats.FormatLatencyLine("native", "boost", 10, 12.01, 2, mean, p99));
+            VulkanStats.FormatLatencyLine("native", "boost", 2, 10, 12.01, 2, mean, p99));
 
         Assert.Equal(VulkanStats.LatencyIntervalCount, VulkanStats.LatencyIntervalTokens.Length);
 
@@ -211,7 +211,7 @@ public class PacingStatsTests
                      VulkanStats.FormatCountersLine(default),
                      VulkanAllocator.FormatMemoryLine(default),
                      VulkanStats.FormatTransientsLine(default),
-                     VulkanStats.FormatLatencyLine("off", "off", 0, 0,
+                     VulkanStats.FormatLatencyLine("off", "off", 0, 0, 0,
                          0, new double[VulkanStats.LatencyIntervalCount], new double[VulkanStats.LatencyIntervalCount]),
                  })
         {

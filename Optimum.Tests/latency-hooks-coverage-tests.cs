@@ -106,7 +106,9 @@ public class LatencyHooksCoverageTests
         Assert.True(input > sleepCall, "InputSample is not stamped after the sleep:\n" + sleep);
         Assert.True(simulation > input, "SimulationStart is not stamped after InputSample:\n" + sleep);
         Assert.Contains("backend.OwnsFrameCap", Body(frame, "public override bool LatencyOwnsFrameCap"));
-        Assert.Contains("internal ulong BeginLatencyFrame()", Read("Optimum.Render.Vulkan/VulkanDevice.cs"));
+        // Stage C owns the counter and made it public, because the lib hook is the
+        // one site outside the renderer that opens a frame (seam S2).
+        Assert.Contains("public ulong BeginLatencyFrame()", Read("Optimum.Render.Vulkan/VulkanDevice.cs"));
     }
 
     [Fact]
