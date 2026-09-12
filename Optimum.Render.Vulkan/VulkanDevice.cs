@@ -147,6 +147,18 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
                     " could not be constructed; using " + LatencyBackends.Token(LatencyBackendKind.Native));
                 return CreateNativeLatencyBackend();
 
+            case LatencyBackendKind.AmdAntiLag:
+                // The context loaded vkAntiLagUpdateAMD when it enabled the
+                // extension; without it the selection degrades the usual way.
+                AmdAntiLagFunctions? antiLag = _context.AmdAntiLag;
+                if (antiLag != null)
+                {
+                    return AmdAntiLagBackend.Create(_context.Device, antiLag, MirrorValidationMessage);
+                }
+                MirrorValidationMessage("latency: " + LatencyBackends.Token(LatencyBackendKind.AmdAntiLag) +
+                    " could not be constructed; using " + LatencyBackends.Token(LatencyBackendKind.Native));
+                return CreateNativeLatencyBackend();
+
             default:
                 return new NoneLatencyBackend(MirrorValidationMessage);
         }
