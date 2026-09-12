@@ -851,3 +851,10 @@ shader is silently shadowed. Needed later: emit `patches/shaders/*.patch` agains
 (`.vanilla/archives/vs_client_*.tar.gz`) from `scripts/extract-patches.sh`, verify in
 `scripts/check-patches.sh`, and keep overrides additive (vanilla functions untouched, Optimum twins
 beside them) so patches stay small. Raised by the user on 2026-09-10 during P3.
+
+One more override since 2026-09-12: `sources/shaders/ssao.fsh` (GTAO roadmap step 2, the temporally
+varying dither). It is additive in the strict sense - two `#if TAAMOTION == 1` blocks, a uniform
+declaration and one `dither = fract(...)` line, nothing else touched - so with no temporal consumer
+it preprocesses back to vanilla and the diff against
+`.vanilla/win-x64/vintagestory/assets/game/shaders/ssao.fsh` stays a handful of added lines to
+re-apply after a game update. Pinned by `Optimum.Tests/ssao-temporal-dither-coverage-tests.cs`.

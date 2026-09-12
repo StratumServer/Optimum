@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..53caefc 100644
+index 6edf0c9..c86a6d1 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -2172,7 +2172,7 @@ index 6edf0c9..53caefc 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1752,63 +3241,394 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1752,40 +3241,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.Primary:
@@ -2265,14 +2265,13 @@ index 6edf0c9..53caefc 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
- 		{
+@@ -1793,22 +3329,306 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
  		{
--			CurrentFrameBufferKeepVw = null;
+ 			CurrentFrameBufferKeepVw = null;
 -			GL.DrawBuffer((DrawBufferMode)1029);
-+			CurrentFrameBufferKeepVw = null;
 +			// Mono.Cecil transplant.
 +			SelectBackDrawBuffer();
 +		}
@@ -2583,7 +2582,7 @@ index 6edf0c9..53caefc 100644
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,156 +3643,251 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,156 +3643,267 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -2623,6 +2622,22 @@ index 6edf0c9..53caefc 100644
 +			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
 +			ssao.Projection = projectMatrix;
 +			ssao.SamplesArray(64, ssaoKernel);
++			// Optimum (GTAO roadmap step 2): the clock the sample kernel's dither
++			// rotates with. Vanilla's Bayer-128 is locked to the pixel grid, so a
++			// jittered camera hands every surface point a different kernel every
++			// frame and no accumulator can average it; the TAAMOTION variant of
++			// ssao.fsh advances the dither by the golden ratio per frame instead.
++			// Set under exactly the condition that compiles the uniform in
++			// (ShaderRegistry stamps TAAMOTION from EffectiveTemporalPipeline), so
++			// with no temporal consumer the pass is vanilla to the byte - a
++			// per-frame dither with nothing accumulating behind it is worse than
++			// the fixed one. The frame index is wrapped to 1024 because that is
++			// the same clock the jitter and the resolve read, cut to a range a
++			// float still represents exactly after hours of play.
++			if (OptimumConfig.EffectiveTemporalPipeline)
++			{
++				ssao.Uniform("temporalFrameIndex", (float)(OptimumTemporal.Frame.FrameIndex & 1023L));
++			}
 +			RenderFullscreenTriangle(screenQuad);
 +			ssao.Stop();
 +			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
@@ -2894,7 +2909,7 @@ index 6edf0c9..53caefc 100644
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
  			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
-@@ -1987,27 +3902,60 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,27 +3918,60 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -2964,7 +2979,7 @@ index 6edf0c9..53caefc 100644
  		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0006: Invalid comparison between Unknown and I4
  		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
-@@ -2023,27 +3971,490 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +3987,490 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -3457,7 +3472,7 @@ index 6edf0c9..53caefc 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4613,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4629,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -3497,7 +3512,7 @@ index 6edf0c9..53caefc 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +5011,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +5027,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -3550,7 +3565,7 @@ index 6edf0c9..53caefc 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +5106,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5122,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -3595,7 +3610,7 @@ index 6edf0c9..53caefc 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +5143,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5159,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3616,7 +3631,7 @@ index 6edf0c9..53caefc 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +5162,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5178,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3637,7 +3652,7 @@ index 6edf0c9..53caefc 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +5181,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5197,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3658,7 +3673,7 @@ index 6edf0c9..53caefc 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +5200,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5216,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3679,7 +3694,7 @@ index 6edf0c9..53caefc 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +5223,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5239,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3700,7 +3715,7 @@ index 6edf0c9..53caefc 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5785,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5801,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3724,7 +3739,7 @@ index 6edf0c9..53caefc 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +6144,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6160,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);
