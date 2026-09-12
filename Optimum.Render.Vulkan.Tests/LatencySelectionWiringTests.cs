@@ -13,9 +13,11 @@ namespace Optimum.Render.Vulkan.Tests;
 /// only thing that joins them is <c>VulkanDevice.InstallSelectedLatencyBackend</c>,
 /// and these tests are about that join, not about any one of the three.
 ///
-/// No vendor backend exists yet (plan wave 3), so every selection must resolve
-/// to <see cref="NoneLatencyBackend" />, which sleeps nowhere and owns no frame
-/// cap - "nothing on screen changes" is exactly that assertion.
+/// Since wave 3 all four backends exist, so a selection resolves to its own kind
+/// or to a rung further down the degrade ladder (asserted per kind in
+/// <see cref="LatencyBackendIntegrationTests" />). Whichever it is, LatencyMode
+/// ships off, so the installed backend sleeps nowhere and owns no frame cap -
+/// "nothing on screen changes" is exactly that assertion.
 /// </summary>
 public class LatencySelectionWiringTests
 {

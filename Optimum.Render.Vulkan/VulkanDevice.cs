@@ -111,8 +111,11 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
         ILatencyBackend backend = CreateLatencyBackend(selected);
         if (backend.Kind != selected)
         {
+            // All four kinds are implemented; the only way to land here now is a
+            // vendor backend whose entry points did not load between device
+            // creation and this call, which degrades one step (NV/AMD to Native).
             MirrorValidationMessage("latency: " + LatencyBackends.Token(selected) +
-                " was selected but is not implemented yet; using " + LatencyBackends.Token(backend.Kind));
+                " could not be constructed on this device; using " + LatencyBackends.Token(backend.Kind));
         }
 
         SetLatencyBackend(backend);
@@ -143,8 +146,7 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
                 {
                     return nvidia!;
                 }
-                MirrorValidationMessage("latency: " + LatencyBackends.Token(LatencyBackendKind.NvLowLatency2) +
-                    " could not be constructed; using " + LatencyBackends.Token(LatencyBackendKind.Native));
+                // The caller (InstallSelectedLatencyBackend) logs the degrade.
                 return CreateNativeLatencyBackend();
 
             case LatencyBackendKind.AmdAntiLag:
@@ -155,8 +157,7 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
                 {
                     return AmdAntiLagBackend.Create(_context.Device, antiLag, MirrorValidationMessage);
                 }
-                MirrorValidationMessage("latency: " + LatencyBackends.Token(LatencyBackendKind.AmdAntiLag) +
-                    " could not be constructed; using " + LatencyBackends.Token(LatencyBackendKind.Native));
+                // The caller (InstallSelectedLatencyBackend) logs the degrade.
                 return CreateNativeLatencyBackend();
 
             default:
