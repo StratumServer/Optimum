@@ -316,6 +316,12 @@ public class PassthroughUpscalerTests
             }
             finally
             {
+                // NGX's lifetime is process-wide and the device is shared by the whole
+                // fixture: an assertion that fails above would otherwise leave this host
+                // live - holding a feature on the shared device - and take a later test
+                // down instead of this one. Shutdown is idempotent (_disposed), so the
+                // successful path's call above stands and this one is a no-op.
+                host.Shutdown();
                 foreach (int texture in new[] { color, depth, motion, output, passthrough })
                 {
                     if (texture > 0) seam.DeleteTexture(texture);

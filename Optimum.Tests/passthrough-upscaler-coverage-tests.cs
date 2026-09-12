@@ -374,8 +374,23 @@ public class PassthroughUpscalerCoverageTests
     /// </summary>
     private static string ReadPatchedOrSource(string patchPath, string sourcePath)
     {
-        string patch = PatchReader.FindRepositoryFile(patchPath);
-        return File.Exists(patch) ? Flatten(File.ReadAllText(patch)) : Read(sourcePath);
+        // FindRepositoryFile throws when nothing matches, so the File.Exists test can
+        // never be the thing that falls back - the missing patch came out as a
+        // FileNotFoundException from the helper instead of as the source file.
+        string? patch = TryFind(patchPath);
+        return patch != null ? Flatten(File.ReadAllText(patch)) : Read(sourcePath);
+    }
+
+    private static string? TryFind(string relativePath)
+    {
+        try
+        {
+            return PatchReader.FindRepositoryFile(relativePath);
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
     }
 
     private static string Flatten(string patch)
