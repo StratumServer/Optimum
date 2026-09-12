@@ -42,10 +42,18 @@ internal readonly record struct UpscalePlan(
         (uint)RenderWidth, (uint)RenderHeight, (uint)DisplayWidth, (uint)DisplayHeight,
         Quality, NgxDlssSettings.ContractFlags);
 
+    /// <summary>
+    /// One line, in a fixed format. Invariant culture: this string is a log line and
+    /// the settings tab's plan readout, so its numbers must read the same on every
+    /// machine rather than picking up the user's decimal separator.
+    /// </summary>
     public override string ToString() =>
         RenderWidth + "x" + RenderHeight + " -> " + DisplayWidth + "x" + DisplayHeight +
-        " " + Quality + " (scale " + RenderScale.ToString("0.###") +
-        ", lod bias " + LodBias.ToString("0.##") + ", " + JitterPhaseCount + " jitter phases)";
+        " " + Quality + " (scale " +
+        RenderScale.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) +
+        ", lod bias " +
+        LodBias.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) +
+        ", " + JitterPhaseCount + " jitter phases)";
 }
 
 /// <summary>
@@ -262,6 +270,42 @@ internal sealed class DlssUpscaler : IDisposable
         {
             NgxInterop.DestroyParameters(handle);
         }
+    }
+
+    /// <summary>
+    /// What the frame buffers must be allocated at, for a display size the client
+    /// has already computed - the sizing question, answered for the frame that is
+    /// being built.
+    ///
+    /// <para><b>The setting is asked first, before the host is asked anything at
+    /// all.</b> A host stays alive and <see cref="Active" /> across a settings
+    /// change: switching the upscaler off retires the feature and rebuilds the
+    /// targets, and the host is still up while that rebuild runs (it has to be -
+    /// NGX allows one lifetime per process and the user may switch back on). A
+    /// sizing answer taken from the host's liveness therefore rebuilt Primary at
+    /// the vendor's reduced size on the very rebuild that stood the upscaler down,
+    /// and the in-house TAA resolve then resolved a 1707x993 frame into a
+    /// 2560x1490 chain - the "Quality profile still applies with DLSS off" report
+    /// on PR #3, invisible at DLAA because its ratio is 1. The setting in force
+    /// (<c>OptimumConfig.UpscalerReplacesTaa</c>, which a runtime stand-down has
+    /// already turned off) is the only thing that may decide it.</para>
+    ///
+    /// False leaves both sizes at the display size, which is exactly what the
+    /// client allocates when no upscaler was ever enabled.
+    /// </summary>
+    public static bool TryPlanForFrame(
+        DlssUpscaler? host, int displayWidth, int displayHeight,
+        out int renderWidth, out int renderHeight, out UpscalePlan plan)
+    {
+        renderWidth = displayWidth;
+        renderHeight = displayHeight;
+        plan = default;
+        if (!OptimumConfig.UpscalerReplacesTaa) return false;
+        if (host == null || !host.Active) return false;
+        if (!host.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out plan)) return false;
+        renderWidth = plan.RenderWidth;
+        renderHeight = plan.RenderHeight;
+        return true;
     }
 
     /// <summary>

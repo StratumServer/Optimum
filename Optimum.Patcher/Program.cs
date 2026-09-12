@@ -179,6 +179,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumUpscalerUnavailable",
         "ApplyOptimumUpscalerSettings",
         "ApplyOptimumLatencySettings",
+        // PR #3 follow-up: the live plan the upscaling tab reads back.
+        "OptimumUpscalerPlan",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -467,6 +469,16 @@ var membersToInject = new Dictionary<string, List<string>>
         "oButtonBounds",
         "OnOptimumOptions",
         "_AddOptimumTab",
+        // PR #3 follow-up: upscaling is its own tab beside the Extra one. The button
+        // bounds, the page, its plan readout and the per-frame refresh that feeds it
+        // (Refresh is a vanilla method, transplanted so the readout gets its frame).
+        "uButtonBounds",
+        "OnOptimumUpscalingOptions",
+        "optimumUpscalePlanText",
+        "optimumUpdateUpscalePlanReadout",
+        // Refresh is vanilla and therefore cannot be injected - member injection skips
+        // anything the target already declares - so its body is transplanted through
+        // the method-target list below instead.
         "onOptimumBackgroundFpsChanged",
         "onOptimumFramePacingChanged",
         "onOptimumShadowCullChanged",
@@ -773,6 +785,12 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
+    // GuiCompositeSettings.Refresh (PR #3 follow-up): the once-per-frame call the
+    // escape menu already makes, so the upscaling tab's plan readout follows the
+    // frame instead of the moment the page was composed. Vanilla method, vanilla
+    // body plus one call into the injected readout, so it is transplanted rather
+    // than injected.
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", "Refresh", 0),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.

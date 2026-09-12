@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..d8ac1eb 100644
+index d6eb844..22a505b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,530 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,544 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -487,6 +487,20 @@ index d6eb844..d8ac1eb 100644
 +	public virtual string OptimumUpscalerUnavailable()
 +	{
 +		return Vintagestory.API.Config.Lang.Get("optimum-upscaler-unavailable-renderer");
++	}
++
++	/// <summary>
++	/// Optimum: the plan the upscaler is really serving this frame, in one line -
++	/// render size, display size, preset, render scale, texture LOD bias and jitter
++	/// phase count - or null when nothing is upscaling. The upscaling settings tab
++	/// shows it while the player judges a preset, so the numbers on screen are the
++	/// ones the frame used and never a prediction.
++	///
++	/// Neutral answer: null. A platform with no upscaler has no plan.
++	/// </summary>
++	public virtual string OptimumUpscalerPlan()
++	{
++		return null;
 +	}
 +
 +	/// <summary>

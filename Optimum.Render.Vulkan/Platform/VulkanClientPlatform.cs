@@ -153,6 +153,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // DLSS plan, Phase 6: the settings-tab seams - the honest reason there can be no
         // upscaler here, the upscaler/preset re-plan and rebuild, and the latency re-apply.
         new(true, "OptimumUpscalerUnavailable", Array.Empty<string>()),
+        new(true, "OptimumUpscalerPlan", Array.Empty<string>()),
         new(true, "ApplyOptimumUpscalerSettings", Array.Empty<string>()),
         new(true, "ApplyOptimumLatencySettings", Array.Empty<string>()),
     };

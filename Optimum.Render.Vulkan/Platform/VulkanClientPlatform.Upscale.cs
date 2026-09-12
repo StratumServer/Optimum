@@ -161,6 +161,11 @@ public partial class VulkanClientPlatform
     /// Then the base does what the OpenGL path does on its own: rebuild every framebuffer,
     /// which re-plans the render size through <see cref="OptimumTryPlanUpscaleRenderSize" />
     /// and resets the temporal history.
+    ///
+    /// <para>Order matters: the feature is retired <i>before</i> the rebuild, and the
+    /// rebuild's sizing question is answered from the setting the caller has already
+    /// written, never from this host still being alive (<c>DlssUpscaler.TryPlanForFrame</c>).
+    /// </para>
     /// </summary>
     public override void ApplyOptimumUpscalerSettings()
     {
@@ -196,17 +201,30 @@ public partial class VulkanClientPlatform
     public override bool OptimumTryPlanUpscaleRenderSize(
         int displayWidth, int displayHeight, out int renderWidth, out int renderHeight)
     {
-        renderWidth = displayWidth;
-        renderHeight = displayHeight;
-        if (upscaler == null || !upscaler.Active) return false;
-        if (!upscaler.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out UpscalePlan plan))
+        // The whole rule lives in DlssUpscaler.TryPlanForFrame: the setting in force
+        // for the frame being built decides, and only then is the host asked. The
+        // host outlives a settings change, so its liveness is not the question.
+        if (!DlssUpscaler.TryPlanForFrame(
+            upscaler, displayWidth, displayHeight, out renderWidth, out renderHeight, out UpscalePlan plan))
         {
             return false;
         }
-        renderWidth = plan.RenderWidth;
-        renderHeight = plan.RenderHeight;
         LogUpscaler("[Optimum] DLSS plan: " + plan);
         return true;
+    }
+
+    /// <summary>
+    /// DLSS plan, Phase 6 (PR #3 follow-up): the live plan, for the upscaling settings
+    /// tab's readout - "1707x993 -> 2560x1490 MaxQuality (scale 0.667, lod bias -1.59,
+    /// 18 jitter phases)". Null whenever no feature is serving a plan, which is every
+    /// frame the upscaler is off, standing down, or has not created its feature yet;
+    /// the tab then says so rather than showing numbers the frame is not using.
+    /// </summary>
+    public override string OptimumUpscalerPlan()
+    {
+        if (upscaler == null) return null;
+        UpscalePlan plan = upscaler.Plan;
+        return plan.IsValid ? plan.ToString() : null;
     }
 
     /// <summary>Whether the one-time "no depth blit here" line has been logged.</summary>

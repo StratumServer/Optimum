@@ -105,6 +105,112 @@ public class UpscalerSettingsUiCoverageTests
         Assert.Contains("optimumUpdateUpscalerRows();", gui);
     }
 
+    // ---- (a2) the tab the rows live on -------------------------------------
+
+    /// <summary>
+    /// PR #3, "needs its own settings tab": upscaling is a page beside the Extra
+    /// one, registered exactly the way every other tab in this dialog is - a
+    /// toggle button in both <c>ComposerHeader</c> branches (main menu and
+    /// in-game), its own bounds measured in <c>updateButtonBounds</c>, its toggle
+    /// key set from the current tab, and a page method that composes through
+    /// <c>ComposerHeader</c> with that key.
+    /// </summary>
+    [Fact]
+    public void UpscalingIsItsOwnTabRegisteredLikeEveryOtherTab()
+    {
+        string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
+
+        // The bounds, beside the Extra tab's own.
+        Assert.Contains("private ElementBounds uButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0)", gui);
+        Assert.Contains("uButtonBounds.ParentBounds = elementBounds;", gui);   // main menu
+        Assert.Contains("uButtonBounds.ParentBounds = elementBounds3;", gui);  // in game
+
+        // The button, in both branches, with the same toggle key the page composes with.
+        Assert.Contains(
+            "AddToggleButton(Lang.Get(\"optimum-upscaling-tab-header\"), font, OnOptimumUpscalingOptions, uButtonBounds, \"optimumupscaling\")",
+            gui);
+        Assert.Equal(2, Occurrences(gui,
+            "AddToggleButton(Lang.Get(\"optimum-upscaling-tab-header\"), font, OnOptimumUpscalingOptions, uButtonBounds, \"optimumupscaling\")"));
+        Assert.Contains("result.GetToggleButton(\"optimumupscaling\")?.SetValue(currentTab == \"optimumupscaling\");", gui);
+
+        // The tab-width measurement that sizes the button row, and the Back button
+        // that now follows the new tab rather than the Extra one.
+        Assert.Contains("cairoFont.GetTextExtents(Lang.Get(\"optimum-upscaling-tab-header\"));", gui);
+        Assert.Contains("uButtonBounds.WithFixedWidth(width10).FixedRightOf(oButtonBounds, 15.0);", gui);
+        Assert.Contains("backButtonBounds.WithFixedWidth(width8).FixedRightOf(uButtonBounds, 25.0);", gui);
+
+        // The page itself.
+        Assert.Contains("private void OnOptimumUpscalingOptions(bool on)", gui);
+        Assert.Contains("ComposerHeader(\"gamesettings-optimumupscalingoptions\", \"optimumupscaling\")", gui);
+        Assert.Contains("composer.GetToggleButton(\"optimumupscaling\")?.SetValue(true);", gui);
+    }
+
+    /// <summary>
+    /// The Cecil path adds its tab buttons through one injected hook helper
+    /// (<c>_AddOptimumTab</c>, called after <c>EndIf</c> in vanilla's
+    /// <c>ComposerHeader</c>), so the new tab has to be added there too or it
+    /// exists only in the developer build. The Back button and the dialog-width
+    /// walk measure from the last button in the row, which is now the new one -
+    /// the walk itself is what keeps the Cairo surface from being overrun.
+    /// </summary>
+    [Fact]
+    public void TheCecilHookAddsBothTabButtons()
+    {
+        string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
+        string hook = Between(gui, "private Vintagestory.API.Client.GuiComposer _AddOptimumTab(", "\n\t}");
+
+        Assert.Contains("Lang.Get(\"optimum-upscaling-tab-header\")", hook);
+        Assert.Contains("OnOptimumUpscalingOptions, uButtonBounds, \"optimumupscaling\")", hook);
+        Assert.Contains("uButtonBounds.FixedRightOf(oButtonBounds, 10.0);", hook);
+        Assert.Contains("backButtonBounds.FixedRightOf(uButtonBounds, 15.0);", hook);
+        Assert.Contains("? uButtonBounds.fixedX + uButtonBounds.fixedWidth", hook);
+    }
+
+    /// <summary>
+    /// The readout the tab buys with the space: the plan the frame is really
+    /// running, asked of the platform that owns the upscaler and re-read once per
+    /// frame, never predicted from the preset.
+    /// </summary>
+    [Fact]
+    public void TheTabShowsTheLivePlan()
+    {
+        string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
+        string platform = ReadPatchedOrSource(AbstractPatch, AbstractSource);
+
+        Assert.Contains("public virtual string OptimumUpscalerPlan()", platform);
+        Assert.Contains(
+            "AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 6, 650, 60), \"optUpscalePlan\")",
+            gui);
+
+        string text = Between(gui, "private string optimumUpscalePlanText()", "\n\t}");
+        Assert.Contains("ScreenManager.Platform.OptimumUpscalerPlan()", text);
+        Assert.Contains("Lang.Get(\"optimum-upscaleplan-none\")", text);
+
+        // Live: the readout follows the frame, because the plan only becomes the new
+        // one on the frame that creates the feature.
+        string refresh = Between(gui, "internal void Refresh()", "\n\t}");
+        Assert.Contains("optimumUpdateUpscalePlanReadout();", refresh);
+        string readout = Between(gui, "private void optimumUpdateUpscalePlanReadout()", "\n\t}");
+        Assert.Contains("composer.GetDynamicText(\"optUpscalePlan\")", readout);
+        Assert.Contains("readout.SetNewText(optimumUpscalePlanText());", readout);
+    }
+
+    /// <summary>
+    /// The Vulkan platform answers the readout from the live feature's own plan,
+    /// and null while none is serving one - the tab then says so rather than
+    /// printing numbers no frame used.
+    /// </summary>
+    [Fact]
+    public void TheVulkanPlatformAnswersThePlanFromTheLiveFeature()
+    {
+        string upscale = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Upscale.cs");
+        string plan = Between(upscale, "public override string OptimumUpscalerPlan()", "\n    }");
+
+        Assert.Contains("if (upscaler == null) return null;", plan);
+        Assert.Contains("UpscalePlan plan = upscaler.Plan;", plan);
+        Assert.Contains("return plan.IsValid ? plan.ToString() : null;", plan);
+    }
+
     // ---- (b) honest state --------------------------------------------------
 
     [Fact]
@@ -256,10 +362,24 @@ public class UpscalerSettingsUiCoverageTests
             // The page method that builds the rows was already a target; it has to
             // stay one, or the new rows never reach the shipped client.
             "\"OnOptimumOptions\"",
+            // PR #3 follow-up: the upscaling tab, its bounds, its readout and the
+            // per-frame refresh that feeds it.
+            "\"uButtonBounds\"",
+            "\"OnOptimumUpscalingOptions\"",
+            "\"optimumUpscalePlanText\"",
+            "\"optimumUpdateUpscalePlanReadout\"",
+            "\"OptimumUpscalerPlan\"",
         })
         {
             Assert.Contains(member, patcher);
         }
+
+        // Refresh is vanilla, so member injection would skip it ("MEMBER EXISTS")
+        // and the readout would never get its frame: its body is transplanted
+        // through the method-target list instead.
+        Assert.Contains(
+            "new(\"Vintagestory.Client.NoObf.GuiCompositeSettings\", \"Refresh\", 0)",
+            patcher);
     }
 
     [Fact]
@@ -319,6 +439,9 @@ public class UpscalerSettingsUiCoverageTests
             "optimum-latency", "optimum-latency-tooltip",
             "optimum-latency-off", "optimum-latency-on", "optimum-latency-boost",
             "optimum-taa-upscaler-owns-resolve",
+            // PR #3 follow-up: the tab and its plan readout.
+            "optimum-upscaling-tab-header",
+            "optimum-upscaleplan", "optimum-upscaleplan-tooltip", "optimum-upscaleplan-none",
         })
         {
             Assert.Contains("\"" + key + "\":", lang);
@@ -347,7 +470,9 @@ public class UpscalerSettingsUiCoverageTests
             if (to < 0) break;
             at = to;
             string key = gui[from..to];
-            if (key.StartsWith("optimum-upscaler", StringComparison.Ordinal) ||
+            // "optimum-upscal" covers optimum-upscaler*, optimum-upscaling-tab-header
+            // and the optimum-upscaleplan* readout keys in one prefix.
+            if (key.StartsWith("optimum-upscal", StringComparison.Ordinal) ||
                 key.StartsWith("optimum-latency", StringComparison.Ordinal) ||
                 key.StartsWith("optimum-taa-upscaler", StringComparison.Ordinal))
             {
@@ -363,6 +488,19 @@ public class UpscalerSettingsUiCoverageTests
     }
 
     // ---- helpers -----------------------------------------------------------
+
+    private static int Occurrences(string text, string needle)
+    {
+        int count = 0;
+        int at = 0;
+        while (true)
+        {
+            int found = text.IndexOf(needle, at, StringComparison.Ordinal);
+            if (found < 0) return count;
+            count++;
+            at = found + needle.Length;
+        }
+    }
 
     private static string Between(string text, string start, string end)
     {

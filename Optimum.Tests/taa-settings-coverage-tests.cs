@@ -153,21 +153,32 @@ public class TaaSettingsCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
 
         // ComposerHeader lays the main-menu dialog out at a fixed 740px, and the
-        // tab starts at y0 = 87. Since the upscaler, quality, sharpness and latency
-        // rows joined it (DLSS plan, Phase 6) the stock build ends at row 25 (TAA
-        // mip bias) and the feature-flag build at row 29, so the row interval
-        // shrinks in both or the last rows fall off the dialog.
-        Assert.Contains("double rowH = 24.0;", gui);
-        Assert.Contains("double rowH = 21.0;", gui);
+        // tab starts at y0 = 87. The stock build ends at row 21 (TAA mip bias) and
+        // the feature-flag build at row 25 (greedy far distance), which is what the
+        // 28px and 24px intervals are sized for.
+        //
+        // These are the intervals this page had before the four upscaler rows were
+        // squeezed in beside them and forced 24px, then 21px (PR #3: "the menu is
+        // wonky"). Upscaling has its own tab now, so a shrunken interval here is a
+        // regression, not a fix: pin both the intervals and the last row's index.
+        string page = Between(gui, "private void OnOptimumOptions(", "private void OnOptimumUpscalingOptions(");
+        Assert.Contains("double rowH = 28.0;", page);
+        Assert.Contains("double rowH = 24.0;", page);
+        Assert.DoesNotContain("double rowH = 21.0;", page);
 
-        Assert.Contains("rowH * 23", gui); // TAA toggle
-        Assert.Contains("rowH * 24", gui); // sharpness
-        Assert.Contains("rowH * 25", gui); // mip bias
-        Assert.Contains("rowH * 29", gui); // greedy far distance, shifted down
+        Assert.Contains("rowH * 19", page); // TAA toggle
+        Assert.Contains("rowH * 20", page); // sharpness
+        Assert.Contains("rowH * 21", page); // mip bias
+        Assert.Contains("rowH * 25", page); // greedy far distance, shifted down
+        // And the four upscaling rows are not on this page any more.
+        Assert.DoesNotContain("\"optUpscaler\")", page);
+        Assert.DoesNotContain("\"optUpscalerQuality\")", page);
+        Assert.DoesNotContain("\"optUpscalerSharpness\")", page);
+        Assert.DoesNotContain("\"optLatency\")", page);
 
         // The row itself is 30px tall, so the last one has to end inside the dialog.
+        Assert.True(87.0 + 28.0 * 21 + 30.0 <= 740.0);
         Assert.True(87.0 + 24.0 * 25 + 30.0 <= 740.0);
-        Assert.True(87.0 + 21.0 * 29 + 30.0 <= 740.0);
     }
 
     [Fact]

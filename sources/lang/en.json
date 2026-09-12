@@ -1,5 +1,6 @@
 {
 	"optimum-tab-header": "Extra",
+	"optimum-upscaling-tab-header": "Upscaling",
 	"optimum-bgfps": "Limit Background FPS",
 	"optimum-bgfps-tooltip": "Cap to 30 FPS when the game window loses focus.",
 	"optimum-framepacing": "Smooth Frame Pacing",
@@ -71,6 +72,9 @@
 	"optimum-latency-off": "Off",
 	"optimum-latency-on": "On",
 	"optimum-latency-boost": "On + Boost",
+	"optimum-upscaleplan": "Current Plan",
+	"optimum-upscaleplan-tooltip": "What the upscaler is really doing right now: the size the world is rendered at, the size it is reconstructed to, the preset in force, the resulting render scale, the texture mip-map bias and the length of the jitter sequence. It follows the frame, so a preset change shows here as soon as the next frame uses it.",
+	"optimum-upscaleplan-none": "No upscaler is running, so the world is rendered at your window resolution and TAA does the anti-aliasing.",
 	"optimum-taa-upscaler-owns-resolve": "An upscaler is on, so it does the temporal anti-aliasing and this switch has no effect until you turn the upscaler off.",
 	"optimum-godrayscap": "Cap God-Rays Samples",
 	"optimum-taa": "Temporal Anti-Aliasing (TAA)",

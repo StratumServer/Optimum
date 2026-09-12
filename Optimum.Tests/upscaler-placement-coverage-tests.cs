@@ -233,7 +233,15 @@ public class UpscalerPlacementCoverageTests
         string upscale = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Upscale.cs");
 
         Assert.Contains("public override bool OptimumTryPlanUpscaleRenderSize(", upscale);
-        Assert.Contains("upscaler.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out UpscalePlan plan)", upscale);
+        // The plan still comes from the vendor query, now through the one rule that
+        // asks the setting in force before the host (PR #3 item A,
+        // DlssUpscaler.TryPlanForFrame); the query itself is asserted there.
+        Assert.Contains(
+            "DlssUpscaler.TryPlanForFrame(\n            upscaler, displayWidth, displayHeight, out renderWidth, out renderHeight, out UpscalePlan plan)",
+            upscale);
+        Assert.Contains(
+            "host.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out plan)",
+            Read("Optimum.Render.Vulkan/Upscale/DlssUpscaler.cs"));
         Assert.Contains("public override bool RenderOptimumUpscale()", upscale);
         Assert.Contains("JitterOffsetX = -frame.JitterPx.X,", upscale);
         Assert.Contains("JitterOffsetY = -frame.JitterPx.Y,", upscale);
