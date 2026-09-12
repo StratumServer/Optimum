@@ -527,6 +527,13 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
             RequiredInstanceExtensions = headless
                 ? Array.Empty<string>()
                 : WindowSurface.RequiredInstanceExtensions(),
+            // The upscaler slot's half of the latency coupling (plan, "The slots
+            // are coupled"): the vendor backend is only taken when the active
+            // upscaler's vendor is the GPU's vendor. Read once, here, because the
+            // latency backend is chosen while the device is created; switching
+            // the upscaler mid-session does not move the backend, and the
+            // decision is logged either way.
+            UpscalerVendor = UpscalerVendors.FromSettingToken(OptimumConfig.EffectiveUpscaler),
         };
 
         ConfigureContextOptions?.Invoke(options);
