@@ -131,6 +131,14 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     {
         switch (kind)
         {
+            case LatencyBackendKind.NvLowLatency2:
+                if (NvLowLatency2Backend.TryCreate(_context, MirrorValidationMessage,
+                        out NvLowLatency2Backend? nvidia))
+                {
+                    return nvidia!;
+                }
+                return new NoneLatencyBackend(MirrorValidationMessage);
+
             default:
                 return new NoneLatencyBackend(MirrorValidationMessage);
         }
@@ -572,8 +580,12 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
                 return false;
             }
 
+            // Seam S5: a backend with a per-swapchain create struct (NV's
+            // VkSwapchainLatencyCreateInfoNV) hands it over here, so the first
+            // swapchain is created with it exactly as every rebuild is.
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError, Latency))
+                    out Swapchain? swapchain, out string? swapchainError, Latency,
+                    (Latency as NvLowLatency2Backend)?.SwapchainCreateChain))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
