@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..22a505b 100644
+index d6eb844..af4b616 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,544 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,559 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -487,6 +487,21 @@ index d6eb844..22a505b 100644
 +	public virtual string OptimumUpscalerUnavailable()
 +	{
 +		return Vintagestory.API.Config.Lang.Get("optimum-upscaler-unavailable-renderer");
++	}
++
++	/// <summary>
++	/// Optimum: the same question asked about one entry of the upscaler dropdown, so a
++	/// slot that needs no vendor library is not refused for a vendor library's absence.
++	///
++	/// The default forwards to <see cref="OptimumUpscalerUnavailable" />, which is the
++	/// right answer for every vendor slot and for a platform with no upscaler at all.
++	/// The Vulkan platform overrides it so that "passthrough" - the comparison
++	/// upscaler, which touches no vendor runtime - is offered whenever the Vulkan
++	/// renderer is running, even on a machine where DLSS cannot come up.
++	/// </summary>
++	public virtual string OptimumUpscalerUnavailableFor(string upscaler)
++	{
++		return OptimumUpscalerUnavailable();
 +	}
 +
 +	/// <summary>

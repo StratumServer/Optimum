@@ -438,7 +438,20 @@ public static class OptimumConfig
     public static bool TaaJitterDev = false;
 
     /// <summary>
-    /// The upscaler slot: "off" or "dlss" (DLSS Super Resolution through raw NGX).
+    /// The upscaler slot: "off", "dlss" (DLSS Super Resolution through raw NGX) or
+    /// "passthrough" (the diagnostic below).
+    ///
+    /// <para><b>"passthrough" is a comparison entry, not a feature.</b> It occupies
+    /// exactly the DLSS slot - the same render/display split, the same preset render
+    /// size, the same jitter, the same motion attachment, the same display-resolution
+    /// post chain, the same TAA and FSR stand-down - and its "evaluate" is a plain
+    /// magnifying blit from the render-resolution scene colour to the display-resolution
+    /// target. It exists to answer one question: at a low render ratio, is the shimmer
+    /// the vendor's reconstruction or our own rendering path? With
+    /// <see cref="UpscalerJitter" /> off the frame is a still magnification and nothing
+    /// temporal moves; with it on the render grid moves every frame and nothing
+    /// reconstructs it. Those two states are the measurement. It touches no vendor
+    /// library at all, which is also why it runs on any GPU.</para>
     ///
     /// Off by default, and off is the whole of the old behaviour: with no
     /// upscaler the render chain is exactly the pre-DLSS one, including the
@@ -465,7 +478,36 @@ public static class OptimumConfig
     /// ones a config file may carry. Kept next to the parser so the two cannot
     /// drift; a new vendor is added here and in <see cref="Load" />'s switch.
     /// </summary>
-    public static readonly string[] UpscalerNames = { "off", "dlss" };
+    public static readonly string[] UpscalerNames = { "off", "dlss", "passthrough" };
+
+    /// <summary>
+    /// Which filter the passthrough upscaler magnifies with: "linear" (the default)
+    /// or "nearest". Nearest shows the render grid itself, which is what makes a
+    /// moving jitter grid visible without any reconstruction in the way; linear is
+    /// the closer stand-in for "an upscaler that does no temporal work".
+    /// Unrecognised values degrade to "linear".
+    /// </summary>
+    public static string UpscalerPassthroughFilter = "linear";
+
+    /// <summary>The filters <see cref="UpscalerPassthroughFilter" /> may hold.</summary>
+    public static readonly string[] UpscalerPassthroughFilterNames = { "linear", "nearest" };
+
+    /// <summary>Whether the passthrough blit magnifies with NEAREST rather than LINEAR.</summary>
+    public static bool UpscalerPassthroughIsNearest =>
+        string.Equals(UpscalerPassthroughFilter, "nearest", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The experiment's switch: whether the jitter is applied while an upscaler owns
+    /// the resolve. Debug only, on by default, and it means nothing without an
+    /// upscaler - the in-house TAA resolve is not built to run unjittered and keeps
+    /// its jitter regardless (see <see cref="JitterWindowOpen" />).
+    ///
+    /// With the passthrough upscaler this is the whole measurement: jitter off is a
+    /// plain magnification of a still grid, jitter on moves the render grid every
+    /// frame with nothing reconstructing it. Whatever shimmer survives the first and
+    /// appears in the second is ours, not the vendor's.
+    /// </summary>
+    public static bool UpscalerJitter = true;
 
     /// <summary>The presets <see cref="UpscalerQuality" /> may hold, in descending render scale.</summary>
     public static readonly string[] UpscalerQualityNames =
@@ -544,6 +586,13 @@ public static class OptimumConfig
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Whether the passthrough comparison upscaler is the one in effect. It is in the
+    /// slot DLSS is in and takes the identical path; only the evaluate differs.
+    /// </summary>
+    public static bool EffectiveUpscalerIsPassthrough =>
+        string.Equals(EffectiveUpscaler, "passthrough", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Whether the temporal pipeline runs at all this frame: the scene is
     /// jittered and motion vectors are written, for whichever consumer owns the
     /// resolve - the in-house TAA resolve or an upscaler that replaces it. This
@@ -560,7 +609,21 @@ public static class OptimumConfig
     /// TAA sharpen pass and the FSR 1 blit do not run (the upscaler does all
     /// three jobs), while the jitter stays on because the upscaler needs it.
     /// </summary>
-    public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss;
+    public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss || EffectiveUpscalerIsPassthrough;
+
+    /// <summary>
+    /// Whether the temporal window is open this frame - the one expression
+    /// <c>ClientMain.MainRenderLoop</c> assigns to
+    /// <c>OptimumTemporal.Frame.JitterActive</c>.
+    ///
+    /// The developer switch wins over everything (it exists to jitter with nothing
+    /// resolving). Otherwise an upscaler that owns the resolve decides for itself,
+    /// through <see cref="UpscalerJitter" />, because the passthrough experiment needs
+    /// to render at the upscaler's ratio with the grid standing still; with no
+    /// upscaler the answer is the one it always was, our own resolve.
+    /// </summary>
+    public static bool JitterWindowOpen =>
+        TaaJitterDev || (UpscalerReplacesTaa ? UpscalerJitter : EffectiveTaa);
 
     /// <summary>
     /// Which renderer the client runs: "opengl", "vulkan", or "auto".
@@ -1122,6 +1185,8 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.Upscaler), Upscaler),
         (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
         (nameof(OptimumConfigData.UpscalerLodBiasOffset), UpscalerLodBiasOffset.ToString("F2")),
+        (nameof(OptimumConfigData.UpscalerPassthroughFilter), UpscalerPassthroughFilter),
+        (nameof(OptimumConfigData.UpscalerJitter), UpscalerJitter.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -1240,6 +1305,7 @@ public static class OptimumConfig
             string requestedUpscaler = data.Upscaler?.Trim() ?? "";
             Upscaler =
                 string.Equals(requestedUpscaler, "dlss", StringComparison.OrdinalIgnoreCase) ? "dlss" :
+                string.Equals(requestedUpscaler, "passthrough", StringComparison.OrdinalIgnoreCase) ? "passthrough" :
                 "off";
             // Same rule for the preset, degrading to the safest one rather than off:
             // the preset only chooses a render resolution, so an unknown name must
@@ -1255,6 +1321,13 @@ public static class OptimumConfig
             // the bias less aggressive, never more, so a hand-edited file is clamped
             // into [0, 1] here and the bias computation caps it again.
             UpscalerLodBiasOffset = Math.Clamp(data.UpscalerLodBiasOffset, 0f, 1.0f);
+            // Same defensive rule again: the passthrough filter degrades to linear and
+            // the debug jitter switch is a plain bool, so neither can fail the parse.
+            string requestedPassthroughFilter = data.UpscalerPassthroughFilter?.Trim() ?? "";
+            UpscalerPassthroughFilter =
+                string.Equals(requestedPassthroughFilter, "nearest", StringComparison.OrdinalIgnoreCase) ? "nearest" :
+                "linear";
+            UpscalerJitter = data.UpscalerJitter;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -1333,6 +1406,8 @@ public static class OptimumConfig
             Upscaler = Upscaler,
             UpscalerQuality = UpscalerQuality,
             UpscalerLodBiasOffset = UpscalerLodBiasOffset,
+            UpscalerPassthroughFilter = UpscalerPassthroughFilter,
+            UpscalerJitter = UpscalerJitter,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1419,6 +1494,8 @@ internal sealed class OptimumConfigData
     public string Upscaler { get; set; } = "off";
     public string UpscalerQuality { get; set; } = "quality";
     public float UpscalerLodBiasOffset { get; set; } = 1.0f;
+    public string UpscalerPassthroughFilter { get; set; } = "linear";
+    public bool UpscalerJitter { get; set; } = true;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

@@ -177,6 +177,9 @@ var membersToInject = new Dictionary<string, List<string>>
         // the upscaler/preset re-plan and rebuild, and the latency re-apply. Neutral
         // bodies; VulkanClientPlatform overrides all three.
         "OptimumUpscalerUnavailable",
+        // The passthrough comparison upscaler: the same question asked per dropdown
+        // entry, so a slot needing no vendor runtime is not refused for NGX's absence.
+        "OptimumUpscalerUnavailableFor",
         "ApplyOptimumUpscalerSettings",
         "ApplyOptimumLatencySettings",
         // PR #3 follow-up: the live plan the upscaling tab reads back.
@@ -506,6 +509,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumUpscalerSharpnessChanged",
         "optimumUpscalerLodBiasText",
         "onOptimumLatencyChanged",
+        // The passthrough comparison upscaler's two debug rows.
+        "onOptimumUpscalerPassthroughFilterChanged",
+        "onOptimumUpscalerJitterChanged",
         "optimumUpdateUpscalerRows",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",

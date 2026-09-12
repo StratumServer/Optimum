@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..3f628be 100644
+index 4d08f84..a654a7f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,17 @@ public class GuiCompositeSettings : GuiComposite
@@ -127,7 +127,7 @@ index 4d08f84..3f628be 100644
  			DefaultShaderUniforms shaderUniforms = ScreenManager.Platform.ShaderUniforms;
  			if (shaderUniforms != null)
  			{
-@@ -1740,10 +1768,490 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1768,550 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -308,7 +308,7 @@ index 4d08f84..3f628be 100644
 +		composer = ComposerHeader("gamesettings-optimumupscalingoptions", "optimumupscaling")
 +			.AddStaticText(Lang.Get("optimum-upscaler"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
 +			.AddHoverText(upscalerTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
-+			.AddDropDown(new string[] { "off", "dlss" }, new string[] { Lang.Get("optimum-upscaler-off"), upscalerDlssLabel }, 0, onOptimumUpscalerChanged, ElementBounds.Fixed(450, y0 + 2, 200, 25), "optUpscaler")
++			.AddDropDown(new string[] { "off", "dlss", "passthrough" }, new string[] { Lang.Get("optimum-upscaler-off"), upscalerDlssLabel, Lang.Get("optimum-upscaler-passthrough") }, 0, onOptimumUpscalerChanged, ElementBounds.Fixed(450, y0 + 2, 200, 25), "optUpscaler")
 +			.AddStaticText(Lang.Get("optimum-upscalerquality"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-upscalerquality-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH, 400, 25))
 +			.AddDropDown(new string[] { "dlaa", "quality", "balanced", "performance", "ultraperformance" }, new string[] { Lang.Get("optimum-upscalerquality-dlaa"), Lang.Get("optimum-upscalerquality-quality"), Lang.Get("optimum-upscalerquality-balanced"), Lang.Get("optimum-upscalerquality-performance"), Lang.Get("optimum-upscalerquality-ultraperformance") }, 1, onOptimumUpscalerQualityChanged, ElementBounds.Fixed(450, y0 + rowH + 2, 200, 25), "optUpscalerQuality")
@@ -323,12 +323,22 @@ index 4d08f84..3f628be 100644
 +			.AddStaticText(Lang.Get("optimum-latency"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 3, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-latency-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 3, 400, 25))
 +			.AddDropDown(new string[] { "off", "on", "boost" }, new string[] { Lang.Get("optimum-latency-off"), Lang.Get("optimum-latency-on"), Lang.Get("optimum-latency-boost") }, 1, onOptimumLatencyChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 25), "optLatency")
++			// The two rows below belong to the comparison experiment, not to a shipping
++			// feature: the filter the passthrough upscaler magnifies with, and whether
++			// the jitter is applied while an upscaler owns the resolve. Both are marked
++			// as debug in their labels and both do nothing unless an upscaler is on.
++			.AddStaticText(Lang.Get("optimum-upscalerpassthroughfilter"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 4, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalerpassthroughfilter-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 4, 400, 25))
++			.AddDropDown(new string[] { "linear", "nearest" }, new string[] { Lang.Get("optimum-upscalerpassthroughfilter-linear"), Lang.Get("optimum-upscalerpassthroughfilter-nearest") }, 0, onOptimumUpscalerPassthroughFilterChanged, ElementBounds.Fixed(450, y0 + rowH * 4 + 2, 200, 25), "optUpscalerPassthroughFilter")
++			.AddStaticText(Lang.Get("optimum-upscalerjitter"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalerjitter-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 5, 400, 25))
++			.AddDropDown(new string[] { "on", "off" }, new string[] { Lang.Get("optimum-upscalerjitter-on"), Lang.Get("optimum-upscalerjitter-off") }, 0, onOptimumUpscalerJitterChanged, ElementBounds.Fixed(450, y0 + rowH * 5 + 2, 200, 25), "optUpscalerJitter")
 +			// The readout. Dynamic, not static: it is re-read every frame from the
 +			// platform while the dialog is open (Refresh), so a preset change shows the
 +			// plan the next frame really used instead of the one before it.
-+			.AddStaticText(Lang.Get("optimum-upscaleplan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 650, 30))
-+			.AddHoverText(Lang.Get("optimum-upscaleplan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 5, 650, 25))
-+			.AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 6, 650, 60), "optUpscalePlan")
++			.AddStaticText(Lang.Get("optimum-upscaleplan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 650, 30))
++			.AddHoverText(Lang.Get("optimum-upscaleplan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 650, 25))
++			.AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 7, 650, 60), "optUpscalePlan")
 +			.EndChildElements()
 +			.Compose();
 +		handler.LoadComposer(composer);
@@ -339,6 +349,8 @@ index 4d08f84..3f628be 100644
 +		composer.GetDropDown("optUpscaler").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.EffectiveUpscaler);
 +		composer.GetDropDown("optUpscalerQuality").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerQuality);
 +		composer.GetDropDown("optLatency").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.LatencyMode);
++		composer.GetDropDown("optUpscalerPassthroughFilter").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter);
++		composer.GetDropDown("optUpscalerJitter").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerJitter ? "on" : "off");
 +		// The sharpness row's value and its "-> -1.59 mip" text are both set by
 +		// optimumUpdateUpscalerRows, which is also what a slider move calls, so the
 +		// row never shows a bias the samplers are not carrying.
@@ -423,7 +435,11 @@ index 4d08f84..3f628be 100644
 +	// down on.
 +	private void onOptimumUpscalerChanged(string code, bool selected)
 +	{
-+		string unavailable = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerUnavailable() : "no platform";
++		// Asked about the entry that was picked, not about the slot in general: the
++		// passthrough comparison upscaler needs no vendor runtime, so it stays
++		// selectable on a machine where DLSS cannot come up - which is the machine
++		// the comparison is most worth running on.
++		string unavailable = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerUnavailableFor(code) : "no platform";
 +		if (unavailable != null && !string.Equals(code, "off", StringComparison.OrdinalIgnoreCase))
 +		{
 +			// The row has already moved by the time the handler runs, so refusing has
@@ -458,6 +474,32 @@ index 4d08f84..3f628be 100644
 +		optimumUpdateUpscalerRows();
 +	}
 +
++	// The comparison experiment's two debug rows.
++	//
++	// The filter only changes how the passthrough blit magnifies, so it is a plain
++	// setting write: no target changes size, nothing temporal is invalidated, and the
++	// next frame's blit reads it.
++	private void onOptimumUpscalerPassthroughFilterChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		optimumUpdateUpscalerRows();
++	}
++
++	// The jitter switch changes the projection every pass is rendered with, so the
++	// history that was accumulated on the other side of it would be reprojected into a
++	// frame that never made it: the temporal state is dropped, exactly as toggling the
++	// upscaler does. No rebuild - no target changes size - and no shader reload, because
++	// EffectiveTemporalPipeline is unmoved: the motion writers still run, they are just
++	// writing for an unjittered frame.
++	private void onOptimumUpscalerJitterChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerJitter = string.Equals(code, "on", StringComparison.OrdinalIgnoreCase);
++		Vintagestory.API.Config.OptimumConfig.Save();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++		optimumUpdateUpscalerRows();
++	}
++
 +	// The latency mode is one call into the live backend: no target changes size,
 +	// nothing temporal is invalidated, and the OpenGL path has no backend at all.
 +	private void onOptimumLatencyChanged(string code, bool selected)
@@ -488,7 +530,10 @@ index 4d08f84..3f628be 100644
 +		GuiElementDropDown quality = composer.GetDropDown("optUpscalerQuality");
 +		if (quality != null)
 +		{
-+			quality.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss;
++			// Any upscaler that owns the resolve, not DLSS alone: the preset chooses the
++			// render size for the passthrough comparison upscaler too, which is the whole
++			// point of it - it renders at the size DLSS would have rendered at.
++			quality.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
 +		}
 +		// The sharpness row follows the quality row exactly: it only describes how
 +		// the upscaler samples the atlases, so with nothing upscaling it describes
@@ -497,8 +542,23 @@ index 4d08f84..3f628be 100644
 +		GuiElementSlider sharpness = composer.GetSlider("optUpscalerSharpness");
 +		if (sharpness != null)
 +		{
-+			sharpness.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss;
++			sharpness.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
 +			sharpness.SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.UpscalerLodBiasOffset * 100f), 0, 100, 5, optimumUpscalerLodBiasText());
++		}
++		// The filter row is the passthrough upscaler's alone; the jitter row belongs to
++		// whichever upscaler owns the resolve, because the experiment is run against
++		// both of them.
++		GuiElementDropDown passthroughFilter = composer.GetDropDown("optUpscalerPassthroughFilter");
++		if (passthroughFilter != null)
++		{
++			passthroughFilter.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsPassthrough;
++			passthroughFilter.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter);
++		}
++		GuiElementDropDown jitter = composer.GetDropDown("optUpscalerJitter");
++		if (jitter != null)
++		{
++			jitter.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++			jitter.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerJitter ? "on" : "off");
 +		}
 +		optimumUpdateUpscalePlanReadout();
 +	}
@@ -618,7 +678,7 @@ index 4d08f84..3f628be 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2326,87 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2386,87 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

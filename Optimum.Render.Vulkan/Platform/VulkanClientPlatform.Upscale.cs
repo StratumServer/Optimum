@@ -118,7 +118,8 @@ public partial class VulkanClientPlatform
     /// the same frame twice.</para>
     /// </summary>
     public override bool OptimumUpscalerActive =>
-        UpscalerActive && OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0;
+        (UpscalerActive || PassthroughUpscaler.Requested) &&
+        OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0;
 
     /// <summary>
     /// DLSS plan, Phase 6: why the settings tab may not offer an upscaler here, or null
@@ -132,6 +133,19 @@ public partial class VulkanClientPlatform
     /// before the client restarts. That is said plainly rather than silently offering a
     /// choice that would stand itself down one rebuild later.
     /// </summary>
+    /// <summary>
+    /// The same question about one entry of the dropdown. The passthrough comparison
+    /// upscaler needs no vendor runtime at all - no NGX, no session, no feature - so it
+    /// is available wherever this platform is running, which is exactly the machine
+    /// where "is the shimmer DLSS's or ours" has to be asked. Every other entry is the
+    /// slot-wide answer.
+    /// </summary>
+    public override string OptimumUpscalerUnavailableFor(string upscaler)
+    {
+        if (string.Equals(upscaler, "passthrough", StringComparison.OrdinalIgnoreCase)) return null;
+        return OptimumUpscalerUnavailable();
+    }
+
     public override string OptimumUpscalerUnavailable()
     {
         if (OptimumConfig.UpscalerRuntimeDisabled && upscaler == null)
@@ -170,6 +184,12 @@ public partial class VulkanClientPlatform
     public override void ApplyOptimumUpscalerSettings()
     {
         if (upscaler != null) upscaler.RetireFeature();
+        // The comparison upscaler holds no feature, so its plan is retired by hand:
+        // both the remembered one behind the tab's readout and the published one the
+        // LOD bias and the jitter sequence length are derived from. The next frame that
+        // blits republishes it from the targets that were really allocated.
+        passthroughPlan = default;
+        OptimumConfig.ClearUpscalerPlan();
         base.ApplyOptimumUpscalerSettings();
         // Retiring the feature cleared the published plan, so the bias the samplers
         // carry is now the one the old preset asked for. A preset change does not
@@ -201,6 +221,18 @@ public partial class VulkanClientPlatform
     public override bool OptimumTryPlanUpscaleRenderSize(
         int displayWidth, int displayHeight, out int renderWidth, out int renderHeight)
     {
+        // The passthrough comparison upscaler first, and without asking any host
+        // anything: it must plan the same render size DLSS would have planned while
+        // making no vendor call at all, which is what lets the experiment run on a
+        // machine with no NGX. A session that brought DLSS up earlier is irrelevant
+        // here - the setting decides, exactly as it does below.
+        if (PassthroughUpscaler.TryPlanForFrame(
+            displayWidth, displayHeight, out renderWidth, out renderHeight, out UpscalePlan passthrough))
+        {
+            LogUpscaler("[Optimum] passthrough upscaler plan: " + passthrough);
+            return true;
+        }
+
         // The whole rule lives in DlssUpscaler.TryPlanForFrame: the setting in force
         // for the frame being built decides, and only then is the host asked. The
         // host outlives a settings change, so its liveness is not the question.
@@ -222,6 +254,15 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override string OptimumUpscalerPlan()
     {
+        // The comparison upscaler has no feature to serve a plan, so the plan it
+        // reports is the one the last frame really blitted, marked for what it is.
+        if (PassthroughUpscaler.Requested)
+        {
+            return passthroughPlan.IsValid
+                ? passthroughPlan + " - passthrough, no reconstruction, jitter " +
+                    (OptimumConfig.UpscalerJitter ? "on" : "off")
+                : null;
+        }
         if (upscaler == null) return null;
         UpscalePlan plan = upscaler.Plan;
         return plan.IsValid ? plan.ToString() : null;
@@ -229,6 +270,42 @@ public partial class VulkanClientPlatform
 
     /// <summary>Whether the one-time "no depth blit here" line has been logged.</summary>
     private bool upscaleDepthRefused;
+
+    /// <summary>The plan the last passthrough frame really blitted; default when none has.</summary>
+    private UpscalePlan passthroughPlan;
+
+    /// <summary>
+    /// The comparison upscaler's evaluate: the render-resolution scene colour magnified
+    /// into the display-resolution target, and nothing else. No history, no motion, no
+    /// vendor runtime - the motion attachment and the jitter are still produced exactly
+    /// as they are for DLSS, they are simply not consumed, which is the point.
+    ///
+    /// Everything around it is shared with <see cref="RenderOptimumUpscale" />'s DLSS
+    /// path, including the overlays' depth upscale, so the only difference between the
+    /// two frames is the reconstruction itself.
+    /// </summary>
+    private bool RenderPassthroughUpscale(FrameBufferRef primary, FrameBufferRef target)
+    {
+        UpscalePlan plan = new UpscalePlan(
+            primary.Width, primary.Height, target.Width, target.Height,
+            DlssUpscaler.QualityOf(OptimumConfig.UpscalerQuality));
+        // The same publication the DLSS feature makes when it is created: the jitter
+        // sequence length and the texture LOD bias follow the ratio the frame really
+        // rendered at, so the two configurations differ in the reconstruction alone.
+        PassthroughUpscaler.Publish(plan);
+        ShaderRegistry.ApplyOptimumLodBias();
+
+        if (!device.BlitColorScaled(
+            primary.ColorTextureIds[0], target.ColorTextureIds[0],
+            !OptimumConfig.UpscalerPassthroughIsNearest))
+        {
+            DisableOptimumUpscaler("this driver refuses the passthrough upscaler's colour blit");
+            passthroughPlan = default;
+            return false;
+        }
+        passthroughPlan = plan;
+        return true;
+    }
 
     /// <summary>
     /// DLSS plan, Phase 3: the evaluate, where the TAA resolve would be - the jittered
@@ -251,7 +328,7 @@ public partial class VulkanClientPlatform
     /// </summary>
     public override bool RenderOptimumUpscale()
     {
-        if (!OptimumUpscalerActive || upscaler == null) return false;
+        if (!OptimumUpscalerActive) return false;
 
         List<FrameBufferRef> buffers = FrameBuffers;
         if (buffers == null || buffers.Count <= OptimumUpscaledSceneIndex) return false;
@@ -259,6 +336,51 @@ public partial class VulkanClientPlatform
         FrameBufferRef target = buffers[OptimumUpscaledSceneIndex];
         if (primary == null || target == null) return false;
         if (primary.ColorTextureIds == null || primary.ColorTextureIds.Length <= MotionAttachmentIndex) return false;
+
+        // The comparison upscaler takes the whole of the rest of this method's frame -
+        // the same targets, the same depth upscale below - and replaces only the
+        // reconstruction with a magnifying blit.
+        if (PassthroughUpscaler.Requested)
+        {
+            if (!RenderPassthroughUpscale(primary, target)) return false;
+        }
+        else if (!RenderDlssUpscale(primary, target))
+        {
+            return false;
+        }
+
+        // The overlays' depth, once per frame, from the depth the world was drawn with.
+        if (target.DepthTextureId > 0 &&
+            !device.UpscaleDepthNearest(primary.DepthTextureId, target.DepthTextureId))
+        {
+            // A refused blit must not leave the display-resolution depth as it was: on
+            // the first frame it is undefined, on every frame after that it is the
+            // previous frame's silhouettes, and the late 3D overlays test against it
+            // either way. Far plane, every affected frame, so the overlays lose their
+            // depth occlusion instead of testing against depth that belongs to no
+            // geometry in this frame.
+            device.ClearDepthImageToFar(target.DepthTextureId);
+            if (!upscaleDepthRefused)
+            {
+                upscaleDepthRefused = true;
+                LogUpscaler("[Optimum] upscaler: this driver refuses a depth blit, so the late 3D overlays " +
+                    "(selection outline and similar) are drawn without depth occlusion: their " +
+                    "display-resolution depth is cleared to the far plane instead of upscaled.");
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// The DLSS evaluate: the jittered render-resolution colour, depth and motion in,
+    /// the display-resolution scene colour out. Split out of
+    /// <see cref="RenderOptimumUpscale" /> when the passthrough comparison upscaler
+    /// joined the slot, so both paths provably share everything except the
+    /// reconstruction.
+    /// </summary>
+    private bool RenderDlssUpscale(FrameBufferRef primary, FrameBufferRef target)
+    {
+        if (upscaler == null) return false;
 
         // The triple the targets were really allocated for, which is the one the feature
         // must serve. Taken from the targets rather than from the remembered plan, so a
@@ -304,25 +426,6 @@ public partial class VulkanClientPlatform
             return false;
         }
 
-        // The overlays' depth, once per frame, from the depth the world was drawn with.
-        if (target.DepthTextureId > 0 &&
-            !device.UpscaleDepthNearest(primary.DepthTextureId, target.DepthTextureId))
-        {
-            // A refused blit must not leave the display-resolution depth as it was: on
-            // the first frame it is undefined, on every frame after that it is the
-            // previous frame's silhouettes, and the late 3D overlays test against it
-            // either way. Far plane, every affected frame, so the overlays lose their
-            // depth occlusion instead of testing against depth that belongs to no
-            // geometry in this frame.
-            device.ClearDepthImageToFar(target.DepthTextureId);
-            if (!upscaleDepthRefused)
-            {
-                upscaleDepthRefused = true;
-                LogUpscaler("[Optimum] DLSS: this driver refuses a depth blit, so the late 3D overlays " +
-                    "(selection outline and similar) are drawn without depth occlusion: their " +
-                    "display-resolution depth is cleared to the far plane instead of upscaled.");
-            }
-        }
         return true;
     }
 
