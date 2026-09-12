@@ -232,6 +232,55 @@ public class TimelineLifetimeTests
         Assert.Equal(0, queue.PendingCount);
     }
 
+    /// <summary>
+    /// PR #3 review, the FrameRing teardown contract: a resource retired inside a
+    /// frame that was reserved and then abandoned is keyed at a Frame value the GPU
+    /// will never reach, so a plain Collect leaves it queued for ever - and the one
+    /// caller of DrainRetirements needs a DLSS feature really released before
+    /// NVSDK_NGX_VULKAN_Shutdown1, where "still queued" is a use-after-free.
+    ///
+    /// CollectThrough is how the abandoned value is declared reached.
+    /// </summary>
+    [Fact]
+    public void AResourceRetiredInAnAbandonedFrameIsOnlyCollectedThroughItsValue()
+    {
+        // Frame 8 was reserved by BeginFrame; frames through 7 were submitted and have
+        // completed. Nothing will ever submit 8, so FrameCompleted stops at 7.
+        var clock = new FakeClock { FrameRecorded = 8, FrameCompleted = 7 };
+        var queue = new RetireQueue(clock);
+        var feature = new Tracked(1);
+        queue.Retire(feature);
+
+        // What DrainRetirements did before: wait for every signalled frame, then
+        // collect. The wait cannot move FrameCompleted past 7, so nothing goes.
+        Assert.Equal(0, queue.Collect());
+        Assert.False(feature.Disposed, "the abandoned frame's retirement was collected by a plain Collect");
+
+        // What it does now, with the abandoned value counting as reached.
+        Assert.Equal(1, queue.CollectThrough(Math.Max(clock.FrameCompleted, 8UL), clock.TransferCompleted));
+        Assert.True(feature.Disposed);
+        Assert.Equal(0, queue.PendingCount);
+    }
+
+    /// <summary>A ceiling never releases an entry that is genuinely still in flight.</summary>
+    [Fact]
+    public void CollectThroughStillHoldsBackEntriesPastTheCeiling()
+    {
+        var clock = new FakeClock { FrameRecorded = 12, TransferRecorded = 3 };
+        var queue = new RetireQueue(clock);
+        var resource = new Tracked(1);
+        queue.Retire(resource);
+
+        Assert.Equal(0, queue.CollectThrough(11, 3));
+        Assert.False(resource.Disposed);
+        // The Transfer side is not waived by the Frame ceiling either.
+        Assert.Equal(0, queue.CollectThrough(12, 2));
+        Assert.False(resource.Disposed);
+
+        Assert.Equal(1, queue.CollectThrough(12, 3));
+        Assert.True(resource.Disposed);
+    }
+
     [Theory]
     [InlineData(5UL, 7UL, 5UL)]
     [InlineData(9UL, 7UL, 7UL)]

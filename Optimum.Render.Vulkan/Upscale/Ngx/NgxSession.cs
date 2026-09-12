@@ -150,7 +150,20 @@ internal sealed unsafe class NgxSession : IDisposable
     {
         if (!NgxInterop.ManagedCallSiteIsSupported) return NgxResult.FailNotImplemented;
 
-        Directory.CreateDirectory(ApplicationDataPath);
+        // Best effort, exactly as the host's own preparation does it: NGX writes only
+        // logs and caches there, and an unwritable path is not worth refusing the
+        // feature over - let alone failing InitializeGraphics, which is what an
+        // exception here would do, falling the whole client back to OpenGL.
+        try
+        {
+            if (!string.IsNullOrEmpty(ApplicationDataPath)) Directory.CreateDirectory(ApplicationDataPath);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
         return NgxInterop.InitProjectId(
             _projectId, NgxEngineType.Custom, _engineVersion, _applicationDataPath,
             instance, physicalDevice, device, NgxInterop.VersionApi, _featureInfo);

@@ -96,6 +96,19 @@ internal sealed class DlssUpscaler : IDisposable
     private NgxDlssFeature? _feature;
     private bool _disposed;
 
+    /// <summary>
+    /// Whether <c>NVSDK_NGX_VULKAN_Init_ProjectID</c> succeeded on
+    /// <see cref="_vkDevice" /> and has not been shut down yet.
+    ///
+    /// Separate from "the upscaler is usable" (<see cref="Unavailable" />) on
+    /// purpose: every later <see cref="Fail" /> - the driver refusing to create the
+    /// feature, an evaluate that came back an error - sets a reason string while NGX
+    /// is still up on a live device. Shutting NGX down is owed to the device, not to
+    /// the setting, and skipping it leaves NGX initialised while the VkDevice it was
+    /// initialised on is destroyed, which is the use-after-free this class documents.
+    /// </summary>
+    private bool _ngxInitialized;
+
     public DlssUpscaler(Action<string>? log = null)
     {
         _log = log ?? (_ => { });
@@ -209,6 +222,7 @@ internal sealed class DlssUpscaler : IDisposable
 
         _device = device;
         _vkDevice = vkDevice;
+        _ngxInitialized = true;
         Unavailable = null;
         _log("[Optimum] DLSS Super Resolution is available and will upscale the frame.");
         return true;
@@ -408,7 +422,12 @@ internal sealed class DlssUpscaler : IDisposable
         RetireFeature();
         _device?.DrainDeferredDeletions();
 
-        if (_ownsSession && _session != null && _vkDevice != IntPtr.Zero && Unavailable == null)
+        // Gated on "NGX is up on this device", never on "the upscaler still works":
+        // a Fail() after BringUp succeeded - a driver that refuses to create the
+        // feature is the realistic one - sets Unavailable while NGX is still
+        // initialised, and skipping Shutdown1 here would destroy the VkDevice under
+        // a live NGX. Once it has run the process lifetime is spent either way.
+        if (_ownsSession && _session != null && _vkDevice != IntPtr.Zero && _ngxInitialized)
         {
             _processLifetimeSpent = true;
             NgxResult shutdown = NgxSession.Shutdown(_vkDevice);
@@ -416,6 +435,7 @@ internal sealed class DlssUpscaler : IDisposable
         }
         if (_ownsSession) _session?.Dispose();
 
+        _ngxInitialized = false;
         _session = null;
         _device = null;
         _vkDevice = IntPtr.Zero;

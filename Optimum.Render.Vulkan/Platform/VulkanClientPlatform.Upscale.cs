@@ -306,12 +306,22 @@ public partial class VulkanClientPlatform
 
         // The overlays' depth, once per frame, from the depth the world was drawn with.
         if (target.DepthTextureId > 0 &&
-            !device.UpscaleDepthNearest(primary.DepthTextureId, target.DepthTextureId) &&
-            !upscaleDepthRefused)
+            !device.UpscaleDepthNearest(primary.DepthTextureId, target.DepthTextureId))
         {
-            upscaleDepthRefused = true;
-            LogUpscaler("[Optimum] DLSS: this driver refuses a depth blit, so the late 3D overlays " +
-                "(selection outline and similar) keep whatever depth the target holds.");
+            // A refused blit must not leave the display-resolution depth as it was: on
+            // the first frame it is undefined, on every frame after that it is the
+            // previous frame's silhouettes, and the late 3D overlays test against it
+            // either way. Far plane, every affected frame, so the overlays lose their
+            // depth occlusion instead of testing against depth that belongs to no
+            // geometry in this frame.
+            device.ClearDepthImageToFar(target.DepthTextureId);
+            if (!upscaleDepthRefused)
+            {
+                upscaleDepthRefused = true;
+                LogUpscaler("[Optimum] DLSS: this driver refuses a depth blit, so the late 3D overlays " +
+                    "(selection outline and similar) are drawn without depth occlusion: their " +
+                    "display-resolution depth is cleared to the far plane instead of upscaled.");
+            }
         }
         return true;
     }

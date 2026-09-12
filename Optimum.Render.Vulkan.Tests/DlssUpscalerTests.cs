@@ -228,55 +228,67 @@ public class DlssUpscalerTests
         Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan plan));
         Log("plan: " + plan);
 
-        int color = CreateColor(seam, plan);
-        int depth = CreateDepth(seam, plan);
-        int motion = CreateMotion(seam, plan);
-        int output = CreateOutput(seam, plan);
-
-        const int frames = 8;
-        float[]? pixels = null;
-        for (int index = 0; index < frames; index++)
+        int color = 0, depth = 0, motion = 0, output = 0;
+        try
         {
-            seam.BeginFrame();
-            Assert.True(host.EnsureFeature(plan), "the feature was refused at frame " + index);
+            color = CreateColor(seam, plan);
+            depth = CreateDepth(seam, plan);
+            motion = CreateMotion(seam, plan);
+            output = CreateOutput(seam, plan);
 
-            var frame = new NgxDlssEvaluation
+            const int frames = 8;
+            float[]? pixels = null;
+            for (int index = 0; index < frames; index++)
             {
-                // Frame 0 is the reset frame: no history to reproject. This is where
-                // EnumTemporalResetReason maps onto NGX's reset flag in the client.
-                Reset = index == 0,
-                MotionVectorScaleX = 1f,
-                MotionVectorScaleY = 1f,
-            };
-            NgxResult evaluated = host.Evaluate(color, depth, motion, output, frame);
-            Log("frame " + index + " evaluate: " + NgxInterop.Describe(evaluated));
-            Assert.Equal(NgxResult.Success, evaluated);
+                seam.BeginFrame();
+                Assert.True(host.EnsureFeature(plan), "the feature was refused at frame " + index);
 
-            if (index == frames - 1) pixels = ReadOutput(seam, output);
-            seam.Present();
+                var frame = new NgxDlssEvaluation
+                {
+                    // Frame 0 is the reset frame: no history to reproject. This is where
+                    // EnumTemporalResetReason maps onto NGX's reset flag in the client.
+                    Reset = index == 0,
+                    MotionVectorScaleX = 1f,
+                    MotionVectorScaleY = 1f,
+                };
+                NgxResult evaluated = host.Evaluate(color, depth, motion, output, frame);
+                Log("frame " + index + " evaluate: " + NgxInterop.Describe(evaluated));
+                Assert.Equal(NgxResult.Success, evaluated);
+
+                if (index == frames - 1) pixels = ReadOutput(seam, output);
+                seam.Present();
+            }
+
+            // One feature for the whole run: the plan never changed, so nothing was
+            // rebuilt and nothing leaked.
+            Assert.Equal(1, host.FeaturesCreated);
+            Assert.Equal(0, host.FeaturesRetired);
+            Assert.Equal(plan, host.Plan);
+            Assert.Equal(plan.LodBias, OptimumConfig.UpscalerLodBias, 3);
+
+            Assert.NotNull(pixels);
+            Assert.Equal(DisplayWidth * DisplayHeight, pixels!.Length / 4);
+            BlockReport report = SampleBlocks(pixels, DisplayWidth, DisplayHeight);
+            Log("after " + frames + " frames: " + report);
+            Assert.True(report.MinBright > 0.75f, "dimmest bright block " + report.MinBright);
+            Assert.True(report.MaxDark < 0.25f, "brightest dark block " + report.MaxDark);
+
+            host.RetireFeature();
+            seam.DrainDeferredDeletions();
+            Assert.Equal(1, host.FeaturesRetired);
+            Assert.Equal(0f, OptimumConfig.UpscalerLodBias);
+            host.Dispose();
+
+            GpuTest.AssertCleanSince(seam, mark);
         }
-
-        // One feature for the whole run: the plan never changed, so nothing was
-        // rebuilt and nothing leaked.
-        Assert.Equal(1, host.FeaturesCreated);
-        Assert.Equal(0, host.FeaturesRetired);
-        Assert.Equal(plan, host.Plan);
-        Assert.Equal(plan.LodBias, OptimumConfig.UpscalerLodBias, 3);
-
-        Assert.NotNull(pixels);
-        Assert.Equal(DisplayWidth * DisplayHeight, pixels!.Length / 4);
-        BlockReport report = SampleBlocks(pixels, DisplayWidth, DisplayHeight);
-        Log("after " + frames + " frames: " + report);
-        Assert.True(report.MinBright > 0.75f, "dimmest bright block " + report.MinBright);
-        Assert.True(report.MaxDark < 0.25f, "brightest dark block " + report.MaxDark);
-
-        host.RetireFeature();
-        seam.DrainDeferredDeletions();
-        Assert.Equal(1, host.FeaturesRetired);
-        Assert.Equal(0f, OptimumConfig.UpscalerLodBias);
-        host.Dispose();
-
-        GpuTest.AssertCleanSince(seam, mark);
+        finally
+        {
+            // The fixture device is shared by every DLSS test in this process, so a
+            // test that keeps its images alive keeps them alive for the whole run;
+            // this one allocates about 40 MiB of image storage.
+            // In a finally because a failed assert above must not turn into a leak.
+            Release(seam, color, depth, motion, output);
+        }
     }
 
     /// <summary>
@@ -297,63 +309,93 @@ public class DlssUpscalerTests
         Log("after the resize:  " + second);
         Assert.NotEqual(first, second);
 
-        int colorA = CreateColor(seam, first);
-        int depthA = CreateDepth(seam, first);
-        int motionA = CreateMotion(seam, first);
-        int outputA = CreateOutput(seam, first);
+        int colorA = 0, depthA = 0, motionA = 0, outputA = 0;
+        int colorB = 0, depthB = 0, motionB = 0, outputB = 0;
+        try
+        {
+            colorA = CreateColor(seam, first);
+            depthA = CreateDepth(seam, first);
+            motionA = CreateMotion(seam, first);
+            outputA = CreateOutput(seam, first);
 
-        seam.BeginFrame();
-        Assert.True(host.EnsureFeature(first));
-        NgxDlssFeature? featureA = host.Feature;
-        Assert.NotNull(featureA);
-        Assert.Equal(NgxResult.Success, host.Evaluate(colorA, depthA, motionA, outputA,
-            new NgxDlssEvaluation { Reset = true, MotionVectorScaleX = 1f, MotionVectorScaleY = 1f }));
-        seam.Present();
+            seam.BeginFrame();
+            Assert.True(host.EnsureFeature(first));
+            NgxDlssFeature? featureA = host.Feature;
+            Assert.NotNull(featureA);
+            Assert.Equal(NgxResult.Success, host.Evaluate(colorA, depthA, motionA, outputA,
+                new NgxDlssEvaluation { Reset = true, MotionVectorScaleX = 1f, MotionVectorScaleY = 1f }));
+            seam.Present();
 
-        int colorB = CreateColor(seam, second);
-        int depthB = CreateDepth(seam, second);
-        int motionB = CreateMotion(seam, second);
-        int outputB = CreateOutput(seam, second);
+            colorB = CreateColor(seam, second);
+            depthB = CreateDepth(seam, second);
+            motionB = CreateMotion(seam, second);
+            outputB = CreateOutput(seam, second);
 
-        seam.BeginFrame();
-        // The rebuild happens here: a feature created for the old plan cannot
-        // serve the new one, so it is retired and another is created.
-        Assert.True(host.EnsureFeature(second));
-        Assert.NotSame(featureA, host.Feature);
-        Assert.Equal(2, host.FeaturesCreated);
-        Assert.Equal(1, host.FeaturesRetired);
-        Assert.Equal(second, host.Plan);
-        Assert.Equal(second.LodBias, OptimumConfig.UpscalerLodBias, 3);
+            seam.BeginFrame();
+            // The rebuild happens here: a feature created for the old plan cannot
+            // serve the new one, so it is retired and another is created.
+            Assert.True(host.EnsureFeature(second));
+            Assert.NotSame(featureA, host.Feature);
+            Assert.Equal(2, host.FeaturesCreated);
+            Assert.Equal(1, host.FeaturesRetired);
+            Assert.Equal(second, host.Plan);
+            Assert.Equal(second.LodBias, OptimumConfig.UpscalerLodBias, 3);
 
-        Assert.Equal(NgxResult.Success, host.Evaluate(colorB, depthB, motionB, outputB,
-            new NgxDlssEvaluation { Reset = true, MotionVectorScaleX = 1f, MotionVectorScaleY = 1f }));
-        float[] pixels = ReadOutput(seam, outputB);
-        seam.Present();
+            Assert.Equal(NgxResult.Success, host.Evaluate(colorB, depthB, motionB, outputB,
+                new NgxDlssEvaluation { Reset = true, MotionVectorScaleX = 1f, MotionVectorScaleY = 1f }));
+            float[] pixels = ReadOutput(seam, outputB);
+            seam.Present();
 
-        // The retired feature is released once the timeline says nothing names it.
-        seam.DrainDeferredDeletions();
-        Log("released the pre-resize feature: " + NgxInterop.Describe(featureA!.LastReleaseResult) +
-            ", parameters: " + NgxInterop.Describe(featureA.LastDestroyParametersResult));
-        Assert.False(featureA.IsValid);
-        Assert.Equal(NgxResult.Success, featureA.LastReleaseResult);
-        Assert.Equal(NgxResult.Success, featureA.LastDestroyParametersResult);
+            // The retired feature is released once the timeline says nothing names it.
+            seam.DrainDeferredDeletions();
+            Log("released the pre-resize feature: " + NgxInterop.Describe(featureA!.LastReleaseResult) +
+                ", parameters: " + NgxInterop.Describe(featureA.LastDestroyParametersResult));
+            Assert.False(featureA.IsValid);
+            Assert.Equal(NgxResult.Success, featureA.LastReleaseResult);
+            Assert.Equal(NgxResult.Success, featureA.LastDestroyParametersResult);
 
-        // And the new size is what comes out.
-        Assert.Equal(1920 * 1080, pixels.Length / 4);
-        BlockReport report = SampleBlocks(pixels, 1920, 1080);
-        Log("after the resize: " + report);
-        Assert.True(report.MinBright > 0.75f, "dimmest bright block " + report.MinBright);
-        Assert.True(report.MaxDark < 0.25f, "brightest dark block " + report.MaxDark);
+            // And the new size is what comes out.
+            Assert.Equal(1920 * 1080, pixels.Length / 4);
+            BlockReport report = SampleBlocks(pixels, 1920, 1080);
+            Log("after the resize: " + report);
+            Assert.True(report.MinBright > 0.75f, "dimmest bright block " + report.MinBright);
+            Assert.True(report.MaxDark < 0.25f, "brightest dark block " + report.MaxDark);
 
-        // Shutting the host down retires what is left: created and retired agree,
-        // which is the whole of "a resize must not leak features".
-        host.Shutdown();
-        Assert.Equal(host.FeaturesCreated, host.FeaturesRetired);
+            // Shutting the host down retires what is left: created and retired agree,
+            // which is the whole of "a resize must not leak features".
+            host.Shutdown();
+            Assert.Equal(host.FeaturesCreated, host.FeaturesRetired);
 
-        GpuTest.AssertCleanSince(seam, mark);
+            GpuTest.AssertCleanSince(seam, mark);
+        }
+        finally
+        {
+            // The fixture device is shared by every DLSS test in this process, so a
+            // test that keeps its images alive keeps them alive for the whole run;
+            // this one allocates about 93 MiB of image storage.
+            // In a finally because a failed assert above must not turn into a leak.
+            Release(seam, colorA, depthA, motionA, outputA, colorB, depthB, motionB, outputB);
+        }
     }
 
     // ---------------------------------------------------------------- inputs
+
+    /// <summary>
+    /// Releases the images a test created on the shared fixture device.
+    ///
+    /// <c>NgxRuntime.Device</c> lives for the whole test process, so an image a test
+    /// does not delete is held until the fixture is disposed, not until the test
+    /// ends. <c>DeleteTexture</c> evicts the descriptor references and defers the
+    /// destruction onto the frame timeline, so it is legal between frames and costs
+    /// the test nothing. A zero handle is a test that failed before it allocated.
+    /// </summary>
+    private static void Release(VulkanDevice seam, params int[] textures)
+    {
+        foreach (int texture in textures)
+        {
+            if (texture > 0) seam.DeleteTexture(texture);
+        }
+    }
 
     private static bool Bright(int x, int y, int width, int height) =>
         (x * Blocks / width + y * Blocks / height) % 2 == 0;

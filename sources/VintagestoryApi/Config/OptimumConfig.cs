@@ -682,7 +682,15 @@ public static class OptimumConfig
             // log2(render / display) - 1. The renderer publishes the value from the
             // ratio the SDK's optimal-settings query actually returned, so the two
             // terms never stack: with an upscaler active, its bias is the bias.
-            if (UpscalerReplacesTaa && UpscalerLodBias != 0f)
+            //
+            // "A plan is published" is UpscalerRenderScale, never the bias: the bias is
+            // legitimately 0 at DLAA (render size == display size, so log2 of the ratio
+            // is 0) and reachable at any preset with the offset slider, and at 0 the old
+            // test fell through and left RenderScale's term plus TaaMipBias standing -
+            // a -1 bias on a frame rendered at the display resolution. Only
+            // SetUpscalerPlan raises the scale and only ClearUpscalerPlan puts it back
+            // to 0, which is exactly the question being asked here.
+            if (UpscalerReplacesTaa && UpscalerRenderScale > 0f)
             {
                 bias = Math.Clamp(UpscalerLodBias, -3.0f, 1.0f);
             }

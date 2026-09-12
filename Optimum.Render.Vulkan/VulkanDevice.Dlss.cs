@@ -111,7 +111,17 @@ public sealed unsafe partial class VulkanDevice
     /// handle names, so releasing the feature afterwards is a use-after-free
     /// inside the driver (it takes the process down; measured 2026-09-12).
     /// </summary>
-    internal int DrainDeferredDeletions() => _frames.DrainRetirements();
+    /// <para>A frame that is still open when this runs is abandoned by the drain
+    /// (its recording is thrown away and its Frame value counts as reached, because
+    /// nothing will ever submit it), so the device must stop calling itself
+    /// in-frame: every later Commands access would name a command buffer that went
+    /// back to the initial state.</para>
+    internal int DrainDeferredDeletions()
+    {
+        int collected = _frames.DrainRetirements();
+        _frameActive = false;
+        return collected;
+    }
 
     /// <summary>
     /// Point-upscales one depth image into another, for the display-resolution depth the
@@ -155,6 +165,47 @@ public sealed unsafe partial class VulkanDevice
         {
             RenderTrace.Write("depth upscale src=" + sourceTexture + " dst=" + destinationTexture +
                 " " + source.Width + "x" + source.Height + " -> " + destination.Width + "x" + destination.Height);
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Clears a depth image to the far plane, for the display-resolution depth of a
+    /// frame whose upscale of it was refused.
+    ///
+    /// Not a quality path and not a substitute for the point upscale: it is what
+    /// keeps the buffer <i>defined</i>. A depth image the upscale never wrote holds
+    /// undefined content on the frame it was created and the previous frame's
+    /// silhouettes after that, and the late 3D overlays test against it - so they
+    /// would either vanish behind depth that belongs to nothing or show through where
+    /// the world occludes them. Far plane costs them their occlusion, which is the
+    /// one degradation that is not wrong pixels.
+    ///
+    /// <c>vkCmdClearDepthStencilImage</c> rather than the blit, because it needs only
+    /// TRANSFER_DST image usage - which this target has - and no format feature the
+    /// refusal already told us is missing.
+    /// </summary>
+    internal bool ClearDepthImageToFar(int destinationTexture)
+    {
+        if (!_frameActive) return false;
+        VulkanTexture? destination = _textures.Get(destinationTexture);
+        if (destination == null) return false;
+
+        CommandBuffer commandBuffer = Commands;
+        _targets.FlushAllPendingClears(commandBuffer);
+        _targets.EndRendering(commandBuffer);
+
+        _textures.Require(_barriers, commandBuffer, destination, ResourceUsage.TransferDst);
+        _barriers.Flush(commandBuffer);
+
+        var value = new ClearDepthStencilValue(1f, 0);
+        var range = new ImageSubresourceRange(destination.Aspect, 0, 1, 0, 1);
+        _context.Api.CmdClearDepthStencilImage(commandBuffer,
+            destination.Image, ImageLayout.TransferDstOptimal, &value, 1, &range);
+
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("depth upscale refused, cleared dst=" + destinationTexture + " to the far plane");
         }
         return true;
     }

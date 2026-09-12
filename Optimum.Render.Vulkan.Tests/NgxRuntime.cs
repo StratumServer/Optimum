@@ -116,6 +116,7 @@ public sealed class NgxRuntime : IDisposable
         const int displayWidth = 1280, displayHeight = 720;
 
         VulkanDevice device = _device!;
+        bool frameOpen = false;
         try
         {
             int color = device.CreateUpscaleTexture(
@@ -132,6 +133,7 @@ public sealed class NgxRuntime : IDisposable
                 NgxPerfQuality.MaxPerf, NgxDlssSettings.ContractFlags);
 
             device.BeginFrame();
+            frameOpen = true;
             NgxResult created = device.CreateDlssFeature(settings, out NgxDlssFeature? feature);
             if (created == NgxResult.Success && feature != null)
             {
@@ -146,12 +148,34 @@ public sealed class NgxRuntime : IDisposable
                 Log("warm-up feature could not be created: " + NgxInterop.Describe(created));
             }
             device.Present();
+            frameOpen = false;
             device.DrainDeferredDeletions();
             Log("warm-up absorbed " + GpuTest.MessagesOf(device).Count + " layer message(s)");
         }
         catch (Exception error)
         {
+            // The warm-up is an optimisation of the ledger and never fails a run - but
+            // it must not hand the next test a device with a frame still open on it.
+            // An exception between BeginFrame and Present leaves the slot recording
+            // under a reserved Frame value that nothing will signal, so the next
+            // BeginFrame would recycle a slot whose pool is still in use and every
+            // retirement made inside the abandoned frame would stay queued past
+            // Shutdown1. DrainDeferredDeletions closes exactly that frame.
             Log("warm-up did not run: " + error.Message);
+            if (frameOpen)
+            {
+                try
+                {
+                    device.DrainDeferredDeletions();
+                    Log("warm-up abandoned its open frame; the shared device is usable again");
+                }
+                catch (Exception cleanup)
+                {
+                    // Nothing left to salvage: no test may run against this device.
+                    Unavailable = "the NGX warm-up left the shared device unusable: " + cleanup.Message;
+                    Log(Unavailable);
+                }
+            }
         }
     }
 
@@ -181,10 +205,18 @@ public sealed class NgxRuntime : IDisposable
     /// <summary>Lines the bring-up produced, for a test to echo into its own output.</summary>
     public IReadOnlyList<string> Diagnostics => _log;
 
-    /// <summary>Skips the calling test unless NGX is up on this runtime's device.</summary>
+    /// <summary>
+    /// Skips the calling test unless NGX is up on this runtime's device and the
+    /// device is still usable.
+    ///
+    /// The two are not the same question. <see cref="Initialized" /> says NGX was
+    /// brought up, which is what <see cref="Dispose" /> owes a Shutdown1 to;
+    /// <see cref="Unavailable" /> says no test may run against this device - which a
+    /// failed warm-up can decide after Init already succeeded.
+    /// </summary>
     public void Require()
     {
-        Skip.If(!Initialized, Unavailable ?? "NGX did not come up.");
+        Skip.If(!Initialized || Unavailable != null, Unavailable ?? "NGX did not come up.");
     }
 
     /// <summary>

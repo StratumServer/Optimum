@@ -224,6 +224,41 @@ internal sealed unsafe class FrameSlot : IDisposable
     }
 
     /// <summary>
+    /// Throws the frame's recording away without submitting it, for a frame that
+    /// <c>BeginFrame</c> reserved and that nothing will ever submit - an exception
+    /// unwound past <c>Present</c>, a teardown that begins while a frame is open.
+    ///
+    /// Resetting the pool rather than ending and submitting the command buffer,
+    /// because an abandoned recording may be anywhere: inside a rendering scope, or
+    /// after a command the driver rejected. <c>vkResetCommandPool</c> only requires
+    /// that none of its buffers is in the pending state, which is exactly what "never
+    /// submitted" means, and it returns a buffer in the recording state to the initial
+    /// state whatever was recorded into it.
+    ///
+    /// Returns the Frame value that will now never be signalled, or 0 when there was
+    /// no open frame; the caller has to tell the retire queue about it, because every
+    /// resource retired inside the frame is keyed at that value.
+    /// </summary>
+    public ulong AbandonFrame()
+    {
+        ulong abandoned = FrameValue;
+        // A value the queue already accepted is not abandoned, it is in flight: after
+        // EndFrameAndSubmit or SubmitPresent the slot still names the value it
+        // submitted, and resetting its pool would pull a pending command buffer.
+        if (abandoned == 0 || abandoned <= _timeline.FrameSignalled) return 0;
+        _context.Api.ResetCommandPool(_context.Device, CommandPool, 0);
+        // Nothing may record inline into the buffer that just went back to the
+        // initial state; the next Begin starts a fresh one and re-registers it.
+        _uploads.OnFrameCommandsSubmittedLocked();
+        _commandBuffersUsed = 0;
+        _cursor = 0;
+        PartialSubmits = 0;
+        CommandBuffer = default;
+        FrameValue = 0;
+        return abandoned;
+    }
+
+    /// <summary>
     /// After <see cref="EndFrameAndSubmit" /> and a successful acquire: starts the
     /// present command buffer (Submit B) in this slot under a newly reserved Frame
     /// value.
@@ -516,9 +551,28 @@ internal sealed class FrameRing : IDisposable
     /// </summary>
     public int DrainRetirements()
     {
+        // A frame that BeginFrame reserved and nothing submitted never signals its
+        // value, and every resource retired inside it is keyed at that value
+        // (RetireQueue.Retire reads FrameRecorded, which ReserveFrame already
+        // advanced). FrameCompleted therefore stays below it for ever and a plain
+        // Collect would leave those resources queued - fatal for the caller this
+        // drain exists for, because a DLSS feature still alive when
+        // NVSDK_NGX_VULKAN_Shutdown1 runs is a use-after-free inside the driver.
+        // So close the abandoned frame first and let its value count as reached.
+        ulong abandoned = AbortFrame();
         _timeline.WaitForSignalledFramesAtTeardown();
-        return _retired.Collect();
+        ulong frameCeiling = Math.Max(_timeline.FrameCompleted, abandoned);
+        return _retired.CollectThrough(frameCeiling, _timeline.TransferCompleted);
     }
+
+    /// <summary>
+    /// Discards the recording of a frame that was begun and never submitted, and
+    /// returns the Frame value that will now never be signalled (0 when no frame was
+    /// open). Part of the teardown contract: <see cref="DrainRetirements" /> calls
+    /// it, and any other path that has to release what an abandoned frame retired
+    /// must call it before collecting.
+    /// </summary>
+    public ulong AbortFrame() => _index < 0 ? 0 : _slots[_index].AbandonFrame();
 
     public void Dispose()
     {

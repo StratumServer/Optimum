@@ -100,6 +100,14 @@
        It degrades and never fails the solution build: with no compiler on the
        host build.sh prints one line and exits 0, no file appears, and the
        managed side reports NGX unavailable (NgxShim.Diagnosis says why).
+
+       The Windows command carries the same -fno-optimize-sibling-calls that
+       build.sh does, and for the same reason: a tail call pops the shim's frame,
+       so NGX resolves the managed caller's module instead of the shim's and
+       refuses. It creates bin/native first, because on a clean Windows checkout
+       the directory does not exist yet and the link would fail with the shim's
+       "no compiler" line covering for it. The mkdir is joined with & rather than
+       && so an existing directory does not skip the compile.
        ContinueOnError covers the rest. -->
   <Target Name="BuildNgxShim" BeforeTargets="AssignTargetPaths">
     <PropertyGroup>
@@ -110,7 +118,7 @@
           Command="bash &quot;$(NgxShimDir)/build.sh&quot; &quot;$(NgxShimOut)&quot;"
           ContinueOnError="true" />
     <Exec Condition="'$(OS)' == 'Windows_NT'"
-          Command="where cc.exe &gt;nul 2&gt;&amp;1 &amp;&amp; cc.exe -std=c99 -O2 -shared &quot;$(NgxShimDir)/optimum_ngx.c&quot; -o &quot;$(NgxShimOut)/OptimumNgx.dll&quot; || echo optimum-ngx: no C compiler on this host; skipping the NGX shim - DLSS will report unavailable."
+          Command="if not exist &quot;$(NgxShimOut)&quot; mkdir &quot;$(NgxShimOut)&quot; &amp; where cc.exe &gt;nul 2&gt;&amp;1 &amp;&amp; cc.exe -std=c99 -O2 -fno-optimize-sibling-calls -shared &quot;$(NgxShimDir)/optimum_ngx.c&quot; -o &quot;$(NgxShimOut)/OptimumNgx.dll&quot; || echo optimum-ngx: the NGX shim was not built on this host; DLSS will report unavailable."
           ContinueOnError="true" />
     <ItemGroup>
       <None Include="$(NgxShimOut)/libOptimumNgx.so" Condition="Exists('$(NgxShimOut)/libOptimumNgx.so')">

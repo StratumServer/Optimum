@@ -111,7 +111,9 @@ int main(int argc, char **argv)
         memset(props, 0, sizeof props);
         gpdp(pds[i], props);
         uint32_t vendor = *(uint32_t *)(props + 8);
-        printf("physical device %u: vendor 0x%04X '%s'\n", i, vendor, props + 24);
+        /* VkPhysicalDeviceProperties: apiVersion 0, driverVersion 4, vendorID 8,
+           deviceID 12, deviceType 16, deviceName 20. */
+        printf("physical device %u: vendor 0x%04X '%s'\n", i, vendor, props + 20);
         if (vendor == 0x10DE && !pd) pd = pds[i];
     }
     if (!pd) { printf("no NVIDIA physical device\n"); return 1; }

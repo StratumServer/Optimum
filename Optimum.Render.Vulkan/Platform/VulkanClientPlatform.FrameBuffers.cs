@@ -255,10 +255,23 @@ public partial class VulkanClientPlatform
             }
             catch (Exception error)
             {
-                // No target, no upscale: the setting stands down for the session and the
-                // next rebuild sizes the world at the display resolution again.
+                // No target, no upscale - and the set built so far is the wrong shape for
+                // a frame without one: Primary, Transparent, the SSAO pair and the TAA
+                // slots were all allocated at the vendor's reduced render size, while
+                // everything after the upscale is display-sized. Returning that list
+                // would run the world at the render size with nothing upscaling it into
+                // the display chain.
+                //
+                // So stand the setting down, release everything this build made, and
+                // build the set again from the top. DisableOptimumUpscaler clears
+                // OptimumConfig.UpscalerReplacesTaa, which is the first thing
+                // TryPlanForFrame reads, so the second build plans no upscale, takes
+                // width = displayWidth, and cannot reach this branch again - one retry,
+                // not a loop.
                 DisableOptimumUpscaler("the upscaled scene target (device): " + error.Message);
                 list[OptimumUpscaledSceneIndex] = null;
+                DisposeFrameBuffers(list);
+                return SetupDefaultFrameBuffers();
             }
         }
 
@@ -448,30 +461,48 @@ public partial class VulkanClientPlatform
     /// Neither image is a transient: both are read and written across pass boundaries in
     /// the same frame, and the depth one carries content from before the upscale.
     /// </summary>
+    /// <remarks>
+    /// All or nothing: the target it returns is complete, and a failure - an
+    /// allocation that threw, or an incomplete FBO - releases whatever it had already
+    /// created before it leaves. Nothing it makes reaches the caller's list until the
+    /// last line, so a partially built target is the one thing DisposeFrameBuffers
+    /// cannot clean up afterwards. The GL body releases its three handles the same
+    /// way on an incomplete status.
+    /// </remarks>
     private FrameBufferRef CreateOptimumUpscaledSceneTarget(int width, int height)
     {
         FrameBufferRef target = new FrameBufferRef();
         target.Width = width;
         target.Height = height;
-        target.FboId = device.CreateFramebuffer(width, height);
         target.ColorTextureIds = new int[1];
-        target.ColorTextureIds[0] = device.CreateUpscaleTexture(
-            width, height, Silk.NET.Vulkan.Format.R8G8B8A8Unorm, storage: true);
-        // The blit, the bloom chain and the screenshot all sample it; linear and clamped,
-        // like every other post-chain colour target.
-        SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
-        device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
-
-        target.DepthTextureId = device.CreateTexture2D(width, height,
-            EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
-        // NEAREST, exactly as Primary's depth: nothing may interpolate a depth across a
-        // silhouette, least of all a buffer that was point-upscaled to begin with.
-        SetupOptimumTextureSampler(target.DepthTextureId, 9728, 33071);
-        device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
-        device.SetDrawBuffers(target.FboId, 1);
-        if (!device.CheckFramebufferComplete(target.FboId, out string status))
+        try
         {
-            throw new Exception("Optimum upscaled scene FBO: " + status);
+            target.FboId = device.CreateFramebuffer(width, height);
+            target.ColorTextureIds[0] = device.CreateUpscaleTexture(
+                width, height, Silk.NET.Vulkan.Format.R8G8B8A8Unorm, storage: true);
+            // The blit, the bloom chain and the screenshot all sample it; linear and clamped,
+            // like every other post-chain colour target.
+            SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
+            device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
+
+            target.DepthTextureId = device.CreateTexture2D(width, height,
+                EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
+            // NEAREST, exactly as Primary's depth: nothing may interpolate a depth across a
+            // silhouette, least of all a buffer that was point-upscaled to begin with.
+            SetupOptimumTextureSampler(target.DepthTextureId, 9728, 33071);
+            device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
+            device.SetDrawBuffers(target.FboId, 1);
+            if (!device.CheckFramebufferComplete(target.FboId, out string status))
+            {
+                throw new Exception("Optimum upscaled scene FBO: " + status);
+            }
+        }
+        catch
+        {
+            if (target.ColorTextureIds[0] > 0) device.DeleteTexture(target.ColorTextureIds[0]);
+            if (target.DepthTextureId > 0) device.DeleteTexture(target.DepthTextureId);
+            if (target.FboId > 0) device.DeleteFramebuffer(target.FboId);
+            throw;
         }
         return target;
     }
