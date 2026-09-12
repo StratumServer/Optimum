@@ -15,13 +15,16 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <c>NVSDK_NGX_VULKAN_Shutdown1</c>.
 ///
 /// It is shared rather than per test because NGX only supports one lifetime per
-/// process on this driver, and the failure is fatal rather than an error code:
-/// the <i>second</i> <c>Shutdown1</c> in a process segfaults inside
-/// <c>libnvidia-ngx.so.1</c> (measured 2026-09-12, driver 615.71.09; core dump
-/// stack <c>libnvidia-ngx+0xa1898</c> under
-/// <c>OptimumNgx_VulkanShutdown</c>), whether or not each init was paired with
-/// its own device and its own features. So every NGX test shares this one and
-/// nothing else calls Init or Shutdown.
+/// process on this driver, and the failure is fatal rather than an error code. The
+/// bring-up and the one shutdown go through <c>NgxLifetime</c>, which is the only
+/// thing in the process allowed to call either.
+///
+/// <para>The segfault inside <c>libnvidia-ngx.so.1</c> that used to end every run
+/// here (core dump stack <c>libnvidia-ngx+0xa1898</c> under
+/// <c>OptimumNgx_VulkanShutdown</c>) was not a second shutdown and not an ordering
+/// mistake: the driver's <c>Shutdown1</c> takes a second, undeclared parameter and
+/// writes through it. It is fixed in the shim; see
+/// <c>native/optimum-ngx/optimum_ngx.c</c>.</para>
 ///
 /// The runtime never fails a test by existing: when the shim, the driver library
 /// or the NGX feature libraries are missing it simply comes up unavailable and
@@ -77,7 +80,8 @@ public sealed class NgxRuntime : IDisposable
         PhysicalDevice = (IntPtr)context.PhysicalDevice.Handle;
         VkDevice = (IntPtr)context.Device.Handle;
 
-        InitResult = _session.Initialize(Instance, PhysicalDevice, VkDevice);
+        NgxLifetime.Initialize(_session, Instance, PhysicalDevice, VkDevice, out NgxResult initResult);
+        InitResult = initResult;
         Log("NVSDK_NGX_VULKAN_Init_ProjectID: " + NgxInterop.Describe(InitResult));
         if (InitResult != NgxResult.Success)
         {
@@ -268,13 +272,15 @@ public sealed class NgxRuntime : IDisposable
 
         if (_device != null)
         {
-            _device.DrainDeferredDeletions();
-            if (Initialized)
-            {
-                ShutdownResult = NgxSession.Shutdown(VkDevice);
-                Log("NVSDK_NGX_VULKAN_Shutdown1: " + NgxInterop.Describe(ShutdownResult));
-            }
-            _device.Dispose();
+            // Through the one owner, exactly as the client does it: the owner drains
+            // the frame timeline and calls Shutdown1 itself, once, and the device is
+            // destroyed only afterwards.
+            VulkanDevice device = _device;
+            NgxLifetimeOutcome outcome = NgxLifetime.ShutDown(null, device.DrainDeferredDeletions, Log);
+            ShutdownResult = outcome == NgxLifetimeOutcome.Done
+                ? NgxLifetime.ShutdownResult
+                : NgxResult.FailNotInitialized;
+            device.Dispose();
         }
         _session?.Dispose();
 

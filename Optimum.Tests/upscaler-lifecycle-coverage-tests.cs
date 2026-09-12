@@ -83,15 +83,21 @@ public class UpscalerLifecycleCoverageTests
         Assert.True(shutdown > 0);
         string body = host.Substring(shutdown);
 
-        int retire = body.IndexOf("RetireFeature();", StringComparison.Ordinal);
-        int drain = body.IndexOf("_device?.DrainDeferredDeletions();", StringComparison.Ordinal);
-        int ngx = body.IndexOf("NgxSession.Shutdown(_vkDevice)", StringComparison.Ordinal);
-        Assert.True(retire > 0 && drain > retire && ngx > drain,
-            "Shutdown must retire, drain and only then shut NGX down:\n" + body.Substring(0, 900));
+        // The order is no longer written out at this call site: it is performed by
+        // the one owner, which is handed the release and the drain to run itself.
+        Assert.Contains(
+            "NgxLifetime.ShutDown(RetireFeature, device != null ? device.DrainDeferredDeletions : null, _log);",
+            body);
+
+        string owner = Read("Optimum.Render.Vulkan/Upscale/Ngx/NgxLifetime.cs");
+        int release = owner.IndexOf("if (releaseFeatures != null) releaseFeatures();", StringComparison.Ordinal);
+        int drain = owner.IndexOf("if (drainFrameTimeline != null) drainFrameTimeline();", StringComparison.Ordinal);
+        int ngx = owner.IndexOf("ShutdownResult = _shutdownCall(_device);", StringComparison.Ordinal);
+        Assert.True(release > 0 && drain > release && ngx > drain,
+            "the owner must release, drain and only then shut NGX down");
 
         // One lifetime per process, enforced in both directions.
-        Assert.Contains("_processLifetimeSpent = true;", body);
-        Assert.Contains("private static bool _processLifetimeSpent;", host);
+        Assert.Contains("if (_shutDown) return NgxLifetimeOutcome.AlreadyShutDown;", owner);
         Assert.Contains(
             "return Fail(\"NGX was already shut down in this process and allows exactly one lifetime\");", host);
 

@@ -40,17 +40,22 @@ public class Pr3ReviewBatchCoverageTests
         string upscaler = Read(Upscaler);
         string shutdown = Between(upscaler, "public void Shutdown()", "public void Dispose()");
 
-        Assert.Contains("_ngxInitialized", shutdown);
+        // The gate now lives in the one owner, which knows whether NGX is up; the
+        // host only says whether the lifetime is its own to end.
         Assert.DoesNotContain("Unavailable == null", shutdown);
-        Assert.Contains("NgxSession.Shutdown(_vkDevice)", shutdown);
-        Assert.Contains("_processLifetimeSpent = true;", shutdown);
+        Assert.Contains("if (_ownsSession)", shutdown);
+        Assert.Contains("NgxLifetime.ShutDown(", shutdown);
 
-        // Set exactly where Init succeeded, and nowhere else: AdoptSession owns no
-        // lifetime, so a test host that adopts must never shut the owner's NGX down.
-        string bringUp = Between(upscaler, "public bool BringUp(", "internal bool AdoptSession(");
-        Assert.Contains("_ngxInitialized = true;", bringUp);
+        string owner = Read("Optimum.Render.Vulkan/Upscale/Ngx/NgxLifetime.cs");
+        string ownerShutdown = Between(owner, "internal NgxLifetimeOutcome ShutDown(", "internal static class NgxLifetime");
+        Assert.Contains("if (!_initialized)", ownerShutdown);
+        Assert.DoesNotContain("Unavailable", ownerShutdown);
+
+        // AdoptSession owns no lifetime, so a test host that adopts retires and
+        // drains but must never shut the owner's NGX down.
         string adopt = Between(upscaler, "internal bool AdoptSession(", "// ---------------------------------------------------------------- plan");
-        Assert.DoesNotContain("_ngxInitialized", adopt);
+        Assert.DoesNotContain("NgxLifetime.ShutDown", adopt);
+        Assert.Contains("_ownsSession = false;", adopt);
     }
 
     /// <summary>
@@ -64,7 +69,7 @@ public class Pr3ReviewBatchCoverageTests
     public void TheNgxDataDirectoryNeverAbortsTheVulkanBringUp()
     {
         string session = Read(Session);
-        string initialize = Between(session, "public NgxResult Initialize(", "public static NgxResult Shutdown(");
+        string initialize = Between(session, "public NgxResult Initialize(", "// There is deliberately no Shutdown here.");
 
         Assert.Contains("Directory.CreateDirectory(ApplicationDataPath)", initialize);
         Assert.Contains("catch (IOException)", initialize);

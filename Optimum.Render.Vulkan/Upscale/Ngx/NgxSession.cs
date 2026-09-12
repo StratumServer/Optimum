@@ -169,8 +169,10 @@ internal sealed unsafe class NgxSession : IDisposable
             instance, physicalDevice, device, NgxInterop.VersionApi, _featureInfo);
     }
 
-    public static NgxResult Shutdown(IntPtr device) =>
-        NgxInterop.ManagedCallSiteIsSupported ? NgxInterop.Shutdown1(device) : NgxResult.FailNotImplemented;
+    // There is deliberately no Shutdown here. NVSDK_NGX_VULKAN_Shutdown1 has exactly
+    // one caller in this process - NgxLifetime.ShutDown - which performs the release
+    // and the drain that must precede it and refuses to run twice. A session that
+    // could shut NGX down on its own would be a second way to get the order wrong.
 
     /// <summary>
     /// The C# equivalent of <c>NGX_DLSS_GET_OPTIMAL_SETTINGS</c> from

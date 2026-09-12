@@ -183,6 +183,34 @@ OptimumNgxResult OptimumNgx_LoadRuntime(void)
 typedef OptimumNgxResult (*pfn_init_project_id)(
     const char *, int, const char *, const void *, void *, void *, void *, int, const void *);
 typedef OptimumNgxResult (*pfn_handle)(void *);
+/*
+ * NVSDK_NGX_VULKAN_Shutdown1 as the driver really implements it.
+ *
+ * The public header (nvsdk_ngx_vk.h) declares one parameter, VkDevice. The
+ * implementation in libnvidia-ngx.so.1 (driver 615.71.09) takes two: it moves
+ * its *second* argument straight into the fourth argument of the internal
+ * shutdown routine, and that routine stores the SDK's remaining reference count
+ * through it without ever testing it for NULL:
+ *
+ *     NVSDK_NGX_VULKAN_Shutdown1:  mov %rsi,%rcx  ...  jmp <internal shutdown>
+ *     internal shutdown:           mov %rcx,0x10(%rsp)
+ *                                  ...
+ *                                  mov 0x10(%rsp),%rsi
+ *                                  mov %eax,(%rsi)      <-- the SIGSEGV
+ *
+ * The deprecated one-argument NVSDK_NGX_VULKAN_Shutdown passes `lea 0xc(%rsp)`
+ * there, which is what the count is meant to land in. Called through the
+ * header's prototype, %rsi holds whatever the caller happened to leave in it -
+ * a writable address by luck (a C test harness), or 8192 (the .NET client and
+ * the test host, every time), and then NGX writes four bytes to address 0x2000
+ * and the process dies inside the driver. That is the crash both core dumps
+ * show, on the *first* Shutdown1 of the process.
+ *
+ * So the shim always passes a real int* it owns. An extra register argument is
+ * harmless if a future driver really does take one parameter, and it is the
+ * only thing that makes the call defined on this one.
+ */
+typedef OptimumNgxResult (*pfn_shutdown1)(void *, int *);
 typedef OptimumNgxResult (*pfn_out_pointer)(void **);
 
 OptimumNgxResult OptimumNgx_VulkanInitProjectId(
@@ -199,8 +227,10 @@ OptimumNgxResult OptimumNgx_VulkanInitProjectId(
 
 OptimumNgxResult OptimumNgx_VulkanShutdown(void *device)
 {
+    /* Written by NGX with the SDK's remaining reference count; see pfn_shutdown1. */
+    int remainingReferences = 0;
     OPTIMUM_NGX_REQUIRE(shutdown1)
-    OPTIMUM_NGX_RETURN(((pfn_handle)g_ngx.shutdown1)(device));
+    OPTIMUM_NGX_RETURN(((pfn_shutdown1)g_ngx.shutdown1)(device, &remainingReferences));
 }
 
 /* --------------------------------------------------------- parameter blocks */
