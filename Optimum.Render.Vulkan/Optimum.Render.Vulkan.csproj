@@ -111,12 +111,16 @@
        ContinueOnError covers the rest.
 
        Both commands compile to a temporary file and only replace the shipped one
-       once the compiler said yes, and delete both on failure. A failed compile
-       that left the previous OptimumNgx.dll in place would be packaged by the
-       Exists() condition below: an incremental build would ship a native library
-       older than the managed side that calls it, which is an ABI mismatch inside
-       NGX rather than the "DLSS unavailable" line this is supposed to degrade to.
-       build.sh does the same (it writes to $target.tmp and rm -f's on failure). -->
+       once the compiler said yes, and delete both when the compile fails *and*
+       when there is no compiler at all. A previous OptimumNgx.dll left in place
+       would be packaged by the Exists() condition below: an incremental build
+       would ship a native library older than the managed side that calls it,
+       which is an ABI mismatch inside NGX rather than the "DLSS unavailable"
+       line this is supposed to degrade to. A host that had a compiler yesterday
+       and none today is the same stale library by another route, which is why
+       the `where cc.exe` failure branch deletes as well. build.sh does both too
+       (it writes to $target.tmp, rm -f's on failure, and rm -f's the target when
+       command -v finds no compiler). -->
   <Target Name="BuildNgxShim" BeforeTargets="AssignTargetPaths">
     <PropertyGroup>
       <NgxShimDir>$(MSBuildThisFileDirectory)../native/optimum-ngx</NgxShimDir>
@@ -128,7 +132,7 @@
           Command="bash &quot;$(NgxShimDir)/build.sh&quot; &quot;$(NgxShimOut)&quot;"
           ContinueOnError="true" />
     <Exec Condition="'$(OS)' == 'Windows_NT'"
-          Command="if not exist &quot;$(NgxShimOutWin)&quot; mkdir &quot;$(NgxShimOutWin)&quot; &amp; where cc.exe &gt;nul 2&gt;&amp;1 &amp;&amp; (cc.exe -std=c99 -O2 -fno-optimize-sibling-calls -shared &quot;$(NgxShimDir)/optimum_ngx.c&quot; -o &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &amp;&amp; move /y &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &gt;nul || (del /q &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &gt;nul 2&gt;&amp;1 &amp; echo optimum-ngx: cc.exe failed to build the NGX shim; DLSS will report unavailable.)) || echo optimum-ngx: the NGX shim was not built on this host; DLSS will report unavailable."
+          Command="if not exist &quot;$(NgxShimOutWin)&quot; mkdir &quot;$(NgxShimOutWin)&quot; &amp; where cc.exe &gt;nul 2&gt;&amp;1 &amp;&amp; (cc.exe -std=c99 -O2 -fno-optimize-sibling-calls -shared &quot;$(NgxShimDir)/optimum_ngx.c&quot; -o &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &amp;&amp; move /y &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &gt;nul || (del /q &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &gt;nul 2&gt;&amp;1 &amp; echo optimum-ngx: cc.exe failed to build the NGX shim; DLSS will report unavailable.)) || (del /q &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &gt;nul 2&gt;&amp;1 &amp; echo optimum-ngx: the NGX shim was not built on this host; DLSS will report unavailable.)"
           ContinueOnError="true" />
     <ItemGroup>
       <None Include="$(NgxShimOut)/libOptimumNgx.so" Condition="Exists('$(NgxShimOut)/libOptimumNgx.so')">
