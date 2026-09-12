@@ -1,5 +1,6 @@
 using System;
 using Silk.NET.Vulkan;
+using Vintagestory.API.Client;
 
 namespace Optimum.Render.Vulkan.Core;
 
@@ -75,6 +76,15 @@ internal readonly record struct NgxDlssSettings(
 /// </summary>
 internal readonly record struct NgxDlssEvaluation
 {
+    internal static NgxDlssEvaluation FromTemporalContext(IOptimumTemporalContext frame) => new()
+    {
+        JitterOffsetX = -frame.JitterPx.X,
+        JitterOffsetY = -frame.JitterPx.Y,
+        MotionVectorScaleX = 1f,
+        MotionVectorScaleY = 1f,
+        Reset = frame.Reset,
+    };
+
     public NgxDlssEvaluation()
     {
     }
