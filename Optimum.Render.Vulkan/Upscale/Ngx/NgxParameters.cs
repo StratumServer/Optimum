@@ -45,10 +45,17 @@ internal static class NgxParameterNames
 /// (<c>nvsdk_ngx_params.h</c>), and the C accessors NVIDIA documents
 /// (<c>NVSDK_NGX_Parameter_SetUI</c> and friends) live in the SDK's static
 /// library, not in the driver's <c>libnvidia-ngx.so.1</c>. So the calls go
-/// through the object's own vtable: under the Itanium C++ ABI the first
-/// pointer-sized word of the object is the vptr, and the overloads occupy the
-/// slots below in declaration order, with <c>this</c> as the first argument in
-/// the ordinary SysV register order.
+/// through the object's own vtable - and that dispatch lives in
+/// <c>native/optimum-ngx</c>, not here: the vtable slots are functions inside
+/// libnvidia-ngx, so calling them from a managed stub hits the same
+/// return-address abort as every other NGX entry point
+/// (<see cref="NgxInterop.ManagedCallSiteIsSupported" />). No slot number
+/// appears in managed code any more.
+///
+/// The <c>Direct*</c> path below is kept for
+/// <see cref="NgxInterop.AllowDirectCallsVariable" />, so the finding can be
+/// reproduced; under the Itanium C++ ABI the first pointer-sized word of the
+/// object is the vptr and the overloads occupy the slots in declaration order.
 /// </summary>
 internal readonly unsafe struct NgxParameters
 {
@@ -77,6 +84,7 @@ internal readonly unsafe struct NgxParameters
 
     public void SetUInt(string name, uint value)
     {
+        if (!NgxInterop.UseDirectCalls) { NgxShim.SetUInt(Handle, name, value); return; }
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -87,6 +95,7 @@ internal readonly unsafe struct NgxParameters
 
     public void SetInt(string name, int value)
     {
+        if (!NgxInterop.UseDirectCalls) { NgxShim.SetInt(Handle, name, value); return; }
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -97,6 +106,7 @@ internal readonly unsafe struct NgxParameters
 
     public void SetFloat(string name, float value)
     {
+        if (!NgxInterop.UseDirectCalls) { NgxShim.SetFloat(Handle, name, value); return; }
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -107,6 +117,7 @@ internal readonly unsafe struct NgxParameters
 
     public void SetDouble(string name, double value)
     {
+        if (!NgxInterop.UseDirectCalls) { NgxShim.SetDouble(Handle, name, value); return; }
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -117,6 +128,7 @@ internal readonly unsafe struct NgxParameters
 
     public void SetULong(string name, ulong value)
     {
+        if (!NgxInterop.UseDirectCalls) { NgxShim.SetULong(Handle, name, value); return; }
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -127,6 +139,7 @@ internal readonly unsafe struct NgxParameters
 
     public void SetVoidPointer(string name, IntPtr value)
     {
+        if (!NgxInterop.UseDirectCalls) { NgxShim.SetVoidPointer(Handle, name, value); return; }
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -138,6 +151,7 @@ internal readonly unsafe struct NgxParameters
 
     public NgxResult GetUInt(string name, out uint value)
     {
+        if (!NgxInterop.UseDirectCalls) return NgxShim.GetUInt(Handle, name, out value);
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -152,6 +166,7 @@ internal readonly unsafe struct NgxParameters
 
     public NgxResult GetInt(string name, out int value)
     {
+        if (!NgxInterop.UseDirectCalls) return NgxShim.GetInt(Handle, name, out value);
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -166,6 +181,7 @@ internal readonly unsafe struct NgxParameters
 
     public NgxResult GetFloat(string name, out float value)
     {
+        if (!NgxInterop.UseDirectCalls) return NgxShim.GetFloat(Handle, name, out value);
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -180,6 +196,7 @@ internal readonly unsafe struct NgxParameters
 
     public NgxResult GetDouble(string name, out double value)
     {
+        if (!NgxInterop.UseDirectCalls) return NgxShim.GetDouble(Handle, name, out value);
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -194,6 +211,7 @@ internal readonly unsafe struct NgxParameters
 
     public NgxResult GetULong(string name, out ulong value)
     {
+        if (!NgxInterop.UseDirectCalls) return NgxShim.GetULong(Handle, name, out value);
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {
@@ -208,6 +226,7 @@ internal readonly unsafe struct NgxParameters
 
     public NgxResult GetVoidPointer(string name, out IntPtr value)
     {
+        if (!NgxInterop.UseDirectCalls) return NgxShim.GetVoidPointer(Handle, name, out value);
         IntPtr utf8 = Marshal.StringToCoTaskMemUTF8(name);
         try
         {

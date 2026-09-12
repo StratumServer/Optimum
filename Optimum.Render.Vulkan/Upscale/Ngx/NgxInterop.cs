@@ -29,6 +29,20 @@ internal enum NgxResult : uint
     FailUnsupportedParameter = Fail | 16,
     FailDenied = Fail | 17,
     FailNotImplemented = Fail | 18,
+
+    // Optimum's own codes, shaped like NGX failures (top 12 bits 0xBAD, so
+    // NVSDK_NGX_FAILED and Succeeded() treat them as failures) but in the
+    // 0xBAD1 range the driver never uses. The first three are the shim's, and
+    // are defined in native/optimum-ngx/optimum_ngx.h with these values.
+
+    /// <summary>The shim loaded, but the NGX runtime could not be dlopen()ed.</summary>
+    FailShimRuntimeMissing = 0xBAD10001,
+    /// <summary>The NGX runtime loaded but does not export the entry point asked for.</summary>
+    FailShimEntryPointMissing = 0xBAD10002,
+    /// <summary>A null handle or output pointer reached the shim; nothing was called.</summary>
+    FailShimInvalidArgument = 0xBAD10003,
+    /// <summary>The shim itself is absent or has the wrong ABI version; see <see cref="NgxShim.Diagnosis" />.</summary>
+    FailShimMissing = 0xBAD1FFFF,
 }
 
 /// <summary>NVSDK_NGX_Feature; only the two Optimum cares about are named.</summary>
@@ -163,11 +177,13 @@ internal unsafe struct NgxExtensionProperties
 }
 
 /// <summary>
-/// The Vulkan NGX entry points, P/Invoked straight into the NVIDIA Linux
-/// driver's own <c>libnvidia-ngx.so.1</c>, which exports all 21 of them
-/// (<c>nm -D</c>). The SDK's static <c>libnvsdk_ngx.a</c> is only a dlopen
-/// shim around exactly these symbols, so linking it would buy nothing and cost
-/// a native build step.
+/// The Vulkan NGX entry points as Optimum calls them: through
+/// <see cref="NgxShim" /> (<c>native/optimum-ngx</c>), which is a real shared
+/// object and therefore a call site NGX accepts. The <c>Direct*</c> members
+/// below P/Invoke the driver's <c>libnvidia-ngx.so.1</c> without the shim and
+/// exist only for diagnosis behind
+/// <see cref="AllowDirectCallsVariable" />: on Linux they take the process
+/// down (see <see cref="ManagedCallSiteIsSupported" />).
 ///
 /// Two entry points differ from the header prototypes, because the header
 /// declares the SDK-side wrapper and the driver exports the core function the
@@ -187,8 +203,16 @@ internal static unsafe class NgxInterop
     /// <summary>NVSDK_NGX_VERSION_API_MACRO for SDK 310.9.1.</summary>
     public const int VersionApi = 0x0000015;
 
-    /// <summary>Forces the direct calls on for a re-test; see <see cref="ManagedCallSiteIsSupported" />.</summary>
+    /// <summary>
+    /// Bypasses the shim and P/Invokes the driver directly, for diagnosis only.
+    /// On Linux this takes the process down; see
+    /// <see cref="ManagedCallSiteIsSupported" />.
+    /// </summary>
     public const string AllowDirectCallsVariable = "OPTIMUM_NGX_ALLOW_DIRECT_CALLS";
+
+    /// <summary>Whether the diagnostic direct path is switched on for this process.</summary>
+    public static bool UseDirectCalls =>
+        Environment.GetEnvironmentVariable(AllowDirectCallsVariable) == "1";
 
     /// <summary>Whether the driver library can be loaded at all.</summary>
     public static bool IsDriverLibraryPresent()
@@ -217,29 +241,110 @@ internal static unsafe class NgxInterop
     /// trampoline in an anonymous <c>mmap</c> page - which is exactly what the
     /// JIT stub is. Init and the pre-init discovery queries both abort.
     ///
-    /// So NGX needs a call site inside a real shared object. Until Optimum has
-    /// one, the paths below degrade instead of calling, and the extension
-    /// requirements come from the SDK's own fallback lists (which is what this
-    /// driver makes the SDK use anyway - see <see cref="NgxSession" />).
-    /// Set <see cref="AllowDirectCallsVariable" /> to 1 to re-test the direct
-    /// path; it will take the process down until the driver or the call site
-    /// changes.
+    /// So NGX needs a call site inside a real shared object, and since
+    /// 2026-09-12 it has one: <c>native/optimum-ngx</c>, bound by
+    /// <see cref="NgxShim" />. This property is therefore no longer "is the
+    /// platform capable" but "can this process reach NGX at all" - the shim is
+    /// loadable and speaks the expected ABI version, or the diagnostic direct
+    /// path is switched on with <see cref="AllowDirectCallsVariable" /> (which
+    /// still takes the process down on Linux, and is kept only so the finding
+    /// above can be reproduced).
     /// </summary>
-    public static bool ManagedCallSiteIsSupported =>
-        !OperatingSystem.IsLinux() ||
-        Environment.GetEnvironmentVariable(AllowDirectCallsVariable) == "1";
+    public static bool ManagedCallSiteIsSupported => NgxShim.IsAvailable || UseDirectCalls;
 
-    /// <summary>One line for a log or a test report saying why, when it is not supported.</summary>
-    public static string ManagedCallSiteDiagnosis => ManagedCallSiteIsSupported
-        ? "NGX may be called directly from managed code in this process."
-        : "libnvidia-ngx resolves its caller's module from the return address and aborts the process " +
-          "when that is a JIT stub in anonymous memory, which is what every .NET P/Invoke call site is; " +
-          "NGX needs a call site inside a loaded shared object (set " + AllowDirectCallsVariable +
-          "=1 to re-test).";
+    /// <summary>One line for a log or a test report saying how NGX is reached, or why it is not.</summary>
+    public static string ManagedCallSiteDiagnosis => UseDirectCalls
+        ? AllowDirectCallsVariable + "=1: calling " + LibraryName + " directly, bypassing the shim. " +
+          "On Linux this aborts the process inside NGX - diagnosis only."
+        : NgxShim.IsAvailable
+            ? "NGX is reached through the native shim: " + NgxShim.Diagnosis
+            : "NGX is unreachable from this process: " + NgxShim.Diagnosis + " libnvidia-ngx resolves its " +
+              "caller's module from the return address and aborts when that is a JIT stub in anonymous " +
+              "memory, which is what every .NET P/Invoke call site is, so the shim is not optional.";
+
+    // --------------------------------------------------------------- dispatch
+    //
+    // Every entry point below goes through the shim. The Direct* twins keep the
+    // old behaviour for OPTIMUM_NGX_ALLOW_DIRECT_CALLS=1, which exists only to
+    // reproduce the spike's finding.
+
+    public static NgxResult InitProjectId(
+        IntPtr projectId,
+        NgxEngineType engineType,
+        IntPtr engineVersion,
+        IntPtr applicationDataPath,
+        IntPtr instance,
+        IntPtr physicalDevice,
+        IntPtr device,
+        int sdkVersion,
+        NgxFeatureCommonInfo* featureInfo) => UseDirectCalls
+        ? DirectInitProjectId(projectId, engineType, engineVersion, applicationDataPath,
+            instance, physicalDevice, device, sdkVersion, featureInfo)
+        : NgxShim.IsAvailable
+            ? NgxShim.InitProjectId(projectId, engineType, engineVersion, applicationDataPath,
+                instance, physicalDevice, device, sdkVersion, featureInfo)
+            : NgxResult.FailShimMissing;
+
+    public static NgxResult Shutdown1(IntPtr device) => UseDirectCalls
+        ? DirectShutdown1(device)
+        : NgxShim.IsAvailable ? NgxShim.Shutdown(device) : NgxResult.FailShimMissing;
+
+    public static NgxResult GetCapabilityParameters(out IntPtr parameters)
+    {
+        if (UseDirectCalls) return DirectGetCapabilityParameters(out parameters);
+        if (NgxShim.IsAvailable) return NgxShim.GetCapabilityParameters(out parameters);
+        parameters = IntPtr.Zero;
+        return NgxResult.FailShimMissing;
+    }
+
+    public static NgxResult AllocateParameters(out IntPtr parameters)
+    {
+        if (UseDirectCalls) return DirectAllocateParameters(out parameters);
+        if (NgxShim.IsAvailable) return NgxShim.AllocateParameters(out parameters);
+        parameters = IntPtr.Zero;
+        return NgxResult.FailShimMissing;
+    }
+
+    public static NgxResult DestroyParameters(IntPtr parameters) => UseDirectCalls
+        ? DirectDestroyParameters(parameters)
+        : NgxShim.IsAvailable ? NgxShim.DestroyParameters(parameters) : NgxResult.FailShimMissing;
+
+    public static NgxResult GetFeatureRequirements(
+        IntPtr instance, IntPtr physicalDevice,
+        NgxFeatureDiscoveryInfo* discovery, NgxFeatureRequirement* outSupported) => UseDirectCalls
+        ? DirectGetFeatureRequirements(instance, physicalDevice, discovery, outSupported)
+        : NgxShim.IsAvailable
+            ? NgxShim.GetFeatureRequirements(instance, physicalDevice, discovery, outSupported)
+            : NgxResult.FailShimMissing;
+
+    public static NgxResult GetFeatureInstanceExtensionRequirements(
+        NgxFeatureDiscoveryInfo* discovery,
+        uint* outExtensionCount,
+        NgxExtensionProperties** outExtensionProperties) => UseDirectCalls
+        ? DirectGetFeatureInstanceExtensionRequirements(discovery, outExtensionCount, outExtensionProperties)
+        : NgxShim.IsAvailable
+            ? NgxShim.GetFeatureInstanceExtensionRequirements(
+                discovery, outExtensionCount, outExtensionProperties)
+            : NgxResult.FailShimMissing;
+
+    public static NgxResult GetFeatureDeviceExtensionRequirements(
+        IntPtr instance,
+        IntPtr physicalDevice,
+        NgxFeatureDiscoveryInfo* discovery,
+        uint* outExtensionCount,
+        NgxExtensionProperties** outExtensionProperties) => UseDirectCalls
+        ? DirectGetFeatureDeviceExtensionRequirements(
+            instance, physicalDevice, discovery, outExtensionCount, outExtensionProperties)
+        : NgxShim.IsAvailable
+            ? NgxShim.GetFeatureDeviceExtensionRequirements(
+                instance, physicalDevice, discovery, outExtensionCount, outExtensionProperties)
+            : NgxResult.FailShimMissing;
+
+    // ------------------------------------------------- the diagnostic direct path
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_Init_ProjectID",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult InitProjectId(
+    private static extern NgxResult DirectInitProjectId(
         IntPtr projectId,
         NgxEngineType engineType,
         IntPtr engineVersion,
@@ -252,23 +357,23 @@ internal static unsafe class NgxInterop
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_Shutdown1",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult Shutdown1(IntPtr device);
+    private static extern NgxResult DirectShutdown1(IntPtr device);
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_GetCapabilityParameters",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult GetCapabilityParameters(out IntPtr parameters);
+    private static extern NgxResult DirectGetCapabilityParameters(out IntPtr parameters);
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_AllocateParameters",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult AllocateParameters(out IntPtr parameters);
+    private static extern NgxResult DirectAllocateParameters(out IntPtr parameters);
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_DestroyParameters",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult DestroyParameters(IntPtr parameters);
+    private static extern NgxResult DirectDestroyParameters(IntPtr parameters);
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_GetFeatureRequirements",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult GetFeatureRequirements(
+    private static extern NgxResult DirectGetFeatureRequirements(
         IntPtr instance,
         IntPtr physicalDevice,
         NgxFeatureDiscoveryInfo* discovery,
@@ -276,14 +381,14 @@ internal static unsafe class NgxInterop
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_GetFeatureInstanceExtensionRequirements",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult GetFeatureInstanceExtensionRequirements(
+    private static extern NgxResult DirectGetFeatureInstanceExtensionRequirements(
         NgxFeatureDiscoveryInfo* discovery,
         uint* outExtensionCount,
         NgxExtensionProperties** outExtensionProperties);
 
     [DllImport(LibraryName, EntryPoint = "NVSDK_NGX_VULKAN_GetFeatureDeviceExtensionRequirements",
         CallingConvention = CallingConvention.Cdecl)]
-    public static extern NgxResult GetFeatureDeviceExtensionRequirements(
+    private static extern NgxResult DirectGetFeatureDeviceExtensionRequirements(
         IntPtr instance,
         IntPtr physicalDevice,
         NgxFeatureDiscoveryInfo* discovery,
@@ -320,6 +425,14 @@ internal static unsafe class NgxInterop
         NgxResult.FailUnsupportedParameter => "FAIL_UnsupportedParameter (0xBAD00010)",
         NgxResult.FailDenied => "FAIL_Denied (0xBAD00011)",
         NgxResult.FailNotImplemented => "FAIL_NotImplemented (0xBAD00012)",
+        NgxResult.FailShimRuntimeMissing =>
+            "shim: the NGX runtime (" + LibraryName + ") could not be loaded (0xBAD10001)",
+        NgxResult.FailShimEntryPointMissing =>
+            "shim: the NGX runtime does not export this entry point (0xBAD10002)",
+        NgxResult.FailShimInvalidArgument =>
+            "shim: a null handle or output pointer; nothing was called (0xBAD10003)",
+        NgxResult.FailShimMissing =>
+            "shim: " + NgxShim.LibraryName + " is absent or has the wrong ABI version (0xBAD1FFFF)",
         _ => "0x" + ((uint)result).ToString("X8"),
     };
 }

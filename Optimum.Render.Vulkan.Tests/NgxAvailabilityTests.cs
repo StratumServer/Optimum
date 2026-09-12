@@ -11,7 +11,8 @@ namespace Optimum.Render.Vulkan.Tests;
 /// Can Optimum drive NGX (DLSS Super Resolution and DLSS Frame Generation)
 /// straight from C# on native Linux Vulkan? (DLSS spike, 2026-09-12.)
 ///
-/// The answer this suite pins down is "the API surface yes, the call site no".
+/// The answer, since the shim landed on 2026-09-12: yes, through
+/// <c>native/optimum-ngx</c>.
 /// The NVIDIA Linux driver's own <c>libnvidia-ngx.so.1</c> exports the whole
 /// Vulkan NGX API and answers it on native X11 - on this RTX 4070 Laptop with
 /// driver 615.71.09, <c>Init_ProjectID</c> with our own project GUID and engine
@@ -21,20 +22,17 @@ namespace Optimum.Render.Vulkan.Tests;
 /// stub is JIT-compiled into anonymous memory, so every direct managed call
 /// aborts the process inside the driver (see
 /// <see cref="NgxInterop.ManagedCallSiteIsSupported" /> for the evidence and the
-/// exact failure). The interop below is therefore written and layout-checked,
-/// but it degrades instead of calling until Optimum has a call site inside a
-/// real shared object.
-///
-/// What still runs for real here is the part that decides whether the rest can
-/// ever work: a headless <see cref="VulkanDevice" /> built through seam S1 with
-/// the extensions NGX requires, which is deliverable (b) of the spike minus the
-/// calls the driver refuses to take from managed code.
+/// exact failure). So every call goes managed -> <see cref="NgxShim" /> ->
+/// libOptimumNgx.so -> NGX, and the tests below bring NGX up for real on a
+/// headless <see cref="VulkanDevice" /> built through seam S1 and read back the
+/// same numbers <c>scripts/dev/ngx-probe.c</c> got from a C executable.
 ///
 /// Everything skips, never fails, when the driver library or the NGX feature
 /// libraries are missing. The feature libraries are NVIDIA redistributables and
 /// are not in this repository: point <c>OPTIMUM_NGX_FEATURE_PATH</c> at a
 /// directory holding <c>libnvidia-ngx-dlss.so.*</c> and
-/// <c>libnvidia-ngx-dlssg.so.*</c>.
+/// <c>libnvidia-ngx-dlssg.so.*</c> (DLSS SDK 310.9.1's
+/// <c>lib/Linux_x86_64/rel</c>), and build the shim with <c>make native</c>.
 /// </summary>
 public class NgxAvailabilityTests
 {
@@ -173,6 +171,160 @@ public class NgxAvailabilityTests
         }
     }
 
+    /// <summary>
+    /// The shim has to be the build's own: its <c>OPTIMUM_NGX_SHIM_VERSION</c>
+    /// must match what this managed code is compiled against, or a stale
+    /// libOptimumNgx.so left beside the renderer from an older build would be
+    /// called with signatures it no longer has. A mismatch has to make NGX
+    /// unavailable, not crash - so the version check is the gate, not a hint.
+    /// </summary>
+    [SkippableFact]
+    public void TheShimIsTheBuildsOwnAndReportsItsAbiVersion()
+    {
+        Skip.IfNot(NgxShim.Version != 0,
+            "The NGX shim could not be loaded: " + NgxShim.Diagnosis +
+            " (build it with `make native`).");
+
+        Log("shim: " + NgxShim.Diagnosis);
+        Log("shim runtime name: " + NgxShim.RuntimeName);
+        Assert.Equal(NgxShim.ExpectedVersion, NgxShim.Version);
+        Assert.True(NgxShim.IsAvailable);
+        Assert.True(NgxInterop.ManagedCallSiteIsSupported,
+            "with a loadable shim of the right version, NGX is reachable from managed code");
+        Assert.Equal(NgxInterop.LibraryName, NgxShim.RuntimeName);
+    }
+
+    /// <summary>
+    /// The deliverable: managed code brings NGX up through the shim on a live
+    /// headless device and reads back exactly what the native probe read
+    /// (RTX 4070 Laptop, driver 615.71.09, DLSS SDK 310.9.1) - Init Success,
+    /// SuperSampling.Available = 1, FrameGeneration.Available = 1, and the DLSS
+    /// optimal settings at 2560x1490 (Quality 1707x993, Performance 1280x745).
+    ///
+    /// Those numbers are asserted, not just reported: they are the proof that
+    /// the shim forwards arguments and structs correctly rather than merely
+    /// returning Success. The feature libraries decide them, so the test skips
+    /// when they are absent and never fails for their absence.
+    ///
+    /// It then shuts NGX down and checks the device is still validation-clean,
+    /// because NGX creates its own Vulkan objects on our device and a leak or a
+    /// hazard it left behind would be ours to carry.
+    /// </summary>
+    [SkippableFact]
+    public void NgxComesUpFromManagedCodeThroughTheShimAndReportsWhatTheNativeProbeSaw()
+    {
+        using NgxSession session = RequireSession();
+        Skip.IfNot(NgxShim.IsAvailable,
+            "The NGX shim is not loadable: " + NgxShim.Diagnosis + " (build it with `make native`).");
+
+        NgxResult runtime = NgxShim.LoadRuntime();
+        Skip.IfNot(NgxInterop.Succeeded(runtime),
+            "The shim could not load the NGX runtime: " + NgxInterop.Describe(runtime) + " " +
+            NgxShim.LastLoadError);
+
+        Log("shim: " + NgxShim.Diagnosis);
+        Log("call site: " + NgxInterop.ManagedCallSiteDiagnosis);
+
+        var requirements = new NgxDeviceRequirements(session, Features, Log);
+        VulkanDevice device = GpuTest.NewDevice();
+        Action<VulkanContextOptions>? configured = device.ConfigureContextOptions;
+        device.ConfigureContextOptions = options =>
+        {
+            configured?.Invoke(options);
+            options.RequirementContributors.Add(requirements);
+        };
+
+        using (device)
+        {
+            Skip.IfNot(device.Initialize(IntPtr.Zero, 0, 0, out string failureReason),
+                "No usable Vulkan device: " + failureReason);
+
+            VulkanContext context = device.ContextForTests;
+            Log("device: " + context.Capabilities.DeviceName + " / " + context.Capabilities.DriverName);
+            Skip.IfNot(context.Capabilities.DeviceName.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase),
+                "NGX needs the NVIDIA driver; this device is " + context.Capabilities.DeviceName + ".");
+
+            IntPtr instance = (IntPtr)context.Instance.Handle;
+            IntPtr physicalDevice = (IntPtr)context.PhysicalDevice.Handle;
+            IntPtr vkDevice = (IntPtr)context.Device.Handle;
+
+            // Pre-init discovery, which aborted the process before the shim.
+            foreach (NgxFeature feature in Features)
+            {
+                NgxResult supportResult = session.FeatureRequirements(
+                    instance, physicalDevice, feature,
+                    out NgxFeatureSupport supported, out uint minArch, out string minOs);
+                Log(feature + " requirements: " + NgxInterop.Describe(supportResult) +
+                    " FeatureSupported=" + supported + " MinHwArchitecture=0x" + minArch.ToString("X") +
+                    " MinOsVersion='" + minOs + "'");
+                Assert.Equal(NgxResult.Success, supportResult);
+                Assert.Equal(NgxFeatureSupport.Supported, supported);
+            }
+
+            NgxResult init = session.Initialize(instance, physicalDevice, vkDevice);
+            Log("NVSDK_NGX_VULKAN_Init_ProjectID: " + NgxInterop.Describe(init));
+            Assert.Equal(NgxResult.Success, init);
+
+            try
+            {
+                NgxResult capabilities = NgxInterop.GetCapabilityParameters(out IntPtr handle);
+                Log("NVSDK_NGX_VULKAN_GetCapabilityParameters: " + NgxInterop.Describe(capabilities));
+                Assert.Equal(NgxResult.Success, capabilities);
+                Assert.NotEqual(IntPtr.Zero, handle);
+
+                var parameters = new NgxParameters(handle);
+                try
+                {
+                    uint superSampling = ReportUInt(parameters, NgxParameterNames.SuperSamplingAvailable);
+                    ReportUInt(parameters, NgxParameterNames.SuperSamplingNeedsUpdatedDriver);
+                    ReportUInt(parameters, NgxParameterNames.SuperSamplingMinDriverVersionMajor);
+                    ReportUInt(parameters, NgxParameterNames.SuperSamplingMinDriverVersionMinor);
+                    ReportInt(parameters, NgxParameterNames.SuperSamplingFeatureInitResult);
+
+                    uint frameGeneration = ReportUInt(parameters, NgxParameterNames.FrameGenerationAvailable);
+                    ReportUInt(parameters, NgxParameterNames.FrameGenerationNeedsUpdatedDriver);
+                    ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMajor);
+                    ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMinor);
+                    ReportInt(parameters, NgxParameterNames.FrameGenerationFeatureInitResult);
+
+                    Assert.Equal(1u, superSampling);
+                    Assert.Equal(1u, frameGeneration);
+
+                    // The optimal-settings callback lives inside libnvidia-ngx
+                    // too, so the shim owns that call as well.
+                    NgxResult quality = NgxSession.OptimalSettings(
+                        parameters, 2560, 1490, NgxPerfQuality.MaxQuality, out NgxOptimalSettings qualitySettings);
+                    Log("optimal settings 2560x1490 Quality: " + NgxInterop.Describe(quality) +
+                        " -> " + qualitySettings);
+                    Assert.Equal(NgxResult.Success, quality);
+                    Assert.Equal(1707u, qualitySettings.OptimalWidth);
+                    Assert.Equal(993u, qualitySettings.OptimalHeight);
+
+                    NgxResult performance = NgxSession.OptimalSettings(
+                        parameters, 2560, 1490, NgxPerfQuality.MaxPerf, out NgxOptimalSettings perfSettings);
+                    Log("optimal settings 2560x1490 Performance: " + NgxInterop.Describe(performance) +
+                        " -> " + perfSettings);
+                    Assert.Equal(NgxResult.Success, performance);
+                    Assert.Equal(1280u, perfSettings.OptimalWidth);
+                    Assert.Equal(745u, perfSettings.OptimalHeight);
+                }
+                finally
+                {
+                    NgxResult destroyed = NgxInterop.DestroyParameters(parameters.Handle);
+                    Log("NVSDK_NGX_VULKAN_DestroyParameters: " + NgxInterop.Describe(destroyed));
+                }
+            }
+            finally
+            {
+                NgxResult shutdown = NgxSession.Shutdown(vkDevice);
+                Log("NVSDK_NGX_VULKAN_Shutdown1: " + NgxInterop.Describe(shutdown));
+                Assert.Equal(NgxResult.Success, shutdown);
+            }
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private static readonly NgxFeature[] Features =
@@ -189,6 +341,23 @@ public class NgxAvailabilityTests
         _output.WriteLine(line);
         Console.Error.WriteLine("[ngx] " + line);
         Console.Error.Flush();
+    }
+
+    private uint ReportUInt(NgxParameters parameters, string name)
+    {
+        NgxResult result = parameters.GetUInt(name, out uint value);
+        Log("  " + name.PadRight(44) + (NgxInterop.Succeeded(result)
+            ? " = " + value
+            : " : " + NgxInterop.Describe(result)));
+        return NgxInterop.Succeeded(result) ? value : 0;
+    }
+
+    private void ReportInt(NgxParameters parameters, string name)
+    {
+        NgxResult result = parameters.GetInt(name, out int value);
+        Log("  " + name.PadRight(44) + (NgxInterop.Succeeded(result)
+            ? " = " + value + " (0x" + ((uint)value).ToString("X8") + ")"
+            : " : " + NgxInterop.Describe(result)));
     }
 
     private void Report(

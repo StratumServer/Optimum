@@ -41,7 +41,7 @@ BOOTSTRAP_ARGS := --version $(VERSION)
 
 .PHONY: help check check-patches check-compat check-shaders bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
-        coverage mutate-launcher server-smoke
+        coverage mutate-launcher server-smoke native
 
 help: ## Show available targets
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sort | awk -F ':.*## ' '{printf "  %-14s %s\n", $$1, $$2}'
@@ -64,7 +64,10 @@ bootstrap: ## Download client, decompile, clone forks, apply patches
 bootstrap-git-test: ## Verify cloned repositories survive Git environment overrides
 	bash scripts/tests/bootstrap-git-repository.sh
 
-build: ## Build Release (runs bootstrap if missing or incomplete)
+native: ## Build the native NGX shim (libOptimumNgx.so) into bin/native
+	bash native/optimum-ngx/build.sh $(CURDIR)/bin/native
+
+build: native ## Build Release (runs bootstrap if missing or incomplete)
 	@if [ ! -f .bootstrap-complete ]; then $(MAKE) bootstrap; fi
 	unset Platform; dotnet build VintageStory.slnx -c $(CONFIGURATION)
 
@@ -106,6 +109,12 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@# stale copy here makes the probe throw and the client fall back to OpenGL.
 	@cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/Silk.NET.*.dll $(VANILLA_DIR)/
+	@# The NGX shim (native/optimum-ngx): NGX is only callable from a real
+	@# shared object, so no shim beside the renderer means no DLSS. Absent on a
+	@# host without a C compiler, which is not an error - see native/optimum-ngx.
+	@if [ -f "$(MOD_OUT)/libOptimumNgx.so" ]; then cp $(MOD_OUT)/libOptimumNgx.so $(VANILLA_DIR)/; fi
+	@if [ -f "$(MOD_OUT)/OptimumNgx.dll" ]; then cp $(MOD_OUT)/OptimumNgx.dll $(VANILLA_DIR)/; fi
+	@if [ -f "$(MOD_OUT)/libOptimumNgx.dylib" ]; then cp $(MOD_OUT)/libOptimumNgx.dylib $(VANILLA_DIR)/; fi
 	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/Lib/; fi
 	@# Every file, not *.fsh plus *.vsh: the packagers copy the whole directory,
 	@# and a stage that ships only on one of the two paths is the bug the
@@ -136,6 +145,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
+		for shim in libOptimumNgx.so OptimumNgx.dll libOptimumNgx.dylib; do [ -f "$(MOD_OUT)/$$shim" ] && cp "$(MOD_OUT)/$$shim" $(INSTALL_DIR)/; done; \
 		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/Lib/; fi; \
 		for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done; \
 		if [ -d "sources/shaderincludes" ]; then mkdir -p $(INSTALL_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi; \

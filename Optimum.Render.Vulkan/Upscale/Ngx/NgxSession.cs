@@ -170,6 +170,29 @@ internal sealed unsafe class NgxSession : IDisposable
         out NgxOptimalSettings settings)
     {
         settings = default;
+        if (parameters.IsNull) return NgxResult.FailInvalidParameter;
+
+        if (!NgxInterop.UseDirectCalls)
+        {
+            // The callback NGX hands out lives inside libnvidia-ngx, so calling
+            // it has the same return-address problem as every other entry
+            // point: the shim reads it out of the parameter block and calls it.
+            if (!NgxShim.IsAvailable) return NgxResult.FailShimMissing;
+
+            uint shimWidth = 0, shimHeight = 0;
+            uint shimMinWidth = 0, shimMinHeight = 0, shimMaxWidth = 0, shimMaxHeight = 0;
+            float shimSharpness = 0;
+            NgxResult shimResult = NgxShim.DlssGetOptimalSettings(
+                parameters.Handle, displayWidth, displayHeight, quality,
+                &shimWidth, &shimHeight, &shimMinWidth, &shimMinHeight,
+                &shimMaxWidth, &shimMaxHeight, &shimSharpness);
+            if (!NgxInterop.Succeeded(shimResult)) return shimResult;
+            settings = new NgxOptimalSettings(
+                shimWidth, shimHeight, shimMinWidth, shimMinHeight,
+                shimMaxWidth, shimMaxHeight, shimSharpness);
+            return shimResult;
+        }
+
         NgxResult lookup = parameters.GetVoidPointer(
             NgxParameterNames.DlssOptimalSettingsCallback, out IntPtr callback);
         if (callback == IntPtr.Zero)
