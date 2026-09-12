@@ -70,6 +70,51 @@ public class HeadlessHarnessCoverageTests
         Assert.Contains("OptimumHeadless.WriteFrame(worldFrame, width, height, pixels, OptimumDefaultFramebufferIsBgra)", capture);
     }
 
+    /// <summary>
+    /// Where the headless stream and the upscaler slot meet: the capture has to
+    /// stay display-resolution while an upscaler is running.
+    ///
+    /// An upscaled frame is built at the render size and only reaches the display
+    /// size in <c>BlitPrimaryToDefault</c>, which blits the composite into
+    /// <c>EnumFrameBuffer.Default</c> at the window's client size. So the capture
+    /// must size itself from the window - never from the plan, the composite or
+    /// Primary, all of which are the render size under an upscaler - and it must
+    /// run after that blit. The tick is called from window_RenderFrame after the
+    /// whole render, which is where the blit has already happened; that placement
+    /// is pinned by RenderFrameCallsTheHarnessBesideTheParityDumpAndBeforeEndFrame
+    /// above, and the size is pinned here.
+    ///
+    /// The GPU half - a render-resolution pattern magnified to the display size
+    /// and captured through the same call - is
+    /// Optimum.Render.Vulkan.Tests/HeadlessCaptureTests.TheCaptureIsDisplayResolutionWhileAnUpscalerIsRunning.
+    /// </summary>
+    [Fact]
+    public void TheCaptureIsSizedByTheWindowSoAnUpscalerCannotShrinkIt()
+    {
+        string platform = ReadPatchedOrSource(PlatformPatch, PlatformSource);
+        string capture = Body(platform, "private void OptimumHeadlessCaptureFrame(long worldFrame)");
+
+        // The window's client size, which is the size Default is blitted at.
+        Assert.Contains("int width = ((NativeWindow)window).ClientSize.X;", capture);
+        Assert.Contains("int height = ((NativeWindow)window).ClientSize.Y;", capture);
+        // And the buffer it allocates is that size, so a short read cannot pass.
+        Assert.Contains("byte[] pixels = new byte[width * height * 4];", capture);
+
+        // None of the render-resolution sources an upscaler introduces.
+        Assert.DoesNotContain("OptimumCompositeFrameBuffer", capture);
+        Assert.DoesNotContain("frameBuffers[0]", capture);
+        Assert.DoesNotContain("UpscalePlan", capture);
+        Assert.DoesNotContain("OptimumTryPlanUpscaleRenderSize", capture);
+        Assert.DoesNotContain("RenderWidth", capture);
+
+        // And the blit the capture depends on really is the one that takes the
+        // composite to the window's size, whether or not an upscaler ran.
+        string blit = Body(platform, "public override void BlitPrimaryToDefault()");
+        Assert.Contains("FrameBufferRef blitSource = OptimumCompositeFrameBuffer;", blit);
+        Assert.Contains(
+            "GlViewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);", blit);
+    }
+
     [Fact]
     public void TheCommandScriptIsRoutedTheWayTheChatHudRoutesTypedCommands()
     {

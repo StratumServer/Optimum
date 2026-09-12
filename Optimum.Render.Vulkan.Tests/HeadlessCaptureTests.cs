@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using Optimum.Render.Vulkan;
+using Optimum.Render.Vulkan.Core;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 using Xunit;
@@ -150,6 +151,161 @@ public class HeadlessCaptureTests
     }
 
     /// <summary>
+    /// The harness with an upscaler running - where the headless stream and the
+    /// upscaler slot meet.
+    ///
+    /// The frame an upscaler produces is built at the render size and only
+    /// reaches the display size in <c>BlitPrimaryToDefault</c>, which blits the
+    /// composite into <c>EnumFrameBuffer.Default</c> at the window's client size.
+    /// The harness captures after that blit and sizes its buffer from the window,
+    /// so the file it writes must be display-resolution and must carry the
+    /// magnified image - not the render-resolution one, and not a display-sized
+    /// buffer with a render-sized image in its corner.
+    ///
+    /// That is what this reproduces on the device: a render-resolution pattern,
+    /// the magnifying blit the passthrough slot does, then the harness's own
+    /// capture-and-write of the bound target at the display size. If someone ever
+    /// moves the capture before the blit, or sizes it from the plan instead of the
+    /// window, the block pattern stops landing on block boundaries and this fails.
+    /// </summary>
+    [SkippableTheory]
+    [InlineData("passthrough", "performance")]
+    [InlineData("passthrough", "quality")]
+    public void TheCaptureIsDisplayResolutionWhileAnUpscalerIsRunning(string upscaler, string quality)
+    {
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+
+        string directory = Path.Combine(Path.GetTempPath(), "optimum-headless-tests-" + Guid.NewGuid().ToString("N"));
+        string previousUpscaler = OptimumConfig.Upscaler;
+        string previousQuality = OptimumConfig.UpscalerQuality;
+        try
+        {
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            OptimumConfig.Upscaler = upscaler;
+            OptimumConfig.UpscalerQuality = quality;
+
+            using (device)
+            {
+                VulkanDevice seam = device!;
+
+                // The sizes the frame would really be built at, from the setting.
+                Assert.True(PassthroughUpscaler.TryPlanForFrame(
+                    DisplayWidth, DisplayHeight, out int renderWidth, out int renderHeight, out UpscalePlan plan));
+                Assert.True(renderWidth < DisplayWidth && renderHeight < DisplayHeight);
+                _output.WriteLine("plan: " + plan);
+
+                int source = 0, composite = 0, framebuffer = 0;
+                byte[] pixels = new byte[DisplayWidth * DisplayHeight * 4];
+                try
+                {
+                    source = CreateBlockPattern(seam, renderWidth, renderHeight);
+                    composite = seam.CreateTexture2D(DisplayWidth, DisplayHeight,
+                        EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba, IntPtr.Zero, false);
+                    framebuffer = seam.CreateFramebuffer(DisplayWidth, DisplayHeight);
+                    seam.AttachTexture(framebuffer, EnumFramebufferAttachment.ColorAttachment0, composite, 0);
+                    seam.SetDrawBuffers(framebuffer, 1);
+                    Assert.True(seam.CheckFramebufferComplete(framebuffer, out string status), status);
+
+                    seam.BeginFrame();
+
+                    // The upscaler's own step: render size in, display size out.
+                    Assert.True(seam.BlitColorScaled(source, composite, linear: false),
+                        "the driver refused the magnifying blit");
+
+                    // And then exactly what OptimumHeadlessCaptureFrame does: the
+                    // bound target, sized from the window, read back inside the
+                    // frame and handed to the writer.
+                    seam.BindFramebuffer(framebuffer);
+                    GCHandle handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
+                    try
+                    {
+                        seam.ReadDefaultFramebuffer(0, 0, DisplayWidth, DisplayHeight, handle.AddrOfPinnedObject());
+                    }
+                    finally
+                    {
+                        handle.Free();
+                    }
+
+                    Assert.True(OptimumParityDump.WriteFrame(
+                        Path.Combine(directory, OptimumHeadless.FrameFileName(0)),
+                        DisplayWidth, DisplayHeight, pixels, bgra: false));
+
+                    seam.Present();
+                    GpuTest.AssertClean(seam);
+                }
+                finally
+                {
+                    if (framebuffer > 0) seam.DeleteFramebuffer(framebuffer);
+                    if (composite > 0) seam.DeleteTexture(composite);
+                    if (source > 0) seam.DeleteTexture(source);
+                }
+            }
+
+            // The file is the display size, and it is the render image magnified:
+            // every block interior is still saturated one way or the other, which a
+            // capture of the render-size image (or of the wrong extent) cannot do.
+            string path = Path.Combine(directory, OptimumHeadless.FrameFileName(0));
+            byte[] rgb = ReadPpm(path, DisplayWidth, DisplayHeight);
+            Assert.Equal(DisplayWidth * DisplayHeight * 3, rgb.Length);
+
+            int checkedTexels = 0;
+            for (int by = 0; by < Blocks; by++)
+            for (int bx = 0; bx < Blocks; bx++)
+            {
+                // The interior of each block, away from any filtered edge.
+                int x = (bx * DisplayWidth + DisplayWidth / 2) / Blocks;
+                int y = (by * DisplayHeight + DisplayHeight / 2) / Blocks;
+                int texel = y * DisplayWidth + x;
+                byte value = rgb[texel * 3];
+                if ((bx + by) % 2 == 0) Assert.True(value > 230, "bright block " + bx + "," + by + " = " + value);
+                else Assert.True(value < 25, "dark block " + bx + "," + by + " = " + value);
+                checkedTexels++;
+            }
+            Assert.Equal(Blocks * Blocks, checkedTexels);
+        }
+        finally
+        {
+            OptimumConfig.Upscaler = previousUpscaler;
+            OptimumConfig.UpscalerQuality = previousQuality;
+            OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
+            OptimumConfig.ClearUpscalerPlan();
+            if (Directory.Exists(directory))
+            {
+                try { Directory.Delete(directory, recursive: true); } catch (IOException) { }
+            }
+        }
+    }
+
+    /// <summary>A display size that is odd and non-square, like the capture's.</summary>
+    private const int DisplayWidth = 320;
+    private const int DisplayHeight = 176;
+
+    /// <summary>The alternating block pattern, at whatever size it is asked for.</summary>
+    private const int Blocks = 4;
+
+    private static unsafe int CreateBlockPattern(VulkanDevice seam, int width, int height)
+    {
+        byte[] texels = new byte[width * height * 4];
+        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            bool bright = (x * Blocks / width + y * Blocks / height) % 2 == 0;
+            byte value = bright ? (byte)255 : (byte)0;
+            int texel = (y * width + x) * 4;
+            texels[texel] = value;
+            texels[texel + 1] = value;
+            texels[texel + 2] = value;
+            texels[texel + 3] = 255;
+        }
+
+        fixed (byte* data = texels)
+        {
+            return seam.CreateTexture2D(width, height, EnumTextureInternalFormat.Rgba8,
+                EnumTexturePixelFormat.Rgba, (IntPtr)data, false);
+        }
+    }
+
+    /// <summary>
     /// The BGRA half of the same writer, on bytes rather than a GPU: the OpenGL
     /// path reads GL_BGRA and the Vulkan one RGBA, and the file must come out the
     /// same either way, or every cross-backend comparison is a red/blue swap.
@@ -199,8 +355,16 @@ public class HeadlessCaptureTests
         }
     }
 
-    private static byte[] ReadPpm(string path)
+    private static byte[] ReadPpm(string path) => ReadPpm(path, Width, Height);
+
+    /// <summary>
+    /// Decodes a P6 PPM and holds it to the size it is supposed to be: the header
+    /// is where a capture that used the wrong extent - the render size instead of
+    /// the display size, say - shows up first.
+    /// </summary>
+    private static byte[] ReadPpm(string path, int width, int height)
     {
+        Assert.True(File.Exists(path), path + " was not written");
         byte[] file = File.ReadAllBytes(path);
         int offset = 0;
         string[] header = new string[4];
@@ -212,10 +376,10 @@ public class HeadlessCaptureTests
             offset++;
         }
         Assert.Equal("P6", header[0]);
-        Assert.Equal(Width.ToString(CultureInfo.InvariantCulture), header[1]);
-        Assert.Equal(Height.ToString(CultureInfo.InvariantCulture), header[2]);
+        Assert.Equal(width.ToString(CultureInfo.InvariantCulture), header[1]);
+        Assert.Equal(height.ToString(CultureInfo.InvariantCulture), header[2]);
         Assert.Equal("255", header[3]);
-        Assert.Equal(offset + Width * Height * 3, file.Length);
+        Assert.Equal(offset + width * height * 3, file.Length);
         return file.AsSpan(offset).ToArray();
     }
 }
