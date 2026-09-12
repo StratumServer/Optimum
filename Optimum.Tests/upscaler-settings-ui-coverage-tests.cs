@@ -50,7 +50,7 @@ public class UpscalerSettingsUiCoverageTests
 
         // A switch cannot express three upscaler presets, let alone five, so all
         // three rows are dropdowns - the shape the render-scale row already uses.
-        Assert.Contains("AddDropDown(new string[] { \"off\", \"dlss\" }", gui);
+        Assert.Contains("AddDropDown(new string[] { \"off\", \"dlss\", \"passthrough\" }", gui);
         Assert.Contains(
             "AddDropDown(new string[] { \"dlaa\", \"quality\", \"balanced\", \"performance\", \"ultraperformance\" }",
             gui);
@@ -79,8 +79,15 @@ public class UpscalerSettingsUiCoverageTests
             Assert.Contains("Lang.Get(\"optimum-upscalerquality-" + preset + "\")", gui);
         }
 
-        // And the upscaler row offers exactly the slots the config knows about.
-        Assert.Contains("\"off\", \"dlss\"", Between(config, "UpscalerNames = {", "}"));
+        // And the upscaler row offers exactly the slots the config knows about -
+        // the passthrough upscaler included, which is the only one a GPU with no
+        // vendor path can select.
+        string slots = Between(config, "UpscalerNames = {", "}");
+        foreach (string slot in new[] { "off", "dlss", "passthrough" })
+        {
+            Assert.Contains("\"" + slot + "\"", slots);
+            Assert.Contains("Lang.Get(\"optimum-upscaler-" + slot + "\")", gui);
+        }
     }
 
     /// <summary>
@@ -179,7 +186,7 @@ public class UpscalerSettingsUiCoverageTests
 
         Assert.Contains("public virtual string OptimumUpscalerPlan()", platform);
         Assert.Contains(
-            "AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 6, 650, 60), \"optUpscalePlan\")",
+            "AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 7, 650, 60), \"optUpscalePlan\")",
             gui);
 
         string text = Between(gui, "private string optimumUpscalePlanText()", "\n\t}");
@@ -206,6 +213,10 @@ public class UpscalerSettingsUiCoverageTests
         string upscale = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Upscale.cs");
         string plan = Between(upscale, "public override string OptimumUpscalerPlan()", "\n    }");
 
+        // The passthrough upscaler holds no feature, so its readout is the plan the
+        // last frame really blitted, marked for what it is.
+        Assert.Contains("if (PassthroughUpscaler.Requested)", plan);
+        Assert.Contains("passthrough, no reconstruction, jitter ", plan);
         Assert.Contains("if (upscaler == null) return null;", plan);
         Assert.Contains("UpscalePlan plan = upscaler.Plan;", plan);
         Assert.Contains("return plan.IsValid ? plan.ToString() : null;", plan);
@@ -227,8 +238,10 @@ public class UpscalerSettingsUiCoverageTests
 
         // And selecting it anyway is refused, with the row put back to what is
         // running rather than left claiming an upscale.
+        // Asked per entry, not about the slot: the passthrough upscaler needs no
+        // vendor runtime and must stay selectable where DLSS cannot come up.
         string handler = Between(gui, "private void onOptimumUpscalerChanged(", "\n\t}\n");
-        Assert.Contains("OptimumUpscalerUnavailable()", handler);
+        Assert.Contains("ScreenManager.Platform.OptimumUpscalerUnavailableFor(code)", handler);
         Assert.Contains(
             "if (unavailable != null && !string.Equals(code, \"off\", StringComparison.OrdinalIgnoreCase))",
             handler);
@@ -248,8 +261,10 @@ public class UpscalerSettingsUiCoverageTests
         string gui = ReadPatchedOrSource(GuiPatch, GuiSource);
         string refresh = Between(gui, "private void optimumUpdateUpscalerRows()", "\n\t}\n");
 
+        // Any upscaler that owns the resolve, not DLSS alone: the preset chooses the
+        // render size for the passthrough upscaler too.
         Assert.Contains(
-            "quality.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss;",
+            "quality.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;",
             refresh);
         // And the selection follows the effective upscaler, not the setting.
         Assert.Contains(
@@ -406,6 +421,7 @@ public class UpscalerSettingsUiCoverageTests
 
         Assert.Contains("public override string OptimumUpscalerUnavailable()", upscale);
         Assert.Contains("return upscaler.Active ? null : upscaler.Unavailable;", upscale);
+        Assert.Contains("public override string OptimumUpscalerUnavailableFor(string upscaler)", upscale);
 
         string apply = Between(upscale, "public override void ApplyOptimumUpscalerSettings()", "\n    }");
         Assert.Contains("upscaler.RetireFeature();", apply);
@@ -417,7 +433,8 @@ public class UpscalerSettingsUiCoverageTests
         // The setting, not just the host's liveness, decides whether the frame
         // upscales: the tab can turn it off while the host is still up.
         Assert.Contains(
-            "UpscalerActive && OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0",
+            "(UpscalerActive || PassthroughUpscaler.Requested) &&\n" +
+            "        OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0",
             upscale);
     }
 
@@ -442,6 +459,13 @@ public class UpscalerSettingsUiCoverageTests
             // PR #3 follow-up: the tab and its plan readout.
             "optimum-upscaling-tab-header",
             "optimum-upscaleplan", "optimum-upscaleplan-tooltip", "optimum-upscaleplan-none",
+            // The passthrough upscaler: the slot entry, its filter row and the
+            // comparison experiment's jitter switch.
+            "optimum-upscaler-passthrough",
+            "optimum-upscalerpassthroughfilter", "optimum-upscalerpassthroughfilter-tooltip",
+            "optimum-upscalerpassthroughfilter-linear", "optimum-upscalerpassthroughfilter-nearest",
+            "optimum-upscalerjitter", "optimum-upscalerjitter-tooltip",
+            "optimum-upscalerjitter-on", "optimum-upscalerjitter-off",
         })
         {
             Assert.Contains("\"" + key + "\":", lang);

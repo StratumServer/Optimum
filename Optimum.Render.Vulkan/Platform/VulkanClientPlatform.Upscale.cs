@@ -83,20 +83,34 @@ public partial class VulkanClientPlatform
     /// timeline, shut NGX down. Releasing a feature after
     /// <c>NVSDK_NGX_VULKAN_Shutdown1</c>, or shutting NGX down after the device
     /// it was initialised on is gone, takes the process down inside the driver.
+    ///
+    /// <para>The published plan is retired here whichever upscaler produced it. A
+    /// passthrough session has no host to shut down but does publish a plan every
+    /// frame it blits (the LOD bias and the jitter sequence length are derived from
+    /// it), so an early return on "no host" left the process's last plan standing -
+    /// invisible in a client that is exiting, and a state leak between tests in a
+    /// process that is not.</para>
     /// </summary>
     internal void ShutDownUpscaler()
     {
-        if (upscaler == null) return;
-        try
+        bool published = upscaler != null || passthroughPlan.IsValid;
+        if (upscaler != null)
         {
-            upscaler.Shutdown();
+            try
+            {
+                upscaler.Shutdown();
+            }
+            catch (Exception error)
+            {
+                // A vendor runtime throwing on teardown must not stop the client exiting.
+                LogUpscaler("[Optimum] DLSS teardown: " + error.Message);
+            }
+            upscaler = null;
         }
-        catch (Exception error)
-        {
-            // A vendor runtime throwing on teardown must not stop the client exiting.
-            LogUpscaler("[Optimum] DLSS teardown: " + error.Message);
-        }
-        upscaler = null;
+        passthroughPlan = default;
+        // Nothing of ours ever published a plan, so there is nothing to retire and no
+        // sampler to write: this is the common case of a client that never upscaled.
+        if (!published) return;
         OptimumConfig.ClearUpscalerPlan();
         // No upscaler owns the resolve any more, so the bias goes back to whatever
         // the render scale and TAA ask for - 0, and the parameter off the atlases
@@ -122,23 +136,12 @@ public partial class VulkanClientPlatform
         OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0;
 
     /// <summary>
-    /// DLSS plan, Phase 6: why the settings tab may not offer an upscaler here, or null
-    /// while it may. Everything the host already knows, in the words it already produced -
-    /// "the NVIDIA driver library ... is not installed", "the NGX shim is not loadable",
-    /// "no NGX feature libraries were found", or the sentence a runtime stand-down logged.
-    ///
-    /// The one case the host cannot describe is the one where there is no host: the
-    /// session started with the setting off, so NGX's device extensions were never
-    /// requested at device creation and no amount of setting-flipping can bring DLSS up
-    /// before the client restarts. That is said plainly rather than silently offering a
-    /// choice that would stand itself down one rebuild later.
-    /// </summary>
-    /// <summary>
-    /// The same question about one entry of the dropdown. The passthrough comparison
+    /// The slot-wide question asked about one entry of the dropdown. The passthrough
     /// upscaler needs no vendor runtime at all - no NGX, no session, no feature - so it
-    /// is available wherever this platform is running, which is exactly the machine
-    /// where "is the shimmer DLSS's or ours" has to be asked. Every other entry is the
-    /// slot-wide answer.
+    /// is available wherever this platform is running: on the machine where "is the
+    /// shimmer DLSS's or ours" has to be asked, and on every GPU that has no vendor
+    /// upscaler at all, where it is the fallback. Every other entry gets the slot-wide
+    /// answer below.
     /// </summary>
     public override string OptimumUpscalerUnavailableFor(string upscaler)
     {
@@ -146,6 +149,19 @@ public partial class VulkanClientPlatform
         return OptimumUpscalerUnavailable();
     }
 
+    /// <summary>
+    /// DLSS plan, Phase 6: why the settings tab may not offer a vendor upscaler here, or
+    /// null while it may. Everything the host already knows, in the words it already
+    /// produced - "the NVIDIA driver library ... is not installed", "the NGX shim is not
+    /// loadable", "no NGX feature libraries were found", or the sentence a runtime
+    /// stand-down logged.
+    ///
+    /// The one case the host cannot describe is the one where there is no host: the
+    /// session started with the setting off, so NGX's device extensions were never
+    /// requested at device creation and no amount of setting-flipping can bring DLSS up
+    /// before the client restarts. That is said plainly rather than silently offering a
+    /// choice that would stand itself down one rebuild later.
+    /// </summary>
     public override string OptimumUpscalerUnavailable()
     {
         if (OptimumConfig.UpscalerRuntimeDisabled && upscaler == null)

@@ -81,10 +81,23 @@ public class UpscalerMutualExclusionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs");
 
-        Assert.Contains(
-            "OptimumTemporal.Frame.JitterActive = OptimumConfig.EffectiveTaa || OptimumConfig.TaaJitterDev || " +
-            "OptimumConfig.UpscalerReplacesTaa;",
-            main);
+        // One expression, in the config beside every other rule that reads the slot:
+        // the developer switch wins, an upscaler that owns the resolve decides through
+        // UpscalerJitter (the comparison experiment renders at the upscaler's ratio
+        // with the grid standing still), and with no upscaler the answer is our own
+        // resolve, exactly as it always was.
+        Assert.Contains("OptimumTemporal.Frame.JitterActive = OptimumConfig.JitterWindowOpen;", main);
+        foreach (string config in new[]
+        {
+            Read("VintagestoryApi/Config/OptimumConfig.cs"),
+            Read("sources/VintagestoryApi/Config/OptimumConfig.cs"),
+        })
+        {
+            Assert.Contains(
+                "public static bool JitterWindowOpen =>\n" +
+                "        TaaJitterDev || (UpscalerReplacesTaa ? UpscalerJitter : EffectiveTaa);",
+                config);
+        }
         Assert.Contains("OptimumConfig.EffectiveTemporalRenderScale, MainCamera.ZNear", main);
         // And the old expression is gone, so there is one answer to "what scale is
         // this frame jittered for".

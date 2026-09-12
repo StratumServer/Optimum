@@ -439,19 +439,25 @@ public static class OptimumConfig
 
     /// <summary>
     /// The upscaler slot: "off", "dlss" (DLSS Super Resolution through raw NGX) or
-    /// "passthrough" (the diagnostic below).
+    /// "passthrough" (below).
     ///
-    /// <para><b>"passthrough" is a comparison entry, not a feature.</b> It occupies
+    /// <para><b>"passthrough" is two things at once.</b> It occupies
     /// exactly the DLSS slot - the same render/display split, the same preset render
     /// size, the same jitter, the same motion attachment, the same display-resolution
     /// post chain, the same TAA and FSR stand-down - and its "evaluate" is a plain
     /// magnifying blit from the render-resolution scene colour to the display-resolution
-    /// target. It exists to answer one question: at a low render ratio, is the shimmer
+    /// target.
+    ///
+    /// As a diagnostic it answers one question: at a low render ratio, is the shimmer
     /// the vendor's reconstruction or our own rendering path? With
     /// <see cref="UpscalerJitter" /> off the frame is a still magnification and nothing
     /// temporal moves; with it on the render grid moves every frame and nothing
-    /// reconstructs it. Those two states are the measurement. It touches no vendor
-    /// library at all, which is also why it runs on any GPU.</para>
+    /// reconstructs it. Those two states are the measurement.
+    ///
+    /// As a feature it is the upscaler for a GPU with no vendor path: it touches no
+    /// vendor library at all - no NGX, no session, no feature, not even the
+    /// optimal-settings query - so it runs wherever the Vulkan renderer runs, and
+    /// trades reconstruction for the frame rate of the reduced render size.</para>
     ///
     /// Off by default, and off is the whole of the old behaviour: with no
     /// upscaler the render chain is exactly the pre-DLSS one, including the
@@ -537,13 +543,19 @@ public static class OptimumConfig
     /// <summary>
     /// The render scale each preset nominally asks the vendor for, in the order
     /// of <see cref="UpscalerQualityNames" /> (DLAA 1, Quality 1/1.5, Balanced
-    /// 1/1.7, Performance 1/2, Ultra Performance 1/3). Only used to describe a
-    /// preset before a feature exists - the real number always comes from the
-    /// vendor's own optimal-settings query, published as
+    /// 1/1.724, Performance 1/2, Ultra Performance 1/3). Used to describe a
+    /// preset before a feature exists, and - because the passthrough upscaler
+    /// must render at the size the vendor would have chosen while making no
+    /// vendor call at all - as that upscaler's plan. So these are the SDK's own
+    /// ratios, not round numbers: Balanced is 1/1.724, which is what NGX's
+    /// optimal-settings query answers (2560x1490 -> 1485x864, measured on driver
+    /// 615.71.09); 1/1.7 put it 21 pixels wide of the vendor and cost the
+    /// comparison its size-for-size claim. For DLSS itself the real number
+    /// always comes from the query, published as
     /// <see cref="UpscalerRenderScale" />.
     /// </summary>
     private static readonly float[] UpscalerQualityRenderScales =
-        { 1.0f, 1.0f / 1.5f, 1.0f / 1.7f, 0.5f, 1.0f / 3.0f };
+        { 1.0f, 1.0f / 1.5f, 1.0f / 1.724f, 0.5f, 1.0f / 3.0f };
 
     /// <summary>
     /// Set by the renderer when the selected upscaler cannot come up - no native

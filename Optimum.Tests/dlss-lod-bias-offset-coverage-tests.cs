@@ -187,8 +187,11 @@ public class DlssLodBiasOffsetCoverageTests
         Assert.Contains("onOptimumUpscalerSharpnessChanged", gui);
         Assert.Contains("\"optUpscalerSharpness\"", gui);
 
-        // Disabled while nothing upscales, exactly as the quality row is.
-        Assert.Contains("sharpness.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss;", gui);
+        // Disabled while nothing upscales, exactly as the quality row is - and
+        // "nothing upscales" means any upscaler that owns the resolve, not DLSS
+        // alone: the passthrough upscaler samples the atlases at its own render
+        // ratio too, so the bias is the player's choice there as well.
+        Assert.Contains("sharpness.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;", gui);
         // And it shows the bias the choice produces.
         Assert.Contains("optimumUpscalerLodBiasText()", gui);
         Assert.Contains("OptimumConfig.PreviewUpscalerLodBias()", gui);

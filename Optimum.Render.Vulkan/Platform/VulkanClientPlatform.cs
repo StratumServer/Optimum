@@ -153,6 +153,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // DLSS plan, Phase 6: the settings-tab seams - the honest reason there can be no
         // upscaler here, the upscaler/preset re-plan and rebuild, and the latency re-apply.
         new(true, "OptimumUpscalerUnavailable", Array.Empty<string>()),
+        // The same question asked about one dropdown entry, so the passthrough
+        // upscaler - which needs no vendor runtime - is not refused for NGX's absence.
+        new(true, "OptimumUpscalerUnavailableFor", new[] { "String" }),
         new(true, "OptimumUpscalerPlan", Array.Empty<string>()),
         new(true, "ApplyOptimumUpscalerSettings", Array.Empty<string>()),
         new(true, "ApplyOptimumLatencySettings", Array.Empty<string>()),

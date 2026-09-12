@@ -106,11 +106,15 @@ public class DlssLodBiasCoverageTests
     {
         string upscale = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Upscale.cs");
 
-        // Three call sites, one per way the effective value moves: a feature was
-        // created (the plan is published), the tab changed the preset or turned
-        // the slot off (the plan is cleared and no shader is reloaded), and the
-        // upscaler was shut down with the platform.
-        Assert.Equal(3, Count(upscale, "ShaderRegistry.ApplyOptimumLodBias();"));
+        // Four call sites, one per way the effective value moves: a DLSS feature was
+        // created (the plan is published), a passthrough frame blitted (the same
+        // publication, from the ratio the targets were really allocated at), the tab
+        // changed the preset or turned the slot off (the plan is cleared and no shader
+        // is reloaded), and the upscaler was shut down with the platform.
+        Assert.Equal(4, Count(upscale, "ShaderRegistry.ApplyOptimumLodBias();"));
+        int blitted = upscale.IndexOf("PassthroughUpscaler.Publish(plan);", StringComparison.Ordinal);
+        Assert.True(blitted > 0);
+        Assert.True(upscale.IndexOf("ShaderRegistry.ApplyOptimumLodBias();", blitted, StringComparison.Ordinal) > blitted);
         int created = upscale.IndexOf("if (!upscaler.EnsureFeature(plan)) return false;", StringComparison.Ordinal);
         Assert.True(created > 0);
         Assert.True(upscale.IndexOf("ShaderRegistry.ApplyOptimumLodBias();", created, StringComparison.Ordinal) > created);
