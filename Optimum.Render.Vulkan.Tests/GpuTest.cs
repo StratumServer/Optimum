@@ -107,9 +107,19 @@ internal static class GpuTest
     /// reports as an error through GetError (failed Vulkan calls, rejected
     /// shaders) fails too.
     /// </summary>
-    public static void AssertClean(VulkanDevice seam, [CallerFilePath] string callerFile = "")
+    public static void AssertClean(VulkanDevice seam, [CallerFilePath] string callerFile = "") =>
+        AssertCleanSince(seam, 0, callerFile);
+
+    /// <summary>
+    /// The same, judging only the messages recorded after <paramref name="mark" />
+    /// (<see cref="NgxRuntime.MessageMark" />). For a device shared by several
+    /// tests, where the ones before this test started are not this test's to
+    /// answer for; <see cref="AssertClean" /> is this with a mark of 0.
+    /// </summary>
+    public static void AssertCleanSince(VulkanDevice seam, int mark, [CallerFilePath] string callerFile = "")
     {
-        List<string> messages = MessagesOf(seam);
+        List<string> all = MessagesOf(seam);
+        List<string> messages = mark <= 0 ? all : Since(all, mark);
         ValidationAssert.NoErrors(messages);
         ValidationAssert.NoSyncHazards(messages, callerFile);
 
@@ -118,8 +128,10 @@ internal static class GpuTest
 
         // GetError repeats the layer messages (sanitised for the client's
         // string.Format); those were judged above, so only the rest counts here.
+        // Every message, not just this test's slice: GetError reports the
+        // device's whole history and an earlier test's line is not a residual.
         string residual = diagnostics;
-        foreach (string message in ValidationAssert.Snapshot(messages))
+        foreach (string message in ValidationAssert.Snapshot(all))
         {
             residual = residual.Replace(message.Replace('{', '[').Replace('}', ']'), "");
         }
@@ -130,5 +142,16 @@ internal static class GpuTest
             if (line.Trim().Length > 0) remaining.Add(line);
         }
         Assert.True(remaining.Count == 0, "device diagnostics:\n" + string.Join("\n", remaining));
+    }
+
+    /// <summary>The messages from <paramref name="mark" /> on, under the list's own lock.</summary>
+    private static List<string> Since(List<string> messages, int mark)
+    {
+        lock (messages)
+        {
+            return mark >= messages.Count
+                ? new List<string>()
+                : messages.GetRange(mark, messages.Count - mark);
+        }
     }
 }

@@ -507,6 +507,19 @@ internal sealed class FrameRing : IDisposable
 
     public int PendingDeletionCount => _retired.PendingCount;
 
+    /// <summary>
+    /// Waits for every frame already submitted and destroys everything the retire
+    /// queue holds, returning how many went. For a teardown that has to finish
+    /// before something else is shut down - releasing a vendor upscaler's feature
+    /// before NGX itself goes away, which NGX requires - rather than for the
+    /// steady state, where <see cref="BeginFrame" /> collects what has passed.
+    /// </summary>
+    public int DrainRetirements()
+    {
+        _timeline.WaitForSignalledFramesAtTeardown();
+        return _retired.Collect();
+    }
+
     public void Dispose()
     {
         if (_disposed) return;

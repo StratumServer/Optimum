@@ -7,7 +7,14 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <param name="TestClass">The test class that produces it.</param>
 /// <param name="TestMethod">The test method that produces it.</param>
 /// <param name="Defect">The backend defect behind it.</param>
-/// <param name="RetiredBy">The plan phase that removes the defect: "1B" or "2".</param>
+/// <param name="RetiredBy">
+/// The plan phase that removes the defect: "1B" or "2" - or "vendor" for a
+/// hazard entirely inside a vendor runtime's own recorded commands, which no
+/// phase of ours can retire. A "vendor" entry has to name, in
+/// <paramref name="Defect" />, both sides of the hazard and the evidence that
+/// neither is ours; it is the only kind of entry that is not a promise to fix
+/// something.
+/// </param>
 internal sealed record KnownSyncHazard(string Id, string TestClass, string TestMethod, string Defect, string RetiredBy);
 
 /// <summary>
@@ -19,8 +26,22 @@ internal sealed record KnownSyncHazard(string Id, string TestClass, string TestM
 /// </summary>
 internal static class KnownSyncHazards
 {
+    private const string DlssInternalClear =
+        "inside NGX: vkCmdClearColorImage on NGX's own image (nv.ngx.dlss.resource) against the layout " +
+        "transition NGX's own vkCmdPipelineBarrier made for it, both recorded by NGX inside its " +
+        "nv.ngx.dlss.Evaluate debug scope. No Optimum image, barrier or command is named on either side, " +
+        "and the images are ones NGX allocates on our device and never shows us, so there is nothing here " +
+        "for us to synchronise. Measured 2026-09-12 on driver 615.71.09 with DLSS SDK 310.9.1. It is " +
+        "reported twice, on the first DLSS evaluate in the process and not again: NGX allocates and " +
+        "clears those images once per NGX lifetime, and the runtime is shared (NgxRuntime), so it is " +
+        "pinned against whichever DLSS test runs first. If the order changes, this entry goes stale and " +
+        "the one that inherits the hazard fails - which is the ledger doing its job, not a regression.";
+
     public static readonly KnownSyncHazard[] Entries =
     {
+        new("SYNC-HAZARD-WRITE-AFTER-WRITE", nameof(NgxDlssEvaluateTests),
+            nameof(NgxDlssEvaluateTests.DlssEvaluatesOnTheDeviceAndTheOutputCarriesThePattern),
+            DlssInternalClear, "vendor"),
     };
 
     public static bool Covers(string id, string testClass, string testMethod)

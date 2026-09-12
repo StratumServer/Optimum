@@ -36,6 +36,51 @@ internal static class NgxParameterNames
     public const string DlssGetDynamicMaxRenderHeight = "DLSS.Get.Dynamic.Max.Render.Height";
     public const string DlssGetDynamicMinRenderWidth = "DLSS.Get.Dynamic.Min.Render.Width";
     public const string DlssGetDynamicMinRenderHeight = "DLSS.Get.Dynamic.Min.Render.Height";
+
+    // ------------------------------------------------------- feature creation
+    // What NGX_VULKAN_CREATE_DLSS_EXT1 (nvsdk_ngx_helpers_vk.h) sets before
+    // CreateFeature1. The helper is inline C, so this is the whole of it.
+
+    public const string CreationNodeMask = "CreationNodeMask";
+    public const string VisibilityNodeMask = "VisibilityNodeMask";
+    public const string DlssFeatureCreateFlags = "DLSS.Feature.Create.Flags";
+    public const string DlssEnableOutputSubrects = "DLSS.Enable.Output.Subrects";
+
+    // --------------------------------------------------------------- evaluate
+    // What NGX_VULKAN_EVALUATE_DLSS_EXT sets. The resource parameters take a
+    // pointer to an NVSDK_NGX_Resource_VK, not a VkImage.
+
+    public const string Color = "Color";
+    public const string Output = "Output";
+    public const string Depth = "Depth";
+    public const string MotionVectors = "MotionVectors";
+    public const string JitterOffsetX = "Jitter.Offset.X";
+    public const string JitterOffsetY = "Jitter.Offset.Y";
+    public const string Reset = "Reset";
+    public const string MvScaleX = "MV.Scale.X";
+    public const string MvScaleY = "MV.Scale.Y";
+    public const string TransparencyMask = "TransparencyMask";
+    public const string ExposureTexture = "ExposureTexture";
+    public const string DlssInputBiasCurrentColorMask = "DLSS.Input.Bias.Current.Color.Mask";
+    public const string TonemapperType = "TonemapperType";
+    public const string DlssRenderSubrectDimensionsWidth = "DLSS.Render.Subrect.Dimensions.Width";
+    public const string DlssRenderSubrectDimensionsHeight = "DLSS.Render.Subrect.Dimensions.Height";
+    public const string DlssPreExposure = "DLSS.Pre.Exposure";
+    public const string DlssExposureScale = "DLSS.Exposure.Scale";
+    public const string DlssIndicatorInvertXAxis = "DLSS.Indicator.Invert.X.Axis";
+    public const string DlssIndicatorInvertYAxis = "DLSS.Indicator.Invert.Y.Axis";
+    public const string DlssInputColorSubrectBaseX = "DLSS.Input.Color.Subrect.Base.X";
+    public const string DlssInputColorSubrectBaseY = "DLSS.Input.Color.Subrect.Base.Y";
+    public const string DlssInputDepthSubrectBaseX = "DLSS.Input.Depth.Subrect.Base.X";
+    public const string DlssInputDepthSubrectBaseY = "DLSS.Input.Depth.Subrect.Base.Y";
+    public const string DlssInputMvSubrectBaseX = "DLSS.Input.MV.Subrect.Base.X";
+    public const string DlssInputMvSubrectBaseY = "DLSS.Input.MV.Subrect.Base.Y";
+    public const string DlssInputTranslucencySubrectBaseX = "DLSS.Input.Translucency.Subrect.Base.X";
+    public const string DlssInputTranslucencySubrectBaseY = "DLSS.Input.Translucency.Subrect.Base.Y";
+    public const string DlssInputBiasCurrentColorSubrectBaseX = "DLSS.Input.Bias.Current.Color.Subrect.Base.X";
+    public const string DlssInputBiasCurrentColorSubrectBaseY = "DLSS.Input.Bias.Current.Color.Subrect.Base.Y";
+    public const string DlssOutputSubrectBaseX = "DLSS.Output.Subrect.Base.X";
+    public const string DlssOutputSubrectBaseY = "DLSS.Output.Subrect.Base.Y";
 }
 
 /// <summary>

@@ -148,6 +148,51 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     }
 
     /// <summary>
+    /// The <c>VkPhysicalDeviceVulkan12Features</c> the device will be created
+    /// with, set by <see cref="VulkanContext" /> before the contributors run.
+    ///
+    /// A contributor cannot chain its own copy of a promoted feature struct -
+    /// <c>VkPhysicalDeviceBufferDeviceAddressFeatures</c> and this one in the
+    /// same pNext chain is invalid - so a core-1.2 feature is asked for by
+    /// turning a bit on in here, through <see cref="RequestBufferDeviceAddress" />.
+    /// </summary>
+    public PhysicalDeviceVulkan12Features* Vulkan12 { get; set; }
+
+    /// <summary>
+    /// Turns on <c>bufferDeviceAddress</c> when the physical device supports it,
+    /// and answers whether the device will have it.
+    ///
+    /// NGX needs it: DLSS's own shaders call <c>vkGetBufferDeviceAddress</c> on
+    /// buffers it allocates on our device, and the extension alone is not enough
+    /// - without the feature the layers report
+    /// <c>VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324</c> on every
+    /// evaluate (measured 2026-09-12, driver 615.71.09). Like every requirement
+    /// here it may only ask: a device without it keeps the upscaler unavailable
+    /// rather than failing vkCreateDevice.
+    /// </summary>
+    public bool RequestBufferDeviceAddress(string? requestedBy = null)
+    {
+        if (Vulkan12 == null) return false;
+        if (Vulkan12->BufferDeviceAddress) return true;
+
+        var supported = new PhysicalDeviceVulkan12Features
+        {
+            SType = StructureType.PhysicalDeviceVulkan12Features,
+        };
+        QueryFeatures(&supported);
+        if (!supported.BufferDeviceAddress)
+        {
+            Log?.Invoke((requestedBy ?? "a contributor") +
+                " asked for the bufferDeviceAddress feature, which this device does not support; " +
+                "continuing without it");
+            return false;
+        }
+
+        Vulkan12->BufferDeviceAddress = true;
+        return true;
+    }
+
+    /// <summary>
     /// Queries physical-device features through a caller-built pNext chain. The
     /// two-step shape the colour-write probe uses: query what is supported, then
     /// re-request only what is actually going to be used.

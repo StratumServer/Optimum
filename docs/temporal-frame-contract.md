@@ -438,6 +438,14 @@ Stored: `mv = previousPixel − currentPixel`, render pixels, Y up, jitter exclu
 `OptimumTemporalMath.AdaptMotionVector(x, y, w, h, adapter)` implements exactly this: identity for
 `Fsr` and `Xess`, `(x/w, y/h)` for `Dlss`.
 
+> **Note (2026-09-12, not a v1 change).** The DLSS row above is Streamline's convention, and that is
+> the layer the row names. Optimum drives **raw NGX** instead (`NgxDlssFeature`, no Streamline), where
+> `NVSDK_NGX_Parameter_MV_Scale_X/Y` multiplies the sampled vector into *render pixels*. Our vectors
+> are already render pixels, so raw NGX gets `MV.Scale = (1, 1)` and no per-vector scaling — measured
+> against the SDK headers, as §7 requires of an adapter when it lands. The stored vectors, their sign
+> and their units are unchanged; only the constant handed to the vendor differs between the two layers.
+> The same applies to jitter (§7.2): raw NGX takes `-JitterPx`, in render pixels.
+
 ### 7.2 Jitter
 
 Stored: `JitterPx` = the raster displacement of a static point, Y up, applied by

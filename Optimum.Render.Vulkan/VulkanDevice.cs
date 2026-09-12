@@ -24,7 +24,7 @@ namespace Optimum.Render.Vulkan;
 /// out integer ids, because the game's public API exposes raw GL names as fields
 /// that mods read and pass back.
 /// </summary>
-public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageListener
+public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatencyStageListener
 {
     /// <summary>The platform's stage bracket reaches the latency markers here (seam S4).</summary>
     void Platform.ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();

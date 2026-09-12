@@ -922,6 +922,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             Api, Instance, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
         {
             Log = options.DebugCallback,
+            Vulkan12 = &vulkan12,
         };
         if (wantDeviceFault) requirements.ChainFeature(&faultFeatures);
         if (colorWriteTier == ColorWriteTier.DynamicEnable) requirements.ChainFeature(&colorWriteFeatures);

@@ -34,11 +34,17 @@ namespace Optimum.Render.Vulkan.Tests;
 /// <c>libnvidia-ngx-dlssg.so.*</c> (DLSS SDK 310.9.1's
 /// <c>lib/Linux_x86_64/rel</c>), and build the shim with <c>make native</c>.
 /// </summary>
+[Collection(NgxCollection.Name)]
 public class NgxAvailabilityTests
 {
     private readonly ITestOutputHelper _output;
+    private readonly NgxRuntime _ngx;
 
-    public NgxAvailabilityTests(ITestOutputHelper output) => _output = output;
+    public NgxAvailabilityTests(ITestOutputHelper output, NgxRuntime ngx)
+    {
+        _output = output;
+        _ngx = ngx;
+    }
 
     /// <summary>
     /// The struct sizes the NGX headers imply on the x86-64 SysV ABI. Every one
@@ -213,116 +219,84 @@ public class NgxAvailabilityTests
     [SkippableFact]
     public void NgxComesUpFromManagedCodeThroughTheShimAndReportsWhatTheNativeProbeSaw()
     {
-        using NgxSession session = RequireSession();
-        Skip.IfNot(NgxShim.IsAvailable,
-            "The NGX shim is not loadable: " + NgxShim.Diagnosis + " (build it with `make native`).");
-
-        NgxResult runtime = NgxShim.LoadRuntime();
-        Skip.IfNot(NgxInterop.Succeeded(runtime),
-            "The shim could not load the NGX runtime: " + NgxInterop.Describe(runtime) + " " +
-            NgxShim.LastLoadError);
+        _ngx.Require();
+        foreach (string line in _ngx.Diagnostics) Log(line);
+        int mark = _ngx.MessageMark();
 
         Log("shim: " + NgxShim.Diagnosis);
         Log("call site: " + NgxInterop.ManagedCallSiteDiagnosis);
 
-        var requirements = new NgxDeviceRequirements(session, Features, Log);
-        VulkanDevice device = GpuTest.NewDevice();
-        Action<VulkanContextOptions>? configured = device.ConfigureContextOptions;
-        device.ConfigureContextOptions = options =>
+        VulkanDevice device = _ngx.Device;
+        NgxSession session = _ngx.Session;
+
+        // Pre-init discovery, which aborted the process before the shim.
+        foreach (NgxFeature feature in Features)
         {
-            configured?.Invoke(options);
-            options.RequirementContributors.Add(requirements);
-        };
-
-        using (device)
-        {
-            Skip.IfNot(device.Initialize(IntPtr.Zero, 0, 0, out string failureReason),
-                "No usable Vulkan device: " + failureReason);
-
-            VulkanContext context = device.ContextForTests;
-            Log("device: " + context.Capabilities.DeviceName + " / " + context.Capabilities.DriverName);
-            Skip.IfNot(context.Capabilities.DeviceName.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase),
-                "NGX needs the NVIDIA driver; this device is " + context.Capabilities.DeviceName + ".");
-
-            IntPtr instance = (IntPtr)context.Instance.Handle;
-            IntPtr physicalDevice = (IntPtr)context.PhysicalDevice.Handle;
-            IntPtr vkDevice = (IntPtr)context.Device.Handle;
-
-            // Pre-init discovery, which aborted the process before the shim.
-            foreach (NgxFeature feature in Features)
-            {
-                NgxResult supportResult = session.FeatureRequirements(
-                    instance, physicalDevice, feature,
-                    out NgxFeatureSupport supported, out uint minArch, out string minOs);
-                Log(feature + " requirements: " + NgxInterop.Describe(supportResult) +
-                    " FeatureSupported=" + supported + " MinHwArchitecture=0x" + minArch.ToString("X") +
-                    " MinOsVersion='" + minOs + "'");
-                Assert.Equal(NgxResult.Success, supportResult);
-                Assert.Equal(NgxFeatureSupport.Supported, supported);
-            }
-
-            NgxResult init = session.Initialize(instance, physicalDevice, vkDevice);
-            Log("NVSDK_NGX_VULKAN_Init_ProjectID: " + NgxInterop.Describe(init));
-            Assert.Equal(NgxResult.Success, init);
-
-            try
-            {
-                NgxResult capabilities = NgxInterop.GetCapabilityParameters(out IntPtr handle);
-                Log("NVSDK_NGX_VULKAN_GetCapabilityParameters: " + NgxInterop.Describe(capabilities));
-                Assert.Equal(NgxResult.Success, capabilities);
-                Assert.NotEqual(IntPtr.Zero, handle);
-
-                var parameters = new NgxParameters(handle);
-                try
-                {
-                    uint superSampling = ReportUInt(parameters, NgxParameterNames.SuperSamplingAvailable);
-                    ReportUInt(parameters, NgxParameterNames.SuperSamplingNeedsUpdatedDriver);
-                    ReportUInt(parameters, NgxParameterNames.SuperSamplingMinDriverVersionMajor);
-                    ReportUInt(parameters, NgxParameterNames.SuperSamplingMinDriverVersionMinor);
-                    ReportInt(parameters, NgxParameterNames.SuperSamplingFeatureInitResult);
-
-                    uint frameGeneration = ReportUInt(parameters, NgxParameterNames.FrameGenerationAvailable);
-                    ReportUInt(parameters, NgxParameterNames.FrameGenerationNeedsUpdatedDriver);
-                    ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMajor);
-                    ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMinor);
-                    ReportInt(parameters, NgxParameterNames.FrameGenerationFeatureInitResult);
-
-                    Assert.Equal(1u, superSampling);
-                    Assert.Equal(1u, frameGeneration);
-
-                    // The optimal-settings callback lives inside libnvidia-ngx
-                    // too, so the shim owns that call as well.
-                    NgxResult quality = NgxSession.OptimalSettings(
-                        parameters, 2560, 1490, NgxPerfQuality.MaxQuality, out NgxOptimalSettings qualitySettings);
-                    Log("optimal settings 2560x1490 Quality: " + NgxInterop.Describe(quality) +
-                        " -> " + qualitySettings);
-                    Assert.Equal(NgxResult.Success, quality);
-                    Assert.Equal(1707u, qualitySettings.OptimalWidth);
-                    Assert.Equal(993u, qualitySettings.OptimalHeight);
-
-                    NgxResult performance = NgxSession.OptimalSettings(
-                        parameters, 2560, 1490, NgxPerfQuality.MaxPerf, out NgxOptimalSettings perfSettings);
-                    Log("optimal settings 2560x1490 Performance: " + NgxInterop.Describe(performance) +
-                        " -> " + perfSettings);
-                    Assert.Equal(NgxResult.Success, performance);
-                    Assert.Equal(1280u, perfSettings.OptimalWidth);
-                    Assert.Equal(745u, perfSettings.OptimalHeight);
-                }
-                finally
-                {
-                    NgxResult destroyed = NgxInterop.DestroyParameters(parameters.Handle);
-                    Log("NVSDK_NGX_VULKAN_DestroyParameters: " + NgxInterop.Describe(destroyed));
-                }
-            }
-            finally
-            {
-                NgxResult shutdown = NgxSession.Shutdown(vkDevice);
-                Log("NVSDK_NGX_VULKAN_Shutdown1: " + NgxInterop.Describe(shutdown));
-                Assert.Equal(NgxResult.Success, shutdown);
-            }
-
-            GpuTest.AssertClean(device);
+            NgxResult supportResult = session.FeatureRequirements(
+                _ngx.Instance, _ngx.PhysicalDevice, feature,
+                out NgxFeatureSupport supported, out uint minArch, out string minOs);
+            Log(feature + " requirements: " + NgxInterop.Describe(supportResult) +
+                " FeatureSupported=" + supported + " MinHwArchitecture=0x" + minArch.ToString("X") +
+                " MinOsVersion='" + minOs + "'");
+            Assert.Equal(NgxResult.Success, supportResult);
+            Assert.Equal(NgxFeatureSupport.Supported, supported);
         }
+
+        // NGX came up on the shared runtime; Shutdown1 is its business too,
+        // because the driver allows exactly one lifetime per process (see
+        // NgxRuntime), and its Dispose fails the run if that shutdown does not
+        // return Success.
+        Log("NVSDK_NGX_VULKAN_Init_ProjectID: " + NgxInterop.Describe(_ngx.InitResult));
+        Assert.Equal(NgxResult.Success, _ngx.InitResult);
+
+        NgxResult capabilities = NgxInterop.GetCapabilityParameters(out IntPtr handle);
+        Log("NVSDK_NGX_VULKAN_GetCapabilityParameters: " + NgxInterop.Describe(capabilities));
+        Assert.Equal(NgxResult.Success, capabilities);
+        Assert.NotEqual(IntPtr.Zero, handle);
+
+        var parameters = new NgxParameters(handle);
+        try
+        {
+            uint superSampling = ReportUInt(parameters, NgxParameterNames.SuperSamplingAvailable);
+            ReportUInt(parameters, NgxParameterNames.SuperSamplingNeedsUpdatedDriver);
+            ReportUInt(parameters, NgxParameterNames.SuperSamplingMinDriverVersionMajor);
+            ReportUInt(parameters, NgxParameterNames.SuperSamplingMinDriverVersionMinor);
+            ReportInt(parameters, NgxParameterNames.SuperSamplingFeatureInitResult);
+
+            uint frameGeneration = ReportUInt(parameters, NgxParameterNames.FrameGenerationAvailable);
+            ReportUInt(parameters, NgxParameterNames.FrameGenerationNeedsUpdatedDriver);
+            ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMajor);
+            ReportUInt(parameters, NgxParameterNames.FrameGenerationMinDriverVersionMinor);
+            ReportInt(parameters, NgxParameterNames.FrameGenerationFeatureInitResult);
+
+            Assert.Equal(1u, superSampling);
+            Assert.Equal(1u, frameGeneration);
+
+            // The optimal-settings callback lives inside libnvidia-ngx too, so
+            // the shim owns that call as well.
+            NgxResult quality = NgxSession.OptimalSettings(
+                parameters, 2560, 1490, NgxPerfQuality.MaxQuality, out NgxOptimalSettings qualitySettings);
+            Log("optimal settings 2560x1490 Quality: " + NgxInterop.Describe(quality) +
+                " -> " + qualitySettings);
+            Assert.Equal(NgxResult.Success, quality);
+            Assert.Equal(1707u, qualitySettings.OptimalWidth);
+            Assert.Equal(993u, qualitySettings.OptimalHeight);
+
+            NgxResult performance = NgxSession.OptimalSettings(
+                parameters, 2560, 1490, NgxPerfQuality.MaxPerf, out NgxOptimalSettings perfSettings);
+            Log("optimal settings 2560x1490 Performance: " + NgxInterop.Describe(performance) +
+                " -> " + perfSettings);
+            Assert.Equal(NgxResult.Success, performance);
+            Assert.Equal(1280u, perfSettings.OptimalWidth);
+            Assert.Equal(745u, perfSettings.OptimalHeight);
+        }
+        finally
+        {
+            NgxResult destroyed = NgxInterop.DestroyParameters(parameters.Handle);
+            Log("NVSDK_NGX_VULKAN_DestroyParameters: " + NgxInterop.Describe(destroyed));
+        }
+
+        GpuTest.AssertCleanSince(device, mark);
     }
 
     // ------------------------------------------------------------------ helpers

@@ -97,5 +97,16 @@ internal sealed class NgxDeviceRequirements : IDeviceRequirementContributor
                 if (!requirements.Request(extension, 0, Name)) Refused.Add("device:" + extension);
             }
         }
+
+        // The extension list NGX names is not the whole requirement: DLSS calls
+        // vkGetBufferDeviceAddress on buffers it allocates on our device, and
+        // VK_KHR_buffer_device_address without the bufferDeviceAddress feature
+        // is a validation error on every evaluate. NGX's own queries never
+        // mention features, so this is ours to ask for.
+        BufferDeviceAddress = requirements.RequestBufferDeviceAddress(Name);
+        if (!BufferDeviceAddress) Refused.Add("feature:bufferDeviceAddress");
     }
+
+    /// <summary>Whether the device will have the <c>bufferDeviceAddress</c> feature DLSS needs.</summary>
+    public bool BufferDeviceAddress { get; private set; }
 }
