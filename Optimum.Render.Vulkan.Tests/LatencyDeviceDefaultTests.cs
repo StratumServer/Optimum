@@ -27,7 +27,10 @@ public class LatencyDeviceDefaultTests
             ILatencyBackend latency = device!.Latency;
             _output.WriteLine("latency backend: " + LatencyBackends.Token(latency.Kind));
 
-            Assert.Equal(LatencyBackendKind.None, latency.Kind);
+            // LatencyMode ships off, so the installed backend - None, or the Native
+            // one auto-selection lands on where no vendor path exists - is disabled:
+            // it sleeps nowhere and owns no frame cap. "Off is off" is that, not the
+            // identity of the instance.
             Assert.False(latency.OwnsFrameCap);
             Assert.Equal(LatencyMode.Off, latency.Settings.Mode);
             Assert.Equal(0UL, latency.Settings.MinimumIntervalUs);
@@ -97,9 +100,8 @@ public class LatencyDeviceDefaultTests
         using (device)
         {
             Assert.Equal(LatencyBackendKind.Native, seen);
-            // This stage only carries the option; selection lands in a later one,
-            // so the live backend is still None.
-            Assert.Equal(LatencyBackendKind.None, device.Latency.Kind);
+            // Whatever was installed, LatencyMode ships off, so it paces nothing.
+            Assert.False(device.Latency.OwnsFrameCap);
             GpuTest.AssertClean(device);
         }
     }

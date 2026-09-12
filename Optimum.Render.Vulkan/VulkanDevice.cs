@@ -89,10 +89,10 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     /// submit tag, the stats source and every swapchain creation see the same
     /// instance.
     ///
-    /// Until the vendor backends land (plan wave 3) every selection resolves to
-    /// <see cref="NoneLatencyBackend" />, which sleeps nowhere and owns no frame
-    /// cap: the shipped frame is byte-for-byte the one Milestone 1 delivered, and
-    /// the selection is still exercised, logged and testable.
+    /// The client's <c>LatencyMode</c> ships off, so the installed backend is
+    /// handed <see cref="LatencySettings.Disabled" /> and sleeps nowhere and owns
+    /// no frame cap whichever kind it is: the shipped frame stays the one
+    /// Milestone 1 delivered until the setting is turned on.
     /// </summary>
     private void InstallSelectedLatencyBackend()
     {
@@ -123,14 +123,16 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     private bool _latencyBackendInstalled;
 
     /// <summary>
-    /// The implementation of one selected backend kind. Only
-    /// <see cref="LatencyBackendKind.None" /> has one today; Native, NV and AMD
-    /// arrive in wave 3 and this is the single place that learns about them.
+    /// The implementation of one selected backend kind: the single place that
+    /// learns about them. None and Native exist; NV and AMD arrive beside them and
+    /// fall through to None until they do.
     /// </summary>
     private ILatencyBackend CreateLatencyBackend(LatencyBackendKind kind)
     {
         switch (kind)
         {
+            case LatencyBackendKind.Native:
+                return new NativeLatencyBackend(() => _frames?.Timeline, MirrorValidationMessage);
             default:
                 return new NoneLatencyBackend(MirrorValidationMessage);
         }

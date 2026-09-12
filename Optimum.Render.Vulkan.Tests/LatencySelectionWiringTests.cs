@@ -40,15 +40,12 @@ public class LatencySelectionWiringTests
                 "selected " + LatencyBackends.Token(capabilities.LatencyBackend) +
                 " but installed " + LatencyBackends.Token(device.Latency.Kind));
 
-            // Wave 3 has not landed: everything resolves to None, which is why the
-            // shipped frame is unchanged.
-            Assert.Equal(LatencyBackendKind.None, device.Latency.Kind);
-
             // The stats source is the very instance the frame uses, so the line
             // cannot report a backend the frame is not running.
             Assert.Same(device.Latency, VulkanStats.LatencySource);
 
-            // The None backend never takes the client's FPS limiter away.
+            // LatencyMode ships off, so whichever backend was installed, it never
+            // takes the client's FPS limiter away.
             Assert.False(device.Latency.OwnsFrameCap);
 
             GpuTest.AssertClean(device);
