@@ -180,7 +180,35 @@ public static class OptimumParityDump
         return 2;
     }
 
-    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels)
+    /// <summary>
+    /// Writes one whole frame as a binary PPM (P6) - the encoding
+    /// <c>scripts/dev/ssim.py</c> reads, so two captures pair by file name.
+    ///
+    /// <paramref name="pixels" /> is four bytes per texel in GL row order
+    /// (bottom-up, the first row in the file is GL row 0), exactly as
+    /// <c>ReadDefaultFramebuffer</c> hands it back. <paramref name="bgra" /> says
+    /// which order those four are in: the OpenGL path reads <c>GL_BGRA</c>, the
+    /// Vulkan device's default colour target is <c>R8G8B8A8_UNORM</c> and its
+    /// readback hands the texels back untouched, so the two backends differ here
+    /// and the written file must not.
+    ///
+    /// Returns false when the arguments do not describe a frame; it never throws
+    /// for that reason alone.
+    /// </summary>
+    public static bool WriteFrame(string path, int width, int height, byte[] pixels, bool bgra)
+    {
+        if (path == null || pixels == null || width <= 0 || height <= 0) return false;
+        if (pixels.LongLength < (long)width * height * 4) return false;
+        string directory = System.IO.Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory)) System.IO.Directory.CreateDirectory(directory);
+        // BGRA: start at B's neighbour R (index 2) and walk backwards, so the file
+        // gets R, G, B either way.
+        WriteNetpbm(path, width, height, pixels, bgra ? 2 : 0, 3, bgra ? -1 : 1);
+        return true;
+    }
+
+    private static void WriteNetpbm(string path, int width, int height, byte[] rgba, int firstChannel, int channels,
+        int step = 1)
     {
         using var file = new System.IO.FileStream(path, System.IO.FileMode.Create, System.IO.FileAccess.Write);
         byte[] header = System.Text.Encoding.ASCII.GetBytes(
@@ -194,7 +222,7 @@ public static class OptimumParityDump
             {
                 for (int c = 0; c < channels; c++)
                 {
-                    row[x * channels + c] = rgba[source + x * 4 + firstChannel + c];
+                    row[x * channels + c] = rgba[source + x * 4 + firstChannel + c * step];
                 }
             }
             file.Write(row, 0, row.Length);
@@ -222,6 +250,223 @@ public static class OptimumParityDump
             }
             file.Write(row, 0, row.Length);
         }
+    }
+}
+
+/// <summary>
+/// The headless render harness: the real client and the real renderer, no visible
+/// window, frames on disk.
+///
+/// Every knob is an environment variable, read once, so a run that sets none of
+/// them pays one static bool check per frame and behaves exactly as before. The
+/// frame loop is not changed by any of this - the harness only makes the window
+/// invisible, types the chat commands a human would have typed, and reads the
+/// presented image back on the frames it was asked for.
+///
+/// <list type="bullet">
+/// <item><c>OPTIMUM_HEADLESS=1</c> - the window is created with
+/// <c>StartVisible=false</c> and <c>StartFocused=false</c>. It is still a real
+/// window with a real surface and a real swapchain (there is no surfaceless GL
+/// path in this client, so this is the only offscreen mode that is symmetric
+/// across both backends), it is simply never mapped. Because it is also never
+/// focused, the existing background FPS limiter caps the run at 30 FPS, which is
+/// what keeps it usable while the machine is in use.</item>
+/// <item><c>OPTIMUM_HEADLESS_COMMANDS=&lt;file&gt;</c> - a newline-separated list of
+/// chat commands, dispatched once, on in-world frame
+/// <c>OPTIMUM_HEADLESS_COMMAND_FRAME</c> (default 30). Blank lines and lines
+/// starting with <c>#</c> are ignored. A line starting with the client command
+/// prefix (<c>.</c>) runs locally - that is how the scripted camera
+/// (<c>.cam load &lt;points&gt;</c>, <c>.cam play &lt;seconds&gt;</c>) is driven -
+/// and anything else is sent to the server as chat, which is how the fixed scene
+/// (<c>/time set</c>, <c>/weather</c>, <c>/gamemode</c>) is set.</item>
+/// <item><c>OPTIMUM_HEADLESS_FIXED_DT=&lt;seconds&gt;</c> - pins
+/// <c>ClientMain.DeltaTimeLimiter</c>, the field vanilla's own cinematic recorder
+/// sets, so every simulated frame advances by the same amount regardless of how
+/// long it actually took. This is what makes a sequence repeatable; it is not
+/// bit-exact (chunk streaming, particle and mob RNG are not pinned by it).</item>
+/// <item><c>OPTIMUM_HEADLESS_FRAMES=&lt;abs dir&gt;</c> plus either
+/// <c>OPTIMUM_HEADLESS_FRAME_LIST=0,30,60</c> (an explicit list of in-world frame
+/// indices) or <c>OPTIMUM_HEADLESS_FRAME_COUNT=&lt;n&gt;</c> with
+/// <c>OPTIMUM_HEADLESS_FRAME_STRIDE=&lt;s&gt;</c> (default 1) and
+/// <c>OPTIMUM_HEADLESS_FIRST_FRAME=&lt;f&gt;</c> (default: the frame after the
+/// command script runs) - a cadence. Each selected frame is written as
+/// <c>frame-NNNNNN.ppm</c>, so two captures of the same list pair by name under
+/// <c>scripts/dev/ssim.py</c>.</item>
+/// </list>
+///
+/// What this does not cover: an X server (real, nested or Xvfb) still has to be
+/// there - GLFW queries the screen size before any window exists and Vulkan needs
+/// a WSI surface - and the per-attachment dump that
+/// <c>scripts/dev/taa-rejection.py</c> reads is still <c>OPTIMUM_PARITY_DUMP</c>,
+/// which composes with this rather than being replaced by it.
+/// </summary>
+public static class OptimumHeadless
+{
+    /// <summary>True when <c>OPTIMUM_HEADLESS</c> asks for an invisible window.</summary>
+    public static readonly bool Enabled = ResolveFlag("OPTIMUM_HEADLESS");
+
+    /// <summary>The chat-command script, or null when there is none.</summary>
+    public static readonly string CommandScriptPath = ResolveExistingFile("OPTIMUM_HEADLESS_COMMANDS");
+
+    /// <summary>The in-world frame the command script is dispatched on, counted from 0.</summary>
+    public static readonly long CommandFrame = ResolveLong("OPTIMUM_HEADLESS_COMMAND_FRAME", 30L);
+
+    /// <summary>Seconds per simulated frame, or 0 when the wall clock keeps driving it.</summary>
+    public static readonly float FixedDeltaTime = ResolveFixedDeltaTime();
+
+    /// <summary>The absolute directory frames are written to, or null when no frames are wanted.</summary>
+    public static readonly string FrameDirectory = ResolveDirectory("OPTIMUM_HEADLESS_FRAMES");
+
+    /// <summary>The in-world frames to write, ascending and without duplicates. Never null.</summary>
+    public static readonly long[] Frames = ResolveFrames();
+
+    /// <summary>True when frames will be written.</summary>
+    public static readonly bool CaptureEnabled = FrameDirectory != null && Frames.Length > 0;
+
+    /// <summary>
+    /// True when the client has to do anything at all per frame for the harness.
+    /// The single test the render loop makes.
+    /// </summary>
+    public static readonly bool Active = Enabled || CaptureEnabled || CommandScriptPath != null
+        || FixedDeltaTime > 0f;
+
+    private static bool ResolveFlag(string name)
+    {
+        string value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        value = value.Trim();
+        return value != "0" && !value.Equals("false", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveExistingFile(string name)
+    {
+        string value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        string full = System.IO.Path.GetFullPath(value);
+        return System.IO.File.Exists(full) ? full : null;
+    }
+
+    private static string ResolveDirectory(string name)
+    {
+        string value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value) || !System.IO.Path.IsPathRooted(value)) return null;
+        return System.IO.Path.GetFullPath(value);
+    }
+
+    private static long ResolveLong(string name, long fallback)
+    {
+        string value = Environment.GetEnvironmentVariable(name);
+        return long.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out long parsed) && parsed >= 0 ? parsed : fallback;
+    }
+
+    private static float ResolveFixedDeltaTime()
+    {
+        string value = Environment.GetEnvironmentVariable("OPTIMUM_HEADLESS_FIXED_DT");
+        if (!float.TryParse(value, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float seconds)) return 0f;
+        // A negative or absurd step would make the simulation meaningless rather
+        // than reproducible; one second per frame is already far past useful.
+        return seconds > 0f && seconds <= 1f ? seconds : 0f;
+    }
+
+    private static long[] ResolveFrames()
+    {
+        string list = Environment.GetEnvironmentVariable("OPTIMUM_HEADLESS_FRAME_LIST");
+        if (!string.IsNullOrWhiteSpace(list)) return ParseFrameList(list);
+
+        long count = ResolveLong("OPTIMUM_HEADLESS_FRAME_COUNT", 0L);
+        if (count <= 0L) return new long[0];
+        long stride = ResolveLong("OPTIMUM_HEADLESS_FRAME_STRIDE", 1L);
+        if (stride <= 0L) stride = 1L;
+        // Default: the first frame after the command script has run, so a camera
+        // started by the script is already moving on frame one of the capture.
+        long first = ResolveLong("OPTIMUM_HEADLESS_FIRST_FRAME",
+            CommandScriptPath != null ? CommandFrame + 1L : 0L);
+
+        long[] frames = new long[count];
+        for (long i = 0; i < count; i++) frames[i] = first + i * stride;
+        return frames;
+    }
+
+    private static long[] ParseFrameList(string list)
+    {
+        string[] parts = list.Split(new char[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries);
+        var frames = new System.Collections.Generic.List<long>(parts.Length);
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (long.TryParse(parts[i].Trim(), System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out long frame) && frame >= 0
+                && !frames.Contains(frame))
+            {
+                frames.Add(frame);
+            }
+        }
+        frames.Sort();
+        return frames.ToArray();
+    }
+
+    /// <summary>True when this in-world frame is one of the frames to write.</summary>
+    public static bool ShouldCapture(long worldFrame)
+    {
+        long[] frames = Frames;
+        for (int i = 0; i < frames.Length; i++)
+        {
+            if (frames[i] == worldFrame) return true;
+            if (frames[i] > worldFrame) return false;
+        }
+        return false;
+    }
+
+    /// <summary>True once this in-world frame is past the last frame to write.</summary>
+    public static bool CaptureFinished(long worldFrame)
+    {
+        long[] frames = Frames;
+        return frames.Length == 0 || worldFrame >= frames[frames.Length - 1];
+    }
+
+    /// <summary>The one file name both backends write, so two captures pair by name.</summary>
+    public static string FrameFileName(long worldFrame)
+    {
+        return "frame-" + worldFrame.ToString("D6", System.Globalization.CultureInfo.InvariantCulture) + ".ppm";
+    }
+
+    /// <summary>
+    /// The command script's lines, blank lines and <c>#</c> comments removed.
+    /// Empty when there is no script or it cannot be read - a capture that loses
+    /// its scene is worth a warning, not a crashed client.
+    /// </summary>
+    public static string[] ReadCommands()
+    {
+        if (CommandScriptPath == null) return new string[0];
+        string[] lines;
+        try
+        {
+            lines = System.IO.File.ReadAllLines(CommandScriptPath);
+        }
+        catch (Exception)
+        {
+            return new string[0];
+        }
+        var commands = new System.Collections.Generic.List<string>(lines.Length);
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string line = lines[i].Trim();
+            if (line.Length == 0 || line[0] == '#') continue;
+            commands.Add(line);
+        }
+        return commands.ToArray();
+    }
+
+    /// <summary>
+    /// Writes one presented frame into <see cref="FrameDirectory" />. Returns
+    /// false when nothing was written.
+    /// </summary>
+    public static bool WriteFrame(long worldFrame, int width, int height, byte[] pixels, bool bgra)
+    {
+        if (FrameDirectory == null) return false;
+        return OptimumParityDump.WriteFrame(
+            System.IO.Path.Combine(FrameDirectory, FrameFileName(worldFrame)), width, height, pixels, bgra);
     }
 }
 
