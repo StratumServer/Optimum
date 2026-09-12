@@ -919,7 +919,7 @@ internal sealed unsafe class VulkanContext : IDisposable
         // subsystems can be on at once (seam S1). What each of them asks for is
         // unchanged, and the tier still enables exactly one of its two extensions.
         using var requirements = new DeviceRequirements(
-            Api, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
+            Api, Instance, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
         {
             Log = options.DebugCallback,
         };

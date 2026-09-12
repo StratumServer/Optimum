@@ -93,15 +93,25 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     private bool _disposed;
 
     public DeviceRequirements(
-        Vk api, PhysicalDevice physicalDevice, Dictionary<string, uint> available, List<string> enabled)
+        Vk api, Instance instance, PhysicalDevice physicalDevice,
+        Dictionary<string, uint> available, List<string> enabled)
     {
         Api = api;
+        Instance = instance;
         PhysicalDevice = physicalDevice;
         _available = available;
         _enabled = enabled;
     }
 
     public Vk Api { get; }
+
+    /// <summary>
+    /// The instance the device is being created on. NGX's
+    /// <c>GetFeatureDeviceExtensionRequirements</c> takes both the instance and
+    /// the physical device, so a contributor has to be able to see it.
+    /// </summary>
+    public Instance Instance { get; }
+
     public PhysicalDevice PhysicalDevice { get; }
 
     /// <summary>Notes about refused requests; never an error.</summary>
