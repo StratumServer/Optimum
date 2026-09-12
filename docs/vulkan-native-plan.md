@@ -649,7 +649,7 @@ our own (user, 2026-09-12).**
 | DLSS / DLSS-G | Reflex (`VK_NV_low_latency2`) | - | - |
 | FSR | Native | `VK_AMD_anti_lag` | Native |
 | XeSS (+ XeFG) | Native | Native | XeLL on the Windows D3D12 bridge, Native on Vulkan/Linux |
-| none | device-based auto: NV, AMD, Native, None |
+| none | Reflex | `VK_AMD_anti_lag` | Native |
 
 A cross-vendor pair (FSR on NVIDIA or Intel, XeSS on AMD or NVIDIA) takes Optimum's own completion pacing:
 the vendor stacks are only specified and tested against their own upscaler, and mixing them risks the

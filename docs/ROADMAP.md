@@ -1,7 +1,7 @@
 # Optimum roadmap
 
-What is done, what is being worked on, and what is planned. The detailed design lives in the Vulkan-native
-rebuild plan (local, `~/.claude/plans/i-never-wanted-this-sequential-kernighan.md`); acceptance numbers live
+What is done, what is being worked on, and what is planned. The detailed design lives in
+[`docs/vulkan-native-plan.md`](vulkan-native-plan.md); acceptance numbers live
 in `docs/vulkan-acceptance.md` and `docs/taa-acceptance.md`; the temporal rules live in
 `docs/temporal-frame-contract.md`.
 
