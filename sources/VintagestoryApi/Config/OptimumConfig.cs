@@ -468,6 +468,26 @@ public static class OptimumConfig
         string.Equals(Renderer, "auto", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// How hard the Vulkan renderer's latency backend works: "off", "on" or "boost"
+    /// (Vulkan-native plan, "Latency seams"). "on" lets the backend pace the frame and
+    /// move its wait in front of the input sample; "boost" adds the vendor's clock boost
+    /// where one exists. Off by default until the acceptance numbers exist.
+    ///
+    /// A string rather than an enum for the same reason as <see cref="Renderer" />: an
+    /// unrecognised value in optimum.json degrades to "off" instead of failing the parse.
+    /// Ignored on the OpenGL path, which has no latency backend.
+    /// </summary>
+    public static string LatencyMode = "off";
+
+    /// <summary>True when the configuration asks for any latency work at all.</summary>
+    public static bool LatencyEnabled =>
+        !string.Equals(LatencyMode, "off", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>True when the vendor's clock boost is asked for on top of the sleep.</summary>
+    public static bool LatencyBoost =>
+        string.Equals(LatencyMode, "boost", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// R4: cap the god-rays post-process at 100 texture samples when enabled.
     /// The disabled path sends the vanilla 180-sample limit. This option can
     /// change the post-process image, so it stays off by default.
@@ -763,6 +783,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
         (nameof(OptimumConfigData.Renderer), Renderer),
+        (nameof(OptimumConfigData.LatencyMode), LatencyMode),
         (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
         (nameof(OptimumConfigData.Taa), Taa.ToString()),
         (nameof(OptimumConfigData.TaaSharpness), TaaSharpness.ToString("F2")),
@@ -866,6 +887,13 @@ public static class OptimumConfig
                 string.Equals(requestedRenderer, "vulkan", StringComparison.OrdinalIgnoreCase) ? "vulkan" :
                 string.Equals(requestedRenderer, "auto", StringComparison.OrdinalIgnoreCase) ? "auto" :
                 "opengl";
+            // Same rule for the latency mode: anything unrecognised means off, so a
+            // hand-edited config cannot leave the renderer pacing in an unknown way.
+            string requestedLatencyMode = data.LatencyMode?.Trim() ?? "";
+            LatencyMode =
+                string.Equals(requestedLatencyMode, "on", StringComparison.OrdinalIgnoreCase) ? "on" :
+                string.Equals(requestedLatencyMode, "boost", StringComparison.OrdinalIgnoreCase) ? "boost" :
+                "off";
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
             Taa = data.Taa;
             TaaSharpness = Math.Clamp(data.TaaSharpness, 0f, 1f);
@@ -940,6 +968,7 @@ public static class OptimumConfig
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
             Renderer = Renderer,
+            LatencyMode = LatencyMode,
             GodRaysSampleCap = GodRaysSampleCapEnabled,
             Taa = Taa,
             TaaSharpness = TaaSharpness,
@@ -1022,6 +1051,7 @@ internal sealed class OptimumConfigData
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
     public string Renderer { get; set; } = "opengl";
+    public string LatencyMode { get; set; } = "off";
     public bool GodRaysSampleCap { get; set; } = false;
     public bool Taa { get; set; } = false;
     public float TaaSharpness { get; set; } = 0.2f;

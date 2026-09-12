@@ -131,6 +131,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
+        // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
+        new(true, "LatencySleep", Array.Empty<string>()),
+        new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
     };
 
     /// <summary>

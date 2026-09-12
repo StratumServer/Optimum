@@ -62,6 +62,20 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     internal ILatencyBackend Latency { get; private set; } = new NoneLatencyBackend();
 
+    /// <summary>The latency frame id counter (seam S2); 0 means no frame has started yet.</summary>
+    private ulong _latencyFrameId;
+
+    /// <summary>
+    /// Allocates the frame id for the frame about to start, at the one point that opens a
+    /// frame before input: <c>VulkanClientPlatform.LatencySleep</c> (seam S3). Ids are
+    /// strictly increasing and start at 1. Seam S2 takes this over and maps the id to the
+    /// present id; until then it only counts.
+    /// </summary>
+    internal ulong BeginLatencyFrame() => ++_latencyFrameId;
+
+    /// <summary>Test seam: the latency frame id last allocated; 0 before the first frame.</summary>
+    internal ulong CurrentLatencyFrameId => _latencyFrameId;
+
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
     private readonly Dictionary<IShader, StagedStage> _stagedStages = new();
