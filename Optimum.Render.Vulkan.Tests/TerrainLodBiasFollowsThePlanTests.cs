@@ -76,6 +76,11 @@ public class TerrainLodBiasFollowsThePlanTests
         // measured below is the upscaler's own.
         bool taa = OptimumConfig.Taa;
         float renderScale = OptimumConfig.RenderScale;
+        // The published plan is process-global too, so it is restored rather than
+        // cleared; the atlas registration and the applied marker belong to the
+        // fixture below, which puts both back when it is disposed.
+        float planScale = OptimumConfig.UpscalerRenderScale;
+        float planBias = OptimumConfig.UpscalerLodBias;
         OptimumConfig.Taa = false;
         OptimumConfig.RenderScale = 1.0f;
         var host = new DlssUpscaler(Log);
@@ -158,9 +163,8 @@ public class TerrainLodBiasFollowsThePlanTests
             OptimumConfig.Taa = taa;
             OptimumConfig.RenderScale = renderScale;
             OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
-            OptimumConfig.ClearUpscalerPlan();
-            OptimumConfig.RegisterLodBiasedAtlases(Array.Empty<int>());
-            OptimumConfig.InvalidateTerrainLodBias();
+            if (planScale > 0f) OptimumConfig.SetUpscalerPlan(planScale, planBias);
+            else OptimumConfig.ClearUpscalerPlan();
         }
 
         GpuTest.AssertCleanSince(seam, mark);
@@ -194,6 +198,8 @@ public class TerrainLodBiasFollowsThePlanTests
         bool taa = OptimumConfig.Taa;
         float renderScale = OptimumConfig.RenderScale;
         float offset = OptimumConfig.UpscalerLodBiasOffset;
+        float planScale = OptimumConfig.UpscalerRenderScale;
+        float planBias = OptimumConfig.UpscalerLodBias;
         OptimumConfig.Taa = false;
         OptimumConfig.RenderScale = 1.0f;
         var host = new DlssUpscaler(Log);
@@ -265,10 +271,52 @@ public class TerrainLodBiasFollowsThePlanTests
             OptimumConfig.RenderScale = renderScale;
             OptimumConfig.UpscalerLodBiasOffset = offset;
             OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
-            OptimumConfig.ClearUpscalerPlan();
-            OptimumConfig.RegisterLodBiasedAtlases(Array.Empty<int>());
-            OptimumConfig.InvalidateTerrainLodBias();
+            if (planScale > 0f) OptimumConfig.SetUpscalerPlan(planScale, planBias);
+            else OptimumConfig.ClearUpscalerPlan();
         }
+
+        GpuTest.AssertCleanSince(seam, mark);
+    }
+
+    /// <summary>
+    /// The fixture gives its atlas images and its config back.
+    ///
+    /// <c>NgxRuntime.Device</c> is shared by every test in the process, so a
+    /// fixture that only restored the client statics kept two mipmapped images
+    /// alive for the whole run and left its own atlas ids registered as the ones
+    /// the bias applies to (CodeRabbit, PR #3, second round). Both are measured on
+    /// the device itself: <c>TextureLodBias</c> answers NaN for an id that names
+    /// no texture.
+    /// </summary>
+    [SkippableFact]
+    public void DisposingTheSamplerFixtureReleasesItsAtlasesAndTheRegistration()
+    {
+        _ngx.Require();
+        int mark = _ngx.MessageMark();
+        VulkanDevice seam = _ngx.Device;
+
+        int[] previous = OptimumConfig.LodBiasedAtlases;
+        float previousApplied = OptimumConfig.AppliedTerrainLodBias;
+        int[] atlases;
+        using (var terrain = new TerrainSamplers(seam))
+        {
+            atlases = terrain.Atlases;
+            Assert.Equal(2, atlases.Length);
+            foreach (int id in atlases)
+            {
+                Assert.True(id > 0, "the fixture did not create an atlas texture");
+                Assert.False(float.IsNaN(seam.TextureLodBias(id)), "atlas " + id + " was never created");
+            }
+            Assert.Same(atlases, OptimumConfig.LodBiasedAtlases);
+        }
+
+        foreach (int id in atlases)
+        {
+            Assert.True(float.IsNaN(seam.TextureLodBias(id)),
+                "atlas " + id + " is still live on the shared device after the fixture was disposed");
+        }
+        Assert.Same(previous, OptimumConfig.LodBiasedAtlases);
+        Assert.Equal(float.IsNaN(previousApplied), float.IsNaN(OptimumConfig.AppliedTerrainLodBias));
 
         GpuTest.AssertCleanSince(seam, mark);
     }
@@ -287,7 +335,13 @@ public class TerrainLodBiasFollowsThePlanTests
         private readonly ClientPlatformAbstract _previousPlatform;
         private readonly ShaderProgramChunkopaque _previousOpaque;
         private readonly ShaderProgramChunktopsoil _previousTopsoil;
+        private readonly int[] _previousAtlases;
+        private readonly float _previousAppliedBias;
         private readonly int[] _atlases;
+        private bool _disposed;
+
+        /// <summary>The atlas texture ids this fixture created on the device.</summary>
+        public int[] Atlases => _atlases;
 
         public TerrainSamplers(VulkanDevice seam)
         {
@@ -295,6 +349,8 @@ public class TerrainLodBiasFollowsThePlanTests
             _previousPlatform = ScreenManager.Platform;
             _previousOpaque = ShaderPrograms.Chunkopaque;
             _previousTopsoil = ShaderPrograms.Chunktopsoil;
+            _previousAtlases = OptimumConfig.LodBiasedAtlases;
+            _previousAppliedBias = OptimumConfig.AppliedTerrainLodBias;
 
             // ShaderRegistry's static initialiser creates every ShaderPrograms
             // object, so it has to run before the programs below are prepared -
@@ -355,11 +411,39 @@ public class TerrainLodBiasFollowsThePlanTests
             return first;
         }
 
+        /// <summary>
+        /// Gives back everything the fixture took: the client statics, the atlas
+        /// images on the device, and the two pieces of process-global config it
+        /// moved.
+        ///
+        /// The images matter because <c>NgxRuntime.Device</c> is shared by every
+        /// test in the process: an atlas this fixture never deleted is held until
+        /// the fixture class is torn down, not until the test ends.
+        /// <c>DeleteTexture</c> evicts the descriptor references and defers the
+        /// Vulkan destruction onto the frame timeline, so it is legal here.
+        /// </summary>
         public void Dispose()
         {
+            if (_disposed) return;
+            _disposed = true;
+
             ShaderPrograms.Chunkopaque = _previousOpaque;
             ShaderPrograms.Chunktopsoil = _previousTopsoil;
             ScreenManager.Platform = _previousPlatform;
+
+            for (int i = 0; i < _atlases.Length; i++)
+            {
+                if (_atlases[i] > 0) _seam.DeleteTexture(_atlases[i]);
+            }
+
+            // Restore, never force: the config is process-global and this assembly
+            // runs its tests one at a time.
+            OptimumConfig.RegisterLodBiasedAtlases(_previousAtlases);
+            OptimumConfig.InvalidateTerrainLodBias();
+            if (!float.IsNaN(_previousAppliedBias))
+            {
+                OptimumConfig.NoteTerrainLodBiasApplied(_previousAppliedBias, reachedAtlases: true);
+            }
         }
     }
 

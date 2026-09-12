@@ -26,10 +26,11 @@ public class DlssLodBiasCoverageTests
     [Fact]
     public void TheAppliedBiasRuleKeepsTheUpscalerOffPathUntouched()
     {
-        float applied = OptimumConfig.AppliedTerrainLodBias;
-        bool taa = OptimumConfig.Taa;
-        float scale = OptimumConfig.RenderScale;
-        int[] atlases = OptimumConfig.LodBiasedAtlases;
+        // Every field this test moves - the setting, the published plan, the atlas
+        // registration and the applied marker - is process-global and this assembly
+        // does not parallelise, so the cleanup restores what it found instead of
+        // forcing defaults onto whatever runs next.
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
         try
         {
             OptimumConfig.Taa = false;
@@ -76,13 +77,7 @@ public class DlssLodBiasCoverageTests
         }
         finally
         {
-            OptimumConfig.Upscaler = "off";
-            OptimumConfig.ClearUpscalerPlan();
-            OptimumConfig.RegisterLodBiasedAtlases(atlases);
-            OptimumConfig.Taa = taa;
-            OptimumConfig.RenderScale = scale;
-            OptimumConfig.InvalidateTerrainLodBias();
-            if (!float.IsNaN(applied)) OptimumConfig.NoteTerrainLodBiasApplied(applied, true);
+            snapshot.Restore();
         }
     }
 

@@ -188,25 +188,32 @@ public class DlssUpscalerTests
     public void ThePlanComesFromTheSdksOwnOptimalSettingsQuery()
     {
         DlssUpscaler host = Host();
+        // Everything after Host() is inside the teardown: the host holds the
+        // process's one NGX session, so a failed assertion that skipped Shutdown
+        // would leave it live for every test that follows on the shared fixture.
+        try
+        {
+            Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "quality", out UpscalePlan quality));
+            Log("plan at quality: " + quality);
+            Assert.Equal(1707, quality.RenderWidth);
+            Assert.Equal(993, quality.RenderHeight);
+            Assert.Equal(NgxPerfQuality.MaxQuality, quality.Quality);
 
-        Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "quality", out UpscalePlan quality));
-        Log("plan at quality: " + quality);
-        Assert.Equal(1707, quality.RenderWidth);
-        Assert.Equal(993, quality.RenderHeight);
-        Assert.Equal(NgxPerfQuality.MaxQuality, quality.Quality);
+            Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan performance));
+            Log("plan at performance: " + performance);
+            Assert.Equal(1280, performance.RenderWidth);
+            Assert.Equal(745, performance.RenderHeight);
+            Assert.Equal(32, performance.JitterPhaseCount);
 
-        Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan performance));
-        Log("plan at performance: " + performance);
-        Assert.Equal(1280, performance.RenderWidth);
-        Assert.Equal(745, performance.RenderHeight);
-        Assert.Equal(32, performance.JitterPhaseCount);
-
-        Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "dlaa", out UpscalePlan dlaa));
-        Log("plan at dlaa: " + dlaa);
-        Assert.Equal(DisplayWidth, dlaa.RenderWidth);
-        Assert.Equal(0f, dlaa.LodBias);
-
-        host.Dispose();
+            Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "dlaa", out UpscalePlan dlaa));
+            Log("plan at dlaa: " + dlaa);
+            Assert.Equal(DisplayWidth, dlaa.RenderWidth);
+            Assert.Equal(0f, dlaa.LodBias);
+        }
+        finally
+        {
+            host.Shutdown();
+        }
     }
 
     /// <summary>
@@ -225,12 +232,12 @@ public class DlssUpscalerTests
     {
         DlssUpscaler host = Host(out VulkanDevice seam, out int mark);
 
-        Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan plan));
-        Log("plan: " + plan);
-
         int color = 0, depth = 0, motion = 0, output = 0;
         try
         {
+            Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan plan));
+            Log("plan: " + plan);
+
             color = CreateColor(seam, plan);
             depth = CreateDepth(seam, plan);
             motion = CreateMotion(seam, plan);
@@ -288,6 +295,12 @@ public class DlssUpscalerTests
             // this one allocates about 40 MiB of image storage.
             // In a finally because a failed assert above must not turn into a leak.
             Release(seam, color, depth, motion, output);
+            // And a failure between BeginFrame and Present would otherwise leave the
+            // shared device with an open frame and this host's feature alive: the
+            // adopted-session Shutdown retires the feature and drains, and the drain
+            // abandons the unsubmitted frame (FrameRing.DrainRetirements). Idempotent,
+            // so the success path's own Dispose above stands.
+            host.Shutdown();
         }
     }
 
@@ -303,16 +316,16 @@ public class DlssUpscalerTests
     {
         DlssUpscaler host = Host(out VulkanDevice seam, out int mark);
 
-        Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan first));
-        Assert.True(host.TryPlan(1920, 1080, "performance", out UpscalePlan second));
-        Log("before the resize: " + first);
-        Log("after the resize:  " + second);
-        Assert.NotEqual(first, second);
-
         int colorA = 0, depthA = 0, motionA = 0, outputA = 0;
         int colorB = 0, depthB = 0, motionB = 0, outputB = 0;
         try
         {
+            Assert.True(host.TryPlan(DisplayWidth, DisplayHeight, "performance", out UpscalePlan first));
+            Assert.True(host.TryPlan(1920, 1080, "performance", out UpscalePlan second));
+            Log("before the resize: " + first);
+            Log("after the resize:  " + second);
+            Assert.NotEqual(first, second);
+
             colorA = CreateColor(seam, first);
             depthA = CreateDepth(seam, first);
             motionA = CreateMotion(seam, first);
@@ -375,6 +388,9 @@ public class DlssUpscalerTests
             // this one allocates about 93 MiB of image storage.
             // In a finally because a failed assert above must not turn into a leak.
             Release(seam, colorA, depthA, motionA, outputA, colorB, depthB, motionB, outputB);
+            // See the note in the frame-path test: a failure between BeginFrame and
+            // Present must not hand the next test an open frame and a live feature.
+            host.Shutdown();
         }
     }
 
