@@ -92,9 +92,15 @@ public class UpscalerLifecycleCoverageTests
         string owner = Read("Optimum.Render.Vulkan/Upscale/Ngx/NgxLifetime.cs");
         int release = owner.IndexOf("if (releaseFeatures != null) releaseFeatures();", StringComparison.Ordinal);
         int drain = owner.IndexOf("if (drainFrameTimeline != null) drainFrameTimeline();", StringComparison.Ordinal);
-        int ngx = owner.IndexOf("ShutdownResult = _shutdownCall(_device);", StringComparison.Ordinal);
+        // The handle is copied into a local before the call, so that an exception out
+        // of native code cannot leave the owner both Spent and Initialized; match the
+        // call rather than its argument.
+        int ngx = owner.IndexOf("ShutdownResult = _shutdownCall(", StringComparison.Ordinal);
         Assert.True(release > 0 && drain > release && ngx > drain,
             "the owner must release, drain and only then shut NGX down");
+        int cleared = owner.IndexOf("_device = IntPtr.Zero;", ngx - 200 > 0 ? ngx - 200 : 0, StringComparison.Ordinal);
+        Assert.True(cleared > 0 && cleared < ngx,
+            "the owner must clear its state before it calls into NGX, so a throw cannot leave it half shut down");
 
         // One lifetime per process, enforced in both directions.
         Assert.Contains("if (_shutDown) return NgxLifetimeOutcome.AlreadyShutDown;", owner);

@@ -19,10 +19,21 @@ internal enum GpuVendor
 /// <summary>
 /// The vendor of the upscaler that is running. This is the upscaler slot's half
 /// of the coupling (plan, "The slots are coupled", 2026-09-12): DLSS and DLSS-G
-/// are NVIDIA's, FSR is AMD's, XeSS and XeFG are Intel's. <see cref="None" />
-/// covers both "no upscaler" and an upscaler with no vendor latency stack behind
-/// it (Optimum's own passthrough experiment), because neither constrains the
-/// latency slot: the device-based auto order runs.
+/// are NVIDIA's, FSR is AMD's, XeSS and XeFG are Intel's.
+///
+/// <see cref="None" /> means no upscaler at all, and only that: nothing owns the
+/// resolve, nothing constrains the latency slot, and the device-based auto order
+/// runs exactly as it did before the coupling existed.
+///
+/// <see cref="VendorLess" /> is an upscaler that owns the resolve but has no
+/// vendor latency stack behind it - Optimum's own passthrough comparison
+/// upscaler. It is not the same as "no upscaler": a vendor latency backend is
+/// specified and tested only against its own vendor's upscaler, so a vendor-less
+/// upscaler is the same mismatch as a cross-vendor pair and takes Optimum's own
+/// pacing. Running Reflex behind the passthrough resolve on an NVIDIA box would
+/// also make the passthrough-vs-DLSS comparison differ in the latency stack as
+/// well as the reconstruction, which is the one thing that slot exists to hold
+/// still.
 /// </summary>
 internal enum UpscalerVendor
 {
@@ -30,6 +41,7 @@ internal enum UpscalerVendor
     Nvidia = 1,
     Amd = 2,
     Intel = 3,
+    VendorLess = 4,
 }
 
 /// <summary>Vendor ids and tokens for <see cref="GpuVendor" />.</summary>
@@ -66,15 +78,18 @@ internal static class UpscalerVendors
 {
     /// <summary>
     /// The vendor behind an <c>OptimumConfig.EffectiveUpscaler</c> token.
-    /// "off" and Optimum's own "passthrough" have no vendor latency stack, so
-    /// both are <see cref="UpscalerVendor.None" /> and leave the latency slot to
-    /// the device-based auto order.
+    /// "off" is <see cref="UpscalerVendor.None" /> and leaves the latency slot to
+    /// the device-based auto order; Optimum's own "passthrough" is an upscaler
+    /// with no vendor stack behind it, so it is
+    /// <see cref="UpscalerVendor.VendorLess" /> and takes our own pacing.
     /// </summary>
     public static UpscalerVendor FromSettingToken(string? upscaler)
     {
         string token = upscaler == null ? "" : upscaler.Trim().ToLowerInvariant();
         switch (token)
         {
+            case "passthrough":
+                return UpscalerVendor.VendorLess;
             case "dlss":
             case "dlssg":
             case "dlss-g":
@@ -99,6 +114,7 @@ internal static class UpscalerVendors
         UpscalerVendor.Nvidia => "nvidia",
         UpscalerVendor.Amd => "amd",
         UpscalerVendor.Intel => "intel",
+        UpscalerVendor.VendorLess => "vendorless",
         _ => "none",
     };
 }
@@ -112,7 +128,8 @@ internal static class UpscalerVendors
 /// <item><term>FSR on AMD</term><description>VK_AMD_anti_lag</description></item>
 /// <item><term>XeSS (+ XeFG) on Intel</term><description>XeLL, but only on the Windows D3D12 bridge; on Vulkan the pacing is ours</description></item>
 /// <item><term>any cross-vendor pair</term><description>Optimum's own completion pacing (Native)</description></item>
-/// <item><term>no vendor upscaler</term><description>the device-based auto order: NV, AMD, Native</description></item>
+/// <item><term>a vendor-less upscaler (passthrough)</term><description>Optimum's own completion pacing (Native)</description></item>
+/// <item><term>no upscaler at all</term><description>the device-based auto order: NV, AMD, Native</description></item>
 /// </list>
 ///
 /// The vendor stacks are only specified and tested against their own upscaler;
@@ -133,8 +150,14 @@ internal static class LatencySlotCoupling
     {
         if (upscaler == UpscalerVendor.None)
         {
-            reason = "no vendor upscaler; device auto order";
+            reason = "no upscaler; device auto order";
             return null;
+        }
+
+        if (upscaler == UpscalerVendor.VendorLess)
+        {
+            reason = "vendor-less upscaler; Optimum's own pacing";
+            return LatencyBackendKind.Native;
         }
 
         if (!Matches(upscaler, gpu))

@@ -197,11 +197,17 @@ internal sealed class NgxLifetimeOwner
                 return NgxLifetimeOutcome.FeatureStillLive;
             }
 
+            // Clear the state before the call, not after: the shutdown reaches native
+            // code (and a throwing delegate in tests), and an exception must not leave
+            // the owner reporting Spent and Initialized at the same time - the platform
+            // catches it and carries on with teardown. The handle is copied because the
+            // call still needs it.
+            IntPtr device = _device;
             _shutDown = true;
-            ShutdownCalls++;
-            ShutdownResult = _shutdownCall(_device);
             _initialized = false;
             _device = IntPtr.Zero;
+            ShutdownCalls++;
+            ShutdownResult = _shutdownCall(device);
             if (log != null)
             {
                 log("[Optimum] DLSS: NVSDK_NGX_VULKAN_Shutdown1: " + NgxInterop.Describe(ShutdownResult));

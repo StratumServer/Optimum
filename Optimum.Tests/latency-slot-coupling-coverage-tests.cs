@@ -51,6 +51,41 @@ public class LatencySlotCouplingCoverageTests
         Assert.Contains("Vendor = GpuVendors.FromVendorId(properties.VendorID),", context);
     }
 
+    /// <summary>
+    /// Where the two roadmap streams meet: the passthrough comparison upscaler is
+    /// an upscaler with no vendor stack, not "no upscaler". It has to be its own
+    /// vendor value, because the two answers differ - "no upscaler" leaves the
+    /// device auto order (Reflex on an NVIDIA box) and a vendor-less upscaler
+    /// takes Optimum's own pacing, which is what keeps passthrough-vs-DLSS a
+    /// comparison of the reconstruction alone.
+    /// </summary>
+    [Fact]
+    public void ThePassthroughUpscalerIsVendorLessRatherThanNoUpscaler()
+    {
+        string coupling = Read("Optimum.Render.Vulkan/Latency/LatencySlotCoupling.cs");
+
+        // Its own enum value, and the setting token maps to it.
+        Assert.Contains("VendorLess = 4,", coupling);
+        Assert.Contains("case \"passthrough\":\n                return UpscalerVendor.VendorLess;",
+            coupling.Replace("\r\n", "\n"));
+
+        // And it asks for our own pacing, before the vendor-match question is
+        // ever reached - there is no vendor to match.
+        Assert.Contains(
+            "if (upscaler == UpscalerVendor.VendorLess)\n        {\n" +
+            "            reason = \"vendor-less upscaler; Optimum's own pacing\";\n" +
+            "            return LatencyBackendKind.Native;\n        }",
+            coupling.Replace("\r\n", "\n"));
+
+        // "off" keeps the untouched auto order, so the two really are distinct.
+        Assert.Contains("reason = \"no upscaler; device auto order\";", coupling);
+        Assert.Contains("return null;", coupling);
+
+        // The passthrough token is the one the config actually persists.
+        string config = Read("VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains("UpscalerNames = { \"off\", \"dlss\", \"passthrough\" }", config);
+    }
+
     private static string Read(string relativePath)
     {
         string? directory = AppContext.BaseDirectory;

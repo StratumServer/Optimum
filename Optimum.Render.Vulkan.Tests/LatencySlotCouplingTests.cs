@@ -58,6 +58,15 @@ public class LatencySlotCouplingTests
     [InlineData((int)UpscalerVendor.Intel, (int)GpuVendor.Nvidia, "native")]
     [InlineData((int)UpscalerVendor.Intel, (int)GpuVendor.Amd, "native")]
     [InlineData((int)UpscalerVendor.Intel, (int)GpuVendor.Unknown, "native")]
+    // The passthrough comparison upscaler owns the resolve but has no vendor
+    // stack behind it: that is the same mismatch as a cross-vendor pair, so it
+    // takes Optimum's own pacing on every GPU - including the NVIDIA box, where
+    // "no upscaler" would have taken Reflex. Holding the latency stack still is
+    // what makes passthrough-vs-DLSS a comparison of the reconstruction alone.
+    [InlineData((int)UpscalerVendor.VendorLess, (int)GpuVendor.Nvidia, "native")]
+    [InlineData((int)UpscalerVendor.VendorLess, (int)GpuVendor.Amd, "native")]
+    [InlineData((int)UpscalerVendor.VendorLess, (int)GpuVendor.Intel, "native")]
+    [InlineData((int)UpscalerVendor.VendorLess, (int)GpuVendor.Unknown, "native")]
     public void TheUpscalerVendorAndTheGpuVendorDecideTheBackend(int upscaler, int gpu, string expected)
     {
         var notes = new List<string>();
@@ -203,15 +212,17 @@ public class LatencySlotCouplingTests
         Assert.Equal((GpuVendor)expected, GpuVendors.FromVendorId(vendorId));
     }
 
-    // The upscaler half is the persisted setting token; "off" and Optimum's own
-    // passthrough have no vendor latency stack, so they leave the slot alone.
+    // The upscaler half is the persisted setting token. "off" is no upscaler at
+    // all and leaves the slot to the device auto order; Optimum's own passthrough
+    // is an upscaler with no vendor stack, which is a different answer.
     [Theory]
     [InlineData("dlss", (int)UpscalerVendor.Nvidia)]
     [InlineData("DLSS-G", (int)UpscalerVendor.Nvidia)]
     [InlineData("fsr", (int)UpscalerVendor.Amd)]
     [InlineData("xess", (int)UpscalerVendor.Intel)]
     [InlineData("xefg", (int)UpscalerVendor.Intel)]
-    [InlineData("passthrough", (int)UpscalerVendor.None)]
+    [InlineData("passthrough", (int)UpscalerVendor.VendorLess)]
+    [InlineData("PassThrough", (int)UpscalerVendor.VendorLess)]
     [InlineData("off", (int)UpscalerVendor.None)]
     [InlineData("", (int)UpscalerVendor.None)]
     [InlineData(null, (int)UpscalerVendor.None)]
@@ -233,12 +244,50 @@ public class LatencySlotCouplingTests
             {
                 Assert.Equal(UpscalerVendor.Nvidia, vendor);
             }
-            else
+            else if (string.Equals(name, "off", StringComparison.OrdinalIgnoreCase))
             {
-                // "off" and the passthrough experiment: no vendor latency stack.
+                // No upscaler at all: the device auto order, untouched.
                 Assert.Equal(UpscalerVendor.None, vendor);
             }
+            else
+            {
+                // Everything else Optimum ships in the slot today is its own
+                // passthrough: an upscaler, but with no vendor stack behind it.
+                Assert.Equal(UpscalerVendor.VendorLess, vendor);
+            }
         }
+    }
+
+    // The passthrough slot is an upscaler, so the decision is logged: the pair
+    // and the result are named, and the result is ours - not the auto order's
+    // Reflex, which is what "no upscaler" would have taken on this same device.
+    [Fact]
+    public void TheVendorLessUpscalerTakesOursAndSaysSo()
+    {
+        var notes = new List<string>();
+        LatencyBackendKind selected = LatencyBackendSelector.Select(
+            FullySupportedDevice, forced: null, LatencyPresentPath.BlitFromOwned,
+            UpscalerVendor.VendorLess, GpuVendor.Nvidia, notes.Add);
+
+        Assert.Equal(LatencyBackendKind.Native, selected);
+        string line = Assert.Single(notes, note => note.Contains("upscaler vendorless"));
+        Assert.Contains("on nvidia gpu -> native", line);
+        Assert.Contains("vendor-less upscaler; Optimum's own pacing", line);
+        foreach (string note in notes) _output.WriteLine(note);
+    }
+
+    // And the override still wins over it, exactly as it does over a vendor pair.
+    [Fact]
+    public void TheOverrideWinsOverTheVendorLessUpscaler()
+    {
+        var notes = new List<string>();
+        LatencyBackendKind selected = LatencyBackendSelector.Select(
+            FullySupportedDevice, LatencyBackendKind.NvLowLatency2, LatencyPresentPath.BlitFromOwned,
+            UpscalerVendor.VendorLess, GpuVendor.Nvidia, notes.Add);
+
+        Assert.Equal(LatencyBackendKind.NvLowLatency2, selected);
+        Assert.Contains(notes, note => note.Contains(LatencyBackends.LatencyVariable + "=nv overrides the pair"));
+        foreach (string note in notes) _output.WriteLine(note);
     }
 
     // The wiring: the device the client creates carries the vendor the coupling
