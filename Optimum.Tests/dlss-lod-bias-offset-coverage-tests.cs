@@ -33,7 +33,7 @@ public class DlssLodBiasOffsetCoverageTests
     [Fact]
     public void TheOffsetDefaultsToTheGuideRecommendationAndCannotPassItsBound()
     {
-        float offset = OptimumConfig.UpscalerLodBiasOffset;
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
         try
         {
             // The default is the guide's own recommendation, so nothing moves
@@ -79,17 +79,16 @@ public class DlssLodBiasOffsetCoverageTests
         }
         finally
         {
-            OptimumConfig.UpscalerLodBiasOffset = offset;
+            snapshot.Restore();
         }
     }
 
     [Fact]
     public void MovingTheOffsetRepublishesThePublishedPlansBias()
     {
-        float offset = OptimumConfig.UpscalerLodBiasOffset;
-        string upscaler = OptimumConfig.Upscaler;
-        bool taa = OptimumConfig.Taa;
-        float scale = OptimumConfig.RenderScale;
+        // The published plan and the applied marker are moved here too, and both
+        // are process-global: restore the caller's, do not force defaults.
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
         try
         {
             OptimumConfig.Taa = false;
@@ -123,20 +122,14 @@ public class DlssLodBiasOffsetCoverageTests
         }
         finally
         {
-            OptimumConfig.ClearUpscalerPlan();
-            OptimumConfig.Upscaler = upscaler;
-            OptimumConfig.UpscalerLodBiasOffset = offset;
-            OptimumConfig.Taa = taa;
-            OptimumConfig.RenderScale = scale;
-            OptimumConfig.InvalidateTerrainLodBias();
+            snapshot.Restore();
         }
     }
 
     [Fact]
     public void TheRowShowsTheBiasThePresetEndsUpWith()
     {
-        float offset = OptimumConfig.UpscalerLodBiasOffset;
-        string preset = OptimumConfig.UpscalerQuality;
+        OptimumConfigSnapshot snapshot = OptimumConfigSnapshot.Capture();
         try
         {
             OptimumConfig.ClearUpscalerPlan();
@@ -162,9 +155,7 @@ public class DlssLodBiasOffsetCoverageTests
         }
         finally
         {
-            OptimumConfig.ClearUpscalerPlan();
-            OptimumConfig.UpscalerQuality = preset;
-            OptimumConfig.UpscalerLodBiasOffset = offset;
+            snapshot.Restore();
         }
     }
 

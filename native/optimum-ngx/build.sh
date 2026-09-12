@@ -52,14 +52,20 @@ libs=""
 # caller's return address and aborts - exactly the failure the shim exists to
 # prevent (measured 2026-09-12). The source also stores every forwarded result
 # in a volatile local, so this flag is the second of two guards.
+#
+# It compiles to a temporary file and only replaces the shipped library once the
+# compiler said yes: a failed compile that left the previous library in place
+# would be picked up by the csproj's Exists() condition and shipped beside a
+# managed side it no longer matches.
 if ! "$cc" -std=c99 -O2 -fPIC -shared -fvisibility=hidden \
         -fno-optimize-sibling-calls \
         -Wall -Wextra -Wno-unused-parameter \
-        "$src" -o "$target" $libs; then
+        "$src" -o "$target.tmp" $libs; then
     echo "optimum-ngx: $cc failed to build the NGX shim; DLSS will report unavailable." >&2
-    rm -f "$target"
+    rm -f "$target.tmp" "$target"
     exit 0
 fi
+mv -f "$target.tmp" "$target"
 
 echo "optimum-ngx: built $target"
 exit 0
