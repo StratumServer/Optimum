@@ -69,17 +69,19 @@ internal readonly record struct NgxDlssSettings(
 /// render pixels (§7.1), so the scale is (1, 1). Streamline's
 /// <c>mvecScale = (1/renderWidth, 1/renderHeight)</c> is the NDC convention of
 /// that layer, not of NGX.</item>
-/// <item><b>Jitter sign.</b> NGX wants the offset of a projection built by
-/// <i>adding</i> the shear; ours subtracts it (§7.2), so the value handed over
-/// is <c>-JitterPx</c>, in render pixels.</item>
+/// <item><b>Jitter sign.</b> NGX takes the raster displacement in the input
+/// image's pixel coordinates, not the sign of a projection-matrix coefficient.
+/// Our positive-height offscreen viewport maps <c>JitterPx</c> directly to that
+/// displacement in both axes (§7.2); no negation or Y flip is needed.</item>
 /// </list>
 /// </summary>
 internal readonly record struct NgxDlssEvaluation
 {
+    /// <summary>The game's adapter, also exercised by the multi-frame NGX readback test.</summary>
     internal static NgxDlssEvaluation FromTemporalContext(IOptimumTemporalContext frame) => new()
     {
-        JitterOffsetX = -frame.JitterPx.X,
-        JitterOffsetY = -frame.JitterPx.Y,
+        JitterOffsetX = frame.JitterPx.X,
+        JitterOffsetY = frame.JitterPx.Y,
         MotionVectorScaleX = 1f,
         MotionVectorScaleY = 1f,
         Reset = frame.Reset,
@@ -89,7 +91,7 @@ internal readonly record struct NgxDlssEvaluation
     {
     }
 
-    /// <summary>Jitter offset in render pixels, NGX's sign: <c>-JitterPx</c>.</summary>
+    /// <summary>Raster displacement in input-image render pixels: <c>JitterPx</c>.</summary>
     public float JitterOffsetX { get; init; }
     public float JitterOffsetY { get; init; }
 

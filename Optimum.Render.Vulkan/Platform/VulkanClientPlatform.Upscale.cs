@@ -399,19 +399,7 @@ public partial class VulkanClientPlatform
         ShaderRegistry.ApplyOptimumLodBias();
 
         IOptimumTemporalContext frame = OptimumTemporal.Context;
-        NgxDlssEvaluation evaluation = new NgxDlssEvaluation
-        {
-            // Temporal contract 7.2: NGX wants the offset of a projection built by
-            // adding the shear; ours subtracts it, so it gets -JitterPx, render pixels.
-            JitterOffsetX = -frame.JitterPx.X,
-            JitterOffsetY = -frame.JitterPx.Y,
-            // 7.1 for raw NGX: our vectors are already render pixels.
-            MotionVectorScaleX = 1f,
-            MotionVectorScaleY = 1f,
-            // Section 5: any reset reason at all throws the history away rather than
-            // reprojecting it - a resize, a teleport, a rebase, a world load.
-            Reset = frame.Reset,
-        };
+        NgxDlssEvaluation evaluation = NgxDlssEvaluation.FromTemporalContext(frame);
 
         NgxResult result = upscaler.Evaluate(
             primary.ColorTextureIds[0],

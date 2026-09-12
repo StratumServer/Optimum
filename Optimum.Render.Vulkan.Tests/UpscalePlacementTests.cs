@@ -48,8 +48,7 @@ public class UpscalePlacementTests
 
     /// <summary>
     /// The real frame's target format, through the real frame's shape: create on the first
-    /// frame, evaluate every frame with the jitter the contract hands over (negated, in
-    /// render pixels, from the Halton sequence), Present between frames, no readback in the
+    /// frame, evaluate the constant pattern without raster jitter, Present between frames, no readback in the
     /// loop, one readback at the end.
     ///
     /// Asserted: every evaluate on an <c>R8G8B8A8_UNORM</c> storage output succeeds, the
@@ -93,15 +92,11 @@ public class UpscalePlacementTests
             seam.BeginFrame();
             Assert.True(host.EnsureFeature(plan), "the feature was refused at frame " + index);
 
-            // The jitter the client hands over: the contract's Halton offset, negated,
-            // in render pixels (temporal contract 7.2). The inputs do not move with it -
-            // this is a still scene - so the converged image is still the pattern.
-            (float jitterX, float jitterY) = Halton(index, plan.JitterPhaseCount);
+            // This uploaded pattern is not raster-jittered. Report zero jitter;
+            // DlssJitterConventionTests covers actual jittered inputs and registration.
             var frame = new NgxDlssEvaluation
             {
                 Reset = index == 0,
-                JitterOffsetX = -jitterX,
-                JitterOffsetY = -jitterY,
                 MotionVectorScaleX = 1f,
                 MotionVectorScaleY = 1f,
             };
@@ -286,28 +281,6 @@ public class UpscalePlacementTests
         {
             return seam.CreateUpscaleTexture(width, height, format, false, (IntPtr)data, bytesPerPixel);
         }
-    }
-
-    /// <summary>The contract's jitter (section 2): Halton(2, 3), one-indexed, centred on zero.</summary>
-    private static (float, float) Halton(long frameIndex, int phaseCount)
-    {
-        long phase = frameIndex % Math.Max(1, phaseCount);
-        float x = (float)(Radical(phase + 1, 2) - 0.5);
-        float y = (float)(Radical(phase + 1, 3) - 0.5);
-        if (x == 0f && y == 0f) x = 0.25f;
-        return (x, y);
-    }
-
-    private static double Radical(long index, int radix)
-    {
-        double result = 0, fraction = 1.0 / radix;
-        while (index > 0)
-        {
-            result += (index % radix) * fraction;
-            index /= radix;
-            fraction /= radix;
-        }
-        return result;
     }
 
     // -------------------------------------------------------------- measures

@@ -243,10 +243,12 @@ public class UpscalerPlacementCoverageTests
             "host.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out plan)",
             Read("Optimum.Render.Vulkan/Upscale/DlssUpscaler.cs"));
         Assert.Contains("public override bool RenderOptimumUpscale()", upscale);
-        Assert.Contains("JitterOffsetX = -frame.JitterPx.X,", upscale);
-        Assert.Contains("JitterOffsetY = -frame.JitterPx.Y,", upscale);
-        Assert.Contains("MotionVectorScaleX = 1f,", upscale);
-        Assert.Contains("Reset = frame.Reset,", upscale);
+        Assert.Contains("NgxDlssEvaluation.FromTemporalContext(frame)", upscale);
+        string adapter = Read("Optimum.Render.Vulkan/Upscale/Ngx/NgxDlssFeature.cs");
+        Assert.Contains("JitterOffsetX = frame.JitterPx.X,", adapter);
+        Assert.Contains("JitterOffsetY = frame.JitterPx.Y,", adapter);
+        Assert.Contains("MotionVectorScaleX = 1f,", adapter);
+        Assert.Contains("Reset = frame.Reset,", adapter);
         Assert.Contains("primary.ColorTextureIds[MotionAttachmentIndex],", upscale);
         Assert.Contains("device.UpscaleDepthNearest(primary.DepthTextureId, target.DepthTextureId)", upscale);
         // A failed evaluate stands the upscaler down instead of repeating itself.

@@ -37,10 +37,10 @@ public class DlssJitterConventionTests(ITestOutputHelper output, NgxRuntime ngx)
         output.WriteLine($"{settings}: shipped {shipped}; opposite {opposite}");
         Console.Error.WriteLine($"[dlss-jitter] {settings}: shipped {shipped}; opposite {opposite}");
         GpuTest.AssertCleanSince(device, mark);
-        Assert.True(shipped.WobbleX < 0.02 && shipped.WobbleY < 0.02,
+        Assert.True(shipped.WobbleX < 0.01 && shipped.WobbleY < 0.01,
             $"Static reconstruction moves in render pixels: {shipped}");
-        Assert.True(shipped.Error < opposite.Error * 0.5,
-            $"The supplied jitter must reconstruct the known scene more accurately than its opposite: {shipped}; {opposite}");
+        Assert.True(shipped.WobbleX + shipped.WobbleY < (opposite.WobbleX + opposite.WobbleY) / 3,
+            $"The supplied jitter must keep the scene better registered than its opposite: {shipped}; {opposite}");
     }
 
     [Theory]

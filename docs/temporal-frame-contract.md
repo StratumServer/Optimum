@@ -473,18 +473,28 @@ Stored: `mv = previousPixel − currentPixel`, render pixels, Y up, jitter exclu
 > are already render pixels, so raw NGX gets `MV.Scale = (1, 1)` and no per-vector scaling — measured
 > against the SDK headers, as §7 requires of an adapter when it lands. The stored vectors, their sign
 > and their units are unchanged; only the constant handed to the vendor differs between the two layers.
-> The same applies to jitter (§7.2): raw NGX takes `-JitterPx`, in render pixels.
+> Raw NGX takes `+JitterPx`, in render pixels (the corrected mapping in §7.2).
 
 ### 7.2 Jitter
 
 Stored: `JitterPx` = the raster displacement of a static point, Y up, applied by
 `P[8] -= 2*jx/W; P[9] -= 2*jy/H`.
 
-Every SDK asks for "the jitter offset applied to the camera" in pixels, but defines it against a
-projection built by **adding** the shear. In our sign that is `-JitterPx`. The Y component
-additionally depends on whether the SDK assumes a Y-down raster (D3D-style) — that is the one thing
-the adapter must confirm against the SDK's own sample before it is trusted, not inferred from this
-document. The engine-side invariant a consumer can rely on unconditionally:
+**Raw NGX (verified on 2026-09-12): pass `+JitterPx` in both axes.** The input is
+raster displacement in the input image's pixel coordinates. Optimum's offscreen Vulkan
+viewport has positive height, so increasing either component moves the raster content
+towards increasing image coordinates. The GL-style Y-up interpretation does not require
+an additional flip for an image consumed directly by NGX.
+
+The previous adapter negated both components based on the projection coefficient's sign.
+That was incorrect: `clip.w = -view.z` means subtracting the coefficient moves raster
+content by **positive** jitter. NVIDIA's DLSS Programming Guide §3.7.3 specifies pixel
+coordinates, not matrix coefficient signs. Full-cycle NGX readback tests at Performance
+and Ultra Performance pin this mapping (`DlssJitterConventionTests`), including an
+intentionally mirrored control. This corrects the adapter, not the v1 stored contract.
+Other vendor adapters must still verify their own coordinate conventions.
+
+The engine-side invariants remain:
 
 - the applied offset is `JitterPx`, and it is `(0,0)` whenever `JitterActive` is false;
 - the phase count is `max(1, ceil(8 * upscale^2))` — FSR's `ffxFsr2GetJitterPhaseCount` and XeSS's
