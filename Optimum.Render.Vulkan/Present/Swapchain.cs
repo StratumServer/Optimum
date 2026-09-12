@@ -9,6 +9,91 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 // the renderer is reorganised, like Frame/.
 namespace Optimum.Render.Vulkan.Core;
 
+/// <summary>
+/// The process-wide present id (plan section "Latency seams", seam S2): one
+/// value per <c>vkQueuePresentKHR</c>, monotonically increasing and never reset.
+///
+/// It is deliberately not the latency frame id and not a Frame timeline value.
+/// The Frame timeline advances two or three times per frame, and the frame id is
+/// allocated once per rendered frame; the present id counts presents, which is
+/// what <c>VK_KHR_present_id</c> and every vendor's present-timing query mean by
+/// it. One frame maps to one present today, and the map below keeps that pairing
+/// explicit, because DLSS frame generation will present a frame more than once.
+///
+/// Global rather than per swapchain so the sequence survives recreation: a
+/// resize, a vsync toggle or an OUT_OF_DATE rebuild must not restart it.
+/// </summary>
+internal static class PresentIdCounter
+{
+    private static long _next;
+
+    /// <summary>The next present id; the first is 1.</summary>
+    public static ulong Next() => (ulong)System.Threading.Interlocked.Increment(ref _next);
+
+    /// <summary>The last id handed out, 0 before the first present.</summary>
+    public static ulong Current => (ulong)System.Threading.Interlocked.Read(ref _next);
+}
+
+/// <summary>
+/// The last presents' frame id per present id, kept small and wrapping: enough
+/// to answer "which frame was present id N" for the frames a driver report can
+/// still be about, never a growing map.
+/// </summary>
+internal sealed class PresentIdMap
+{
+    public const int DefaultCapacity = 64;
+
+    private readonly ulong[] _presentIds;
+    private readonly ulong[] _frameIds;
+    private int _next;
+
+    public PresentIdMap(int capacity = DefaultCapacity)
+    {
+        _presentIds = new ulong[capacity];
+        _frameIds = new ulong[capacity];
+    }
+
+    /// <summary>The newest present id recorded, 0 before the first.</summary>
+    public ulong LastPresentId { get; private set; }
+
+    /// <summary>The frame id of the newest present recorded, 0 before the first.</summary>
+    public ulong LastFrameId { get; private set; }
+
+    public void Record(ulong presentId, ulong frameId)
+    {
+        _presentIds[_next] = presentId;
+        _frameIds[_next] = frameId;
+        _next = (_next + 1) % _presentIds.Length;
+        LastPresentId = presentId;
+        LastFrameId = frameId;
+    }
+
+    /// <summary>The frame that produced <paramref name="presentId" />, while it is still remembered.</summary>
+    public bool TryGetFrameId(ulong presentId, out ulong frameId)
+    {
+        for (int i = 0; i < _presentIds.Length; i++)
+        {
+            if (_presentIds[i] == presentId && presentId != 0)
+            {
+                frameId = _frameIds[i];
+                return true;
+            }
+        }
+        frameId = 0;
+        return false;
+    }
+}
+
+/// <summary>
+/// Fills the pNext chain of <c>VkSwapchainCreateInfoKHR</c> (seam S5). A latency
+/// backend that needs per-swapchain state - NV's
+/// <c>VkSwapchainLatencyCreateInfoNV</c> - hands one of these to the swapchain;
+/// it is called on every creation and recreation, with the chain built so far,
+/// and returns the chain to use. Whatever it returns must stay valid until
+/// <c>vkCreateSwapchainKHR</c> returns.
+/// </summary>
+internal unsafe delegate void* SwapchainCreateChain(void* pNext);
+
 /// <summary>An acquired swapchain image and the semaphores its present submission uses.</summary>
 internal readonly struct PresentTarget
 {
@@ -219,6 +304,38 @@ internal sealed unsafe class Swapchain : IDisposable
     /// <summary>The slot being acquired from. Tests only.</summary>
     internal SwapchainSlot? CurrentSlotForTests => _current;
 
+    /// <summary>
+    /// The active latency backend (seam S5): every swapchain creation tells it,
+    /// so a backend can re-apply the per-swapchain sleep mode a resize, a vsync
+    /// toggle, an OUT_OF_DATE rebuild or the FIFO_RELAXED promotion dropped. The
+    /// None backend does nothing with it.
+    /// </summary>
+    internal ILatencyBackend Latency
+    {
+        get => _latency;
+        set => _latency = value;
+    }
+
+    private ILatencyBackend _latency = new NoneLatencyBackend();
+
+    /// <summary>
+    /// The pNext chain the latency backend adds to <c>VkSwapchainCreateInfoKHR</c>;
+    /// null when it needs none. See <see cref="SwapchainCreateChain" />.
+    /// </summary>
+    internal SwapchainCreateChain? CreateChain { get; set; }
+
+    /// <summary>
+    /// Whether <c>VkPresentIdKHR</c> may be chained onto the present (seam S2).
+    /// Set by the capabilities stage when VK_KHR_present_id is enabled AND its
+    /// feature was turned on; chaining it otherwise is a validation error, so it
+    /// stays off by default. The id itself is allocated either way, so the frame
+    /// to present mapping does not depend on the extension.
+    /// </summary>
+    internal bool PresentIdEnabled { get; set; }
+
+    /// <summary>The frame id of each of the last presents, by present id (seam S2).</summary>
+    internal PresentIdMap PresentIds { get; } = new();
+
     private Swapchain(VulkanContext context, KhrSurface surfaceApi, KhrSwapchain swapchainApi, SurfaceKHR surface,
         ITimelineClock clock)
     {
@@ -238,7 +355,8 @@ internal sealed unsafe class Swapchain : IDisposable
     /// </remarks>
     public static bool TryCreate(
         VulkanContext context, SurfaceKHR surface, uint width, uint height, bool vsync, ITimelineClock clock,
-        out Swapchain? swapchain, out string? failureReason)
+        out Swapchain? swapchain, out string? failureReason, ILatencyBackend? latency = null,
+        SwapchainCreateChain? createChain = null)
     {
         swapchain = null;
         failureReason = null;
@@ -273,6 +391,10 @@ internal sealed unsafe class Swapchain : IDisposable
         }
 
         var created = new Swapchain(context, surfaceApi, swapchainApi, surface, clock);
+        // Before the first Build, so the backend is told about the first
+        // swapchain exactly as it is told about every later one.
+        if (latency != null) created._latency = latency;
+        created.CreateChain = createChain;
         created._width = width;
         created._height = height;
         created._vsync = vsync;
@@ -339,6 +461,12 @@ internal sealed unsafe class Swapchain : IDisposable
             OldSwapchain = old?.Handle ?? default,
         };
 
+        // Seam S5: the latency backend's per-swapchain create struct, if it has
+        // one. Build is the single creation and recreation path, so a backend
+        // that needs one gets it on every resize, vsync toggle, OUT_OF_DATE
+        // rebuild and FIFO_RELAXED promotion.
+        if (CreateChain != null) createInfo.PNext = CreateChain(createInfo.PNext);
+
         Result result = _swapchainApi.CreateSwapchain(_context.Device, &createInfo, null, out SwapchainKHR handle);
 
         // Passing oldSwapchain retires it even when creation fails.
@@ -360,6 +488,10 @@ internal sealed unsafe class Swapchain : IDisposable
         Extent = extent;
         PresentMode = presentMode;
         Creations++;
+        // Exactly once per created swapchain, and only for one that exists: a
+        // failed creation returned above. The sleep mode a backend set on the old
+        // handle does not carry over, so this is where it is re-applied.
+        _latency.OnSwapchainCreated(handle);
         NeedsRecreation = false;
         RebuildFailure = null;
         return true;
@@ -530,15 +662,35 @@ internal sealed unsafe class Swapchain : IDisposable
         target.Slot.NotePresentSubmitted(frameValue);
     }
 
-    public void Present(in PresentTarget target)
+    /// <summary>
+    /// Presents <paramref name="target" /> and returns the present id this present
+    /// was given (seam S2): one per call, increasing across swapchain recreation,
+    /// chained as <c>VkPresentIdKHR</c> when <see cref="PresentIdEnabled" />.
+    /// <paramref name="frameId" /> is the latency frame id that produced it, kept
+    /// in <see cref="PresentIds" />.
+    /// </summary>
+    public ulong Present(in PresentTarget target, ulong frameId = 0)
     {
         SwapchainKHR handle = target.Slot.Handle;
         Semaphore wait = target.PresentSemaphore;
         uint index = target.ImageIndex;
 
+        // Allocated for every present, whether or not the extension carries it,
+        // so the frame to present mapping is the same on every driver.
+        ulong presentId = PresentIdCounter.Next();
+        PresentIds.Record(presentId, frameId);
+
+        var presentIdInfo = new PresentIdKHR
+        {
+            SType = StructureType.PresentIDKhr,
+            SwapchainCount = 1,
+            PPresentIds = &presentId,
+        };
+
         var presentInfo = new PresentInfoKHR
         {
             SType = StructureType.PresentInfoKhr,
+            PNext = PresentIdEnabled ? &presentIdInfo : null,
             WaitSemaphoreCount = 1,
             PWaitSemaphores = &wait,
             SwapchainCount = 1,
@@ -563,6 +715,8 @@ internal sealed unsafe class Swapchain : IDisposable
         {
             VulkanResult.Check(result, "vkQueuePresentKHR");
         }
+
+        return presentId;
     }
 
     public void Dispose()

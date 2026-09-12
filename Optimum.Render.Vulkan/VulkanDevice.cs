@@ -24,8 +24,11 @@ namespace Optimum.Render.Vulkan;
 /// out integer ids, because the game's public API exposes raw GL names as fields
 /// that mods read and pass back.
 /// </summary>
-public sealed unsafe class VulkanDevice : IDisposable
+public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageListener
 {
+    /// <summary>The platform's stage bracket reaches the latency markers here (seam S4).</summary>
+    void Platform.ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();
+
     private VulkanContext _context = null!;
     private UploadManager _uploads = null!;
     private GlStateTracker _state = null!;
@@ -62,19 +65,68 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// </summary>
     internal ILatencyBackend Latency { get; private set; } = new NoneLatencyBackend();
 
-    /// <summary>The latency frame id counter (seam S2); 0 means no frame has started yet.</summary>
-    private ulong _latencyFrameId;
+    /// <summary>
+    /// Installs the latency backend every marker, tag and swapchain callback goes
+    /// to (seam S2-S5). Called once while the device comes up, before the
+    /// swapchain exists, so the first swapchain creation reaches it like every
+    /// later one; the stats line reports whichever is installed.
+    /// </summary>
+    internal void SetLatencyBackend(ILatencyBackend backend)
+    {
+        Latency = backend ?? throw new ArgumentNullException(nameof(backend));
+        VulkanStats.LatencySource = Latency;
+        if (_frames != null) _frames.Latency.Backend = Latency;
+        if (_swapchain != null) _swapchain.Latency = Latency;
+    }
 
     /// <summary>
-    /// Allocates the frame id for the frame about to start, at the one point that opens a
-    /// frame before input: <c>VulkanClientPlatform.LatencySleep</c> (seam S3). Ids are
-    /// strictly increasing and start at 1. Seam S2 takes this over and maps the id to the
-    /// present id; until then it only counts.
+    /// The latency identity of the frame being recorded (seam S2): one monotonic
+    /// value per rendered frame, allocated by <see cref="BeginLatencyFrame" />
+    /// before the client samples input, and used by every marker, every submit tag
+    /// and the present map of that frame.
+    ///
+    /// Deliberately not the Frame timeline value, which advances two or three
+    /// times per frame (Submit A, Submit B, any partial submit), and deliberately
+    /// not <c>_frameCounter</c>, which stays a 32-bit counter because the GPU
+    /// checkpoint markers pack it into a pointer-sized word.
     /// </summary>
-    internal ulong BeginLatencyFrame() => ++_latencyFrameId;
+    internal ulong LatencyFrameId => _latencyFrameId;
 
-    /// <summary>Test seam: the latency frame id last allocated; 0 before the first frame.</summary>
-    internal ulong CurrentLatencyFrameId => _latencyFrameId;
+    private ulong _latencyFrameId;
+
+    /// <summary>An id was allocated by the platform hook and no frame has consumed it yet.</summary>
+    private bool _latencyFrameIdPending;
+
+    /// <summary>The frame whose render start has already been stamped; 0 before the first.</summary>
+    private ulong _latencyRenderStartFrame;
+
+    /// <summary>
+    /// Allocates the next latency frame id. The lib hook calls this from
+    /// <c>VulkanClientPlatform.LatencySleep</c>, before input is sampled and
+    /// therefore before <see cref="BeginFrame" />; a frame that starts without it
+    /// (a headless test, a path with no platform) allocates its own id in
+    /// <see cref="BeginFrame" />, so the identity exists exactly once either way.
+    /// </summary>
+    public ulong BeginLatencyFrame()
+    {
+        _latencyFrameId++;
+        _latencyFrameIdPending = true;
+        return _latencyFrameId;
+    }
+
+    /// <summary>
+    /// The frame's first render stage has begun: simulation is over and the
+    /// renderer starts recording (seam S4). Called from
+    /// <c>VulkanClientPlatform.BeginRenderStage</c> on every stage; only the first
+    /// of a frame stamps anything, so no marker of a frame is ever stamped twice.
+    /// </summary>
+    internal void NoteRenderStageStarted()
+    {
+        if (_latencyRenderStartFrame == _latencyFrameId) return;
+        _latencyRenderStartFrame = _latencyFrameId;
+        Latency.Marker(_latencyFrameId, LatencyMarker.SimulationEnd);
+        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitStart);
+    }
 
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
@@ -394,6 +446,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         // any thread into the ring's upload batch (or inline into the frame when
         // it already used the destination; see UploadManager).
         _frames = new FrameRing(_context);
+        // Seams S4 and S7: whatever backend is installed tags this ring's submits
+        // and feeds the stats.latency line. A later stage replaces it through
+        // SetLatencyBackend before the swapchain is built.
+        _frames.Latency.Backend = Latency;
+        VulkanStats.LatencySource = Latency;
         _uploads = _frames.Uploads;
         _textures = new TextureManager(_context, _uploads);
         _meshes = new MeshManager(_context, _state, _uploads);
@@ -442,7 +499,7 @@ public sealed unsafe class VulkanDevice : IDisposable
             }
 
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError))
+                    out Swapchain? swapchain, out string? swapchainError, Latency))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
@@ -742,6 +799,15 @@ public sealed unsafe class VulkanDevice : IDisposable
             _transients.AliasedBytes, _transients.Leases.Count, _transients.AliasedLeaseCount, _readSelfCopies.Live);
         _transients.BeginFrame();
 
+        // Seam S2: the frame's latency identity. The platform hook allocates it
+        // before input is sampled; a frame that reaches here without one (headless
+        // tests, any path with no platform) allocates it now, so every frame has
+        // exactly one id and the ids increase by one.
+        if (!_latencyFrameIdPending) BeginLatencyFrame();
+        _latencyFrameIdPending = false;
+        // Every submit of this frame carries the frame's id (seam S4).
+        _frames.Latency.FrameId = _latencyFrameId;
+
         FrameSlot slot = _frames.BeginFrame();
         _readSelfCopies.Collect();
         _frameActive = true;
@@ -904,6 +970,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         long presentEntry = System.Diagnostics.Stopwatch.GetTimestamp();
         ulong renderValue = _frames.EndFrame();
         _frameActive = false;
+        // Seam S4: the frame's work is queued (Submit A). Stamped before the
+        // acquire, which is where the CPU may block, so the render-submit
+        // interval is recording time and nothing else.
+        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitEnd);
         long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
         // Headless: nothing to present; the frame is submitted all the same.
@@ -928,7 +998,13 @@ public sealed unsafe class VulkanDevice : IDisposable
         _swapchain.NotePresentSubmitted(target, presentValue);
         long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        _swapchain.Present(target);
+        // Seam S4: PresentStart and PresentEnd bracket vkQueuePresentKHR itself,
+        // and the present id the call was given closes the frame's report.
+        Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
+        ulong presentId = _swapchain.Present(target, _latencyFrameId);
+        Latency.Marker(_latencyFrameId, LatencyMarker.PresentEnd);
+        Latency.OnPresent(_latencyFrameId, presentId);
+        LastPresentIdForTests = presentId;
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
 
@@ -949,6 +1025,9 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>The last Present's timings. Tests only.</summary>
     internal PresentTimings LastPresentTimingsForTests { get; private set; }
+
+    /// <summary>The present id of the last present, 0 before the first. Tests only.</summary>
+    internal ulong LastPresentIdForTests { get; private set; }
 
     /// <summary>The swapchain, null when headless. Tests only.</summary>
     internal Swapchain? SwapchainForTests => _swapchain;
@@ -3202,6 +3281,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         {
             VulkanStats.MemorySource = null;
         }
+        if (ReferenceEquals(VulkanStats.LatencySource, Latency)) VulkanStats.LatencySource = null;
+        // The device installed it, so the device ends it; the None backend and
+        // the test fake have nothing to release.
+        Latency.Dispose();
         _context?.Dispose();
     }
 }

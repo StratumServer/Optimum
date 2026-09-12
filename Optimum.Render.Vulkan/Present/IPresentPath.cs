@@ -18,6 +18,17 @@ internal interface IPresentPath
     /// </summary>
     PipelineStageFlags AcquireWaitStage { get; }
 
+    /// <summary>
+    /// The latency backends this present path can run with (plan section
+    /// "Latency seams", seam S8). A backend is chosen per present path, because
+    /// what a backend needs is a property of how the frame reaches the screen:
+    /// every Vulkan-swapchain path supports the Vulkan backends, and the later
+    /// D3D12 bridge path will support XeLL only. Checked when the backend is
+    /// selected, so an unsupported pairing degrades to None instead of making
+    /// vendor calls the path cannot honour.
+    /// </summary>
+    LatencyBackendKind[] SupportedLatencyBackends { get; }
+
     void Record(CommandBuffer commandBuffer, in PresentTarget target);
 }
 
@@ -78,6 +89,21 @@ internal sealed unsafe class BlitPresentPath : IPresentPath
     }
 
     public PipelineStageFlags AcquireWaitStage => PresentWaitStages.BlitAcquireWait;
+
+    /// <summary>
+    /// Every backend that works over a Vulkan swapchain: the blit present is an
+    /// ordinary vkQueuePresentKHR, so None, the renderer's own completion pacing,
+    /// NV's low-latency2 and AMD's anti-lag all apply to it.
+    /// </summary>
+    public LatencyBackendKind[] SupportedLatencyBackends => VulkanSwapchainLatencyBackends;
+
+    private static readonly LatencyBackendKind[] VulkanSwapchainLatencyBackends =
+    {
+        LatencyBackendKind.None,
+        LatencyBackendKind.Native,
+        LatencyBackendKind.NvLowLatency2,
+        LatencyBackendKind.AmdAntiLag,
+    };
 
     public void Record(CommandBuffer commandBuffer, in PresentTarget target)
     {
