@@ -43,6 +43,13 @@ internal sealed class VulkanContextOptions
     public ColorWriteTier? ColorWriteTier;
 
     /// <summary>
+    /// Forces a latency backend (<see cref="Core.LatencyBackendKind" />); null reads
+    /// OPTIMUM_VULKAN_LATENCY. A backend the device lacks degrades to Native, the
+    /// same rule the colour-write tier follows. Tests use it to pin a backend.
+    /// </summary>
+    public LatencyBackendKind? LatencyBackend;
+
+    /// <summary>
     /// Tests only: sleeps this long before every vkAcquireNextImageKHR, standing
     /// in for a compositor that holds images back (PresentDecouplingTests).
     /// </summary>

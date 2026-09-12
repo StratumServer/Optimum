@@ -54,6 +54,14 @@ public sealed unsafe class VulkanDevice : IDisposable
     /// <summary>Scratch for the SSBO path's pruned custom ints, grown as needed.</summary>
     private int[] _prunedCustomInts = [];
 
+    /// <summary>
+    /// The active latency backend (plan section "Latency seams"). The None
+    /// backend until a later stage selects one from the device's capabilities and
+    /// the OPTIMUM_VULKAN_LATENCY override; never null, so every call site is a
+    /// plain virtual call with no branch.
+    /// </summary>
+    internal ILatencyBackend Latency { get; private set; } = new NoneLatencyBackend();
+
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
     private readonly Dictionary<IShader, StagedStage> _stagedStages = new();
