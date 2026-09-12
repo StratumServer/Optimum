@@ -105,8 +105,73 @@ public partial class VulkanClientPlatform
     /// DLSS plan, Phase 3: whether the frame may be planned and evaluated through an
     /// upscaler. The host's own liveness plus the one thing the placement needs beyond
     /// it - the motion attachment, without which there is nothing to reproject with.
+    ///
+    /// <para>The setting is part of the condition, not just the host's liveness: the tab
+    /// can turn the upscaler off while the host is still up and holding a feature, and on
+    /// that frame the answer has to be "no" immediately - the in-house TAA resolve takes
+    /// the frame back on the same rebuild, and two resolves over one history would blend
+    /// the same frame twice.</para>
     /// </summary>
-    public override bool OptimumUpscalerActive => UpscalerActive && MotionAttachmentIndex >= 0;
+    public override bool OptimumUpscalerActive =>
+        UpscalerActive && OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0;
+
+    /// <summary>
+    /// DLSS plan, Phase 6: why the settings tab may not offer an upscaler here, or null
+    /// while it may. Everything the host already knows, in the words it already produced -
+    /// "the NVIDIA driver library ... is not installed", "the NGX shim is not loadable",
+    /// "no NGX feature libraries were found", or the sentence a runtime stand-down logged.
+    ///
+    /// The one case the host cannot describe is the one where there is no host: the
+    /// session started with the setting off, so NGX's device extensions were never
+    /// requested at device creation and no amount of setting-flipping can bring DLSS up
+    /// before the client restarts. That is said plainly rather than silently offering a
+    /// choice that would stand itself down one rebuild later.
+    /// </summary>
+    public override string OptimumUpscalerUnavailable()
+    {
+        if (OptimumConfig.UpscalerRuntimeDisabled && upscaler == null)
+        {
+            return "the renderer stood the upscaler down for this session";
+        }
+        if (upscaler == null)
+        {
+            return "this session started without an upscaler, and NGX's device extensions " +
+                "are requested when the Vulkan device is created; restart the game with the " +
+                "upscaler on to use DLSS";
+        }
+        return upscaler.Active ? null : upscaler.Unavailable;
+    }
+
+    /// <summary>
+    /// DLSS plan, Phase 6: the upscaler slot or its preset changed while the client runs.
+    ///
+    /// The live feature goes back on the frame timeline first, because it was created for
+    /// a plan that is no longer the one the frame will ask for - a different preset, or
+    /// none at all - and NGX sizes its internal buffers at creation, so a preset change is
+    /// a new feature, never a reconfigured one. The host creates the replacement lazily on
+    /// the next frame that evaluates, from the sizes the rebuilt targets were really
+    /// allocated at; with the slot off it creates none, and nothing is left holding vendor
+    /// memory for a feature the frame will never evaluate again.
+    ///
+    /// Then the base does what the OpenGL path does on its own: rebuild every framebuffer,
+    /// which re-plans the render size through <see cref="OptimumTryPlanUpscaleRenderSize" />
+    /// and resets the temporal history.
+    /// </summary>
+    public override void ApplyOptimumUpscalerSettings()
+    {
+        if (upscaler != null) upscaler.RetireFeature();
+        base.ApplyOptimumUpscalerSettings();
+    }
+
+    /// <summary>
+    /// DLSS plan, Phase 6: the latency mode changed. One call into the live backend,
+    /// which is the same call device bring-up makes; no target changes size and nothing
+    /// temporal is invalidated, so there is no rebuild here.
+    /// </summary>
+    public override void ApplyOptimumLatencySettings()
+    {
+        device?.ReapplyLatencySettings();
+    }
 
     /// <summary>
     /// DLSS plan, Phase 3: what to render at for this display size, from the vendor's

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..5a760a7 100644
+index 4d08f84..24d619e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
@@ -99,7 +99,7 @@ index 4d08f84..5a760a7 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,232 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1750,363 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -107,16 +107,38 @@ index 4d08f84..5a760a7 100644
  
 +	private void OnOptimumOptions(bool on)
 +	{
-+		// The stock build uses 22 rows inside the fixed 740px dialog: the 28px
-+		// interval places the last row (TAA mip bias) at 675px. The feature-flag
-+		// build stacks the four greedy-mesh rows on top of the three TAA ones,
-+		// and 26 rows only fit at a 24px interval (last row at 687px).
++		// The rows share one fixed 740px dialog, so the interval follows the row
++		// count: 25 rows in the stock build (the three upscaler/latency rows joined
++		// the 22 that were here) fit at 24px, the last one landing at 663px; the
++		// feature-flag build stacks the four greedy-mesh rows on top of those 25 and
++		// only fits at 22px (last row at 703px).
 +#if OPTIMUM_GREEDY_MESH
-+		double rowH = 24.0;
++		double rowH = 22.0;
 +#else
-+		double rowH = 28.0;
++		double rowH = 24.0;
 +#endif
 +		double y0 = 87.0;
++		// Optimum (DLSS plan, Phase 6): the upscaler row says what this machine can
++		// really do. The platform answers with the one-sentence reason there can be no
++		// upscaler here - the OpenGL renderer has none, NGX or its shim is missing, the
++		// GPU is not an NVIDIA one, or the renderer stood the upscaler down at runtime -
++		// or null while DLSS is up. A row that offered DLSS anyway would be asserting
++		// something the frame is not doing.
++		string upscalerUnavailable = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerUnavailable() : Lang.Get("optimum-upscaler-unavailable-renderer");
++		string upscalerDlssLabel = (upscalerUnavailable == null) ? Lang.Get("optimum-upscaler-dlss") : Lang.Get("optimum-upscaler-dlss-unavailable");
++		string upscalerTooltip = Lang.Get("optimum-upscaler-tooltip");
++		if (upscalerUnavailable != null)
++		{
++			upscalerTooltip = upscalerTooltip + "\n\n" + Lang.Get("optimum-upscaler-unavailable") + " " + upscalerUnavailable;
++		}
++		// The TAA switch keeps showing the setting, but while an upscaler owns the
++		// resolve the in-house one does not run: the row says so rather than letting
++		// the page imply two resolves.
++		string taaTooltip = Lang.Get("optimum-taa-tooltip");
++		if (Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)
++		{
++			taaTooltip = taaTooltip + "\n\n" + Lang.Get("optimum-taa-upscaler-owns-resolve");
++		}
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-bgfps-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
@@ -169,31 +191,44 @@ index 4d08f84..5a760a7 100644
 +			.AddStaticText(Lang.Get("optimum-renderscale"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 17, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-renderscale-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 17, 400, 25))
 +			.AddDropDown(new string[] { "1.0", "0.85", "0.77", "0.67" }, new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, 0, onOptimumRenderScaleChanged, ElementBounds.Fixed(450, y0 + rowH * 17 + 2, 200, 25), "optRenderScale")
-+			.AddStaticText(Lang.Get("optimum-godrayscap"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-godrayscap-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
-+			.AddSwitch(onOptimumGodRaysCapChanged, ElementBounds.Fixed(450, y0 + rowH * 18 - 3, 200, 20), "optGodRaysCap")
-+			.AddStaticText(Lang.Get("optimum-taa"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-taa-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
-+			.AddSwitch(onOptimumTaaChanged, ElementBounds.Fixed(450, y0 + rowH * 19 - 3, 200, 20), "optTaa")
-+			.AddStaticText(Lang.Get("optimum-taasharpness"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-taasharpness-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
-+			.AddSlider(onOptimumTaaSharpnessChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 20), "optTaaSharpness")
-+			.AddStaticText(Lang.Get("optimum-taamipbias"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 21, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-taamipbias-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 21, 400, 25))
-+			.AddSlider(onOptimumTaaMipBiasChanged, ElementBounds.Fixed(450, y0 + rowH * 21 + 2, 200, 20), "optTaaMipBias")
++			// Optimum (DLSS plan, Phase 6): the upscaler slot, its quality preset and the
++			// latency mode, placed with the render-scale and TAA rows they belong to - an
++			// upscaler replaces the TAA resolve rather than running beside it, so the four
++			// rows are one decision and read as one group.
++			.AddStaticText(Lang.Get("optimum-upscaler"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 18, 400, 30))
++			.AddHoverText(upscalerTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
++			.AddDropDown(new string[] { "off", "dlss" }, new string[] { Lang.Get("optimum-upscaler-off"), upscalerDlssLabel }, 0, onOptimumUpscalerChanged, ElementBounds.Fixed(450, y0 + rowH * 18 + 2, 200, 25), "optUpscaler")
++			.AddStaticText(Lang.Get("optimum-upscalerquality"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalerquality-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
++			.AddDropDown(new string[] { "dlaa", "quality", "balanced", "performance", "ultraperformance" }, new string[] { Lang.Get("optimum-upscalerquality-dlaa"), Lang.Get("optimum-upscalerquality-quality"), Lang.Get("optimum-upscalerquality-balanced"), Lang.Get("optimum-upscalerquality-performance"), Lang.Get("optimum-upscalerquality-ultraperformance") }, 1, onOptimumUpscalerQualityChanged, ElementBounds.Fixed(450, y0 + rowH * 19 + 2, 200, 25), "optUpscalerQuality")
++			.AddStaticText(Lang.Get("optimum-latency"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
++			.AddHoverText(Lang.Get("optimum-latency-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
++			.AddDropDown(new string[] { "off", "on", "boost" }, new string[] { Lang.Get("optimum-latency-off"), Lang.Get("optimum-latency-on"), Lang.Get("optimum-latency-boost") }, 1, onOptimumLatencyChanged, ElementBounds.Fixed(450, y0 + rowH * 20 + 2, 200, 25), "optLatency")
++			.AddStaticText(Lang.Get("optimum-godrayscap"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 21, 400, 30))
++			.AddHoverText(Lang.Get("optimum-godrayscap-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 21, 400, 25))
++			.AddSwitch(onOptimumGodRaysCapChanged, ElementBounds.Fixed(450, y0 + rowH * 21 - 3, 200, 20), "optGodRaysCap")
++			.AddStaticText(Lang.Get("optimum-taa"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 22, 400, 30))
++			.AddHoverText(taaTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 22, 400, 25))
++			.AddSwitch(onOptimumTaaChanged, ElementBounds.Fixed(450, y0 + rowH * 22 - 3, 200, 20), "optTaa")
++			.AddStaticText(Lang.Get("optimum-taasharpness"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 23, 400, 30))
++			.AddHoverText(Lang.Get("optimum-taasharpness-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 23, 400, 25))
++			.AddSlider(onOptimumTaaSharpnessChanged, ElementBounds.Fixed(450, y0 + rowH * 23 + 2, 200, 20), "optTaaSharpness")
++			.AddStaticText(Lang.Get("optimum-taamipbias"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 24, 400, 30))
++			.AddHoverText(Lang.Get("optimum-taamipbias-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 24, 400, 25))
++			.AddSlider(onOptimumTaaMipBiasChanged, ElementBounds.Fixed(450, y0 + rowH * 24 + 2, 200, 20), "optTaaMipBias")
 +#if OPTIMUM_GREEDY_MESH
-+			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 22, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 22, 400, 25))
-+			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 22 - 3, 200, 20), "optGreedyMesh")
-+			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 23, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 23, 400, 25))
-+			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 23 + 2, 200, 20), "optGreedySpan")
-+			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 24, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 24, 400, 25))
-+			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 24 + 2, 200, 20), "optGreedyLightTol")
-+			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 25, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 25, 400, 25))
-+			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 25 + 2, 200, 20), "optGreedyFarDist")
++			.AddStaticText(Lang.Get("optimum-greedymesh"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 25, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedymesh-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 25, 400, 25))
++			.AddSwitch(onOptimumGreedyMeshChanged, ElementBounds.Fixed(450, y0 + rowH * 25 - 3, 200, 20), "optGreedyMesh")
++			.AddStaticText(Lang.Get("optimum-greedyspan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 26, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyspan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 26, 400, 25))
++			.AddSlider(onOptimumGreedySpanChanged, ElementBounds.Fixed(450, y0 + rowH * 26 + 2, 200, 20), "optGreedySpan")
++			.AddStaticText(Lang.Get("optimum-greedylighttol"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 27, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedylighttol-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 27, 400, 25))
++			.AddSlider(onOptimumGreedyLightTolChanged, ElementBounds.Fixed(450, y0 + rowH * 27 + 2, 200, 20), "optGreedyLightTol")
++			.AddStaticText(Lang.Get("optimum-greedyfardist"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 28, 400, 30))
++			.AddHoverText(Lang.Get("optimum-greedyfardist-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 28, 400, 25))
++			.AddSlider(onOptimumGreedyFarDistChanged, ElementBounds.Fixed(450, y0 + rowH * 28 + 2, 200, 20), "optGreedyFarDist")
 +#endif
 +			.EndChildElements()
 +			.Compose();
@@ -218,6 +253,13 @@ index 4d08f84..5a760a7 100644
 +		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveEntityShaderStateCache);
 +		int renderScaleIdx = ClientSettings.OptimumRenderScale >= 1.0f ? 0 : ClientSettings.OptimumRenderScale >= 0.85f ? 1 : ClientSettings.OptimumRenderScale >= 0.77f ? 2 : 3;
 +		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
++		// Optimum (DLSS plan, Phase 6): EffectiveUpscaler, not Upscaler - a renderer that
++		// stood the upscaler down has already made this session's answer "off", and the
++		// row must show what is running, exactly as the TAA switch does.
++		composer.GetDropDown("optUpscaler").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.EffectiveUpscaler);
++		composer.GetDropDown("optUpscalerQuality").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerQuality);
++		composer.GetDropDown("optLatency").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.LatencyMode);
++		optimumUpdateUpscalerRows();
 +		composer.GetSwitch("optGodRaysCap").SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
 +		composer.GetSwitch("optTaa").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveTaa);
 +		// The two sliders are ints; TaaSharpness (0..1) and TaaMipBias (-1..0)
@@ -272,6 +314,95 @@ index 4d08f84..5a760a7 100644
 +		handler.ReloadShaders();
 +	}
 +	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++
++	// Optimum (DLSS plan, Phase 6): the upscaler rows.
++	//
++	// An upscaler is a whole-chain decision, exactly like TAA: it owns the temporal
++	// resolve, the frame is rendered at a size the vendor chooses, and every target
++	// downstream of the resolve moves between the render size and the display size.
++	// So the handler persists the choice and then re-plans and rebuilds through the
++	// platform (ApplyOptimumUpscalerSettings, whose neutral body is
++	// RebuildFrameBuffers), reloads the shaders - the motion writers are compiled
++	// against "does anything temporal want this frame jittered", which changes when
++	// the upscaler is the only temporal consumer - and drops the history, because a
++	// history produced by the other configuration would be reprojected into a frame
++	// that never made it.
++	//
++	// Switching to off is the same path in reverse and restores the pre-upscaler
++	// chain exactly: the rebuild allocates the TAA history slots and the sharpen
++	// target again, and OptimumConfig.UpscalerReplacesTaa goes false, which is the
++	// one condition the in-house resolve, the sharpen pass and the FSR 1 blit stand
++	// down on.
++	private void onOptimumUpscalerChanged(string code, bool selected)
++	{
++		string unavailable = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerUnavailable() : "no platform";
++		if (unavailable != null && !string.Equals(code, "off", StringComparison.OrdinalIgnoreCase))
++		{
++			// The row has already moved by the time the handler runs, so refusing has
++			// to put it back: the frame is not going to upscale, and a row left on
++			// "DLSS" would claim it does.
++			optimumUpdateUpscalerRows();
++			return;
++		}
++		Vintagestory.API.Config.OptimumConfig.Upscaler = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (ScreenManager.Platform != null)
++		{
++			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++		}
++		handler.ReloadShaders();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++		optimumUpdateUpscalerRows();
++	}
++
++	// The preset only changes the render size the vendor asks for, so this is the
++	// re-plan and the rebuild without the shader reload: every define, every motion
++	// writer and every uniform is the same on both sides of it.
++	private void onOptimumUpscalerQualityChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerQuality = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (ScreenManager.Platform != null)
++		{
++			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++		}
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.RenderScale);
++		optimumUpdateUpscalerRows();
++	}
++
++	// The latency mode is one call into the live backend: no target changes size,
++	// nothing temporal is invalidated, and the OpenGL path has no backend at all.
++	private void onOptimumLatencyChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.LatencyMode = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (ScreenManager.Platform != null)
++		{
++			ScreenManager.Platform.ApplyOptimumLatencySettings();
++		}
++	}
++
++	/// <summary>
++	/// Optimum: puts the two upscaler rows back in step with what the frame is
++	/// really doing - the selection shows the effective upscaler (a renderer that
++	/// stood DLSS down has already made it "off"), and the quality row is disabled
++	/// while nothing is upscaling, because a preset with no upscaler selects
++	/// nothing.
++	/// </summary>
++	private void optimumUpdateUpscalerRows()
++	{
++		if (composer == null) return;
++		GuiElementDropDown upscaler = composer.GetDropDown("optUpscaler");
++		if (upscaler != null)
++		{
++			upscaler.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.EffectiveUpscaler);
++		}
++		GuiElementDropDown quality = composer.GetDropDown("optUpscalerQuality");
++		if (quality != null)
++		{
++			quality.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsDlss;
++		}
++	}
 +
 +	// TAA is a whole-chain switch, not a per-frame flag: the resolve's history
 +	// targets and the motion attachment only exist while it is on, and final.fsh
@@ -332,7 +463,7 @@ index 4d08f84..5a760a7 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2050,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2181,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

@@ -173,6 +173,12 @@ var membersToInject = new Dictionary<string, List<string>>
         // Review follow-up 2026-09-12: the effective frame cap (background reduction
         // included) window_RenderFrame hands to a pacing backend before the sleep.
         "SetLatencyFrameCap",
+        // DLSS plan, Phase 6: the settings-tab seams - why no upscaler can run here,
+        // the upscaler/preset re-plan and rebuild, and the latency re-apply. Neutral
+        // bodies; VulkanClientPlatform overrides all three.
+        "OptimumUpscalerUnavailable",
+        "ApplyOptimumUpscalerSettings",
+        "ApplyOptimumLatencySettings",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -479,6 +485,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumTaaChanged",
         "onOptimumTaaSharpnessChanged",
         "onOptimumTaaMipBiasChanged",
+        "onOptimumUpscalerChanged",
+        "onOptimumUpscalerQualityChanged",
+        "onOptimumLatencyChanged",
+        "optimumUpdateUpscalerRows",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..c3e5b54 100644
+index d6eb844..d8ac1eb 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,481 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,530 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -466,6 +466,55 @@ index d6eb844..c3e5b54 100644
 +	// paces an unfocused window to the same number the client's own limiter would have used.
 +	// Neutral body; the OpenGL path does not override it.
 +	public virtual void SetLatencyFrameCap(int maxFps)
++	{
++	}
++
++	// DLSS plan, Phase 6: the three settings-tab seams, so the Optimum tab can change
++	// the upscaler slot, its quality preset and the latency mode while the game runs
++	// without knowing that a renderer backend exists at all.
++
++	/// <summary>
++	/// Optimum: why no upscaler can run on this platform, in one sentence, or null
++	/// when one can. The settings tab shows this instead of offering a choice the
++	/// frame would not honour.
++	///
++	/// The neutral answer is a reason, not null: a platform that does not override
++	/// this has no upscaler - the OpenGL path never will, and it is the one every
++	/// unpatched build runs. The Vulkan platform answers null while DLSS is up and
++	/// the host's own diagnosis otherwise ("the NVIDIA driver library is not
++	/// installed", "the NGX shim is not loadable", the runtime stand-down).
++	/// </summary>
++	public virtual string OptimumUpscalerUnavailable()
++	{
++		return Vintagestory.API.Config.Lang.Get("optimum-upscaler-unavailable-renderer");
++	}
++
++	/// <summary>
++	/// Optimum: the upscaler slot or its quality preset changed. Everything that
++	/// depends on the render size is re-planned and reallocated, and the temporal
++	/// history is dropped, which is exactly what <see cref="RebuildFrameBuffers" />
++	/// already does: it asks the platform for the render size again
++	/// (<c>OptimumTryPlanUpscaleRenderSize</c>) and rebuilds every target from the
++	/// answer, so switching off restores the pre-upscaler chain - the in-house TAA
++	/// resolve, its history slots, the sharpen pass and the FSR 1 blit - on that
++	/// same rebuild.
++	///
++	/// Neutral body: the rebuild is all the OpenGL path needs, because it has no
++	/// upscaler to retire. The Vulkan platform overrides it to retire the live
++	/// vendor feature first.
++	/// </summary>
++	public virtual void ApplyOptimumUpscalerSettings()
++	{
++		RebuildFrameBuffers();
++	}
++
++	/// <summary>
++	/// Optimum: the latency mode changed. Empty here, because the OpenGL path has
++	/// no latency backend and never reads the setting; the Vulkan platform re-applies
++	/// it to the live backend, which is one <c>vkSetLatencySleepModeNV</c>-shaped call
++	/// and needs no rebuild of anything.
++	/// </summary>
++	public virtual void ApplyOptimumLatencySettings()
 +	{
 +	}
 +

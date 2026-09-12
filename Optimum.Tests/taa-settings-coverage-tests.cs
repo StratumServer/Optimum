@@ -153,19 +153,21 @@ public class TaaSettingsCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs");
 
         // ComposerHeader lays the main-menu dialog out at a fixed 740px, and the
-        // tab starts at y0 = 87. The stock build now ends at row 21 (TAA mip
-        // bias) and the feature-flag build at row 25, so the row interval has to
-        // shrink in the latter or the last rows fall off the dialog.
-        Assert.Contains("double rowH = 28.0;", gui);
+        // tab starts at y0 = 87. Since the upscaler, quality and latency rows joined
+        // it (DLSS plan, Phase 6) the stock build ends at row 24 (TAA mip bias) and
+        // the feature-flag build at row 28, so the row interval shrinks in both or
+        // the last rows fall off the dialog.
         Assert.Contains("double rowH = 24.0;", gui);
+        Assert.Contains("double rowH = 22.0;", gui);
 
-        Assert.Contains("rowH * 19", gui); // TAA toggle
-        Assert.Contains("rowH * 20", gui); // sharpness
-        Assert.Contains("rowH * 21", gui); // mip bias
-        Assert.Contains("rowH * 25", gui); // greedy far distance, shifted down
+        Assert.Contains("rowH * 22", gui); // TAA toggle
+        Assert.Contains("rowH * 23", gui); // sharpness
+        Assert.Contains("rowH * 24", gui); // mip bias
+        Assert.Contains("rowH * 28", gui); // greedy far distance, shifted down
 
-        Assert.True(87.0 + 28.0 * 21 <= 740.0);
-        Assert.True(87.0 + 24.0 * 25 <= 740.0);
+        // The row itself is 30px tall, so the last one has to end inside the dialog.
+        Assert.True(87.0 + 24.0 * 24 + 30.0 <= 740.0);
+        Assert.True(87.0 + 22.0 * 28 + 30.0 <= 740.0);
     }
 
     [Fact]

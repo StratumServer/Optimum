@@ -141,6 +141,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
         new(true, "SetLatencyFrameCap", new[] { "Int32" }),
+        // DLSS plan, Phase 6: the settings-tab seams - the honest reason there can be no
+        // upscaler here, the upscaler/preset re-plan and rebuild, and the latency re-apply.
+        new(true, "OptimumUpscalerUnavailable", Array.Empty<string>()),
+        new(true, "ApplyOptimumUpscalerSettings", Array.Empty<string>()),
+        new(true, "ApplyOptimumLatencySettings", Array.Empty<string>()),
     };
 
     /// <summary>

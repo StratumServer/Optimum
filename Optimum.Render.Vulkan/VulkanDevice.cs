@@ -186,6 +186,18 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
     }
 
     /// <summary>
+    /// The persisted latency setting changed while the client runs (the Optimum
+    /// settings tab). The backend is not replaced - which backend this device uses is
+    /// a device-and-driver question answered at bring-up - only its mode and boost,
+    /// which is the same call bring-up makes and which every backend already re-applies
+    /// on each swapchain creation.
+    /// </summary>
+    internal void ReapplyLatencySettings()
+    {
+        Latency.Apply(LatencySettingsFromConfig());
+    }
+
+    /// <summary>
     /// The latency identity of the frame being recorded (seam S2): one monotonic
     /// value per rendered frame, allocated by <see cref="BeginLatencyFrame" />
     /// before the client samples input, and used by every marker, every submit tag
