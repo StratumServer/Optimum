@@ -133,6 +133,9 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "DeleteOcclusionQuery", new[] { "Int32" }),
         new(true, "ReadDefaultFramebuffer", new[] { "Int32", "Int32", "Int32", "Int32", "IntPtr" }),
         new(true, "get_GraphicsBackendName", Array.Empty<string>()),
+        // Headless render harness: the channel order ReadDefaultFramebuffer leaves
+        // behind (GL_BGRA on the OpenGL path, RGBA off the device's R8G8B8A8 target).
+        new(true, "get_OptimumDefaultFramebufferIsBgra", Array.Empty<string>()),
         // Phase 2: render-stage bracket from ClientMain.TriggerRenderStage (contract C3).
         new(true, "BeginRenderStage", new[] { "EnumRenderStage" }),
         new(true, "EndRenderStage", new[] { "EnumRenderStage" }),

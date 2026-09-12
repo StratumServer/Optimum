@@ -13,7 +13,37 @@ Status: **done** = merged to `main` and accepted in game · **in progress** = on
 |---|---|---|
 | done | **TAA** with a jitter-stable resolve: 3x3 nearest-depth disocclusion, motion from the nearest-depth tap, luminance anti-flicker weighting | `docs/taa-acceptance.md`, `scripts/dev/taa-rejection.py` (distant-leaf rejection 1.05 %, was 3.7 %) |
 | done | **Native Vulkan backend, Milestone 1**: platform substitution (`VulkanClientPlatform : ClientPlatformWindows`), timeline semaphores, asynchronous uploads, split present, usage-derived barriers, streaming frame graph, transient allocator | `docs/vulkan-acceptance.md` "Milestone 1 exit results"; blocking uploads 0, passes == scopes, validation clean |
+| done | **A headless render harness**: `OPTIMUM_HEADLESS` runs the real client and the real renderer with the window never mapped, a chat-command script sets the scene and drives vanilla's keyframed camera, and the selected in-world frames are written as PPM through the backend-agnostic readback | `scripts/dev/headless-capture.sh`, `Optimum.Render.Vulkan.Tests/HeadlessCaptureTests.cs` (frames off a device with no surface at all), `Optimum.Tests/headless-harness-coverage-tests.cs` |
 | done | **Latency reduction**, on by default: the sleep moved before input sampling, NVIDIA Reflex (`VK_NV_low_latency2`), AMD anti-lag (`VK_AMD_anti_lag`) and Optimum's own completion pacing | `docs/vulkan-acceptance.md` "Latency acceptance"; input-to-present 7.67 ms -> 1.85 ms on an RTX 4070, free with Reflex |
+
+### The headless render harness, honestly
+
+What it covers. `OPTIMUM_HEADLESS=1` creates the window with `StartVisible=false` and `StartFocused=false`:
+a real window with a real surface and a real swapchain, never mapped and never focused, on both backends
+(there is no surfaceless GL path in this client, so this is the only offscreen mode that is symmetric).
+The frame loop, the swapchain and every rendering path are unchanged - the harness is one call in
+`window_RenderFrame`, beside the parity dump, after the post chain and the final blit. Frames come from
+`ReadDefaultFramebuffer`, the same polymorphic call the in-game screenshot makes and a device-side copy on
+Vulkan, so no OS window capture is involved and no compositor is needed; they are written as
+`frame-NNNNNN.ppm` at a chosen frame list or cadence, which `scripts/dev/ssim.py` reads and which pairs
+between two captures by name. `OPTIMUM_HEADLESS_COMMANDS` feeds a file of chat lines on an in-world frame,
+routed the way the chat HUD routes what a human types, so `/time` and `/weather` fix the scene and `.cam
+load` / `.cam play` drive vanilla's own keyframed camera (`SystemCinematicCamera`, which nothing in this
+repo used before). `OPTIMUM_HEADLESS_FIXED_DT` pins `ClientMain.DeltaTimeLimiter`, the field vanilla's own
+recorder sets, so the simulated step is constant. A permanently unfocused window falls under the existing
+30 FPS background cap, so a run does not take the machine. The renderer line is still logged and
+`scripts/dev/headless-capture.sh` refuses to report a capture it cannot attribute to the backend it asked
+for.
+
+What it does not cover. A display server is still required - real, nested or Xvfb - because GLFW asks for
+the screen size before any window exists and Vulkan needs a WSI surface; "headless" here means no visible
+window, not no display. Reproducibility is frame-for-frame repeatable, not bit-exact: a fixed step does not
+pin chunk streaming, particle or mob RNG, which is the same standard `docs/vulkan-acceptance.md` already
+sets for GL-vs-GL noise. The per-attachment dump `scripts/dev/taa-rejection.py` reads is still
+`OPTIMUM_PARITY_DUMP` (composed in by `--parity-dump`, not replaced). Presenting to a never-mapped window
+has been exercised on this project's dev box and in the GPU suite, not on every driver, Wayland or Xvfb
+combination. No camera path is checked in yet - one has to be authored per scene with `.cam p` and
+`.cam save`.
 
 ## In progress
 
@@ -46,12 +76,10 @@ AO work below.
   before the upscaler at render resolution, (2) make the dither temporally varying, (3) only then port
   XeGTAO (MIT, HLSL compute -> GLSL port; 0.56 ms at 1080p on an RTX 2060). Judge it against fixed SSAO,
   not against today's.
-- **A headless render harness.** The real renderer and client path without a visible window, writing frames
-  to disk, with a scripted camera and fixed world state so a sequence is reproducible frame for frame, and
-  low GPU priority so it runs while the machine is in use. This is what turns shimmer into a number instead
-  of an argument, and it is why in-game checks are currently rationed. Pieces already exist: the GPU suite
-  creates real devices with hidden windows, `OPTIMUM_PARITY_DUMP` writes every attachment at a chosen
-  frame, `scripts/dev/parity-capture.sh` drives an unattended run.
+- **Acceptance runs driven by the headless harness.** The harness itself is done (above); what is still
+  manual is using it - an authored camera path per scene checked in as data, a shimmer number computed
+  from a capture rather than judged by eye, and the harness wired into `docs/vulkan-acceptance.md` so a
+  backend comparison is a script invocation. See "what it does not cover" under the harness for the gaps.
 
 ### Bigger, in dependency order
 

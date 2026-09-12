@@ -377,20 +377,32 @@ public static class OptimumHeadless
 
         long count = ResolveLong("OPTIMUM_HEADLESS_FRAME_COUNT", 0L);
         if (count <= 0L) return new long[0];
-        long stride = ResolveLong("OPTIMUM_HEADLESS_FRAME_STRIDE", 1L);
-        if (stride <= 0L) stride = 1L;
         // Default: the first frame after the command script has run, so a camera
         // started by the script is already moving on frame one of the capture.
-        long first = ResolveLong("OPTIMUM_HEADLESS_FIRST_FRAME",
-            CommandScriptPath != null ? CommandFrame + 1L : 0L);
+        return PlanFrames(
+            ResolveLong("OPTIMUM_HEADLESS_FIRST_FRAME", CommandScriptPath != null ? CommandFrame + 1L : 0L),
+            count,
+            ResolveLong("OPTIMUM_HEADLESS_FRAME_STRIDE", 1L));
+    }
 
+    /// <summary>A cadence: <paramref name="count" /> frames from <paramref name="first" />, every <paramref name="stride" />.</summary>
+    public static long[] PlanFrames(long first, long count, long stride)
+    {
+        if (count <= 0L) return new long[0];
+        if (stride <= 0L) stride = 1L;
+        if (first < 0L) first = 0L;
         long[] frames = new long[count];
         for (long i = 0; i < count; i++) frames[i] = first + i * stride;
         return frames;
     }
 
-    private static long[] ParseFrameList(string list)
+    /// <summary>
+    /// An explicit frame list: comma, space or semicolon separated, negatives and
+    /// unparsable entries dropped, ascending and without duplicates.
+    /// </summary>
+    public static long[] ParseFrameList(string list)
     {
+        if (string.IsNullOrWhiteSpace(list)) return new long[0];
         string[] parts = list.Split(new char[] { ',', ' ', ';' }, StringSplitOptions.RemoveEmptyEntries);
         var frames = new System.Collections.Generic.List<long>(parts.Length);
         for (int i = 0; i < parts.Length; i++)
@@ -407,9 +419,12 @@ public static class OptimumHeadless
     }
 
     /// <summary>True when this in-world frame is one of the frames to write.</summary>
-    public static bool ShouldCapture(long worldFrame)
+    public static bool ShouldCapture(long worldFrame) => ShouldCapture(Frames, worldFrame);
+
+    /// <summary>True when this in-world frame is one of <paramref name="frames" /> (ascending).</summary>
+    public static bool ShouldCapture(long[] frames, long worldFrame)
     {
-        long[] frames = Frames;
+        if (frames == null) return false;
         for (int i = 0; i < frames.Length; i++)
         {
             if (frames[i] == worldFrame) return true;
@@ -418,11 +433,13 @@ public static class OptimumHeadless
         return false;
     }
 
-    /// <summary>True once this in-world frame is past the last frame to write.</summary>
-    public static bool CaptureFinished(long worldFrame)
+    /// <summary>True once this in-world frame is at or past the last frame to write.</summary>
+    public static bool CaptureFinished(long worldFrame) => CaptureFinished(Frames, worldFrame);
+
+    /// <summary>True once this in-world frame is at or past the last of <paramref name="frames" />.</summary>
+    public static bool CaptureFinished(long[] frames, long worldFrame)
     {
-        long[] frames = Frames;
-        return frames.Length == 0 || worldFrame >= frames[frames.Length - 1];
+        return frames == null || frames.Length == 0 || worldFrame >= frames[frames.Length - 1];
     }
 
     /// <summary>The one file name both backends write, so two captures pair by name.</summary>
@@ -436,13 +453,16 @@ public static class OptimumHeadless
     /// Empty when there is no script or it cannot be read - a capture that loses
     /// its scene is worth a warning, not a crashed client.
     /// </summary>
-    public static string[] ReadCommands()
+    public static string[] ReadCommands() => ReadCommands(CommandScriptPath);
+
+    /// <summary>The command lines of one script file; empty when it cannot be read.</summary>
+    public static string[] ReadCommands(string path)
     {
-        if (CommandScriptPath == null) return new string[0];
+        if (path == null) return new string[0];
         string[] lines;
         try
         {
-            lines = System.IO.File.ReadAllLines(CommandScriptPath);
+            lines = System.IO.File.ReadAllLines(path);
         }
         catch (Exception)
         {
