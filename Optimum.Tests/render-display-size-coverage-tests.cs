@@ -133,10 +133,15 @@ public class RenderDisplaySizeCoverageTests
 
         Assert.Equal(1, Count(post, "int renderWidth = RenderWidth;"));
         Assert.Equal(1, Count(post, "int renderHeight = RenderHeight;"));
-        Assert.Equal(3, Count(post, "GlViewport(0, 0, renderWidth, renderHeight);"));
-        Assert.Contains("blur.Uniform(\"frameSize\", (float)renderWidth, (float)renderHeight);", post);
+        // DLSS plan, Phase 3: the passes after the upscale work on the target that holds
+        // this frame's image, which is the display-resolution one when an upscaler ran and
+        // Primary otherwise - one pair of integers again, read once.
+        Assert.Equal(1, Count(post, "int postWidth = renderWidth;"));
+        Assert.Equal(1, Count(post, "int postHeight = renderHeight;"));
+        Assert.Equal(3, Count(post, "GlViewport(0, 0, postWidth, postHeight);"));
+        Assert.Contains("blur.Uniform(\"frameSize\", (float)postWidth, (float)postHeight);", post);
         Assert.Contains(
-            "godrays.Uniform(\"invFrameSizeIn\", 1f / (float)renderWidth, 1f / (float)renderHeight);", post);
+            "godrays.Uniform(\"invFrameSizeIn\", 1f / (float)postWidth, 1f / (float)postHeight);", post);
         Assert.Contains("ssao.Uniform(\"screenSize\", (float)renderWidth * num, (float)renderHeight * num);", post);
         // The quarter-resolution blur viewport comes from the target it is about to bind.
         Assert.Contains("FrameBufferRef lowResBlurTarget = frameBuffers[9];", post);
@@ -155,8 +160,11 @@ public class RenderDisplaySizeCoverageTests
         Assert.True(start >= 0 && end > start);
         string final = WithoutComments(platform.Substring(start, end - start));
 
+        // DLSS plan, Phase 3: the size of the target the pass draws into, which is
+        // Primary's - the render size - with no upscaler and the display size with one.
         Assert.Contains(
-            "final.Uniform(\"invFrameSizeIn\", 1f / (float)RenderWidth, 1f / (float)RenderHeight);", final);
+            "final.Uniform(\"invFrameSizeIn\", 1f / (float)compositeTarget.Width, 1f / (float)compositeTarget.Height);",
+            final);
         Assert.DoesNotContain("ssaaLevel", final);
         Assert.DoesNotContain("ClientSize", final);
     }
@@ -192,8 +200,11 @@ public class RenderDisplaySizeCoverageTests
         Assert.True(slot >= 0);
         string declaration = platform.Substring(slot, 200);
 
-        Assert.Contains("Width = num / 4", declaration);
-        Assert.Contains("Height = num2 / 4", declaration);
+        // DLSS plan, Phase 3: the blur chain is downstream of the upscale, so its quarter
+        // is a quarter of the display size - the same number as before whenever no
+        // upscaler is running.
+        Assert.Contains("Width = displayWidth / 4", declaration);
+        Assert.Contains("Height = displayHeight / 4", declaration);
     }
 
     /// <summary>

@@ -36,6 +36,9 @@ public class PlatformDeviceBranchMoveCoverageTests
         string patcher = Read("Optimum.Patcher/Program.cs");
         string injectedAbstract = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformAbstract\"] = new()", "},");
         string virtualized = Block(patcher, "var methodsToVirtualize = new List<MethodTarget>", "};");
+        // A virtual ClientPlatformWindows member that Optimum adds itself is injected with
+        // its flags rather than virtualized in place; either list is a valid answer.
+        string injectedWindows = Block(patcher, "[\"Vintagestory.Client.NoObf.ClientPlatformWindows\"] = new()", "},");
         string selfCheck = Block(Read(VulkanPlatformSource.MainFile), "internal static readonly ExpectedVirtual[] ExpectedVirtuals", "};");
 
         var names = new SortedSet<string>(StringComparer.Ordinal);
@@ -64,9 +67,12 @@ public class PlatformDeviceBranchMoveCoverageTests
             }
             if (virtualizedInPlace && !abstractMember && !injectedVirtual)
             {
-                Assert.True(virtualized.Contains("\"" + name + "\"", StringComparison.Ordinal),
-                    name + " is virtual in the donor ClientPlatformWindows but not in methodsToVirtualize");
-                Assert.True(selfCheck.Contains("new(false, \"" + name + "\"", StringComparison.Ordinal),
+                Assert.True(virtualized.Contains("\"" + name + "\"", StringComparison.Ordinal)
+                    || injectedWindows.Contains("\"" + name + "\",", StringComparison.Ordinal),
+                    name + " is virtual in the donor ClientPlatformWindows but is neither in " +
+                    "methodsToVirtualize nor injected into ClientPlatformWindows");
+                Assert.True(selfCheck.Contains("new(false, \"" + name + "\"", StringComparison.Ordinal)
+                    || selfCheck.Contains("new(false, \"get_" + name + "\"", StringComparison.Ordinal),
                     name + " is missing from VulkanClientPlatform.ExpectedVirtuals");
             }
         }

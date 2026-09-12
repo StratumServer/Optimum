@@ -114,6 +114,67 @@ public sealed unsafe partial class VulkanDevice
     internal int DrainDeferredDeletions() => _frames.DrainRetirements();
 
     /// <summary>
+    /// Point-upscales one depth image into another, for the display-resolution depth the
+    /// late 3D overlays test against after an upscale.
+    ///
+    /// NEAREST is not a quality choice: filtering a depth buffer invents depths that lie
+    /// on neither surface, and Vulkan refuses a linear blit of a depth format outright.
+    /// The blit needs <c>VK_FORMAT_FEATURE_BLIT_DST_BIT</c> on the destination format,
+    /// which is not guaranteed for depth formats by the specification; it is present on
+    /// the drivers that can run this path at all (DLSS is NVIDIA-only), and a driver
+    /// without it gets false - and, from the caller, one log line - rather than a
+    /// broken frame.
+    /// </summary>
+    internal bool UpscaleDepthNearest(int sourceTexture, int destinationTexture)
+    {
+        if (!_frameActive) return false;
+        VulkanTexture? source = _textures.Get(sourceTexture);
+        VulkanTexture? destination = _textures.Get(destinationTexture);
+        if (source == null || destination == null) return false;
+        if (!SupportsDepthBlitDestination(destination.Format)) return false;
+
+        CommandBuffer commandBuffer = Commands;
+        _targets.FlushAllPendingClears(commandBuffer);
+        _targets.EndRendering(commandBuffer);
+
+        _textures.Require(_barriers, commandBuffer, source, ResourceUsage.TransferSrc);
+        _textures.Require(_barriers, commandBuffer, destination, ResourceUsage.TransferDst);
+        _barriers.Flush(commandBuffer);
+
+        ImageBlit region = default;
+        region.SrcSubresource = new ImageSubresourceLayers(source.Aspect, 0, 0, 1);
+        region.DstSubresource = new ImageSubresourceLayers(destination.Aspect, 0, 0, 1);
+        region.SrcOffsets.Element1 = new Offset3D((int)source.Width, (int)source.Height, 1);
+        region.DstOffsets.Element1 = new Offset3D((int)destination.Width, (int)destination.Height, 1);
+        _context.Api.CmdBlitImage(commandBuffer,
+            source.Image, ImageLayout.TransferSrcOptimal,
+            destination.Image, ImageLayout.TransferDstOptimal,
+            1, &region, Filter.Nearest);
+
+        if (RenderTrace.Enabled)
+        {
+            RenderTrace.Write("depth upscale src=" + sourceTexture + " dst=" + destinationTexture +
+                " " + source.Width + "x" + source.Height + " -> " + destination.Width + "x" + destination.Height);
+        }
+        return true;
+    }
+
+    private int _depthBlitDestinationSupport;
+
+    /// <summary>
+    /// Whether this device can be the destination of a depth blit, asked once and
+    /// remembered. A refusal is logged once, not once a frame.
+    /// </summary>
+    private bool SupportsDepthBlitDestination(Format format)
+    {
+        if (_depthBlitDestinationSupport != 0) return _depthBlitDestinationSupport > 0;
+        _context.Api.GetPhysicalDeviceFormatProperties(_context.PhysicalDevice, format, out FormatProperties properties);
+        bool supported = (properties.OptimalTilingFeatures & FormatFeatureFlags.BlitDstBit) != 0;
+        _depthBlitDestinationSupport = supported ? 1 : -1;
+        return supported;
+    }
+
+    /// <summary>
     /// Runs DLSS on this frame's command buffer: colour, depth and motion
     /// vectors at render resolution in, the display-resolution output written in
     /// place.

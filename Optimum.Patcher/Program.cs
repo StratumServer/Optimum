@@ -364,6 +364,19 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumTaaSharpenIndex",
         "OptimumFsrBlitActive",
         "RenderOptimumTaaSharpen",
+        // DLSS plan, Phase 3: the upscaler's placement in the frame - the
+        // display-resolution target it writes, the per-frame flag every downstream
+        // reader shares, the platform questions VulkanClientPlatform answers (is an
+        // upscaler up, what render size does it want, run the evaluate) and the
+        // screenshot redirect that captures the composited image wherever it lives.
+        "OptimumUpscaledSceneIndex",
+        "optimumUpscaledThisFrame",
+        "OptimumUpscalerActive",
+        "OptimumTryPlanUpscaleRenderSize",
+        "RenderOptimumUpscale",
+        "OptimumCompositeFrameBuffer",
+        "OptimumUpscaledThisFrame",
+        "OptimumBindCompositeForCapture",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.
@@ -931,6 +944,10 @@ var targets = new List<MethodTarget>
     // TAA P4: the decal motion window.
     new("Vintagestory.Client.NoObf.SystemRenderDecals", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
+    // DLSS plan, Phase 3: the scaled and mega screenshot paths capture whichever target
+    // holds the composited image, which with an upscaler is not Primary.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SaveScreenshot", 5),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GrabScreenshot", 2),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop

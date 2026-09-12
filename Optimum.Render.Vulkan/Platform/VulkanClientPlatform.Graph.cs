@@ -102,6 +102,23 @@ public partial class VulkanClientPlatform
     private void DeclareFinalCompositionPass()
     {
         if (device == null || !device.FrameGraphEnabled) return;
+        List<FrameBufferRef> buffers = FrameBuffers;
+        if (CurrentFrameBuffer != null && buffers != null && buffers.Count > PrimaryIndex &&
+            !ReferenceEquals(CurrentFrameBuffer, buffers[PrimaryIndex]))
+        {
+            // DLSS plan, Phase 3: with an upscaler the composition writes the
+            // display-resolution target instead. Nothing it samples lives in that
+            // target, so the attachment-subset trick has no work to do and the pass is
+            // an ordinary one writing its single attachment.
+            device.DeclarePass(new PassDeclaration
+            {
+                Name = "FinalComposition/" + OptimumUpscaledSceneIndex.ToString(CultureInfo.InvariantCulture),
+                FramebufferId = PassDeclaration.BoundFramebuffer,
+                Reads = PassReads("FinalComposition", PrimaryIndex),
+                Flags = PassFlags.None,
+            });
+            return;
+        }
         device.DeclarePass(new PassDeclaration
         {
             Name = "FinalComposition/0",
@@ -205,6 +222,7 @@ public partial class VulkanClientPlatform
         case "Blit":
             AddColour(reads, PrimaryIndex, 0);
             AddColour(reads, OptimumFsrFramebufferIndex, 0);
+            AddColour(reads, OptimumUpscaledSceneIndex, 0);
             break;
         case "Before":
         case "ShadowFar":
@@ -244,6 +262,9 @@ public partial class VulkanClientPlatform
         AddColour(reads, OptimumTaaHistoryIndexB, 0);
         AddColour(reads, OptimumTaaHistoryIndexB, 1);
         AddColour(reads, OptimumTaaSharpenIndex, 0);
+        // DLSS plan, Phase 3: and the upscaled scene colour, which is what the post
+        // chain reads on a frame an upscaler produced.
+        AddColour(reads, OptimumUpscaledSceneIndex, 0);
     }
 
     private void AddColour(List<int> reads, int index, int slot)

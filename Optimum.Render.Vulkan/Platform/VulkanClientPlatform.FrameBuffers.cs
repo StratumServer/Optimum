@@ -22,6 +22,7 @@ public partial class VulkanClientPlatform
     private const int OptimumTaaHistoryIndexA = 19;
     private const int OptimumTaaHistoryIndexB = 20;
     private const int OptimumTaaSharpenIndex = 21;
+    private const int OptimumUpscaledSceneIndex = 22;
     private const int OptimumGlR32f = 0x822E;
 
     // GL keeps the clear colour in driver state and applies it at glClear; the device
@@ -53,11 +54,24 @@ public partial class VulkanClientPlatform
         int shadowMapQuality = ClientSettings.ShadowMapQuality;
         float ssaaLevel = ClientSettings.SSAA;
 
-        int width = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
-        int height = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
-        if (width == 0 || height == 0)
+        // DLSS plan, Phase 3: the product the client has always computed is the display
+        // size; the render size is the upscaler's own answer for it, or the same number
+        // again when no upscaler is running. Same split, same order, same fallbacks as
+        // the GL body.
+        int displayWidth = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
+        int displayHeight = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
+        if (displayWidth == 0 || displayHeight == 0)
         {
             return list;
+        }
+        int width = displayWidth;
+        int height = displayHeight;
+        bool upscaling = OptimumTryPlanUpscaleRenderSize(
+            displayWidth, displayHeight, out int upscaleRenderWidth, out int upscaleRenderHeight);
+        if (upscaling)
+        {
+            width = upscaleRenderWidth;
+            height = upscaleRenderHeight;
         }
 
         bool taaRequested = OptimumTaaRequested;
@@ -212,13 +226,31 @@ public partial class VulkanClientPlatform
             list[15] = CreateOptimumColorTarget(ssaoWidth, ssaoHeight, EnumTextureInternalFormat.Rgba8);
         }
 
-        list[2] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
-        list[3] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba8);
-        list[9] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
-        list[8] = CreateOptimumColorTarget(width / 4, height / 4, EnumTextureInternalFormat.Rgba8);
-        list[4] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f);
-        list[7] = CreateOptimumColorTarget(width / 2, height / 2, EnumTextureInternalFormat.Rgba16f);
-        list[10] = CreateOptimumColorTarget(width, height, EnumTextureInternalFormat.Rgba16f);
+        // DLSS plan, Phase 3: everything after the upscale runs at the display size -
+        // FindBright, the blur chain (its own halves and quarters of it), god rays and
+        // luma. With no upscaler the display size is the render size and these are the
+        // sizes they have always had.
+        list[2] = CreateOptimumColorTarget(displayWidth / 2, displayHeight / 2, EnumTextureInternalFormat.Rgba8);
+        list[3] = CreateOptimumColorTarget(displayWidth / 2, displayHeight / 2, EnumTextureInternalFormat.Rgba8);
+        list[9] = CreateOptimumColorTarget(displayWidth / 4, displayHeight / 4, EnumTextureInternalFormat.Rgba8);
+        list[8] = CreateOptimumColorTarget(displayWidth / 4, displayHeight / 4, EnumTextureInternalFormat.Rgba8);
+        list[4] = CreateOptimumColorTarget(displayWidth, displayHeight, EnumTextureInternalFormat.Rgba16f);
+        list[7] = CreateOptimumColorTarget(displayWidth / 2, displayHeight / 2, EnumTextureInternalFormat.Rgba16f);
+        list[10] = CreateOptimumColorTarget(displayWidth, displayHeight, EnumTextureInternalFormat.Rgba16f);
+        if (upscaling)
+        {
+            try
+            {
+                list[OptimumUpscaledSceneIndex] = CreateOptimumUpscaledSceneTarget(displayWidth, displayHeight);
+            }
+            catch (Exception error)
+            {
+                // No target, no upscale: the setting stands down for the session and the
+                // next rebuild sizes the world at the display resolution again.
+                DisableOptimumUpscaler("the upscaled scene target (device): " + error.Message);
+                list[OptimumUpscaledSceneIndex] = null;
+            }
+        }
 
         // Optimum: TAA history, render-resolution like Primary. Two slots so the
         // resolve reads last frame's parity while writing this frame's; never
@@ -388,6 +420,49 @@ public partial class VulkanClientPlatform
         SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
         device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
         device.SetDrawBuffers(target.FboId, 1);
+        return target;
+    }
+
+    /// <summary>
+    /// DLSS plan, Phase 3: the display-resolution target an upscaler writes and the rest
+    /// of the frame is composited into.
+    ///
+    /// Two things make it different from every other post-chain target. Its colour image
+    /// carries <c>VK_IMAGE_USAGE_STORAGE_BIT</c>, because an upscaler writes it as a
+    /// storage image (NGX answers <c>FAIL_RWFlagMissing</c> otherwise), so it goes
+    /// through the upscale creation route rather than <c>CreateTexture2D</c>. And it owns
+    /// a depth attachment - the nearest-neighbour upscale of Primary's depth, refilled
+    /// once per frame - so the AfterFinalComposition overlays, which draw depth-tested 3D
+    /// world content into the composited image, still test against the world they sit in.
+    ///
+    /// Neither image is a transient: both are read and written across pass boundaries in
+    /// the same frame, and the depth one carries content from before the upscale.
+    /// </summary>
+    private FrameBufferRef CreateOptimumUpscaledSceneTarget(int width, int height)
+    {
+        FrameBufferRef target = new FrameBufferRef();
+        target.Width = width;
+        target.Height = height;
+        target.FboId = device.CreateFramebuffer(width, height);
+        target.ColorTextureIds = new int[1];
+        target.ColorTextureIds[0] = device.CreateUpscaleTexture(
+            width, height, Silk.NET.Vulkan.Format.R8G8B8A8Unorm, storage: true);
+        // The blit, the bloom chain and the screenshot all sample it; linear and clamped,
+        // like every other post-chain colour target.
+        SetupOptimumTextureSampler(target.ColorTextureIds[0], 9729, 33071);
+        device.AttachTexture(target.FboId, EnumFramebufferAttachment.ColorAttachment0, target.ColorTextureIds[0], 0);
+
+        target.DepthTextureId = device.CreateTexture2D(width, height,
+            EnumTextureInternalFormat.DepthComponent32, EnumTexturePixelFormat.DepthComponent, IntPtr.Zero, false);
+        // NEAREST, exactly as Primary's depth: nothing may interpolate a depth across a
+        // silhouette, least of all a buffer that was point-upscaled to begin with.
+        SetupOptimumTextureSampler(target.DepthTextureId, 9728, 33071);
+        device.AttachTexture(target.FboId, EnumFramebufferAttachment.DepthAttachment, target.DepthTextureId, 0);
+        device.SetDrawBuffers(target.FboId, 1);
+        if (!device.CheckFramebufferComplete(target.FboId, out string status))
+        {
+            throw new Exception("Optimum upscaled scene FBO: " + status);
+        }
         return target;
     }
 

@@ -131,6 +131,12 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
+        // DLSS plan, Phase 3: the upscaler's placement - injected into
+        // ClientPlatformWindows with its flags, so these arrive virtual there rather than
+        // through methodsToVirtualize.
+        new(false, "get_OptimumUpscalerActive", Array.Empty<string>()),
+        new(false, "OptimumTryPlanUpscaleRenderSize", new[] { "Int32", "Int32", "Int32&", "Int32&" }),
+        new(false, "RenderOptimumUpscale", Array.Empty<string>()),
         // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),

@@ -49,7 +49,14 @@ public class ClientPlatformWindowsVanillaRegionsTests
         // DLSS plan, Phase 2: the temporal pipeline's shared questions and the
         // upscaler's half of DisableOptimumTaa.
         "OptimumTemporalRequested", "OptimumMotionWritesReady", "DisableOptimumUpscaler",
-        "OptimumTaaSharpenIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
+        "OptimumTaaSharpenIndex",
+        // DLSS plan, Phase 3: the upscaler's placement in the frame - its
+        // display-resolution target, the per-frame flag, the platform questions the
+        // Vulkan platform answers and the screenshot redirect.
+        "OptimumUpscaledSceneIndex", "optimumUpscaledThisFrame", "OptimumUpscalerActive",
+        "OptimumTryPlanUpscaleRenderSize", "RenderOptimumUpscale", "OptimumCompositeFrameBuffer",
+        "OptimumUpscaledThisFrame", "OptimumBindCompositeForCapture",
+        "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",
         "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RenderWidth", "RestorePrimaryDrawBuffers",
@@ -74,7 +81,8 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "DisposeFrameBuffers", "GetGraphicsCardRenderer", "GlGetMaxTextureSize", "GlToggleBlend",
         "LoadFrameBuffer", "LogAndTestHardwareInfosStage2", "MergeTransparentRenderPass", "MouseGrabbed",
         "Mouse_WheelChanged", "RebuildFrameBuffers", "RenderFinalComposition", "RenderFullscreenTriangle",
-        "RenderPostprocessingEffects", "SetupDefaultFrameBuffers", "Start", "UnloadFrameBuffer",
+        "RenderPostprocessingEffects", "SaveScreenshot", "GrabScreenshot",
+        "SetupDefaultFrameBuffers", "Start", "UnloadFrameBuffer",
         "UpdateMesh", "UpdateSSBOMesh", "Window_Resize", "updateIndices", "updateVAO", "window_RenderFrame",
 
         // Compile fix-ups only: decompiler artefacts the donor tree rewrites to build

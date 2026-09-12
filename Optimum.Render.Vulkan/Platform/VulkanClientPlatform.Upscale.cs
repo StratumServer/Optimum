@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Optimum.Render.Vulkan.Core;
+using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 
 namespace Optimum.Render.Vulkan.Platform;
@@ -95,6 +97,125 @@ public partial class VulkanClientPlatform
         }
         upscaler = null;
         OptimumConfig.ClearUpscalerPlan();
+    }
+
+    // ------------------------------------------------------- the placement
+
+    /// <summary>
+    /// DLSS plan, Phase 3: whether the frame may be planned and evaluated through an
+    /// upscaler. The host's own liveness plus the one thing the placement needs beyond
+    /// it - the motion attachment, without which there is nothing to reproject with.
+    /// </summary>
+    public override bool OptimumUpscalerActive => UpscalerActive && MotionAttachmentIndex >= 0;
+
+    /// <summary>
+    /// DLSS plan, Phase 3: what to render at for this display size, from the vendor's
+    /// own optimal-settings query. Called from <c>SetupDefaultFrameBuffers</c>, so it
+    /// runs before there are any framebuffers and must not touch them.
+    ///
+    /// The plan is remembered rather than recomputed per frame: the feature is created
+    /// for one (render size, display size, preset) triple, and the frame must ask for
+    /// exactly the triple its targets were allocated for.
+    /// </summary>
+    public override bool OptimumTryPlanUpscaleRenderSize(
+        int displayWidth, int displayHeight, out int renderWidth, out int renderHeight)
+    {
+        renderWidth = displayWidth;
+        renderHeight = displayHeight;
+        if (upscaler == null || !upscaler.Active) return false;
+        if (!upscaler.TryPlan(displayWidth, displayHeight, OptimumConfig.UpscalerQuality, out UpscalePlan plan))
+        {
+            return false;
+        }
+        plannedUpscale = plan;
+        renderWidth = plan.RenderWidth;
+        renderHeight = plan.RenderHeight;
+        LogUpscaler("[Optimum] DLSS plan: " + plan);
+        return true;
+    }
+
+    /// <summary>The plan the framebuffers were allocated for; default when there is none.</summary>
+    private UpscalePlan plannedUpscale;
+
+    /// <summary>Whether the one-time "no depth blit here" line has been logged.</summary>
+    private bool upscaleDepthRefused;
+
+    /// <summary>
+    /// DLSS plan, Phase 3: the evaluate, where the TAA resolve would be - the jittered
+    /// render-resolution colour, depth and motion in, the display-resolution scene colour
+    /// out, followed by the one nearest-neighbour depth upscale the
+    /// AfterFinalComposition overlays depth-test against.
+    ///
+    /// <para><b>Edge behaviour of that depth.</b> A nearest-neighbour upscale gives every
+    /// display pixel the depth of the render pixel it lands in, so along a silhouette the
+    /// overlay's depth test is quantised to the render grid: a depth-tested overlay can
+    /// gain or lose up to one render pixel (about 1.5 display pixels at the Quality
+    /// preset) of coverage against the edge it meets. That is deliberate. The
+    /// alternative - moving the upscaler after the overlays - would feed DLSS a colour
+    /// buffer with un-jittered, un-reprojectable 2D content baked into it, which the DLSS
+    /// Programming Guide section 3.1 rules out.</para>
+    ///
+    /// <para>Any failure ends the same way every other upscaler failure does: false, one
+    /// log line, the setting stood down, and a frame that runs the chain it ran before
+    /// the upscaler was asked for.</para>
+    /// </summary>
+    public override bool RenderOptimumUpscale()
+    {
+        if (!OptimumUpscalerActive || upscaler == null) return false;
+
+        List<FrameBufferRef> buffers = FrameBuffers;
+        if (buffers == null || buffers.Count <= OptimumUpscaledSceneIndex) return false;
+        FrameBufferRef primary = buffers[0];
+        FrameBufferRef target = buffers[OptimumUpscaledSceneIndex];
+        if (primary == null || target == null) return false;
+        if (primary.ColorTextureIds == null || primary.ColorTextureIds.Length <= MotionAttachmentIndex) return false;
+
+        // The triple the targets were really allocated for, which is the one the feature
+        // must serve. Taken from the targets rather than from the remembered plan, so a
+        // rebuild that produced different sizes cannot evaluate against a stale feature.
+        UpscalePlan plan = new UpscalePlan(
+            primary.Width, primary.Height, target.Width, target.Height,
+            DlssUpscaler.QualityOf(OptimumConfig.UpscalerQuality));
+        if (!upscaler.EnsureFeature(plan)) return false;
+
+        IOptimumTemporalContext frame = OptimumTemporal.Context;
+        NgxDlssEvaluation evaluation = new NgxDlssEvaluation
+        {
+            // Temporal contract 7.2: NGX wants the offset of a projection built by
+            // adding the shear; ours subtracts it, so it gets -JitterPx, render pixels.
+            JitterOffsetX = -frame.JitterPx.X,
+            JitterOffsetY = -frame.JitterPx.Y,
+            // 7.1 for raw NGX: our vectors are already render pixels.
+            MotionVectorScaleX = 1f,
+            MotionVectorScaleY = 1f,
+            // Section 5: any reset reason at all throws the history away rather than
+            // reprojecting it - a resize, a teleport, a rebase, a world load.
+            Reset = frame.Reset,
+        };
+
+        NgxResult result = upscaler.Evaluate(
+            primary.ColorTextureIds[0],
+            primary.DepthTextureId,
+            primary.ColorTextureIds[MotionAttachmentIndex],
+            target.ColorTextureIds[0],
+            evaluation);
+        if (result != NgxResult.Success)
+        {
+            DisableOptimumUpscaler("NVSDK_NGX_VULKAN_EvaluateFeature: " + NgxInterop.Describe(result));
+            upscaler.RetireFeature();
+            return false;
+        }
+
+        // The overlays' depth, once per frame, from the depth the world was drawn with.
+        if (target.DepthTextureId > 0 &&
+            !device.UpscaleDepthNearest(primary.DepthTextureId, target.DepthTextureId) &&
+            !upscaleDepthRefused)
+        {
+            upscaleDepthRefused = true;
+            LogUpscaler("[Optimum] DLSS: this driver refuses a depth blit, so the late 3D overlays " +
+                "(selection outline and similar) keep whatever depth the target holds.");
+        }
+        return true;
     }
 
     /// <summary>
