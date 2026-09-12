@@ -70,6 +70,12 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "InitializeGraphics",
         "ShutdownGraphics",
+        // DLSS plan, Phase 1: render size vs display size, one source of truth each.
+        // Neutral bodies answer the window size; ClientPlatformWindows overrides them.
+        "RenderWidth",
+        "RenderHeight",
+        "DisplayWidth",
+        "DisplayHeight",
         // Phase 1A step 2: the TAA/FSR members the renderers call without a cast to
         // ClientPlatformWindows. Neutral bodies; ClientPlatformWindows overrides them.
         "MotionAttachmentIndex",
@@ -288,6 +294,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "DeleteOcclusionQuery",
         "ReadDefaultFramebuffer",
         "GraphicsBackendName",
+        // DLSS plan, Phase 1: the GL overrides of the render/display size - Primary's
+        // allocated size and the live window client size.
+        "RenderWidth",
+        "RenderHeight",
+        "DisplayWidth",
+        "DisplayHeight",
         "OptimumTaaHistoryIndexA",
         "OptimumTaaHistoryIndexB",
         "OptimumGlR32f",
@@ -899,6 +911,9 @@ var targets = new List<MethodTarget>
     // Vulkan backend: the GUI depth clear between the world and the interface,
     // the only raw GL left in the screen loop.
     new("Vintagestory.Client.ScreenManager", "Render", 1),
+    // DLSS plan, Phase 1: the world viewport reads the platform's render size instead
+    // of recomputing WindowSize * ClientSettings.SSAA.
+    new("Vintagestory.Client.GuiScreenRunningGame", "RenderToPrimary", 1),
     // Vulkan backend: the post-process chain's remaining direct GL - viewport,
     // draw-buffer selection, depth toggle and the SSAO clear.
     // Vulkan backend: the device's default target and swapchain follow the

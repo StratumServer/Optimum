@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..1d2a981 100644
+index 6edf0c9..8b6214b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -250,12 +250,84 @@ index 6edf0c9..1d2a981 100644
  	private int ShadowMapQuality;
  
  	private float ssaaLevel;
-@@ -256,10 +458,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -256,10 +458,95 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
  	public override List<FrameBufferRef> FrameBuffers => frameBuffers;
  
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 1): the render size, read from the allocated Primary
++	/// target instead of recomputed. Primary is the target the world is drawn into, so
++	/// its size <em>is</em> the render size by definition, and the blur, god-ray, SSAO
++	/// and final passes all derive their viewports and inverse-frame-size uniforms from
++	/// it rather than from <c>ClientSize * SSAA</c>. That product survives only as the
++	/// fallback for the window between the two (before the first
++	/// <see cref="SetupDefaultFrameBuffers" /> and while the window is minimised), and
++	/// it produces exactly the value the allocator would have produced, truncation
++	/// included.
++	///
++	/// Both backends fill Primary's size: VulkanClientPlatform overrides
++	/// SetupDefaultFrameBuffers but writes the same Width/Height, so these properties
++	/// need no device override.
++	/// </summary>
++	public override int RenderWidth
++	{
++		get
++		{
++			List<FrameBufferRef> buffers = frameBuffers;
++			if (buffers != null && buffers.Count > 0)
++			{
++				FrameBufferRef primary = buffers[0];
++				if (primary != null && primary.Width > 0)
++				{
++					return primary.Width;
++				}
++			}
++			return (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
++		}
++	}
++
++	public override int RenderHeight
++	{
++		get
++		{
++			List<FrameBufferRef> buffers = frameBuffers;
++			if (buffers != null && buffers.Count > 0)
++			{
++				FrameBufferRef primary = buffers[0];
++				if (primary != null && primary.Height > 0)
++				{
++					return primary.Height;
++				}
++			}
++			return (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 1): the display size - the window's client size, which
++	/// is what the default framebuffer, the HUD and the final blit are sized by. The live
++	/// window value, exactly as the <c>EnumFrameBuffer.Default</c> viewport used it
++	/// before this phase; <see cref="WindowSize" /> is the same number one resize event
++	/// later.
++	/// </summary>
++	public override int DisplayWidth
++	{
++		get
++		{
++			return ((NativeWindow)window).ClientSize.X;
++		}
++	}
++
++	public override int DisplayHeight
++	{
++		get
++		{
++			return ((NativeWindow)window).ClientSize.Y;
++		}
++	}
++
 +	/// <summary>
 +	/// Optimum: one of the two TAA history slots, selected by frame parity
 +	/// (typically <c>frameIndex &amp; 1</c>). Null when TAA is off or its targets
@@ -274,7 +346,7 @@ index 6edf0c9..1d2a981 100644
  		get
  		{
  			return serverRunning;
-@@ -278,34 +493,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -278,34 +565,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -337,7 +409,7 @@ index 6edf0c9..1d2a981 100644
  	public override bool GlDebugMode
  	{
  		get
-@@ -478,40 +713,162 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,40 +785,162 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -506,7 +578,7 @@ index 6edf0c9..1d2a981 100644
  	}
  
  	public void LogAndTestHardwareInfosStage1()
-@@ -531,11 +888,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -531,11 +960,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		logger.Notification("C# Framework: " + GetFrameworkInfos());
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
@@ -519,7 +591,7 @@ index 6edf0c9..1d2a981 100644
  		logger.Notification("Graphics Card Version: " + GL.GetString((StringName)7938));
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
-@@ -702,24 +1059,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1131,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
@@ -564,7 +636,7 @@ index 6edf0c9..1d2a981 100644
  
  	private void Window_FileDrop(FileDropEventArgs e)
  	{
-@@ -796,10 +1171,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1243,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
@@ -584,7 +656,7 @@ index 6edf0c9..1d2a981 100644
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1023,11 +1407,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1023,11 +1479,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.DrawElements(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, 0);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
@@ -597,7 +669,7 @@ index 6edf0c9..1d2a981 100644
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
-@@ -1150,11 +1534,509 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,11 +1606,509 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -1108,7 +1180,7 @@ index 6edf0c9..1d2a981 100644
  		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
  		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
  		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
-@@ -1187,10 +2069,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1187,10 +2141,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
  		if (num == 0 || num2 == 0)
  		{
@@ -1126,7 +1198,7 @@ index 6edf0c9..1d2a981 100644
  		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
-@@ -1210,11 +2099,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1210,11 +2171,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -1143,7 +1215,7 @@ index 6edf0c9..1d2a981 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1251,10 +2144,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1251,10 +2216,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
@@ -1182,7 +1254,29 @@ index 6edf0c9..1d2a981 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1436,10 +2357,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1394,13 +2387,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+ 		setupAttachment(frameBufferRef3, num / 4, num2 / 4, 0, val, (PixelInternalFormat)32856);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.BlurHorizontalLowRes);
++		// Optimum (DLSS plan, Phase 1): vanilla left this slot's Width/Height at zero
++		// while attaching a quarter-resolution texture, because nothing read them - the
++		// low-res blur viewport was recomputed from ClientSize * SSAA instead. It is
++		// read now (and the device path has always filled it), so the record has to
++		// describe the texture it owns. Same size, no allocation change.
+ 		frameBufferRef = (list[8] = new FrameBufferRef
+ 		{
+-			FboId = GL.GenFramebuffer()
++			FboId = GL.GenFramebuffer(),
++			Width = num / 4,
++			Height = num2 / 4
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+ 		setupAttachment(frameBufferRef3, num / 4, num2 / 4, 0, val, (PixelInternalFormat)32856);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+@@ -1436,10 +2436,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
@@ -1258,7 +1352,7 @@ index 6edf0c9..1d2a981 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +2534,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +2613,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -1273,7 +1367,7 @@ index 6edf0c9..1d2a981 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +2557,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +2636,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1287,7 +1381,7 @@ index 6edf0c9..1d2a981 100644
 +	/// member for it) attachments.
 +	/// </summary>
 +	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
-+	{
+ 	{
 +		FrameBufferRef target = new FrameBufferRef
 +		{
 +			FboId = GL.GenFramebuffer(),
@@ -1339,7 +1433,7 @@ index 6edf0c9..1d2a981 100644
 +	}
 +
 +	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
- 	{
++	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
 +		// Transparent, so the same handle appears in more than one FrameBufferRef.
@@ -1368,7 +1462,7 @@ index 6edf0c9..1d2a981 100644
  			}
  		}
  	}
-@@ -1591,11 +2651,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +2730,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1387,19 +1481,44 @@ index 6edf0c9..1d2a981 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1619,27 +2686,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		LoadFrameBuffer(EnumFrameBuffer.Primary);
+@@ -1606,40 +2752,98 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			float num = 1f;
+ 			GL.ClearBuffer((ClearBuffer)6145, 0, ref num);
+ 		}
  	}
  
- 	public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)
- 	{
+-	public override void LoadFrameBuffer(FrameBufferRef frameBuffer, int textureId)
+-	{
+-		CurrentFrameBuffer = frameBuffer;
+-		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, textureId, 0);
+-	}
+-
+-	public override void UnloadFrameBuffer(FrameBufferRef frameBuffer)
+-	{
+-		LoadFrameBuffer(EnumFrameBuffer.Primary);
+-	}
+-
+-	public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)
++	public override void LoadFrameBuffer(FrameBufferRef frameBuffer, int textureId)
++	{
++		CurrentFrameBuffer = frameBuffer;
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, textureId, 0);
++	}
++
++	public override void UnloadFrameBuffer(FrameBufferRef frameBuffer)
++	{
++		LoadFrameBuffer(EnumFrameBuffer.Primary);
++	}
++
++	public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)
++	{
 +		// Mono.Cecil transplant.
 +		// The clears themselves are ClearFrameBufferPass (GL below, the device in
 +		// VulkanClientPlatform); the target selection and the TAA window state stay here.
- 		switch (framebuffer)
- 		{
- 		case EnumFrameBuffer.Default:
- 			CurrentFrameBufferKeepVw = null;
++		switch (framebuffer)
++		{
++		case EnumFrameBuffer.Default:
++			CurrentFrameBufferKeepVw = null;
 +			ClearFrameBufferPass(framebuffer);
 +			CurrentFrameBufferKeepVw = frameBuffers[0];
 +			break;
@@ -1426,10 +1545,11 @@ index 6edf0c9..1d2a981 100644
 +	/// per pass. The target is already bound by the caller.
 +	/// </summary>
 +	public override void ClearFrameBufferPass(EnumFrameBuffer framebuffer)
-+	{
-+		switch (framebuffer)
-+		{
-+		case EnumFrameBuffer.Default:
+ 	{
+ 		switch (framebuffer)
+ 		{
+ 		case EnumFrameBuffer.Default:
+-			CurrentFrameBufferKeepVw = null;
  			GL.DrawBuffer((DrawBufferMode)1029);
  			GL.Clear((ClearBufferMask)16640);
 -			CurrentFrameBufferKeepVw = frameBuffers[0];
@@ -1474,7 +1594,7 @@ index 6edf0c9..1d2a981 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,71 +2795,68 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +2874,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1511,15 +1631,25 @@ index 6edf0c9..1d2a981 100644
  			CurrentFrameBufferKeepVw = null;
 -			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
 -			GL.DrawBuffer((DrawBufferMode)1029);
-+			GlViewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
++			// Optimum (DLSS plan, Phase 1): the display size, not the render size - the
++			// default framebuffer is the window.
++			GlViewport(0, 0, DisplayWidth, DisplayHeight);
 +			SelectBackDrawBuffer();
  			break;
  		case EnumFrameBuffer.BlurHorizontalMedRes:
  		case EnumFrameBuffer.BlurVerticalMedRes:
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
- 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
+-			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
++		{
++			// Optimum (DLSS plan, Phase 1): the target's own allocated size. It is
++			// num/2, which is the same integer the old (int)(ssaa * ClientSize / 2f)
++			// produced - floor(floor(x)/2) == floor(x/2) - and it stays right once an
++			// upscaler decouples the render size from ClientSize * SSAA.
++			FrameBufferRef medResBlur = frameBuffers[(int)framebuffer];
++			GlViewport(0, 0, medResBlur.Width, medResBlur.Height);
++			CurrentFrameBufferKeepVw = medResBlur;
  			break;
++		}
  		case EnumFrameBuffer.SSAOBlurVertical:
  		case EnumFrameBuffer.SSAOBlurHorizontal:
  		case EnumFrameBuffer.SSAOBlurVerticalHalfRes:
@@ -1534,17 +1664,27 @@ index 6edf0c9..1d2a981 100644
  		case EnumFrameBuffer.BlurVerticalLowRes:
  		case EnumFrameBuffer.BlurHorizontalLowRes:
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
- 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
+-			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
++		{
++			// Optimum (DLSS plan, Phase 1): num/4, read from the target.
++			FrameBufferRef lowResBlur = frameBuffers[(int)framebuffer];
++			GlViewport(0, 0, lowResBlur.Width, lowResBlur.Height);
++			CurrentFrameBufferKeepVw = lowResBlur;
  			break;
++		}
  		case EnumFrameBuffer.FindBright:
  			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.GodRays:
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
- 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
+-			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
++		{
++			// Optimum (DLSS plan, Phase 1): num/2, read from the target.
++			FrameBufferRef godRaysTarget = frameBuffers[(int)framebuffer];
++			GlViewport(0, 0, godRaysTarget.Width, godRaysTarget.Height);
++			CurrentFrameBufferKeepVw = godRaysTarget;
  			break;
++		}
  		case EnumFrameBuffer.Luma:
 -			GL.Disable((EnableCap)3042);
 +			SetBlendEnabled(false);
@@ -1560,14 +1700,19 @@ index 6edf0c9..1d2a981 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,39 +2875,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1752,40 +2970,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
  			{
- 				CurrentFrameBufferKeepVw = frameBuffers[0];
+-				CurrentFrameBufferKeepVw = frameBuffers[0];
 -				GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+				GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++				// Optimum (DLSS plan, Phase 1): Primary is the render size by
++				// definition, so the viewport comes from the target itself.
++				FrameBufferRef primaryTarget = frameBuffers[0];
++				CurrentFrameBufferKeepVw = primaryTarget;
++				GlViewport(0, 0, primaryTarget.Width, primaryTarget.Height);
  			}
  			else
  			{
@@ -1632,7 +1777,9 @@ index 6edf0c9..1d2a981 100644
  		}
 -		GL.Viewport(0, 0, (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel), (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel));
 +		// Mono.Cecil transplant.
-+		GlViewport(0, 0, (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel), (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel));
++		// Optimum (DLSS plan, Phase 1): this restores the world's viewport, which is the
++		// render size; no target is bound yet at this point, so it comes from the platform.
++		GlViewport(0, 0, RenderWidth, RenderHeight);
  		if (OffscreenBuffer)
  		{
  			CurrentFrameBufferKeepVw = frameBuffers[0];
@@ -1646,7 +1793,7 @@ index 6edf0c9..1d2a981 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,22 +2957,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +3058,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -1907,19 +2054,25 @@ index 6edf0c9..1d2a981 100644
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,20 +3221,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,77 +3322,106 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
  			return;
  		}
+-		int x = ((NativeWindow)window).ClientSize.X;
+-		int y = ((NativeWindow)window).ClientSize.Y;
 +		// Mono.Cecil transplant.
 +		// The pass structure is API-neutral - it is framebuffer selection, a
 +		// fullscreen triangle and uniforms, all of which are platform virtuals.
 +		// The SSAO clear and the final blend enable are too (ClearSsaoTarget,
 +		// SetBlendEnabled).
- 		int x = ((NativeWindow)window).ClientSize.X;
- 		int y = ((NativeWindow)window).ClientSize.Y;
++		// Optimum (DLSS plan, Phase 1): one read of the render size for the whole post
++		// chain, instead of fifteen recomputations of ClientSize * SSAA. Every pass below
++		// either reads this or reads the size of the target it is drawing into; nothing
++		// here multiplies the window size by the render scale any more.
++		int renderWidth = RenderWidth;
++		int renderHeight = RenderHeight;
 +		// Optimum TAA: resolve first, so bloom, god rays and the final input read
 +		// the temporally stable image instead of the jittered one.
 +		RenderOptimumTaaResolve();
@@ -1944,7 +2097,12 @@ index 6edf0c9..1d2a981 100644
  			RenderFullscreenTriangle(screenQuad);
  			findbright.Stop();
  			ShaderProgramBlur blur = ShaderPrograms.Blur;
-@@ -1848,45 +3260,48 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			blur.Use();
+-			blur.Uniform("frameSize", (float)x * ssaaLevel, (float)y * ssaaLevel);
++			blur.Uniform("frameSize", (float)renderWidth, (float)renderHeight);
+ 			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalMedRes);
+ 			blur.IsVertical = 0;
+ 			blur.InputTexture2D = frameBuffers[4].ColorTextureIds[0];
  			RenderFullscreenTriangle(screenQuad);
  			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
  			blur.IsVertical = 1;
@@ -1953,7 +2111,11 @@ index 6edf0c9..1d2a981 100644
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
 +			// Mono.Cecil transplant: GlViewport is the routed form of GL.Viewport
 +			// and its GL body is the identical call.
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
++			// Optimum (DLSS plan, Phase 1): LoadFrameBuffer on the very next line sets
++			// the low-res viewport from the target itself; this call only keeps the
++			// ordering vanilla had.
++			FrameBufferRef lowResBlurTarget = frameBuffers[9];
++			GlViewport(0, 0, lowResBlurTarget.Width, lowResBlurTarget.Height);
  			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalLowRes);
  			blur.IsVertical = 0;
  			blur.InputTexture2D = frameBuffers[3].ColorTextureIds[0];
@@ -1964,7 +2126,7 @@ index 6edf0c9..1d2a981 100644
  			RenderFullscreenTriangle(screenQuad);
  			blur.Stop();
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			GlViewport(0, 0, renderWidth, renderHeight);
  			GlToggleBlend(on: true);
  		}
  		if (RenderGodRays)
@@ -1972,7 +2134,8 @@ index 6edf0c9..1d2a981 100644
  			LoadFrameBuffer(EnumFrameBuffer.GodRays);
  			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
  			godrays.Use();
- 			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
+-			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
++			godrays.Uniform("invFrameSizeIn", 1f / (float)renderWidth, 1f / (float)renderHeight);
 +			godrays.Uniform("maxGodRaySamples", OptimumConfig.GodRaysSampleLimit);
  			godrays.SunPosScreenIn = ShaderUniforms.SunPositionScreen;
  			godrays.SunPos3dIn = ShaderUniforms.LightPosition3D;
@@ -1986,7 +2149,7 @@ index 6edf0c9..1d2a981 100644
  			RenderFullscreenTriangle(screenQuad);
  			godrays.Stop();
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			GlViewport(0, 0, renderWidth, renderHeight);
  		}
  		if (RenderSSAO && projectMatrix != null)
  		{
@@ -1999,14 +2162,26 @@ index 6edf0c9..1d2a981 100644
  			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
  			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
  			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-@@ -1915,35 +3330,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
++			// Optimum (DLSS plan, Phase 1): vanilla's quirk, kept exactly - at SSAA 1
++			// the SSAO pass is told half the render size (which is the SSAO target's
++			// real size), at any other SSAA the full render size. Only the recomputation
++			// of that render size is gone.
+ 			float num = ((ssaaLevel == 1f) ? 0.5f : 1f);
+-			ssao.Uniform("screenSize", ssaaLevel * (float)x * num, ssaaLevel * (float)y * num);
++			ssao.Uniform("screenSize", (float)renderWidth * num, (float)renderHeight * num);
+ 			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
+ 			ssao.Projection = projectMatrix;
+ 			ssao.SamplesArray(64, ssaoKernel);
+ 			RenderFullscreenTriangle(screenQuad);
+ 			ssao.Stop();
+@@ -1915,35 +3443,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
  			bilateralblur.Stop();
  			GlToggleBlend(on: true);
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			GlViewport(0, 0, renderWidth, renderHeight);
  		}
 -		if (RenderFXAA)
 +		if (RenderFXAA && !TaaResolvedThisFrame)
@@ -2050,7 +2225,7 @@ index 6edf0c9..1d2a981 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,19 +3379,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,26 +3492,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -2076,7 +2251,16 @@ index 6edf0c9..1d2a981 100644
  			if (RenderSSAO)
  			{
  				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
-@@ -1987,24 +3415,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			}
+-			final.Uniform("invFrameSizeIn", 1f / ((float)((NativeWindow)window).ClientSize.X * ssaaLevel), 1f / ((float)((NativeWindow)window).ClientSize.Y * ssaaLevel));
++			// Optimum (DLSS plan, Phase 1): the render size, read from Primary.
++			final.Uniform("invFrameSizeIn", 1f / (float)RenderWidth, 1f / (float)RenderHeight);
+ 			final.GammaLevel = ClientSettings.GammaLevel;
+ 			final.ExtraGamma = ClientSettings.ExtraGammaLevel;
+ 			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
+ 			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
+ 			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
+@@ -1987,24 +3529,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -2133,7 +2317,7 @@ index 6edf0c9..1d2a981 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3470,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +3584,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -2619,7 +2803,7 @@ index 6edf0c9..1d2a981 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4106,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4220,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -2659,7 +2843,7 @@ index 6edf0c9..1d2a981 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +4504,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +4618,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -2712,7 +2896,7 @@ index 6edf0c9..1d2a981 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +4599,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +4713,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2757,7 +2941,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4636,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +4750,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2778,7 +2962,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4655,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +4769,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2799,7 +2983,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4674,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +4788,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2820,7 +3004,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4693,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +4807,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2841,7 +3025,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4716,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +4830,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -2862,7 +3046,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5278,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5392,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -2886,7 +3070,7 @@ index 6edf0c9..1d2a981 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +5637,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +5751,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

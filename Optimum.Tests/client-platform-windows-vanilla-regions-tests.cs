@@ -31,7 +31,11 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "BindProgramTextureCube", "BindSampler", "BindUBO", "ClearBoundFrameBuffer", "ClearDefaultDepth",
         "ClearFrameBufferPass", "ClearSsaoTarget", "ClearTextureRegion", "CreateOitTargets",
         "CreateOptimumHistoryTargetGl", "DeleteMeshHandle", "DeleteOcclusionQuery", "DeleteUBO",
-        "DeleteVertexArrayHandles", "DisableOptimumFsr", "DisableOptimumTaa", "DisposeShaderProgram",
+        "DeleteVertexArrayHandles", "DisableOptimumFsr", "DisableOptimumTaa",
+        // DLSS plan, Phase 1: the display size (window client size) and the render size
+        // (Primary's allocated size), overrides of the ClientPlatformAbstract virtuals.
+        "DisplayHeight", "DisplayWidth",
+        "DisposeShaderProgram",
         "EnableMotionDrawBuffers", "EnableMotionOnlyDrawBuffers", "EndFrame", "EndMotionOnlyWrite",
         "EndMotionWrite", "EndOcclusionQuery", "EnsureOptimumDefaults", "EnsureOptimumTimerResolution",
         "GenOcclusionQuery", "GraphicsBackendName", "InstallOptimumMotionWriteHooks",
@@ -44,8 +48,8 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumSsaoKernel", "OptimumTaaHistoryIndexA", "OptimumTaaHistoryIndexB", "OptimumTaaRequested",
         "OptimumTaaSharpenIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
-        "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderOptimumSkyMotion",
-        "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RestorePrimaryDrawBuffers",
+        "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",
+        "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RenderWidth", "RestorePrimaryDrawBuffers",
         "RestoreWorldDrawBuffers", "SelectBackDrawBuffer", "SelectFsrDrawBuffer", "SetBlendEnabled",
         "SetDepthRange", "SetOptimumMotionAttachmentIndex", "SetProgramSamplerUnit", "SetSamplerLodBias",
         "SetTextureDepthCompare", "SetTextureLodBias", "SetUniform", "SetUniformArray1", "SetUniformArray2",

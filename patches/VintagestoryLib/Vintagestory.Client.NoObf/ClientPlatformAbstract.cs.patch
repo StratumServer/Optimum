@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..4edec1c 100644
+index d6eb844..c3e5b54 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,436 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,481 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -20,6 +20,51 @@ index d6eb844..4edec1c 100644
 +
 +	public virtual void ShutdownGraphics()
 +	{
++	}
++
++	// Optimum (DLSS plan, Phase 1): the frame's two resolutions, one source of truth each.
++	//
++	// RenderWidth/RenderHeight is what the world and every post-processing input is drawn
++	// at - today the window's client size times ClientSettings.SSAA, tomorrow an upscaler's
++	// input size, which is why no caller may recompute that product any more.
++	// DisplayWidth/DisplayHeight is the window's client size: the default framebuffer, the
++	// HUD and the final blit.
++	//
++	// The bodies here answer the window size for both, which is exactly right for a platform
++	// that owns no offscreen targets; ClientPlatformWindows overrides them with the allocated
++	// Primary target's size (the single carrier of the render size) and the live window size.
++	// Per-target sizes are on FrameBufferRef.Width/Height - a pass that has a target bound
++	// reads that, not these.
++	public virtual int RenderWidth
++	{
++		get
++		{
++			return WindowSize.Width;
++		}
++	}
++
++	public virtual int RenderHeight
++	{
++		get
++		{
++			return WindowSize.Height;
++		}
++	}
++
++	public virtual int DisplayWidth
++	{
++		get
++		{
++			return WindowSize.Width;
++		}
++	}
++
++	public virtual int DisplayHeight
++	{
++		get
++		{
++			return WindowSize.Height;
++		}
 +	}
 +
 +	// Optimum TAA/FSR (Vulkan-native plan, Phase 1A step 2): the temporal members the
