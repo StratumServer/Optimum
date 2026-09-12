@@ -61,6 +61,10 @@ public partial class VulkanClientPlatform
         }
 
         bool taaRequested = OptimumTaaRequested;
+        // DLSS plan, Phase 2: the motion attachment serves both temporal consumers,
+        // exactly as on the GL path - our resolve, or an upscaler that replaces it.
+        // The history slots and the sharpen target below stay TAA's alone.
+        bool temporalRequested = OptimumTemporalRequested;
         int motionAttachmentIndex = -1;
 
         // Primary: depth, colour, glow, and the SSAO position/normal G-buffer.
@@ -95,7 +99,7 @@ public partial class VulkanClientPlatform
                 attachment >= 2 || ssaaLevel > 1f ? 9729 : 9728, attachment >= 2 ? 33069 : 10497);
             if (attachment >= 2) device.SetTextureBorderColor(textureId, 1f, 1f, 1f, 1f);
         }
-        if (taaRequested)
+        if (temporalRequested)
         {
             // Optimum: TAA motion attachment, appended after the SSAO G-buffer
             // so every existing attachment index is unchanged. Deliberately not
@@ -113,7 +117,9 @@ public partial class VulkanClientPlatform
             }
             catch (Exception error)
             {
+                // Both consumers lose their vectors, so both stand down.
                 DisableOptimumTaa("Primary motion attachment (device): " + error.Message);
+                DisableOptimumUpscaler("Primary motion attachment (device): " + error.Message);
                 motionAttachmentIndex = -1;
             }
         }

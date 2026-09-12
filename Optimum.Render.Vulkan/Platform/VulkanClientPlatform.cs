@@ -269,6 +269,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         {
             device = DeviceFactory();
 
+            // DLSS plan, Phase 2: prepared before the device is created, because
+            // NGX's instance and device extensions have to be requested at device
+            // creation. Nothing happens here when the setting is off.
+            PrepareUpscaler(device);
+
             // The marker goes down before the driver is touched: a crash inside
             // device creation is exactly the kind the next start must see. A
             // clean failure clears it again, since the caller falls back to
@@ -284,6 +289,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
+            // DLSS plan, Phase 2: NGX comes up on the device that now exists. A
+            // refusal leaves the client on the Vulkan device with no upscaler, one
+            // line in the log and the setting stood down - never a failed install.
+            BringUpUpscaler(device);
             // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
             RenderStageListener = new FrameGraphStageListener(this);
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
@@ -314,6 +323,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     {
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
+        // DLSS plan, Phase 2: the vendor runtime goes before the device it was
+        // initialised on - retire the feature, drain the timeline, shut NGX down.
+        // The other order is a use-after-free inside the driver.
+        ShutDownUpscaler();
         try
         {
             device?.Dispose();

@@ -56,6 +56,25 @@ public sealed unsafe partial class VulkanDevice
     }
 
     /// <summary>
+    /// The three handles a vendor runtime is initialised on. Zero on all three
+    /// before <see cref="Initialize" /> has succeeded, which is the only state a
+    /// caller has to distinguish.
+    /// </summary>
+    internal void UpscalerHandles(out IntPtr instance, out IntPtr physicalDevice, out IntPtr deviceHandle)
+    {
+        if (_context == null)
+        {
+            instance = IntPtr.Zero;
+            physicalDevice = IntPtr.Zero;
+            deviceHandle = IntPtr.Zero;
+            return;
+        }
+        instance = (IntPtr)_context.Instance.Handle;
+        physicalDevice = (IntPtr)_context.PhysicalDevice.Handle;
+        deviceHandle = (IntPtr)_context.Device.Handle;
+    }
+
+    /// <summary>
     /// Creates a DLSS feature on this frame's command buffer. The frame must be
     /// open: NGX records initialisation work into the buffer it is given.
     /// </summary>
