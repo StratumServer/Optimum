@@ -960,6 +960,16 @@ Acceptance: an agent can produce a 60-frame deterministic sequence on both backe
 line confirmed, without a window appearing on the user's desktop; the shimmer class of bug (jitter,
 disocclusion, AO noise) shows up as a number from that sequence.
 
+**Built 2026-09-12.** `OPTIMUM_HEADLESS` (hidden window - the surfaceless-device alternative was rejected
+because there is no surfaceless GL path in this client, so it would not be symmetric across backends),
+`OPTIMUM_HEADLESS_COMMANDS` (chat-command script: the section 0 scene and vanilla's own `SystemCinematicCamera`
+via `.cam load` / `.cam play`), `OPTIMUM_HEADLESS_FIXED_DT` (pins `ClientMain.DeltaTimeLimiter`),
+`OPTIMUM_HEADLESS_FRAMES` plus a frame list or a cadence (PPM per frame, through `ReadDefaultFramebuffer`),
+`scripts/dev/headless-capture.sh` end to end. The 30 FPS background cap comes free from the window never
+being focused. See `docs/ROADMAP.md`, "The headless render harness, honestly", for what it does not cover:
+a display server is still required, reproducibility is repeatable rather than bit-exact, and no camera path
+is checked in yet - which is why the acceptance sentence above is not yet a claim, only a capability.
+
 ### Roadmap item: GTAO (XeGTAO) replaces the vanilla SSAO
 
 Added 2026-09-12 at the user's request, after DLSS exposed the ambient occlusion as the last frame-wide
