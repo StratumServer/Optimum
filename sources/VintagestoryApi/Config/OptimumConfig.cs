@@ -438,6 +438,76 @@ public static class OptimumConfig
     public static bool TaaJitterDev = false;
 
     /// <summary>
+    /// The upscaler slot: "off" or "dlss" (DLSS Super Resolution through raw NGX).
+    ///
+    /// Off by default, and off is the whole of the old behaviour: with no
+    /// upscaler the render chain is exactly the pre-DLSS one, including the
+    /// in-house TAA resolve and the FSR 1 blit. An upscaler replaces the TAA
+    /// resolve rather than running beside it (see <see cref="UpscalerReplacesTaa" />).
+    ///
+    /// A string for the same reason <see cref="Renderer" /> is one: it is
+    /// persisted in optimum.json, and an unrecognised value has to degrade to
+    /// "off" rather than fail the parse.
+    /// </summary>
+    public static string Upscaler = "off";
+
+    /// <summary>
+    /// The upscaler's quality preset: "quality", "balanced", "performance",
+    /// "ultraperformance" or "dlaa". It selects the render resolution the vendor
+    /// library asks for; Optimum never hard-codes a ratio, it asks the SDK's own
+    /// optimal-settings query with this preset (DLAA = render at display size).
+    /// Unrecognised values degrade to "quality".
+    /// </summary>
+    public static string UpscalerQuality = "quality";
+
+    /// <summary>
+    /// The upscaler names a vendor library, so the only honest answers are the
+    /// ones a config file may carry. Kept next to the parser so the two cannot
+    /// drift; a new vendor is added here and in <see cref="Load" />'s switch.
+    /// </summary>
+    public static readonly string[] UpscalerNames = { "off", "dlss" };
+
+    /// <summary>The presets <see cref="UpscalerQuality" /> may hold, in descending render scale.</summary>
+    public static readonly string[] UpscalerQualityNames =
+        { "dlaa", "quality", "balanced", "performance", "ultraperformance" };
+
+    /// <summary>
+    /// Set by the renderer when the selected upscaler cannot come up - no native
+    /// shim, no NGX, no supported GPU, a feature that refused to create. The
+    /// upscaler stays off for the rest of the session and the frame runs exactly
+    /// as it does with the setting off; it is never a hard failure and never an
+    /// abort. Returns true the first time only, so the renderer logs one line.
+    /// </summary>
+    public static bool UpscalerRuntimeDisabled { get; private set; }
+
+    public static bool DisableUpscalerAtRuntime()
+    {
+        if (UpscalerRuntimeDisabled) return false;
+        UpscalerRuntimeDisabled = true;
+        return true;
+    }
+
+    /// <summary>
+    /// The upscaler actually in effect: the setting unless the renderer stood it
+    /// down at runtime. Like TAA and the Vulkan renderer selection this is a
+    /// renderer-level feature, so a missing launcher shader scan must not
+    /// disable it - there is no shader of ours involved at all.
+    /// </summary>
+    public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? "off" : Upscaler;
+
+    /// <summary>Whether DLSS Super Resolution is the upscaler in effect.</summary>
+    public static bool EffectiveUpscalerIsDlss =>
+        string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether an upscaler owns the temporal resolve this session. It is the one
+    /// question the render chain asks: with it true the in-house TAA resolve, the
+    /// TAA sharpen pass and the FSR 1 blit do not run (the upscaler does all
+    /// three jobs), while the jitter stays on because the upscaler needs it.
+    /// </summary>
+    public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss;
+
+    /// <summary>
     /// Which renderer the client runs: "opengl", "vulkan", or "auto".
     ///
     /// OpenGL is the default and stays so until the Vulkan backend reaches
@@ -552,8 +622,44 @@ public static class OptimumConfig
             {
                 bias += Math.Clamp(TaaMipBias, -2.0f, 1.0f);
             }
+            // An upscaler owns this term instead: it renders at its own ratio, not
+            // at RenderScale, and every vendor asks for the same bias,
+            // log2(render / display) - 1. The renderer publishes the value from the
+            // ratio the SDK's optimal-settings query actually returned, so the two
+            // terms never stack: with an upscaler active, its bias is the bias.
+            if (UpscalerReplacesTaa && UpscalerLodBias != 0f)
+            {
+                bias = Math.Clamp(UpscalerLodBias, -3.0f, 1.0f);
+            }
             return bias;
         }
+    }
+
+    /// <summary>
+    /// The texture LOD bias the active upscaler asks for, published by the
+    /// renderer when it creates the feature, and 0 whenever no upscaler is
+    /// running. Not persisted: it is derived from the render and display sizes
+    /// the vendor query returned, never from a config file.
+    /// </summary>
+    public static float UpscalerLodBias { get; private set; }
+
+    /// <summary>
+    /// The bias every current vendor SDK recommends for an upscaled frame:
+    /// <c>log2(renderWidth / displayWidth) - 1</c> (DLSS Programming Guide
+    /// §3.5, and the same formula in the FSR and XeSS guides). 0 when the two
+    /// sizes are equal (DLAA), which is also the value that means "leave the
+    /// sampler parameter alone".
+    /// </summary>
+    public static float RecommendedUpscalerLodBias(int renderWidth, int displayWidth)
+    {
+        if (renderWidth <= 0 || displayWidth <= 0 || renderWidth >= displayWidth) return 0f;
+        return MathF.Log2((float)renderWidth / displayWidth) - 1.0f;
+    }
+
+    /// <summary>Publishes the bias for the sizes the vendor query returned; 0 clears it.</summary>
+    public static void SetUpscalerLodBias(float bias)
+    {
+        UpscalerLodBias = bias;
     }
 
     // Like the Vulkan renderer selection, TAA is a renderer-level feature: a
@@ -797,6 +903,8 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaMipBias), TaaMipBias.ToString("F2")),
         (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
+        (nameof(OptimumConfigData.Upscaler), Upscaler),
+        (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -909,6 +1017,23 @@ public static class OptimumConfig
             TaaMipBias = Math.Clamp(data.TaaMipBias, -2f, 1f);
             TaaDebugView = Math.Max(0, data.TaaDebugView);
             TaaJitterDev = data.TaaJitterDev;
+            // The upscaler names a vendor library, so an unrecognised value means
+            // "off" rather than a parse failure: a hand-edited config can never
+            // leave the client trying to load something that does not exist.
+            string requestedUpscaler = data.Upscaler?.Trim() ?? "";
+            Upscaler =
+                string.Equals(requestedUpscaler, "dlss", StringComparison.OrdinalIgnoreCase) ? "dlss" :
+                "off";
+            // Same rule for the preset, degrading to the safest one rather than off:
+            // the preset only chooses a render resolution, so an unknown name must
+            // not silently turn the upscaler off as well.
+            string requestedUpscalerQuality = data.UpscalerQuality?.Trim() ?? "";
+            UpscalerQuality =
+                string.Equals(requestedUpscalerQuality, "dlaa", StringComparison.OrdinalIgnoreCase) ? "dlaa" :
+                string.Equals(requestedUpscalerQuality, "balanced", StringComparison.OrdinalIgnoreCase) ? "balanced" :
+                string.Equals(requestedUpscalerQuality, "performance", StringComparison.OrdinalIgnoreCase) ? "performance" :
+                string.Equals(requestedUpscalerQuality, "ultraperformance", StringComparison.OrdinalIgnoreCase) ? "ultraperformance" :
+                "quality";
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -984,6 +1109,8 @@ public static class OptimumConfig
             TaaMipBias = TaaMipBias,
             TaaDebugView = TaaDebugView,
             TaaJitterDev = TaaJitterDev,
+            Upscaler = Upscaler,
+            UpscalerQuality = UpscalerQuality,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1067,6 +1194,8 @@ internal sealed class OptimumConfigData
     public float TaaMipBias { get; set; } = -0.5f;
     public int TaaDebugView { get; set; } = 0;
     public bool TaaJitterDev { get; set; } = false;
+    public string Upscaler { get; set; } = "off";
+    public string UpscalerQuality { get; set; } = "quality";
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;
