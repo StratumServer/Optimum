@@ -256,19 +256,8 @@ internal sealed unsafe class NgxSession : IDisposable
     /// </summary>
     public static IReadOnlyList<string> FindFeaturePaths()
     {
-        var candidates = new List<string>();
-        string? configured = Environment.GetEnvironmentVariable(FeaturePathVariable);
-        if (!string.IsNullOrEmpty(configured)) candidates.Add(configured);
-
-        string? root = AppContext.BaseDirectory;
-        for (int i = 0; i < 8 && root != null; i++)
-        {
-            candidates.Add(Path.Combine(root, "vendor", "dlss", "lib", "Linux_x86_64", "rel"));
-            root = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar));
-        }
-
         var found = new List<string>();
-        foreach (string candidate in candidates)
+        foreach (string candidate in FeaturePathCandidates())
         {
             if (!Directory.Exists(candidate)) continue;
             if (Directory.GetFiles(candidate, "libnvidia-ngx-*.so*").Length == 0) continue;
@@ -276,6 +265,41 @@ internal sealed unsafe class NgxSession : IDisposable
             if (!found.Contains(full)) found.Add(full);
         }
         return found;
+    }
+
+    /// <summary>
+    /// Every directory <see cref="FindFeaturePaths" /> looks in, in order and
+    /// before any of them is tested for existence.
+    ///
+    /// The shipping layout comes first after the override: the feature libraries
+    /// are NVIDIA redistributables that ship <i>beside the client</i>, next to
+    /// <c>Optimum.Render.Vulkan.dll</c> and the Silk.NET natives, or in a
+    /// <c>dlss</c> folder there. A deployed client has no
+    /// <see cref="FeaturePathVariable" /> set and no repository above it, so
+    /// without the application directory in this list DLSS is only ever findable
+    /// in a development tree - which is exactly how it failed before 2026-09-12.
+    /// The repository's vendor directories follow, for the development loop.
+    /// </summary>
+    internal static IReadOnlyList<string> FeaturePathCandidates()
+    {
+        var candidates = new List<string>();
+        string? configured = Environment.GetEnvironmentVariable(FeaturePathVariable);
+        if (!string.IsNullOrEmpty(configured)) candidates.Add(configured);
+
+        string? application = AppContext.BaseDirectory;
+        if (!string.IsNullOrEmpty(application))
+        {
+            candidates.Add(application);
+            candidates.Add(Path.Combine(application, "dlss"));
+        }
+
+        string? root = application;
+        for (int i = 0; i < 8 && root != null; i++)
+        {
+            candidates.Add(Path.Combine(root, "vendor", "dlss", "lib", "Linux_x86_64", "rel"));
+            root = Path.GetDirectoryName(root.TrimEnd(Path.DirectorySeparatorChar));
+        }
+        return candidates;
     }
 
     private static void Collect(uint count, NgxExtensionProperties* properties, List<string> into)
