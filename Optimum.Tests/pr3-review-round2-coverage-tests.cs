@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using Vintagestory.API.Config;
 using Xunit;
 
@@ -188,6 +190,63 @@ public class Pr3ReviewRound2CoverageTests
         Assert.Contains("-o \"$target.tmp\"", script);
         Assert.Contains("rm -f \"$target.tmp\" \"$target\"", script);
         Assert.Contains("mv -f \"$target.tmp\" \"$target\"", script);
+    }
+
+    /// <summary>
+    /// No compiler ships nothing either - the wave-2 half of the same finding.
+    ///
+    /// A host that built the shim yesterday and lost its compiler today reaches the
+    /// packaging condition with the same stale library a failed compile would have
+    /// left, so both "no cc" branches delete the output instead of walking past it.
+    /// The Windows branch is asserted as text (there is no cmd here to run it); the
+    /// shell branch is driven for real below.
+    /// </summary>
+    [Fact]
+    public void AHostWithNoCompilerAlsoLeavesNoStaleLibraryToPackage()
+    {
+        string windows = Between(Read(Project), "<Exec Condition=\"'$(OS)' == 'Windows_NT'\"", "ContinueOnError");
+        // "where cc.exe" failing lands in the trailing || branch: it must delete, not just echo.
+        string noCompiler = windows[windows.LastIndexOf("|| (", StringComparison.Ordinal)..];
+        Assert.Contains("del /q", noCompiler);
+        Assert.Contains("OptimumNgx.dll", noCompiler);
+        Assert.Contains("the NGX shim was not built on this host", noCompiler);
+    }
+
+    /// <summary>
+    /// The shell branch, driven: seed a stale library, run build.sh with a compiler
+    /// name that does not exist, and require it gone and the build still green.
+    /// </summary>
+    [Fact]
+    public void BuildShWithNoCompilerDeletesTheStaleLibrary()
+    {
+        string script = PatchReader.FindRepositoryFile("native/optimum-ngx/build.sh");
+        string dir = Path.Combine(Path.GetTempPath(), "optimum-ngx-stale-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string stale = Path.Combine(dir, RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                ? "libOptimumNgx.dylib"
+                : "libOptimumNgx.so");
+            File.WriteAllText(stale, "stale");
+
+            ProcessStartInfo start = new("bash", "\"" + script + "\" \"" + dir + "\"")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            start.Environment["CC"] = "optimum-ngx-no-such-compiler";
+            using Process process = Process.Start(start)!;
+            string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+            process.WaitForExit();
+
+            Assert.Equal(0, process.ExitCode);
+            Assert.Contains("no C compiler", output);
+            Assert.False(File.Exists(stale), "build.sh left a stale " + stale + " for the csproj to package");
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 
     // ---- helpers -----------------------------------------------------------

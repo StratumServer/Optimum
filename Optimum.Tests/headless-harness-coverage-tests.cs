@@ -181,10 +181,11 @@ public class HeadlessHarnessCoverageTests
     /// caller, <c>Screenshot.GrabScreenshot</c> (the screenshot key and the AVI
     /// recorder), decodes into an <c>SKBitmap</c> declared <c>Bgra8888</c>, so every
     /// Vulkan screenshot came out red/blue swapped. The conversion moved into
-    /// <c>VulkanDevice.ReadDefaultFramebuffer</c>, where it fixes all of them at
-    /// once, and the platform inherits the base's "true". This test is what keeps
-    /// the override from coming back without the device change being undone with
-    /// it.</para>
+    /// <c>VulkanClientPlatform.ReadDefaultFramebuffer</c> (Leaf.cs), where it fixes
+    /// all of them at once, and the platform inherits the base's "true". This test
+    /// is what keeps the override from coming back without the seam conversion
+    /// being undone with it - including in the comments, which told the next reader
+    /// the override still existed for a whole review round.</para>
     /// </summary>
     [Fact]
     public void BothBackendsAnswerTheChannelOrderAndTheDeviceConvertsToIt()
@@ -193,6 +194,9 @@ public class HeadlessHarnessCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
         Assert.Contains("public virtual bool OptimumDefaultFramebufferIsBgra", abstractPlatform);
+        // The comment on it has to say what the code does: no platform overrides it.
+        Assert.DoesNotContain("VulkanClientPlatform overrides this to false", abstractPlatform);
+        Assert.Contains("no platform overrides this", abstractPlatform);
         // The base says BGRA, which is what the OpenGL body really produces.
         Assert.Contains("GL.ReadPixels(x, y, width, height, (PixelFormat)32993",
             ReadPatchedOrSource(PlatformPatch, PlatformSource));
