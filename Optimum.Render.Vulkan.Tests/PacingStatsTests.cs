@@ -119,16 +119,40 @@ public class PacingStatsTests
             "stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=3",
             VulkanStats.FormatPacingLine(new FramePacingSnapshot(512, 16.66666, 17.1, 18.3, 0.42, 3)));
 
-        var counts = new long[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+        var counts = new long[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
         // No midpoints: F1 rounding of an exact x.x5 is not something to pin.
-        var ms = new double[] { 1.21, 2.4, 3.6, 4.8, 6.0, 7.2, 8.4, 9.66, 10.83 };
+        var ms = new double[] { 1.21, 2.4, 3.6, 4.8, 6.0, 7.2, 8.4, 9.66, 10.83, 12.01 };
         Assert.Equal(
             "stats.waits frame_pacing_n=1 frame_pacing_ms=1.2 upload_submit_n=2 upload_submit_ms=2.4 " +
             "flush_frame_n=3 flush_frame_ms=3.6 device_wait_idle_n=4 device_wait_idle_ms=4.8 " +
             "readback_n=5 readback_ms=6.0 occlusion_query_n=6 occlusion_query_ms=7.2 " +
             "swapchain_acquire_n=7 swapchain_acquire_ms=8.4 present_n=8 present_ms=9.7 " +
-            "queue_submit_n=9 queue_submit_ms=10.8",
+            "queue_submit_n=9 queue_submit_ms=10.8 latency_sleep_n=10 latency_sleep_ms=12.0",
             VulkanStats.FormatWaitsLine(counts, ms));
+
+        // The latency line (seam S7) is always present: backend, mode, the sleep
+        // of the interval and each report interval as a mean and a p99.
+        var mean = new double[VulkanStats.LatencyIntervalCount];
+        var p99 = new double[VulkanStats.LatencyIntervalCount];
+        VulkanStats.ReduceReports(
+            new[]
+            {
+                new LatencyFrameReport(1, 1, 1000, 2000, 3000, 400, 0, 0, 0, 16000),
+                new LatencyFrameReport(2, 2, 3000, 4000, 5000, 600, 0, 0, 0, 20000),
+            }, mean, p99);
+        Assert.Equal(2.0, mean[0], 3);
+        Assert.Equal(3.0, p99[0], 3);
+        Assert.Equal(18.0, mean[7], 3);
+        Assert.Equal(20.0, p99[7], 3);
+        Assert.Equal(
+            "stats.latency backend=native mode=boost sleep_n=10 sleep_ms=12.0 frames=2 " +
+            "input_mean_ms=2.00 input_p99_ms=3.00 sim_mean_ms=3.00 sim_p99_ms=4.00 " +
+            "render_submit_mean_ms=4.00 render_submit_p99_ms=5.00 present_mean_ms=0.50 present_p99_ms=0.60 " +
+            "driver_mean_ms=0.00 driver_p99_ms=0.00 os_queue_mean_ms=0.00 os_queue_p99_ms=0.00 " +
+            "gpu_mean_ms=0.00 gpu_p99_ms=0.00 total_mean_ms=18.00 total_p99_ms=20.00",
+            VulkanStats.FormatLatencyLine("native", "boost", 10, 12.01, 2, mean, p99));
+
+        Assert.Equal(VulkanStats.LatencyIntervalCount, VulkanStats.LatencyIntervalTokens.Length);
 
         Assert.Equal(
             "stats.counters blocking_uploads=1 uploads=2 scopes=3 barriers=4 rebar_fallbacks=5 " +
@@ -160,11 +184,13 @@ public class PacingStatsTests
 
         Assert.NotNull(sample);
         string[] lines = sample!.Split('\n');
-        Assert.Equal(6, lines.Length);
+        Assert.Equal(7, lines.Length);
         // Phase 2 step 4: transient and aliased MiB, the Transient pool's heap peak, ReadSelf copies.
-        Assert.StartsWith("stats.transients transient_mib=", lines[5]);
+        Assert.StartsWith("stats.transients transient_mib=", lines[6]);
         // Phase 1B step 5: pool classes, ReBAR use and misses, used/budget per heap.
-        Assert.StartsWith("stats.memory blocks=", lines[4]);
+        Assert.StartsWith("stats.memory blocks=", lines[5]);
+        // Latency seams S7: always emitted, with no backend installed too.
+        Assert.StartsWith("stats.latency backend=", lines[4]);
         Assert.Matches(new Regex(
             @"^stats [\d.]+s: \d+ frames \([\d.]+ ms/frame\), \d+ allocations \(\d+ live\), " +
             @"\d+ blocking uploads costing \d+ ms \(\S+% of the interval\), textures \+\d+/-\d+, " +
@@ -185,6 +211,8 @@ public class PacingStatsTests
                      VulkanStats.FormatCountersLine(default),
                      VulkanAllocator.FormatMemoryLine(default),
                      VulkanStats.FormatTransientsLine(default),
+                     VulkanStats.FormatLatencyLine("off", "off", 0, 0,
+                         0, new double[VulkanStats.LatencyIntervalCount], new double[VulkanStats.LatencyIntervalCount]),
                  })
         {
             foreach (Match token in Regex.Matches(line, @"([a-z0-9_]+)="))
@@ -201,6 +229,7 @@ public class PacingStatsTests
         Assert.Contains("stats.counters", doc);
         Assert.Contains("stats.memory", doc);
         Assert.Contains("stats.transients", doc);
+        Assert.Contains("stats.latency", doc);
     }
 
     [Fact]
@@ -347,7 +376,7 @@ public class PacingStatsTests
 
         string swapchain = Source("Present/Swapchain.cs");
         Assert.Contains("WaitSite.SwapchainAcquire", Body(swapchain, "public bool TryAcquire("));
-        Assert.Contains("WaitSite.Present", Body(swapchain, "public void Present("));
+        Assert.Contains("WaitSite.Present", Body(swapchain, "public ulong Present("));
 
         string device = Source("VulkanDevice.cs");
         Assert.Contains("FrameSlot slot = _frames.BeginFrame();", Body(device, "public void BeginFrame()"));

@@ -11,6 +11,28 @@ namespace Optimum.Render.Vulkan.Core;
 internal readonly record struct RingAllocation(Buffer Buffer, uint Offset, IntPtr Pointer);
 
 /// <summary>
+/// What a frame's submissions are tagged with (plan section "Latency seams",
+/// seam S4): the active latency backend and the latency frame id the renderer
+/// allocated for the frame being recorded.
+///
+/// One mutable holder rather than a parameter on every submit, because the tag
+/// has to reach the shared <see cref="FrameSlot.Submit" /> that Submit A,
+/// Submit B and SubmitPartial all pass through, and because the backend and the
+/// frame id change at different moments (the backend once at device setup, the
+/// id once per frame). <c>UploadManager.SubmitStandalone</c> does not go through
+/// that path and stays untagged, which is the rule for NV's revision-3 tagging:
+/// a frame's submits are all tagged or none of them are.
+/// </summary>
+internal sealed class LatencySubmitTag
+{
+    /// <summary>The active backend; the None backend adds nothing to any chain.</summary>
+    public ILatencyBackend Backend = new NoneLatencyBackend();
+
+    /// <summary>The latency frame id of the frame being recorded; 0 before the first.</summary>
+    public ulong FrameId;
+}
+
+/// <summary>
 /// One frame's worth of transient GPU state.
 ///
 /// Everything here is reset wholesale rather than freed piecemeal: the command
@@ -38,6 +60,7 @@ internal sealed unsafe class FrameSlot : IDisposable
     private readonly ulong _regionStart;
     private readonly ulong _regionSize;
     private readonly VulkanBuffer _uniformRing;
+    private readonly LatencySubmitTag _latency;
     // Allocated once and recycled: resetting the pool returns every one of them
     // to the initial state, where it can be begun again.
     private readonly List<CommandBuffer> _commandBuffers = new();
@@ -64,8 +87,9 @@ internal sealed unsafe class FrameSlot : IDisposable
     public int PartialSubmits { get; private set; }
 
     public FrameSlot(VulkanContext context, FrameTimeline timeline, UploadManager uploads, VulkanBuffer uniformRing,
-        ulong regionStart, ulong regionSize, int index = 0)
+        ulong regionStart, ulong regionSize, int index = 0, LatencySubmitTag? latency = null)
     {
+        _latency = latency ?? new LatencySubmitTag();
         _context = context;
         _timeline = timeline;
         _uploads = uploads;
@@ -304,10 +328,16 @@ internal sealed unsafe class FrameSlot : IDisposable
                 PSignalSemaphoreValues = signalValues,
             };
 
+            // Seam S4: every submit of the frame passes through here, so the
+            // backend chains its per-submit struct (NV's VkLatencySubmissionPresentIdNV
+            // at extension revision 3 and up) onto the chain the frame already
+            // built. The None backend returns it unchanged, so nothing branches.
+            void* chain = _latency.Backend.TagSubmit(_latency.FrameId, &timelineInfo);
+
             var submit = new SubmitInfo
             {
                 SType = StructureType.SubmitInfo,
-                PNext = &timelineInfo,
+                PNext = chain,
                 CommandBufferCount = commandBufferCount,
                 PCommandBuffers = commandBuffers,
                 WaitSemaphoreCount = waitCount,
@@ -373,6 +403,7 @@ internal sealed class FrameRing : IDisposable
     private readonly RetireQueue _retired;
     private readonly UploadManager _uploads;
     private readonly VulkanAllocator _allocator;
+    private readonly LatencySubmitTag _latency = new();
     private int _index = -1;
     private bool _disposed;
 
@@ -397,11 +428,18 @@ internal sealed class FrameRing : IDisposable
         _slots = new FrameSlot[framesInFlight];
         for (int i = 0; i < framesInFlight; i++)
         {
-            _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i);
+            _slots[i] = new FrameSlot(context, _timeline, _uploads, _uniformRing, regionSize * (ulong)i, regionSize, i,
+                _latency);
         }
     }
 
     public int FramesInFlight => _slots.Length;
+
+    /// <summary>
+    /// What every submit of this ring is tagged with (seam S4). The device sets
+    /// the backend once and the frame id once per frame; the slots read it.
+    /// </summary>
+    public LatencySubmitTag Latency => _latency;
 
     /// <summary>The Frame and Transfer timelines every submission signals.</summary>
     public FrameTimeline Timeline => _timeline;
