@@ -144,11 +144,13 @@ public partial class VulkanClientPlatform
         return device.ReadTextureForParity(textureId);
     }
 
-    /// <summary>
-    /// The device's default colour target is R8G8B8A8_UNORM and
-    /// <c>ReadDefaultFramebuffer</c> copies its texels back untouched, so what the
-    /// caller gets is RGBA - where the OpenGL path reads GL_BGRA. The headless
-    /// frame writer asks, so its PPMs match across the two backends.
-    /// </summary>
-    public override bool OptimumDefaultFramebufferIsBgra => false;
+    // OptimumDefaultFramebufferIsBgra is deliberately NOT overridden here. The
+    // device's default colour target is R8G8B8A8_UNORM, but this platform's
+    // ReadDefaultFramebuffer (Leaf.cs) converts to B G R A on the way out, because
+    // the OpenGL body of that virtual reads GL_BGRA and its vanilla caller -
+    // Screenshot.GrabScreenshot, behind the screenshot key and the AVI recorder -
+    // decodes into an SKBitmap declared Bgra8888. Answering "false" here made the
+    // headless harness correct and left the screenshot path red/blue swapped on
+    // this backend; converting at the seam makes every caller correct at once, so
+    // the base's "true" is the true answer.
 }

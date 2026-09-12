@@ -156,10 +156,18 @@ public class PlatformLeafRoutingTests
         int row = size / 2 * size;
         int left = (row + 2) * 4;
         int right = (row + size - 3) * 4;
-        _output.WriteLine($"left RGBA = {read[left]}, {read[left + 1]}, {read[left + 2]}, {read[left + 3]}");
-        _output.WriteLine($"right RGBA = {read[right]}, {read[right + 1]}, {read[right + 2]}, {read[right + 3]}");
+        // The platform's readback is the client's seam, and its contract is the
+        // OpenGL body's: glReadPixels(..., GL_BGRA, ...). So the R=10, G=200, B=30
+        // texel that went in comes back B, G, R, A = 30, 200, 10, 255. Asserting
+        // RGBA here is what let every Vulkan screenshot and AVI recording ship with
+        // red and blue exchanged, because Screenshot.GrabScreenshot decodes into an
+        // SKBitmap declared Bgra8888 (wave-1 review, 2026-09-12). The device-level
+        // VulkanDevice.ReadDefaultFramebuffer still hands texels back in their
+        // stored order; the conversion is VulkanClientPlatform's.
+        _output.WriteLine($"left BGRA = {read[left]}, {read[left + 1]}, {read[left + 2]}, {read[left + 3]}");
+        _output.WriteLine($"right BGRA = {read[right]}, {read[right + 1]}, {read[right + 2]}, {read[right + 3]}");
         Assert.Equal(new byte[] { 0, 0, 0, 0 }, read[left..(left + 4)]);
-        Assert.Equal(new byte[] { 10, 200, 30, 255 }, read[right..(right + 4)]);
+        Assert.Equal(new byte[] { 30, 200, 10, 255 }, read[right..(right + 4)]);
 
         fork.DeleteFramebuffer(framebuffer);
         platform.GLDeleteTexture(texture);

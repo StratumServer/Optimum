@@ -616,6 +616,31 @@ public static class OptimumConfig
     public static bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa;
 
     /// <summary>
+    /// Whether anything actually <i>accumulates</i> the frames the temporal
+    /// pipeline produces - which is a narrower question than
+    /// <see cref="EffectiveTemporalPipeline" /> and the right one for any input
+    /// that is deliberately varied per frame so a history can average it.
+    ///
+    /// <para>The passthrough upscaler is the whole difference between the two. It
+    /// owns the resolve exactly as DLSS does, so the pipeline is on - the scene is
+    /// jittered, motion vectors are written and <c>TAAMOTION</c> is stamped 1 - but
+    /// its "evaluate" is a magnifying blit and it reconstructs nothing. A term that
+    /// changes every frame with no accumulator behind it is not converging noise,
+    /// it is flicker; and on this path it would also corrupt the one measurement
+    /// the passthrough slot exists to make, because the frame would then differ
+    /// from the DLSS frame in more than the reconstruction.</para>
+    ///
+    /// <para>With the in-house resolve or a reconstructing upscaler (DLSS, and the
+    /// FSR/XeSS slots when they land) this is true; with the passthrough slot, or
+    /// with nothing temporal at all, it is false. Note that
+    /// <see cref="EffectiveTaa" /> is not the test: the TAA setting can be on while
+    /// an upscaler stands our resolve down, so the config flag alone says nothing
+    /// about whether a history is being written.</para>
+    /// </summary>
+    public static bool EffectiveTemporalAccumulation =>
+        EffectiveTemporalPipeline && !EffectiveUpscalerIsPassthrough;
+
+    /// <summary>
     /// Whether an upscaler owns the temporal resolve this session. It is the one
     /// question the render chain asks: with it true the in-house TAA resolve, the
     /// TAA sharpen pass and the FSR 1 blit do not run (the upscaler does all

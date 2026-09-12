@@ -3377,13 +3377,23 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
 
     /// <summary>
     /// Reads back the bound target's first colour attachment, four bytes per
-    /// pixel, rows bottom-up.
+    /// pixel, rows bottom-up, in the target's own channel order.
     ///
     /// Bottom-up is not an accident: it is what <c>glReadPixels</c> produces, and
     /// the existing screenshot and AVI paths already expect it. Because the
     /// backend never flips Y, the image in memory is laid out exactly as GL laid
     /// it out, so those paths keep working untouched. The game reads pixels
     /// mid-frame and carries on drawing; <see cref="ReadBack" /> keeps the frame open.
+    ///
+    /// <para><b>Channels are not converted here.</b> The texels come back in the
+    /// target's own order, which for the default colour target is R G B A. The
+    /// client's seam is one level up: the OpenGL body of
+    /// <c>ClientPlatformAbstract.ReadDefaultFramebuffer</c> reads
+    /// <c>GL_BGRA</c>, so <c>VulkanClientPlatform.ReadDefaultFramebuffer</c>
+    /// converts (see <see cref="Core.PixelOrder" />) and everything that speaks to
+    /// the platform - the screenshot key, the AVI recorder, the headless harness -
+    /// gets one answer. Callers of this method, the GPU tests among them, read the
+    /// bound target as it is stored.</para>
     /// </summary>
     public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
@@ -3398,6 +3408,12 @@ public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatency
         ReadBack(texture, x, y, (uint)width, (uint)height, ImageAspectFlags.ColorBit,
             (ulong)width * (ulong)height * 4, destination);
     }
+
+    /// <summary>
+    /// The format of the default colour target, so the platform above knows the
+    /// channel order the readback hands back rather than assuming one.
+    /// </summary>
+    internal Format DefaultColorFormat => DefaultColorTexture()?.Format ?? Format.R8G8B8A8Unorm;
 
     // ------------------------------------------------------------------- teardown
 

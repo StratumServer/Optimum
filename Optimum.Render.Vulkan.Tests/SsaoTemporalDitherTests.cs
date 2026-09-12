@@ -71,6 +71,17 @@ public class SsaoTemporalDitherTests(ITestOutputHelper output)
             // and not the device.
             Assert.Equal(0, repeated);
 
+            // Wave-1 review, 2026-09-12: frame index 0 is the vanilla dither, to the
+            // byte. That is not decoration - it is what lets the pass switch the
+            // temporal term off at run time without a shader reload, which is how a
+            // temporal consumer that accumulates nothing (the passthrough upscaler,
+            // which owns the resolve and reconstructs nothing) gets vanilla's fixed
+            // dither while TAAMOTION is still stamped 1. It holds because bayer128 is
+            // strictly below 1, so fract(dither + fract(0)) is dither exactly.
+            int atZero = Differing(withTemporal[0], withoutTemporal[0]);
+            output.WriteLine("SSAOLEVEL " + quality + ": frame index 0 vs TAAMOTION 0: " + atZero + " px differ");
+            Assert.Equal(0, atZero);
+
             int off = Differing(withoutTemporal[0], withoutTemporal[1]);
             int offAgain = Differing(withoutTemporal[1], withoutTemporal[3]);
             output.WriteLine($"SSAOLEVEL {quality}: temporal off - frame 0 vs 1: {off} px differ, 1 vs 3: {offAgain} px differ");

@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
+using Optimum.Render.Vulkan.Core;
+using Silk.NET.Vulkan;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 using Vintagestory.Client.NoObf;
@@ -203,10 +205,28 @@ public partial class VulkanClientPlatform
     /// The device reads back the colour target it has bound, which is the same image GL
     /// would read from the bound framebuffer and in the same orientation - the one flip
     /// happens at present, after this.
+    ///
+    /// <para>Channel order is converted here (wave-1 review, 2026-09-12). The OpenGL body
+    /// of this virtual is <c>glReadPixels(..., GL_BGRA, ...)</c>, and its callers depend
+    /// on that: <c>Screenshot.GrabScreenshot</c> - the screenshot key and the AVI recorder
+    /// - decodes into an <c>SKBitmap</c> declared <c>Bgra8888</c>, and the headless
+    /// harness writes its PPMs from the same call. The device's default colour target is
+    /// <c>R8G8B8A8_UNORM</c>, so without this every Vulkan screenshot and recording came
+    /// out with red and blue exchanged. The conversion sits here rather than in
+    /// <c>VulkanDevice.ReadDefaultFramebuffer</c> because that method is also the
+    /// backend's general "read the bound target" operation, which the GPU tests use to
+    /// inspect attachments in their stored order.</para>
+    ///
+    /// <para>A target that is already B G R A needs nothing done, which is why the format
+    /// is asked rather than assumed; <see cref="OptimumDefaultFramebufferIsBgra" /> is
+    /// left at the base's true either way, because this method has now made it true.</para>
     /// </summary>
     public override void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
         device.ReadDefaultFramebuffer(x, y, width, height, destination);
+        if (destination == IntPtr.Zero || width <= 0 || height <= 0) return;
+        if (device.DefaultColorFormat is Format.B8G8R8A8Unorm or Format.B8G8R8A8Srgb) return;
+        PixelOrder.SwapRedAndBlue(destination, (long)width * height);
     }
 
     public override string GraphicsBackendName => device.BackendName;

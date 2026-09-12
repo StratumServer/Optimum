@@ -110,9 +110,12 @@ public class HeadlessCaptureTests
                         handle.Free();
                     }
 
-                    // bgra: false - the device's colour targets are R8G8B8A8 and the
-                    // readback copies texels untouched, which is exactly what
-                    // VulkanClientPlatform.OptimumDefaultFramebufferIsBgra reports.
+                    // bgra: false - this reads at the device level, where texels come
+                    // back in the target's own R8G8B8A8 order. The client goes through
+                    // VulkanClientPlatform.ReadDefaultFramebuffer, which converts that
+                    // to the GL path's B G R A (PixelOrder.SwapRedAndBlue) and so
+                    // passes bgra: true; both spellings write the same file, which is
+                    // what BgraAndRgbaPixelsWriteTheSameFile holds.
                     Assert.True(OptimumParityDump.WriteFrame(
                         Path.Combine(directory, OptimumHeadless.FrameFileName(frame)),
                         Width, Height, pixels, bgra: false));
@@ -303,6 +306,48 @@ public class HeadlessCaptureTests
             return seam.CreateTexture2D(width, height, EnumTextureInternalFormat.Rgba8,
                 EnumTexturePixelFormat.Rgba, (IntPtr)data, false);
         }
+    }
+
+    /// <summary>
+    /// The conversion <c>VulkanClientPlatform.ReadDefaultFramebuffer</c> applies on
+    /// top of the device readback (wave-1 review, 2026-09-12).
+    ///
+    /// The OpenGL body of that virtual is
+    /// <c>glReadPixels(..., GL_BGRA, GL_UNSIGNED_BYTE, ...)</c>, and its callers
+    /// depend on it: <c>Screenshot.GrabScreenshot</c> - the screenshot key and the
+    /// AVI recorder - decodes into an <c>SKBitmap</c> declared
+    /// <c>SKColorType.Bgra8888</c>, and the harness writes its PPMs from the same
+    /// call. The device's default colour target is R8G8B8A8, so without the swap
+    /// every Vulkan screenshot came out with red and blue exchanged. A greyscale
+    /// pattern cannot see that, so this one is saturated red and blue, with green
+    /// and alpha left where they are to catch a rotation rather than a swap.
+    /// </summary>
+    [Fact]
+    public unsafe void TheClientSeamTurnsTheDevicesRgbaIntoTheGlPathsBgra()
+    {
+        byte[] texels = [255, 17, 0, 255, 0, 34, 255, 200];
+        fixed (byte* data = texels)
+        {
+            PixelOrder.SwapRedAndBlue((IntPtr)data, 2);
+        }
+
+        // Red in, B G R A out - and back again, because the conversion is its own
+        // inverse, which is what lets one writer serve both backends.
+        Assert.Equal([0, 17, 255, 255, 255, 34, 0, 200], texels);
+        fixed (byte* data = texels)
+        {
+            PixelOrder.SwapRedAndBlue((IntPtr)data, 2);
+        }
+        Assert.Equal([255, 17, 0, 255, 0, 34, 255, 200], texels);
+
+        // Nothing to convert is not a crash.
+        PixelOrder.SwapRedAndBlue(IntPtr.Zero, 4);
+        fixed (byte* data = texels)
+        {
+            PixelOrder.SwapRedAndBlue((IntPtr)data, 0);
+            PixelOrder.SwapRedAndBlue((IntPtr)data, -1);
+        }
+        Assert.Equal([255, 17, 0, 255, 0, 34, 255, 200], texels);
     }
 
     /// <summary>

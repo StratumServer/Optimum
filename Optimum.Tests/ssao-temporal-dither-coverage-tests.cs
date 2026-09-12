@@ -108,7 +108,8 @@ public class SsaoTemporalDitherCoverageTests
         // wrapped only so it stays exact in a float.
         Assert.Contains("if (OptimumConfig.EffectiveTemporalPipeline)", post);
         Assert.Contains(
-            "ssao.Uniform(\"temporalFrameIndex\", (float)(OptimumTemporal.Frame.FrameIndex & 1023L));",
+            "ssao.Uniform(\"temporalFrameIndex\", OptimumConfig.EffectiveTemporalAccumulation " +
+            "? (float)(OptimumTemporal.Frame.FrameIndex & 1023L) : 0f);",
             post);
         // Set on the bound SSAO program, before the draw that reads it.
         int set = post.IndexOf("ssao.Uniform(\"temporalFrameIndex\"", StringComparison.Ordinal);
@@ -120,6 +121,45 @@ public class SsaoTemporalDitherCoverageTests
         Assert.Contains(
             "new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"RenderPostprocessingEffects\", 1)",
             Read("Optimum.Patcher/Program.cs"));
+    }
+
+    /// <summary>
+    /// Wave-1 review, 2026-09-12. The uniform is declared by
+    /// <c>EffectiveTemporalPipeline</c>, but what may <i>vary</i> per frame is
+    /// governed by the narrower <c>EffectiveTemporalAccumulation</c>: the
+    /// passthrough upscaler owns the resolve (so the pipeline is on and TAAMOTION
+    /// is stamped 1) and reconstructs nothing, and a per-frame dither with no
+    /// accumulator behind it is flicker, not convergence - and would put a
+    /// difference other than the reconstruction between the passthrough frame and
+    /// the DLSS frame, which is the one thing that slot exists to hold still.
+    ///
+    /// The uniform is still written on every frame that declares it, never
+    /// conditionally: a declared uniform left unset reads back as whatever the
+    /// Vulkan uniform ring last held there. Index 0 is the vanilla dither exactly,
+    /// because bayer128 is strictly below 1 and <c>fract(dither + 0)</c> is
+    /// <c>dither</c>; <c>SsaoTemporalDitherTests</c> holds that to the device.
+    /// </summary>
+    [Fact]
+    public void TheFrameVaryingTermNeedsSomethingThatAccumulates()
+    {
+        string config = Read("sources/VintagestoryApi/Config/OptimumConfig.cs");
+        Assert.Contains(
+            "public static bool EffectiveTemporalAccumulation =>\n" +
+            "        EffectiveTemporalPipeline && !EffectiveUpscalerIsPassthrough;",
+            config.Replace("\r\n", "\n"));
+
+        string platform = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        int start = platform.IndexOf("public override void RenderPostprocessingEffects", StringComparison.Ordinal);
+        string post = platform[start..platform.IndexOf("public override void ClearSsaoTarget", start, StringComparison.Ordinal)];
+
+        // Written unconditionally inside the block that declares it, and the
+        // accumulation question is what chooses the value.
+        int guard = post.IndexOf("if (OptimumConfig.EffectiveTemporalPipeline)", StringComparison.Ordinal);
+        int set = post.IndexOf("ssao.Uniform(\"temporalFrameIndex\"", StringComparison.Ordinal);
+        Assert.True(guard > 0 && set > guard);
+        Assert.DoesNotContain("if (OptimumConfig.EffectiveTemporalAccumulation)", post);
+        Assert.Contains("OptimumConfig.EffectiveTemporalAccumulation ?", post);
+        Assert.Contains(": 0f);", post);
     }
 
     /// <summary>

@@ -160,8 +160,9 @@ public class HeadlessHarnessCoverageTests
             Assert.Contains("\"" + member + "\"", patcher);
         }
 
-        // The virtual the backends answer differently, injected into the abstract
-        // platform so VulkanClientPlatform can override it.
+        // The channel-order virtual, injected into the abstract platform: the
+        // harness reads it, and a backend whose readback cannot produce BGRA would
+        // override it (none does today - the Vulkan device converts instead).
         Assert.Contains("\"OptimumDefaultFramebufferIsBgra\"", patcher);
 
         // Both patched bodies live in methods the patcher already replaces whole.
@@ -169,16 +170,62 @@ public class HeadlessHarnessCoverageTests
         Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"window_RenderFrame\", 1)", patcher);
     }
 
+    /// <summary>
+    /// The channel order is one answer on both backends, and the Vulkan device is
+    /// what makes it so.
+    ///
+    /// <para>Wave-1 review, 2026-09-12: the harness originally answered "the Vulkan
+    /// readback is RGBA" through an override of this virtual. That made the harness
+    /// correct and left every other caller wrong - the OpenGL body of
+    /// <c>ReadDefaultFramebuffer</c> reads <c>GL_BGRA</c>, and its only vanilla
+    /// caller, <c>Screenshot.GrabScreenshot</c> (the screenshot key and the AVI
+    /// recorder), decodes into an <c>SKBitmap</c> declared <c>Bgra8888</c>, so every
+    /// Vulkan screenshot came out red/blue swapped. The conversion moved into
+    /// <c>VulkanDevice.ReadDefaultFramebuffer</c>, where it fixes all of them at
+    /// once, and the platform inherits the base's "true". This test is what keeps
+    /// the override from coming back without the device change being undone with
+    /// it.</para>
+    /// </summary>
     [Fact]
-    public void BothBackendsAnswerTheChannelOrderAndOnlyTheDeviceSaysRgba()
+    public void BothBackendsAnswerTheChannelOrderAndTheDeviceConvertsToIt()
     {
         string abstractPlatform = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs");
         Assert.Contains("public virtual bool OptimumDefaultFramebufferIsBgra", abstractPlatform);
+        // The base says BGRA, which is what the OpenGL body really produces.
+        Assert.Contains("GL.ReadPixels(x, y, width, height, (PixelFormat)32993",
+            ReadPatchedOrSource(PlatformPatch, PlatformSource));
 
+        // Nothing overrides it any more: the platform's readback converts instead.
         string vulkan = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Frame.cs");
-        Assert.Contains("public override bool OptimumDefaultFramebufferIsBgra => false;", vulkan);
+        Assert.DoesNotContain("override bool OptimumDefaultFramebufferIsBgra", vulkan);
+
+        string leaf = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
+        int at = leaf.IndexOf(
+            "public override void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)",
+            StringComparison.Ordinal);
+        Assert.True(at > 0, "VulkanClientPlatform.ReadDefaultFramebuffer is gone");
+        string body = leaf[at..leaf.IndexOf("\n    }", at, StringComparison.Ordinal)];
+        Assert.Contains("device.ReadDefaultFramebuffer(x, y, width, height, destination);", body);
+        Assert.Contains("PixelOrder.SwapRedAndBlue(destination, (long)width * height);", body);
+        // A target that is already BGRA is left alone, so the format is asked.
+        Assert.Contains("device.DefaultColorFormat is Format.B8G8R8A8Unorm", body);
+
+        // ... and the conversion itself is the R <-> B swap, not something else.
+        string pixelOrder = Read("Optimum.Render.Vulkan/Core/PixelOrder.cs");
+        Assert.Contains("texel[0] = texel[2];", pixelOrder);
+        Assert.Contains("texel[2] = first;", pixelOrder);
+
+        // The device stays untouched: it is the general "read the bound target"
+        // operation the GPU tests inspect attachments with, in their stored order.
+        string deviceFile = Read("Optimum.Render.Vulkan/VulkanDevice.cs");
+        int deviceAt = deviceFile.IndexOf(
+            "public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)",
+            StringComparison.Ordinal);
+        Assert.True(deviceAt > 0, "VulkanDevice.ReadDefaultFramebuffer is gone");
+        Assert.DoesNotContain("SwapRedAndBlue",
+            deviceFile[deviceAt..deviceFile.IndexOf("\n    }", deviceAt, StringComparison.Ordinal)]);
     }
 
     [Fact]
