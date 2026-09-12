@@ -43,11 +43,14 @@ public class HeadlessHarnessCoverageTests
         string platform = ReadPatchedOrSource(PlatformPatch, PlatformSource);
 
         int parity = platform.IndexOf("OptimumRunParityDump();", StringComparison.Ordinal);
+        // Before anything that searches from it: IndexOf(_, -1) throws
+        // ArgumentOutOfRangeException, which says nothing about what is missing.
+        Assert.True(parity >= 0, "the parity dump call site is gone");
+
         int guard = platform.IndexOf("if (Vintagestory.API.Config.OptimumHeadless.Active)", StringComparison.Ordinal);
         int tick = platform.IndexOf("OptimumHeadlessTick();", StringComparison.Ordinal);
         int endFrame = platform.IndexOf("EndFrame();", parity, StringComparison.Ordinal);
 
-        Assert.True(parity >= 0, "the parity dump call site is gone");
         Assert.True(guard > parity, "the harness is not gated behind OptimumHeadless.Active after the dump");
         Assert.True(tick > guard, "OptimumHeadlessTick is not inside its guard");
         Assert.True(endFrame > tick, "the harness runs after presentation instead of before it");

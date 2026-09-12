@@ -23,6 +23,7 @@ public class Pr3ReviewRound2CoverageTests
 {
     private const string GpuTests = "Optimum.Render.Vulkan.Tests/DlssUpscalerTests.cs";
     private const string TerrainTests = "Optimum.Render.Vulkan.Tests/TerrainLodBiasFollowsThePlanTests.cs";
+    private const string PassthroughGpuTests = "Optimum.Render.Vulkan.Tests/PassthroughUpscalerTests.cs";
     private const string Project = "Optimum.Render.Vulkan/Optimum.Render.Vulkan.csproj";
 
     /// <summary>
@@ -132,7 +133,13 @@ public class Pr3ReviewRound2CoverageTests
              at = tests.IndexOf(marker, at + marker.Length, StringComparison.Ordinal))
         {
             hosts++;
-            string after = tests[(at + marker.Length)..];
+            // Bounded by the next Host(...) - to the end of the file it would let one
+            // host's try/finally be satisfied by another member's, which is exactly the
+            // teardown this test exists to find missing.
+            int next = tests.IndexOf(marker, at + marker.Length, StringComparison.Ordinal);
+            string after = next >= 0
+                ? tests[(at + marker.Length)..next]
+                : tests[(at + marker.Length)..];
 
             // The try that guards the host comes before anything that can fail.
             int tryAt = after.IndexOf("try", StringComparison.Ordinal);
@@ -149,6 +156,40 @@ public class Pr3ReviewRound2CoverageTests
         }
 
         Assert.Equal(3, hosts);
+    }
+
+    /// <summary>
+    /// Wave-2 review, 2026-09-12. The same rule, in the file the previous round did
+    /// not read: the passthrough GPU suite builds its own hosts with
+    /// <c>new DlssUpscaler(Log)</c> rather than through <c>Host(...)</c>, and one of
+    /// them shut down only on the successful path. NGX's lifetime is process-wide, so
+    /// a host leaked by a failed assertion here is not this test's failure - it is the
+    /// next test on the shared device falling over.
+    /// </summary>
+    [Fact]
+    public void ThePassthroughGpuTestsShutTheirHostsDownFromAFinally()
+    {
+        string tests = Read(PassthroughGpuTests);
+
+        int hosts = 0;
+        const string marker = "var host = new DlssUpscaler(";
+        for (int at = tests.IndexOf(marker, StringComparison.Ordinal); at >= 0;
+             at = tests.IndexOf(marker, at + marker.Length, StringComparison.Ordinal))
+        {
+            hosts++;
+            int next = tests.IndexOf(marker, at + marker.Length, StringComparison.Ordinal);
+            string after = next >= 0
+                ? tests[(at + marker.Length)..next]
+                : tests[(at + marker.Length)..];
+
+            int finallyAt = after.IndexOf("finally", StringComparison.Ordinal);
+            Assert.True(finallyAt > 0, "no finally after the host at " + at);
+            int shutdownAt = after.IndexOf("host.Shutdown();", finallyAt, StringComparison.Ordinal);
+            Assert.True(shutdownAt > 0,
+                "the finally after the host at " + at + " does not shut the host down");
+        }
+
+        Assert.Equal(2, hosts);
     }
 
     /// <summary>

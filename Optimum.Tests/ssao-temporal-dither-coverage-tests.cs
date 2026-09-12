@@ -113,7 +113,12 @@ public class SsaoTemporalDitherCoverageTests
             post);
         // Set on the bound SSAO program, before the draw that reads it.
         int set = post.IndexOf("ssao.Uniform(\"temporalFrameIndex\"", StringComparison.Ordinal);
-        Assert.True(post.IndexOf("ssao.Use();", StringComparison.Ordinal) < set);
+        // The anchor has to exist before its position means anything: a missing
+        // ssao.Use() is IndexOf -1, and -1 < set would pass the ordering check on a
+        // pass that never bound the program.
+        int use = post.IndexOf("ssao.Use();", StringComparison.Ordinal);
+        Assert.True(use >= 0, "the SSAO pass never binds ssao before setting its uniforms");
+        Assert.True(use < set);
         Assert.True(set < post.IndexOf("RenderFullscreenTriangle(screenQuad);", set, StringComparison.Ordinal));
         Assert.True(set < post.IndexOf("ssao.Stop();", StringComparison.Ordinal));
 
