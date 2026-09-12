@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Silk.NET.Vulkan;
 
 namespace Optimum.Render.Vulkan.Core;
@@ -16,13 +15,13 @@ namespace Optimum.Render.Vulkan.Core;
 internal sealed class NoneLatencyBackend : ILatencyBackend
 {
     private readonly LatencyPhaseTracker _tracker;
-    private readonly List<LatencyFrameReport> _reports = new();
 
-    /// <summary>Reports are drained by the stats sample, which is not the frame thread.</summary>
-    private readonly object _reportLock = new();
-
-    /// <summary>A frame's worth of reports is plenty; a client that never samples must not grow this.</summary>
-    private const int MaxReports = 256;
+    /// <summary>
+    /// The finished reports, in a fixed ring: the stats sample may never run, and
+    /// a full buffer must not cost the present path anything (see
+    /// <see cref="LatencyReportBuffer" />).
+    /// </summary>
+    private readonly LatencyReportBuffer _reports = new();
 
     public NoneLatencyBackend(Action<string>? log = null) => _tracker = new LatencyPhaseTracker(log);
 
@@ -46,29 +45,21 @@ internal sealed class NoneLatencyBackend : ILatencyBackend
     {
     }
 
+    /// <summary>Nothing was bound to the swapchain, so nothing is dropped with it.</summary>
+    public void OnSwapchainRetired()
+    {
+    }
+
     /// <summary>Adds nothing to the submit chain.</summary>
     public unsafe void* TagSubmit(ulong frameId, void* pNext) => pNext;
 
     public void OnPresent(ulong frameId, ulong presentId)
     {
         if (!_tracker.TryComplete(frameId, presentId, out LatencyFrameReport report)) return;
-        lock (_reportLock)
-        {
-            if (_reports.Count >= MaxReports) _reports.RemoveAt(0);
-            _reports.Add(report);
-        }
+        _reports.Add(report);
     }
 
-    public LatencyFrameReport[] TakeReports()
-    {
-        lock (_reportLock)
-        {
-            if (_reports.Count == 0) return Array.Empty<LatencyFrameReport>();
-            LatencyFrameReport[] taken = _reports.ToArray();
-            _reports.Clear();
-            return taken;
-        }
-    }
+    public LatencyFrameReport[] TakeReports() => _reports.Take();
 
     public void Dispose()
     {

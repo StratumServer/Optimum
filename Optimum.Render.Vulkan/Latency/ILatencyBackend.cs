@@ -75,6 +75,21 @@ internal interface ILatencyBackend : IDisposable
     void OnSwapchainCreated(SwapchainKHR swapchain);
 
     /// <summary>
+    /// The swapchain the backend was last told about has been retired (a rebuild
+    /// passed it as oldSwapchain) or destroyed, and nothing must be called
+    /// against that handle any more. Called from <c>Swapchain.Build</c> the
+    /// moment the old slot is handed to the retirement queue - which happens even
+    /// when the creation that replaces it fails, so the frames that keep running
+    /// on a chain that could not be rebuilt make no vendor call at all - and from
+    /// <c>Swapchain.Dispose</c>.
+    ///
+    /// A backend with no per-swapchain state does nothing; NV drops the handle,
+    /// so its sleep, its markers and its timing query all stand down until the
+    /// next <see cref="OnSwapchainCreated" />.
+    /// </summary>
+    void OnSwapchainRetired();
+
+    /// <summary>
     /// Offers a pNext struct for one <c>vkQueueSubmit</c> of the frame (NV's
     /// <c>VkLatencySubmissionPresentIdNV</c> at extension revision 3 and up,
     /// where tagging is all-or-nothing across a frame's submits).

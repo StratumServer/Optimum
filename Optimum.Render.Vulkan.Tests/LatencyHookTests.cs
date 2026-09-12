@@ -78,6 +78,72 @@ public class LatencyHookTests
         Assert.False(platform.LatencyOwnsFrameCap);
     }
 
+    /// <summary>
+    /// Latency review 2026-09-12: every backend answers <c>OwnsFrameCap</c> true
+    /// as soon as its mode is not Off, which stands the lib's own FPS limiter
+    /// down (seam S3). The cap therefore has to reach the backend, or turning
+    /// LatencyMode on would silently uncap the client. It is handed over at the
+    /// sleep, and only when it changed - an Apply per frame would re-arm the
+    /// driver's heuristic every frame.
+    /// </summary>
+    [Fact]
+    public void TheClientsFrameCapReachesAPacingBackendOnceAndOnlyWhenItChanges()
+    {
+        var backend = new RecordingLatencyBackend();
+        VulkanClientPlatform platform = PlatformWith(backend);
+        platform.MaxFps = 60f;
+        // A cap no client setting produces, so the first sleep always changes it,
+        // whatever this machine's vsync setting says.
+        backend.Apply(new LatencySettings(LatencyMode.On, 999_999));
+        backend.Applied.Clear();
+
+        ulong expected = VulkanClientPlatform.FrameCapIntervalUs(60f, ClientSettings.VsyncMode);
+
+        platform.LatencySleep();
+        platform.LatencySleep();
+        platform.LatencySleep();
+
+        Assert.Equal(new List<LatencySettings> { new(LatencyMode.On, expected) }, backend.Applied);
+        // The mode is the device's business; this site only ever sets the cap.
+        Assert.Equal(LatencyMode.On, backend.Settings.Mode);
+    }
+
+    /// <summary>
+    /// Off is off: a backend whose mode is Off is never applied to, so the frame
+    /// with LatencyMode off is the frame Milestone 1 delivered.
+    /// </summary>
+    [Fact]
+    public void ADisabledBackendIsNeverTouchedByTheFrameCap()
+    {
+        var backend = new RecordingLatencyBackend();
+        VulkanClientPlatform platform = PlatformWith(backend);
+        platform.MaxFps = 60f;
+
+        for (int frame = 0; frame < 4; frame++) platform.LatencySleep();
+
+        Assert.Empty(backend.Applied);
+        Assert.Equal(LatencySettings.Disabled, backend.Settings);
+    }
+
+    /// <summary>
+    /// The cap conversion itself, under exactly the conditions the lib's own
+    /// limiter uses: vsync off, MaxFps above 10 and below the client's 241
+    /// "unlimited". 0 is uncapped for every backend.
+    /// </summary>
+    [Theory]
+    [InlineData(60f, 0, 16666UL)]
+    [InlineData(120f, 0, 8333UL)]
+    [InlineData(240f, 0, 4166UL)]
+    [InlineData(241f, 0, 0UL)]
+    [InlineData(1000f, 0, 0UL)]
+    [InlineData(10f, 0, 0UL)]
+    [InlineData(5f, 0, 0UL)]
+    [InlineData(60f, 1, 0UL)]
+    public void TheFrameCapFollowsTheClientsOwnConditions(float maxFps, int vsyncMode, ulong expectedUs)
+    {
+        Assert.Equal(expectedUs, VulkanClientPlatform.FrameCapIntervalUs(maxFps, vsyncMode));
+    }
+
     [Fact]
     public void WithNoBackendAndNoDeviceTheSleepIsANoOp()
     {

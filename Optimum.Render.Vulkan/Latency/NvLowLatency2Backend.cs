@@ -216,6 +216,18 @@ internal sealed unsafe class NvLowLatency2Backend : ILatencyBackend
         ApplySleepMode();
     }
 
+    /// <summary>
+    /// The swapchain every call of this backend is made against has been retired
+    /// or destroyed. Everything here is keyed on a live <c>VkSwapchainKHR</c> -
+    /// vkLatencySleepNV, vkSetLatencyMarkerNV, vkGetLatencyTimingsNV and
+    /// vkSetLatencySleepModeNV all take one - and a rebuild retires the old chain
+    /// even when the creation that should replace it fails, after which the
+    /// client keeps rendering frames. Dropping the handle makes every one of
+    /// those calls stand down until the next swapchain exists, instead of calling
+    /// into a handle the retirement queue is about to destroy.
+    /// </summary>
+    public void OnSwapchainRetired() => _swapchain = default;
+
     private void ApplySleepMode()
     {
         if (_disposed || _swapchain.Handle == 0) return;

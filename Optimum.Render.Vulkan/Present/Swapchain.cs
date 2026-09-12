@@ -474,6 +474,11 @@ internal sealed unsafe class Swapchain : IDisposable
         {
             _retirement.Retire(old, SwapchainPolicy.RetireAfter(old.LastPresentValue));
             _current = null;
+            // Seam S5: the handle the backend holds is now the retired one, and
+            // the retirement queue will destroy it. Told before the new handle is
+            // announced, so a creation that fails below leaves the backend with
+            // no swapchain at all rather than with a dead one.
+            _latency.OnSwapchainRetired();
         }
 
         if (result != Result.Success)
@@ -730,6 +735,9 @@ internal sealed unsafe class Swapchain : IDisposable
         _retirement.DisposeAll();
         _current?.Dispose();
         _current = null;
+        // Nothing may be called against these handles again; the backend outlives
+        // the swapchain (the device disposes it last).
+        _latency.OnSwapchainRetired();
 
         if (_surface.Handle != 0)
         {

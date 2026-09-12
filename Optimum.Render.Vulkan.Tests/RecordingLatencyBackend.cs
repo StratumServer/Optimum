@@ -61,7 +61,23 @@ internal sealed class RecordingLatencyBackend : ILatencyBackend
 
     public void Marker(ulong frameId, LatencyMarker marker) => Markers.Add((frameId, marker));
 
-    public void OnSwapchainCreated(SwapchainKHR swapchain) => Swapchains.Add(swapchain);
+    public void OnSwapchainCreated(SwapchainKHR swapchain)
+    {
+        Swapchains.Add(swapchain);
+        SwapchainEvents.Add(swapchain);
+    }
+
+    /// <summary>The handles announced, plus a null entry for every retirement, in order.</summary>
+    public List<SwapchainKHR> SwapchainEvents { get; } = new();
+
+    /// <summary>How often the swapchain the backend holds was retired or destroyed.</summary>
+    public int SwapchainRetirements { get; private set; }
+
+    public void OnSwapchainRetired()
+    {
+        SwapchainRetirements++;
+        SwapchainEvents.Add(default);
+    }
 
     public unsafe void* TagSubmit(ulong frameId, void* pNext)
     {

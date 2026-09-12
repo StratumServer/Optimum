@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using Silk.NET.Vulkan;
 
@@ -80,13 +79,13 @@ internal sealed class NativeLatencyBackend : ILatencyBackend
     private readonly Func<FrameTimeline?> _timeline;
 
     private readonly LatencyPhaseTracker _tracker;
-    private readonly List<LatencyFrameReport> _reports = new();
 
-    /// <summary>Reports are drained by the stats sample, which is not the frame thread.</summary>
-    private readonly object _reportLock = new();
-
-    /// <summary>A frame's worth of reports is plenty; a client that never samples must not grow this.</summary>
-    private const int MaxReports = 256;
+    /// <summary>
+    /// The finished reports, in a fixed ring (see <see cref="LatencyReportBuffer" />):
+    /// the stats sample may never run, and a full buffer must cost the present
+    /// path nothing.
+    /// </summary>
+    private readonly LatencyReportBuffer _reports = new();
 
     public NativeLatencyBackend(Func<FrameTimeline?> timeline, Action<string>? log = null)
     {
@@ -239,16 +238,7 @@ internal sealed class NativeLatencyBackend : ILatencyBackend
     {
         if (_lastPresentUs <= 0 || completedUs <= _lastPresentUs) return;
         var gpuUs = (ulong)(completedUs - _lastPresentUs);
-
-        lock (_reportLock)
-        {
-            for (int i = _reports.Count - 1; i >= 0; i--)
-            {
-                if (_reports[i].FrameId != _lastPresentFrameId) continue;
-                _reports[i] = _reports[i] with { GpuUs = gpuUs };
-                return;
-            }
-        }
+        _reports.AmendGpuUs(_lastPresentFrameId, gpuUs);
     }
 
     // ---------------------------------------------------------------- markers
@@ -262,6 +252,15 @@ internal sealed class NativeLatencyBackend : ILatencyBackend
     /// across a resize, a vsync toggle and an OUT_OF_DATE rebuild.
     /// </summary>
     public void OnSwapchainCreated(SwapchainKHR swapchain)
+    {
+    }
+
+    /// <summary>
+    /// Nothing is bound to the swapchain here either: the Frame timeline the
+    /// sleep waits on belongs to the ring, not to the chain, so a retirement
+    /// changes nothing about the pacing.
+    /// </summary>
+    public void OnSwapchainRetired()
     {
     }
 
@@ -280,11 +279,7 @@ internal sealed class NativeLatencyBackend : ILatencyBackend
     {
         if (_tracker.TryComplete(frameId, presentId, out LatencyFrameReport report))
         {
-            lock (_reportLock)
-            {
-                if (_reports.Count >= MaxReports) _reports.RemoveAt(0);
-                _reports.Add(report);
-            }
+            _reports.Add(report);
         }
 
         FrameTimeline? timeline = _timeline();
@@ -298,16 +293,7 @@ internal sealed class NativeLatencyBackend : ILatencyBackend
         _lastPresentUs = LatencyClock.NowUs();
     }
 
-    public LatencyFrameReport[] TakeReports()
-    {
-        lock (_reportLock)
-        {
-            if (_reports.Count == 0) return Array.Empty<LatencyFrameReport>();
-            LatencyFrameReport[] taken = _reports.ToArray();
-            _reports.Clear();
-            return taken;
-        }
-    }
+    public LatencyFrameReport[] TakeReports() => _reports.Take();
 
     public void Dispose()
     {

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using Silk.NET.Vulkan;
 
 namespace Optimum.Render.Vulkan.Core;
@@ -47,9 +46,6 @@ internal readonly record struct AmdAntiLagCall(
 /// </summary>
 internal sealed class AmdAntiLagBackend : ILatencyBackend
 {
-    /// <summary>A frame's worth of reports; a client that never samples must not grow this.</summary>
-    private const int MaxReports = 256;
-
     /// <summary>The recorded-call ring the tests read; the frame never looks at it.</summary>
     private const int MaxCalls = 512;
 
@@ -58,11 +54,21 @@ internal sealed class AmdAntiLagBackend : ILatencyBackend
     private readonly LatencyPhaseTracker _tracker;
     private readonly Action<string>? _log;
 
-    private readonly List<LatencyFrameReport> _reports = new();
-    private readonly List<AmdAntiLagCall> _calls = new();
+    /// <summary>The finished reports, in a fixed ring (see <see cref="LatencyReportBuffer" />).</summary>
+    private readonly LatencyReportBuffer _reports = new();
 
-    /// <summary>Reports and the call log are drained by the stats sample, which is not the frame thread.</summary>
-    private readonly object _reportLock = new();
+    /// <summary>
+    /// The call log, a fixed ring rather than a list that shifts: both anti-lag
+    /// calls of every frame pass through <see cref="Update" />, so a
+    /// <c>RemoveAt(0)</c> here was a per-frame copy of the whole log in the sleep
+    /// and present path (review 2026-09-12).
+    /// </summary>
+    private readonly AmdAntiLagCall[] _calls = new AmdAntiLagCall[MaxCalls];
+    private int _callNext;
+    private int _callCount;
+
+    /// <summary>The call log is read by a test thread, not the frame thread.</summary>
+    private readonly object _callLock = new();
 
     /// <summary>The mode and cap the driver has been told about; null until the first call.</summary>
     private AntiLagModeAMD? _appliedMode;
@@ -127,7 +133,21 @@ internal sealed class AmdAntiLagBackend : ILatencyBackend
     /// <summary>The calls this backend made, oldest first (capped).</summary>
     public AmdAntiLagCall[] Calls
     {
-        get { lock (_reportLock) return _calls.ToArray(); }
+        get
+        {
+            lock (_callLock)
+            {
+                var taken = new AmdAntiLagCall[_callCount];
+                int index = _callNext - _callCount;
+                if (index < 0) index += MaxCalls;
+                for (int i = 0; i < _callCount; i++)
+                {
+                    taken[i] = _calls[index];
+                    index = index + 1 == MaxCalls ? 0 : index + 1;
+                }
+                return taken;
+            }
+        }
     }
 
     /// <summary>
@@ -203,29 +223,21 @@ internal sealed class AmdAntiLagBackend : ILatencyBackend
     {
     }
 
+    /// <summary>Nothing is bound to the swapchain, so a retirement drops nothing.</summary>
+    public void OnSwapchainRetired()
+    {
+    }
+
     /// <summary>The extension attributes by its own frame index; submits are never tagged.</summary>
     public unsafe void* TagSubmit(ulong frameId, void* pNext) => pNext;
 
     public void OnPresent(ulong frameId, ulong presentId)
     {
         if (!_tracker.TryComplete(frameId, presentId, out LatencyFrameReport report)) return;
-        lock (_reportLock)
-        {
-            if (_reports.Count >= MaxReports) _reports.RemoveAt(0);
-            _reports.Add(report);
-        }
+        _reports.Add(report);
     }
 
-    public LatencyFrameReport[] TakeReports()
-    {
-        lock (_reportLock)
-        {
-            if (_reports.Count == 0) return Array.Empty<LatencyFrameReport>();
-            LatencyFrameReport[] taken = _reports.ToArray();
-            _reports.Clear();
-            return taken;
-        }
-    }
+    public LatencyFrameReport[] TakeReports() => _reports.Take();
 
     /// <summary>
     /// Switches the driver back off, so a device that outlives this backend (the
@@ -306,10 +318,11 @@ internal sealed class AmdAntiLagBackend : ILatencyBackend
             else PresentStageCalls++;
         }
 
-        lock (_reportLock)
+        lock (_callLock)
         {
-            if (_calls.Count >= MaxCalls) _calls.RemoveAt(0);
-            _calls.Add(new AmdAntiLagCall(modeOnly ? 0UL : frameId, stage, mode, maxFps, modeOnly));
+            _calls[_callNext] = new AmdAntiLagCall(modeOnly ? 0UL : frameId, stage, mode, maxFps, modeOnly);
+            _callNext = _callNext + 1 == MaxCalls ? 0 : _callNext + 1;
+            if (_callCount < MaxCalls) _callCount++;
         }
     }
 

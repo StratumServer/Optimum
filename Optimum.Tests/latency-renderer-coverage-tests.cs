@@ -156,6 +156,40 @@ public class LatencyRendererCoverageTests
         }
     }
 
+    /// <summary>
+    /// Latency review 2026-09-12. Two placements the review added, both of which
+    /// a refactor could silently undo:
+    /// the client's frame cap reaches a pacing backend at the sleep (without it,
+    /// turning LatencyMode on stands the lib's limiter down and replaces it with
+    /// nothing), and the swapchain tells the backend when the handle it holds is
+    /// retired or destroyed, before the replacement is announced.
+    /// </summary>
+    [Fact]
+    public void TheFrameCapAndTheSwapchainRetirementReachTheBackend()
+    {
+        string frame = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Frame.cs");
+        string sleep = Body(frame, "    public override void LatencySleep()");
+        int cap = sleep.IndexOf("ApplyFrameCap(backend);", StringComparison.Ordinal);
+        int backendSleep = sleep.IndexOf("backend.Sleep(frameId);", StringComparison.Ordinal);
+        Assert.True(cap >= 0, "the cap never reaches the backend:\n" + sleep);
+        Assert.True(backendSleep > cap, "the cap is applied after the sleep it paces:\n" + sleep);
+
+        // Off is off: a disabled backend is never applied to.
+        string apply = Body(frame, "    private void ApplyFrameCap(ILatencyBackend backend)");
+        Assert.Contains("if (current.Mode == LatencyMode.Off) return;", apply);
+        Assert.Contains("if (current.MinimumIntervalUs == interval) return;", apply);
+
+        string swapchain = Read(SwapchainPath);
+        // Once where the old slot is retired (a rebuild, failed or not), once at
+        // teardown, and nowhere else.
+        Assert.Equal(2, Regex.Matches(swapchain, @"_latency\.OnSwapchainRetired\(\);").Count);
+        string build = Body(swapchain, "    private bool Build(out string? failureReason)");
+        int retired = build.IndexOf("_latency.OnSwapchainRetired();", StringComparison.Ordinal);
+        int created = build.IndexOf("_latency.OnSwapchainCreated(handle);", StringComparison.Ordinal);
+        Assert.True(retired >= 0, "a rebuild never tells the backend the old handle is gone:\n" + build);
+        Assert.True(created > retired, "the new handle is announced before the old one is retired:\n" + build);
+    }
+
     private static string Read(string relativePath) =>
         File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));
 
