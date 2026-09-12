@@ -53,6 +53,13 @@ internal enum WaitSite
     /// thread can stall here on GPU work it did not issue.
     /// </summary>
     QueueSubmit = 8,
+    /// <summary>
+    /// The latency backend's one sleep before the frame's input is sampled
+    /// (plan section "Latency seams", seam S6). Zero with the None backend, which
+    /// never sleeps; with a backend active this is where the frame waits, and
+    /// <see cref="FramePacing" /> should find its value already signalled.
+    /// </summary>
+    LatencySleep = 9,
 }
 
 /// <summary>
@@ -77,6 +84,7 @@ internal enum WaitSite
 /// stats.pacing samples=512 p50_ms=16.667 p95_ms=17.100 p99_ms=18.300 stddev_ms=0.420 stutters=0
 /// stats.waits frame_pacing_n=60 frame_pacing_ms=812.4 upload_submit_n=0 upload_submit_ms=0.0 ... queue_submit_n=60 queue_submit_ms=1.9
 /// stats.counters blocking_uploads=0 uploads=0 scopes=900 barriers=12 rebar_fallbacks=0 dynamic_state=12600 uniform_ring_used=412800 uniform_ring_capacity=16777216
+/// stats.latency backend=off mode=off sleep_n=0 sleep_ms=0.0 frames=60 input_mean_ms=0.02 input_p99_ms=0.04 ... total_mean_ms=16.60 total_p99_ms=18.20
 /// </code>
 /// </summary>
 internal static class VulkanStats
@@ -93,9 +101,10 @@ internal static class VulkanStats
         "swapchain_acquire",
         "present",
         "queue_submit",
+        "latency_sleep",
     };
 
-    public const int WaitSiteCount = 9;
+    public const int WaitSiteCount = 10;
 
     /// <summary>
     /// Dynamic-state commands <c>VulkanDevice.ApplyDynamicState</c> can record for
@@ -415,6 +424,7 @@ internal static class VulkanStats
                FormatPacingLine(FrameIntervals.Snapshot()) + "\n" +
                FormatWaitsLine(waitCounts, waitMs) + "\n" +
                FormatCountersLine(counters) + "\n" +
+               LatencyLine(waitCounts[(int)WaitSite.LatencySleep], waitMs[(int)WaitSite.LatencySleep]) + "\n" +
                VulkanAllocator.FormatMemoryLine(memorySnapshot) + "\n" +
                FormatTransientsLine(new TransientSample(
                    TransientBytes: (ulong)Interlocked.Read(ref _transientBytes),
@@ -446,6 +456,142 @@ internal static class VulkanStats
     /// reports; the device sets it at init and clears it at dispose.
     /// </summary>
     public static volatile VulkanAllocator? MemorySource;
+
+    /// <summary>
+    /// The latency backend the <c>stats.latency</c> line reports (seam S7); the
+    /// device sets it whenever the active backend changes and clears it at
+    /// dispose. Null means the line still appears, with the "off" backend and no
+    /// frames - the line is always present so a parser never has to branch.
+    /// </summary>
+    public static volatile ILatencyBackend? LatencySource;
+
+    /// <summary>
+    /// The vendor extension revision behind the active backend, for the
+    /// <c>rev=</c> token of the line (plan seam S7): VK_NV_low_latency2's
+    /// specVersion, which decides whether submits carry per-submit attribution.
+    /// 0 when the device advertises no such extension, which is every device
+    /// running the None or Native backend.
+    /// </summary>
+    public static volatile uint LatencyRevision;
+
+    /// <summary>
+    /// The eight intervals of <see cref="LatencyFrameReport" />, in the order they
+    /// appear on the <c>stats.latency</c> line.
+    /// </summary>
+    public static readonly string[] LatencyIntervalTokens =
+    {
+        "input",
+        "sim",
+        "render_submit",
+        "present",
+        "driver",
+        "os_queue",
+        "gpu",
+        "total",
+    };
+
+    public const int LatencyIntervalCount = 8;
+
+    /// <summary>The intervals of one report, in <see cref="LatencyIntervalTokens" /> order, in microseconds.</summary>
+    private static void IntervalsOf(in LatencyFrameReport report, ulong[] into)
+    {
+        into[0] = report.InputUs;
+        into[1] = report.SimulationUs;
+        into[2] = report.RenderSubmitUs;
+        into[3] = report.PresentUs;
+        into[4] = report.DriverUs;
+        into[5] = report.OsRenderQueueUs;
+        into[6] = report.GpuUs;
+        into[7] = report.TotalUs;
+    }
+
+    /// <summary>
+    /// Reduces the frame reports of one interval to a mean and a p99 per interval,
+    /// in milliseconds - the same reduction <see cref="FramePacingSnapshot" />
+    /// applies to frame intervals, and the same nearest-rank percentile
+    /// (index ceil(0.99 * n) - 1), so the two lines are read the same way.
+    /// </summary>
+    public static void ReduceReports(LatencyFrameReport[] reports, double[] meanMs, double[] p99Ms)
+    {
+        for (int i = 0; i < LatencyIntervalCount; i++)
+        {
+            meanMs[i] = 0;
+            p99Ms[i] = 0;
+        }
+        if (reports.Length == 0) return;
+
+        var values = new double[LatencyIntervalCount][];
+        for (int i = 0; i < LatencyIntervalCount; i++) values[i] = new double[reports.Length];
+
+        var scratch = new ulong[LatencyIntervalCount];
+        for (int r = 0; r < reports.Length; r++)
+        {
+            IntervalsOf(reports[r], scratch);
+            for (int i = 0; i < LatencyIntervalCount; i++) values[i][r] = scratch[i] / 1000.0;
+        }
+
+        for (int i = 0; i < LatencyIntervalCount; i++)
+        {
+            double sum = 0;
+            for (int r = 0; r < reports.Length; r++) sum += values[i][r];
+            meanMs[i] = sum / reports.Length;
+
+            Array.Sort(values[i]);
+            int index = (int)Math.Ceiling(0.99 * reports.Length) - 1;
+            if (index < 0) index = 0;
+            if (index > reports.Length - 1) index = reports.Length - 1;
+            p99Ms[i] = values[i][index];
+        }
+    }
+
+    /// <summary>
+    /// <c>stats.latency</c> (seam S7): which backend is active, the mode asked of
+    /// it, the sleep it made in the interval, and each report interval reduced to
+    /// a mean and a p99. Always emitted, so "off" is as visible as "on".
+    /// </summary>
+    public static string FormatLatencyLine(string backend, string mode, uint rev, long sleepCount, double sleepMs,
+        int frames, double[] meanMs, double[] p99Ms)
+    {
+        var line = new StringBuilder("stats.latency backend=");
+        line.Append(backend).Append(" mode=").Append(mode);
+        line.Append(" rev=").Append(rev.ToString(CultureInfo.InvariantCulture));
+        line.Append(" sleep_n=").Append(sleepCount.ToString(CultureInfo.InvariantCulture));
+        line.Append(" sleep_ms=").Append(sleepMs.ToString("F1", CultureInfo.InvariantCulture));
+        line.Append(" frames=").Append(frames.ToString(CultureInfo.InvariantCulture));
+        for (int i = 0; i < LatencyIntervalCount; i++)
+        {
+            line.Append(' ').Append(LatencyIntervalTokens[i]).Append("_mean_ms=")
+                .Append(meanMs[i].ToString("F2", CultureInfo.InvariantCulture));
+            line.Append(' ').Append(LatencyIntervalTokens[i]).Append("_p99_ms=")
+                .Append(p99Ms[i].ToString("F2", CultureInfo.InvariantCulture));
+        }
+        return line.ToString();
+    }
+
+    /// <summary>The <c>stats.latency</c> line for the backend currently set as <see cref="LatencySource" />.</summary>
+    private static string LatencyLine(long sleepCount, double sleepMs)
+    {
+        ILatencyBackend? latency = LatencySource;
+        LatencyFrameReport[] reports = latency == null
+            ? Array.Empty<LatencyFrameReport>()
+            : latency.TakeReports();
+
+        var meanMs = new double[LatencyIntervalCount];
+        var p99Ms = new double[LatencyIntervalCount];
+        ReduceReports(reports, meanMs, p99Ms);
+
+        string backend = LatencyBackends.Token(latency == null ? LatencyBackendKind.None : latency.Kind);
+        string mode = latency == null ? "off" : ModeToken(latency.Settings.Mode);
+        return FormatLatencyLine(backend, mode, LatencyRevision, sleepCount, sleepMs, reports.Length, meanMs, p99Ms);
+    }
+
+    /// <summary>The token of one <see cref="LatencyMode" /> on the stats line.</summary>
+    public static string ModeToken(LatencyMode mode) => mode switch
+    {
+        LatencyMode.On => "on",
+        LatencyMode.Boost => "boost",
+        _ => "off",
+    };
 
     /// <summary>The original stats line. Its format must not change.</summary>
     public static string FormatIntervalLine(double elapsed, long frames, long allocations, int liveAllocations,

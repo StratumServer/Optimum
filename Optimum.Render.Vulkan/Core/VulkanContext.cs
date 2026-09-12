@@ -43,6 +43,26 @@ internal sealed class VulkanContextOptions
     public ColorWriteTier? ColorWriteTier;
 
     /// <summary>
+    /// Forces a latency backend (<see cref="Core.LatencyBackendKind" />); null reads
+    /// OPTIMUM_VULKAN_LATENCY. A backend the device lacks degrades to Native, the
+    /// same rule the colour-write tier follows. Tests use it to pin a backend.
+    /// </summary>
+    public LatencyBackendKind? LatencyBackend;
+
+    /// <summary>
+    /// Which present path will drive the frame's last submission. A latency
+    /// backend is only valid for the path that drives it (plan seam S8).
+    /// </summary>
+    public LatencyPresentPath PresentPath = LatencyPresentPath.BlitFromOwned;
+
+    /// <summary>
+    /// Subsystems that need instance or device extensions and feature structs
+    /// (plan seam S1). The latency requirements are added by the context itself;
+    /// this is where a test or a later vendor SDK adds its own.
+    /// </summary>
+    public List<IDeviceRequirementContributor> RequirementContributors = new();
+
+    /// <summary>
     /// Tests only: sleeps this long before every vkAcquireNextImageKHR, standing
     /// in for a compositor that holds images back (PresentDecouplingTests).
     /// </summary>
@@ -77,6 +97,36 @@ internal sealed class VulkanCapabilities
     public bool DynamicColorBlend;
     /// <summary>The tier draws use; see <see cref="Core.ColorWriteTier" />.</summary>
     public ColorWriteTier ColorWriteTier = ColorWriteTier.PipelineKey;
+
+    // ------------------------------------------------------------------ latency
+    // Plan seam S1. Detection is recorded whether or not anything was enabled:
+    // the "device up" line, the stats sample and the acceptance numbers report
+    // what the driver offered, not only what was taken.
+
+    /// <summary>What the driver advertises for latency work.</summary>
+    public LatencyDeviceSupport LatencySupport;
+
+    /// <summary>The backend selected for this device and present path.</summary>
+    public LatencyBackendKind LatencyBackend = LatencyBackendKind.None;
+
+    /// <summary>VK_NV_low_latency2 is enabled on the device (only when that backend was selected).</summary>
+    public bool NvLowLatency2Enabled;
+
+    /// <summary>VK_AMD_anti_lag is enabled on the device (only when that backend was selected).</summary>
+    public bool AmdAntiLagEnabled;
+
+    /// <summary>VK_KHR_present_id is enabled, so Swapchain.Present may chain VkPresentIdKHR.</summary>
+    public bool PresentIdEnabled;
+
+    /// <summary>VK_KHR_get_surface_capabilities2 is on the instance (seam S5's caps query).</summary>
+    public bool SurfaceCapabilities2Enabled;
+
+    /// <summary>
+    /// The latency part of the "device up" log line and of the stats sample
+    /// (<c>VulkanDevice.cs:359-365</c> formats the line; that file belongs to
+    /// another seam, so the token is carried here).
+    /// </summary>
+    public string LatencySummary = "latency backend off";
 }
 
 /// <summary>
@@ -183,6 +233,25 @@ internal sealed unsafe class VulkanContext : IDisposable
     private nint _getQueueCheckpointData;
     private ExtDeviceFault? _deviceFault;
 
+    /// <summary>The instance extensions actually named in VkInstanceCreateInfo.</summary>
+    public string[] EnabledInstanceExtensions { get; private set; } = Array.Empty<string>();
+
+    /// <summary>The device extensions actually named in VkDeviceCreateInfo.</summary>
+    public string[] EnabledDeviceExtensions { get; private set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// VK_NV_low_latency2's entry points, loaded when that backend was selected;
+    /// null otherwise. The backend that calls them is a later stage.
+    /// </summary>
+    public NvLowLatency2Functions? NvLowLatency2 { get; private set; }
+
+    /// <summary>vkAntiLagUpdateAMD, loaded when the AMD backend was selected; null otherwise.</summary>
+    public AmdAntiLagFunctions? AmdAntiLag { get; private set; }
+
+    /// <summary>The latency contributor, which also holds the detection results.</summary>
+    private LatencyDeviceRequirements? _latencyRequirements;
+    private List<IDeviceRequirementContributor>? _contributors;
+
     private ExtDebugUtils? _debugUtils;
     private DebugUtilsMessengerEXT _debugMessenger;
     private Action<string>? _debugCallback;
@@ -275,6 +344,20 @@ internal sealed unsafe class VulkanContext : IDisposable
             extensions.Add(ValidationFeaturesExtensionName);
         }
 
+        // Seam S1: subsystems ask for what they need. A request the loader cannot
+        // satisfy is refused and logged, never named in the create info - naming
+        // an absent extension fails vkCreateInstance, which would turn an
+        // optional feature into a silent fall back to OpenGL (rule 1).
+        var instanceRequirements = new InstanceRequirements(EnumerateInstanceExtensions(), extensions)
+        {
+            Log = options.DebugCallback,
+        };
+        foreach (IDeviceRequirementContributor contributor in Contributors(options))
+        {
+            contributor.ContributeInstanceExtensions(instanceRequirements);
+        }
+        EnabledInstanceExtensions = extensions.ToArray();
+
         byte* applicationName = (byte*)SilkMarshal.StringToPtr("Optimum");
         byte* engineName = (byte*)SilkMarshal.StringToPtr("Optimum.Render.Vulkan");
         nint extensionsPtr = SilkMarshal.StringArrayToPtr(extensions);
@@ -334,6 +417,56 @@ internal sealed unsafe class VulkanContext : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The requirement contributors for this context, built once: the latency
+    /// requirements (always present, because detection is reported even when
+    /// nothing is enabled) followed by whatever the caller added.
+    /// </summary>
+    private List<IDeviceRequirementContributor> Contributors(VulkanContextOptions options)
+    {
+        if (_contributors != null) return _contributors;
+
+        _latencyRequirements = new LatencyDeviceRequirements(
+            options.LatencyBackend ?? LatencyBackends.FromEnvironment(options.DebugCallback),
+            options.PresentPath,
+            options.DebugCallback);
+
+        _contributors = new List<IDeviceRequirementContributor> { _latencyRequirements };
+        if (options.RequirementContributors != null)
+        {
+            _contributors.AddRange(options.RequirementContributors);
+        }
+        return _contributors;
+    }
+
+    /// <summary>The instance extensions the loader advertises (no layer named).</summary>
+    private HashSet<string> EnumerateInstanceExtensions()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+
+        uint count = 0;
+        if (Api.EnumerateInstanceExtensionProperties((byte*)null, &count, null) != Result.Success || count == 0)
+        {
+            return names;
+        }
+
+        var properties = new ExtensionProperties[count];
+        fixed (ExtensionProperties* propertiesPtr = properties)
+        {
+            if (Api.EnumerateInstanceExtensionProperties((byte*)null, &count, propertiesPtr) != Result.Success)
+            {
+                return names;
+            }
+            // The name is a fixed-size buffer, readable only through a pointer.
+            for (int i = 0; i < count; i++)
+            {
+                string? name = SilkMarshal.PtrToString((nint)propertiesPtr[i].ExtensionName);
+                if (name != null) names.Add(name);
+            }
+        }
+        return names;
     }
 
     /// <summary>Name of VK_EXT_validation_features; Silk.NET has no wrapper class for it.</summary>
@@ -660,18 +793,18 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         // Diagnostics for a lost device. Both are optional and cost nothing when
         // the GPU is healthy, so they are taken wherever the driver offers them.
-        HashSet<string> deviceExtensionsAvailable = EnumerateDeviceExtensions();
+        Dictionary<string, uint> deviceExtensionsAvailable = EnumerateDeviceExtensions();
         bool checkpointsDisabled =
             Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_CHECKPOINTS") is "0" or "off" or "false";
         bool wantCheckpoints = !checkpointsDisabled && IntPtr.Size == 8
-            && deviceExtensionsAvailable.Contains("VK_NV_device_diagnostic_checkpoints");
+            && deviceExtensionsAvailable.ContainsKey("VK_NV_device_diagnostic_checkpoints");
 
         var faultFeatures = new PhysicalDeviceFaultFeaturesEXT
         {
             SType = StructureType.PhysicalDeviceFaultFeaturesExt,
         };
         bool wantDeviceFault = false;
-        if (deviceExtensionsAvailable.Contains("VK_EXT_device_fault"))
+        if (deviceExtensionsAvailable.ContainsKey("VK_EXT_device_fault"))
         {
             var query = new PhysicalDeviceFeatures2
             {
@@ -714,8 +847,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         {
             SType = StructureType.PhysicalDeviceExtendedDynamicState3FeaturesExt,
         };
-        bool hasColorWriteEnable = deviceExtensionsAvailable.Contains("VK_EXT_color_write_enable");
-        bool hasDynamicState3 = deviceExtensionsAvailable.Contains("VK_EXT_extended_dynamic_state3");
+        bool hasColorWriteEnable = deviceExtensionsAvailable.ContainsKey("VK_EXT_color_write_enable");
+        bool hasDynamicState3 = deviceExtensionsAvailable.ContainsKey("VK_EXT_extended_dynamic_state3");
         if (hasColorWriteEnable || hasDynamicState3)
         {
             colorWriteFeatures.PNext = hasDynamicState3 ? &dynamicState3Features : null;
@@ -737,28 +870,19 @@ internal sealed unsafe class VulkanContext : IDisposable
         colorWriteFeatures = new PhysicalDeviceColorWriteEnableFeaturesEXT
         {
             SType = StructureType.PhysicalDeviceColorWriteEnableFeaturesExt,
-            PNext = wantDeviceFault ? &faultFeatures : null,
             ColorWriteEnable = true,
         };
         dynamicState3Features = new PhysicalDeviceExtendedDynamicState3FeaturesEXT
         {
             SType = StructureType.PhysicalDeviceExtendedDynamicState3FeaturesExt,
-            PNext = wantDeviceFault ? &faultFeatures : null,
             ExtendedDynamicState3ColorWriteMask = true,
             ExtendedDynamicState3ColorBlendEnable = canBlend,
             ExtendedDynamicState3ColorBlendEquation = canBlend,
-        };
-        void* optionalFeatures = colorWriteTier switch
-        {
-            ColorWriteTier.DynamicEnable => &colorWriteFeatures,
-            ColorWriteTier.DynamicMask => &dynamicState3Features,
-            _ => wantDeviceFault ? &faultFeatures : null,
         };
 
         var vulkan13 = new PhysicalDeviceVulkan13Features
         {
             SType = StructureType.PhysicalDeviceVulkan13Features,
-            PNext = optionalFeatures,
             DynamicRendering = true,
             Synchronization2 = true,
         };
@@ -783,11 +907,31 @@ internal sealed unsafe class VulkanContext : IDisposable
 
         // Optional tier: per-heap budgets from the driver; without it the
         // allocator budgets heap x 0.7. The env override forces the fallback.
-        bool wantMemoryBudget = deviceExtensionsAvailable.Contains("VK_EXT_memory_budget")
+        bool wantMemoryBudget = deviceExtensionsAvailable.ContainsKey("VK_EXT_memory_budget")
             && Environment.GetEnvironmentVariable("OPTIMUM_VULKAN_NO_MEMORY_BUDGET") != "1";
         if (wantMemoryBudget) deviceExtensions.Add("VK_EXT_memory_budget");
         if (colorWriteTier == ColorWriteTier.DynamicEnable) deviceExtensions.Add("VK_EXT_color_write_enable");
         if (colorWriteTier == ColorWriteTier.DynamicMask) deviceExtensions.Add("VK_EXT_extended_dynamic_state3");
+
+        // One pNext chain instead of the single "optionalFeatures" slot this
+        // method used to have: device fault, the colour-write tier and every
+        // contributor's feature struct now link together, so two optional
+        // subsystems can be on at once (seam S1). What each of them asks for is
+        // unchanged, and the tier still enables exactly one of its two extensions.
+        using var requirements = new DeviceRequirements(
+            Api, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
+        {
+            Log = options.DebugCallback,
+        };
+        if (wantDeviceFault) requirements.ChainFeature(&faultFeatures);
+        if (colorWriteTier == ColorWriteTier.DynamicEnable) requirements.ChainFeature(&colorWriteFeatures);
+        if (colorWriteTier == ColorWriteTier.DynamicMask) requirements.ChainFeature(&dynamicState3Features);
+
+        foreach (IDeviceRequirementContributor contributor in Contributors(options))
+        {
+            contributor.ContributeDeviceRequirements(requirements);
+        }
+        vulkan13.PNext = requirements.Chain;
 
         nint extensionsPtr = deviceExtensions.Count > 0
             ? SilkMarshal.StringArrayToPtr(deviceExtensions)
@@ -834,13 +978,57 @@ internal sealed unsafe class VulkanContext : IDisposable
             DynamicState3Api = state3;
         }
         MemoryBudgetAvailable = wantMemoryBudget;
+        EnabledDeviceExtensions = deviceExtensions.ToArray();
+        RecordLatencyCapabilities();
         Allocator = new VulkanAllocator(this);
         return true;
     }
 
-    private HashSet<string> EnumerateDeviceExtensions()
+    /// <summary>
+    /// Copies the latency contributor's findings into the capabilities and loads
+    /// the vendor entry points of the selected backend (seam S1). Everything the
+    /// driver advertised is recorded, whether or not it was enabled.
+    /// </summary>
+    private void RecordLatencyCapabilities()
     {
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        if (_latencyRequirements == null) return;
+
+        Capabilities.LatencySupport = _latencyRequirements.Support;
+        Capabilities.LatencyBackend = _latencyRequirements.Selected;
+        Capabilities.NvLowLatency2Enabled = _latencyRequirements.NvLowLatency2Enabled;
+        Capabilities.AmdAntiLagEnabled = _latencyRequirements.AmdAntiLagEnabled;
+        Capabilities.PresentIdEnabled = _latencyRequirements.PresentIdEnabled;
+        Capabilities.SurfaceCapabilities2Enabled = _latencyRequirements.SurfaceCapabilities2Enabled;
+
+        if (Capabilities.NvLowLatency2Enabled)
+        {
+            NvLowLatency2 = NvLowLatency2Functions.Load(Api, Device);
+            if (NvLowLatency2 == null)
+            {
+                // The extension was enabled but the driver did not resolve all
+                // five entry points: report Native rather than call into nothing.
+                Capabilities.NvLowLatency2Enabled = false;
+                Capabilities.LatencyBackend = LatencyBackendKind.Native;
+            }
+        }
+        if (Capabilities.AmdAntiLagEnabled)
+        {
+            AmdAntiLag = AmdAntiLagFunctions.Load(Api, Device);
+            if (AmdAntiLag == null)
+            {
+                Capabilities.AmdAntiLagEnabled = false;
+                Capabilities.LatencyBackend = LatencyBackendKind.Native;
+            }
+        }
+
+        Capabilities.LatencySummary = LatencyBackendSelector.Summary(
+            Capabilities.LatencyBackend, Capabilities.LatencySupport, Capabilities.PresentIdEnabled);
+    }
+
+    /// <summary>Every device extension the driver advertises, with its revision.</summary>
+    private Dictionary<string, uint> EnumerateDeviceExtensions()
+    {
+        var names = new Dictionary<string, uint>(StringComparer.Ordinal);
 
         uint count = 0;
         Result result = Api.EnumerateDeviceExtensionProperties(PhysicalDevice, (byte*)null, &count, null);
@@ -855,7 +1043,7 @@ internal sealed unsafe class VulkanContext : IDisposable
             for (int i = 0; i < count; i++)
             {
                 string? name = SilkMarshal.PtrToString((nint)propertiesPtr[i].ExtensionName);
-                if (name != null) names.Add(name);
+                if (name != null) names[name] = propertiesPtr[i].SpecVersion;
             }
         }
         return names;

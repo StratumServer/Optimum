@@ -24,8 +24,11 @@ namespace Optimum.Render.Vulkan;
 /// out integer ids, because the game's public API exposes raw GL names as fields
 /// that mods read and pass back.
 /// </summary>
-public sealed unsafe class VulkanDevice : IDisposable
+public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageListener
 {
+    /// <summary>The platform's stage bracket reaches the latency markers here (seam S4).</summary>
+    void Platform.ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();
+
     private VulkanContext _context = null!;
     private UploadManager _uploads = null!;
     private GlStateTracker _state = null!;
@@ -53,6 +56,183 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>Scratch for the SSBO path's pruned custom ints, grown as needed.</summary>
     private int[] _prunedCustomInts = [];
+
+    /// <summary>
+    /// The active latency backend (plan section "Latency seams"). Replaced while
+    /// the device comes up by whatever <c>LatencyDeviceRequirements</c> selected
+    /// from the device's capabilities and the OPTIMUM_VULKAN_LATENCY override
+    /// (see <see cref="InstallSelectedLatencyBackend" />); never null, so every
+    /// call site is a plain virtual call with no branch.
+    /// </summary>
+    internal ILatencyBackend Latency { get; private set; } = new NoneLatencyBackend();
+
+    /// <summary>
+    /// Installs the latency backend every marker, tag and swapchain callback goes
+    /// to (seam S2-S5). Called once while the device comes up, before the
+    /// swapchain exists, so the first swapchain creation reaches it like every
+    /// later one; the stats line reports whichever is installed.
+    /// </summary>
+    internal void SetLatencyBackend(ILatencyBackend backend)
+    {
+        Latency = backend ?? throw new ArgumentNullException(nameof(backend));
+        _latencyBackendInstalled = true;
+        VulkanStats.LatencySource = Latency;
+        if (_frames != null) _frames.Latency.Backend = Latency;
+        if (_swapchain != null) _swapchain.Latency = Latency;
+    }
+
+    /// <summary>
+    /// Installs the backend the capabilities stage selected for this device
+    /// (<c>VulkanCapabilities.LatencyBackend</c>) and hands it the client's
+    /// persisted <c>LatencyMode</c> setting. Called once, right after the context
+    /// exists and before the frame ring and the first swapchain, so the ring's
+    /// submit tag, the stats source and every swapchain creation see the same
+    /// instance.
+    ///
+    /// The client's <c>LatencyMode</c> ships off, so the installed backend is
+    /// handed <see cref="LatencySettings.Disabled" /> and sleeps nowhere and owns
+    /// no frame cap whichever kind it is: the shipped frame stays the one
+    /// Milestone 1 delivered until the setting is turned on.
+    /// </summary>
+    private void InstallSelectedLatencyBackend()
+    {
+        VulkanStats.LatencyRevision = _context.Capabilities.LatencySupport.NvLowLatency2SpecVersion;
+
+        // A backend installed before the device came up was a deliberate choice
+        // (the GPU tests' recording backend, and later a caller that builds its
+        // own): it wins over the selection, and only the settings are re-applied.
+        if (_latencyBackendInstalled)
+        {
+            Latency.Apply(LatencySettingsFromConfig());
+            return;
+        }
+
+        LatencyBackendKind selected = _context.Capabilities.LatencyBackend;
+        ILatencyBackend backend = CreateLatencyBackend(selected);
+        if (backend.Kind != selected)
+        {
+            // All four kinds are implemented; the only way to land here now is a
+            // vendor backend whose entry points did not load between device
+            // creation and this call, which degrades one step (NV/AMD to Native).
+            MirrorValidationMessage("latency: " + LatencyBackends.Token(selected) +
+                " could not be constructed on this device; using " + LatencyBackends.Token(backend.Kind));
+        }
+
+        SetLatencyBackend(backend);
+        backend.Apply(LatencySettingsFromConfig());
+    }
+
+    /// <summary>Someone has installed a backend, so the selection must not overwrite it.</summary>
+    private bool _latencyBackendInstalled;
+
+    /// <summary>
+    /// The implementation of one selected backend kind: the single place that
+    /// learns about them. All four exist (None, Native, NV low_latency2, AMD
+    /// anti-lag). A vendor backend that cannot be constructed after all - the
+    /// entry points did not load between device creation and here - degrades one
+    /// step the way <see cref="LatencyBackendSelector.Degrade" /> does, i.e. to
+    /// Native, never silently to None.
+    /// </summary>
+    private ILatencyBackend CreateLatencyBackend(LatencyBackendKind kind)
+    {
+        switch (kind)
+        {
+            case LatencyBackendKind.Native:
+                return CreateNativeLatencyBackend();
+
+            case LatencyBackendKind.NvLowLatency2:
+                if (NvLowLatency2Backend.TryCreate(_context, MirrorValidationMessage,
+                        out NvLowLatency2Backend? nvidia))
+                {
+                    return nvidia!;
+                }
+                // The caller (InstallSelectedLatencyBackend) logs the degrade.
+                return CreateNativeLatencyBackend();
+
+            case LatencyBackendKind.AmdAntiLag:
+                // The context loaded vkAntiLagUpdateAMD when it enabled the
+                // extension; without it the selection degrades the usual way.
+                AmdAntiLagFunctions? antiLag = _context.AmdAntiLag;
+                if (antiLag != null)
+                {
+                    return AmdAntiLagBackend.Create(_context.Device, antiLag, MirrorValidationMessage);
+                }
+                // The caller (InstallSelectedLatencyBackend) logs the degrade.
+                return CreateNativeLatencyBackend();
+
+            default:
+                return new NoneLatencyBackend(MirrorValidationMessage);
+        }
+    }
+
+    /// <summary>
+    /// The vendor-independent completion-pacing backend. The frame timeline is
+    /// fetched through a callback rather than captured, because the selection is
+    /// installed before the frame ring exists.
+    /// </summary>
+    private ILatencyBackend CreateNativeLatencyBackend() =>
+        new NativeLatencyBackend(() => _frames?.Timeline, MirrorValidationMessage);
+
+    /// <summary>
+    /// The client's persisted latency setting as the backend's own settings. The
+    /// frame cap is not part of the setting: the client's own limiter keeps it
+    /// while no backend owns the cap, and a backend that does own it is handed
+    /// the cap from the client's MaxFps at that point.
+    /// </summary>
+    private static LatencySettings LatencySettingsFromConfig()
+    {
+        if (!OptimumConfig.LatencyEnabled) return LatencySettings.Disabled;
+        return new LatencySettings(OptimumConfig.LatencyBoost ? LatencyMode.Boost : LatencyMode.On, 0);
+    }
+
+    /// <summary>
+    /// The latency identity of the frame being recorded (seam S2): one monotonic
+    /// value per rendered frame, allocated by <see cref="BeginLatencyFrame" />
+    /// before the client samples input, and used by every marker, every submit tag
+    /// and the present map of that frame.
+    ///
+    /// Deliberately not the Frame timeline value, which advances two or three
+    /// times per frame (Submit A, Submit B, any partial submit), and deliberately
+    /// not <c>_frameCounter</c>, which stays a 32-bit counter because the GPU
+    /// checkpoint markers pack it into a pointer-sized word.
+    /// </summary>
+    internal ulong LatencyFrameId => _latencyFrameId;
+
+    private ulong _latencyFrameId;
+
+    /// <summary>An id was allocated by the platform hook and no frame has consumed it yet.</summary>
+    private bool _latencyFrameIdPending;
+
+    /// <summary>The frame whose render start has already been stamped; 0 before the first.</summary>
+    private ulong _latencyRenderStartFrame;
+
+    /// <summary>
+    /// Allocates the next latency frame id. The lib hook calls this from
+    /// <c>VulkanClientPlatform.LatencySleep</c>, before input is sampled and
+    /// therefore before <see cref="BeginFrame" />; a frame that starts without it
+    /// (a headless test, a path with no platform) allocates its own id in
+    /// <see cref="BeginFrame" />, so the identity exists exactly once either way.
+    /// </summary>
+    public ulong BeginLatencyFrame()
+    {
+        _latencyFrameId++;
+        _latencyFrameIdPending = true;
+        return _latencyFrameId;
+    }
+
+    /// <summary>
+    /// The frame's first render stage has begun: simulation is over and the
+    /// renderer starts recording (seam S4). Called from
+    /// <c>VulkanClientPlatform.BeginRenderStage</c> on every stage; only the first
+    /// of a frame stamps anything, so no marker of a frame is ever stamped twice.
+    /// </summary>
+    internal void NoteRenderStageStarted()
+    {
+        if (_latencyRenderStartFrame == _latencyFrameId) return;
+        _latencyRenderStartFrame = _latencyFrameId;
+        Latency.Marker(_latencyFrameId, LatencyMarker.SimulationEnd);
+        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitStart);
+    }
 
     private uint _frameCounter;
     private uint _uniformExhaustionReportedFrame = uint.MaxValue;
@@ -362,7 +542,12 @@ public sealed unsafe class VulkanDevice : IDisposable
             "; device fault reporting " + (_context.DeviceFaultAvailable ? "ENABLED" : "NOT AVAILABLE") +
             "; poison " + (_context.PoisonFreshResources ? "ON" : "off") +
             "; color write tier " + DeviceCaps.Token(_context.Capabilities.ColorWriteTier) +
-            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : ""));
+            (_context.Capabilities.DynamicColorBlend ? " (dynamic blend)" : "") +
+            "; " + _context.Capabilities.LatencySummary);
+        // Seams S1-S5: the backend the capabilities stage selected is installed
+        // before the frame ring and the first swapchain exist, so nothing in the
+        // frame ever sees a different instance than the one that was announced.
+        InstallSelectedLatencyBackend();
         // A ReBAR miss is logged, not an error: the validation mirror and the
         // trace, never GetError. The stats sample reads this allocator's heaps.
         _context.Allocator.Log = MirrorValidationMessage;
@@ -372,6 +557,11 @@ public sealed unsafe class VulkanDevice : IDisposable
         // any thread into the ring's upload batch (or inline into the frame when
         // it already used the destination; see UploadManager).
         _frames = new FrameRing(_context);
+        // Seams S4 and S7: whatever backend is installed tags this ring's submits
+        // and feeds the stats.latency line. A later stage replaces it through
+        // SetLatencyBackend before the swapchain is built.
+        _frames.Latency.Backend = Latency;
+        VulkanStats.LatencySource = Latency;
         _uploads = _frames.Uploads;
         _textures = new TextureManager(_context, _uploads);
         _meshes = new MeshManager(_context, _state, _uploads);
@@ -419,14 +609,22 @@ public sealed unsafe class VulkanDevice : IDisposable
                 return false;
             }
 
+            // Seam S5: a backend with a per-swapchain create struct (NV's
+            // VkSwapchainLatencyCreateInfoNV) hands it over here, so the first
+            // swapchain is created with it exactly as every rebuild is.
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError))
+                    out Swapchain? swapchain, out string? swapchainError, Latency,
+                    (Latency as NvLowLatency2Backend)?.SwapchainCreateChain))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
             }
 
             _swapchain = swapchain;
+            // Seam S2: VkPresentIdKHR may only be chained when VK_KHR_present_id
+            // and its feature were actually enabled, which is what the capability
+            // says; chaining it otherwise is a validation error.
+            _swapchain.PresentIdEnabled = _context.Capabilities.PresentIdEnabled;
             _presentPath = new BlitPresentPath(_context, _textures, DefaultColorTexture);
             CreateDefaultFramebuffer((uint)width, (uint)height);
         }
@@ -720,6 +918,15 @@ public sealed unsafe class VulkanDevice : IDisposable
             _transients.AliasedBytes, _transients.Leases.Count, _transients.AliasedLeaseCount, _readSelfCopies.Live);
         _transients.BeginFrame();
 
+        // Seam S2: the frame's latency identity. The platform hook allocates it
+        // before input is sampled; a frame that reaches here without one (headless
+        // tests, any path with no platform) allocates it now, so every frame has
+        // exactly one id and the ids increase by one.
+        if (!_latencyFrameIdPending) BeginLatencyFrame();
+        _latencyFrameIdPending = false;
+        // Every submit of this frame carries the frame's id (seam S4).
+        _frames.Latency.FrameId = _latencyFrameId;
+
         FrameSlot slot = _frames.BeginFrame();
         _readSelfCopies.Collect();
         _frameActive = true;
@@ -882,6 +1089,10 @@ public sealed unsafe class VulkanDevice : IDisposable
         long presentEntry = System.Diagnostics.Stopwatch.GetTimestamp();
         ulong renderValue = _frames.EndFrame();
         _frameActive = false;
+        // Seam S4: the frame's work is queued (Submit A). Stamped before the
+        // acquire, which is where the CPU may block, so the render-submit
+        // interval is recording time and nothing else.
+        Latency.Marker(_latencyFrameId, LatencyMarker.RenderSubmitEnd);
         long frameSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
         // Headless: nothing to present; the frame is submitted all the same.
@@ -906,7 +1117,13 @@ public sealed unsafe class VulkanDevice : IDisposable
         _swapchain.NotePresentSubmitted(target, presentValue);
         long presentSubmitted = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        _swapchain.Present(target);
+        // Seam S4: PresentStart and PresentEnd bracket vkQueuePresentKHR itself,
+        // and the present id the call was given closes the frame's report.
+        Latency.Marker(_latencyFrameId, LatencyMarker.PresentStart);
+        ulong presentId = _swapchain.Present(target, _latencyFrameId);
+        Latency.Marker(_latencyFrameId, LatencyMarker.PresentEnd);
+        Latency.OnPresent(_latencyFrameId, presentId);
+        LastPresentIdForTests = presentId;
         LastPresentTimingsForTests = new PresentTimings(presentEntry, frameSubmitted, acquireReturned, presentSubmitted,
             renderValue, presentValue, renderCompletedAtAcquire, true);
 
@@ -927,6 +1144,9 @@ public sealed unsafe class VulkanDevice : IDisposable
 
     /// <summary>The last Present's timings. Tests only.</summary>
     internal PresentTimings LastPresentTimingsForTests { get; private set; }
+
+    /// <summary>The present id of the last present, 0 before the first. Tests only.</summary>
+    internal ulong LastPresentIdForTests { get; private set; }
 
     /// <summary>The swapchain, null when headless. Tests only.</summary>
     internal Swapchain? SwapchainForTests => _swapchain;
@@ -3180,6 +3400,14 @@ public sealed unsafe class VulkanDevice : IDisposable
         {
             VulkanStats.MemorySource = null;
         }
+        if (ReferenceEquals(VulkanStats.LatencySource, Latency))
+        {
+            VulkanStats.LatencySource = null;
+            VulkanStats.LatencyRevision = 0;
+        }
+        // The device installed it, so the device ends it; the None backend and
+        // the test fake have nothing to release.
+        Latency.Dispose();
         _context?.Dispose();
     }
 }

@@ -287,6 +287,34 @@ pacing seen in Phase 0 and Phase 1 was the moving world, not the build. Evidence
   one 60 s run per backend, the Vulkan stats counters, one `taa-rejection.py` dump per backend and the
   GPU suite's validation. No 10-minute sessions, no multi-launch SSIM matrices.
 
+### Latency acceptance (2026-09-12, branch `feat/latency` at b58d89f)
+
+RTX 4070 Laptop, driver 615.71.09 (VK_NV_low_latency2 revision 2), X11, section 0's fixed scene, TAA on,
+vsync off, `MANGOHUD=0`. Three 60 s Vulkan runs, one per mode, logs in
+`docs/gpu-verification-2026-09-11/latency/`. Input-to-present is the `stats.latency` total interval
+(driver-reported for NV, renderer timestamps otherwise).
+
+| | mode off | Native (completion pacing) | NV Reflex (`VK_NV_low_latency2`) |
+|---|---|---|---|
+| mean frame time | 7.700 ms (130 fps) | 9.434 ms (106 fps) | 7.656 ms (131 fps) |
+| 1 % low | 9.27 ms | 13.71 ms | 9.46 ms |
+| frame stddev | 0.428 ms | 0.374 ms | 0.426 ms |
+| input to present, median | 7.67 ms | 1.84 ms | 1.85 ms |
+| input to present, p99 | - | - | 3.91 ms |
+| simulation interval | 5.92 ms | 0.16 ms | 0.15 ms |
+| driver / OS queue / GPU | not reported | not reported | 0.07 / 12.80 / 12.72 ms |
+
+- **Both backends cut input-to-present by about 5.8 ms**, roughly three quarters, by moving the wait in
+  front of input sampling: the simulation interval drops from 5.92 ms to 0.15 ms because it no longer
+  absorbs the frame-pacing wait.
+- **Reflex is free, our own pacing costs 18 % of the frame rate** (9.43 ms vs 7.70), which is the expected
+  trade: completion pacing leaves the GPU idle while the CPU records the next frame.
+- **`VK_NV_low_latency2` works on the Linux driver at revision 2**: `vkGetLatencyTimingsNV` returns the
+  driver, OS-queue and GPU intervals, and the marker present ids match ours.
+- **Decision (user, 2026-09-12): latency reduction ships on by default, Native included**, so GPUs with no
+  vendor path (Intel on Vulkan, AMD without the Mesa layer) also get the latency win at that frame-rate
+  cost. Auto order: NV, AMD, Native, None; `OPTIMUM_VULKAN_LATENCY=off|native|nv|amd` forces one.
+
 ## 3. Methods
 
 ### Parity dump and SSIM

@@ -160,6 +160,13 @@ var membersToInject = new Dictionary<string, List<string>>
         // Phase 2 (contract C3): the render-stage bracket ClientMain.TriggerRenderStage calls.
         "BeginRenderStage",
         "EndRenderStage",
+        // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag
+        // window_RenderFrame calls.
+        "LatencySleep",
+        "LatencyOwnsFrameCap",
+        // Review follow-up 2026-09-12: the effective frame cap (background reduction
+        // included) window_RenderFrame hands to a pacing backend before the sleep.
+        "SetLatencyFrameCap",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {

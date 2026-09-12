@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..49a9a11 100644
+index d6eb844..4edec1c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,416 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,436 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -401,6 +401,26 @@ index d6eb844..49a9a11 100644
 +	}
 +
 +	public virtual void EndRenderStage(EnumRenderStage stage)
++	{
++	}
++
++	// Vulkan-native plan, "Latency seams" S3: window_RenderFrame calls LatencySleep()
++	// immediately before it samples the mouse, so a latency backend's wait happens
++	// before input rather than after it, and skips its own FPS limiter when the
++	// platform's backend paces the frame itself. Neutral bodies; the OpenGL path does
++	// not override them, so vanilla pacing is unchanged.
++	public virtual void LatencySleep()
++	{
++	}
++
++	public virtual bool LatencyOwnsFrameCap => false;
++
++	// Vulkan-native plan, "Latency seams" S3 (review follow-up, 2026-09-12): the frame cap
++	// window_RenderFrame computed for this frame in frames per second, 0 meaning uncapped.
++	// It already includes the background-window reduction, so a backend that owns the cap
++	// paces an unfocused window to the same number the client's own limiter would have used.
++	// Neutral body; the OpenGL path does not override it.
++	public virtual void SetLatencyFrameCap(int maxFps)
 +	{
 +	}
 +
