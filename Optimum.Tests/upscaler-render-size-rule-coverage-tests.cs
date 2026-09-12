@@ -101,8 +101,17 @@ public class UpscalerRenderSizeRuleCoverageTests
     {
         string platform = Read(Platform);
         Assert.Contains(
-            "UpscalerActive && OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0",
+            "(UpscalerActive || PassthroughUpscaler.Requested) &&\n" +
+            "        OptimumConfig.UpscalerReplacesTaa && MotionAttachmentIndex >= 0",
             platform);
+
+        // The passthrough upscaler answers the same question the same way and one
+        // step earlier: it asks no host anything at all, which is what lets it plan
+        // on a machine with no NGX.
+        string passthrough = Read("Optimum.Render.Vulkan/Upscale/PassthroughUpscaler.cs");
+        string plan = Between(passthrough, "public static bool TryPlanForFrame(", "\n    }");
+        Assert.Contains("renderWidth = displayWidth;", plan);
+        Assert.Contains("if (!Requested) return false;", plan);
     }
 
     /// <summary>

@@ -45,7 +45,12 @@ public class UpscalerSettingCoverageTests
             Assert.Contains("public static bool UpscalerRuntimeDisabled { get; private set; }", config);
             Assert.Contains("public static bool DisableUpscalerAtRuntime()", config);
             Assert.Contains("public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? \"off\" : Upscaler;", config);
-            Assert.Contains("public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss;", config);
+            // Every upscaler that owns the resolve, not DLSS alone: the passthrough
+            // upscaler takes the identical path and stands the in-house resolve, the
+            // sharpen pass and the FSR blit down exactly as DLSS does.
+            Assert.Contains(
+                "public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss || EffectiveUpscalerIsPassthrough;",
+                config);
         }
     }
 

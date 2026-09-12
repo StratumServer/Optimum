@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..a654a7f 100644
+index 4d08f84..91b6558 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,17 @@ public class GuiCompositeSettings : GuiComposite
@@ -127,7 +127,7 @@ index 4d08f84..a654a7f 100644
  			DefaultShaderUniforms shaderUniforms = ScreenManager.Platform.ShaderUniforms;
  			if (shaderUniforms != null)
  			{
-@@ -1740,10 +1768,550 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1768,551 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -323,10 +323,11 @@ index 4d08f84..a654a7f 100644
 +			.AddStaticText(Lang.Get("optimum-latency"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 3, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-latency-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 3, 400, 25))
 +			.AddDropDown(new string[] { "off", "on", "boost" }, new string[] { Lang.Get("optimum-latency-off"), Lang.Get("optimum-latency-on"), Lang.Get("optimum-latency-boost") }, 1, onOptimumLatencyChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 25), "optLatency")
-+			// The two rows below belong to the comparison experiment, not to a shipping
-+			// feature: the filter the passthrough upscaler magnifies with, and whether
-+			// the jitter is applied while an upscaler owns the resolve. Both are marked
-+			// as debug in their labels and both do nothing unless an upscaler is on.
++			// The two rows below belong to the passthrough upscaler: the filter it
++			// magnifies with, which is a shipping choice, and whether the jitter is
++			// applied while an upscaler owns the resolve, which is the comparison
++			// experiment and is marked as debug in its label. Neither does anything
++			// unless an upscaler is on.
 +			.AddStaticText(Lang.Get("optimum-upscalerpassthroughfilter"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 4, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-upscalerpassthroughfilter-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 4, 400, 25))
 +			.AddDropDown(new string[] { "linear", "nearest" }, new string[] { Lang.Get("optimum-upscalerpassthroughfilter-linear"), Lang.Get("optimum-upscalerpassthroughfilter-nearest") }, 0, onOptimumUpscalerPassthroughFilterChanged, ElementBounds.Fixed(450, y0 + rowH * 4 + 2, 200, 25), "optUpscalerPassthroughFilter")
@@ -474,7 +475,7 @@ index 4d08f84..a654a7f 100644
 +		optimumUpdateUpscalerRows();
 +	}
 +
-+	// The comparison experiment's two debug rows.
++	// The passthrough upscaler's filter, and the comparison experiment's jitter switch.
 +	//
 +	// The filter only changes how the passthrough blit magnifies, so it is a plain
 +	// setting write: no target changes size, nothing temporal is invalidated, and the
@@ -678,7 +679,7 @@ index 4d08f84..a654a7f 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2386,87 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2387,87 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

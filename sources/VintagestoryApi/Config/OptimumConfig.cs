@@ -439,19 +439,25 @@ public static class OptimumConfig
 
     /// <summary>
     /// The upscaler slot: "off", "dlss" (DLSS Super Resolution through raw NGX) or
-    /// "passthrough" (the diagnostic below).
+    /// "passthrough" (below).
     ///
-    /// <para><b>"passthrough" is a comparison entry, not a feature.</b> It occupies
+    /// <para><b>"passthrough" is two things at once.</b> It occupies
     /// exactly the DLSS slot - the same render/display split, the same preset render
     /// size, the same jitter, the same motion attachment, the same display-resolution
     /// post chain, the same TAA and FSR stand-down - and its "evaluate" is a plain
     /// magnifying blit from the render-resolution scene colour to the display-resolution
-    /// target. It exists to answer one question: at a low render ratio, is the shimmer
+    /// target.
+    ///
+    /// As a diagnostic it answers one question: at a low render ratio, is the shimmer
     /// the vendor's reconstruction or our own rendering path? With
     /// <see cref="UpscalerJitter" /> off the frame is a still magnification and nothing
     /// temporal moves; with it on the render grid moves every frame and nothing
-    /// reconstructs it. Those two states are the measurement. It touches no vendor
-    /// library at all, which is also why it runs on any GPU.</para>
+    /// reconstructs it. Those two states are the measurement.
+    ///
+    /// As a feature it is the upscaler for a GPU with no vendor path: it touches no
+    /// vendor library at all - no NGX, no session, no feature, not even the
+    /// optimal-settings query - so it runs wherever the Vulkan renderer runs, and
+    /// trades reconstruction for the frame rate of the reduced render size.</para>
     ///
     /// Off by default, and off is the whole of the old behaviour: with no
     /// upscaler the render chain is exactly the pre-DLSS one, including the

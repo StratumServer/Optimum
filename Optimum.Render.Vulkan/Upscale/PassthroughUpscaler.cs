@@ -34,9 +34,11 @@ namespace Optimum.Render.Vulkan.Core;
 /// <c>PassthroughPlanMatchesTheVendorPlanSizeForSize</c> in the GPU suite is what holds
 /// that claim to the real driver's answer.</para>
 ///
-/// <para>It may well be deleted once the question is answered, or kept as a cheap upscaler
-/// for GPUs with no vendor path. Everything it needs lives in this file and one blit on
-/// the device (<c>VulkanDevice.BlitColorScaled</c>).</para>
+/// <para><b>It is also the fallback upscaler.</b> Because it needs no vendor runtime it
+/// is offered wherever the Vulkan renderer runs (<c>OptimumUpscalerUnavailableFor</c>),
+/// which makes it the one upscaler a GPU with no vendor path can select: the frame rate
+/// of the reduced render size, without reconstruction. Everything it needs lives in this
+/// file and one blit on the device (<c>VulkanDevice.BlitColorScaled</c>).</para>
 /// </summary>
 internal static class PassthroughUpscaler
 {
