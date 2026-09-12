@@ -36,6 +36,7 @@ public sealed class NgxRuntime : IDisposable
     private NgxSession? _session;
     private VulkanDevice? _device;
     private bool _disposed;
+    private NgxLifetimeOutcome _shutdownOutcome = NgxLifetimeOutcome.Done;
 
     public NgxRuntime()
     {
@@ -276,8 +277,8 @@ public sealed class NgxRuntime : IDisposable
             // the frame timeline and calls Shutdown1 itself, once, and the device is
             // destroyed only afterwards.
             VulkanDevice device = _device;
-            NgxLifetimeOutcome outcome = NgxLifetime.ShutDown(null, device.DrainDeferredDeletions, Log);
-            ShutdownResult = outcome == NgxLifetimeOutcome.Done
+            _shutdownOutcome = NgxLifetime.ShutDown(null, device.DrainDeferredDeletions, Log);
+            ShutdownResult = _shutdownOutcome == NgxLifetimeOutcome.Done
                 ? NgxLifetime.ShutdownResult
                 : NgxResult.FailNotInitialized;
             device.Dispose();
@@ -286,8 +287,13 @@ public sealed class NgxRuntime : IDisposable
 
         if (Initialized && ShutdownResult != NgxResult.Success)
         {
+            // The outcome matters as much as the result code: FeatureStillLive means
+            // Shutdown1 was never called, so reporting only "Shutdown1 did not
+            // succeed" sends the reader looking at the driver instead of at the
+            // feature that was never released.
             throw new InvalidOperationException(
-                "NVSDK_NGX_VULKAN_Shutdown1 did not succeed: " + NgxInterop.Describe(ShutdownResult));
+                "NGX teardown did not complete: outcome " + _shutdownOutcome +
+                ", NVSDK_NGX_VULKAN_Shutdown1 " + NgxInterop.Describe(ShutdownResult));
         }
     }
 }

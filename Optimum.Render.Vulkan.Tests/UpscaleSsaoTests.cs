@@ -73,7 +73,7 @@ public class UpscaleSsaoTests(ITestOutputHelper output)
                 for (int slot = 0; slot < 5; slot++)
                 {
                     byte[] pixels = seam.ReadBackLevel0ForTests(colors[i][slot]);
-                    for (int y = 1; y < size; y++)
+                    for (int y = 0; y < size; y++)
                     for (int x = 0; x < size; x++)
                     {
                         double factor = quality == 2 || y % 2 == 0 ? 64 : 192;
