@@ -177,6 +177,93 @@ public class UpscalerMutualExclusionCoverageTests
     }
 
     /// <summary>Every new lib member reaches the shipped DLL.</summary>
+    /// <summary>
+    /// Phase 3 review, finding 1 - the regression this pins is "none where one is
+    /// expected".
+    ///
+    /// <c>OptimumConfig.UpscalerReplacesTaa</c> is the setting, nothing more, and it is
+    /// what silences the in-house resolve, the TAA sharpen and the FSR blit. So a session
+    /// whose setting says "dlss" while the platform cannot actually plan an upscale used
+    /// to render jittered with nothing resolving it: the OpenGL path always, because it
+    /// has no upscaler and nothing there ever calls
+    /// <c>OptimumConfig.DisableUpscalerAtRuntime</c>, and the Vulkan path whenever the
+    /// vendor's optimal-settings query answered a size the plan rejects.
+    ///
+    /// The allocator is the one place that knows both halves - it asks for the plan and
+    /// it is re-run on every resize and settings change - so it stands the upscaler down
+    /// there, before the two temporal flags below it read the config, which hands the
+    /// resolve back to TAA on the very same build.
+    /// </summary>
+    [Fact]
+    public void AnUnplannableUpscalerStandsDownInsteadOfSilencingEveryResolve()
+    {
+        string platform = Platform();
+        string body = MethodBodyAfter(platform, "public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()");
+
+        Assert.Contains(
+            "if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)", body);
+        int standDown = body.IndexOf(
+            "if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)",
+            StringComparison.Ordinal);
+        int disable = body.IndexOf("DisableOptimumUpscaler(", standDown, StringComparison.Ordinal);
+        Assert.True(disable > standDown, "the stand-down must be the one log line and the config flag:\n" + body);
+
+        // Ordering is the whole point: both flags that gate the temporal pipeline read
+        // the config, so the stand-down has to happen before either of them is computed.
+        int plan = body.IndexOf("bool upscaling = OptimumTryPlanUpscaleRenderSize(", StringComparison.Ordinal);
+        int taaRequested = body.IndexOf("bool taaRequested =", StringComparison.Ordinal);
+        int temporalRequested = body.IndexOf("bool temporalRequested =", StringComparison.Ordinal);
+        Assert.True(plan >= 0 && taaRequested > standDown && temporalRequested > standDown,
+            "the stand-down must sit between the plan and the two temporal flags:\n" + body);
+        Assert.True(standDown > plan);
+    }
+
+    /// <summary>
+    /// The same stand-down on the Vulkan platform's own allocator, which does not go
+    /// through the lib body at all. Without it the device path would keep the defect on
+    /// exactly the machines that ask for DLSS and get a plan they cannot use.
+    /// </summary>
+    [Fact]
+    public void TheDevicePlatformStandsTheUpscalerDownTheSameWay()
+    {
+        string frameBuffers = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.FrameBuffers.cs");
+        Assert.Contains(
+            "if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)", frameBuffers);
+        int standDown = frameBuffers.IndexOf(
+            "if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)",
+            StringComparison.Ordinal);
+        int temporalRequested = frameBuffers.IndexOf(
+            "bool temporalRequested = OptimumTemporalRequested;", StringComparison.Ordinal);
+        Assert.True(standDown > 0 && temporalRequested > standDown,
+            "the device allocator must stand the upscaler down before it reads the temporal flag");
+    }
+
+    /// <summary>
+    /// Phase 3 review, finding 2: the post chain's two integers describe the targets the
+    /// chain writes, never the render size. They agree with the render size on every
+    /// frame with no upscaler, and with the display size on every frame with one - and,
+    /// on the frame in between (the evaluate failed after the targets were already
+    /// allocated at the display size), they still describe the targets rather than a
+    /// resolution nothing in this chain is drawn at.
+    /// </summary>
+    [Fact]
+    public void ThePostChainSizesComeFromTheTargetsItWrites()
+    {
+        string platform = Platform();
+        string post = MethodBodyAfter(platform,
+            "public override void RenderPostprocessingEffects(float[] projectMatrix)");
+
+        Assert.Contains("FrameBufferRef postChainTarget = frameBuffers[4];", post);
+        Assert.Contains(
+            "int postWidth = ((postChainTarget != null) ? postChainTarget.Width : renderWidth);", post);
+        Assert.Contains(
+            "int postHeight = ((postChainTarget != null) ? postChainTarget.Height : renderHeight);", post);
+        // The render size is still what SSAO is told, because SSAO's own targets and its
+        // G-buffer never left the render resolution.
+        Assert.Contains(
+            "ssao.Uniform(\"screenSize\", (float)renderWidth * num, (float)renderHeight * num);", post);
+    }
+
     [Fact]
     public void ThePatcherListsEveryNewMember()
     {

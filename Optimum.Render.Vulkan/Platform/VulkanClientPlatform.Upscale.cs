@@ -113,9 +113,10 @@ public partial class VulkanClientPlatform
     /// own optimal-settings query. Called from <c>SetupDefaultFrameBuffers</c>, so it
     /// runs before there are any framebuffers and must not touch them.
     ///
-    /// The plan is remembered rather than recomputed per frame: the feature is created
-    /// for one (render size, display size, preset) triple, and the frame must ask for
-    /// exactly the triple its targets were allocated for.
+    /// Nothing is remembered from it: the feature is created for one (render size,
+    /// display size, preset) triple, and <see cref="RenderOptimumUpscale" /> reads that
+    /// triple off the targets that were really allocated, so a plan cached here could
+    /// only ever disagree with them.
     /// </summary>
     public override bool OptimumTryPlanUpscaleRenderSize(
         int displayWidth, int displayHeight, out int renderWidth, out int renderHeight)
@@ -127,15 +128,11 @@ public partial class VulkanClientPlatform
         {
             return false;
         }
-        plannedUpscale = plan;
         renderWidth = plan.RenderWidth;
         renderHeight = plan.RenderHeight;
         LogUpscaler("[Optimum] DLSS plan: " + plan);
         return true;
     }
-
-    /// <summary>The plan the framebuffers were allocated for; default when there is none.</summary>
-    private UpscalePlan plannedUpscale;
 
     /// <summary>Whether the one-time "no depth blit here" line has been logged.</summary>
     private bool upscaleDepthRefused;

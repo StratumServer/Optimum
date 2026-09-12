@@ -73,6 +73,16 @@ public partial class VulkanClientPlatform
             width = upscaleRenderWidth;
             height = upscaleRenderHeight;
         }
+        // DLSS plan, Phase 3 review, finding 1: the same stand-down the GL body does, for
+        // the same reason. OptimumConfig.UpscalerReplacesTaa is what silences the in-house
+        // resolve, the TAA sharpen and the FSR blit, and it is the setting alone; a build
+        // that could not plan an upscale would otherwise leave the frame jittered with
+        // nothing resolving it. One line, once, before the two flags below read the config.
+        if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)
+        {
+            DisableOptimumUpscaler(
+                "this renderer cannot plan an upscale for the frame, so the temporal resolve stays with TAA");
+        }
 
         bool taaRequested = OptimumTaaRequested;
         // DLSS plan, Phase 2: the motion attachment serves both temporal consumers,

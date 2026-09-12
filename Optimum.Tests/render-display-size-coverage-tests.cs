@@ -135,9 +135,14 @@ public class RenderDisplaySizeCoverageTests
         Assert.Equal(1, Count(post, "int renderHeight = RenderHeight;"));
         // DLSS plan, Phase 3: the passes after the upscale work on the target that holds
         // this frame's image, which is the display-resolution one when an upscaler ran and
-        // Primary otherwise - one pair of integers again, read once.
-        Assert.Equal(1, Count(post, "int postWidth = renderWidth;"));
-        Assert.Equal(1, Count(post, "int postHeight = renderHeight;"));
+        // Primary otherwise - one pair of integers again, read once, and read off the
+        // first target the chain writes rather than off the render size (Phase 3 review,
+        // finding 2), so the two can never disagree with the targets being written.
+        Assert.Equal(1, Count(post, "FrameBufferRef postChainTarget = frameBuffers[4];"));
+        Assert.Equal(1, Count(post,
+            "int postWidth = ((postChainTarget != null) ? postChainTarget.Width : renderWidth);"));
+        Assert.Equal(1, Count(post,
+            "int postHeight = ((postChainTarget != null) ? postChainTarget.Height : renderHeight);"));
         Assert.Equal(3, Count(post, "GlViewport(0, 0, postWidth, postHeight);"));
         Assert.Contains("blur.Uniform(\"frameSize\", (float)postWidth, (float)postHeight);", post);
         Assert.Contains(
