@@ -31,16 +31,17 @@ internal static class KnownSyncHazards
         "transition NGX's own vkCmdPipelineBarrier made for it, both recorded by NGX inside its " +
         "nv.ngx.dlss.Evaluate debug scope. No Optimum image, barrier or command is named on either side, " +
         "and the images are ones NGX allocates on our device and never shows us, so there is nothing here " +
-        "for us to synchronise. Measured 2026-09-12 on driver 615.71.09 with DLSS SDK 310.9.1. It is " +
-        "reported twice, on the first DLSS evaluate in the process and not again: NGX allocates and " +
-        "clears those images once per NGX lifetime, and the runtime is shared (NgxRuntime), so it is " +
-        "pinned against whichever DLSS test runs first. If the order changes, this entry goes stale and " +
-        "the one that inherits the hazard fails - which is the ledger doing its job, not a regression.";
+        "for us to synchronise. Measured 2026-09-12 on driver 615.71.09 with DLSS SDK 310.9.1. It happens " +
+        "on the first evaluate of a feature whose internal images NGX has just allocated, which is once " +
+        "per feature size rather than once per process: NgxRuntime's warm-up absorbs the process's first " +
+        "one before any test takes its message mark, so the only test that still sees it is the one that " +
+        "deliberately creates a second feature at a second size - the resize test below. Every other DLSS " +
+        "test therefore asserts a genuinely clean run.";
 
     public static readonly KnownSyncHazard[] Entries =
     {
-        new("SYNC-HAZARD-WRITE-AFTER-WRITE", nameof(NgxDlssEvaluateTests),
-            nameof(NgxDlssEvaluateTests.DlssEvaluatesOnTheDeviceAndTheOutputCarriesThePattern),
+        new("SYNC-HAZARD-WRITE-AFTER-WRITE", nameof(DlssUpscalerTests),
+            nameof(DlssUpscalerTests.AResizeRebuildsTheFeatureWithoutLeakingIt),
             DlssInternalClear, "vendor"),
     };
 

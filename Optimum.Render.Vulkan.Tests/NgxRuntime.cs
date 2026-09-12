@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using Optimum.Render.Vulkan;
 using Optimum.Render.Vulkan.Core;
+using Silk.NET.Vulkan;
 using Xunit;
 
 namespace Optimum.Render.Vulkan.Tests;
@@ -84,6 +85,74 @@ public sealed class NgxRuntime : IDisposable
             return;
         }
         Initialized = true;
+        WarmUpVendorInternalClear();
+    }
+
+    /// <summary>
+    /// One throwaway DLSS feature, evaluated once and released, before any test
+    /// takes its message mark.
+    ///
+    /// NGX allocates and clears its own internal images on the <i>first</i>
+    /// feature created in a process, and that <c>vkCmdClearColorImage</c> races
+    /// the layout transition NGX's own <c>vkCmdPipelineBarrier</c> made for the
+    /// same image - both sides recorded by NGX inside its own
+    /// <c>nv.ngx.dlss.Evaluate</c> scope, neither side an Optimum image, barrier
+    /// or command (measured 2026-09-12, driver 615.71.09, DLSS SDK 310.9.1).
+    /// It is a hazard no phase of ours can retire, and it happens exactly once
+    /// per NGX lifetime, so whichever DLSS test happened to run first inherited
+    /// it and the pin had to move every time the test order changed. Absorbing it
+    /// here makes it belong to no test at all: every DLSS test then asserts a
+    /// genuinely clean run, and a hazard that really is ours cannot hide behind a
+    /// vendor entry in the ledger.
+    ///
+    /// Failures are logged and ignored: the warm-up is an optimisation of the
+    /// ledger, never a reason for a run to fail.
+    /// </summary>
+    private void WarmUpVendorInternalClear()
+    {
+        // Half-resolution, which is DLSS Performance's ratio, at a size every
+        // preset's dynamic range covers.
+        const int renderWidth = 640, renderHeight = 360;
+        const int displayWidth = 1280, displayHeight = 720;
+
+        VulkanDevice device = _device!;
+        try
+        {
+            int color = device.CreateUpscaleTexture(
+                renderWidth, renderHeight, Format.R8G8B8A8Unorm, storage: false);
+            int depth = device.CreateUpscaleTexture(
+                renderWidth, renderHeight, Format.R32Sfloat, storage: false);
+            int motion = device.CreateUpscaleTexture(
+                renderWidth, renderHeight, Format.R16G16Sfloat, storage: false);
+            int output = device.CreateUpscaleTexture(
+                displayWidth, displayHeight, Format.R16G16B16A16Sfloat, storage: true);
+
+            var settings = new NgxDlssSettings(
+                renderWidth, renderHeight, displayWidth, displayHeight,
+                NgxPerfQuality.MaxPerf, NgxDlssSettings.ContractFlags);
+
+            device.BeginFrame();
+            NgxResult created = device.CreateDlssFeature(settings, out NgxDlssFeature? feature);
+            if (created == NgxResult.Success && feature != null)
+            {
+                NgxResult evaluated = device.EvaluateDlss(feature, color, depth, motion, output,
+                    new NgxDlssEvaluation { Reset = true, MotionVectorScaleX = 1f, MotionVectorScaleY = 1f });
+                Log("warm-up evaluate (absorbs NGX's own first-feature clear hazard): " +
+                    NgxInterop.Describe(evaluated));
+                device.RetireDlssFeature(feature);
+            }
+            else
+            {
+                Log("warm-up feature could not be created: " + NgxInterop.Describe(created));
+            }
+            device.Present();
+            device.DrainDeferredDeletions();
+            Log("warm-up absorbed " + GpuTest.MessagesOf(device).Count + " layer message(s)");
+        }
+        catch (Exception error)
+        {
+            Log("warm-up did not run: " + error.Message);
+        }
     }
 
     /// <summary>Why NGX is not usable here, or null when it is.</summary>

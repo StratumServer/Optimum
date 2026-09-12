@@ -488,6 +488,18 @@ public static class OptimumConfig
     }
 
     /// <summary>
+    /// Clears the stand-down. Only the tests call it - they exercise the failure
+    /// path in a process that then has to go on running the other cases - because
+    /// in the client the stand-down is meant to last the session: NGX allows
+    /// exactly one lifetime per process, so a second attempt is not something a
+    /// running client may make.
+    /// </summary>
+    public static void ResetUpscalerRuntimeDisabledForTests()
+    {
+        UpscalerRuntimeDisabled = false;
+    }
+
+    /// <summary>
     /// The upscaler actually in effect: the setting unless the renderer stood it
     /// down at runtime. Like TAA and the Vulkan renderer selection this is a
     /// renderer-level feature, so a missing launcher shader scan must not
