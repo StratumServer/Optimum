@@ -13,8 +13,24 @@ Status: **done** = merged to `main` and accepted in game · **in progress** = on
 |---|---|---|
 | done | **TAA** with a jitter-stable resolve: 3x3 nearest-depth disocclusion, motion from the nearest-depth tap, luminance anti-flicker weighting | `docs/taa-acceptance.md`, `scripts/dev/taa-rejection.py` (distant-leaf rejection 1.05 %, was 3.7 %) |
 | done | **Native Vulkan backend, Milestone 1**: platform substitution (`VulkanClientPlatform : ClientPlatformWindows`), timeline semaphores, asynchronous uploads, split present, usage-derived barriers, streaming frame graph, transient allocator | `docs/vulkan-acceptance.md` "Milestone 1 exit results"; blocking uploads 0, passes == scopes, validation clean |
-| done | **A headless render harness**: `OPTIMUM_HEADLESS` runs the real client and the real renderer with the window never mapped, a chat-command script sets the scene and drives vanilla's keyframed camera, and the selected in-world frames are written as PPM through the backend-agnostic readback | `scripts/dev/headless-capture.sh`, `Optimum.Render.Vulkan.Tests/HeadlessCaptureTests.cs` (frames off a device with no surface at all), `Optimum.Tests/headless-harness-coverage-tests.cs` |
 | done | **Latency reduction**, on by default: the sleep moved before input sampling, NVIDIA Reflex (`VK_NV_low_latency2`), AMD anti-lag (`VK_AMD_anti_lag`) and Optimum's own completion pacing | `docs/vulkan-acceptance.md` "Latency acceptance"; input-to-present 7.67 ms -> 1.85 ms on an RTX 4070, free with Reflex |
+
+## Landed on `feat/dlss`, not yet seen in game
+
+Built, tested and merged into the branch by the 2026-09-12 roadmap wave. Every one of these is proven by
+the GPU suite on a real device and by source coverage, and **none of it has been run in the client** - the
+wave's stages had no launch permission. That is the gap between this table and the one above, and it is why
+these rows are not "done": by this file's own legend, done means accepted in game.
+
+| | What | Evidence | What is unproven |
+|---|---|---|---|
+| landed | **A headless render harness**: `OPTIMUM_HEADLESS` runs the real client and the real renderer with the window never mapped, a chat-command script sets the scene and drives vanilla's keyframed camera, and the selected in-world frames are written as PPM through the backend-agnostic readback | `scripts/dev/headless-capture.sh`, `Optimum.Render.Vulkan.Tests/HeadlessCaptureTests.cs` (frames off a device with no surface at all, and display-resolution frames while an upscaler runs), `Optimum.Tests/headless-harness-coverage-tests.cs` | The whole end-to-end run. Nobody has yet driven a live client through it; the hidden-window presentation path is proven by the GPU suite and by inspection. No camera path is checked in |
+| landed | **The orchestrator's slot coupling**: the latency backend follows the pair (upscaler vendor, GPU vendor), not the device alone - DLSS on NVIDIA takes Reflex, FSR on AMD anti-lag, XeSS on Intel means XeLL and so Native on every Vulkan path, every cross-vendor pair and the vendor-less passthrough slot take Optimum's own pacing, and no upscaler at all leaves the device auto order untouched | `Optimum.Render.Vulkan/Latency/LatencySlotCoupling.cs`; the full vendor table plus the override precedence in `LatencySlotCouplingTests` (53 cases) | Whether the chosen backend is the right one for frame times in a real session, on anything but this dev box |
+| landed | **A passthrough upscaler**: the slot that plans exactly like DLSS - same render size, same jitter, same LOD bias - and reconstructs with a magnifying blit instead. Both the diagnostic that separates our rendering from the vendor's and the fallback upscaler for a GPU with no vendor path | `Optimum.Render.Vulkan/Upscale/PassthroughUpscaler.cs`, `PassthroughUpscalerTests` (the plan matches NGX's own answer size for size at all five presets) | The magnified frame on screen, and the overlays' depth upscale behind it - shared code that has never run behind a magnifying blit |
+| landed | **SSAO temporal dither** (the GTAO item's step 2): vanilla's screen-locked Bayer-128 dither advances by the golden ratio per frame under `TAAMOTION`, so successive frames rotate the kernel instead of re-rolling the same screen-fixed one | `sources/shaders/ssao.fsh`, `SsaoTemporalDitherTests` (AO differs per frame with the temporal pipeline on, bit-identical with it off, bit-identical when the frame index repeats) | The pay-off. AO that converges instead of fighting the accumulator is the claim; it has not been judged in game or on a parity dump |
+
+The next session's first job, before adding anything: run the client on both backends, confirm the renderer
+from the log, and look. The harness exists precisely so that is a script invocation now.
 
 ### The headless render harness, honestly
 
@@ -62,11 +78,12 @@ AO work below.
 - **DLSS Frame Generation (DLSS-G)** - reports available on native Linux; Optimum owns the pacing
   (present the generated frame when evaluate returns, the retained real frame at equal spacing from a
   present thread), `FramesInFlight = 3`, HUD-less colour and UI inputs. Requires Reflex active.
+  Design and order of work: the "DLSS frame generation: the design" section below.
 - **XeSS and FSR** - the second and third upscaler backends behind the same slot. XeSS ships Windows-only
-  libraries; AMD's current SDK has no Vulkan backend, so FSR is a shader port.
-- **The orchestrator's slot coupling** - a vendor latency backend only when the upscaler's vendor matches
-  the GPU, otherwise Optimum's own pacing (DLSS -> Reflex, FSR on AMD -> anti-lag, XeSS+XeFG on Intel ->
-  XeLL on the Windows D3D12 bridge, every cross-vendor pair -> ours).
+  libraries; AMD's current SDK has no Vulkan backend, so FSR is a shader port. The coupling above already
+  maps their setting tokens, so they need no latency work when they land - only `UpscalerNames` grows.
+
+(The slot coupling that used to sit here has landed; see "Landed on `feat/dlss`".)
 
 ### Quality and tooling
 
@@ -120,6 +137,114 @@ AO work below.
   denoiser - DLSS Ray Reconstruction on NVIDIA (`libnvidia-ngx-dlssd.so`, already bound), a spatiotemporal
   denoiser as the cross-vendor fallback. Depends on native shaders, a stable temporal contract, HDR range
   and the headless harness.
+
+## DLSS frame generation: the design
+
+Written from a read-only map of the present path, the frame ring and the render-stage call order against
+the DLSS-FG Programming Guide v310.7.0 (2026-09-12). Nothing here is implemented. The point of this section
+is that the next session starts from the order of work and the three hazards, not from the guide.
+
+### What the present path can and cannot do today
+
+`VulkanDevice.Present()` is single-shot: one submit, one acquire, one present-command submit, one
+`vkQueuePresentKHR`, return - called once per game-loop tick from the lib's `EndFrame()`. Frame generation
+needs that call site to present **N times per rendered frame at even wall-clock spacing**, generated frame
+first, then the retained real one.
+
+Three of the four pieces underneath it are already shaped for that, which is the good news:
+
+- `Swapchain`'s `PresentIdCounter` and `PresentIdMap` were built many-present-ids-to-one-frame-id on
+  purpose; the class comment says outright that frame generation will present a frame more than once.
+- `VulkanContext.QueueLock` exists because `vkQueueSubmit`/`vkQueuePresentKHR` from two threads is
+  undefined behaviour, and the client already submits from two threads for uploads. A present thread can
+  share it.
+- `FrameTimeline.ReserveFrame`/`NoteFrameSubmitted` are already `Interlocked`, so the clock itself is
+  thread-safe even though its doc comment still says "render thread".
+- `LatencyMarker` already reserves `OutOfBandRenderSubmitStart/End` and `OutOfBandPresentStart/End`
+  explicitly for async present paths. Nothing stamps them yet; they are the seam.
+
+Two are not:
+
+- `BlitPresentPath`'s blit source is a constructor-captured delegate hardwired to `_defaultColor`. There is
+  no way to present a *different* image - the generated frame, or NGX's `OutputReal` copy - without giving
+  `IPresentPath.Record` a per-call source.
+- `FrameSlot.BeginPresentCommands`/`SubmitPresent` record into the current render frame's own command
+  pool, which the render thread resets in the next `BeginFrame`. A real present thread cannot borrow it;
+  it needs its own pools.
+
+### HUD-less colour and the UI, today
+
+The real stage order is `RenderFinalComposition` -> `RenderAfterFinalComposition` -> `BlitPrimaryToDefault`
+-> `RenderAfterBlit` -> Ortho (the 2D GUI). `RenderFinalComposition` writes `OptimumCompositeFrameBuffer`,
+which *is* the guide's `pHudless` state - but nothing snapshots it, and the very next stage draws
+world-space overlays (selection boxes, work-item guides) straight onto the same image. The composited
+backbuffer the guide wants exists continuously as `_defaultColor` once Ortho finishes, so that half is
+free. `pUI` - premultiplied UI colour plus alpha - has no analogue at all: the GUI is alpha-blended onto
+the same buffer as the world and is never isolated. `docs/temporal-frame-contract.md` §8 reached the same
+conclusion independently and reserves the rows.
+
+### Order of work
+
+Smallest independently verifiable step first, rising risk. Do not reorder: each step exists to isolate one
+unknown from the next.
+
+0. **Two presents per frame, no NGX anywhere.** Present `_defaultColor` a second time inside
+   `VulkanDevice.Present()`, tagged Generated against the same latency frame id and stamped through the
+   already-reserved out-of-band markers. This isolates the one open mechanical question - whether the
+   acquire-semaphore free list and the timeline bookkeeping survive 2x present pressure - from every
+   vendor and threading question. Verifiable with a GPU test under `sync,best` (zero new hazards) plus a
+   check that both presents carry the identical image. If this breaks, it breaks here, before any vendor
+   code exists.
+1. **A per-call source on `IPresentPath.Record`**, replacing the captured delegate. Mechanical; behaviour
+   is unchanged while every caller still passes `_defaultColor`.
+2. **The `SceneNoHud` snapshot**: copy `OptimumCompositeFrameBuffer`'s colour right after
+   `RenderFinalComposition` and before `RenderAfterFinalComposition`, published the way
+   `MotionAttachmentIndex` is. Verifiable alone - it equals the composited image on a frame with no
+   overlays and no GUI, and provably differs once either draws.
+3. **Decide how `pUI` is built.** A second premultiplied-alpha GUI pass (roughly 2x GUI draw cost) or
+   differencing the composite against `SceneNoHud` (cheaper, wrong wherever GUI and world colours
+   coincide). This is a design decision for the user, not an engineering unknown - settle it before code.
+4. **`FramesInFlight` 2 -> 3, on its own.** Every arena already sizes off `_frames.FramesInFlight`, so this
+   is close to a constant flip - except `AcquireSemaphoreFreeList`'s `imageCount + 1`, which is derived
+   from "at most FramesInFlight - 1 presents outstanding", an assumption frame generation breaks. Re-derive
+   it, do not just recompile it. Land it before any FG code so `pacing-gate.sh` separates the cost of
+   three-deep buffering from the cost of generation.
+5. **NGX DLSS-FG bring-up**, mirroring the proven `DlssUpscaler`/`NgxDlssFeature`/`NgxSession`/`NgxLifetime`
+   shim pattern for `NVSDK_NGX_Feature_FrameGeneration`. Feed it the composited image as a stand-in for
+   `pHudless`/`pBackbuffer` until step 3 lands `pUI` for real.
+6. **The present thread and its spacing pacer, last.** It has the least existing scaffolding and is the
+   hardest thing here to verify.
+
+### The three things most likely to go wrong
+
+1. **Resource lifetime past Present.** The generated frame and the retained real frame must survive until
+   an out-of-band present thread actually presents them, but every transient and every frame-slot resource
+   is retired against the timeline value of the *render* frame that produced it - which assumes it was
+   consumed by the time that value completes. A present thread that lags the render thread by one
+   `BeginFrame` lets the retire queue recycle an image before it is blitted. That is flicker or garbage
+   that no single-frame readback can see; it needs a multi-frame GPU test, and poison mode.
+2. **Command-pool threading, not GPU synchronisation.** A present thread needs its own command pools,
+   synchronised with the render thread only through `QueueLock` and timeline waits. Getting this wrong is a
+   CPU data race on command-buffer state, which `sync,best` validation does *not* reliably catch under
+   light interleaving - unlike the GPU hazards it is good at.
+3. **Spacing measured at the wrong place.** DLSS-FG wants the generated and real presents of one interval
+   evenly spaced in wall-clock time, but nothing today measures present-to-present spacing - the pacing
+   model and the frame-interval tracker both measure `BeginFrame` to `BeginFrame`. This is exactly the
+   "jitter invisible to screenshots" failure class: it needs `pacing-gate.sh` stddev and percentile numbers
+   against the OpenGL baseline of the same scene, never a screenshot.
+
+### Open questions to settle first
+
+- Whether `native/optimum-ngx` already forwards the DLSS-FG entry points (`NGX_VK_CREATE_DLSSG` /
+  `NGX_VK_EVALUATE_DLSSG`) or only the super-resolution ones. The plan names them as the target, not as
+  implemented.
+- Whether `NvLowLatency2Backend`'s current sleep and marker pattern mis-times Reflex once a generated
+  present is interleaved. DLSS-G requires Reflex active, so this is not optional.
+- The temporal contract needs a v2 for the presentation-lifetime and HUD-less rows (§8 already reserves
+  them). Motion vectors and depth (§7.1, §7.3) need no new row - FG consumes the same per-pixel semantics
+  super resolution already does.
+- HDR interacts: DLSS-G forbids FP16/scRGB, so an HDR path that wants frame generation must be RGB10A2.
+  That decision belongs with the HDR item, not this one.
 
 ## Known debt
 
