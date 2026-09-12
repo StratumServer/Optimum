@@ -66,6 +66,25 @@ AO work below.
   its metadata. The upscaler contract changes with it (DLSS switches to `IsHDR = 1`, exposure stops being
   optional) and DLSS-G forbids FP16/scRGB, so an HDR path that wants frame generation must be RGB10A2.
   After Phase 3, alongside the frame-generation format decision.
+- **Auto-PBR materials** - a prerequisite for anything specular, and useful on its own. Minecraft shader
+  packs (Complementary's Integrated PBR and friends) generate normals from luminance differences in the
+  albedo and guess specular from colour, because a resource pack is only pixels. Vintage Story gives us
+  more: every block carries a material class (stone, wood, metal, glass, plant, liquid) and its light
+  emission, so roughness, metalness and emissive masks come from a curated table keyed on what the block
+  *is*, with generated normals filling in surface detail. Generate it at atlas build time into companion
+  atlas layers (normal, roughness/metalness, emissive), never per frame; hand-authored PBR layers from a
+  resource pack override the generated ones where present. Wanted by the user, 2026-09-12: "I want to use
+  some autopbr like some minecraft shaderpacks do when possible." Sits after native shaders (the material
+  set convention lands there) and before ray tracing, which needs roughness and normals to be worth
+  anything.
+  Read from Iris (cloned 2026-09-12, `net.irisshaders.iris.pbr`): Iris itself generates nothing - it is the
+  plumbing, and that plumbing is what we copy. Hand-authored `_n` and `_s` textures are loaded per sprite
+  and assembled into companion atlases beside the albedo atlas (`PBRAtlasTexture`, `PBRAtlasHolder`,
+  `AtlasPBRLoader`), with LabPBR channel packing and, importantly, **per-channel mipmap generation**
+  (`ChannelMipmapGenerator`, `DiscreteBlendFunction`) - averaging a normal or a packed specular channel
+  across mips the way colour is averaged is wrong. The auto-generation the user is after lives in the shader
+  packs instead (Complementary's Integrated PBR derives normals from albedo luminance differences when a
+  pack ships no PBR layers); take the technique, not their code - those packs carry restrictive licences.
 - **Ray tracing** - last. Acceleration structures over a world the player edits (BLAS per chunk, TLAS over
   loaded chunks, refit as chunks stream) are the hard part; `VK_KHR_ray_query` in the existing fragment
   shaders is the cheaper entry than a full ray-tracing pipeline. Spend rays in this order: ambient
