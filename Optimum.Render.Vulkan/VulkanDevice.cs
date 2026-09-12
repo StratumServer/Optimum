@@ -124,19 +124,41 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
 
     /// <summary>
     /// The implementation of one selected backend kind: the single place that
-    /// learns about them. None and Native exist; NV and AMD arrive beside them and
-    /// fall through to None until they do.
+    /// learns about them. All four exist (None, Native, NV low_latency2, AMD
+    /// anti-lag). A vendor backend that cannot be constructed after all - the
+    /// entry points did not load between device creation and here - degrades one
+    /// step the way <see cref="LatencyBackendSelector.Degrade" /> does, i.e. to
+    /// Native, never silently to None.
     /// </summary>
     private ILatencyBackend CreateLatencyBackend(LatencyBackendKind kind)
     {
         switch (kind)
         {
             case LatencyBackendKind.Native:
-                return new NativeLatencyBackend(() => _frames?.Timeline, MirrorValidationMessage);
+                return CreateNativeLatencyBackend();
+
+            case LatencyBackendKind.NvLowLatency2:
+                if (NvLowLatency2Backend.TryCreate(_context, MirrorValidationMessage,
+                        out NvLowLatency2Backend? nvidia))
+                {
+                    return nvidia!;
+                }
+                MirrorValidationMessage("latency: " + LatencyBackends.Token(LatencyBackendKind.NvLowLatency2) +
+                    " could not be constructed; using " + LatencyBackends.Token(LatencyBackendKind.Native));
+                return CreateNativeLatencyBackend();
+
             default:
                 return new NoneLatencyBackend(MirrorValidationMessage);
         }
     }
+
+    /// <summary>
+    /// The vendor-independent completion-pacing backend. The frame timeline is
+    /// fetched through a callback rather than captured, because the selection is
+    /// installed before the frame ring exists.
+    /// </summary>
+    private ILatencyBackend CreateNativeLatencyBackend() =>
+        new NativeLatencyBackend(() => _frames?.Timeline, MirrorValidationMessage);
 
     /// <summary>
     /// The client's persisted latency setting as the backend's own settings. The
@@ -574,8 +596,12 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
                 return false;
             }
 
+            // Seam S5: a backend with a per-swapchain create struct (NV's
+            // VkSwapchainLatencyCreateInfoNV) hands it over here, so the first
+            // swapchain is created with it exactly as every rebuild is.
             if (!Swapchain.TryCreate(_context, surface, (uint)width, (uint)height, _vsync, _frames.Timeline,
-                    out Swapchain? swapchain, out string? swapchainError, Latency))
+                    out Swapchain? swapchain, out string? swapchainError, Latency,
+                    (Latency as NvLowLatency2Backend)?.SwapchainCreateChain))
             {
                 failureReason = swapchainError ?? "could not create a swapchain";
                 return false;
