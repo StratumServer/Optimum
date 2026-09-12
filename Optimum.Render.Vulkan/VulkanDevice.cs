@@ -123,17 +123,27 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     private bool _latencyBackendInstalled;
 
     /// <summary>
-    /// The implementation of one selected backend kind. Only
-    /// <see cref="LatencyBackendKind.None" /> has one today; Native, NV and AMD
-    /// arrive in wave 3 and this is the single place that learns about them.
+    /// The implementation of one selected backend kind:
+    /// <see cref="LatencyBackendKind.None" /> and
+    /// <see cref="LatencyBackendKind.AmdAntiLag" /> today; Native and NV arrive
+    /// beside them and this is the single place that learns about them. A kind
+    /// whose implementation is missing falls back to None, and the caller says so.
     /// </summary>
     private ILatencyBackend CreateLatencyBackend(LatencyBackendKind kind)
     {
         switch (kind)
         {
+            case LatencyBackendKind.AmdAntiLag:
+                // The context loaded vkAntiLagUpdateAMD when it enabled the
+                // extension; without it the selection degrades the usual way.
+                AmdAntiLagFunctions? antiLag = _context.AmdAntiLag;
+                if (antiLag == null) break;
+                return AmdAntiLagBackend.Create(_context.Device, antiLag, MirrorValidationMessage);
             default:
-                return new NoneLatencyBackend(MirrorValidationMessage);
+                break;
         }
+
+        return new NoneLatencyBackend(MirrorValidationMessage);
     }
 
     /// <summary>
