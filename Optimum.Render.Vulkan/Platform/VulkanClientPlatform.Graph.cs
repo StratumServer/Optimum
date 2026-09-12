@@ -102,6 +102,22 @@ public partial class VulkanClientPlatform
     private void DeclareFinalCompositionPass()
     {
         if (device == null || !device.FrameGraphEnabled) return;
+        if (passContext == "Post")
+        {
+            // The pre-upscale AO multiply shares the colour-0 mask, but samples
+            // only AO and preserves every other Primary attachment.
+            var reads = new List<int>();
+            AddColour(reads, SsaoBlurVerticalIndex, 0);
+            device.DeclarePass(new PassDeclaration
+            {
+                Name = "UpscaleSsao/0",
+                FramebufferId = PassDeclaration.BoundFramebuffer,
+                ColorSlots = 1u,
+                Reads = reads.ToArray(),
+                Flags = PassFlags.None,
+            });
+            return;
+        }
         List<FrameBufferRef> buffers = FrameBuffers;
         if (CurrentFrameBuffer != null && buffers != null && buffers.Count > PrimaryIndex &&
             !ReferenceEquals(CurrentFrameBuffer, buffers[PrimaryIndex]))

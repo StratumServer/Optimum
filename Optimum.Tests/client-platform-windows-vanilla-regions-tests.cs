@@ -54,6 +54,7 @@ public class ClientPlatformWindowsVanillaRegionsTests
         // display-resolution target, the per-frame flag, the platform questions the
         // Vulkan platform answers and the screenshot redirect.
         "OptimumUpscaledSceneIndex", "optimumUpscaledThisFrame", "OptimumUpscalerActive",
+        "optimumUpscaleSsaoApplied", "ApplyOptimumUpscaleSsao",
         "OptimumTryPlanUpscaleRenderSize", "RenderOptimumUpscale", "OptimumCompositeFrameBuffer",
         "OptimumUpscaledThisFrame", "OptimumBindCompositeForCapture",
         "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",

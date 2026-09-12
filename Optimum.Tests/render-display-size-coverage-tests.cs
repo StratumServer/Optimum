@@ -143,7 +143,9 @@ public class RenderDisplaySizeCoverageTests
             "int postWidth = ((postChainTarget != null) ? postChainTarget.Width : renderWidth);"));
         Assert.Equal(1, Count(post,
             "int postHeight = ((postChainTarget != null) ? postChainTarget.Height : renderHeight);"));
-        Assert.Equal(3, Count(post, "GlViewport(0, 0, postWidth, postHeight);"));
+        Assert.Equal(2, Count(post, "GlViewport(0, 0, postWidth, postHeight);"));
+        // SSAO now runs before the upscale, on the jittered render-size inputs.
+        Assert.Equal(1, Count(post, "GlViewport(0, 0, renderWidth, renderHeight);"));
         Assert.Contains("blur.Uniform(\"frameSize\", (float)postWidth, (float)postHeight);", post);
         Assert.Contains(
             "godrays.Uniform(\"invFrameSizeIn\", 1f / (float)postWidth, 1f / (float)postHeight);", post);

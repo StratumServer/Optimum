@@ -382,6 +382,8 @@ var membersToInject = new Dictionary<string, List<string>>
         // screenshot redirect that captures the composited image wherever it lives.
         "OptimumUpscaledSceneIndex",
         "optimumUpscaledThisFrame",
+        "optimumUpscaleSsaoApplied",
+        "ApplyOptimumUpscaleSsao",
         "OptimumUpscalerActive",
         "OptimumTryPlanUpscaleRenderSize",
         "RenderOptimumUpscale",
@@ -435,6 +437,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "TaaResolve",
         // TAA P5: the post-resolve sharpen pass program.
         "TaaSharpen",
+        "UpscaleSsao",
         // TAA P4: the liquid velocity pass program.
         "ChunkLiquidMotion",
         // TAA P4: the sky / volumetric-cloud motion pass program.

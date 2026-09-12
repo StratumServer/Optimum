@@ -528,6 +528,22 @@ Stored: `motion.b`, `[0,1]`, per pixel, in the motion attachment.
 The semantics of `b` per class are in §6. The caveat in §3.2 applies to every consumer: `b` is
 present even on pixels whose vector was rejected.
 
+### 7.4.1 SSAO placement for upscalers
+
+SSAO is generated and blurred from the jittered render-resolution G-buffer **before**
+the temporal consumer. When an upscaler is active, `upscale-ssao` multiplies the result
+into Primary colour 0, using render-size coordinates; depth, glow and motion remain
+unchanged. DLSS therefore reconstructs AO together with the scene. Final composition
+skips its legacy AO multiply when that precomposition actually ran, including an
+upscale-failure frame, so occlusion is never applied twice. Without an upscaler,
+Final retains its existing AO path and the in-house TAA resolve is unchanged.
+
+Previously AO was generated after DLSS and applied to the stable display image from
+the jittered low-resolution texture. That bypassed reconstruction and caused the
+remaining AO shimmer at low presets even after the NGX jitter sign was corrected.
+The AO is now part of scene shading before bloom, rather than a late modulation of
+bloom; this also removes the old late-pass bloom exemption from the upscaled path.
+
 ### 7.5 Exposure
 
 Optimum has **no HDR exposure path**. Primary colour 0 is `RGBA8` scene colour before bloom, god
