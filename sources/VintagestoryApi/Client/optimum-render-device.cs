@@ -291,7 +291,9 @@ public static class OptimumParityDump
 /// <c>OPTIMUM_HEADLESS_FIRST_FRAME=&lt;f&gt;</c> (default: the frame after the
 /// command script runs) - a cadence. Each selected frame is written as
 /// <c>frame-NNNNNN.ppm</c>, so two captures of the same list pair by name under
-/// <c>scripts/dev/ssim.py</c>.</item>
+/// <c>scripts/dev/ssim.py</c>. Negative or unparsable numbers fall back to the
+/// default and a count above <see cref="OptimumHeadless.MaxFrames" /> is clamped
+/// to it.</item>
 /// </list>
 ///
 /// What this does not cover: an X server (real, nested or Xvfb) still has to be
@@ -385,12 +387,25 @@ public static class OptimumHeadless
             ResolveLong("OPTIMUM_HEADLESS_FRAME_STRIDE", 1L));
     }
 
+    /// <summary>
+    /// The most frames one capture may plan. Past this the number is a typo or a
+    /// stray environment variable, not a request: the array alone would be
+    /// gigabytes, and it is allocated in a static initialiser, so failing it takes
+    /// the client down with a TypeInitializationException instead of a bad capture.
+    /// Clamping caps <c>first</c> and <c>stride</c> too, which keeps
+    /// <c>first + i * stride</c> far away from overflowing.
+    /// </summary>
+    public const long MaxFrames = 100000L;
+
     /// <summary>A cadence: <paramref name="count" /> frames from <paramref name="first" />, every <paramref name="stride" />.</summary>
     public static long[] PlanFrames(long first, long count, long stride)
     {
         if (count <= 0L) return new long[0];
+        if (count > MaxFrames) count = MaxFrames;
         if (stride <= 0L) stride = 1L;
+        if (stride > MaxFrames) stride = MaxFrames;
         if (first < 0L) first = 0L;
+        if (first > MaxFrames * MaxFrames) first = MaxFrames * MaxFrames;
         long[] frames = new long[count];
         for (long i = 0; i < count; i++) frames[i] = first + i * stride;
         return frames;

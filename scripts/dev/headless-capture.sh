@@ -152,15 +152,29 @@ if [[ -z "$PARITY_FRAME" ]]; then PARITY_FRAME="$FIRST_CAPTURED"; fi
 # 1. Renderer for this run, restored on exit whatever happens next.
 SAVED_RENDERER="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("Renderer")))' "$CONFIG")" || {
   echo "cannot read $CONFIG; not launching" >&2; exit 1; }
+# Rewrites Renderer in the live config without ever leaving it truncated: the new
+# file is written beside it and renamed over it, which is atomic on the same
+# filesystem. Used for both the set and the restore in cleanup().
 set_renderer() {
-  python3 -c 'import json,sys
+  python3 -c 'import json,os,sys,tempfile
 path, value = sys.argv[1], json.loads(sys.argv[2])
-data = json.load(open(path))
+with open(path) as handle:
+    data = json.load(handle)
 if value is None:
     data.pop("Renderer", None)
 else:
     data["Renderer"] = value
-json.dump(data, open(path, "w"), indent=2)' "$CONFIG" "$1"
+directory = os.path.dirname(os.path.abspath(path))
+fd, tmp = tempfile.mkstemp(dir=directory, prefix=".optimum.json.")
+try:
+    with os.fdopen(fd, "w") as handle:
+        json.dump(data, handle, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(tmp, path)
+except BaseException:
+    os.unlink(tmp)
+    raise' "$CONFIG" "$1"
 }
 client_alive() {
   # No -q: grep reads all of ps's output, so pipefail never sees ps die of SIGPIPE.

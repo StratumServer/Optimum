@@ -98,6 +98,27 @@ AO work below.
   from a capture rather than judged by eye, and the harness wired into `docs/vulkan-acceptance.md` so a
   backend comparison is a script invocation. See "what it does not cover" under the harness for the gaps.
 
+  *The determinism guard the shimmer number needs.* A shimmer number is a difference between consecutive
+  captured frames, so anything that moves for a reason other than the effect under test is measured as
+  shimmer. Two captures are comparable only when all of this is pinned and recorded beside the number:
+  the world (save file and seed), the camera path (the checked-in `.cam` file, played from a fixed
+  in-world frame), the step (`--fixed-dt`, same value), the frame list (same indices, not the same
+  count), the graphics settings that change what is drawn (`ssaa`, `fxaa`, `ssaoQuality`, `bloom`,
+  `godRays`, `mipMapLevel`, render and display resolution, upscaler and quality preset), the time and
+  weather the command script sets, and the backend and GPU/driver the run actually used (from the
+  renderer line, not from what was asked for). What is *not* pinned, and therefore may never be read as
+  a signal: chunk streaming order and the pop-in it causes, particle and mob RNG, wind phase, and
+  anything before the first frame the world has finished loading - so the capture starts well after the
+  command script, and mobs and weather are commanded off rather than hoped away.
+
+  A run that drifted is rejected, not reported. The check is mechanical: capture the same scene twice on
+  the same backend and settings, and compare the two runs frame by frame (`scripts/dev/ssim.py`). That
+  GL-vs-GL (or Vulkan-vs-Vulkan) self-pair is the noise floor, and the shimmer number is only meaningful
+  above it. A run whose self-pair falls below the floor agreed in `docs/vulkan-acceptance.md`, or whose
+  recorded settings, camera file, frame list or renderer line differ from the reference run's, is thrown
+  away and re-run - it is not published with a caveat. Frames that fail to pair by name (a short or
+  ragged capture) are the same failure and get the same treatment.
+
 ### Bigger, in dependency order
 
 - **Native Vulkan shaders (Phase 3)** - Vulkan-native GLSL for the vanilla program set, explicit sets and
