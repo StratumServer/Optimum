@@ -494,7 +494,8 @@ public class VulkanBackendIntegrationTests
         int frameSubmit = device.IndexOf("ulong renderValue = _frames.EndFrame();", present, StringComparison.Ordinal);
         int acquire = device.IndexOf("_swapchain.TryAcquire(out PresentTarget target)", present, StringComparison.Ordinal);
         int presentSubmit = device.IndexOf("_frames.SubmitPresent(", present, StringComparison.Ordinal);
-        int queuePresent = device.IndexOf("_swapchain.Present(target);", present, StringComparison.Ordinal);
+        // The present carries the frame's latency id since the latency seams (S2).
+        int queuePresent = device.IndexOf("_swapchain.Present(target, _latencyFrameId);", present, StringComparison.Ordinal);
         Assert.True(present >= 0 && frameSubmit > present && acquire > frameSubmit &&
                     presentSubmit > acquire && queuePresent > presentSubmit,
             "Present must submit the frame, then acquire, then submit the present path, then present");
