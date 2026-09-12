@@ -471,13 +471,20 @@ public static class OptimumConfig
     /// How hard the Vulkan renderer's latency backend works: "off", "on" or "boost"
     /// (Vulkan-native plan, "Latency seams"). "on" lets the backend pace the frame and
     /// move its wait in front of the input sample; "boost" adds the vendor's clock boost
-    /// where one exists. Off by default until the acceptance numbers exist.
+    /// where one exists.
+    ///
+    /// On by default since 2026-09-12: the acceptance runs on the RTX 4070 (three 60 s
+    /// Vulkan runs, fixed scene, vsync off) measured input-to-present 7.67 ms with the
+    /// mode off against 1.85 ms on NV Reflex at an unchanged 7.656 ms mean frame time,
+    /// and 1.84 ms on the vendor-neutral Native backend (9.434 ms mean frame time, the
+    /// cost of completion pacing). Every GPU therefore gets a latency path by default;
+    /// the auto order stays NvLowLatency2, AmdAntiLag, Native, None.
     ///
     /// A string rather than an enum for the same reason as <see cref="Renderer" />: an
     /// unrecognised value in optimum.json degrades to "off" instead of failing the parse.
     /// Ignored on the OpenGL path, which has no latency backend.
     /// </summary>
-    public static string LatencyMode = "off";
+    public static string LatencyMode = "on";
 
     /// <summary>True when the configuration asks for any latency work at all.</summary>
     public static bool LatencyEnabled =>
@@ -889,6 +896,8 @@ public static class OptimumConfig
                 "opengl";
             // Same rule for the latency mode: anything unrecognised means off, so a
             // hand-edited config cannot leave the renderer pacing in an unknown way.
+            // A config that never mentions the setting keeps the "on" default instead,
+            // because that is what the data object deserialises to.
             string requestedLatencyMode = data.LatencyMode?.Trim() ?? "";
             LatencyMode =
                 string.Equals(requestedLatencyMode, "on", StringComparison.OrdinalIgnoreCase) ? "on" :
@@ -1051,7 +1060,7 @@ internal sealed class OptimumConfigData
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
     public string Renderer { get; set; } = "opengl";
-    public string LatencyMode { get; set; } = "off";
+    public string LatencyMode { get; set; } = "on";
     public bool GodRaysSampleCap { get; set; } = false;
     public bool Taa { get; set; } = false;
     public float TaaSharpness { get; set; } = 0.2f;

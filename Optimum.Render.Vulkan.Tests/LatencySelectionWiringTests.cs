@@ -15,9 +15,10 @@ namespace Optimum.Render.Vulkan.Tests;
 ///
 /// Since wave 3 all four backends exist, so a selection resolves to its own kind
 /// or to a rung further down the degrade ladder (asserted per kind in
-/// <see cref="LatencyBackendIntegrationTests" />). Whichever it is, LatencyMode
-/// ships off, so the installed backend sleeps nowhere and owns no frame cap -
-/// "nothing on screen changes" is exactly that assertion.
+/// <see cref="LatencyBackendIntegrationTests" />). Whichever it is, with the mode
+/// off the installed backend sleeps nowhere and owns no frame cap - "nothing on
+/// screen changes" is exactly that assertion. (The shipped default is on since
+/// 2026-09-12; these tests pin the mode themselves.)
 /// </summary>
 public class LatencySelectionWiringTests
 {
@@ -28,6 +29,8 @@ public class LatencySelectionWiringTests
     [SkippableFact]
     public void TheDeviceRunsTheBackendItsCapabilitiesSelected()
     {
+        // The setting ships on since 2026-09-12, so "off is off" is asked for here.
+        using LatencyModeScope mode = LatencyModeScope.Off();
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
@@ -46,8 +49,8 @@ public class LatencySelectionWiringTests
             // cannot report a backend the frame is not running.
             Assert.Same(device.Latency, VulkanStats.LatencySource);
 
-            // LatencyMode ships off, so whichever backend was installed, it never
-            // takes the client's FPS limiter away.
+            // With the mode off, whichever backend was installed never takes the
+            // client's FPS limiter away.
             Assert.False(device.Latency.OwnsFrameCap);
 
             GpuTest.AssertClean(device);

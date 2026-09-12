@@ -82,8 +82,9 @@ public class LatencyHookTests
     /// Latency review 2026-09-12: every backend answers <c>OwnsFrameCap</c> true
     /// as soon as its mode is not Off, which stands the lib's own FPS limiter
     /// down (seam S3). The cap therefore has to reach the backend, or turning
-    /// LatencyMode on would silently uncap the client. It is handed over at the
-    /// sleep, and only when it changed - an Apply per frame would re-arm the
+    /// LatencyMode on would silently uncap the client. The lib hands it over with
+    /// <c>SetLatencyFrameCap</c> immediately before the sleep, and the platform
+    /// applies it only when it changed - an Apply per frame would re-arm the
     /// driver's heuristic every frame.
     /// </summary>
     [Fact]
@@ -91,20 +92,52 @@ public class LatencyHookTests
     {
         var backend = new RecordingLatencyBackend();
         VulkanClientPlatform platform = PlatformWith(backend);
-        platform.MaxFps = 60f;
-        // A cap no client setting produces, so the first sleep always changes it,
-        // whatever this machine's vsync setting says.
+        // A cap no client setting produces, so the first hand-over always changes it.
         backend.Apply(new LatencySettings(LatencyMode.On, 999_999));
         backend.Applied.Clear();
 
-        ulong expected = VulkanClientPlatform.FrameCapIntervalUs(60f, ClientSettings.VsyncMode);
+        for (int frame = 0; frame < 3; frame++)
+        {
+            platform.SetLatencyFrameCap(60);
+            platform.LatencySleep();
+        }
 
-        platform.LatencySleep();
-        platform.LatencySleep();
-        platform.LatencySleep();
-
-        Assert.Equal(new List<LatencySettings> { new(LatencyMode.On, expected) }, backend.Applied);
+        Assert.Equal(
+            new List<LatencySettings> { new(LatencyMode.On, LatencySettings.IntervalUsForFps(60)) },
+            backend.Applied);
         // The mode is the device's business; this site only ever sets the cap.
+        Assert.Equal(LatencyMode.On, backend.Settings.Mode);
+    }
+
+    /// <summary>
+    /// The behaviour the review left open and this change closes: the lib's
+    /// background-window cap (30 fps after sustained focus loss) is folded into
+    /// the number <c>window_RenderFrame</c> hands over, so an unfocused window
+    /// paces to it even though the lib's own limiter has stood down. Coming back
+    /// into focus restores the foreground cap, and a repeated cap applies nothing.
+    /// </summary>
+    [Fact]
+    public void TheBackgroundWindowCapReachesTheBackendAsItsMinimumInterval()
+    {
+        var backend = new RecordingLatencyBackend();
+        VulkanClientPlatform platform = PlatformWith(backend);
+        backend.Apply(new LatencySettings(LatencyMode.On, LatencySettings.IntervalUsForFps(144)));
+        backend.Applied.Clear();
+
+        // Focus lost: window_RenderFrame's effective cap is OptimumBgMaxFps (30).
+        platform.SetLatencyFrameCap(30);
+        Assert.Equal(LatencySettings.IntervalUsForFps(30), backend.Settings.MinimumIntervalUs);
+        Assert.Equal(33333UL, backend.Settings.MinimumIntervalUs);
+        Assert.Equal(30u, backend.Settings.MaxFps);
+
+        // Still unfocused: nothing changed, so nothing is applied.
+        for (int frame = 0; frame < 5; frame++) platform.SetLatencyFrameCap(30);
+        Assert.Single(backend.Applied);
+
+        // Focused again: back to the foreground cap, one more Apply.
+        platform.SetLatencyFrameCap(144);
+        Assert.Equal(2, backend.Applied.Count);
+        Assert.Equal(LatencySettings.IntervalUsForFps(144), backend.Settings.MinimumIntervalUs);
         Assert.Equal(LatencyMode.On, backend.Settings.Mode);
     }
 
@@ -117,31 +150,55 @@ public class LatencyHookTests
     {
         var backend = new RecordingLatencyBackend();
         VulkanClientPlatform platform = PlatformWith(backend);
-        platform.MaxFps = 60f;
 
-        for (int frame = 0; frame < 4; frame++) platform.LatencySleep();
+        for (int frame = 0; frame < 4; frame++)
+        {
+            platform.SetLatencyFrameCap(60);
+            platform.LatencySleep();
+        }
 
         Assert.Empty(backend.Applied);
         Assert.Equal(LatencySettings.Disabled, backend.Settings);
     }
 
     /// <summary>
-    /// The cap conversion itself, under exactly the conditions the lib's own
-    /// limiter uses: vsync off, MaxFps above 10 and below the client's 241
-    /// "unlimited". 0 is uncapped for every backend.
+    /// The conversion itself. The lib decides when a cap applies at all (vsync
+    /// off, MaxFps in the 10..241 window) and hands 0 over when it does not; 0 is
+    /// uncapped for every backend, and so is any nonsense below it.
     /// </summary>
     [Theory]
-    [InlineData(60f, 0, 16666UL)]
-    [InlineData(120f, 0, 8333UL)]
-    [InlineData(240f, 0, 4166UL)]
-    [InlineData(241f, 0, 0UL)]
-    [InlineData(1000f, 0, 0UL)]
-    [InlineData(10f, 0, 0UL)]
-    [InlineData(5f, 0, 0UL)]
-    [InlineData(60f, 1, 0UL)]
-    public void TheFrameCapFollowsTheClientsOwnConditions(float maxFps, int vsyncMode, ulong expectedUs)
+    [InlineData(60, 16666UL)]
+    [InlineData(120, 8333UL)]
+    [InlineData(240, 4166UL)]
+    [InlineData(30, 33333UL)]
+    [InlineData(0, 0UL)]
+    [InlineData(-1, 0UL)]
+    public void TheFrameCapConvertsFpsToAMinimumInterval(int maxFps, ulong expectedUs)
     {
-        Assert.Equal(expectedUs, VulkanClientPlatform.FrameCapIntervalUs(maxFps, vsyncMode));
+        Assert.Equal(expectedUs, VulkanClientPlatform.FrameCapIntervalUs(maxFps));
+    }
+
+    [Fact]
+    public void AnUncappedClientLeavesThePacingBackendUncapped()
+    {
+        var backend = new RecordingLatencyBackend();
+        VulkanClientPlatform platform = PlatformWith(backend);
+        backend.Apply(new LatencySettings(LatencyMode.On, LatencySettings.IntervalUsForFps(60)));
+        backend.Applied.Clear();
+
+        // What the lib hands over with vsync on, or MaxFps at the "unlimited" end.
+        platform.SetLatencyFrameCap(0);
+
+        Assert.Equal(new List<LatencySettings> { new(LatencyMode.On, 0) }, backend.Applied);
+    }
+
+    [Fact]
+    public void WithNoBackendTheFrameCapIsANoOp()
+    {
+        var platform = new VulkanClientPlatform(null!);
+        Assert.Null(platform.LatencyBackend);
+
+        platform.SetLatencyFrameCap(30);
     }
 
     [Fact]
@@ -162,12 +219,15 @@ public class LatencyHookTests
 
         // Neutral: calling them on the base platform does nothing and never throws.
         platform.LatencySleep();
+        platform.SetLatencyFrameCap(30);
         Assert.False(platform.LatencyOwnsFrameCap);
 
         Assert.Equal(typeof(ClientPlatformAbstract),
             typeof(ClientPlatformWindows).GetMethod(nameof(ClientPlatformAbstract.LatencySleep))!.DeclaringType);
         Assert.Equal(typeof(ClientPlatformAbstract),
             typeof(ClientPlatformWindows).GetProperty(nameof(ClientPlatformAbstract.LatencyOwnsFrameCap))!.DeclaringType);
+        Assert.Equal(typeof(ClientPlatformAbstract),
+            typeof(ClientPlatformWindows).GetMethod(nameof(ClientPlatformAbstract.SetLatencyFrameCap))!.DeclaringType);
     }
 
     [Fact]
@@ -177,5 +237,7 @@ public class LatencyHookTests
             typeof(VulkanClientPlatform).GetMethod(nameof(ClientPlatformAbstract.LatencySleep))!.DeclaringType);
         Assert.Equal(typeof(VulkanClientPlatform),
             typeof(VulkanClientPlatform).GetProperty(nameof(ClientPlatformAbstract.LatencyOwnsFrameCap))!.DeclaringType);
+        Assert.Equal(typeof(VulkanClientPlatform),
+            typeof(VulkanClientPlatform).GetMethod(nameof(ClientPlatformAbstract.SetLatencyFrameCap))!.DeclaringType);
     }
 }

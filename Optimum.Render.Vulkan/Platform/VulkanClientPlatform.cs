@@ -134,6 +134,7 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
+        new(true, "SetLatencyFrameCap", new[] { "Int32" }),
     };
 
     /// <summary>

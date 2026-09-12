@@ -47,11 +47,6 @@ public partial class VulkanClientPlatform
         ILatencyBackend? backend = LatencyBackend;
         if (backend == null) return;
 
-        // The backend owns the frame cap the moment it paces (seam S3: the lib's
-        // own limiter stands down then), so the client's cap has to reach it, or
-        // turning the setting on would silently uncap the frame rate.
-        ApplyFrameCap(backend);
-
         ulong frameId = NextLatencyFrameId();
         backend.Sleep(frameId);
         backend.Marker(frameId, LatencyMarker.InputSample);
@@ -59,41 +54,42 @@ public partial class VulkanClientPlatform
     }
 
     /// <summary>
-    /// Hands the client's frame cap to the backend, and only when it changed: an
-    /// Apply per frame would re-arm a driver heuristic (NV's
-    /// vkSetLatencySleepModeNV, AMD's mode update) every frame.
+    /// "Latency seams" S3 (review follow-up, 2026-09-12): the client's effective frame
+    /// cap for this frame, handed over by <c>window_RenderFrame</c> immediately before
+    /// <see cref="LatencySleep" />. The lib decides when a cap applies at all (vsync off,
+    /// MaxFps in the 10..241 window) and folds in the background-window reduction it
+    /// applies on sustained focus loss, so an unfocused window paces to the reduced cap
+    /// here too - the backend owns the cap the moment it paces, and without this the
+    /// window would run uncapped in the background.
     ///
-    /// The mode stays whatever the device configured from <c>LatencyMode</c>;
-    /// only the cap is this site's business. Off is off: a disabled backend is
-    /// never touched, so the frame with the setting off is byte for byte the
-    /// frame Milestone 1 delivered.
+    /// Applied only when it changed: an Apply per frame would re-arm a driver heuristic
+    /// (NV's vkSetLatencySleepModeNV, AMD's mode update) every frame. The mode stays
+    /// whatever the device configured from <c>LatencyMode</c>; only the cap is this
+    /// site's business. Off is off: a disabled backend is never touched, so the frame
+    /// with the setting off is the frame Milestone 1 delivered.
     /// </summary>
-    private void ApplyFrameCap(ILatencyBackend backend)
+    /// <param name="maxFps">Frames per second, or 0 for uncapped.</param>
+    public override void SetLatencyFrameCap(int maxFps)
     {
+        ILatencyBackend? backend = LatencyBackend;
+        if (backend == null) return;
+
         LatencySettings current = backend.Settings;
         if (current.Mode == LatencyMode.Off) return;
 
-        ulong interval = FrameCapIntervalUs(MaxFps, ClientSettings.VsyncMode);
+        ulong interval = FrameCapIntervalUs(maxFps);
         if (current.MinimumIntervalUs == interval) return;
         backend.Apply(new LatencySettings(current.Mode, interval));
     }
 
     /// <summary>
-    /// The cap as a minimum frame interval in microseconds, under exactly the
-    /// conditions the lib's own limiter applies it (<c>window_RenderFrame</c>):
-    /// vsync off, and a MaxFps above 10 and below 241, where 241 and up is the
-    /// client's "unlimited". 0 means uncapped, which is what every backend reads
-    /// as "do not pace to an interval".
-    ///
-    /// The background-window cap the lib applies on sustained focus loss is not
-    /// here: it is computed from private state of <c>ClientPlatformWindows</c>.
-    /// While a backend paces, an unfocused window therefore keeps the foreground
-    /// cap (reported as an open issue of the latency review).
+    /// The cap as a minimum frame interval in microseconds; 0 in, 0 out, which is
+    /// what every backend reads as "do not pace to an interval". Negative values
+    /// mean the same, so a garbage cap can never turn into a pacing interval.
     /// </summary>
-    internal static ulong FrameCapIntervalUs(float maxFps, int vsyncMode)
+    internal static ulong FrameCapIntervalUs(int maxFps)
     {
-        if (vsyncMode == 1) return 0;
-        if (maxFps <= 10f || maxFps >= 241f) return 0;
+        if (maxFps <= 0) return 0;
         return LatencySettings.IntervalUsForFps(maxFps);
     }
 

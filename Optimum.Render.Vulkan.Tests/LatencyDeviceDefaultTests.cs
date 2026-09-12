@@ -21,13 +21,15 @@ public class LatencyDeviceDefaultTests
     [SkippableFact]
     public void AFreshDeviceRunsTheNoneBackendAndNeverPacesTheFrame()
     {
+        // The setting ships on since 2026-09-12, so "off is off" asks for off.
+        using LatencyModeScope mode = LatencyModeScope.Off();
         Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
         using (device)
         {
             ILatencyBackend latency = device!.Latency;
             _output.WriteLine("latency backend: " + LatencyBackends.Token(latency.Kind));
 
-            // LatencyMode ships off, so the installed backend - None, or the Native
+            // With the mode off the installed backend - None, or the Native
             // one auto-selection lands on where no vendor path exists - is disabled:
             // it sleeps nowhere and owns no frame cap. "Off is off" is that, not the
             // identity of the instance.
@@ -78,9 +80,60 @@ public class LatencyDeviceDefaultTests
         }
     }
 
+    /// <summary>
+    /// The decision of 2026-09-12: latency reduction ships on, on every GPU. A device
+    /// that comes up with the shipped setting untouched therefore has an enabled
+    /// backend that owns the client's frame cap, and the cap the lib hands over
+    /// through <c>SetLatencyFrameCap</c> reaches it as the matching minimum interval -
+    /// including the small background-window cap, which is the number an unfocused
+    /// window would otherwise stop being paced by.
+    /// </summary>
+    [SkippableFact]
+    public void TheShippedDefaultPacesTheFrameAndTakesTheClientsFrameCap()
+    {
+        using LatencyModeScope mode = LatencyModeScope.Of(LatencyModeScope.ShippedDefault);
+        Skip.IfNot(GpuTest.TryCreateDevice(_output, out VulkanDevice? device), "No usable Vulkan device.");
+        using (device)
+        {
+            ILatencyBackend latency = device!.Latency;
+            _output.WriteLine("latency backend: " + LatencyBackends.Token(latency.Kind) +
+                " mode " + latency.Settings.Mode);
+
+            // On by default means: a real backend, enabled, owning the frame cap.
+            Assert.NotEqual(LatencyBackendKind.None, latency.Kind);
+            Assert.Equal(LatencyMode.On, latency.Settings.Mode);
+            Assert.True(latency.OwnsFrameCap);
+            // The device installs no cap of its own; the client's is the only source.
+            Assert.Equal(0UL, latency.Settings.MinimumIntervalUs);
+
+            var platform = new Platform.VulkanClientPlatform(null!);
+            platform.LatencyBackendOverride = latency;
+
+            // The background-window cap (OptimumBgMaxFps = 30 after sustained focus loss).
+            platform.SetLatencyFrameCap(30);
+            Assert.Equal(33333UL, latency.Settings.MinimumIntervalUs);
+            Assert.Equal(30u, latency.Settings.MaxFps);
+            Assert.Equal(LatencyMode.On, latency.Settings.Mode);
+
+            // Repeating it changes nothing, so nothing is re-applied to the driver.
+            LatencySettings unchanged = latency.Settings;
+            for (int frame = 0; frame < 4; frame++) platform.SetLatencyFrameCap(30);
+            Assert.Equal(unchanged, latency.Settings);
+
+            // Focused again: the foreground cap, and then uncapped.
+            platform.SetLatencyFrameCap(144);
+            Assert.Equal(LatencySettings.IntervalUsForFps(144), latency.Settings.MinimumIntervalUs);
+            platform.SetLatencyFrameCap(0);
+            Assert.Equal(0UL, latency.Settings.MinimumIntervalUs);
+
+            GpuTest.AssertClean(device);
+        }
+    }
+
     [SkippableFact]
     public void TheForcedBackendOptionReachesTheContextOptions()
     {
+        using LatencyModeScope mode = LatencyModeScope.Off();
         VulkanDevice device = GpuTest.NewDevice();
         Action<VulkanContextOptions>? suite = device.ConfigureContextOptions;
         LatencyBackendKind? seen = null;
@@ -100,7 +153,7 @@ public class LatencyDeviceDefaultTests
         using (device)
         {
             Assert.Equal(LatencyBackendKind.Native, seen);
-            // Whatever was installed, LatencyMode ships off, so it paces nothing.
+            // Whatever was installed, with the mode off it paces nothing.
             Assert.False(device.Latency.OwnsFrameCap);
             GpuTest.AssertClean(device);
         }

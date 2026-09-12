@@ -168,16 +168,21 @@ public class LatencyRendererCoverageTests
     public void TheFrameCapAndTheSwapchainRetirementReachTheBackend()
     {
         string frame = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Frame.cs");
-        string sleep = Body(frame, "    public override void LatencySleep()");
-        int cap = sleep.IndexOf("ApplyFrameCap(backend);", StringComparison.Ordinal);
-        int backendSleep = sleep.IndexOf("backend.Sleep(frameId);", StringComparison.Ordinal);
-        Assert.True(cap >= 0, "the cap never reaches the backend:\n" + sleep);
-        Assert.True(backendSleep > cap, "the cap is applied after the sleep it paces:\n" + sleep);
 
-        // Off is off: a disabled backend is never applied to.
-        string apply = Body(frame, "    private void ApplyFrameCap(ILatencyBackend backend)");
+        // The cap arrives from the lib (window_RenderFrame's effective cap, background
+        // reduction included) through its own injected virtual, ahead of the sleep.
+        string apply = Body(frame, "    public override void SetLatencyFrameCap(int maxFps)");
+        Assert.Contains("ulong interval = FrameCapIntervalUs(maxFps);", apply);
+        Assert.Contains("backend.Apply(new LatencySettings(current.Mode, interval));", apply);
+        // Off is off: a disabled backend is never applied to, and an unchanged cap
+        // never re-arms the driver's heuristic.
         Assert.Contains("if (current.Mode == LatencyMode.Off) return;", apply);
         Assert.Contains("if (current.MinimumIntervalUs == interval) return;", apply);
+
+        // The sleep itself no longer computes a cap of its own - one source, one site.
+        string sleep = Body(frame, "    public override void LatencySleep()");
+        Assert.DoesNotContain("ApplyFrameCap", sleep);
+        Assert.Contains("backend.Sleep(frameId);", sleep);
 
         string swapchain = Read(SwapchainPath);
         // Once where the old slot is retired (a rebuild, failed or not), once at

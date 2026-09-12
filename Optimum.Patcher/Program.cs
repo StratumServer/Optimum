@@ -164,6 +164,9 @@ var membersToInject = new Dictionary<string, List<string>>
         // window_RenderFrame calls.
         "LatencySleep",
         "LatencyOwnsFrameCap",
+        // Review follow-up 2026-09-12: the effective frame cap (background reduction
+        // included) window_RenderFrame hands to a pacing backend before the sleep.
+        "SetLatencyFrameCap",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {

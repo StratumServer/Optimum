@@ -38,6 +38,9 @@ public class LatencyBackendIntegrationTests
     [InlineData(3)] // AmdAntiLag
     public void EveryForcedBackendIsConstructibleOrDegradesDownTheLadder(int forcedKind)
     {
+        // The setting ships on since 2026-09-12; this test is about the ladder, so it
+        // pins the mode off and keeps its "takes no FPS limiter away" assertion.
+        using LatencyModeScope mode = LatencyModeScope.Off();
         // LatencyBackendKind is internal, so the theory data is its numeric value.
         var forced = (LatencyBackendKind)forcedKind;
         VulkanDevice device = GpuTest.NewDevice();
@@ -71,8 +74,8 @@ public class LatencyBackendIntegrationTests
             // the frame ring were handed - the merge must not have split them.
             Assert.Same(device.Latency, VulkanStats.LatencySource);
 
-            // LatencyMode ships off, so no installed backend takes the client's
-            // FPS limiter away on a default run, whichever kind it turned out to be.
+            // With the mode off, no installed backend takes the client's FPS
+            // limiter away, whichever kind it turned out to be.
             Assert.False(device.Latency.OwnsFrameCap);
 
             GpuTest.AssertClean(device);

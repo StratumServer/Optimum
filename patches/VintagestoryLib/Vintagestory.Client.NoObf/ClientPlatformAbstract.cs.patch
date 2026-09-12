@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..b5712ef 100644
+index d6eb844..4edec1c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,427 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,436 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -414,6 +414,15 @@ index d6eb844..b5712ef 100644
 +	}
 +
 +	public virtual bool LatencyOwnsFrameCap => false;
++
++	// Vulkan-native plan, "Latency seams" S3 (review follow-up, 2026-09-12): the frame cap
++	// window_RenderFrame computed for this frame in frames per second, 0 meaning uncapped.
++	// It already includes the background-window reduction, so a backend that owns the cap
++	// paces an unfocused window to the same number the client's own limiter would have used.
++	// Neutral body; the OpenGL path does not override it.
++	public virtual void SetLatencyFrameCap(int maxFps)
++	{
++	}
 +
  	public static void DisposeIndexBuffer()
  	{
