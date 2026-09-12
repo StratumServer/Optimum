@@ -138,6 +138,18 @@ if (jx == 0 && jy == 0) jx = 0.25             // a frame must contribute a new s
 
 At native resolution that is 8 phases; at render scale 0.5 it is 32.
 
+> **Note (2026-09-12, not a v1 change).** `renderScale` is the scale the frame is *really*
+> rendered at, which since the DLSS plan's Phase 2 is not always the config's `ssaa` /
+> `OptimumConfig.RenderScale`: with an upscaler owning the resolve it is that upscaler's own ratio,
+> `renderWidth / displayWidth` from the vendor's optimal-settings query, published as
+> `OptimumConfig.UpscalerRenderScale` and read through `OptimumConfig.EffectiveTemporalRenderScale`.
+> The formula, the sequence and the definition of `JitterPx` are unchanged; only the number fed into
+> them follows the frame instead of a setting, which is what §7.2 already allows ("the sequence length
+> can be taken from the SDK"). The temporal window (`JitterActive`) likewise opens for an upscaler
+> exactly as it does for the in-house resolve — an upscaler needs the jitter just as much — and the
+> motion attachment is allocated for either consumer, while the history slots (§3.3) and the sharpen
+> target (§3.4) stay the in-house resolve's alone.
+
 **Scope.** The jitter reaches **only** the perspective matrix `Set3DProjection` last loaded, and
 only while `JitterActive`. `ClientMain.CurrentProjectionMatrix` compares the top of the projection
 stack element-by-element against that matrix and hands back the sheared copy only on an exact match,
