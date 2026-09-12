@@ -960,6 +960,11 @@ var targets = new List<MethodTarget>
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
     // Vulkan backend: startup capability reporting, which cannot ask GL.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
+    // Optimum (headless render harness): a capture runs silent, so the mixer is
+    // created muted and every later attempt to restore the volume is answered with
+    // silence. Both bodies are vanilla's apart from that one condition.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "StartAudio", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_MasterSoundLevel", 1),
     // Vulkan backend: uniform buffers, whose handles UBO carries across.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
     new("Vintagestory.Client.NoObf.UBO", "Bind", 0),

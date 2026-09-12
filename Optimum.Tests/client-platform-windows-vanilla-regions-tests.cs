@@ -89,6 +89,9 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "Mouse_WheelChanged", "RebuildFrameBuffers", "RenderFinalComposition", "RenderFullscreenTriangle",
         "RenderPostprocessingEffects", "SaveScreenshot", "GrabScreenshot",
         "SetupDefaultFrameBuffers", "Start", "UnloadFrameBuffer",
+        // The headless harness runs silent: the mixer is created muted and every
+        // attempt to restore the volume is answered with silence.
+        "StartAudio", "MasterSoundLevel",
         "UpdateMesh", "UpdateSSBOMesh", "Window_Resize", "updateIndices", "updateVAO", "window_RenderFrame",
 
         // Compile fix-ups only: decompiler artefacts the donor tree rewrites to build
