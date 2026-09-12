@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..5a760a7 100644
+index 4d08f84..91b6558 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-@@ -46,10 +46,12 @@ public class GuiCompositeSettings : GuiComposite
+@@ -46,10 +46,17 @@ public class GuiCompositeSettings : GuiComposite
  
  	private ElementBounds iButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
@@ -10,18 +10,24 @@ index 4d08f84..5a760a7 100644
  
 +	private ElementBounds oButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
 +
++	// Optimum (DLSS plan, Phase 6, PR #3 follow-up): the upscaling tab's own button.
++	// Upscaling is four rows plus a live-plan readout and does not fit beside the
++	// twenty-two Extra rows inside the fixed 740px dialog; it gets its own page.
++	private ElementBounds uButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
++
  	private ElementBounds backButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private List<ConfigItem> mousecontrolItems = new List<ConfigItem>();
  
  	private bool mousecontrolsTabActive;
-@@ -142,19 +144,21 @@ public class GuiCompositeSettings : GuiComposite
+@@ -142,19 +149,23 @@ public class GuiCompositeSettings : GuiComposite
  			mButtonBounds.ParentBounds = elementBounds;
  			cButtonBounds.ParentBounds = elementBounds;
  			sButtonBounds.ParentBounds = elementBounds;
  			iButtonBounds.ParentBounds = elementBounds;
  			dButtonBounds.ParentBounds = elementBounds;
 +			oButtonBounds.ParentBounds = elementBounds;
++			uButtonBounds.ParentBounds = elementBounds;
  			result = handler.dialogBase(dialogName + "main", elementBounds.fixedWidth, elementBounds.fixedHeight).BeginChildElements(elementBounds).AddToggleButton(Lang.Get("setting-graphics-header"), font, OnGraphicsOptions, gButtonBounds, "graphics")
  				.AddToggleButton(Lang.Get("setting-mouse-header"), font, OnMouseOptions, mButtonBounds, "mouse")
  				.AddToggleButton(Lang.Get("setting-controls-header"), font, OnControlOptions, cButtonBounds, "controls")
@@ -32,49 +38,53 @@ index 4d08f84..5a760a7 100644
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
 -				.EndIf();
 +				.EndIf()
-+				.AddToggleButton(Lang.Get("optimum-tab-header"), font, OnOptimumOptions, oButtonBounds, "optimum");
++				.AddToggleButton(Lang.Get("optimum-tab-header"), font, OnOptimumOptions, oButtonBounds, "optimum")
++				.AddToggleButton(Lang.Get("optimum-upscaling-tab-header"), font, OnOptimumUpscalingOptions, uButtonBounds, "optimumupscaling");
  		}
  		else
  		{
  			ElementBounds elementBounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed).WithFixedPosition(0.0, 75.0);
  			double num = backButtonBounds.fixedX + backButtonBounds.fixedWidth + 35.0;
-@@ -168,10 +172,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -168,10 +179,12 @@ public class GuiCompositeSettings : GuiComposite
  			mButtonBounds.ParentBounds = elementBounds3;
  			cButtonBounds.ParentBounds = elementBounds3;
  			sButtonBounds.ParentBounds = elementBounds3;
  			iButtonBounds.ParentBounds = elementBounds3;
  			dButtonBounds.ParentBounds = elementBounds3;
 +			oButtonBounds.ParentBounds = elementBounds3;
++			uButtonBounds.ParentBounds = elementBounds3;
  			backButtonBounds.ParentBounds = elementBounds3;
  			result = handler.GuiComposers.Create(dialogName + "ingame", elementBounds2).AddShadedDialogBG(elementBounds3, withTitleBar: false).AddStaticCustomDraw(elementBounds3, delegate(Context ctx, ImageSurface surface, ElementBounds bounds)
  			{
  				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
  				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
-@@ -185,10 +190,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -185,10 +198,12 @@ public class GuiCompositeSettings : GuiComposite
  				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
  				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
  				.EndIf()
 +				.AddToggleButton(Lang.Get("optimum-tab-header"), font, OnOptimumOptions, oButtonBounds, "optimum")
++				.AddToggleButton(Lang.Get("optimum-upscaling-tab-header"), font, OnOptimumUpscalingOptions, uButtonBounds, "optimumupscaling")
  				.AddButton(Lang.Get("general-back"), delegate
  				{
  					clickedItemIndex = null;
  					hotkeyCapturer?.EndCapture(wasCancelled: true);
  					return handler.OnBackPressed();
-@@ -199,10 +205,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -199,10 +214,12 @@ public class GuiCompositeSettings : GuiComposite
  		result.GetToggleButton("controls").SetValue(currentTab == "controls");
  		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
  		result.GetToggleButton("interface").SetValue(currentTab == "interface");
  		result.GetToggleButton("developer")?.SetValue(currentTab == "developer");
 +		result.GetToggleButton("optimum")?.SetValue(currentTab == "optimum");
++		result.GetToggleButton("optimumupscaling")?.SetValue(currentTab == "optimumupscaling");
  		return result;
  	}
  
  	private void updateButtonBounds()
  	{
-@@ -235,20 +242,23 @@ public class GuiCompositeSettings : GuiComposite
+@@ -235,30 +252,41 @@ public class GuiCompositeSettings : GuiComposite
  		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -82,6 +92,8 @@ index 4d08f84..5a760a7 100644
  		double width7 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
 +		textExtents = cairoFont.GetTextExtents(Lang.Get("optimum-tab-header"));
 +		double width9 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
++		textExtents = cairoFont.GetTextExtents(Lang.Get("optimum-upscaling-tab-header"));
++		double width10 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("general-back"));
  		double width8 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		gButtonBounds.WithFixedWidth(width);
@@ -93,13 +105,29 @@ index 4d08f84..5a760a7 100644
  		dButtonBounds.WithFixedWidth(width7).FixedRightOf(iButtonBounds, 15.0);
 -		backButtonBounds.WithFixedWidth(width8).FixedRightOf(ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds, 25.0);
 +		oButtonBounds.WithFixedWidth(width9).FixedRightOf(ClientSettings.DeveloperMode ? dButtonBounds : iButtonBounds, 15.0);
-+		backButtonBounds.WithFixedWidth(width8).FixedRightOf(oButtonBounds, 25.0);
++		uButtonBounds.WithFixedWidth(width10).FixedRightOf(oButtonBounds, 15.0);
++		backButtonBounds.WithFixedWidth(width8).FixedRightOf(uButtonBounds, 25.0);
  	}
  
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,232 @@ public class GuiCompositeSettings : GuiComposite
+ 		return true;
+ 	}
+ 
+ 	internal void Refresh()
+ 	{
++		// Optimum (PR #3 follow-up): the upscaling tab's plan readout follows the frame,
++		// which is why it is here - this is the once-per-frame call the escape menu
++		// already makes (GuiDialogEscapeMenu.OnFinalizeFrame). It finds no element and
++		// returns on every other page.
++		optimumUpdateUpscalePlanReadout();
+ 		if (ClientSettings.DynamicColorGrading && composer != null)
+ 		{
+ 			DefaultShaderUniforms shaderUniforms = ScreenManager.Platform.ShaderUniforms;
+ 			if (shaderUniforms != null)
+ 			{
+@@ -1740,10 +1768,551 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -109,14 +137,27 @@ index 4d08f84..5a760a7 100644
 +	{
 +		// The stock build uses 22 rows inside the fixed 740px dialog: the 28px
 +		// interval places the last row (TAA mip bias) at 675px. The feature-flag
-+		// build stacks the four greedy-mesh rows on top of the three TAA ones,
-+		// and 26 rows only fit at a 24px interval (last row at 687px).
++		// build stacks the four greedy-mesh rows on top of those, and 26 rows only
++		// fit at a 24px interval (last row at 687px).
++		//
++		// These are the intervals this page had before the upscaler rows were
++		// squeezed in beside them (they forced 24px, then 21px with the greedy-mesh
++		// flag, which is what "the menu is wonky" on PR #3 was). Upscaling has its
++		// own tab now - OnOptimumUpscalingOptions - so the interval is back.
 +#if OPTIMUM_GREEDY_MESH
 +		double rowH = 24.0;
 +#else
 +		double rowH = 28.0;
 +#endif
 +		double y0 = 87.0;
++		// The TAA switch keeps showing the setting, but while an upscaler owns the
++		// resolve the in-house one does not run: the row says so rather than letting
++		// the page imply two resolves.
++		string taaTooltip = Lang.Get("optimum-taa-tooltip");
++		if (Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)
++		{
++			taaTooltip = taaTooltip + "\n\n" + Lang.Get("optimum-taa-upscaler-owns-resolve");
++		}
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddStaticText(Lang.Get("optimum-bgfps"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-bgfps-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
@@ -173,7 +214,7 @@ index 4d08f84..5a760a7 100644
 +			.AddHoverText(Lang.Get("optimum-godrayscap-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 18, 400, 25))
 +			.AddSwitch(onOptimumGodRaysCapChanged, ElementBounds.Fixed(450, y0 + rowH * 18 - 3, 200, 20), "optGodRaysCap")
 +			.AddStaticText(Lang.Get("optimum-taa"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 19, 400, 30))
-+			.AddHoverText(Lang.Get("optimum-taa-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
++			.AddHoverText(taaTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 19, 400, 25))
 +			.AddSwitch(onOptimumTaaChanged, ElementBounds.Fixed(450, y0 + rowH * 19 - 3, 200, 20), "optTaa")
 +			.AddStaticText(Lang.Get("optimum-taasharpness"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 20, 400, 30))
 +			.AddHoverText(Lang.Get("optimum-taasharpness-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 20, 400, 25))
@@ -232,6 +273,108 @@ index 4d08f84..5a760a7 100644
 +#endif
 +	}
 +
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 6, PR #3 follow-up): the upscaling tab.
++	///
++	/// The four rows are one decision - an upscaler replaces the in-house TAA
++	/// resolve rather than running beside it, renders the world at a size the
++	/// vendor chooses, and the latency backend is the other thing that only the
++	/// Vulkan renderer can do - so they get their own page instead of being
++	/// squeezed into the Extra tab, whose row interval had to shrink twice to hold
++	/// them. The space that buys is spent on the readout: the plan the frame is
++	/// really running, so a preset is judged against numbers rather than a guess.
++	///
++	/// Every behaviour of the old rows is unchanged: the same keys, the same
++	/// handlers, the same disabled states, the same one-sentence reason from the
++	/// platform when no upscaler can run here.
++	/// </summary>
++	private void OnOptimumUpscalingOptions(bool on)
++	{
++		double rowH = 28.0;
++		double y0 = 87.0;
++		// The upscaler row says what this machine can really do. The platform answers
++		// with the one-sentence reason there can be no upscaler here - the OpenGL
++		// renderer has none, NGX or its shim is missing, the GPU is not an NVIDIA one,
++		// or the renderer stood the upscaler down at runtime - or null while DLSS is
++		// up. A row that offered DLSS anyway would be asserting something the frame is
++		// not doing.
++		string upscalerUnavailable = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerUnavailable() : Lang.Get("optimum-upscaler-unavailable-renderer");
++		string upscalerDlssLabel = (upscalerUnavailable == null) ? Lang.Get("optimum-upscaler-dlss") : Lang.Get("optimum-upscaler-dlss-unavailable");
++		string upscalerTooltip = Lang.Get("optimum-upscaler-tooltip");
++		if (upscalerUnavailable != null)
++		{
++			upscalerTooltip = upscalerTooltip + "\n\n" + Lang.Get("optimum-upscaler-unavailable") + " " + upscalerUnavailable;
++		}
++		composer = ComposerHeader("gamesettings-optimumupscalingoptions", "optimumupscaling")
++			.AddStaticText(Lang.Get("optimum-upscaler"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0, 400, 30))
++			.AddHoverText(upscalerTooltip, CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0, 400, 25))
++			.AddDropDown(new string[] { "off", "dlss", "passthrough" }, new string[] { Lang.Get("optimum-upscaler-off"), upscalerDlssLabel, Lang.Get("optimum-upscaler-passthrough") }, 0, onOptimumUpscalerChanged, ElementBounds.Fixed(450, y0 + 2, 200, 25), "optUpscaler")
++			.AddStaticText(Lang.Get("optimum-upscalerquality"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalerquality-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH, 400, 25))
++			.AddDropDown(new string[] { "dlaa", "quality", "balanced", "performance", "ultraperformance" }, new string[] { Lang.Get("optimum-upscalerquality-dlaa"), Lang.Get("optimum-upscalerquality-quality"), Lang.Get("optimum-upscalerquality-balanced"), Lang.Get("optimum-upscalerquality-performance"), Lang.Get("optimum-upscalerquality-ultraperformance") }, 1, onOptimumUpscalerQualityChanged, ElementBounds.Fixed(450, y0 + rowH + 2, 200, 25), "optUpscalerQuality")
++			// How sharp the upscaler samples the atlases. The DLSS guide's own caveat
++			// (section 3.5, 3.5.1) is that its recommended bias can flicker on
++			// high-frequency textures, which is what a 32px pixel-art atlas with
++			// alpha-tested foliage is; the row is the player's judgement of that trade,
++			// and only means anything while an upscaler owns the resolve.
++			.AddStaticText(Lang.Get("optimum-upscalersharpness"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 2, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalersharpness-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 2, 400, 25))
++			.AddSlider(onOptimumUpscalerSharpnessChanged, ElementBounds.Fixed(450, y0 + rowH * 2 + 2, 200, 20), "optUpscalerSharpness")
++			.AddStaticText(Lang.Get("optimum-latency"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 3, 400, 30))
++			.AddHoverText(Lang.Get("optimum-latency-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 3, 400, 25))
++			.AddDropDown(new string[] { "off", "on", "boost" }, new string[] { Lang.Get("optimum-latency-off"), Lang.Get("optimum-latency-on"), Lang.Get("optimum-latency-boost") }, 1, onOptimumLatencyChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 25), "optLatency")
++			// The two rows below belong to the passthrough upscaler: the filter it
++			// magnifies with, which is a shipping choice, and whether the jitter is
++			// applied while an upscaler owns the resolve, which is the comparison
++			// experiment and is marked as debug in its label. Neither does anything
++			// unless an upscaler is on.
++			.AddStaticText(Lang.Get("optimum-upscalerpassthroughfilter"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 4, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalerpassthroughfilter-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 4, 400, 25))
++			.AddDropDown(new string[] { "linear", "nearest" }, new string[] { Lang.Get("optimum-upscalerpassthroughfilter-linear"), Lang.Get("optimum-upscalerpassthroughfilter-nearest") }, 0, onOptimumUpscalerPassthroughFilterChanged, ElementBounds.Fixed(450, y0 + rowH * 4 + 2, 200, 25), "optUpscalerPassthroughFilter")
++			.AddStaticText(Lang.Get("optimum-upscalerjitter"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 5, 400, 30))
++			.AddHoverText(Lang.Get("optimum-upscalerjitter-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 5, 400, 25))
++			.AddDropDown(new string[] { "on", "off" }, new string[] { Lang.Get("optimum-upscalerjitter-on"), Lang.Get("optimum-upscalerjitter-off") }, 0, onOptimumUpscalerJitterChanged, ElementBounds.Fixed(450, y0 + rowH * 5 + 2, 200, 25), "optUpscalerJitter")
++			// The readout. Dynamic, not static: it is re-read every frame from the
++			// platform while the dialog is open (Refresh), so a preset change shows the
++			// plan the next frame really used instead of the one before it.
++			.AddStaticText(Lang.Get("optimum-upscaleplan"), CairoFont.WhiteSmallishText(), ElementBounds.Fixed(0, y0 + rowH * 6, 650, 30))
++			.AddHoverText(Lang.Get("optimum-upscaleplan-tooltip"), CairoFont.WhiteSmallText(), 250, ElementBounds.Fixed(0, y0 + rowH * 6, 650, 25))
++			.AddDynamicText(optimumUpscalePlanText(), CairoFont.WhiteSmallText(), ElementBounds.Fixed(0, y0 + rowH * 7, 650, 60), "optUpscalePlan")
++			.EndChildElements()
++			.Compose();
++		handler.LoadComposer(composer);
++		composer.GetToggleButton("optimumupscaling")?.SetValue(true);
++		// EffectiveUpscaler, not Upscaler - a renderer that stood the upscaler down has
++		// already made this session's answer "off", and the row must show what is
++		// running, exactly as the TAA switch does.
++		composer.GetDropDown("optUpscaler").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.EffectiveUpscaler);
++		composer.GetDropDown("optUpscalerQuality").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerQuality);
++		composer.GetDropDown("optLatency").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.LatencyMode);
++		composer.GetDropDown("optUpscalerPassthroughFilter").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter);
++		composer.GetDropDown("optUpscalerJitter").SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerJitter ? "on" : "off");
++		// The sharpness row's value and its "-> -1.59 mip" text are both set by
++		// optimumUpdateUpscalerRows, which is also what a slider move calls, so the
++		// row never shows a bias the samplers are not carrying.
++		optimumUpdateUpscalerRows();
++	}
++
++	/// <summary>
++	/// Optimum: the upscaling tab's plan readout - the plan the frame is really
++	/// running (render size, display size, preset, scale, LOD bias and jitter phase
++	/// count), straight from the platform that owns the upscaler, or the one line
++	/// saying nothing is upscaling. Never a prediction: a number here that the frame
++	/// did not use would be worse than no number at all.
++	/// </summary>
++	private string optimumUpscalePlanText()
++	{
++		string plan = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerPlan() : null;
++		if (plan == null)
++		{
++			return Lang.Get("optimum-upscaleplan-none");
++		}
++		return plan;
++	}
++
 +	private void onOptimumBackgroundFpsChanged(bool on) { ClientSettings.OptimumBackgroundFpsLimit = on; Vintagestory.API.Config.OptimumConfig.BackgroundFpsLimit = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumFramePacingChanged(bool on) { ClientSettings.OptimumPreciseFramePacing = on; Vintagestory.API.Config.OptimumConfig.PreciseFramePacing = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumShadowCullChanged(bool on) { ClientSettings.OptimumEntityShadowCull = on; Vintagestory.API.Config.OptimumConfig.EntityShadowCull = on; Vintagestory.API.Config.OptimumConfig.Save(); }
@@ -272,6 +415,210 @@ index 4d08f84..5a760a7 100644
 +		handler.ReloadShaders();
 +	}
 +	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++
++	// Optimum (DLSS plan, Phase 6): the upscaler rows.
++	//
++	// An upscaler is a whole-chain decision, exactly like TAA: it owns the temporal
++	// resolve, the frame is rendered at a size the vendor chooses, and every target
++	// downstream of the resolve moves between the render size and the display size.
++	// So the handler persists the choice and then re-plans and rebuilds through the
++	// platform (ApplyOptimumUpscalerSettings, whose neutral body is
++	// RebuildFrameBuffers), reloads the shaders - the motion writers are compiled
++	// against "does anything temporal want this frame jittered", which changes when
++	// the upscaler is the only temporal consumer - and drops the history, because a
++	// history produced by the other configuration would be reprojected into a frame
++	// that never made it.
++	//
++	// Switching to off is the same path in reverse and restores the pre-upscaler
++	// chain exactly: the rebuild allocates the TAA history slots and the sharpen
++	// target again, and OptimumConfig.UpscalerReplacesTaa goes false, which is the
++	// one condition the in-house resolve, the sharpen pass and the FSR 1 blit stand
++	// down on.
++	private void onOptimumUpscalerChanged(string code, bool selected)
++	{
++		// Asked about the entry that was picked, not about the slot in general: the
++		// passthrough comparison upscaler needs no vendor runtime, so it stays
++		// selectable on a machine where DLSS cannot come up - which is the machine
++		// the comparison is most worth running on.
++		string unavailable = (ScreenManager.Platform != null) ? ScreenManager.Platform.OptimumUpscalerUnavailableFor(code) : "no platform";
++		if (unavailable != null && !string.Equals(code, "off", StringComparison.OrdinalIgnoreCase))
++		{
++			// The row has already moved by the time the handler runs, so refusing has
++			// to put it back: the frame is not going to upscale, and a row left on
++			// "DLSS" would claim it does.
++			optimumUpdateUpscalerRows();
++			return;
++		}
++		Vintagestory.API.Config.OptimumConfig.Upscaler = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (ScreenManager.Platform != null)
++		{
++			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++		}
++		handler.ReloadShaders();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++		optimumUpdateUpscalerRows();
++	}
++
++	// The preset only changes the render size the vendor asks for, so this is the
++	// re-plan and the rebuild without the shader reload: every define, every motion
++	// writer and every uniform is the same on both sides of it.
++	private void onOptimumUpscalerQualityChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerQuality = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (ScreenManager.Platform != null)
++		{
++			ScreenManager.Platform.ApplyOptimumUpscalerSettings();
++		}
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.RenderScale);
++		optimumUpdateUpscalerRows();
++	}
++
++	// The passthrough upscaler's filter, and the comparison experiment's jitter switch.
++	//
++	// The filter only changes how the passthrough blit magnifies, so it is a plain
++	// setting write: no target changes size, nothing temporal is invalidated, and the
++	// next frame's blit reads it.
++	private void onOptimumUpscalerPassthroughFilterChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		optimumUpdateUpscalerRows();
++	}
++
++	// The jitter switch changes the projection every pass is rendered with, so the
++	// history that was accumulated on the other side of it would be reprojected into a
++	// frame that never made it: the temporal state is dropped, exactly as toggling the
++	// upscaler does. No rebuild - no target changes size - and no shader reload, because
++	// EffectiveTemporalPipeline is unmoved: the motion writers still run, they are just
++	// writing for an unjittered frame.
++	private void onOptimumUpscalerJitterChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerJitter = string.Equals(code, "on", StringComparison.OrdinalIgnoreCase);
++		Vintagestory.API.Config.OptimumConfig.Save();
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.Toggle);
++		optimumUpdateUpscalerRows();
++	}
++
++	// The latency mode is one call into the live backend: no target changes size,
++	// nothing temporal is invalidated, and the OpenGL path has no backend at all.
++	private void onOptimumLatencyChanged(string code, bool selected)
++	{
++		Vintagestory.API.Config.OptimumConfig.LatencyMode = code;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		if (ScreenManager.Platform != null)
++		{
++			ScreenManager.Platform.ApplyOptimumLatencySettings();
++		}
++	}
++
++	/// <summary>
++	/// Optimum: puts the three upscaler rows back in step with what the frame is
++	/// really doing - the selection shows the effective upscaler (a renderer that
++	/// stood DLSS down has already made it "off"), and the quality row is disabled
++	/// while nothing is upscaling, because a preset with no upscaler selects
++	/// nothing.
++	/// </summary>
++	private void optimumUpdateUpscalerRows()
++	{
++		if (composer == null) return;
++		GuiElementDropDown upscaler = composer.GetDropDown("optUpscaler");
++		if (upscaler != null)
++		{
++			upscaler.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.EffectiveUpscaler);
++		}
++		GuiElementDropDown quality = composer.GetDropDown("optUpscalerQuality");
++		if (quality != null)
++		{
++			// Any upscaler that owns the resolve, not DLSS alone: the preset chooses the
++			// render size for the passthrough comparison upscaler too, which is the whole
++			// point of it - it renders at the size DLSS would have rendered at.
++			quality.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++		}
++		// The sharpness row follows the quality row exactly: it only describes how
++		// the upscaler samples the atlases, so with nothing upscaling it describes
++		// nothing. Its text carries the bias the current preset ends up with, which
++		// is the number the player is actually choosing.
++		GuiElementSlider sharpness = composer.GetSlider("optUpscalerSharpness");
++		if (sharpness != null)
++		{
++			sharpness.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++			sharpness.SetValues((int)Math.Round(Vintagestory.API.Config.OptimumConfig.UpscalerLodBiasOffset * 100f), 0, 100, 5, optimumUpscalerLodBiasText());
++		}
++		// The filter row is the passthrough upscaler's alone; the jitter row belongs to
++		// whichever upscaler owns the resolve, because the experiment is run against
++		// both of them.
++		GuiElementDropDown passthroughFilter = composer.GetDropDown("optUpscalerPassthroughFilter");
++		if (passthroughFilter != null)
++		{
++			passthroughFilter.Enabled = Vintagestory.API.Config.OptimumConfig.EffectiveUpscalerIsPassthrough;
++			passthroughFilter.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerPassthroughFilter);
++		}
++		GuiElementDropDown jitter = composer.GetDropDown("optUpscalerJitter");
++		if (jitter != null)
++		{
++			jitter.Enabled = Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++			jitter.SetSelectedValue(Vintagestory.API.Config.OptimumConfig.UpscalerJitter ? "on" : "off");
++		}
++		optimumUpdateUpscalePlanReadout();
++	}
++
++	/// <summary>
++	/// Optimum: the plan readout, re-read from the platform. Called on every change
++	/// the tab makes and once per frame from <c>Refresh</c> while the dialog is
++	/// open, because the plan only becomes the new one on the next frame that
++	/// creates the feature - a readout written once at compose time would show the
++	/// previous preset's numbers for as long as the page stayed open. Does nothing
++	/// on every other page: the element only exists on the upscaling tab.
++	/// </summary>
++	private void optimumUpdateUpscalePlanReadout()
++	{
++		if (composer == null) return;
++		GuiElementDynamicText readout = composer.GetDynamicText("optUpscalePlan");
++		if (readout == null) return;
++		// SetNewText is a no-op when the text is unchanged, which is every frame the
++		// plan is stable, so this costs one string compare per frame.
++		readout.SetNewText(optimumUpscalePlanText());
++	}
++
++	/// <summary>
++	/// Optimum: what the sharpness row appends to its value - the texture LOD bias
++	/// the current preset ends up with, from the live plan's ratio while an
++	/// upscaler is running and from the preset's nominal ratio before one is. So
++	/// the row reads "100 -> -1.59 mip" at Quality with the guide's default.
++	/// Invariant culture: it is a number in a fixed format, not prose.
++	/// </summary>
++	private string optimumUpscalerLodBiasText()
++	{
++		float bias = Vintagestory.API.Config.OptimumConfig.PreviewUpscalerLodBias();
++		return " -> " + bias.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " mip";
++	}
++
++	// Optimum (DLSS plan, Phase 6 follow-up): how sharp the upscaler samples the
++	// atlases. The DLSS Programming Guide's section 3.5 recommends
++	// log2(render / display) - 1 and warns in the same breath that it "can
++	// sometimes lead to increased temporal instability, in the form of flickering
++	// and/or moire", with high-frequency textures as the case (3.5.1); the bound
++	// it gives is log2(render / display) itself. This row is that one term, so the
++	// player can trade the sharpness back for stability on the pixel-art atlas.
++	//
++	// Nothing structural moves with it. The render size is the vendor's and does
++	// not change, so no framebuffer is rebuilt and the NGX feature is not touched;
++	// no shader define depends on the bias, so no shader is reloaded; and the
++	// history is still valid for the frame that produced it, so it is not reset -
++	// a reset here would throw away exactly the accumulation the player is judging.
++	// Only the number the atlas parameters and the terrain sampler objects carry
++	// moves, through the one applier.
++	private bool onOptimumUpscalerSharpnessChanged(int val)
++	{
++		Vintagestory.API.Config.OptimumConfig.UpscalerLodBiasOffset = Math.Clamp(val / 100f, 0f, 1f);
++		Vintagestory.API.Config.OptimumConfig.Save();
++		Vintagestory.API.Config.OptimumConfig.RepublishUpscalerLodBias();
++		ShaderRegistry.ApplyOptimumLodBias();
++		optimumUpdateUpscalerRows();
++		return true;
++	}
 +
 +	// TAA is a whole-chain switch, not a per-frame flag: the resolve's history
 +	// targets and the motion attachment only exist while it is on, and final.fsh
@@ -332,7 +679,7 @@ index 4d08f84..5a760a7 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2050,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2387,87 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
@@ -353,7 +700,19 @@ index 4d08f84..5a760a7 100644
 +		oButtonBounds.WithFixedWidth(w);
 +		if (anchor != null) oButtonBounds.FixedRightOf(anchor, 10.0);
 +		if (anchor?.ParentBounds != null) oButtonBounds.ParentBounds = anchor.ParentBounds;
-+		backButtonBounds.FixedRightOf(oButtonBounds, 15.0);
++		// The upscaling tab (PR #3 follow-up) is the second button this hook adds, and
++		// it sits between the Extra tab and Back, so it - not the Extra tab - is what
++		// the Back button and the width walk below measure from.
++		TextExtents uext = font.GetTextExtents(Lang.Get("optimum-upscaling-tab-header"));
++		double uw = uext.Width / (double)ClientSettings.GUIScale + 15.0;
++		if (uButtonBounds == null)
++		{
++			uButtonBounds = ElementBounds.Fixed(0.0, 0.0, uw, 40.0).WithFixedPadding(0.0, 3.0);
++		}
++		uButtonBounds.WithFixedWidth(uw);
++		uButtonBounds.FixedRightOf(oButtonBounds, 10.0);
++		if (oButtonBounds.ParentBounds != null) uButtonBounds.ParentBounds = oButtonBounds.ParentBounds;
++		backButtonBounds.FixedRightOf(uButtonBounds, 15.0);
 +		// Vanilla already sized this dialog before the hook ran, from a Back
 +		// button that was still sitting directly right of Interface/Developer,
 +		// so the tab row's own parent has to grow to fit the shifted Back
@@ -384,7 +743,7 @@ index 4d08f84..5a760a7 100644
 +		// stops at the first one; the window bounds (the only bounds with a
 +		// null ParentBounds) is never touched.
 +		double contentRight = (onMainscreen
-+			? oButtonBounds.fixedX + oButtonBounds.fixedWidth
++			? uButtonBounds.fixedX + uButtonBounds.fixedWidth
 +			: backButtonBounds.fixedX + backButtonBounds.fixedWidth) + 15.0;
 +		ElementBounds tabRowParent = oButtonBounds.ParentBounds;
 +		if (tabRowParent != null && tabRowParent.fixedWidth < contentRight)
@@ -404,6 +763,7 @@ index 4d08f84..5a760a7 100644
 +				}
 +			}
 +		}
-+		return GuiComposerHelpers.AddToggleButton(c, Lang.Get("optimum-tab-header"), CairoFont.ButtonText(), OnOptimumOptions, oButtonBounds, "optimum");
++		GuiComposer withExtra = GuiComposerHelpers.AddToggleButton(c, Lang.Get("optimum-tab-header"), CairoFont.ButtonText(), OnOptimumOptions, oButtonBounds, "optimum");
++		return GuiComposerHelpers.AddToggleButton(withExtra, Lang.Get("optimum-upscaling-tab-header"), CairoFont.ButtonText(), OnOptimumUpscalingOptions, uButtonBounds, "optimumupscaling");
 +	}
  }

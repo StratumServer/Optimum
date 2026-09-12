@@ -34,6 +34,15 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     /// <summary>Test seam: the device the overrides draw with.</summary>
     internal VulkanDevice? GraphicsDevice => device;
 
+    /// <summary>
+    /// Test seam: binds this platform to a device somebody else brought up, so a
+    /// test can drive the client's own code paths (which go through
+    /// <c>ScreenManager.Platform</c>) against a shared device - the NGX fixture's,
+    /// which may not be created twice in a process. Never called by the client:
+    /// <see cref="InitializeGraphics" /> is the only place the device is set.
+    /// </summary>
+    internal void AdoptDeviceForTests(VulkanDevice adopted) => device = adopted;
+
     public const string ForceInstallFailureVariable = "OPTIMUM_VULKAN_FORCE_INSTALL_FAILURE";
     public const string ForcedInstallFailureReason = "forced by " + ForceInstallFailureVariable;
 
@@ -124,6 +133,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "DeleteOcclusionQuery", new[] { "Int32" }),
         new(true, "ReadDefaultFramebuffer", new[] { "Int32", "Int32", "Int32", "Int32", "IntPtr" }),
         new(true, "get_GraphicsBackendName", Array.Empty<string>()),
+        // Headless render harness: the channel order ReadDefaultFramebuffer leaves
+        // behind. Not overridden here - the device converts its R8G8B8A8 texels to
+        // the GL path's B G R A - but the virtual has to exist in the patched lib,
+        // because the harness reads it to decide how to write a frame.
+        new(true, "get_OptimumDefaultFramebufferIsBgra", Array.Empty<string>()),
         // Phase 2: render-stage bracket from ClientMain.TriggerRenderStage (contract C3).
         new(true, "BeginRenderStage", new[] { "EnumRenderStage" }),
         new(true, "EndRenderStage", new[] { "EnumRenderStage" }),
@@ -131,10 +145,25 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         new(true, "RenderOptimumSkyMotion", Array.Empty<string>()),
         new(true, "RenderOptimumTaaResolve", Array.Empty<string>()),
         new(true, "RenderOptimumTaaSharpen", new[] { "Int32" }),
+        // DLSS plan, Phase 3: the upscaler's placement - injected into
+        // ClientPlatformWindows with its flags, so these arrive virtual there rather than
+        // through methodsToVirtualize.
+        new(false, "get_OptimumUpscalerActive", Array.Empty<string>()),
+        new(false, "OptimumTryPlanUpscaleRenderSize", new[] { "Int32", "Int32", "Int32&", "Int32&" }),
+        new(false, "RenderOptimumUpscale", Array.Empty<string>()),
         // "Latency seams" S3: the pre-input sleep and the frame-cap ownership flag.
         new(true, "LatencySleep", Array.Empty<string>()),
         new(true, "get_LatencyOwnsFrameCap", Array.Empty<string>()),
         new(true, "SetLatencyFrameCap", new[] { "Int32" }),
+        // DLSS plan, Phase 6: the settings-tab seams - the honest reason there can be no
+        // upscaler here, the upscaler/preset re-plan and rebuild, and the latency re-apply.
+        new(true, "OptimumUpscalerUnavailable", Array.Empty<string>()),
+        // The same question asked about one dropdown entry, so the passthrough
+        // upscaler - which needs no vendor runtime - is not refused for NGX's absence.
+        new(true, "OptimumUpscalerUnavailableFor", new[] { "String" }),
+        new(true, "OptimumUpscalerPlan", Array.Empty<string>()),
+        new(true, "ApplyOptimumUpscalerSettings", Array.Empty<string>()),
+        new(true, "ApplyOptimumLatencySettings", Array.Empty<string>()),
     };
 
     /// <summary>
@@ -269,6 +298,11 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
         {
             device = DeviceFactory();
 
+            // DLSS plan, Phase 2: prepared before the device is created, because
+            // NGX's instance and device extensions have to be requested at device
+            // creation. Nothing happens here when the setting is off.
+            PrepareUpscaler(device);
+
             // The marker goes down before the driver is touched: a crash inside
             // device creation is exactly the kind the next start must see. A
             // clean failure clears it again, since the caller falls back to
@@ -284,6 +318,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
             }
 
             this.device = device;
+            // DLSS plan, Phase 2: NGX comes up on the device that now exists. A
+            // refusal leaves the client on the Vulkan device with no upscaler, one
+            // line in the log and the setting stood down - never a failed install.
+            BringUpUpscaler(device);
             // Phase 2 step 2: the stage bracket drives the frame graph's pass declarations.
             RenderStageListener = new FrameGraphStageListener(this);
             OptimumRender.ActiveBackend = EnumRenderBackend.Vulkan;
@@ -314,6 +352,10 @@ public partial class VulkanClientPlatform : ClientPlatformWindows
     {
         // The bridge goes first: nothing may reach a device that is being torn down.
         OptimumForkGraphics.Active = null;
+        // DLSS plan, Phase 2: the vendor runtime goes before the device it was
+        // initialised on - retire the feature, drain the timeline, shut NGX down.
+        // The other order is a use-after-free inside the driver.
+        ShutDownUpscaler();
         try
         {
             device?.Dispose();

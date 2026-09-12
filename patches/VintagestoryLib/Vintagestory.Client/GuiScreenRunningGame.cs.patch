@@ -1,0 +1,27 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
+index 7248005..8cd95d6 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
+@@ -147,16 +147,16 @@ public class GuiScreenRunningGame : GuiScreen
+ 	}
+ 
+ 	public override void RenderToPrimary(float dt)
+ 	{
+ 		platform.DoPostProcessingEffects = true;
+-		float sSAA = ClientSettings.SSAA;
+-		int width = platform.WindowSize.Width;
+-		int height = platform.WindowSize.Height;
+-		int width2 = (int)((float)width * sSAA);
+-		int height2 = (int)((float)height * sSAA);
+-		platform.GlViewport(0, 0, width2, height2);
++		// Optimum (DLSS plan, Phase 1): the world viewport is the render size, and the
++		// render size has exactly one owner - the platform, which answers with the size
++		// of the Primary target the world is about to be drawn into. Recomputing
++		// WindowSize * ClientSettings.SSAA here was a second copy of the allocator's
++		// formula and would be wrong the moment an upscaler chooses the render size.
++		platform.GlViewport(0, 0, platform.RenderWidth, platform.RenderHeight);
+ 		runningGame.MainGameLoop(dt);
+ 		if (runningGame.doReconnect)
+ 		{
+ 			Reconnect();
+ 		}

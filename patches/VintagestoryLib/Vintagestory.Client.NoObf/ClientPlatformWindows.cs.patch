@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..1d2a981 100644
+index 6edf0c9..e541b39 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -115,7 +115,7 @@ index 6edf0c9..1d2a981 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -93,10 +182,115 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +182,131 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<string> drawCallStacks = new List<string>();
  
@@ -140,6 +140,22 @@ index 6edf0c9..1d2a981 100644
 +	// or when its allocation failed - in which case the post chain simply reads
 +	// the unsharpened resolve.
 +	private const int OptimumTaaSharpenIndex = 21;
++
++	// Optimum (DLSS plan, Phase 3): the display-resolution scene colour an upscaler
++	// writes, and the target that carries the frame from the upscale onwards - the
++	// bloom/god-ray/luma chain reads it, the final composition writes it, the
++	// AfterFinalComposition overlays draw into it (against its own depth attachment,
++	// a nearest-neighbour upscale of Primary's depth) and the blit and the
++	// screenshot paths read it. Null whenever no upscaler is running, and then
++	// Primary is that target, exactly as it always was.
++	private const int OptimumUpscaledSceneIndex = 22;
++
++	// Optimum (DLSS plan, Phase 3): whether an upscaler produced this frame's
++	// display-resolution scene colour. Set once per frame by
++	// RenderPostprocessingEffects and read by everything downstream, so the whole
++	// frame agrees on which target holds the image even if the upscaler stands
++	// down mid-frame.
++	private bool optimumUpscaledThisFrame;
 +
 +	private const int OptimumGlR32f = 0x822E;
 +
@@ -231,7 +247,7 @@ index 6edf0c9..1d2a981 100644
  	private bool serverRunning;
  
  	private bool gamepause;
-@@ -109,10 +303,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -109,10 +319,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private bool RenderFXAA;
  
@@ -250,12 +266,101 @@ index 6edf0c9..1d2a981 100644
  	private int ShadowMapQuality;
  
  	private float ssaaLevel;
-@@ -256,10 +458,23 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -200,11 +418,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		{
+ 			return audio.MasterSoundLevel;
+ 		}
+ 		set
+ 		{
+-			audio.MasterSoundLevel = value;
++			// Optimum: while the headless harness is capturing, every path that would
++			// restore the volume (the settings watcher, a settings reload, the sound
++			// options page) is answered with silence instead. Only the running mixer
++			// is affected; ClientSettings keeps whatever the user chose.
++			audio.MasterSoundLevel = (Vintagestory.API.Config.OptimumHeadless.Enabled ? 0f : value);
+ 		}
+ 	}
+ 
+ 	public override AssetManager AssetManager => assetManager;
+ 
+@@ -256,10 +478,180 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  	}
  
  	public override List<FrameBufferRef> FrameBuffers => frameBuffers;
  
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 1): the render size, read from the allocated Primary
++	/// target instead of recomputed. Primary is the target the world is drawn into, so
++	/// its size <em>is</em> the render size by definition, and the blur, god-ray, SSAO
++	/// and final passes all derive their viewports and inverse-frame-size uniforms from
++	/// it rather than from <c>ClientSize * SSAA</c>. That product survives only as the
++	/// fallback for the window between the two (before the first
++	/// <see cref="SetupDefaultFrameBuffers" /> and while the window is minimised), and
++	/// it produces exactly the value the allocator would have produced, truncation
++	/// included.
++	///
++	/// Both backends fill Primary's size: VulkanClientPlatform overrides
++	/// SetupDefaultFrameBuffers but writes the same Width/Height, so these properties
++	/// need no device override.
++	/// </summary>
++	public override int RenderWidth
++	{
++		get
++		{
++			List<FrameBufferRef> buffers = frameBuffers;
++			if (buffers != null && buffers.Count > 0)
++			{
++				FrameBufferRef primary = buffers[0];
++				if (primary != null && primary.Width > 0)
++				{
++					return primary.Width;
++				}
++			}
++			return (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
++		}
++	}
++
++	public override int RenderHeight
++	{
++		get
++		{
++			List<FrameBufferRef> buffers = frameBuffers;
++			if (buffers != null && buffers.Count > 0)
++			{
++				FrameBufferRef primary = buffers[0];
++				if (primary != null && primary.Height > 0)
++				{
++					return primary.Height;
++				}
++			}
++			return (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 1): the display size - the window's client size, which
++	/// is what the default framebuffer, the HUD and the final blit are sized by. The live
++	/// window value, exactly as the <c>EnumFrameBuffer.Default</c> viewport used it
++	/// before this phase; <see cref="WindowSize" /> is the same number one resize event
++	/// later.
++	/// </summary>
++	public override int DisplayWidth
++	{
++		get
++		{
++			return ((NativeWindow)window).ClientSize.X;
++		}
++	}
++
++	public override int DisplayHeight
++	{
++		get
++		{
++			return ((NativeWindow)window).ClientSize.Y;
++		}
++	}
++
 +	/// <summary>
 +	/// Optimum: one of the two TAA history slots, selected by frame parity
 +	/// (typically <c>frameIndex &amp; 1</c>). Null when TAA is off or its targets
@@ -269,12 +374,97 @@ index 6edf0c9..1d2a981 100644
 +		return frameBuffers[(parity & 1) == 0 ? OptimumTaaHistoryIndexA : OptimumTaaHistoryIndexB];
 +	}
 +
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 3): whether an upscaler is up on this platform and
++	/// can be planned and evaluated. False here - the OpenGL path has no upscaler
++	/// and never will; VulkanClientPlatform overrides it.
++	/// </summary>
++	public virtual bool OptimumUpscalerActive
++	{
++		get
++		{
++			return false;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 3): what to render at, for a display size the
++	/// client has already computed (window size x SSAA). The render size is the
++	/// vendor's own answer for that display size, never a ratio invented here, so
++	/// this is a question for the platform that owns the upscaler.
++	///
++	/// False - with both outputs left at the display size - means "no upscaler",
++	/// which is the OpenGL path always and the Vulkan path whenever DLSS is off or
++	/// unavailable. Every framebuffer is then sized exactly as it was before this
++	/// phase.
++	/// </summary>
++	public virtual bool OptimumTryPlanUpscaleRenderSize(int displayWidth, int displayHeight, out int renderWidth, out int renderHeight)
++	{
++		renderWidth = displayWidth;
++		renderHeight = displayHeight;
++		return false;
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 3): runs the upscaler where the TAA resolve runs -
++	/// as close to the start of post-processing as the frame allows, before tone
++	/// mapping, which is the placement the DLSS Programming Guide section 3.1 asks
++	/// for. Reads the render-resolution jittered colour, depth and motion out of
++	/// Primary and writes the display-resolution scene colour, plus the
++	/// display-resolution depth the AfterFinalComposition overlays test against.
++	///
++	/// True means the upscaled target holds this frame's scene colour and
++	/// everything downstream runs at the display size. False means the frame runs
++	/// exactly the chain it ran before an upscaler existed.
++	/// </summary>
++	public virtual bool RenderOptimumUpscale()
++	{
++		return false;
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 3): the target that holds the composited image -
++	/// the upscaled display-resolution target on a frame an upscaler produced, and
++	/// Primary on every other frame, which is what it has always been.
++	/// </summary>
++	public FrameBufferRef OptimumCompositeFrameBuffer
++	{
++		get
++		{
++			if (optimumUpscaledThisFrame && frameBuffers != null && frameBuffers.Count > OptimumUpscaledSceneIndex)
++			{
++				FrameBufferRef upscaled = frameBuffers[OptimumUpscaledSceneIndex];
++				if (upscaled != null)
++				{
++					return upscaled;
++				}
++			}
++			if (frameBuffers == null || frameBuffers.Count == 0)
++			{
++				return null;
++			}
++			return frameBuffers[0];
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 3): whether an upscaler produced this frame's
++	/// scene colour. The one flag every downstream reader shares.
++	/// </summary>
++	public bool OptimumUpscaledThisFrame
++	{
++		get
++		{
++			return optimumUpscaledThisFrame;
++		}
++	}
++
  	public override bool IsServerRunning
  	{
  		get
  		{
  			return serverRunning;
-@@ -278,34 +493,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -278,34 +670,54 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			return curFb;
  		}
@@ -290,9 +480,9 @@ index 6edf0c9..1d2a981 100644
 -			GL.BindFramebuffer((FramebufferTarget)36160, value.FboId);
 -			GL.Viewport(0, 0, value.Width, value.Height);
 +			BindCurrentFrameBuffer(value);
- 		}
- 	}
- 
++		}
++	}
++
 +	/// <summary>
 +	/// Optimum (Vulkan-native plan, Phase 1A step 4): the GL half of the
 +	/// <see cref="CurrentFrameBuffer" /> setter - bind, and size the viewport to the target.
@@ -303,11 +493,11 @@ index 6edf0c9..1d2a981 100644
 +		{
 +			GL.BindFramebuffer((FramebufferTarget)36160, 0);
 +			return;
-+		}
+ 		}
 +		GL.BindFramebuffer((FramebufferTarget)36160, value.FboId);
 +		GL.Viewport(0, 0, value.Width, value.Height);
-+	}
-+
+ 	}
+ 
  	private FrameBufferRef CurrentFrameBufferKeepVw
  	{
  		get
@@ -337,7 +527,27 @@ index 6edf0c9..1d2a981 100644
  	public override bool GlDebugMode
  	{
  		get
-@@ -478,40 +713,162 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -379,10 +791,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	public void StartAudio()
+ 	{
+ 		if (audio == null)
+ 		{
+ 			audio = new AudioOpenAl(logger);
++			// Optimum (headless render harness): a capture runs in the user's session
++			// with no window, so it must not play sound at them either. The mixer is
++			// still created - AvailableAudioDevices, CurrentAudioDevice and the
++			// settings watchers all dereference it - it just runs silent, and the
++			// persisted sound settings are never written.
++			if (Vintagestory.API.Config.OptimumHeadless.Enabled)
++			{
++				audio.MasterSoundLevel = 0f;
++			}
+ 		}
+ 	}
+ 
+ 	public override void AddAudioSettingsWatchers()
+ 	{
+@@ -478,40 +899,170 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -489,6 +699,14 @@ index 6edf0c9..1d2a981 100644
 +		{
 +			OptimumRunParityDump();
 +		}
++		// Optimum: the headless render harness (OptimumHeadless) - the scripted chat
++		// commands and the presented-frame capture, in the same place and for the
++		// same reason as the dump above: after the post chain and the final blit,
++		// before presentation. Off, this is one static bool check.
++		if (Vintagestory.API.Config.OptimumHeadless.Active)
++		{
++			OptimumHeadlessTick();
++		}
 +		EndFrame();
  		ScreenManager.FrameProfiler.End();
  	}
@@ -506,7 +724,7 @@ index 6edf0c9..1d2a981 100644
  	}
  
  	public void LogAndTestHardwareInfosStage1()
-@@ -531,11 +888,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -531,11 +1082,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		logger.Notification("C# Framework: " + GetFrameworkInfos());
  		logger.Notification("Cairo Graphics Version: " + CairoAPI.VersionString);
@@ -519,7 +737,7 @@ index 6edf0c9..1d2a981 100644
  		logger.Notification("Graphics Card Version: " + GL.GetString((StringName)7938));
  		logger.Notification("Graphics Card Renderer: " + GL.GetString((StringName)7937));
  		logger.Notification("Graphics Card ShadingLanguageVersion: " + GL.GetString((StringName)35724));
-@@ -702,24 +1059,42 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -702,24 +1253,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBuffers = SetupDefaultFrameBuffers();
  		minimalGuiShaderProgram = new ShaderProgramMinimalGui();
  		minimalGuiShaderProgram.Compile();
@@ -558,13 +776,17 @@ index 6edf0c9..1d2a981 100644
 +			// point the swap completes so no path can reach a resolve holding a
 +			// disposed read slot.
 +			_taaHistoryValid = false;
++			// Optimum (DLSS plan, Phase 3): the upscaled target the flag pointed at is
++			// one of the buffers just disposed, so no reader may still be told the
++			// frame has one. The next RenderPostprocessingEffects sets it again.
++			optimumUpscaledThisFrame = false;
 +			OptimumTemporal.RequestReset(EnumTemporalResetReason.Resize);
  		}
  	}
  
  	private void Window_FileDrop(FileDropEventArgs e)
  	{
-@@ -796,10 +1171,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -796,10 +1369,19 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			logger.Notification("Window was resized to {0} {1}? Window probably got minimized. Will not rebuild frame buffers", ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  		}
  		else if (((NativeWindow)window).ClientSize.X != windowsize.Width || ((NativeWindow)window).ClientSize.Y != windowsize.Height)
@@ -584,7 +806,85 @@ index 6edf0c9..1d2a981 100644
  			windowsize.Height = ((NativeWindow)window).ClientSize.Y;
  			if ((int)((NativeWindow)window).WindowState == 0)
  			{
-@@ -1023,11 +1407,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -841,28 +1423,73 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	public unsafe override void SetDirectMouseMode(bool enabled)
+ 	{
+ 		GLFW.SetInputMode(((NativeWindow)window).WindowPtr, (RawMouseMotionAttribute)208901, enabled);
+ 	}
+ 
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 3): binds the target that holds the composited image
++	/// when a capture asked for Primary and an upscaler moved that image elsewhere,
++	/// and answers the target the capture should be sized by. Answers
++	/// <paramref name="current" /> unchanged - and binds nothing - in every other
++	/// case, which is every frame with no upscaler.
++	/// </summary>
++	private FrameBufferRef OptimumBindCompositeForCapture(FrameBufferRef current)
++	{
++		if (!optimumUpscaledThisFrame || current == null || frameBuffers == null || frameBuffers.Count == 0)
++		{
++			return current;
++		}
++		if (!ReferenceEquals(current, frameBuffers[0]))
++		{
++			return current;
++		}
++		FrameBufferRef composite = OptimumCompositeFrameBuffer;
++		if (composite == null || ReferenceEquals(composite, current))
++		{
++			return current;
++		}
++		CurrentFrameBuffer = composite;
++		return composite;
++	}
++
+ 	public override string SaveScreenshot(string path = null, string filename = null, bool withAlpha = false, bool flip = false, string metaDataStr = null)
+ 	{
+ 		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
+ 		screenshot.d_GameWindow = (GameWindow)(object)window;
+-		FrameBufferRef currentFrameBuffer = CurrentFrameBuffer;
++		// Optimum (DLSS plan, Phase 3): the scaled and mega screenshot paths bind
++		// Primary and capture what is bound. With an upscaler the composited image is
++		// in the display-resolution target instead, so the capture is redirected there
++		// - and the binding is handed back exactly as it was found. The mega path's
++		// supersampling is unaffected: it raises ssaa, which raises the display size,
++		// which is what this target is allocated at.
++		FrameBufferRef restoreFrameBuffer = CurrentFrameBuffer;
++		FrameBufferRef currentFrameBuffer = OptimumBindCompositeForCapture(restoreFrameBuffer);
+ 		Size2i size = ((currentFrameBuffer == null) ? new Size2i(((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y) : new Size2i(currentFrameBuffer.Width, currentFrameBuffer.Height));
+-		return screenshot.SaveScreenshot(this, size, path, filename, withAlpha, flip, metaDataStr);
++		string savedScreenshot = screenshot.SaveScreenshot(this, size, path, filename, withAlpha, flip, metaDataStr);
++		if (!ReferenceEquals(currentFrameBuffer, restoreFrameBuffer))
++		{
++			CurrentFrameBuffer = restoreFrameBuffer;
++		}
++		return savedScreenshot;
+ 	}
+ 
+ 	public override BitmapRef GrabScreenshot(bool withAlpha = false, bool scale = false)
+ 	{
+ 		//IL_0034: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0044: Unknown result type (might be due to invalid IL or missing references)
+ 		screenshot.d_GameWindow = (GameWindow)(object)window;
+-		FrameBufferRef currentFrameBuffer = CurrentFrameBuffer;
++		// Optimum (DLSS plan, Phase 3): same redirect as SaveScreenshot.
++		FrameBufferRef restoreFrameBuffer = CurrentFrameBuffer;
++		FrameBufferRef currentFrameBuffer = OptimumBindCompositeForCapture(restoreFrameBuffer);
+ 		Size2i size = ((currentFrameBuffer == null) ? new Size2i(((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y) : new Size2i(currentFrameBuffer.Width, currentFrameBuffer.Height));
+-		return new BitmapExternal(screenshot.GrabScreenshot(size, scale, flip: false, withAlpha));
++		BitmapExternal grabbed = new BitmapExternal(screenshot.GrabScreenshot(size, scale, flip: false, withAlpha));
++		if (!ReferenceEquals(currentFrameBuffer, restoreFrameBuffer))
++		{
++			CurrentFrameBuffer = restoreFrameBuffer;
++		}
++		return grabbed;
+ 	}
+ 
+ 	public override BitmapRef GrabScreenshot(int width, int height, bool scaleScreenshot, bool flip, bool withAlpha = false)
+ 	{
+ 		screenshot.d_GameWindow = (GameWindow)(object)window;
+@@ -1023,11 +1650,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.DrawElements(vAO.drawMode, vAO.IndicesCount, (DrawElementsType)5125, 0);
  		GL.BindBuffer((BufferTarget)34963, 0);
  		GL.BindVertexArray(0);
@@ -597,7 +897,7 @@ index 6edf0c9..1d2a981 100644
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
-@@ -1150,11 +1534,509 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,88 +1777,854 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -611,6 +911,239 @@ index 6edf0c9..1d2a981 100644
 +	private long optimumParityWorldFrames;
 +
 +	private bool optimumParityDumpDone;
++
++	/// <summary>
++	/// Optimum (headless render harness): frames rendered while the player is in the
++	/// world, counted independently of the parity dump's counter so the two never
++	/// interfere. No initializer: an injected field starts at the CLR default.
++	/// </summary>
++	private long optimumHeadlessWorldFrames;
++
++	private bool optimumHeadlessCommandsDone;
++
++	private bool optimumHeadlessCaptureDone;
++
++	private int optimumHeadlessFramesWritten;
++
++	/// <summary>
++	/// Optimum (headless render harness, <see cref="OptimumHeadless" />): everything
++	/// the harness does per frame. Called from window_RenderFrame after the post
++	/// chain and the final blit and before presentation, only when one of the
++	/// harness environment variables is set.
++	///
++	/// In order, once the player is actually in the world: pin the simulated frame
++	/// step if one was asked for, dispatch the chat-command script once on its
++	/// frame, then read the presented image back on each frame the capture asked
++	/// for. The frame loop itself is untouched - nothing here changes what is
++	/// rendered or when.
++	/// </summary>
++	private void OptimumHeadlessTick()
+ 	{
+-		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0211: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_02af: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0358: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0576: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0665: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0b13: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0b88: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0bfe: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0c62: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0ccf: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0d44: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0db2: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0a8c: Unknown result type (might be due to invalid IL or missing references)
+-		SetupSSAO = ClientSettings.SSAOQuality > 0;
+-		if (ClientSettings.IsNewSettingsFile && ((NativeWindow)window).ClientSize.X > 1920)
++		Vintagestory.Client.ScreenManager screenManager = Vintagestory.Client.ClientProgram.screenManager;
++		if (screenManager == null)
+ 		{
+-			ClientSettings.SSAA = 0.5f;
++			return;
+ 		}
+-		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
+-		for (int i = 0; i <= 24; i++)
++		Vintagestory.Client.GuiScreenRunningGame runningScreen = screenManager.CurrentScreen as Vintagestory.Client.GuiScreenRunningGame;
++		if (runningScreen == null)
+ 		{
+-			list.Add(null);
++			return;
+ 		}
+-		ShadowMapQuality = ClientSettings.ShadowMapQuality;
+-		ssaaLevel = ClientSettings.SSAA;
+-		int num = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
+-		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
+-		if (num == 0 || num2 == 0)
++		ClientMain game = runningScreen.runningGame;
++		if (game == null || !game.BlocksReceivedAndLoaded)
+ 		{
+-			return list;
++			return;
+ 		}
+-		PixelFormat val = (PixelFormat)6408;
+-		CheckGlError("sdfb-begin");
+-		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
++
++		// Reasserted every frame rather than set once: this is the same field
++		// vanilla's cinematic recorder writes, and it resets it when a path stops.
++		if (OptimumHeadless.FixedDeltaTime > 0f)
+ 		{
+-			FboId = GL.GenFramebuffer(),
+-			Width = num,
+-			Height = num2
+-		});
+-		FrameBufferRef frameBufferRef3 = frameBufferRef;
+-		frameBufferRef3.DepthTextureId = GL.GenTexture();
+-		if (frameBufferRef3.FboId == 0)
++			game.DeltaTimeLimiter = OptimumHeadless.FixedDeltaTime;
++		}
++
++		long worldFrame = optimumHeadlessWorldFrames;
++		optimumHeadlessWorldFrames = worldFrame + 1;
++
++		if (!optimumHeadlessCommandsDone && worldFrame >= OptimumHeadless.CommandFrame)
+ 		{
+-			base.XPlatInterface.ShowMessageBox("Fatal error", "Unable to generate a new framebuffer. This shouldn't happen, ever. Maybe a restart resolves the problem?");
++			optimumHeadlessCommandsDone = true;
++			if (OptimumHeadless.CommandScriptPath != null)
++			{
++				OptimumHeadlessRunCommands(game);
++			}
+ 		}
+-		CurrentFrameBufferKeepVw = frameBufferRef3;
+-		GL.BindTexture((TextureTarget)3553, frameBufferRef3.DepthTextureId);
+-		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, num, num2, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
+-		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
+-		GL.DepthFunc((DepthFunction)513);
+-		frameBufferRef3.ColorTextureIds = ArrayUtil.CreateFilled(SetupSSAO ? 4 : 2, (int n) => GL.GenTexture());
+-		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
+-		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
+-		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
+-		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[1]);
+-		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5121, (IntPtr)IntPtr.Zero);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
+-		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
+-		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36065, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[1], 0);
+-		if (SetupSSAO)
++
++		if (optimumHeadlessCaptureDone || !OptimumHeadless.CaptureEnabled)
+ 		{
+-			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[2]);
+-			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
++			return;
++		}
++		if (OptimumHeadless.ShouldCapture(worldFrame))
++		{
++			OptimumHeadlessCaptureFrame(worldFrame);
++		}
++		if (OptimumHeadless.CaptureFinished(worldFrame))
++		{
++			optimumHeadlessCaptureDone = true;
++			// The line scripts/dev/headless-capture.sh waits for.
++			logger.Notification("[Optimum] headless: " + optimumHeadlessFramesWritten + " frames -> " + OptimumHeadless.FrameDirectory);
++		}
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): dispatches the command script's lines, in order,
++	/// once. A failing line is logged and the rest still run - a capture with one
++	/// command missing is worth looking at, a dead client is not.
++	/// </summary>
++	private void OptimumHeadlessRunCommands(ClientMain game)
++	{
++		string[] commands = OptimumHeadless.ReadCommands();
++		int dispatched = 0;
++		for (int i = 0; i < commands.Length; i++)
++		{
++			string line = commands[i];
++			try
++			{
++				OptimumHeadlessRunCommand(game, line);
++				dispatched = dispatched + 1;
++			}
++			catch (Exception error)
++			{
++				logger.Error("[Optimum] headless: command failed: " + line + ": " + error.Message);
++			}
++		}
++		logger.Notification("[Optimum] headless: " + dispatched + " commands dispatched");
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): one chat line, routed exactly the way the chat
++	/// HUD routes what a human types - the client command prefix runs the command
++	/// locally (that is how <c>.cam</c> is driven), anything else goes to the server
++	/// as chat (that is how <c>/time</c>, <c>/weather</c> and <c>/gamemode</c> set
++	/// the fixed scene).
++	/// </summary>
++	private void OptimumHeadlessRunCommand(ClientMain game, string line)
++	{
++		if (line.StartsWith(Vintagestory.Common.ChatCommandApi.ClientCommandPrefix, StringComparison.Ordinal))
++		{
++			string rest = line.Substring(1);
++			int space = rest.IndexOf(' ');
++			string commandName = rest;
++			string arguments = "";
++			if (space > 0)
++			{
++				commandName = rest.Substring(0, space);
++				arguments = rest.Substring(space + 1);
++			}
++			game.api.chatcommandapi.Execute(commandName, game.player, game.currentGroupid, arguments, null);
++			return;
++		}
++		game.api.SendChatMessage(line, game.currentGroupid, null);
++	}
++
++	/// <summary>
++	/// Optimum (headless harness): reads the presented image back through the same
++	/// polymorphic call the in-game screenshot uses - GL.ReadPixels on the OpenGL
++	/// path, a device-side copy on the Vulkan one - and writes it as a PPM. No OS
++	/// window capture anywhere in here, which is why it works on a window that was
++	/// never mapped.
++	/// </summary>
++	private void OptimumHeadlessCaptureFrame(long worldFrame)
++	{
++		int width = ((NativeWindow)window).ClientSize.X;
++		int height = ((NativeWindow)window).ClientSize.Y;
++		if (width <= 0 || height <= 0)
++		{
++			return;
++		}
++		try
++		{
++			byte[] pixels = new byte[width * height * 4];
++			GCHandle handle = GCHandle.Alloc(pixels, GCHandleType.Pinned);
++			try
++			{
++				ReadDefaultFramebuffer(0, 0, width, height, handle.AddrOfPinnedObject());
++			}
++			finally
++			{
++				handle.Free();
++			}
++			if (OptimumHeadless.WriteFrame(worldFrame, width, height, pixels, OptimumDefaultFramebufferIsBgra))
++			{
++				optimumHeadlessFramesWritten = optimumHeadlessFramesWritten + 1;
++			}
++		}
++		catch (Exception error)
++		{
++			logger.Error("[Optimum] headless: frame " + worldFrame + " failed: " + error.Message);
++		}
++	}
 +
 +	/// <summary>
 +	/// Optimum: the per-attachment parity dump (<see cref="OptimumParityDump" />).
@@ -725,6 +1258,8 @@ index 6edf0c9..1d2a981 100644
 +			return "OptimumTaaHistoryB";
 +		case OptimumTaaSharpenIndex:
 +			return "OptimumTaaSharpen";
++		case OptimumUpscaledSceneIndex:
++			return "OptimumUpscaledScene";
 +		default:
 +			return "Slot" + slot;
 +		}
@@ -1055,6 +1590,59 @@ index 6edf0c9..1d2a981 100644
 +	/// </summary>
 +	public bool OptimumTaaRequested => !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
 +
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 2): whether anything temporal wants this frame
++	/// jittered and its motion vectors written - the in-house TAA resolve, or an
++	/// upscaler that replaces it. The motion attachment and the jitter window are
++	/// shared by both consumers; only the history slots and the sharpen target
++	/// belong to TAA alone, so those keep asking <see cref="OptimumTaaRequested" />.
++	/// </summary>
++	public bool OptimumTemporalRequested =>
++		OptimumTaaRequested || Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 2): whether a pass may open a motion-write
++	/// window this frame. One condition, because the two consumers need different
++	/// targets: the resolve needs its history slots, an upscaler needs none of
++	/// ours, and both need the motion attachment.
++	///
++	/// This is the member the write-window guards read, replacing the pair
++	/// "MotionAttachmentIndex >= 0 && TaaTargetsReady" plus "EffectiveTaa" they
++	/// carried while TAA was the only consumer.
++	/// </summary>
++	public bool OptimumMotionWritesReady
++	{
++		get
++		{
++			if (MotionAttachmentIndex < 0) return false;
++			if (Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa) return true;
++			return Vintagestory.API.Config.OptimumConfig.EffectiveTaa && TaaTargetsReady;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 2): the upscaler's half of
++	/// <see cref="DisableOptimumTaa" /> - a target the upscaler needs could not be
++	/// allocated, so it stands down for the session, once, with one line. Never a
++	/// hard failure: the frame then runs the chain it ran before the upscaler was
++	/// asked for.
++	/// </summary>
++	public void DisableOptimumUpscaler(string reason)
++	{
++		if (Vintagestory.API.Config.OptimumConfig.DisableUpscalerAtRuntime())
++		{
++			logger.Error("Optimum disabled the upscaler: {0}", reason);
++		}
++		Vintagestory.API.Config.OptimumConfig.ClearUpscalerPlan();
++		// Clearing the plan changes EffectiveTerrainLodBias back to the no-upscaler
++		// value, and the samplers still carry the plan's bias until something applies
++		// it. The stand-down frame renders through the fallback path, so re-apply here
++		// rather than waiting for the next chunk pass: every caller (a refused blit, a
++		// failed evaluate, a framebuffer that could not be built) is a frame that is
++		// about to be drawn.
++		ShaderRegistry.ApplyOptimumLodBias();
++	}
++
 +	/// <summary>Optimum: the SSAO sample kernel the setup fills and the SSAO pass uploads.</summary>
 +	public float[] OptimumSsaoKernel => ssaoKernel;
 +
@@ -1103,53 +1691,141 @@ index 6edf0c9..1d2a981 100644
 +	}
 +
 +	public virtual List<FrameBufferRef> SetupDefaultFrameBuffers()
- 	{
- 		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
- 		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
-@@ -1187,10 +2069,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
- 		if (num == 0 || num2 == 0)
- 		{
- 			return list;
- 		}
++	{
++		//IL_001b: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
++		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
++		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0211: Unknown result type (might be due to invalid IL or missing references)
++		//IL_02af: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0358: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0576: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0665: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0b13: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0b88: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0bfe: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0c62: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0ccf: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0d44: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0db2: Unknown result type (might be due to invalid IL or missing references)
++		//IL_0a8c: Unknown result type (might be due to invalid IL or missing references)
++		SetupSSAO = ClientSettings.SSAOQuality > 0;
++		if (ClientSettings.IsNewSettingsFile && ((NativeWindow)window).ClientSize.X > 1920)
++		{
++			ClientSettings.SSAA = 0.5f;
++		}
++		List<FrameBufferRef> list = new List<FrameBufferRef>(31);
++		for (int i = 0; i <= 24; i++)
++		{
++			list.Add(null);
++		}
++		ShadowMapQuality = ClientSettings.ShadowMapQuality;
++		ssaaLevel = ClientSettings.SSAA;
++		// Optimum (DLSS plan, Phase 3): the product the client has always computed is
++		// the DISPLAY size from here on - what the frame is presented at, which is what
++		// the ssaa setting and the mega-screenshot path are really asking for. The
++		// render size is what the world is drawn at, and with an upscaler it comes from
++		// the vendor's own optimal-settings query for that display size. With no
++		// upscaler the two are the same number and every allocation below is exactly
++		// what it was.
++		int displayWidth = (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel);
++		int displayHeight = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
++		if (displayWidth == 0 || displayHeight == 0)
++		{
++			return list;
++		}
++		int num = displayWidth;
++		int num2 = displayHeight;
++		int upscaleRenderWidth;
++		int upscaleRenderHeight;
++		bool upscaling = OptimumTryPlanUpscaleRenderSize(displayWidth, displayHeight, out upscaleRenderWidth, out upscaleRenderHeight);
++		if (upscaling)
++		{
++			num = upscaleRenderWidth;
++			num2 = upscaleRenderHeight;
++		}
++		// Optimum (DLSS plan, Phase 3 review, finding 1): the setting alone is what
++		// stands the in-house TAA resolve, the TAA sharpen and the FSR 1 blit down
++		// (OptimumConfig.UpscalerReplacesTaa), so a session whose setting says "dlss"
++		// while this platform cannot actually plan an upscale would render jittered with
++		// nothing resolving it at all - a shimmering frame, no error, no log line. That
++		// is the OpenGL path always (it has no upscaler and never will) and the Vulkan
++		// path whenever the vendor's optimal-settings query answers a size that is not
++		// usable. There is exactly one honest answer: stand the upscaler down here, once,
++		// with one line, before anything below reads the config - the next statement is
++		// taaRequested, so the in-house resolve takes the frame back on this very build.
++		if (!upscaling && Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)
++		{
++			DisableOptimumUpscaler("this renderer cannot plan an upscale for the frame, so the temporal resolve stays with TAA");
++		}
 +		// Optimum: TAA. Read once per (re-)build; a mid-session config change
 +		// only takes effect on the next RebuildFrameBuffers. optimumTaaDisabled
 +		// is checked as well as EffectiveTaa: DisableOptimumTaa sets both, and
 +		// the local flag keeps this platform from retrying a failed allocation
 +		// even if the process-wide config flag is ever reset.
 +		bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
++		// Optimum (DLSS plan, Phase 2): the motion attachment serves both temporal
++		// consumers, so it is allocated whenever either wants it; the history slots
++		// and the sharpen target below stay TAA's alone.
++		bool temporalRequested = taaRequested || Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
 +		int motionAttachmentIndex = -1;
- 		PixelFormat val = (PixelFormat)6408;
- 		CheckGlError("sdfb-begin");
- 		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
- 		{
- 			FboId = GL.GenFramebuffer(),
-@@ -1210,11 +2099,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
- 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
- 		GL.DepthFunc((DepthFunction)513);
--		frameBufferRef3.ColorTextureIds = ArrayUtil.CreateFilled(SetupSSAO ? 4 : 2, (int n) => GL.GenTexture());
++		PixelFormat val = (PixelFormat)6408;
++		CheckGlError("sdfb-begin");
++		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
++		{
++			FboId = GL.GenFramebuffer(),
++			Width = num,
++			Height = num2
++		});
++		FrameBufferRef frameBufferRef3 = frameBufferRef;
++		frameBufferRef3.DepthTextureId = GL.GenTexture();
++		if (frameBufferRef3.FboId == 0)
++		{
++			base.XPlatInterface.ShowMessageBox("Fatal error", "Unable to generate a new framebuffer. This shouldn't happen, ever. Maybe a restart resolves the problem?");
++		}
++		CurrentFrameBufferKeepVw = frameBufferRef3;
++		GL.BindTexture((TextureTarget)3553, frameBufferRef3.DepthTextureId);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, num, num2, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, frameBufferRef3.DepthTextureId, 0);
++		GL.DepthFunc((DepthFunction)513);
 +		frameBufferRef3.ColorTextureIds = new int[SetupSSAO ? 4 : 2];
 +		for (int j = 0; j < frameBufferRef3.ColorTextureIds.Length; j++)
 +		{
 +			frameBufferRef3.ColorTextureIds[j] = GL.GenTexture();
 +		}
- 		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
- 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
- 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
- 		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1251,10 +2144,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
++		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[0]);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5123, (IntPtr)IntPtr.Zero);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
++		GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[1]);
++		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, num, num2, 0, val, (PixelType)5121, (IntPtr)IntPtr.Zero);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
++		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
++		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36065, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[1], 0);
++		if (SetupSSAO)
++		{
++			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[2]);
++			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, val, (PixelType)5126, (IntPtr)IntPtr.Zero);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)4100, new float[4] { 1f, 1f, 1f, 1f });
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33069);
+ 			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33069);
+ 			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36066, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[2], 0);
+ 			GL.BindTexture((TextureTarget)3553, frameBufferRef3.ColorTextureIds[3]);
+ 			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)34842, num, num2, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)IntPtr.Zero);
+@@ -1251,10 +2644,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
  			GL.DrawBuffers(2, array3);
  		}
-+		if (taaRequested)
++		if (temporalRequested)
 +		{
 +			// Optimum: TAA motion attachment, appended after the SSAO G-buffer
 +			// so every existing attachment index is unchanged. Deliberately not
@@ -1172,7 +1848,9 @@ index 6edf0c9..1d2a981 100644
 +			}
 +			catch (Exception error)
 +			{
++				// Both consumers lose their vectors, so both stand down.
 +				DisableOptimumTaa("Primary motion attachment (GL): " + error.Message);
++				DisableOptimumUpscaler("Primary motion attachment (GL): " + error.Message);
 +				motionAttachmentIndex = -1;
 +			}
 +		}
@@ -1182,10 +1860,109 @@ index 6edf0c9..1d2a981 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1436,10 +2357,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1364,82 +2787,190 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			}
+ 		}
+ 		frameBufferRef = (list[2] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+-			Width = num / 2,
+-			Height = num2 / 2
++			Width = displayWidth / 2,
++			Height = displayHeight / 2
+ 		});
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
- 		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
+-		setupAttachment(frameBufferRef3, num / 2, num2 / 2, 0, val, (PixelInternalFormat)32856);
++		setupAttachment(frameBufferRef3, displayWidth / 2, displayHeight / 2, 0, val, (PixelInternalFormat)32856);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.BlurHorizontalMedRes);
+ 		frameBufferRef = (list[3] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+-			Width = num / 2,
+-			Height = num2 / 2
++			Width = displayWidth / 2,
++			Height = displayHeight / 2
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+-		setupAttachment(frameBufferRef3, num / 2, num2 / 2, 0, val, (PixelInternalFormat)32856);
++		setupAttachment(frameBufferRef3, displayWidth / 2, displayHeight / 2, 0, val, (PixelInternalFormat)32856);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.BlurVerticalMedRes);
+ 		frameBufferRef = (list[9] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+-			Width = num / 4,
+-			Height = num2 / 4
++			Width = displayWidth / 4,
++			Height = displayHeight / 4
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+-		setupAttachment(frameBufferRef3, num / 4, num2 / 4, 0, val, (PixelInternalFormat)32856);
++		setupAttachment(frameBufferRef3, displayWidth / 4, displayHeight / 4, 0, val, (PixelInternalFormat)32856);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.BlurHorizontalLowRes);
++		// Optimum (DLSS plan, Phase 1): vanilla left this slot's Width/Height at zero
++		// while attaching a quarter-resolution texture, because nothing read them - the
++		// low-res blur viewport was recomputed from ClientSize * SSAA instead. It is
++		// read now (and the device path has always filled it), so the record has to
++		// describe the texture it owns. Same size, no allocation change.
+ 		frameBufferRef = (list[8] = new FrameBufferRef
+ 		{
+-			FboId = GL.GenFramebuffer()
++			FboId = GL.GenFramebuffer(),
++			Width = displayWidth / 4,
++			Height = displayHeight / 4
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+-		setupAttachment(frameBufferRef3, num / 4, num2 / 4, 0, val, (PixelInternalFormat)32856);
++		setupAttachment(frameBufferRef3, displayWidth / 4, displayHeight / 4, 0, val, (PixelInternalFormat)32856);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.BlurVerticalLowRes);
+ 		frameBufferRef = (list[4] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+-			Width = num,
+-			Height = num2
++			Width = displayWidth,
++			Height = displayHeight
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+-		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
++		setupAttachment(frameBufferRef3, displayWidth, displayHeight, 0, val, (PixelInternalFormat)34842);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.FindBright);
+ 		frameBufferRef = (list[7] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+-			Width = num / 2,
+-			Height = num2 / 2
++			Width = displayWidth / 2,
++			Height = displayHeight / 2
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+-		setupAttachment(frameBufferRef3, num / 2, num2 / 2, 0, val, (PixelInternalFormat)34842);
++		setupAttachment(frameBufferRef3, displayWidth / 2, displayHeight / 2, 0, val, (PixelInternalFormat)34842);
+ 		GL.DrawBuffer((DrawBufferMode)36064);
+ 		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.GodRays);
+ 		frameBufferRef = (list[10] = new FrameBufferRef
+ 		{
+ 			FboId = GL.GenFramebuffer(),
+-			Width = num,
+-			Height = num2
++			Width = displayWidth,
++			Height = displayHeight
+ 		});
+ 		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
+ 		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
+-		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
++		setupAttachment(frameBufferRef3, displayWidth, displayHeight, 0, val, (PixelInternalFormat)34842);
  		GL.DrawBuffer((DrawBufferMode)36064);
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
 +		// Optimum: TAA history, render-resolution like Primary. Two slots so the
@@ -1253,12 +2030,48 @@ index 6edf0c9..1d2a981 100644
 +				list[OptimumFsrFramebufferIndex] = null;
 +			}
 +		}
++		// Optimum (DLSS plan, Phase 3): the upscaled scene colour, at the display size,
++		// with its own depth attachment - the nearest-neighbour upscale of Primary's
++		// depth the AfterFinalComposition overlays test against. Only allocated when a
++		// plan exists; on the OpenGL path there never is one, so this is the shape the
++		// device path mirrors rather than a target this body ever fills.
++		if (upscaling)
++		{
++			FrameBufferRef optimumUpscaled = (list[OptimumUpscaledSceneIndex] = new FrameBufferRef
++			{
++				FboId = GL.GenFramebuffer(),
++				Width = displayWidth,
++				Height = displayHeight
++			});
++			CurrentFrameBufferKeepVw = optimumUpscaled;
++			optimumUpscaled.ColorTextureIds = new int[1] { GL.GenTexture() };
++			setupAttachment(optimumUpscaled, displayWidth, displayHeight, 0, val, (PixelInternalFormat)32856);
++			optimumUpscaled.DepthTextureId = GL.GenTexture();
++			GL.BindTexture((TextureTarget)3553, optimumUpscaled.DepthTextureId);
++			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)33191, displayWidth, displayHeight, 0, (PixelFormat)6402, (PixelType)5126, (IntPtr)IntPtr.Zero);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
++			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
++			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36096, (TextureTarget)3553, optimumUpscaled.DepthTextureId, 0);
++			GL.DrawBuffer((DrawBufferMode)36064);
++			FramebufferErrorCode optimumUpscaledStatus = GL.CheckFramebufferStatus((FramebufferTarget)36160);
++			if ((int)optimumUpscaledStatus != 36053)
++			{
++				logger.Error("Optimum disabled the upscaler: its display-resolution target returned {0}.", optimumUpscaledStatus);
++				GL.DeleteTexture(optimumUpscaled.ColorTextureIds[0]);
++				GL.DeleteTexture(optimumUpscaled.DepthTextureId);
++				GL.DeleteFramebuffer(optimumUpscaled.FboId);
++				list[OptimumUpscaledSceneIndex] = null;
++				DisableOptimumUpscaler("the upscaled scene target (GL) is incomplete");
++			}
++		}
  		frameBufferRef = (list[5] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +2534,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +3079,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -1273,7 +2086,7 @@ index 6edf0c9..1d2a981 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +2557,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +3102,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1368,7 +2181,7 @@ index 6edf0c9..1d2a981 100644
  			}
  		}
  	}
-@@ -1591,11 +2651,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +3196,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1387,7 +2200,7 @@ index 6edf0c9..1d2a981 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1619,27 +2686,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1619,27 +3231,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -1474,7 +2287,7 @@ index 6edf0c9..1d2a981 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,71 +2795,68 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +3340,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1511,15 +2324,25 @@ index 6edf0c9..1d2a981 100644
  			CurrentFrameBufferKeepVw = null;
 -			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
 -			GL.DrawBuffer((DrawBufferMode)1029);
-+			GlViewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
++			// Optimum (DLSS plan, Phase 1): the display size, not the render size - the
++			// default framebuffer is the window.
++			GlViewport(0, 0, DisplayWidth, DisplayHeight);
 +			SelectBackDrawBuffer();
  			break;
  		case EnumFrameBuffer.BlurHorizontalMedRes:
  		case EnumFrameBuffer.BlurVerticalMedRes:
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
- 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
+-			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
++		{
++			// Optimum (DLSS plan, Phase 1): the target's own allocated size. It is
++			// num/2, which is the same integer the old (int)(ssaa * ClientSize / 2f)
++			// produced - floor(floor(x)/2) == floor(x/2) - and it stays right once an
++			// upscaler decouples the render size from ClientSize * SSAA.
++			FrameBufferRef medResBlur = frameBuffers[(int)framebuffer];
++			GlViewport(0, 0, medResBlur.Width, medResBlur.Height);
++			CurrentFrameBufferKeepVw = medResBlur;
  			break;
++		}
  		case EnumFrameBuffer.SSAOBlurVertical:
  		case EnumFrameBuffer.SSAOBlurHorizontal:
  		case EnumFrameBuffer.SSAOBlurVerticalHalfRes:
@@ -1534,17 +2357,27 @@ index 6edf0c9..1d2a981 100644
  		case EnumFrameBuffer.BlurVerticalLowRes:
  		case EnumFrameBuffer.BlurHorizontalLowRes:
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
- 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
+-			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
++		{
++			// Optimum (DLSS plan, Phase 1): num/4, read from the target.
++			FrameBufferRef lowResBlur = frameBuffers[(int)framebuffer];
++			GlViewport(0, 0, lowResBlur.Width, lowResBlur.Height);
++			CurrentFrameBufferKeepVw = lowResBlur;
  			break;
++		}
  		case EnumFrameBuffer.FindBright:
  			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.GodRays:
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 2f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 2f));
- 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
+-			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
++		{
++			// Optimum (DLSS plan, Phase 1): num/2, read from the target.
++			FrameBufferRef godRaysTarget = frameBuffers[(int)framebuffer];
++			GlViewport(0, 0, godRaysTarget.Width, godRaysTarget.Height);
++			CurrentFrameBufferKeepVw = godRaysTarget;
  			break;
++		}
  		case EnumFrameBuffer.Luma:
 -			GL.Disable((EnableCap)3042);
 +			SetBlendEnabled(false);
@@ -1560,14 +2393,19 @@ index 6edf0c9..1d2a981 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1753,39 +2875,81 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1752,40 +3436,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.Primary:
  			if (OffscreenBuffer)
  			{
- 				CurrentFrameBufferKeepVw = frameBuffers[0];
+-				CurrentFrameBufferKeepVw = frameBuffers[0];
 -				GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+				GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++				// Optimum (DLSS plan, Phase 1): Primary is the render size by
++				// definition, so the viewport comes from the target itself.
++				FrameBufferRef primaryTarget = frameBuffers[0];
++				CurrentFrameBufferKeepVw = primaryTarget;
++				GlViewport(0, 0, primaryTarget.Width, primaryTarget.Height);
  			}
  			else
  			{
@@ -1632,7 +2470,9 @@ index 6edf0c9..1d2a981 100644
  		}
 -		GL.Viewport(0, 0, (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel), (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel));
 +		// Mono.Cecil transplant.
-+		GlViewport(0, 0, (int)((float)((NativeWindow)window).ClientSize.X * ssaaLevel), (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel));
++		// Optimum (DLSS plan, Phase 1): this restores the world's viewport, which is the
++		// render size; no target is bound yet at this point, so it comes from the platform.
++		GlViewport(0, 0, RenderWidth, RenderHeight);
  		if (OffscreenBuffer)
  		{
  			CurrentFrameBufferKeepVw = frameBuffers[0];
@@ -1646,7 +2486,7 @@ index 6edf0c9..1d2a981 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,22 +2957,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +3524,306 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -1678,17 +2518,14 @@ index 6edf0c9..1d2a981 100644
 +		if (optimumMotionWrite)
 +		{
 +			ApplyOptimumMotionAccumulateBlendState();
- 		}
--		GL.Disable((EnableCap)2929);
--		GL.Enable((EnableCap)3042);
--		GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
- 		ShaderProgramTransparentcompose transparentcompose = ShaderPrograms.Transparentcompose;
- 		transparentcompose.Use();
- 		transparentcompose.Revealage2D = frameBuffers[1].ColorTextureIds[1];
- 		transparentcompose.Accumulation2D = frameBuffers[1].ColorTextureIds[0];
- 		transparentcompose.InGlow2D = frameBuffers[1].ColorTextureIds[2];
- 		RenderFullscreenTriangle(screenQuad);
- 		transparentcompose.Stop();
++		}
++		ShaderProgramTransparentcompose transparentcompose = ShaderPrograms.Transparentcompose;
++		transparentcompose.Use();
++		transparentcompose.Revealage2D = frameBuffers[1].ColorTextureIds[1];
++		transparentcompose.Accumulation2D = frameBuffers[1].ColorTextureIds[0];
++		transparentcompose.InGlow2D = frameBuffers[1].ColorTextureIds[2];
++		RenderFullscreenTriangle(screenQuad);
++		transparentcompose.Stop();
 +		if (optimumMotionWrite)
 +		{
 +			// Back to replace before the window closes, so no later pass can
@@ -1738,6 +2575,15 @@ index 6edf0c9..1d2a981 100644
 +	{
 +		OptimumRunPendingTaaShaderReload();
 +		optimumTaaResolvedThisFrame = false;
++		// Optimum (DLSS plan, Phase 2): an upscaler replaces this pass rather than
++		// running beside it - it is the temporal resolve, and two resolves over one
++		// history would blend the same frame twice. The jitter stays on, because the
++		// upscaler needs it; only this pass stands down.
++		if (Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
 +		if (!TaaTargetsReady || !Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
 +		{
 +			_taaHistoryValid = false;
@@ -1836,7 +2682,12 @@ index 6edf0c9..1d2a981 100644
 +	{
 +		ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
 +		ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
++		// Optimum (DLSS plan, Phase 2): FSR 1 is an upscaler too. With a temporal
++		// upscaler active it does not run at all - the frame is already at display
++		// resolution by the time the blit happens, and a second spatial upscale of
++		// it would be a resample of a reconstruction.
 +		return !optimumFsrDisabled
++			&& !Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa
 +			&& ClientSettings.OptimumRenderScale < 1.0f
 +			&& frameBuffers[OptimumFsrFramebufferIndex] != null
 +			&& fsrEasu != null
@@ -1871,6 +2722,12 @@ index 6edf0c9..1d2a981 100644
 +		{
 +			return resolvedScene;
 +		}
++		// Optimum (DLSS plan, Phase 2): an upscaler owns the resolve and its own
++		// sharpening; ours must not run on top of its output.
++		if (OptimumConfig.UpscalerReplacesTaa)
++		{
++			return resolvedScene;
++		}
 +		if (OptimumFsrBlitActive())
 +		{
 +			return resolvedScene;
@@ -1902,24 +2759,150 @@ index 6edf0c9..1d2a981 100644
 +		GlEnableDepthTest();
 +		LoadFrameBuffer(EnumFrameBuffer.Primary);
 +		return target.ColorTextureIds[0];
++	}
++
++	private bool optimumUpscaleSsaoApplied;
++
++	/// <summary>Put jittered AO into the scene DLSS reconstructs, touching only colour 0.</summary>
++	private void ApplyOptimumUpscaleSsao()
++	{
++		ShaderProgram composite = ShaderPrograms.UpscaleSsao;
++		if (composite == null || composite.LoadError)
++		{
++			DisableOptimumUpscaler("the upscaler SSAO input shader could not be loaded");
++			return;
+ 		}
+-		GL.Disable((EnableCap)2929);
+-		GL.Enable((EnableCap)3042);
+-		GL.BlendFunc((BlendingFactor)770, (BlendingFactor)771);
+-		ShaderProgramTransparentcompose transparentcompose = ShaderPrograms.Transparentcompose;
+-		transparentcompose.Use();
+-		transparentcompose.Revealage2D = frameBuffers[1].ColorTextureIds[1];
+-		transparentcompose.Accumulation2D = frameBuffers[1].ColorTextureIds[0];
+-		transparentcompose.InGlow2D = frameBuffers[1].ColorTextureIds[2];
++		LoadFrameBuffer(EnumFrameBuffer.Primary);
++		BeginFinalCompositionDrawBuffers();
++		GlDisableDepthTest();
++		// Multiply uses dst * (1 - srcAlpha). The pass writes 1 - AO into alpha;
++		// it never samples Primary, so there is no attachment feedback loop.
++		GlToggleBlend(on: true, EnumBlendMode.Multiply);
++		composite.Use();
++		composite.BindTexture2D("ssaoScene", frameBuffers[14].ColorTextureIds[0], 0);
++		composite.Uniform("invRenderHeight", 1f / (float)RenderHeight);
+ 		RenderFullscreenTriangle(screenQuad);
+-		transparentcompose.Stop();
++		composite.Stop();
++		GlToggleBlend(on: true);
++		GlEnableDepthTest();
++		RestoreWorldDrawBuffers(RenderSSAO);
++		// Track application rather than evaluate success: even a failed upscale
++		// must not cause Final to multiply the already shaded scene a second time.
++		optimumUpscaleSsaoApplied = true;
  	}
  
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,20 +3221,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,156 +3838,282 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
  			return;
  		}
+-		int x = ((NativeWindow)window).ClientSize.X;
+-		int y = ((NativeWindow)window).ClientSize.Y;
 +		// Mono.Cecil transplant.
 +		// The pass structure is API-neutral - it is framebuffer selection, a
 +		// fullscreen triangle and uniforms, all of which are platform virtuals.
 +		// The SSAO clear and the final blend enable are too (ClearSsaoTarget,
 +		// SetBlendEnabled).
- 		int x = ((NativeWindow)window).ClientSize.X;
- 		int y = ((NativeWindow)window).ClientSize.Y;
++		// Optimum (DLSS plan, Phase 1): one read of the render size for the whole post
++		// chain, instead of fifteen recomputations of ClientSize * SSAA. Every pass below
++		// either reads this or reads the size of the target it is drawing into; nothing
++		// here multiplies the window size by the render scale any more.
++		int renderWidth = RenderWidth;
++		int renderHeight = RenderHeight;
++		// AO is derived from the jittered G-buffer. Compute it before any temporal
++		// consumer, so an upscaler can reconstruct the shading with the geometry.
++		if (RenderSSAO && projectMatrix != null)
++		{
++			GlToggleBlend(on: false);
++			LoadFrameBuffer(EnumFrameBuffer.SSAO);
++			ClearSsaoTarget();
++			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
++			ssao.Use();
++			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
++			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
++			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
++			// Optimum (DLSS plan, Phase 1): vanilla's quirk, kept exactly - at SSAA 1
++			// the SSAO pass is told half the render size (which is the SSAO target's
++			// real size), at any other SSAA the full render size. Only the recomputation
++			// of that render size is gone.
++			float num = ((ssaaLevel == 1f) ? 0.5f : 1f);
++			ssao.Uniform("screenSize", (float)renderWidth * num, (float)renderHeight * num);
++			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
++			ssao.Projection = projectMatrix;
++			ssao.SamplesArray(64, ssaoKernel);
++			// Optimum (GTAO roadmap step 2): the clock the sample kernel's dither
++			// rotates with. Vanilla's Bayer-128 is locked to the pixel grid, so a
++			// jittered camera hands every surface point a different kernel every
++			// frame and no accumulator can average it; the TAAMOTION variant of
++			// ssao.fsh advances the dither by the golden ratio per frame instead.
++			// Set under exactly the condition that compiles the uniform in
++			// (ShaderRegistry stamps TAAMOTION from EffectiveTemporalPipeline), so
++			// with no temporal consumer the pass is vanilla to the byte - a
++			// per-frame dither with nothing accumulating behind it is worse than
++			// the fixed one. The frame index is wrapped to 1024 because that is
++			// the same clock the jitter and the resolve read, cut to a range a
++			// float still represents exactly after hours of play.
++			//
++			// The uniform is written on exactly the condition that declares it
++			// (EffectiveTemporalPipeline), never conditionally: a declared uniform
++			// left unset reads back as whatever the Vulkan uniform ring last held
++			// there. What the frame-varying term is gated on is the narrower
++			// question - is anything accumulating these frames
++			// (EffectiveTemporalAccumulation) - and index 0 makes the dither the
++			// vanilla one to the byte, because bayer128 is strictly below 1 and
++			// fract(dither + 0) is dither. The passthrough upscaler is the case
++			// that separates the two: it owns the resolve, so the pipeline is on
++			// and TAAMOTION is 1, but it reconstructs nothing, and a per-frame
++			// dither with no accumulator behind it is flicker rather than
++			// convergence - and would put a difference other than the
++			// reconstruction between the passthrough frame and the DLSS frame,
++			// which is the one thing that slot exists to hold still.
++			if (OptimumConfig.EffectiveTemporalPipeline)
++			{
++				ssao.Uniform("temporalFrameIndex", OptimumConfig.EffectiveTemporalAccumulation ? (float)(OptimumTemporal.Frame.FrameIndex & 1023L) : 0f);
++			}
++			RenderFullscreenTriangle(screenQuad);
++			ssao.Stop();
++			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
++			bilateralblur.Use();
++			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
++			for (int i = 0; i < num2; i++)
++			{
++				FrameBufferRef frameBufferRef = frameBuffers[15];
++				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurHorizontal);
++				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
++				bilateralblur.IsVertical = 0;
++				bilateralblur.InputTexture2D = frameBuffers[(i == 0) ? 13 : 14].ColorTextureIds[0];
++				bilateralblur.DepthTexture2D = frameBuffers[0].DepthTextureId;
++				RenderFullscreenTriangle(screenQuad);
++				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
++				bilateralblur.IsVertical = 1;
++				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
++				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
++				RenderFullscreenTriangle(screenQuad);
++			}
++			bilateralblur.Stop();
++			GlToggleBlend(on: true);
++			GlViewport(0, 0, renderWidth, renderHeight);
++		}
++		optimumUpscaleSsaoApplied = false;
++		if (OptimumUpscalerActive && RenderSSAO && projectMatrix != null)
++		{
++			ApplyOptimumUpscaleSsao();
++		}
 +		// Optimum TAA: resolve first, so bloom, god rays and the final input read
 +		// the temporally stable image instead of the jittered one.
 +		RenderOptimumTaaResolve();
@@ -1929,6 +2912,34 @@ index 6edf0c9..1d2a981 100644
 +		// reads it, so bloom, god rays and the final composition all see the
 +		// same image. Returns its input unchanged when the pass does not run.
 +		postSceneTexture = RenderOptimumTaaSharpen(postSceneTexture);
++		// Optimum (DLSS plan, Phase 3): the upscale runs exactly where the resolve
++		// runs - it is the temporal resolve - and everything below it is post
++		// processing at the display size, which is the placement the DLSS Programming
++		// Guide section 3.1 asks for ("as close to the start of post processing as
++		// possible", before tone mapping). The world, the G-buffer, the motion
++		// attachment, SSAO and LiquidDepth stay at the render size; bloom, god rays,
++		// luma and the final composition move to the display size, and their targets
++		// were allocated there.
++		optimumUpscaledThisFrame = RenderOptimumUpscale();
++		FrameBufferRef postTarget = OptimumCompositeFrameBuffer;
++		// Optimum (DLSS plan, Phase 3 review, finding 2): the post chain's two integers
++		// are the size of the targets this chain writes, read from the first of them
++		// (FindBright, frameBuffers[4]) rather than from the render size. Without an
++		// upscaler that is the render size, the same integer it has always been. With one
++		// it is the display size. And on the one frame where those two disagree without
++		// an upscale - the evaluate failed after the targets were already allocated at the
++		// display size, so the upscaler stands down but this build's targets do not shrink
++		// until the next rebuild - it is still the size of the targets being written,
++		// which is the only size the blur radius and the god-ray step may be expressed in.
++		FrameBufferRef postChainTarget = frameBuffers[4];
++		int postWidth = ((postChainTarget != null) ? postChainTarget.Width : renderWidth);
++		int postHeight = ((postChainTarget != null) ? postChainTarget.Height : renderHeight);
++		if (optimumUpscaledThisFrame && postTarget != null)
++		{
++			postSceneTexture = postTarget.ColorTextureIds[0];
++			postWidth = postTarget.Width;
++			postHeight = postTarget.Height;
++		}
  		if (RenderBloom)
  		{
  			GlToggleBlend(on: false);
@@ -1944,7 +2955,12 @@ index 6edf0c9..1d2a981 100644
  			RenderFullscreenTriangle(screenQuad);
  			findbright.Stop();
  			ShaderProgramBlur blur = ShaderPrograms.Blur;
-@@ -1848,45 +3260,48 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 			blur.Use();
+-			blur.Uniform("frameSize", (float)x * ssaaLevel, (float)y * ssaaLevel);
++			blur.Uniform("frameSize", (float)postWidth, (float)postHeight);
+ 			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalMedRes);
+ 			blur.IsVertical = 0;
+ 			blur.InputTexture2D = frameBuffers[4].ColorTextureIds[0];
  			RenderFullscreenTriangle(screenQuad);
  			LoadFrameBuffer(EnumFrameBuffer.BlurVerticalMedRes);
  			blur.IsVertical = 1;
@@ -1953,7 +2969,11 @@ index 6edf0c9..1d2a981 100644
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
 +			// Mono.Cecil transplant: GlViewport is the routed form of GL.Viewport
 +			// and its GL body is the identical call.
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X / 4f), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y / 4f));
++			// Optimum (DLSS plan, Phase 1): LoadFrameBuffer on the very next line sets
++			// the low-res viewport from the target itself; this call only keeps the
++			// ordering vanilla had.
++			FrameBufferRef lowResBlurTarget = frameBuffers[9];
++			GlViewport(0, 0, lowResBlurTarget.Width, lowResBlurTarget.Height);
  			LoadFrameBuffer(EnumFrameBuffer.BlurHorizontalLowRes);
  			blur.IsVertical = 0;
  			blur.InputTexture2D = frameBuffers[3].ColorTextureIds[0];
@@ -1964,7 +2984,7 @@ index 6edf0c9..1d2a981 100644
  			RenderFullscreenTriangle(screenQuad);
  			blur.Stop();
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			GlViewport(0, 0, postWidth, postHeight);
  			GlToggleBlend(on: true);
  		}
  		if (RenderGodRays)
@@ -1972,7 +2992,8 @@ index 6edf0c9..1d2a981 100644
  			LoadFrameBuffer(EnumFrameBuffer.GodRays);
  			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
  			godrays.Use();
- 			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
+-			godrays.Uniform("invFrameSizeIn", 1f / ((float)x * ssaaLevel), 1f / ((float)y * ssaaLevel));
++			godrays.Uniform("invFrameSizeIn", 1f / (float)postWidth, 1f / (float)postHeight);
 +			godrays.Uniform("maxGodRaySamples", OptimumConfig.GodRaysSampleLimit);
  			godrays.SunPosScreenIn = ShaderUniforms.SunPositionScreen;
  			godrays.SunPos3dIn = ShaderUniforms.LightPosition3D;
@@ -1986,27 +3007,46 @@ index 6edf0c9..1d2a981 100644
  			RenderFullscreenTriangle(screenQuad);
  			godrays.Stop();
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
- 		}
- 		if (RenderSSAO && projectMatrix != null)
- 		{
- 			GlToggleBlend(on: false);
- 			LoadFrameBuffer(EnumFrameBuffer.SSAO);
+-		}
+-		if (RenderSSAO && projectMatrix != null)
+-		{
+-			GlToggleBlend(on: false);
+-			LoadFrameBuffer(EnumFrameBuffer.SSAO);
 -			GL.ClearBuffer((ClearBuffer)6144, 0, new float[4] { 1f, 1f, 1f, 1f });
-+			ClearSsaoTarget();
- 			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
- 			ssao.Use();
- 			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
- 			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
- 			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
-@@ -1915,35 +3330,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
- 				RenderFullscreenTriangle(screenQuad);
- 			}
- 			bilateralblur.Stop();
- 			GlToggleBlend(on: true);
+-			ShaderProgramSsao ssao = ShaderPrograms.Ssao;
+-			ssao.Use();
+-			ssao.GNormal2D = frameBuffers[0].ColorTextureIds[2];
+-			ssao.GPosition2D = frameBuffers[0].ColorTextureIds[3];
+-			ssao.TexNoise2D = frameBuffers[13].ColorTextureIds[1];
+-			float num = ((ssaaLevel == 1f) ? 0.5f : 1f);
+-			ssao.Uniform("screenSize", ssaaLevel * (float)x * num, ssaaLevel * (float)y * num);
+-			ssao.Revealage2D = frameBuffers[1].ColorTextureIds[1];
+-			ssao.Projection = projectMatrix;
+-			ssao.SamplesArray(64, ssaoKernel);
+-			RenderFullscreenTriangle(screenQuad);
+-			ssao.Stop();
+-			ShaderProgramBilateralblur bilateralblur = ShaderPrograms.Bilateralblur;
+-			bilateralblur.Use();
+-			int num2 = ((ClientSettings.SSAOQuality == 1) ? 1 : 3);
+-			for (int i = 0; i < num2; i++)
+-			{
+-				FrameBufferRef frameBufferRef = frameBuffers[15];
+-				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurHorizontal);
+-				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
+-				bilateralblur.IsVertical = 0;
+-				bilateralblur.InputTexture2D = frameBuffers[(i == 0) ? 13 : 14].ColorTextureIds[0];
+-				bilateralblur.DepthTexture2D = frameBuffers[0].DepthTextureId;
+-				RenderFullscreenTriangle(screenQuad);
+-				LoadFrameBuffer(EnumFrameBuffer.SSAOBlurVertical);
+-				bilateralblur.IsVertical = 1;
+-				bilateralblur.Uniform("frameSize", frameBufferRef.Width, frameBufferRef.Height);
+-				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
+-				RenderFullscreenTriangle(screenQuad);
+-			}
+-			bilateralblur.Stop();
+-			GlToggleBlend(on: true);
 -			GL.Viewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
-+			GlViewport(0, 0, (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.X), (int)(ssaaLevel * (float)((NativeWindow)window).ClientSize.Y));
++			GlViewport(0, 0, postWidth, postHeight);
  		}
 -		if (RenderFXAA)
 +		if (RenderFXAA && !TaaResolvedThisFrame)
@@ -2014,7 +3054,11 @@ index 6edf0c9..1d2a981 100644
  			LoadFrameBuffer(EnumFrameBuffer.Luma);
  			ShaderProgramLuma luma = ShaderPrograms.Luma;
  			luma.Use();
- 			luma.Scene2D = frameBuffers[0].ColorTextureIds[0];
+-			luma.Scene2D = frameBuffers[0].ColorTextureIds[0];
++			// With an upscaler the jittered Primary colour is not this frame's image any
++			// more; FXAA runs on the upscaled one, at the display size it was
++			// allocated for.
++			luma.Scene2D = optimumUpscaledThisFrame ? postSceneTexture : frameBuffers[0].ColorTextureIds[0];
  			RenderFullscreenTriangle(screenQuad);
  			luma.Stop();
  		}
@@ -2050,7 +3094,20 @@ index 6edf0c9..1d2a981 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,19 +3379,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		{
++			// Optimum (DLSS plan, Phase 3): the composition writes the target that
++			// carries the frame - the display-resolution upscaled target when an
++			// upscaler ran this frame, Primary otherwise. Binding it here rather than
++			// at the end of RenderPostprocessingEffects leaves the AfterPostProcessing
++			// stage bound to Primary exactly as before.
++			FrameBufferRef compositeTarget = OptimumCompositeFrameBuffer;
++			bool compositeIsUpscaled = optimumUpscaledThisFrame && compositeTarget != null && !ReferenceEquals(compositeTarget, frameBuffers[0]);
++			if (compositeIsUpscaled)
++			{
++				CurrentFrameBuffer = compositeTarget;
++			}
+ 			int bloomParts2D = frameBuffers[8].ColorTextureIds[0];
+ 			int godrayParts2D = frameBuffers[7].ColorTextureIds[0];
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -2076,23 +3133,52 @@ index 6edf0c9..1d2a981 100644
  			if (RenderSSAO)
  			{
  				final.SsaoScene2D = frameBuffers[14].ColorTextureIds[0];
-@@ -1987,24 +3415,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
++				final.Uniform("optimumSsaoInScene", optimumUpscaleSsaoApplied ? 1 : 0);
+ 			}
+-			final.Uniform("invFrameSizeIn", 1f / ((float)((NativeWindow)window).ClientSize.X * ssaaLevel), 1f / ((float)((NativeWindow)window).ClientSize.Y * ssaaLevel));
++			// Optimum (DLSS plan, Phase 1): the render size, read from Primary - and
++			// since Phase 3 the size of the target this pass actually draws into, which
++			// is the display size whenever an upscaler ran and Primary's size otherwise.
++			final.Uniform("invFrameSizeIn", 1f / (float)compositeTarget.Width, 1f / (float)compositeTarget.Height);
+ 			final.GammaLevel = ClientSettings.GammaLevel;
+ 			final.ExtraGamma = ClientSettings.ExtraGammaLevel;
+ 			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
+ 			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
+ 			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
+@@ -1987,27 +4128,60 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
  			RenderFullscreenTriangle(screenQuad);
  			final.Stop();
 -			if (RenderSSAO)
--			{
++			// Restores the multi-attachment selection the world passes expect. That
++			// selection belongs to Primary, which is where the world passes write, so
++			// with an upscaler Primary is bound for the restore and the
++			// display-resolution target is bound again afterwards - the
++			// AfterFinalComposition overlays draw into the composited image, against
++			// its own upscaled depth.
++			if (compositeIsUpscaled)
+ 			{
 -				array = new DrawBuffersEnum[4] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3 };
 -				GL.DrawBuffers(4, array);
--			}
--			else
-+			// Restores the multi-attachment selection the world passes expect.
-+			RestoreWorldDrawBuffers(RenderSSAO);
-+		}
-+	}
-+
++				LoadFrameBuffer(EnumFrameBuffer.Primary);
++				RestoreWorldDrawBuffers(RenderSSAO);
++				CurrentFrameBuffer = compositeTarget;
+ 			}
+ 			else
+ 			{
+-				array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
+-				{
+-					(DrawBuffersEnum)36064,
+-					(DrawBuffersEnum)36065
+-				};
+-				GL.DrawBuffers(2, array);
++				RestoreWorldDrawBuffers(RenderSSAO);
+ 			}
+ 		}
+ 	}
+ 
 +	/// <summary>Optimum (Phase 1A step 4): the GL half of the final composition's pass state.</summary>
 +	public override void BeginFinalCompositionDrawBuffers()
 +	{
@@ -2116,24 +3202,20 @@ index 6edf0c9..1d2a981 100644
 +		else
 +		{
 +			array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
- 			{
--				array = (DrawBuffersEnum[])(object)new DrawBuffersEnum[2]
--				{
--					(DrawBuffersEnum)36064,
--					(DrawBuffersEnum)36065
--				};
--				GL.DrawBuffers(2, array);
--			}
++			{
 +				(DrawBuffersEnum)36064,
 +				(DrawBuffersEnum)36065
 +			};
 +			GL.DrawBuffers(2, array);
- 		}
- 	}
- 
++		}
++	}
++
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3470,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0006: Invalid comparison between Unknown and I4
+ 		//IL_0026: Unknown result type (might be due to invalid IL or missing references)
+@@ -2023,27 +4197,490 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -2228,8 +3310,9 @@ index 6edf0c9..1d2a981 100644
 +	public override bool BeginMotionWrite()
 +	{
 +		if (OptimumMotionWriteActive) return false;
-+		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		// Optimum (DLSS plan, Phase 2): one condition for both temporal consumers -
++		// the resolve with its history slots, or an upscaler that owns the resolve.
++		if (!OptimumMotionWritesReady) return false;
 +		// Optimum TAA (P4): the motion attachment only means anything inside the
 +		// temporal window. JitterActive is that window - ClientMain opens it in
 +		// MainRenderLoop and closes it in RenderAfterPostProcessing, before the
@@ -2351,8 +3434,9 @@ index 6edf0c9..1d2a981 100644
 +	public override bool BeginMotionOnlyWrite()
 +	{
 +		if (OptimumMotionWriteActive) return false;
-+		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		// Optimum (DLSS plan, Phase 2): one condition for both temporal consumers -
++		// the resolve with its history slots, or an upscaler that owns the resolve.
++		if (!OptimumMotionWritesReady) return false;
 +		// Optimum TAA (P4): the motion attachment only means anything inside the
 +		// temporal window. JitterActive is that window - ClientMain opens it in
 +		// MainRenderLoop and closes it in RenderAfterPostProcessing, before the
@@ -2433,8 +3517,9 @@ index 6edf0c9..1d2a981 100644
 +	/// </summary>
 +	public override bool RenderOptimumSkyMotion()
 +	{
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
-+		if (!TaaTargetsReady || MotionAttachmentIndex < 0) return false;
++		// Optimum (DLSS plan, Phase 2): the sky's motion vectors are written for
++		// whichever temporal consumer owns the frame, so the guard is the shared one.
++		if (!OptimumMotionWritesReady) return false;
 +		ShaderProgram skyMotion = ShaderPrograms.TaaSkyMotion;
 +		if (skyMotion == null || skyMotion.LoadError || skyMotion.Disposed) return false;
 +		if (frameBuffers == null || frameBuffers.Count <= 1) return false;
@@ -2531,7 +3616,11 @@ index 6edf0c9..1d2a981 100644
  		//IL_003c: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
  		{
- 			int scene2D = frameBuffers[0].ColorTextureIds[0];
+-			int scene2D = frameBuffers[0].ColorTextureIds[0];
++			// Optimum (DLSS plan, Phase 3): whatever holds the composited image -
++			// the display-resolution upscaled target, or Primary as always.
++			FrameBufferRef blitSource = OptimumCompositeFrameBuffer;
++			int scene2D = blitSource.ColorTextureIds[0];
 +			// Optimum P1: TAA debug views. Bypasses the normal FSR/blit path
 +			// entirely and draws a fullscreen triangle visualising the Primary
 +			// motion attachment, depth buffer or scene colour. Only reached when
@@ -2619,7 +3708,7 @@ index 6edf0c9..1d2a981 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4106,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4839,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -2659,7 +3748,7 @@ index 6edf0c9..1d2a981 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +4504,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +5237,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -2712,7 +3801,7 @@ index 6edf0c9..1d2a981 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +4599,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +5332,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2757,7 +3846,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4636,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +5369,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2778,7 +3867,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4655,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +5388,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2799,7 +3888,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4674,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +5407,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2820,7 +3909,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4693,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +5426,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2841,7 +3930,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4716,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +5449,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -2862,7 +3951,7 @@ index 6edf0c9..1d2a981 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5278,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +6011,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -2886,7 +3975,7 @@ index 6edf0c9..1d2a981 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +5637,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +6370,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

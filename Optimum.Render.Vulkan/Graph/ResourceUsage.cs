@@ -27,6 +27,27 @@ public enum ResourceUsage
     SampleVertex,
     /// <summary>Read as a storage image.</summary>
     StorageRead,
+    /// <summary>
+    /// Sampled by a shader we did not record - a vendor upscaler's own compute
+    /// dispatches (DLSS, FSR, XeSS). Same layout as <see cref="SampleFragment" />,
+    /// but the destination stage has to cover compute as well as fragment because
+    /// the reads happen in dispatches the backend never sees.
+    /// </summary>
+    SampleExternal,
+    /// <summary>
+    /// Written as a storage image by a shader we did not record - the output of a
+    /// vendor upscaler. GENERAL layout, and the image must carry
+    /// <c>VK_IMAGE_USAGE_STORAGE_BIT</c>.
+    ///
+    /// "Storage write" is what the vendor documents, but not all it does: NGX also
+    /// records a <c>vkCmdClearColorImage</c> into the output image on the first
+    /// evaluate of a feature (measured 2026-09-12 on driver 615.71.09, reported by
+    /// synchronization validation as a write our next barrier did not name), so the
+    /// transfer stage is part of this usage on both sides of a barrier. The cost is
+    /// a wider mask on one barrier per frame; the alternative is a write-after-write
+    /// hazard on an image we own.
+    /// </summary>
+    StorageWriteExternal,
     /// <summary>Source of a copy or blit.</summary>
     TransferSrc,
     /// <summary>Destination of a copy, blit or clear.</summary>
@@ -79,6 +100,14 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
         ResourceUsage.StorageRead => new(ImageLayout.General,
             PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit,
             AccessFlags2.ShaderStorageReadBit),
+        ResourceUsage.SampleExternal => new(ImageLayout.ShaderReadOnlyOptimal,
+            PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit,
+            AccessFlags2.ShaderSampledReadBit | AccessFlags2.ShaderStorageReadBit),
+        ResourceUsage.StorageWriteExternal => new(ImageLayout.General,
+            PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit |
+                PipelineStageFlags2.AllTransferBit,
+            AccessFlags2.ShaderStorageReadBit | AccessFlags2.ShaderStorageWriteBit |
+                AccessFlags2.TransferWriteBit),
         ResourceUsage.TransferSrc => new(ImageLayout.TransferSrcOptimal,
             PipelineStageFlags2.TransferBit, AccessFlags2.TransferReadBit),
         ResourceUsage.TransferDst => new(ImageLayout.TransferDstOptimal,
@@ -103,6 +132,12 @@ internal readonly record struct UsageState(ImageLayout Layout, PipelineStageFlag
             ResourceUsage.DepthWrite or ResourceUsage.DepthReadOnly or ResourceUsage.DepthReadOnlySampled =>
                 (DepthTests, AccessFlags2.DepthStencilAttachmentWriteBit),
             ResourceUsage.TransferDst => (PipelineStageFlags2.TransferBit, AccessFlags2.TransferWriteBit),
+            // The upscaler's dispatches write this image; the next use has to
+            // make that write available, exactly as an attachment's store does.
+            ResourceUsage.StorageWriteExternal =>
+                (PipelineStageFlags2.FragmentShaderBit | PipelineStageFlags2.ComputeShaderBit |
+                    PipelineStageFlags2.AllTransferBit,
+                    AccessFlags2.ShaderStorageWriteBit | AccessFlags2.TransferWriteBit),
             _ => (PipelineStageFlags2.None, AccessFlags2.None),
         };
 

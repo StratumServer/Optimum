@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs
-index 63fb5e6..635ded4 100644
+index 63fb5e6..bec6de5 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs
 @@ -498,13 +498,24 @@ public class ShaderProgramEntityanimated : ShaderProgram
@@ -17,11 +17,11 @@ index 63fb5e6..635ded4 100644
  		ubos["Animation"] = ScreenManager.Platform.CreateUBO(ProgramId, 0, "Animation", GlobalConstants.MaxAnimatedElements * 16 * 4);
 +		// Optimum TAA (P3): the same bones one frame ago, for the motion-vector
 +		// writer in entityanimated.vsh. The block only exists when TAAMOTION was
-+		// stamped 1, which is exactly OptimumConfig.EffectiveTaa - asking GL for
++		// stamped 1, which is exactly OptimumConfig.EffectiveTemporalPipeline - asking GL for
 +		// the index of a block that is not there yields INVALID_INDEX and a GL
 +		// error. The OIT variant renders into Transparent and never writes the
 +		// motion attachment, so it gets no second block either.
-+		if (!Oit && Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
++		if (!Oit && Vintagestory.API.Config.OptimumConfig.EffectiveTemporalPipeline)
 +		{
 +			ubos["AnimationPrev"] = ScreenManager.Platform.CreateUBO(ProgramId, 1, "AnimationPrev", GlobalConstants.MaxAnimatedElements * 16 * 4);
 +		}

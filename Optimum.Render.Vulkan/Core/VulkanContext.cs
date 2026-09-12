@@ -56,6 +56,21 @@ internal sealed class VulkanContextOptions
     public LatencyPresentPath PresentPath = LatencyPresentPath.BlitFromOwned;
 
     /// <summary>
+    /// The vendor of the upscaler that will run, the other half of the slot
+    /// coupling (<see cref="LatencySlotCoupling" />): a vendor latency backend is
+    /// only taken when this matches the GPU's vendor, else Optimum's own pacing
+    /// runs. <see cref="Core.UpscalerVendor.None" /> (the default) leaves the
+    /// device-based auto order alone.
+    /// </summary>
+    public UpscalerVendor UpscalerVendor = UpscalerVendor.None;
+
+    /// <summary>
+    /// Tests only: pins the GPU vendor the coupling matches against; Unknown
+    /// reads <c>VkPhysicalDeviceProperties.vendorID</c> from the real device.
+    /// </summary>
+    public GpuVendor GpuVendorOverride = GpuVendor.Unknown;
+
+    /// <summary>
     /// Subsystems that need instance or device extensions and feature structs
     /// (plan seam S1). The latency requirements are added by the context itself;
     /// this is where a test or a later vendor SDK adds its own.
@@ -74,6 +89,13 @@ internal sealed class VulkanCapabilities
 {
     public string DeviceName = "";
     public string DriverName = "";
+
+    /// <summary>VkPhysicalDeviceProperties.vendorID, as reported.</summary>
+    public uint VendorId;
+
+    /// <summary>The vendor behind <see cref="VendorId" />; the latency slot coupling matches against it.</summary>
+    public GpuVendor Vendor = GpuVendor.Unknown;
+
     public uint ApiVersion;
     public PhysicalDeviceType DeviceType;
     public uint MaxImageDimension2D;
@@ -431,7 +453,9 @@ internal sealed unsafe class VulkanContext : IDisposable
         _latencyRequirements = new LatencyDeviceRequirements(
             options.LatencyBackend ?? LatencyBackends.FromEnvironment(options.DebugCallback),
             options.PresentPath,
-            options.DebugCallback);
+            options.DebugCallback,
+            options.UpscalerVendor,
+            options.GpuVendorOverride);
 
         _contributors = new List<IDeviceRequirementContributor> { _latencyRequirements };
         if (options.RequirementContributors != null)
@@ -919,9 +943,10 @@ internal sealed unsafe class VulkanContext : IDisposable
         // subsystems can be on at once (seam S1). What each of them asks for is
         // unchanged, and the tier still enables exactly one of its two extensions.
         using var requirements = new DeviceRequirements(
-            Api, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
+            Api, Instance, PhysicalDevice, deviceExtensionsAvailable, deviceExtensions)
         {
             Log = options.DebugCallback,
+            Vulkan12 = &vulkan12,
         };
         if (wantDeviceFault) requirements.ChainFeature(&faultFeatures);
         if (colorWriteTier == ColorWriteTier.DynamicEnable) requirements.ChainFeature(&colorWriteFeatures);
@@ -1175,6 +1200,8 @@ internal sealed unsafe class VulkanContext : IDisposable
         {
             DeviceName = SilkMarshal.PtrToString((nint)properties.DeviceName) ?? "unknown",
             DriverName = SilkMarshal.PtrToString((nint)driverProperties.DriverName) ?? "unknown",
+            VendorId = properties.VendorID,
+            Vendor = GpuVendors.FromVendorId(properties.VendorID),
             ApiVersion = properties.ApiVersion,
             DeviceType = properties.DeviceType,
             MaxImageDimension2D = properties.Limits.MaxImageDimension2D,

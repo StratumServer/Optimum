@@ -90,4 +90,64 @@
     <InternalsVisibleTo Include="Optimum.Render.Vulkan.Tests" />
   </ItemGroup>
 
+  <!-- The NGX shim (native/optimum-ngx): the only call site NVIDIA's NGX
+       accepts, because it resolves its caller's module from the return address
+       and a .NET P/Invoke stub lives in anonymous JIT memory. Built with cc into
+       bin/native and copied to this project's output like any content file, so
+       it travels to the test host and to `make deploy` the same way the
+       Silk.NET natives do.
+
+       It degrades and never fails the solution build: with no compiler on the
+       host build.sh prints one line and exits 0, no file appears, and the
+       managed side reports NGX unavailable (NgxShim.Diagnosis says why).
+
+       The Windows command carries the same -fno-optimize-sibling-calls that
+       build.sh does, and for the same reason: a tail call pops the shim's frame,
+       so NGX resolves the managed caller's module instead of the shim's and
+       refuses. It creates bin/native first, because on a clean Windows checkout
+       the directory does not exist yet and the link would fail with the shim's
+       "no compiler" line covering for it. The mkdir is joined with & rather than
+       && so an existing directory does not skip the compile.
+       ContinueOnError covers the rest.
+
+       Both commands compile to a temporary file and only replace the shipped one
+       once the compiler said yes, and delete both when the compile fails *and*
+       when there is no compiler at all. A previous OptimumNgx.dll left in place
+       would be packaged by the Exists() condition below: an incremental build
+       would ship a native library older than the managed side that calls it,
+       which is an ABI mismatch inside NGX rather than the "DLSS unavailable"
+       line this is supposed to degrade to. A host that had a compiler yesterday
+       and none today is the same stale library by another route, which is why
+       the `where cc.exe` failure branch deletes as well. build.sh does both too
+       (it writes to $target.tmp, rm -f's on failure, and rm -f's the target when
+       command -v finds no compiler). -->
+  <Target Name="BuildNgxShim" BeforeTargets="AssignTargetPaths">
+    <PropertyGroup>
+      <NgxShimDir>$(MSBuildThisFileDirectory)../native/optimum-ngx</NgxShimDir>
+      <NgxShimOut>$(MSBuildThisFileDirectory)../bin/native</NgxShimOut>
+      <!-- cmd's move and del take the path apart on forward slashes. -->
+      <NgxShimOutWin>$(NgxShimOut.Replace('/','\'))</NgxShimOutWin>
+    </PropertyGroup>
+    <Exec Condition="'$(OS)' != 'Windows_NT'"
+          Command="bash &quot;$(NgxShimDir)/build.sh&quot; &quot;$(NgxShimOut)&quot;"
+          ContinueOnError="true" />
+    <Exec Condition="'$(OS)' == 'Windows_NT'"
+          Command="if not exist &quot;$(NgxShimOutWin)&quot; mkdir &quot;$(NgxShimOutWin)&quot; &amp; where cc.exe &gt;nul 2&gt;&amp;1 &amp;&amp; (cc.exe -std=c99 -O2 -fno-optimize-sibling-calls -shared &quot;$(NgxShimDir)/optimum_ngx.c&quot; -o &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &amp;&amp; move /y &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &gt;nul || (del /q &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &gt;nul 2&gt;&amp;1 &amp; echo optimum-ngx: cc.exe failed to build the NGX shim; DLSS will report unavailable.)) || (del /q &quot;$(NgxShimOutWin)\OptimumNgx.dll&quot; &quot;$(NgxShimOutWin)\OptimumNgx.tmp.dll&quot; &gt;nul 2&gt;&amp;1 &amp; echo optimum-ngx: the NGX shim was not built on this host; DLSS will report unavailable.)"
+          ContinueOnError="true" />
+    <ItemGroup>
+      <None Include="$(NgxShimOut)/libOptimumNgx.so" Condition="Exists('$(NgxShimOut)/libOptimumNgx.so')">
+        <Link>libOptimumNgx.so</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Include="$(NgxShimOut)/libOptimumNgx.dylib" Condition="Exists('$(NgxShimOut)/libOptimumNgx.dylib')">
+        <Link>libOptimumNgx.dylib</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+      <None Include="$(NgxShimOut)/OptimumNgx.dll" Condition="Exists('$(NgxShimOut)/OptimumNgx.dll')">
+        <Link>OptimumNgx.dll</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+  </Target>
+
 </Project>

@@ -70,6 +70,12 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "InitializeGraphics",
         "ShutdownGraphics",
+        // DLSS plan, Phase 1: render size vs display size, one source of truth each.
+        // Neutral bodies answer the window size; ClientPlatformWindows overrides them.
+        "RenderWidth",
+        "RenderHeight",
+        "DisplayWidth",
+        "DisplayHeight",
         // Phase 1A step 2: the TAA/FSR members the renderers call without a cast to
         // ClientPlatformWindows. Neutral bodies; ClientPlatformWindows overrides them.
         "MotionAttachmentIndex",
@@ -86,6 +92,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "RenderOptimumTaaSharpen",
         "OptimumFsrBlitActive",
         "DisableOptimumTaa",
+        // Headless render harness: the channel order ReadDefaultFramebuffer leaves
+        // in the caller's buffer (GL_BGRA on the OpenGL path, RGBA on the device's
+        // R8G8B8A8 default target, which VulkanClientPlatform overrides).
+        "OptimumDefaultFramebufferIsBgra",
         // Phase 1A step 3: the program, uniform and UBO operations ShaderProgramBase and
         // UBO call. Neutral bodies; ClientPlatformWindows overrides them. SetUniform and
         // SetUniformMatrix inject every overload the donor declares.
@@ -167,6 +177,17 @@ var membersToInject = new Dictionary<string, List<string>>
         // Review follow-up 2026-09-12: the effective frame cap (background reduction
         // included) window_RenderFrame hands to a pacing backend before the sleep.
         "SetLatencyFrameCap",
+        // DLSS plan, Phase 6: the settings-tab seams - why no upscaler can run here,
+        // the upscaler/preset re-plan and rebuild, and the latency re-apply. Neutral
+        // bodies; VulkanClientPlatform overrides all three.
+        "OptimumUpscalerUnavailable",
+        // The passthrough comparison upscaler: the same question asked per dropdown
+        // entry, so a slot needing no vendor runtime is not refused for NGX's absence.
+        "OptimumUpscalerUnavailableFor",
+        "ApplyOptimumUpscalerSettings",
+        "ApplyOptimumLatencySettings",
+        // PR #3 follow-up: the live plan the upscaling tab reads back.
+        "OptimumUpscalerPlan",
     },
     ["Vintagestory.Client.ClientProgram"] = new()
     {
@@ -247,6 +268,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumRenderSsao",
         "OptimumAdoptFrameBufferSettings",
         "OptimumTaaRequested",
+        // DLSS plan, Phase 2: the temporal pipeline's two shared questions - who
+        // wants the motion attachment and the jitter, and who may open a write
+        // window - plus the upscaler's half of DisableOptimumTaa.
+        "OptimumTemporalRequested",
+        "OptimumMotionWritesReady",
+        "DisableOptimumUpscaler",
         "OptimumSsaoKernel",
         "SetOptimumMotionAttachmentIndex",
         "OptimumAdoptTaaTargets",
@@ -288,6 +315,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "DeleteOcclusionQuery",
         "ReadDefaultFramebuffer",
         "GraphicsBackendName",
+        // DLSS plan, Phase 1: the GL overrides of the render/display size - Primary's
+        // allocated size and the live window client size.
+        "RenderWidth",
+        "RenderHeight",
+        "DisplayWidth",
+        "DisplayHeight",
         "OptimumTaaHistoryIndexA",
         "OptimumTaaHistoryIndexB",
         "OptimumGlR32f",
@@ -346,6 +379,21 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumTaaSharpenIndex",
         "OptimumFsrBlitActive",
         "RenderOptimumTaaSharpen",
+        // DLSS plan, Phase 3: the upscaler's placement in the frame - the
+        // display-resolution target it writes, the per-frame flag every downstream
+        // reader shares, the platform questions VulkanClientPlatform answers (is an
+        // upscaler up, what render size does it want, run the evaluate) and the
+        // screenshot redirect that captures the composited image wherever it lives.
+        "OptimumUpscaledSceneIndex",
+        "optimumUpscaledThisFrame",
+        "optimumUpscaleSsaoApplied",
+        "ApplyOptimumUpscaleSsao",
+        "OptimumUpscalerActive",
+        "OptimumTryPlanUpscaleRenderSize",
+        "RenderOptimumUpscale",
+        "OptimumCompositeFrameBuffer",
+        "OptimumUpscaledThisFrame",
+        "OptimumBindCompositeForCapture",
         // Phase 0 parity: the per-attachment dump (OPTIMUM_PARITY_DUMP) called from
         // window_RenderFrame, its in-world frame counter, slot names, the single
         // device-readback call site and the glGetTexImage body.
@@ -355,6 +403,17 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumParitySlotName",
         "OptimumParityDumpAttachment",
         "OptimumParityReadTextureGl",
+        // Headless render harness: the per-frame hook window_RenderFrame calls next
+        // to the parity dump, its own in-world frame counter, the chat-command
+        // script dispatch and the presented-frame readback.
+        "optimumHeadlessWorldFrames",
+        "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone",
+        "optimumHeadlessFramesWritten",
+        "OptimumHeadlessTick",
+        "OptimumHeadlessRunCommands",
+        "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame",
         // Phase 1A step 3: overrides of ClientPlatformAbstract's program, uniform and
         // UBO virtuals, holding the device branch and GL lines ShaderProgramBase and UBO
         // used to call directly. Every SetUniform/SetUniformMatrix overload is injected.
@@ -393,6 +452,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "TaaResolve",
         // TAA P5: the post-resolve sharpen pass program.
         "TaaSharpen",
+        "UpscaleSsao",
         // TAA P4: the liquid velocity pass program.
         "ChunkLiquidMotion",
         // TAA P4: the sky / volumetric-cloud motion pass program.
@@ -412,6 +472,10 @@ var membersToInject = new Dictionary<string, List<string>>
         // is the only place chunkopaque/chunktopsoil mip selection changes.
         "ApplyOptimumTerrainSamplerLodBias",
         "ApplyOptimumSamplerLodBias",
+        // DLSS plan, Phase 6: the single applier both call sites go through, so
+        // an upscaler publishing its plan moves the atlas parameter and the
+        // terrain samplers together, with no shader reload.
+        "ApplyOptimumLodBias",
     },
     ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
     {
@@ -426,6 +490,16 @@ var membersToInject = new Dictionary<string, List<string>>
         "oButtonBounds",
         "OnOptimumOptions",
         "_AddOptimumTab",
+        // PR #3 follow-up: upscaling is its own tab beside the Extra one. The button
+        // bounds, the page, its plan readout and the per-frame refresh that feeds it
+        // (Refresh is a vanilla method, transplanted so the readout gets its frame).
+        "uButtonBounds",
+        "OnOptimumUpscalingOptions",
+        "optimumUpscalePlanText",
+        "optimumUpdateUpscalePlanReadout",
+        // Refresh is vanilla and therefore cannot be injected - member injection skips
+        // anything the target already declares - so its body is transplanted through
+        // the method-target list below instead.
         "onOptimumBackgroundFpsChanged",
         "onOptimumFramePacingChanged",
         "onOptimumShadowCullChanged",
@@ -448,6 +522,15 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumTaaChanged",
         "onOptimumTaaSharpnessChanged",
         "onOptimumTaaMipBiasChanged",
+        "onOptimumUpscalerChanged",
+        "onOptimumUpscalerQualityChanged",
+        "onOptimumUpscalerSharpnessChanged",
+        "optimumUpscalerLodBiasText",
+        "onOptimumLatencyChanged",
+        // The passthrough comparison upscaler's two debug rows.
+        "onOptimumUpscalerPassthroughFilterChanged",
+        "onOptimumUpscalerJitterChanged",
+        "optimumUpdateUpscalerRows",
 #if OPTIMUM_GREEDY_MESH
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",
@@ -491,9 +574,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "chunkOriginScratch",
         "centerPoolLocationsScratch",
         "edgePoolLocationsScratch",
-        "optimumTextureLodBias",
         "ApplyOptimumTextureLodBias",
-        "SetOptimumTextureLodBias",
+        "CollectOptimumLodBiasedAtlases",
         // TAA P3: previous-frame transforms for the terrain motion writers.
         "SetOptimumMotionUniforms",
         // TAA P4: the liquid velocity pass and its reactive constant.
@@ -727,6 +809,12 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
+    // GuiCompositeSettings.Refresh (PR #3 follow-up): the once-per-frame call the
+    // escape menu already makes, so the upscaling tab's plan readout follows the
+    // frame instead of the moment the page was composed. Vanilla method, vanilla
+    // body plus one call into the injected readout, so it is transplanted rather
+    // than injected.
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", "Refresh", 0),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
@@ -770,6 +858,9 @@ var targets = new List<MethodTarget>
     // the tesselation worker thread. See
     // docs/implementation-plans/chunk-tesselator-worker-pool-wiring-plan-2026-08-10.md.
     new("Vintagestory.Client.NoObf.ClientMain", "Start", 0),
+    // DLSS plan, Phase 6: recomposed atlases carry the driver default again, so
+    // the applied LOD bias is forgotten here and written afresh.
+    new("Vintagestory.Client.NoObf.ClientMain", "ReloadTextures", 0),
     // SystemRenderPlayerEffects: dynamic light radius (lambda-free rewrite)
     new("Vintagestory.Client.NoObf.SystemRenderPlayerEffects", "onBeforeRender", 1),
     // ClientPlatformWindows: persistent mapped VBO and index uploads. ParameterTypes
@@ -869,6 +960,11 @@ var targets = new List<MethodTarget>
         new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
     // Vulkan backend: startup capability reporting, which cannot ask GL.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "Start", 0),
+    // Optimum (headless render harness): a capture runs silent, so the mixer is
+    // created muted and every later attempt to restore the volume is answered with
+    // silence. Both bodies are vanilla's apart from that one condition.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "StartAudio", 0),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "set_MasterSoundLevel", 1),
     // Vulkan backend: uniform buffers, whose handles UBO carries across.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "CreateUBO", 4),
     new("Vintagestory.Client.NoObf.UBO", "Bind", 0),
@@ -899,6 +995,9 @@ var targets = new List<MethodTarget>
     // Vulkan backend: the GUI depth clear between the world and the interface,
     // the only raw GL left in the screen loop.
     new("Vintagestory.Client.ScreenManager", "Render", 1),
+    // DLSS plan, Phase 1: the world viewport reads the platform's render size instead
+    // of recomputing WindowSize * ClientSettings.SSAA.
+    new("Vintagestory.Client.GuiScreenRunningGame", "RenderToPrimary", 1),
     // Vulkan backend: the post-process chain's remaining direct GL - viewport,
     // draw-buffer selection, depth toggle and the SSAO clear.
     // Vulkan backend: the device's default target and swapchain follow the
@@ -910,6 +1009,10 @@ var targets = new List<MethodTarget>
     // TAA P4: the decal motion window.
     new("Vintagestory.Client.NoObf.SystemRenderDecals", "OnRenderFrame3D", 1),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderFinalComposition", 0),
+    // DLSS plan, Phase 3: the scaled and mega screenshot paths capture whichever target
+    // holds the composited image, which with an upscaler is not Primary.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "SaveScreenshot", 5),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GrabScreenshot", 2),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // E3: particle spawn distance gate, before the per-particle revive loop

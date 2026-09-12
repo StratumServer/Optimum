@@ -137,14 +137,45 @@ internal static class LatencyBackendSelector
         in LatencyDeviceSupport support,
         LatencyBackendKind? forced,
         LatencyPresentPath path,
+        Action<string>? log = null) =>
+        Select(support, forced, path, UpscalerVendor.None, GpuVendor.Unknown, log);
+
+    /// <summary>
+    /// The same selection with the slot coupling applied
+    /// (<see cref="LatencySlotCoupling" />): the active upscaler's vendor asks for
+    /// a backend when it matches the GPU's vendor, and for Optimum's own pacing
+    /// when it does not. <paramref name="forced" /> - the
+    /// <c>OPTIMUM_VULKAN_LATENCY</c> override - wins over the coupling, so a test
+    /// can still pin any backend with any upscaler running.
+    /// </summary>
+    public static LatencyBackendKind Select(
+        in LatencyDeviceSupport support,
+        LatencyBackendKind? forced,
+        LatencyPresentPath path,
+        UpscalerVendor upscaler,
+        GpuVendor gpu,
         Action<string>? log = null)
     {
-        LatencyBackendKind selected = LatencyBackends.SelectBackend(support.NvUsable, support.AmdUsable, forced);
-
-        if (forced.HasValue && selected != forced.Value)
+        LatencyBackendKind? coupled = LatencySlotCoupling.Requested(upscaler, gpu, path, out string reason);
+        if (forced.HasValue && upscaler != UpscalerVendor.None)
         {
-            log?.Invoke("latency: " + LatencyBackends.Token(forced.Value) + " is not supported on this device (" +
-                support + "); using " + LatencyBackends.Token(selected));
+            reason = LatencyBackends.LatencyVariable + "=" + LatencyBackends.Token(forced.Value) +
+                " overrides the pair";
+        }
+
+        // The override wins over everything; without one the coupling decides,
+        // and without a vendor upscaler the device-based auto order does.
+        LatencyBackendKind? request = forced ?? coupled;
+
+        LatencyBackendKind selected = LatencyBackends.SelectBackend(support.NvUsable, support.AmdUsable, request);
+
+        if (request.HasValue && selected != request.Value)
+        {
+            string source = forced.HasValue
+                ? LatencyBackends.Token(request.Value) + " is not supported on this device ("
+                : "the pair asked for " + LatencyBackends.Token(request.Value) +
+                    ", which is not supported on this device (";
+            log?.Invoke("latency: " + source + support + "); using " + LatencyBackends.Token(selected));
         }
 
         while (!Allows(path, selected))
@@ -153,6 +184,14 @@ internal static class LatencyBackendSelector
             log?.Invoke("latency: " + LatencyBackends.Token(selected) + " is not valid on present path " + path +
                 "; using " + LatencyBackends.Token(lower));
             selected = lower;
+        }
+
+        // One line naming the pair and the decision, logged whenever a vendor
+        // upscaler is running; with no upscaler the selection is exactly what it
+        // was before the coupling existed, and stays as quiet.
+        if (upscaler != UpscalerVendor.None)
+        {
+            log?.Invoke(LatencySlotCoupling.DecisionLine(upscaler, gpu, selected, reason));
         }
 
         return selected;
@@ -189,15 +228,32 @@ internal sealed unsafe class LatencyDeviceRequirements : IDeviceRequirementContr
 {
     private readonly LatencyBackendKind? _forced;
     private readonly LatencyPresentPath _path;
+    private readonly UpscalerVendor _upscaler;
+    private readonly GpuVendor _gpuOverride;
     private readonly Action<string>? _log;
 
     public LatencyDeviceRequirements(
-        LatencyBackendKind? forced, LatencyPresentPath path = LatencyPresentPath.BlitFromOwned, Action<string>? log = null)
+        LatencyBackendKind? forced,
+        LatencyPresentPath path = LatencyPresentPath.BlitFromOwned,
+        Action<string>? log = null,
+        UpscalerVendor upscaler = UpscalerVendor.None,
+        GpuVendor gpu = GpuVendor.Unknown)
     {
         _forced = forced;
         _path = path;
+        _upscaler = upscaler;
+        _gpuOverride = gpu;
         _log = log;
     }
+
+    /// <summary>The active upscaler's vendor, the coupling's other half.</summary>
+    public UpscalerVendor Upscaler => _upscaler;
+
+    /// <summary>
+    /// The GPU's vendor as the selection saw it: the one handed to the
+    /// constructor, else <c>VkPhysicalDeviceProperties.vendorID</c>.
+    /// </summary>
+    public GpuVendor Gpu { get; private set; } = GpuVendor.Unknown;
 
     public string Name => "latency";
 
@@ -271,7 +327,14 @@ internal sealed unsafe class LatencyDeviceRequirements : IDeviceRequirementContr
             ? Support
             : new LatencyDeviceSupport(false, Support.NvLowLatency2SpecVersion, Support.AmdAntiLag, false, false);
 
-        Selected = LatencyBackendSelector.Select(usable, _forced, _path, _log);
+        // The GPU vendor is the device property the coupling matches against; a
+        // caller (the tests) may pin it instead of reading the real device.
+        Gpu = _gpuOverride != GpuVendor.Unknown
+            ? _gpuOverride
+            : GpuVendors.FromVendorId(
+                requirements.Api.GetPhysicalDeviceProperties(requirements.PhysicalDevice).VendorID);
+
+        Selected = LatencyBackendSelector.Select(usable, _forced, _path, _upscaler, Gpu, _log);
 
         switch (Selected)
         {

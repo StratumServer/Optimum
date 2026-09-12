@@ -296,6 +296,13 @@ for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
     [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$STAGE_DIR/"
 done
 
+# Optimum's NGX shim. NVIDIA's NGX resolves its caller's module from the return
+# address, so DLSS can only be driven from a real shared object; without this
+# file beside the renderer NGX simply reports unavailable (never a crash).
+if [[ -f "$MOD_OUT/libOptimumNgx.so" ]]; then
+    cp -f "$MOD_OUT/libOptimumNgx.so" "$STAGE_DIR/"
+fi
+
 # shaderc is a native library; the game loads natives out of Lib/.
 SHADERC_NATIVE="$MOD_OUT/runtimes/linux-x64/native/libshaderc_shared.so"
 if [[ -f "$SHADERC_NATIVE" ]]; then

@@ -24,7 +24,7 @@ namespace Optimum.Render.Vulkan;
 /// out integer ids, because the game's public API exposes raw GL names as fields
 /// that mods read and pass back.
 /// </summary>
-public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageListener
+public sealed unsafe partial class VulkanDevice : IDisposable, Platform.ILatencyStageListener
 {
     /// <summary>The platform's stage bracket reaches the latency markers here (seam S4).</summary>
     void Platform.ILatencyStageListener.OnFrameRenderStart() => NoteRenderStageStarted();
@@ -183,6 +183,18 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
     {
         if (!OptimumConfig.LatencyEnabled) return LatencySettings.Disabled;
         return new LatencySettings(OptimumConfig.LatencyBoost ? LatencyMode.Boost : LatencyMode.On, 0);
+    }
+
+    /// <summary>
+    /// The persisted latency setting changed while the client runs (the Optimum
+    /// settings tab). The backend is not replaced - which backend this device uses is
+    /// a device-and-driver question answered at bring-up - only its mode and boost,
+    /// which is the same call bring-up makes and which every backend already re-applies
+    /// on each swapchain creation.
+    /// </summary>
+    internal void ReapplyLatencySettings()
+    {
+        Latency.Apply(LatencySettingsFromConfig());
     }
 
     /// <summary>
@@ -515,6 +527,13 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
             RequiredInstanceExtensions = headless
                 ? Array.Empty<string>()
                 : WindowSurface.RequiredInstanceExtensions(),
+            // The upscaler slot's half of the latency coupling (plan, "The slots
+            // are coupled"): the vendor backend is only taken when the active
+            // upscaler's vendor is the GPU's vendor. Read once, here, because the
+            // latency backend is chosen while the device is created; switching
+            // the upscaler mid-session does not move the backend, and the
+            // decision is logged either way.
+            UpscalerVendor = UpscalerVendors.FromSettingToken(OptimumConfig.EffectiveUpscaler),
         };
 
         ConfigureContextOptions?.Invoke(options);
@@ -1829,6 +1848,24 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
             ? state with { LodBias = value }
             : state;
     }
+
+    /// <summary>
+    /// Test seam: the LOD bias a draw would sample this texture with when no
+    /// sampler object overrides it, or NaN when the id names no texture. This is
+    /// the state the sampler cache keys on, so it is what the GPU sees.
+    /// </summary>
+    internal float TextureLodBias(int textureId)
+    {
+        VulkanTexture? texture = _textures.Get(textureId);
+        return texture == null ? float.NaN : texture.State.LodBias;
+    }
+
+    /// <summary>
+    /// Test seam: the LOD bias a sampler object carries - the value that wins on
+    /// every unit it is bound to - or NaN when the id names no sampler.
+    /// </summary>
+    internal float SamplerLodBias(int samplerId) =>
+        _standaloneSamplers.TryGetValue(samplerId, out SamplerState state) ? state.LodBias : float.NaN;
 
     public void BindSampler(int unit, int samplerId)
     {
@@ -3340,13 +3377,23 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
 
     /// <summary>
     /// Reads back the bound target's first colour attachment, four bytes per
-    /// pixel, rows bottom-up.
+    /// pixel, rows bottom-up, in the target's own channel order.
     ///
     /// Bottom-up is not an accident: it is what <c>glReadPixels</c> produces, and
     /// the existing screenshot and AVI paths already expect it. Because the
     /// backend never flips Y, the image in memory is laid out exactly as GL laid
     /// it out, so those paths keep working untouched. The game reads pixels
     /// mid-frame and carries on drawing; <see cref="ReadBack" /> keeps the frame open.
+    ///
+    /// <para><b>Channels are not converted here.</b> The texels come back in the
+    /// target's own order, which for the default colour target is R G B A. The
+    /// client's seam is one level up: the OpenGL body of
+    /// <c>ClientPlatformAbstract.ReadDefaultFramebuffer</c> reads
+    /// <c>GL_BGRA</c>, so <c>VulkanClientPlatform.ReadDefaultFramebuffer</c>
+    /// converts (see <see cref="Core.PixelOrder" />) and everything that speaks to
+    /// the platform - the screenshot key, the AVI recorder, the headless harness -
+    /// gets one answer. Callers of this method, the GPU tests among them, read the
+    /// bound target as it is stored.</para>
     /// </summary>
     public void ReadDefaultFramebuffer(int x, int y, int width, int height, IntPtr destination)
     {
@@ -3361,6 +3408,12 @@ public sealed unsafe class VulkanDevice : IDisposable, Platform.ILatencyStageLis
         ReadBack(texture, x, y, (uint)width, (uint)height, ImageAspectFlags.ColorBit,
             (ulong)width * (ulong)height * 4, destination);
     }
+
+    /// <summary>
+    /// The format of the default colour target, so the platform above knows the
+    /// channel order the readback hands back rather than assuming one.
+    /// </summary>
+    internal Format DefaultColorFormat => DefaultColorTexture()?.Format ?? Format.R8G8B8A8Unorm;
 
     // ------------------------------------------------------------------- teardown
 

@@ -104,7 +104,11 @@ public class IssueTrackerBugfixBatchCoverageTests
         string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch");
 
         Assert.Contains("oButtonBounds.WithFixedWidth(w);", source);
-        Assert.Contains("backButtonBounds.FixedRightOf(oButtonBounds, 15.0);", source);
+        // The hook adds two tab buttons since PR #3 (Extra, then Upscaling), so the
+        // Back button follows the last of them; the widening walk below is unchanged
+        // and still measures from that same last button.
+        Assert.Contains("uButtonBounds.FixedRightOf(oButtonBounds, 10.0);", source);
+        Assert.Contains("backButtonBounds.FixedRightOf(uButtonBounds, 15.0);", source);
         // oButtonBounds.ParentBounds (elementBounds on the main menu,
         // elementBounds3 in-game) is what the tab buttons are actually
         // parented to and must widen to fit the shifted Back button.

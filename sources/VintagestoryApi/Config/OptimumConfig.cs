@@ -438,6 +438,231 @@ public static class OptimumConfig
     public static bool TaaJitterDev = false;
 
     /// <summary>
+    /// The upscaler slot: "off", "dlss" (DLSS Super Resolution through raw NGX) or
+    /// "passthrough" (below).
+    ///
+    /// <para><b>"passthrough" is two things at once.</b> It occupies
+    /// exactly the DLSS slot - the same render/display split, the same preset render
+    /// size, the same jitter, the same motion attachment, the same display-resolution
+    /// post chain, the same TAA and FSR stand-down - and its "evaluate" is a plain
+    /// magnifying blit from the render-resolution scene colour to the display-resolution
+    /// target.
+    ///
+    /// As a diagnostic it answers one question: at a low render ratio, is the shimmer
+    /// the vendor's reconstruction or our own rendering path? With
+    /// <see cref="UpscalerJitter" /> off the frame is a still magnification and nothing
+    /// temporal moves; with it on the render grid moves every frame and nothing
+    /// reconstructs it. Those two states are the measurement.
+    ///
+    /// As a feature it is the upscaler for a GPU with no vendor path: it touches no
+    /// vendor library at all - no NGX, no session, no feature, not even the
+    /// optimal-settings query - so it runs wherever the Vulkan renderer runs, and
+    /// trades reconstruction for the frame rate of the reduced render size.</para>
+    ///
+    /// Off by default, and off is the whole of the old behaviour: with no
+    /// upscaler the render chain is exactly the pre-DLSS one, including the
+    /// in-house TAA resolve and the FSR 1 blit. An upscaler replaces the TAA
+    /// resolve rather than running beside it (see <see cref="UpscalerReplacesTaa" />).
+    ///
+    /// A string for the same reason <see cref="Renderer" /> is one: it is
+    /// persisted in optimum.json, and an unrecognised value has to degrade to
+    /// "off" rather than fail the parse.
+    /// </summary>
+    public static string Upscaler = "off";
+
+    /// <summary>
+    /// The upscaler's quality preset: "quality", "balanced", "performance",
+    /// "ultraperformance" or "dlaa". It selects the render resolution the vendor
+    /// library asks for; Optimum never hard-codes a ratio, it asks the SDK's own
+    /// optimal-settings query with this preset (DLAA = render at display size).
+    /// Unrecognised values degrade to "quality".
+    /// </summary>
+    public static string UpscalerQuality = "quality";
+
+    /// <summary>
+    /// The upscaler names a vendor library, so the only honest answers are the
+    /// ones a config file may carry. Kept next to the parser so the two cannot
+    /// drift; a new vendor is added here and in <see cref="Load" />'s switch.
+    /// </summary>
+    public static readonly string[] UpscalerNames = { "off", "dlss", "passthrough" };
+
+    /// <summary>
+    /// Which filter the passthrough upscaler magnifies with: "linear" (the default)
+    /// or "nearest". Nearest shows the render grid itself, which is what makes a
+    /// moving jitter grid visible without any reconstruction in the way; linear is
+    /// the closer stand-in for "an upscaler that does no temporal work".
+    /// Unrecognised values degrade to "linear".
+    /// </summary>
+    public static string UpscalerPassthroughFilter = "linear";
+
+    /// <summary>The filters <see cref="UpscalerPassthroughFilter" /> may hold.</summary>
+    public static readonly string[] UpscalerPassthroughFilterNames = { "linear", "nearest" };
+
+    /// <summary>Whether the passthrough blit magnifies with NEAREST rather than LINEAR.</summary>
+    public static bool UpscalerPassthroughIsNearest =>
+        string.Equals(UpscalerPassthroughFilter, "nearest", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The experiment's switch: whether the jitter is applied while an upscaler owns
+    /// the resolve. Debug only, on by default, and it means nothing without an
+    /// upscaler - the in-house TAA resolve is not built to run unjittered and keeps
+    /// its jitter regardless (see <see cref="JitterWindowOpen" />).
+    ///
+    /// With the passthrough upscaler this is the whole measurement: jitter off is a
+    /// plain magnification of a still grid, jitter on moves the render grid every
+    /// frame with nothing reconstructing it. Whatever shimmer survives the first and
+    /// appears in the second is ours, not the vendor's.
+    /// </summary>
+    public static bool UpscalerJitter = true;
+
+    /// <summary>The presets <see cref="UpscalerQuality" /> may hold, in descending render scale.</summary>
+    public static readonly string[] UpscalerQualityNames =
+        { "dlaa", "quality", "balanced", "performance", "ultraperformance" };
+
+    /// <summary>
+    /// How much sharper than the upscale ratio itself the atlases are sampled:
+    /// the term subtracted from <c>log2(render / display)</c> in
+    /// <see cref="RecommendedUpscalerLodBias(int, int)" />.
+    ///
+    /// 1.0 is the DLSS Programming Guide's recommendation (section 3.5) and the
+    /// default, so nothing moves unless the player moves it. The guide also says
+    /// that recommendation "can sometimes lead to increased temporal instability,
+    /// in the form of flickering and/or moire" and names high-frequency textures
+    /// (3.5.1) as the case - which is what Vintage Story's 32px pixel-art block
+    /// atlas with alpha-tested foliage is, and why the term is a setting here
+    /// rather than a constant: the magnitude grows with the ratio, so the
+    /// shimmer the player sees grows as the preset gets more aggressive.
+    ///
+    /// 0 leaves the bias at exactly <c>log2(render / display)</c>, which the same
+    /// section gives as the upper bound a bias must never exceed. Values are
+    /// clamped to [0, 1] on load and again where the bias is computed, so no
+    /// config file and no rounding can put the sampler above that bound.
+    /// </summary>
+    public static float UpscalerLodBiasOffset = 1.0f;
+
+    /// <summary>
+    /// The render scale each preset nominally asks the vendor for, in the order
+    /// of <see cref="UpscalerQualityNames" /> (DLAA 1, Quality 1/1.5, Balanced
+    /// 1/1.724, Performance 1/2, Ultra Performance 1/3). Used to describe a
+    /// preset before a feature exists, and - because the passthrough upscaler
+    /// must render at the size the vendor would have chosen while making no
+    /// vendor call at all - as that upscaler's plan. So these are the SDK's own
+    /// ratios, not round numbers: Balanced is 1/1.724, which is what NGX's
+    /// optimal-settings query answers (2560x1490 -> 1485x864, measured on driver
+    /// 615.71.09); 1/1.7 put it 21 pixels wide of the vendor and cost the
+    /// comparison its size-for-size claim. For DLSS itself the real number
+    /// always comes from the query, published as
+    /// <see cref="UpscalerRenderScale" />.
+    /// </summary>
+    private static readonly float[] UpscalerQualityRenderScales =
+        { 1.0f, 1.0f / 1.5f, 1.0f / 1.724f, 0.5f, 1.0f / 3.0f };
+
+    /// <summary>
+    /// Set by the renderer when the selected upscaler cannot come up - no native
+    /// shim, no NGX, no supported GPU, a feature that refused to create. The
+    /// upscaler stays off for the rest of the session and the frame runs exactly
+    /// as it does with the setting off; it is never a hard failure and never an
+    /// abort. Returns true the first time only, so the renderer logs one line.
+    /// </summary>
+    public static bool UpscalerRuntimeDisabled { get; private set; }
+
+    public static bool DisableUpscalerAtRuntime()
+    {
+        if (UpscalerRuntimeDisabled) return false;
+        UpscalerRuntimeDisabled = true;
+        return true;
+    }
+
+    /// <summary>
+    /// Clears the stand-down. Only the tests call it - they exercise the failure
+    /// path in a process that then has to go on running the other cases - because
+    /// in the client the stand-down is meant to last the session: NGX allows
+    /// exactly one lifetime per process, so a second attempt is not something a
+    /// running client may make.
+    /// </summary>
+    public static void ResetUpscalerRuntimeDisabledForTests()
+    {
+        UpscalerRuntimeDisabled = false;
+    }
+
+    /// <summary>
+    /// The upscaler actually in effect: the setting unless the renderer stood it
+    /// down at runtime. Like TAA and the Vulkan renderer selection this is a
+    /// renderer-level feature, so a missing launcher shader scan must not
+    /// disable it - there is no shader of ours involved at all.
+    /// </summary>
+    public static string EffectiveUpscaler => UpscalerRuntimeDisabled ? "off" : Upscaler;
+
+    /// <summary>Whether DLSS Super Resolution is the upscaler in effect.</summary>
+    public static bool EffectiveUpscalerIsDlss =>
+        string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the passthrough comparison upscaler is the one in effect. It is in the
+    /// slot DLSS is in and takes the identical path; only the evaluate differs.
+    /// </summary>
+    public static bool EffectiveUpscalerIsPassthrough =>
+        string.Equals(EffectiveUpscaler, "passthrough", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the temporal pipeline runs at all this frame: the scene is
+    /// jittered and motion vectors are written, for whichever consumer owns the
+    /// resolve - the in-house TAA resolve or an upscaler that replaces it. This
+    /// is the flag every shader variant, UBO and motion writer is built against;
+    /// <see cref="EffectiveTaa" /> alone means "our own resolve runs", which is a
+    /// different question and the wrong one for anything that produces the
+    /// inputs.
+    /// </summary>
+    public static bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa;
+
+    /// <summary>
+    /// Whether anything actually <i>accumulates</i> the frames the temporal
+    /// pipeline produces - which is a narrower question than
+    /// <see cref="EffectiveTemporalPipeline" /> and the right one for any input
+    /// that is deliberately varied per frame so a history can average it.
+    ///
+    /// <para>The passthrough upscaler is the whole difference between the two. It
+    /// owns the resolve exactly as DLSS does, so the pipeline is on - the scene is
+    /// jittered, motion vectors are written and <c>TAAMOTION</c> is stamped 1 - but
+    /// its "evaluate" is a magnifying blit and it reconstructs nothing. A term that
+    /// changes every frame with no accumulator behind it is not converging noise,
+    /// it is flicker; and on this path it would also corrupt the one measurement
+    /// the passthrough slot exists to make, because the frame would then differ
+    /// from the DLSS frame in more than the reconstruction.</para>
+    ///
+    /// <para>With the in-house resolve or a reconstructing upscaler (DLSS, and the
+    /// FSR/XeSS slots when they land) this is true; with the passthrough slot, or
+    /// with nothing temporal at all, it is false. Note that
+    /// <see cref="EffectiveTaa" /> is not the test: the TAA setting can be on while
+    /// an upscaler stands our resolve down, so the config flag alone says nothing
+    /// about whether a history is being written.</para>
+    /// </summary>
+    public static bool EffectiveTemporalAccumulation =>
+        EffectiveTemporalPipeline && !EffectiveUpscalerIsPassthrough;
+
+    /// <summary>
+    /// Whether an upscaler owns the temporal resolve this session. It is the one
+    /// question the render chain asks: with it true the in-house TAA resolve, the
+    /// TAA sharpen pass and the FSR 1 blit do not run (the upscaler does all
+    /// three jobs), while the jitter stays on because the upscaler needs it.
+    /// </summary>
+    public static bool UpscalerReplacesTaa => EffectiveUpscalerIsDlss || EffectiveUpscalerIsPassthrough;
+
+    /// <summary>
+    /// Whether the temporal window is open this frame - the one expression
+    /// <c>ClientMain.MainRenderLoop</c> assigns to
+    /// <c>OptimumTemporal.Frame.JitterActive</c>.
+    ///
+    /// The developer switch wins over everything (it exists to jitter with nothing
+    /// resolving). Otherwise an upscaler that owns the resolve decides for itself,
+    /// through <see cref="UpscalerJitter" />, because the passthrough experiment needs
+    /// to render at the upscaler's ratio with the grid standing still; with no
+    /// upscaler the answer is the one it always was, our own resolve.
+    /// </summary>
+    public static bool JitterWindowOpen =>
+        TaaJitterDev || (UpscalerReplacesTaa ? UpscalerJitter : EffectiveTaa);
+
+    /// <summary>
     /// Which renderer the client runs: "opengl", "vulkan", or "auto".
     ///
     /// OpenGL is the default and stays so until the Vulkan backend reaches
@@ -552,8 +777,205 @@ public static class OptimumConfig
             {
                 bias += Math.Clamp(TaaMipBias, -2.0f, 1.0f);
             }
+            // An upscaler owns this term instead: it renders at its own ratio, not
+            // at RenderScale, and every vendor asks for the same bias,
+            // log2(render / display) - 1. The renderer publishes the value from the
+            // ratio the SDK's optimal-settings query actually returned, so the two
+            // terms never stack: with an upscaler active, its bias is the bias.
+            //
+            // "A plan is published" is UpscalerRenderScale, never the bias: the bias is
+            // legitimately 0 at DLAA (render size == display size, so log2 of the ratio
+            // is 0) and reachable at any preset with the offset slider, and at 0 the old
+            // test fell through and left RenderScale's term plus TaaMipBias standing -
+            // a -1 bias on a frame rendered at the display resolution. Only
+            // SetUpscalerPlan raises the scale and only ClearUpscalerPlan puts it back
+            // to 0, which is exactly the question being asked here.
+            if (UpscalerReplacesTaa && UpscalerRenderScale > 0f)
+            {
+                bias = Math.Clamp(UpscalerLodBias, -3.0f, 1.0f);
+            }
             return bias;
         }
+    }
+
+    /// <summary>
+    /// The atlas textures the LOD bias is applied to, registered by the client
+    /// (ChunkRenderer knows them; nothing else does) so that every caller of
+    /// <c>ShaderRegistry.ApplyOptimumLodBias</c> - the per-frame poll, the shader
+    /// load and the renderer, the moment an upscaler publishes a plan - biases
+    /// the same set. Empty until the client has registered one, which is why
+    /// <see cref="NoteTerrainLodBiasApplied" /> refuses to record an application
+    /// that reached no atlas.
+    /// </summary>
+    public static int[] LodBiasedAtlases { get; private set; } = Array.Empty<int>();
+
+    /// <summary>Registers the atlas textures the bias applies to. Null is empty.</summary>
+    public static void RegisterLodBiasedAtlases(int[] textureIds)
+    {
+        LodBiasedAtlases = textureIds ?? Array.Empty<int>();
+    }
+
+    /// <summary>
+    /// The bias the atlas textures and the terrain sampler objects are really
+    /// carrying, or NaN for "Optimum has never touched the parameter" - which is
+    /// the state that keeps the upscaler-off, TAA-off, native-scale configuration
+    /// from making a single TexParameter/SamplerParameter call.
+    /// </summary>
+    public static float AppliedTerrainLodBias { get; private set; } = float.NaN;
+
+    /// <summary>
+    /// Whether <see cref="EffectiveTerrainLodBias" /> has moved away from what the
+    /// samplers carry. A bias of 0 is pending only when something non-zero was
+    /// applied before and has to be taken back off.
+    /// </summary>
+    public static bool TerrainLodBiasPending()
+    {
+        float bias = EffectiveTerrainLodBias;
+        if (bias == 0f) return !float.IsNaN(AppliedTerrainLodBias);
+        return float.IsNaN(AppliedTerrainLodBias) ||
+            Math.Abs(bias - AppliedTerrainLodBias) >= 0.0001f;
+    }
+
+    /// <summary>
+    /// Records what the two call sites just wrote. 0 records NaN again: the
+    /// parameter is back at the driver default and must not be written a second
+    /// time. <paramref name="reachedAtlases" /> false leaves the value pending, so
+    /// a re-apply that ran before the client registered its atlases (the renderer
+    /// publishing a plan on the first frame) is finished by the next per-frame
+    /// poll rather than silently skipped.
+    /// </summary>
+    public static void NoteTerrainLodBiasApplied(float bias, bool reachedAtlases)
+    {
+        if (!reachedAtlases && bias != 0f) return;
+        AppliedTerrainLodBias = bias == 0f ? float.NaN : bias;
+    }
+
+    /// <summary>
+    /// Forgets what the samplers carry, so the next apply writes the parameter
+    /// again: new sampler objects after a shader reload, a new atlas texture, or
+    /// a test that wants the first application back.
+    /// </summary>
+    public static void InvalidateTerrainLodBias()
+    {
+        AppliedTerrainLodBias = float.NaN;
+    }
+
+    /// <summary>
+    /// The texture LOD bias the active upscaler asks for, published by the
+    /// renderer when it creates the feature, and 0 whenever no upscaler is
+    /// running. Not persisted: it is derived from the render and display sizes
+    /// the vendor query returned, never from a config file.
+    /// </summary>
+    public static float UpscalerLodBias { get; private set; }
+
+    /// <summary>
+    /// The bias every current vendor SDK recommends for an upscaled frame:
+    /// <c>log2(renderWidth / displayWidth) - <see cref="UpscalerLodBiasOffset" /></c>
+    /// (DLSS Programming Guide §3.5, and the same formula in the FSR and XeSS
+    /// guides, whose recommended offset is the default 1). 0 when the two
+    /// sizes are equal (DLAA), which is also the value that means "leave the
+    /// sampler parameter alone".
+    /// </summary>
+    public static float RecommendedUpscalerLodBias(int renderWidth, int displayWidth)
+    {
+        if (renderWidth <= 0 || displayWidth <= 0 || renderWidth >= displayWidth) return 0f;
+        return RecommendedUpscalerLodBiasForScale((float)renderWidth / displayWidth);
+    }
+
+    /// <summary>
+    /// The same bias from a ratio rather than a pair of widths, which is what the
+    /// published plan (<see cref="UpscalerRenderScale" />) and the settings row
+    /// have. <c>log2(scale)</c> is the guide's hard upper bound for the bias, so
+    /// the offset is clamped into [0, 1] and the result is capped at the bound
+    /// itself: neither a hand-edited config nor a rounded slider value can make
+    /// the samplers select a sharper mip than the ratio allows.
+    /// </summary>
+    public static float RecommendedUpscalerLodBiasForScale(float renderScale)
+    {
+        if (!(renderScale > 0f) || renderScale >= 1.0f) return 0f;
+        float bound = MathF.Log2(renderScale);
+        float offset = Math.Clamp(UpscalerLodBiasOffset, 0f, 1.0f);
+        return MathF.Min(bound - offset, bound);
+    }
+
+    /// <summary>
+    /// The bias the current preset would end up with, for the settings row to
+    /// show: the live plan's own ratio while an upscaler is running, and the
+    /// preset's nominal ratio before one is. 0 for DLAA and for "no upscaler".
+    /// </summary>
+    public static float PreviewUpscalerLodBias()
+    {
+        float scale = UpscalerRenderScale;
+        if (!(scale > 0f))
+        {
+            scale = NominalUpscalerRenderScale(UpscalerQuality);
+        }
+        return RecommendedUpscalerLodBiasForScale(scale);
+    }
+
+    /// <summary>The ratio a preset name nominally renders at; 1 for an unknown one.</summary>
+    public static float NominalUpscalerRenderScale(string quality)
+    {
+        for (int i = 0; i < UpscalerQualityNames.Length; i++)
+        {
+            if (string.Equals(UpscalerQualityNames[i], quality, StringComparison.OrdinalIgnoreCase))
+            {
+                return UpscalerQualityRenderScales[i];
+            }
+        }
+        return 1.0f;
+    }
+
+    /// <summary>
+    /// Re-derives the published plan's bias after <see cref="UpscalerLodBiasOffset" />
+    /// moved. The plan's ratio is unchanged - the render size, the vendor feature
+    /// and the temporal history are all untouched by this - so only the number the
+    /// samplers carry moves, and the caller finishes it with one
+    /// <c>ShaderRegistry.ApplyOptimumLodBias</c>. False when no plan is published,
+    /// or when the value did not move.
+    /// </summary>
+    public static bool RepublishUpscalerLodBias()
+    {
+        float bias = RecommendedUpscalerLodBiasForScale(UpscalerRenderScale);
+        if (bias == UpscalerLodBias) return false;
+        UpscalerLodBias = bias;
+        return true;
+    }
+
+    /// <summary>
+    /// The render scale the active upscaler really runs at - its render width
+    /// over the display width, from the vendor's own query - and 0 when no
+    /// upscaler is running. Not persisted, for the same reason
+    /// <see cref="UpscalerLodBias" /> is not.
+    /// </summary>
+    public static float UpscalerRenderScale { get; private set; }
+
+    /// <summary>
+    /// The render scale the temporal pipeline runs at, which is what the jitter
+    /// sequence length is derived from (temporal contract §2: the phase count is
+    /// ceil(8 * upscale^2)). With an upscaler active that is the vendor's ratio,
+    /// not the config's render scale - the two are different numbers and only one
+    /// of them describes the frame that is actually being rendered.
+    /// </summary>
+    public static float EffectiveTemporalRenderScale =>
+        UpscalerReplacesTaa && UpscalerRenderScale > 0f ? UpscalerRenderScale : EffectiveRenderScale;
+
+    /// <summary>
+    /// Publishes the plan the vendor query answered - one call, because the scale
+    /// and the bias describe the same feature and a consumer that saw one without
+    /// the other would jitter at one ratio and sample mips at another.
+    /// </summary>
+    public static void SetUpscalerPlan(float renderScale, float lodBias)
+    {
+        UpscalerRenderScale = renderScale;
+        UpscalerLodBias = lodBias;
+    }
+
+    /// <summary>Forgets the plan: no upscaler is running, so neither term applies.</summary>
+    public static void ClearUpscalerPlan()
+    {
+        UpscalerRenderScale = 0f;
+        UpscalerLodBias = 0f;
     }
 
     // Like the Vulkan renderer selection, TAA is a renderer-level feature: a
@@ -797,6 +1219,11 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.TaaMipBias), TaaMipBias.ToString("F2")),
         (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
         (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
+        (nameof(OptimumConfigData.Upscaler), Upscaler),
+        (nameof(OptimumConfigData.UpscalerQuality), UpscalerQuality),
+        (nameof(OptimumConfigData.UpscalerLodBiasOffset), UpscalerLodBiasOffset.ToString("F2")),
+        (nameof(OptimumConfigData.UpscalerPassthroughFilter), UpscalerPassthroughFilter),
+        (nameof(OptimumConfigData.UpscalerJitter), UpscalerJitter.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -909,6 +1336,35 @@ public static class OptimumConfig
             TaaMipBias = Math.Clamp(data.TaaMipBias, -2f, 1f);
             TaaDebugView = Math.Max(0, data.TaaDebugView);
             TaaJitterDev = data.TaaJitterDev;
+            // The upscaler names a vendor library, so an unrecognised value means
+            // "off" rather than a parse failure: a hand-edited config can never
+            // leave the client trying to load something that does not exist.
+            string requestedUpscaler = data.Upscaler?.Trim() ?? "";
+            Upscaler =
+                string.Equals(requestedUpscaler, "dlss", StringComparison.OrdinalIgnoreCase) ? "dlss" :
+                string.Equals(requestedUpscaler, "passthrough", StringComparison.OrdinalIgnoreCase) ? "passthrough" :
+                "off";
+            // Same rule for the preset, degrading to the safest one rather than off:
+            // the preset only chooses a render resolution, so an unknown name must
+            // not silently turn the upscaler off as well.
+            string requestedUpscalerQuality = data.UpscalerQuality?.Trim() ?? "";
+            UpscalerQuality =
+                string.Equals(requestedUpscalerQuality, "dlaa", StringComparison.OrdinalIgnoreCase) ? "dlaa" :
+                string.Equals(requestedUpscalerQuality, "balanced", StringComparison.OrdinalIgnoreCase) ? "balanced" :
+                string.Equals(requestedUpscalerQuality, "performance", StringComparison.OrdinalIgnoreCase) ? "performance" :
+                string.Equals(requestedUpscalerQuality, "ultraperformance", StringComparison.OrdinalIgnoreCase) ? "ultraperformance" :
+                "quality";
+            // The guide's bound is log2(render / display); the offset may only make
+            // the bias less aggressive, never more, so a hand-edited file is clamped
+            // into [0, 1] here and the bias computation caps it again.
+            UpscalerLodBiasOffset = Math.Clamp(data.UpscalerLodBiasOffset, 0f, 1.0f);
+            // Same defensive rule again: the passthrough filter degrades to linear and
+            // the debug jitter switch is a plain bool, so neither can fail the parse.
+            string requestedPassthroughFilter = data.UpscalerPassthroughFilter?.Trim() ?? "";
+            UpscalerPassthroughFilter =
+                string.Equals(requestedPassthroughFilter, "nearest", StringComparison.OrdinalIgnoreCase) ? "nearest" :
+                "linear";
+            UpscalerJitter = data.UpscalerJitter;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -984,6 +1440,11 @@ public static class OptimumConfig
             TaaMipBias = TaaMipBias,
             TaaDebugView = TaaDebugView,
             TaaJitterDev = TaaJitterDev,
+            Upscaler = Upscaler,
+            UpscalerQuality = UpscalerQuality,
+            UpscalerLodBiasOffset = UpscalerLodBiasOffset,
+            UpscalerPassthroughFilter = UpscalerPassthroughFilter,
+            UpscalerJitter = UpscalerJitter,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -1067,6 +1528,11 @@ internal sealed class OptimumConfigData
     public float TaaMipBias { get; set; } = -0.5f;
     public int TaaDebugView { get; set; } = 0;
     public bool TaaJitterDev { get; set; } = false;
+    public string Upscaler { get; set; } = "off";
+    public string UpscalerQuality { get; set; } = "quality";
+    public float UpscalerLodBiasOffset { get; set; } = 1.0f;
+    public string UpscalerPassthroughFilter { get; set; } = "linear";
+    public bool UpscalerJitter { get; set; } = true;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

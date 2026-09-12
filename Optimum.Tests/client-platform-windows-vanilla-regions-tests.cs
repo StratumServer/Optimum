@@ -31,7 +31,11 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "BindProgramTextureCube", "BindSampler", "BindUBO", "ClearBoundFrameBuffer", "ClearDefaultDepth",
         "ClearFrameBufferPass", "ClearSsaoTarget", "ClearTextureRegion", "CreateOitTargets",
         "CreateOptimumHistoryTargetGl", "DeleteMeshHandle", "DeleteOcclusionQuery", "DeleteUBO",
-        "DeleteVertexArrayHandles", "DisableOptimumFsr", "DisableOptimumTaa", "DisposeShaderProgram",
+        "DeleteVertexArrayHandles", "DisableOptimumFsr", "DisableOptimumTaa",
+        // DLSS plan, Phase 1: the display size (window client size) and the render size
+        // (Primary's allocated size), overrides of the ClientPlatformAbstract virtuals.
+        "DisplayHeight", "DisplayWidth",
+        "DisposeShaderProgram",
         "EnableMotionDrawBuffers", "EnableMotionOnlyDrawBuffers", "EndFrame", "EndMotionOnlyWrite",
         "EndMotionWrite", "EndOcclusionQuery", "EnsureOptimumDefaults", "EnsureOptimumTimerResolution",
         "GenOcclusionQuery", "GraphicsBackendName", "InstallOptimumMotionWriteHooks",
@@ -42,10 +46,21 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumParityReadTextureGl", "OptimumParitySlotName", "OptimumRenderSsao", "OptimumRunParityDump",
         "OptimumRunPendingTaaShaderReload", "OptimumSpinIterations", "OptimumSpinTailMinProcessorCount",
         "OptimumSsaoKernel", "OptimumTaaHistoryIndexA", "OptimumTaaHistoryIndexB", "OptimumTaaRequested",
-        "OptimumTaaSharpenIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
+        // DLSS plan, Phase 2: the temporal pipeline's shared questions and the
+        // upscaler's half of DisableOptimumTaa.
+        "OptimumTemporalRequested", "OptimumMotionWritesReady", "DisableOptimumUpscaler",
+        "OptimumTaaSharpenIndex",
+        // DLSS plan, Phase 3: the upscaler's placement in the frame - its
+        // display-resolution target, the per-frame flag, the platform questions the
+        // Vulkan platform answers and the screenshot redirect.
+        "OptimumUpscaledSceneIndex", "optimumUpscaledThisFrame", "OptimumUpscalerActive",
+        "optimumUpscaleSsaoApplied", "ApplyOptimumUpscaleSsao",
+        "OptimumTryPlanUpscaleRenderSize", "RenderOptimumUpscale", "OptimumCompositeFrameBuffer",
+        "OptimumUpscaledThisFrame", "OptimumBindCompositeForCapture",
+        "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
-        "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderOptimumSkyMotion",
-        "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RestorePrimaryDrawBuffers",
+        "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",
+        "RenderOptimumTaaResolve", "RenderOptimumTaaSharpen", "RenderWidth", "RestorePrimaryDrawBuffers",
         "RestoreWorldDrawBuffers", "SelectBackDrawBuffer", "SelectFsrDrawBuffer", "SetBlendEnabled",
         "SetDepthRange", "SetOptimumMotionAttachmentIndex", "SetProgramSamplerUnit", "SetSamplerLodBias",
         "SetTextureDepthCompare", "SetTextureLodBias", "SetUniform", "SetUniformArray1", "SetUniformArray2",
@@ -58,6 +73,11 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "optimumMotionWriteActive", "optimumParityDumpDone", "optimumParityWorldFrames",
         "optimumTaaDisabled", "optimumTaaResolvedThisFrame", "optimumTaaShaderReloadPending",
         "optimumTaaTargetsReady", "taaResolvedColorTexture", "taaResolvedGlowTexture",
+        // Headless render harness: the per-frame hook, its own in-world frame counter,
+        // the chat-command script dispatch and the presented-frame readback.
+        "OptimumHeadlessTick", "OptimumHeadlessRunCommands", "OptimumHeadlessRunCommand",
+        "OptimumHeadlessCaptureFrame", "optimumHeadlessWorldFrames", "optimumHeadlessCommandsDone",
+        "optimumHeadlessCaptureDone", "optimumHeadlessFramesWritten",
 
         // Vanilla members with an Optimum edit (the patcher transplant targets and the members
         // it virtualizes in place: base edits, FSR/TAA/post chain, frame pacing, mesh bulk copy),
@@ -67,7 +87,11 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "DisposeFrameBuffers", "GetGraphicsCardRenderer", "GlGetMaxTextureSize", "GlToggleBlend",
         "LoadFrameBuffer", "LogAndTestHardwareInfosStage2", "MergeTransparentRenderPass", "MouseGrabbed",
         "Mouse_WheelChanged", "RebuildFrameBuffers", "RenderFinalComposition", "RenderFullscreenTriangle",
-        "RenderPostprocessingEffects", "SetupDefaultFrameBuffers", "Start", "UnloadFrameBuffer",
+        "RenderPostprocessingEffects", "SaveScreenshot", "GrabScreenshot",
+        "SetupDefaultFrameBuffers", "Start", "UnloadFrameBuffer",
+        // The headless harness runs silent: the mixer is created muted and every
+        // attempt to restore the volume is answered with silence.
+        "StartAudio", "MasterSoundLevel",
         "UpdateMesh", "UpdateSSBOMesh", "Window_Resize", "updateIndices", "updateVAO", "window_RenderFrame",
 
         // Compile fix-ups only: decompiler artefacts the donor tree rewrites to build

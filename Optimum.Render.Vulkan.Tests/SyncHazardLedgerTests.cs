@@ -121,7 +121,16 @@ public class SyncHazardLedgerTests
             if (!seen.Add(key)) problems.Add(key + ": listed twice");
             if (!entry.Id.StartsWith("SYNC-", StringComparison.Ordinal)) problems.Add(key + ": not a SYNC- id");
             if (string.IsNullOrWhiteSpace(entry.Defect)) problems.Add(key + ": no defect named");
-            if (entry.RetiredBy is not ("1B" or "2")) problems.Add(key + ": retiring phase must be 1B or 2");
+            if (entry.RetiredBy is not ("1B" or "2" or "vendor"))
+            {
+                problems.Add(key + ": retiring phase must be 1B, 2 or vendor");
+            }
+            // A "vendor" entry claims the hazard is not ours at all, so it has to
+            // carry the evidence rather than a one-liner.
+            if (entry.RetiredBy == "vendor" && entry.Defect.Length < 120)
+            {
+                problems.Add(key + ": a vendor entry must name both sides of the hazard and the evidence");
+            }
 
             Type? type = assembly.GetType("Optimum.Render.Vulkan.Tests." + entry.TestClass);
             MethodInfo? method = type?.GetMethod(entry.TestMethod, BindingFlags.Public | BindingFlags.Instance);

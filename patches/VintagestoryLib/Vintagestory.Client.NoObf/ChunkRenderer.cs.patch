@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..2e2e836 100644
+index 431e51a..5e6f4f4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -14,7 +14,7 @@ index 431e51a..2e2e836 100644
  namespace Vintagestory.Client.NoObf;
  
  public class ChunkRenderer
-@@ -40,10 +42,40 @@ public class ChunkRenderer
+@@ -40,10 +42,34 @@ public class ChunkRenderer
  
  	private float lastSetRainFall;
  
@@ -34,12 +34,6 @@ index 431e51a..2e2e836 100644
 +	internal List<ModelDataPoolLocation> centerPoolLocationsScratch;
 +	internal List<ModelDataPoolLocation> edgePoolLocationsScratch;
 +
-+	// NaN means "Optimum has never touched the atlas LOD bias", which is what
-+	// keeps the TAA-off, native-scale configuration from making a single
-+	// TexParameter/SamplerParameter call: a 0f initialiser would make the first
-+	// frame write an explicit bias of 0 over the driver default.
-+	private float optimumTextureLodBias = float.NaN;
-+
 +	/// <summary>
 +	/// Optimum TAA (P4): the reactive value the liquid velocity pass stamps into
 +	/// the motion attachment's blue channel. Foam, the flow-UV scroll and the
@@ -55,65 +49,80 @@ index 431e51a..2e2e836 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +137,57 @@ public class ChunkRenderer
+@@ -105,10 +131,72 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
  		}
  		this.textureIds = textureIds;
-+		optimumTextureLodBias = float.NaN;
++		// A new atlas texture carries the driver default, so the applied bias is
++		// forgotten and the next per-frame poll writes it to the whole set again.
++		Vintagestory.API.Config.OptimumConfig.InvalidateTerrainLodBias();
 +	}
 +
 +	private void ApplyOptimumTextureLodBias()
 +	{
-+		// Only apply a LOD bias when something asks for one: FSR (render scale
-+		// below 1) or TAA (OptimumConfig.TaaMipBias, since the jitter supplies
-+		// the sub-pixel samples a sharper mip needs). The two add, and both
-+		// terms live in OptimumConfig.EffectiveTerrainLodBias so this and the
-+		// sampler objects ShaderRegistry sets cannot drift apart.
++		// The per-frame poll. It is not the only driver any more - the renderer
++		// re-applies the moment an upscaler publishes or clears a plan, and the
++		// shader load applies to freshly created sampler objects - but it is the
++		// one that owns the atlas list, so it registers it before every apply:
++		// the atlases change at runtime (RuntimeAddBlockTextureAtlas) and the
++		// entity atlas does not exist yet when this renderer is constructed.
 +		//
-+		// At a total of 0 - TAA off and render scale 1.0 - no TexParameter call
-+		// is made at all, which is what keeps that configuration identical to
-+		// vanilla.
-+		float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias;
-+		if (textureLodBias == 0f)
-+		{
-+			if (!float.IsNaN(optimumTextureLodBias))
-+			{
-+				SetOptimumTextureLodBias(0f);
-+				optimumTextureLodBias = float.NaN;
-+			}
-+			return;
-+		}
-+		if (Math.Abs(textureLodBias - optimumTextureLodBias) < 0.0001f)
++		// Only a value that moved costs anything; at a bias of 0 - no upscaler,
++		// TAA off, render scale 1.0 - no TexParameter call is ever made, which is
++		// what keeps that configuration identical to vanilla.
++		if (!Vintagestory.API.Config.OptimumConfig.TerrainLodBiasPending())
 +		{
 +			return;
 +		}
-+		SetOptimumTextureLodBias(textureLodBias);
-+		optimumTextureLodBias = textureLodBias;
++		Vintagestory.API.Config.OptimumConfig.RegisterLodBiasedAtlases(CollectOptimumLodBiasedAtlases());
++		ShaderRegistry.ApplyOptimumLodBias();
 +	}
 +
 +	/// <summary>
-+	/// Optimum: applies a texture LOD bias to every block atlas.
++	/// Optimum: the atlas textures that follow the LOD bias - every block atlas
++	/// and every entity atlas.
 +	///
-+	/// The platform applies it (ClientPlatformWindows.SetTextureLodBias binds each
-+	/// texture to unit 0 and sets the parameter on the binding).
++	/// Both are world geometry sampled with screen-space derivatives, so both
++	/// alias the same way when the frame is rendered below the display size and
++	/// both want the same bias (DLSS Programming Guide section 3.5). The item
++	/// atlas is deliberately not here: it is the same case in the world but the
++	/// same texture is what the GUI draws inventory icons from, at display
++	/// resolution, where a negative bias only adds aliasing.
++	///
++	/// Built only when the bias actually moved, so this allocates on a settings
++	/// or preset change and never per frame.
 +	/// </summary>
-+	private void SetOptimumTextureLodBias(float bias)
++	private int[] CollectOptimumLodBiasedAtlases()
 +	{
-+		// The chunkopaque/chunktopsoil sampler objects override the texture
-+		// parameter on the units they are bound to, so setting it here alone
-+		// would move the mip selection of every OTHER terrain pass and leave the
-+		// two that carry the bias in their name untouched until the next shader
-+		// reload. Both halves move together or neither does.
-+		ShaderRegistry.ApplyOptimumTerrainSamplerLodBias(bias);
-+		game.Platform.SetTextureLodBias(textureIds, bias);
++		int count = textureIds.Length;
++		EntityTextureAtlasManager entityAtlases = game.EntityAtlasManager;
++		List<LoadedTexture> entityTextures = ((entityAtlases != null) ? entityAtlases.AtlasTextures : null);
++		if (entityTextures != null)
++		{
++			count += entityTextures.Count;
++		}
++		int[] ids = new int[count];
++		int next = 0;
++		for (int i = 0; i < textureIds.Length; i++)
++		{
++			ids[next++] = textureIds[i];
++		}
++		if (entityTextures != null)
++		{
++			for (int j = 0; j < entityTextures.Count; j++)
++			{
++				ids[next++] = entityTextures[j].TextureId;
++			}
++		}
++		return ids;
  	}
  
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -142,10 +221,16 @@ public class ChunkRenderer
+@@ -142,10 +230,16 @@ public class ChunkRenderer
  		culler.CullInvisibleChunks();
  	}
  
@@ -130,7 +139,7 @@ index 431e51a..2e2e836 100644
  		subPixelPaddingX = game.BlockAtlasManager.SubPixelPaddingX;
  		subPixelPaddingY = game.BlockAtlasManager.SubPixelPaddingY;
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
-@@ -170,10 +255,11 @@ public class ChunkRenderer
+@@ -170,10 +264,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -142,7 +151,7 @@ index 431e51a..2e2e836 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,23 +294,59 @@ public class ChunkRenderer
+@@ -208,23 +303,59 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -153,7 +162,9 @@ index 431e51a..2e2e836 100644
 +		// At 60-270 blocks a chunk subtends 1-3 texels in the 1024² shadow map;
 +		// thin foliage casts no resolvable shadow at that distance.
 +		if (!ClientSettings.OptimumShadowFarVegetation || game.currentRenderStage != EnumRenderStage.ShadowFar)
-+		{
+ 		{
+-			chunkshadowmap.Tex2d2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
 +			OptimumDiagnostics.ShadowFarVegetation.Hit();
 +			for (int k = 0; k < textureIds.Length; k++)
 +			{
@@ -162,9 +173,7 @@ index 431e51a..2e2e836 100644
 +			}
 +		}
 +		else
- 		{
--			chunkshadowmap.Tex2d2D = textureIds[k];
--			poolsByRenderPass[2][k].Render(cameraPos, "origin", frustumCullMode);
++		{
 +			OptimumDiagnostics.ShadowFarVegetation.Skip();
  		}
  		for (int l = 0; l < textureIds.Length; l++)
@@ -205,7 +214,7 @@ index 431e51a..2e2e836 100644
  		Vec3d cameraPos = game.EntityPlayer.CameraPos;
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-begin");
  		platform.GlDepthMask(flag: true);
-@@ -232,105 +354,132 @@ public class ChunkRenderer
+@@ -232,105 +363,132 @@ public class ChunkRenderer
  		platform.GlToggleBlend(on: true);
  		platform.GlEnableCullFace();
  		game.GlMatrixModeModelView();
@@ -229,7 +238,13 @@ index 431e51a..2e2e836 100644
 -		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
 -		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
 -		for (int i = 0; i < textureIds.Length; i++)
--		{
++		// Optimum TAA (P3): every chunk draw in this method writes motion
++		// vectors, so the motion attachment joins Primary's draw-buffer mask for
++		// the whole pass and leaves it again below. A no-op when TAA is off.
++		ClientPlatformAbstract optimumPlatform = platform;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
++		try
+ 		{
 -			chunkopaque.TerrainTex2D = textureIds[i];
 -			chunkopaque.TerrainTexLinear2D = textureIds[i];
 -			poolsByRenderPass[0][i].Render(cameraPos, "origin");
@@ -276,13 +291,7 @@ index 431e51a..2e2e836 100644
 -		chunkopaque.AlphaTest = 0.42f;
 -		chunkopaque.HaxyFade = 1;
 -		for (int l = 0; l < textureIds.Length; l++)
-+		// Optimum TAA (P3): every chunk draw in this method writes motion
-+		// vectors, so the motion attachment joins Primary's draw-buffer mask for
-+		// the whole pass and leaves it again below. A no-op when TAA is off.
-+		ClientPlatformAbstract optimumPlatform = platform;
-+		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
-+		try
- 		{
+-		{
 -			chunkopaque.TerrainTex2D = textureIds[l];
 -			chunkopaque.TerrainTexLinear2D = textureIds[l];
 -			poolsByRenderPass[1][l].Render(cameraPos, "origin");
@@ -425,7 +434,7 @@ index 431e51a..2e2e836 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,51 +551,187 @@ public class ChunkRenderer
+@@ -402,51 +560,189 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -474,7 +483,9 @@ index 431e51a..2e2e836 100644
 +	/// </summary>
 +	internal void RenderLiquidMotion(float deltaTime)
 +	{
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
++		// Optimum (DLSS plan, Phase 2): the liquid velocity pass feeds the motion
++		// attachment, which both temporal consumers read.
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTemporalPipeline)
 +		{
 +			return;
 +		}

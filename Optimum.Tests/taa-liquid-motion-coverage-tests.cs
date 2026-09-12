@@ -167,8 +167,7 @@ public class TaaLiquidMotionCoverageTests
         Assert.True(drawBuffers > begin);
         string guards = platform.Substring(begin, drawBuffers - begin);
         Assert.Contains("if (OptimumMotionWriteActive) return false;", guards);
-        Assert.Contains("if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;", guards);
-        Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;", guards);
+        Assert.Contains("if (!OptimumMotionWritesReady) return false;", guards);
         Assert.Contains("if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;", guards);
 
         // Replace blending on the motion attachment, same as the P3 window.
@@ -193,7 +192,7 @@ public class TaaLiquidMotionCoverageTests
         string pass = MethodBodyAfter(chunk, "internal void RenderLiquidMotion(float deltaTime)");
 
         // Off entirely with TAA off, and never without the window.
-        Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa)", pass);
+        Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.EffectiveTemporalPipeline)", pass);
         Assert.Contains("if (!optimumPlatform.BeginMotionOnlyWrite())", pass);
         Assert.Contains("optimumPlatform.EndMotionOnlyWrite();", pass);
         // Closed on every path, including a throwing draw.

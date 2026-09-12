@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 67feafa..4037dee 100644
+index 67feafa..6dba7c3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -400,7 +400,7 @@ index 67feafa..4037dee 100644
  			timelapse = 0f;
  			timelapsedCurrent = 0f;
  			timelapseEnd = float.MaxValue;
-@@ -1122,10 +1326,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1122,10 +1326,26 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			Platform.ThreadSpinWait(10000000);
  		}
  		shUniforms.Update(dt, api);
@@ -411,14 +411,23 @@ index 67feafa..4037dee 100644
 +		// pass - including the LiquidDepth prepass in the Before stage - sees one
 +		// consistent snapshot and the same jitter.
 +		FrameBufferRef primaryFb = ((Platform.FrameBuffers != null && Platform.FrameBuffers.Count > 0) ? Platform.FrameBuffers[0] : null);
-+		OptimumTemporal.Frame.Advance(dt * 1000f, (primaryFb != null) ? primaryFb.Width : Width, (primaryFb != null) ? primaryFb.Height : Height, OptimumConfig.EffectiveRenderScale, MainCamera.ZNear, MainCamera.ZFar, MainCamera.Fov, shUniforms);
-+		OptimumTemporal.Frame.JitterActive = OptimumConfig.EffectiveTaa || OptimumConfig.TaaJitterDev;
++		// Optimum (DLSS plan, Phase 2): the render scale the jitter sequence is
++		// derived from is the one the frame is really rendered at - an upscaler's
++		// own ratio, from its vendor query, whenever one owns the resolve - and the
++		// temporal window is open for an upscaler exactly as it is for our resolve,
++		// because an upscaler needs the jitter just as much.
++		OptimumTemporal.Frame.Advance(dt * 1000f, (primaryFb != null) ? primaryFb.Width : Width, (primaryFb != null) ? primaryFb.Height : Height, OptimumConfig.EffectiveTemporalRenderScale, MainCamera.ZNear, MainCamera.ZFar, MainCamera.Fov, shUniforms);
++		// One expression, and it lives in OptimumConfig.JitterWindowOpen: the upscaler
++		// comparison experiment (the passthrough slot) needs to render at the upscaler's
++		// ratio with the jitter switched off, which is a decision about the whole
++		// temporal window rather than about this call site.
++		OptimumTemporal.Frame.JitterActive = OptimumConfig.JitterWindowOpen;
  		TriggerRenderStage(EnumRenderStage.Before, dt);
  		Platform.GlEnableDepthTest();
  		Platform.GlDepthMask(flag: true);
  		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
  		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
-@@ -1140,10 +1351,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1140,10 +1360,24 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		}
  		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
  		GlMatrixModeModelView();
@@ -443,7 +452,7 @@ index 67feafa..4037dee 100644
  		{
  			PerspectiveProjectionMat[i] = top[i];
  			PerspectiveViewMat[i] = top2[i];
-@@ -1176,14 +1401,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1176,14 +1410,43 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Platform.GlDepthMask(flag: true);
  		Platform.GlEnableDepthTest();
  		Platform.GlCullFaceBack();
@@ -487,7 +496,7 @@ index 67feafa..4037dee 100644
  			dt = DeltaTimeLimiter;
  		}
  		TriggerRenderStage(EnumRenderStage.AfterPostProcessing, dt);
-@@ -1420,10 +1674,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1420,10 +1683,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	{
  		float num = (float)Platform.WindowSize.Width / (float)Platform.WindowSize.Height;
  		Mat4d.Perspective(set3DProjectionTempMat4, fov, num, MainCamera.ZNear, zfar);
@@ -502,7 +511,7 @@ index 67feafa..4037dee 100644
  		GlMatrixModeModelView();
  	}
  
-@@ -1565,21 +1823,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1565,21 +1832,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			GlOrtho(0.0, width, height, 0.0, 0.4000000059604645, 20001.0);
  		}
  		GlMatrixModeModelView();
@@ -526,7 +535,7 @@ index 67feafa..4037dee 100644
  	public void Connect()
  	{
  		Compression.Reset();
-@@ -2124,12 +2382,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2124,12 +2391,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -551,7 +560,23 @@ index 67feafa..4037dee 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2543,10 +2811,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2296,10 +2573,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		EntityAtlasManager.ResumeRegenMipmaps();
+ 		foreach (Block block in Blocks)
+ 		{
+ 			block.LoadTextureSubIdForBlockColor();
+ 		}
++		// Optimum: the atlases were just recomposed, so whatever LOD bias their
++		// textures carried went with them. Forgetting the applied value makes the
++		// next apply write it again (ChunkRenderer's per-frame poll, one frame
++		// later); at a bias of 0 it still writes nothing.
++		Vintagestory.API.Config.OptimumConfig.InvalidateTerrainLodBias();
+ 	}
+ 
+ 	public int WhiteTexture()
+ 	{
+ 		if (whitetexture == -1)
+@@ -2543,10 +2825,13 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		ShouldRedrawAllBlocks = true;
  	}
  
@@ -565,7 +590,7 @@ index 67feafa..4037dee 100644
  	}
  
  	public void DoReconnect()
-@@ -3531,6 +3802,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3531,6 +3816,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

@@ -49,12 +49,21 @@ internal sealed class RetireQueue
     /// </summary>
     public int Collect()
     {
-        if (PendingCount == 0) return 0;
-
         // Completion only moves forward, so counters read before taking the lock
         // are still true for every entry inside it.
-        ulong frameCompleted = _clock.FrameCompleted;
-        ulong transferCompleted = _clock.TransferCompleted;
+        return CollectThrough(_clock.FrameCompleted, _clock.TransferCompleted);
+    }
+
+    /// <summary>
+    /// <see cref="Collect" /> against explicit ceilings, for the one caller that
+    /// knows a Frame value is safe without the GPU having reached it: a frame that
+    /// was reserved and then abandoned never signals its value, so nothing the GPU
+    /// runs can ever name the resources retired inside it, and waiting for
+    /// <c>FrameCompleted</c> to pass that value would wait for ever.
+    /// </summary>
+    public int CollectThrough(ulong frameCompleted, ulong transferCompleted)
+    {
+        if (PendingCount == 0) return 0;
 
         List<IDisposable>? ready = null;
         lock (_lock)

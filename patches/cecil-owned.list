@@ -9,6 +9,7 @@
 # (Optimum.Patcher/Program.cs), not via a recompiled VintagestoryLib.dll.
 patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/AmbientManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch

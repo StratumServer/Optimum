@@ -113,7 +113,7 @@ public class TaaEntityMotionCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramEntityanimated.cs");
 
         Assert.Contains("ubos[\"Animation\"] = ScreenManager.Platform.CreateUBO(ProgramId, 0, \"Animation\"", shared);
-        Assert.Contains("if (!Oit && Vintagestory.API.Config.OptimumConfig.EffectiveTaa)", shared);
+        Assert.Contains("if (!Oit && Vintagestory.API.Config.OptimumConfig.EffectiveTemporalPipeline)", shared);
         Assert.Contains("ubos[\"AnimationPrev\"] = ScreenManager.Platform.CreateUBO(ProgramId, 1, \"AnimationPrev\"", shared);
 
         string fpHands = ReadPatchedOrSource(

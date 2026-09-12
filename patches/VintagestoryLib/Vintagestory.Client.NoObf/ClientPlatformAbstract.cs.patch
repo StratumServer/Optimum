@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-index d6eb844..4edec1c 100644
+index d6eb844..909e395 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformAbstract.cs
-@@ -327,14 +327,436 @@ public abstract class ClientPlatformAbstract
+@@ -327,14 +327,576 @@ public abstract class ClientPlatformAbstract
  
  	public abstract void ResetGamePauseAndUptimeState();
  
@@ -20,6 +20,68 @@ index d6eb844..4edec1c 100644
 +
 +	public virtual void ShutdownGraphics()
 +	{
++	}
++
++	// Optimum (DLSS plan, Phase 1): the frame's two resolutions, one source of truth each.
++	//
++	// RenderWidth/RenderHeight is what the world and every post-processing input is drawn
++	// at - today the window's client size times ClientSettings.SSAA, tomorrow an upscaler's
++	// input size, which is why no caller may recompute that product any more.
++	// DisplayWidth/DisplayHeight is the window's client size: the default framebuffer, the
++	// HUD and the final blit.
++	//
++	// The bodies here answer the window size for both, which is exactly right for a platform
++	// that owns no offscreen targets; ClientPlatformWindows overrides them with the allocated
++	// Primary target's size (the single carrier of the render size) and the live window size.
++	// Per-target sizes are on FrameBufferRef.Width/Height - a pass that has a target bound
++	// reads that, not these.
++	public virtual int RenderWidth
++	{
++		get
++		{
++			return WindowSize.Width;
++		}
++	}
++
++	public virtual int RenderHeight
++	{
++		get
++		{
++			return WindowSize.Height;
++		}
++	}
++
++	public virtual int DisplayWidth
++	{
++		get
++		{
++			return WindowSize.Width;
++		}
++	}
++
++	public virtual int DisplayHeight
++	{
++		get
++		{
++			return WindowSize.Height;
++		}
++	}
++
++	// Optimum (headless render harness): the channel order ReadDefaultFramebuffer
++	// leaves in the caller's buffer. The OpenGL path reads GL_BGRA, because that is
++	// what the screenshot path's SKBitmap wants. Every backend owes its callers the
++	// same order, so no platform overrides this: the Vulkan device's default colour
++	// target is R8G8B8A8_UNORM, and VulkanClientPlatform.ReadDefaultFramebuffer
++	// swaps red and blue on the way out (wave-1 review, 2026-09-12) rather than
++	// answering false here - answering false fixed the headless PPMs and left the
++	// screenshot key and the AVI recorder swapped. The headless frame writer reads
++	// this so a backend that ever does hand back R G B A can say so.
++	public virtual bool OptimumDefaultFramebufferIsBgra
++	{
++		get
++		{
++			return true;
++		}
 +	}
 +
 +	// Optimum TAA/FSR (Vulkan-native plan, Phase 1A step 2): the temporal members the
@@ -421,6 +483,84 @@ index d6eb844..4edec1c 100644
 +	// paces an unfocused window to the same number the client's own limiter would have used.
 +	// Neutral body; the OpenGL path does not override it.
 +	public virtual void SetLatencyFrameCap(int maxFps)
++	{
++	}
++
++	// DLSS plan, Phase 6: the three settings-tab seams, so the Optimum tab can change
++	// the upscaler slot, its quality preset and the latency mode while the game runs
++	// without knowing that a renderer backend exists at all.
++
++	/// <summary>
++	/// Optimum: why no upscaler can run on this platform, in one sentence, or null
++	/// when one can. The settings tab shows this instead of offering a choice the
++	/// frame would not honour.
++	///
++	/// The neutral answer is a reason, not null: a platform that does not override
++	/// this has no upscaler - the OpenGL path never will, and it is the one every
++	/// unpatched build runs. The Vulkan platform answers null while DLSS is up and
++	/// the host's own diagnosis otherwise ("the NVIDIA driver library is not
++	/// installed", "the NGX shim is not loadable", the runtime stand-down).
++	/// </summary>
++	public virtual string OptimumUpscalerUnavailable()
++	{
++		return Vintagestory.API.Config.Lang.Get("optimum-upscaler-unavailable-renderer");
++	}
++
++	/// <summary>
++	/// Optimum: the same question asked about one entry of the upscaler dropdown, so a
++	/// slot that needs no vendor library is not refused for a vendor library's absence.
++	///
++	/// The default forwards to <see cref="OptimumUpscalerUnavailable" />, which is the
++	/// right answer for every vendor slot and for a platform with no upscaler at all.
++	/// The Vulkan platform overrides it so that "passthrough" - the comparison
++	/// upscaler, which touches no vendor runtime - is offered whenever the Vulkan
++	/// renderer is running, even on a machine where DLSS cannot come up.
++	/// </summary>
++	public virtual string OptimumUpscalerUnavailableFor(string upscaler)
++	{
++		return OptimumUpscalerUnavailable();
++	}
++
++	/// <summary>
++	/// Optimum: the plan the upscaler is really serving this frame, in one line -
++	/// render size, display size, preset, render scale, texture LOD bias and jitter
++	/// phase count - or null when nothing is upscaling. The upscaling settings tab
++	/// shows it while the player judges a preset, so the numbers on screen are the
++	/// ones the frame used and never a prediction.
++	///
++	/// Neutral answer: null. A platform with no upscaler has no plan.
++	/// </summary>
++	public virtual string OptimumUpscalerPlan()
++	{
++		return null;
++	}
++
++	/// <summary>
++	/// Optimum: the upscaler slot or its quality preset changed. Everything that
++	/// depends on the render size is re-planned and reallocated, and the temporal
++	/// history is dropped, which is exactly what <see cref="RebuildFrameBuffers" />
++	/// already does: it asks the platform for the render size again
++	/// (<c>OptimumTryPlanUpscaleRenderSize</c>) and rebuilds every target from the
++	/// answer, so switching off restores the pre-upscaler chain - the in-house TAA
++	/// resolve, its history slots, the sharpen pass and the FSR 1 blit - on that
++	/// same rebuild.
++	///
++	/// Neutral body: the rebuild is all the OpenGL path needs, because it has no
++	/// upscaler to retire. The Vulkan platform overrides it to retire the live
++	/// vendor feature first.
++	/// </summary>
++	public virtual void ApplyOptimumUpscalerSettings()
++	{
++		RebuildFrameBuffers();
++	}
++
++	/// <summary>
++	/// Optimum: the latency mode changed. Empty here, because the OpenGL path has
++	/// no latency backend and never reads the setting; the Vulkan platform re-applies
++	/// it to the live backend, which is one <c>vkSetLatencySleepModeNV</c>-shaped call
++	/// and needs no rebuild of anything.
++	/// </summary>
++	public virtual void ApplyOptimumLatencySettings()
 +	{
 +	}
 +

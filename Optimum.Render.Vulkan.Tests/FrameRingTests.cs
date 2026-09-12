@@ -101,6 +101,86 @@ public class FrameRingTests
     }
 
     /// <summary>
+    /// PR #3 review, the FrameRing teardown contract, on a real device.
+    ///
+    /// A resource retired after BeginFrame and before any submission is keyed at a
+    /// Frame value the queue never accepted, so the GPU can never reach it and the
+    /// wait inside DrainRetirements cannot move past it. DrainRetirements exists for
+    /// exactly one caller - releasing a vendor upscaler's feature before
+    /// NVSDK_NGX_VULKAN_Shutdown1, where a feature still queued is a use-after-free
+    /// inside the driver - so it must close the abandoned frame and collect through
+    /// its value rather than leave the resource behind.
+    ///
+    /// The ring also has to survive it: a frame begins normally afterwards.
+    /// </summary>
+    [SkippableFact]
+    public void DrainRetirementsReleasesWhatAnAbandonedFrameRetired()
+    {
+        Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
+        using (context)
+        {
+            using var ring = new FrameRing(context!, framesInFlight: 2, uniformRingSize: 1 << 20);
+
+            // Two complete frames first, so the timeline is genuinely running and the
+            // abandoned value below is not simply the first one.
+            for (int frame = 0; frame < 2; frame++)
+            {
+                ring.BeginFrame();
+                ring.EndFrame();
+            }
+
+            // The frame that is begun and never submitted - what the NGX warm-up left
+            // behind when its evaluate threw, and what any retirement between
+            // BeginFrame and the submission sees.
+            var feature = new TrackedResource();
+            ulong abandoned = ring.BeginFrame().FrameValue;
+            ring.DeferDeletion(feature);
+            Assert.True(abandoned > ring.Timeline.FrameSignalled,
+                "the test needs a frame value no submission carried");
+
+            Assert.Equal(1, ring.DrainRetirements());
+            Assert.True(feature.Disposed,
+                "the feature retired inside the abandoned frame was not released before the drain returned");
+            Assert.Equal(0, ring.PendingDeletionCount);
+
+            // And the ring keeps working: the abandoned slot's pool went back to the
+            // initial state, so the next frame records and submits normally.
+            ring.BeginFrame();
+            ring.EndFrame();
+            ring.Timeline.WaitForFrame(ring.Timeline.FrameSignalled, WaitSite.DeviceWaitIdle);
+
+            context!.Api.DeviceWaitIdle(context.Device);
+        }
+    }
+
+    /// <summary>
+    /// The counterpart: a drain with no frame open must not abandon the frame that
+    /// was just submitted, which is every real call of it.
+    /// </summary>
+    [SkippableFact]
+    public void DrainRetirementsBetweenFramesLeavesTheSubmittedFrameAlone()
+    {
+        Skip.IfNot(TryCreateContext(_output, out VulkanContext? context), "No usable Vulkan device.");
+        using (context)
+        {
+            using var ring = new FrameRing(context!, framesInFlight: 2, uniformRingSize: 1 << 20);
+
+            var resource = new TrackedResource();
+            ulong submitted = ring.BeginFrame().FrameValue;
+            ring.DeferDeletion(resource);
+            Assert.Equal(submitted, ring.EndFrame());
+
+            Assert.Equal(0UL, ring.AbortFrame());
+            Assert.Equal(1, ring.DrainRetirements());
+            Assert.True(resource.Disposed);
+            Assert.True(ring.Timeline.FrameCompleted >= submitted,
+                "the drain returned before the GPU finished the frame it waited for");
+
+            context!.Api.DeviceWaitIdle(context.Device);
+        }
+    }
+
+    /// <summary>
     /// VAO and UBO finalizers call Dispose from the finalizer thread, so the
     /// deletion queue has to accept work from threads that are not the render
     /// thread while still doing the destruction on it.

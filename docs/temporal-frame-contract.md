@@ -138,6 +138,35 @@ if (jx == 0 && jy == 0) jx = 0.25             // a frame must contribute a new s
 
 At native resolution that is 8 phases; at render scale 0.5 it is 32.
 
+> **Note (2026-09-12, not a v1 change).** `renderScale` is the scale the frame is *really*
+> rendered at, which since the DLSS plan's Phase 2 is not always the config's `ssaa` /
+> `OptimumConfig.RenderScale`: with an upscaler owning the resolve it is that upscaler's own ratio,
+> `renderWidth / displayWidth` from the vendor's optimal-settings query, published as
+> `OptimumConfig.UpscalerRenderScale` and read through `OptimumConfig.EffectiveTemporalRenderScale`.
+> The formula, the sequence and the definition of `JitterPx` are unchanged; only the number fed into
+> them follows the frame instead of a setting, which is what §7.2 already allows ("the sequence length
+> can be taken from the SDK"). The temporal window (`JitterActive`) likewise opens for an upscaler
+> exactly as it does for the in-house resolve — an upscaler needs the jitter just as much — and the
+> motion attachment is allocated for either consumer, while the history slots (§3.3) and the sharpen
+> target (§3.4) stay the in-house resolve's alone.
+
+> **Note (2026-09-12, not a v1 change): where an upscaler sits in the frame.** The DLSS plan's
+> Phase 3 places the vendor evaluate exactly where the in-house resolve runs (DLSS Programming
+> Guide §3.1: during post processing, before tone mapping, as early in it as possible). What that
+> means for this contract's producers is nothing at all - the world, its G-buffer, the motion
+> attachment, SSAO and the LiquidDepth prepass are still render-resolution, the jitter is still one
+> NDC shear on the world projection, and §3.1/§3.2 describe the same images. What changes is
+> downstream of the resolve: the evaluate writes a **display-resolution** scene colour into its own
+> framebuffer slot (22, `OptimumUpscaledScene`, storage-usage colour plus a depth attachment), and
+> FindBright, the blur chain, god rays, luma, the final composition, the AfterFinalComposition
+> overlays, the blit and the screenshots all work at the display size from there on. The late
+> overlays depth-test against a **nearest-neighbour upscale** of Primary's depth, produced once per
+> frame, so their silhouettes are quantised to the render grid by up to one render pixel; that is the
+> accepted cost of keeping the evaluate early, and it is measured by
+> `UpscalePlacementTests.TheOverlayDepthIsAPointUpscaleAndItsEdgeErrorIsOneRenderPixel`.
+> Colour mode: Primary colour 0 is 8-bit LDR and already perceptually encoded, so the feature runs
+> with `IsHDR = 0` (guide §3.1.2), which is what §7.5's "no exposure path" implies.
+
 **Scope.** The jitter reaches **only** the perspective matrix `Set3DProjection` last loaded, and
 only while `JitterActive`. `ClientMain.CurrentProjectionMatrix` compares the top of the projection
 stack element-by-element against that matrix and hands back the sheared copy only on an exact match,
@@ -438,16 +467,34 @@ Stored: `mv = previousPixel − currentPixel`, render pixels, Y up, jitter exclu
 `OptimumTemporalMath.AdaptMotionVector(x, y, w, h, adapter)` implements exactly this: identity for
 `Fsr` and `Xess`, `(x/w, y/h)` for `Dlss`.
 
+> **Note (2026-09-12, not a v1 change).** The DLSS row above is Streamline's convention, and that is
+> the layer the row names. Optimum drives **raw NGX** instead (`NgxDlssFeature`, no Streamline), where
+> `NVSDK_NGX_Parameter_MV_Scale_X/Y` multiplies the sampled vector into *render pixels*. Our vectors
+> are already render pixels, so raw NGX gets `MV.Scale = (1, 1)` and no per-vector scaling — measured
+> against the SDK headers, as §7 requires of an adapter when it lands. The stored vectors, their sign
+> and their units are unchanged; only the constant handed to the vendor differs between the two layers.
+> Raw NGX takes `+JitterPx`, in render pixels (the corrected mapping in §7.2).
+
 ### 7.2 Jitter
 
 Stored: `JitterPx` = the raster displacement of a static point, Y up, applied by
 `P[8] -= 2*jx/W; P[9] -= 2*jy/H`.
 
-Every SDK asks for "the jitter offset applied to the camera" in pixels, but defines it against a
-projection built by **adding** the shear. In our sign that is `-JitterPx`. The Y component
-additionally depends on whether the SDK assumes a Y-down raster (D3D-style) — that is the one thing
-the adapter must confirm against the SDK's own sample before it is trusted, not inferred from this
-document. The engine-side invariant a consumer can rely on unconditionally:
+**Raw NGX (verified on 2026-09-12): pass `+JitterPx` in both axes.** The input is
+raster displacement in the input image's pixel coordinates. Optimum's offscreen Vulkan
+viewport has positive height, so increasing either component moves the raster content
+towards increasing image coordinates. The GL-style Y-up interpretation does not require
+an additional flip for an image consumed directly by NGX.
+
+The previous adapter negated both components based on the projection coefficient's sign.
+That was incorrect: `clip.w = -view.z` means subtracting the coefficient moves raster
+content by **positive** jitter. NVIDIA's DLSS Programming Guide §3.7.3 specifies pixel
+coordinates, not matrix coefficient signs. Full-cycle NGX readback tests at Performance
+and Ultra Performance pin this mapping (`DlssJitterConventionTests`), including an
+intentionally mirrored control. This corrects the adapter, not the v1 stored contract.
+Other vendor adapters must still verify their own coordinate conventions.
+
+The engine-side invariants remain:
 
 - the applied offset is `JitterPx`, and it is `(0,0)` whenever `JitterActive` is false;
 - the phase count is `max(1, ceil(8 * upscale^2))` — FSR's `ffxFsr2GetJitterPhaseCount` and XeSS's
@@ -480,6 +527,22 @@ Stored: `motion.b`, `[0,1]`, per pixel, in the motion attachment.
 
 The semantics of `b` per class are in §6. The caveat in §3.2 applies to every consumer: `b` is
 present even on pixels whose vector was rejected.
+
+### 7.4.1 SSAO placement for upscalers
+
+SSAO is generated and blurred from the jittered render-resolution G-buffer **before**
+the temporal consumer. When an upscaler is active, `upscale-ssao` multiplies the result
+into Primary colour 0, using render-size coordinates; depth, glow and motion remain
+unchanged. DLSS therefore reconstructs AO together with the scene. Final composition
+skips its legacy AO multiply when that precomposition actually ran, including an
+upscale-failure frame, so occlusion is never applied twice. Without an upscaler,
+Final retains its existing AO path and the in-house TAA resolve is unchanged.
+
+Previously AO was generated after DLSS and applied to the stable display image from
+the jittered low-resolution texture. That bypassed reconstruction and caused the
+remaining AO shimmer at low presets even after the NGX jitter sign was corrected.
+The AO is now part of scene shading before bloom, rather than a late modulation of
+bloom; this also removes the old late-pass bloom exemption from the upscaled path.
 
 ### 7.5 Exposure
 

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..d077eb4 100644
+index 4a24e75..a545738 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 4a24e75..d077eb4 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,199 @@ public class ShaderRegistry
+@@ -181,39 +183,240 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -25,6 +25,7 @@ index 4a24e75..d077eb4 100644
 +		RegisterOptimumShaderProgram("taa-resolve", ShaderPrograms.TaaResolve = new ShaderProgram());
 +		// Optimum TAA (P5): the post-resolve sharpen pass.
 +		RegisterOptimumShaderProgram("taa-sharpen", ShaderPrograms.TaaSharpen = new ShaderProgram());
++		RegisterOptimumShaderProgram("upscale-ssao", ShaderPrograms.UpscaleSsao = new ShaderProgram());
 +		// Optimum TAA (P4): the liquid velocity pass.
 +		RegisterOptimumShaderProgram("chunkliquidmotion", ShaderPrograms.ChunkLiquidMotion = new ShaderProgram());
 +		// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
@@ -105,13 +106,13 @@ index 4a24e75..d077eb4 100644
 +			List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
 +			many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
 +			foreach (IAsset item in many)
- 			{
--				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
--				flag = shaderProgram.Compile() && flag;
++			{
 +				includes[item.Name] = item.ToText();
 +			}
 +			for (int i = 0; i < nextPassId; i++)
-+			{
+ 			{
+-				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
+-				flag = shaderProgram.Compile() && flag;
 +				ShaderProgram shaderProgram = shaderPrograms[i];
 +				if (shaderProgram != null)
 +				{
@@ -130,14 +131,54 @@ index 4a24e75..d077eb4 100644
 +		// which is what keeps that configuration identical to vanilla. Both
 +		// terms come from OptimumConfig so the sampler objects here and the
 +		// atlas texture parameters ChunkRenderer sets always agree.
-+		float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias;
-+		if (terrainLodBias != 0f)
-+		{
-+			ApplyOptimumTerrainSamplerLodBias(terrainLodBias);
-+		}
++		// The sampler objects above were just created with the driver default, so
++		// whatever the bias was before this load has to be written again: the
++		// applied value is invalidated first and the apply below is the one that
++		// counts. At a bias of 0 - no upscaler, TAA off, native render scale - it
++		// makes no call at all, which is what keeps that configuration identical
++		// to vanilla.
++		OptimumConfig.InvalidateTerrainLodBias();
++		ApplyOptimumLodBias();
  		return flag;
  	}
  
++	/// <summary>
++	/// Optimum: writes <see cref="OptimumConfig.EffectiveTerrainLodBias" /> to the
++	/// two places it reaches the GPU - the parameter on every registered atlas
++	/// texture and the terrain sampler objects that override it - and remembers
++	/// what it wrote so nothing is written twice.
++	///
++	/// This is the only applier. The value moves for reasons that have nothing to
++	/// do with each other: a render-scale or TAA-setting change, and - since the
++	/// DLSS plan's Phase 6 - an upscaler publishing the ratio its optimal-settings
++	/// query really returned, which happens when a feature is created, again on
++	/// every preset change, and in reverse when the upscaler stands down. So every
++	/// one of those calls this: the per-frame poll in ChunkRenderer, the shader
++	/// load above, and the renderer the moment it publishes or clears a plan. None
++	/// of them needs a shader reload and none rebuilds a texture.
++	/// </summary>
++	public static void ApplyOptimumLodBias()
++	{
++		ClientPlatformAbstract platform = ScreenManager.Platform;
++		if (platform == null)
++		{
++			return;
++		}
++		if (!OptimumConfig.TerrainLodBiasPending())
++		{
++			return;
++		}
++		float bias = OptimumConfig.EffectiveTerrainLodBias;
++		int[] atlases = OptimumConfig.LodBiasedAtlases;
++		bool reachedAtlases = atlases != null && atlases.Length > 0;
++		if (reachedAtlases)
++		{
++			platform.SetTextureLodBias(atlases, bias);
++		}
++		ApplyOptimumTerrainSamplerLodBias(bias);
++		OptimumConfig.NoteTerrainLodBiasApplied(bias, reachedAtlases);
++	}
++
 +	/// <summary>
 +	/// Optimum: writes a texture LOD bias into the chunkopaque/chunktopsoil
 +	/// terrain sampler objects.
@@ -149,12 +190,12 @@ index 4a24e75..d077eb4 100644
 +	/// invisible to them - it only reaches the terrain passes that sample the
 +	/// atlas without a custom sampler (liquid, transparent, shadow map).
 +	///
-+	/// Called once from the shader load above and again from
-+	/// ChunkRenderer.SetOptimumTextureLodBias whenever
-+	/// OptimumConfig.EffectiveTerrainLodBias moves. Without that second caller the
-+	/// TAA mip-bias row would need a shader reload to do anything, while the atlas
-+	/// parameter moved immediately - opaque terrain and liquid would then select
-+	/// different mips of the same atlas until the next reload.
++	/// Called only from <see cref="ApplyOptimumLodBias" />, which is what keeps the
++	/// sampler objects and the atlas texture parameters on the same value. Without
++	/// that the TAA mip-bias row, or an upscaler's published bias, would need a
++	/// shader reload to do anything while the atlas parameter moved immediately -
++	/// opaque terrain and liquid would then select different mips of the same
++	/// atlas until the next reload.
 +	/// </summary>
 +	public static void ApplyOptimumTerrainSamplerLodBias(float bias)
 +	{
@@ -195,7 +236,7 @@ index 4a24e75..d077eb4 100644
 +			bool abiReady = compiled && OptimumConfig.GreedyMeshEnabled && !OptimumConfig.IsShaderFeatureDisabled("GreedyMesh") && HasOptimumGreedyMeshContract(shaderProgram);
 +			OptimumConfig.SetGreedyMeshShaderAbi(abiReady, abiReady);
 +		}
-+		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas || shaderProgram == ShaderPrograms.TaaDebug || shaderProgram == ShaderPrograms.TaaResolve || shaderProgram == ShaderPrograms.TaaSharpen || shaderProgram == ShaderPrograms.ChunkLiquidMotion || shaderProgram == ShaderPrograms.TaaSkyMotion)
++		if (shaderProgram == ShaderPrograms.FsrEasu || shaderProgram == ShaderPrograms.FsrRcas || shaderProgram == ShaderPrograms.TaaDebug || shaderProgram == ShaderPrograms.TaaResolve || shaderProgram == ShaderPrograms.TaaSharpen || shaderProgram == ShaderPrograms.UpscaleSsao || shaderProgram == ShaderPrograms.ChunkLiquidMotion || shaderProgram == ShaderPrograms.TaaSkyMotion)
 +		{
 +			shaderProgram.LoadError |= !compiled;
 +		}
@@ -223,20 +264,20 @@ index 4a24e75..d077eb4 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +458,11 @@ public class ShaderRegistry
+@@ -296,11 +499,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
  	{
  		Shader fragmentShader = program.FragmentShader;
 -		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA ? 1 : 0) + "\r\n";
-+		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTaa ? 1 : 0) + "\r\n";
++		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTemporalPipeline ? 1 : 0) + "\r\n";
  		Shader fragmentShader2 = program.FragmentShader;
  		fragmentShader2.PrefixCode = fragmentShader2.PrefixCode + "#define SSAOLEVEL " + ClientSettings.SSAOQuality + "\r\n";
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +495,48 @@ public class ShaderRegistry
+@@ -333,10 +536,52 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -269,7 +310,11 @@ index 4a24e75..d077eb4 100644
 +		// whose size is (SetupSSAO ? 4 : 2) with SetupSSAO = ClientSettings.SSAOQuality > 0
 +		// - the same condition SSAOLEVEL above is stamped from, so the two can
 +		// never disagree.
-+		bool taaMotion = OptimumConfig.EffectiveTaa;
++		// Optimum (DLSS plan, Phase 2): the motion outputs exist for whichever
++		// temporal consumer owns the frame, so the variant is stamped for the
++		// pipeline, not for our own resolve. An upscaler with TAA off still needs
++		// every writer this define creates.
++		bool taaMotion = OptimumConfig.EffectiveTemporalPipeline;
 +		// The per-uniform hooks in ShaderProgramBase and the bone-upload hook in
 +		// UBO exist for the entity writer only; this is the single flag that tells
 +		// them whether any shader in the process was built with it.

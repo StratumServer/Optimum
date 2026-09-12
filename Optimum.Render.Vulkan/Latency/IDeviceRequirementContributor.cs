@@ -93,15 +93,25 @@ internal sealed unsafe class DeviceRequirements : IDisposable
     private bool _disposed;
 
     public DeviceRequirements(
-        Vk api, PhysicalDevice physicalDevice, Dictionary<string, uint> available, List<string> enabled)
+        Vk api, Instance instance, PhysicalDevice physicalDevice,
+        Dictionary<string, uint> available, List<string> enabled)
     {
         Api = api;
+        Instance = instance;
         PhysicalDevice = physicalDevice;
         _available = available;
         _enabled = enabled;
     }
 
     public Vk Api { get; }
+
+    /// <summary>
+    /// The instance the device is being created on. NGX's
+    /// <c>GetFeatureDeviceExtensionRequirements</c> takes both the instance and
+    /// the physical device, so a contributor has to be able to see it.
+    /// </summary>
+    public Instance Instance { get; }
+
     public PhysicalDevice PhysicalDevice { get; }
 
     /// <summary>Notes about refused requests; never an error.</summary>
@@ -134,6 +144,51 @@ internal sealed unsafe class DeviceRequirements : IDisposable
             return false;
         }
         _enabled.Add(name);
+        return true;
+    }
+
+    /// <summary>
+    /// The <c>VkPhysicalDeviceVulkan12Features</c> the device will be created
+    /// with, set by <see cref="VulkanContext" /> before the contributors run.
+    ///
+    /// A contributor cannot chain its own copy of a promoted feature struct -
+    /// <c>VkPhysicalDeviceBufferDeviceAddressFeatures</c> and this one in the
+    /// same pNext chain is invalid - so a core-1.2 feature is asked for by
+    /// turning a bit on in here, through <see cref="RequestBufferDeviceAddress" />.
+    /// </summary>
+    public PhysicalDeviceVulkan12Features* Vulkan12 { get; set; }
+
+    /// <summary>
+    /// Turns on <c>bufferDeviceAddress</c> when the physical device supports it,
+    /// and answers whether the device will have it.
+    ///
+    /// NGX needs it: DLSS's own shaders call <c>vkGetBufferDeviceAddress</c> on
+    /// buffers it allocates on our device, and the extension alone is not enough
+    /// - without the feature the layers report
+    /// <c>VUID-vkGetBufferDeviceAddress-bufferDeviceAddress-03324</c> on every
+    /// evaluate (measured 2026-09-12, driver 615.71.09). Like every requirement
+    /// here it may only ask: a device without it keeps the upscaler unavailable
+    /// rather than failing vkCreateDevice.
+    /// </summary>
+    public bool RequestBufferDeviceAddress(string? requestedBy = null)
+    {
+        if (Vulkan12 == null) return false;
+        if (Vulkan12->BufferDeviceAddress) return true;
+
+        var supported = new PhysicalDeviceVulkan12Features
+        {
+            SType = StructureType.PhysicalDeviceVulkan12Features,
+        };
+        QueryFeatures(&supported);
+        if (!supported.BufferDeviceAddress)
+        {
+            Log?.Invoke((requestedBy ?? "a contributor") +
+                " asked for the bufferDeviceAddress feature, which this device does not support; " +
+                "continuing without it");
+            return false;
+        }
+
+        Vulkan12->BufferDeviceAddress = true;
         return true;
     }
 
