@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..2e2e836 100644
+index 431e51a..35dd7cc 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -425,7 +425,7 @@ index 431e51a..2e2e836 100644
  
  	internal void RenderOIT(float deltaTime)
  	{
-@@ -402,51 +551,187 @@ public class ChunkRenderer
+@@ -402,51 +551,189 @@ public class ChunkRenderer
  		chunktransparent.Stop();
  		game.GlPopMatrix();
  		ScreenManager.FrameProfiler.Mark("rend3D-ret-tp");
@@ -474,7 +474,9 @@ index 431e51a..2e2e836 100644
 +	/// </summary>
 +	internal void RenderLiquidMotion(float deltaTime)
 +	{
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
++		// Optimum (DLSS plan, Phase 2): the liquid velocity pass feeds the motion
++		// attachment, which both temporal consumers read.
++		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTemporalPipeline)
 +		{
 +			return;
 +		}

@@ -46,6 +46,9 @@ public class ClientPlatformWindowsVanillaRegionsTests
         "OptimumParityReadTextureGl", "OptimumParitySlotName", "OptimumRenderSsao", "OptimumRunParityDump",
         "OptimumRunPendingTaaShaderReload", "OptimumSpinIterations", "OptimumSpinTailMinProcessorCount",
         "OptimumSsaoKernel", "OptimumTaaHistoryIndexA", "OptimumTaaHistoryIndexB", "OptimumTaaRequested",
+        // DLSS plan, Phase 2: the temporal pipeline's shared questions and the
+        // upscaler's half of DisableOptimumTaa.
+        "OptimumTemporalRequested", "OptimumMotionWritesReady", "DisableOptimumUpscaler",
         "OptimumTaaSharpenIndex", "OptimumTimeBeginPeriod", "OptimumTimeEndPeriod",
         "OptimumUndershootPercent", "OptimumYieldThresholdMs", "ProbeThickLineSupport",
         "ReadDefaultFramebuffer", "ReadTextureForParity", "RenderHeight", "RenderOptimumSkyMotion",

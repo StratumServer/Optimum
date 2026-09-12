@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..8b6214b 100644
+index 6edf0c9..e0f7f76 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -26,11 +26,11 @@ using Vintagestory.ClientNative;
@@ -669,7 +669,7 @@ index 6edf0c9..8b6214b 100644
  		GL.BindVertexArray(((VAO)modelRef).VaoId);
  		GL.DrawArrays((PrimitiveType)4, 0, 3);
  		GL.BindVertexArray(0);
-@@ -1150,11 +1606,509 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1150,11 +1606,555 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		CurrentFrameBufferKeepVw = null;
  		GL.BindTexture((TextureTarget)3553, 0);
  		return frameBufferRef;
@@ -1127,6 +1127,52 @@ index 6edf0c9..8b6214b 100644
 +	/// </summary>
 +	public bool OptimumTaaRequested => !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
 +
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 2): whether anything temporal wants this frame
++	/// jittered and its motion vectors written - the in-house TAA resolve, or an
++	/// upscaler that replaces it. The motion attachment and the jitter window are
++	/// shared by both consumers; only the history slots and the sharpen target
++	/// belong to TAA alone, so those keep asking <see cref="OptimumTaaRequested" />.
++	/// </summary>
++	public bool OptimumTemporalRequested =>
++		OptimumTaaRequested || Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 2): whether a pass may open a motion-write
++	/// window this frame. One condition, because the two consumers need different
++	/// targets: the resolve needs its history slots, an upscaler needs none of
++	/// ours, and both need the motion attachment.
++	///
++	/// This is the member the write-window guards read, replacing the pair
++	/// "MotionAttachmentIndex >= 0 && TaaTargetsReady" plus "EffectiveTaa" they
++	/// carried while TAA was the only consumer.
++	/// </summary>
++	public bool OptimumMotionWritesReady
++	{
++		get
++		{
++			if (MotionAttachmentIndex < 0) return false;
++			if (Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa) return true;
++			return Vintagestory.API.Config.OptimumConfig.EffectiveTaa && TaaTargetsReady;
++		}
++	}
++
++	/// <summary>
++	/// Optimum (DLSS plan, Phase 2): the upscaler's half of
++	/// <see cref="DisableOptimumTaa" /> - a target the upscaler needs could not be
++	/// allocated, so it stands down for the session, once, with one line. Never a
++	/// hard failure: the frame then runs the chain it ran before the upscaler was
++	/// asked for.
++	/// </summary>
++	public void DisableOptimumUpscaler(string reason)
++	{
++		if (Vintagestory.API.Config.OptimumConfig.DisableUpscalerAtRuntime())
++		{
++			logger.Error("Optimum disabled the upscaler: {0}", reason);
++		}
++		Vintagestory.API.Config.OptimumConfig.ClearUpscalerPlan();
++	}
++
 +	/// <summary>Optimum: the SSAO sample kernel the setup fills and the SSAO pass uploads.</summary>
 +	public float[] OptimumSsaoKernel => ssaoKernel;
 +
@@ -1180,7 +1226,7 @@ index 6edf0c9..8b6214b 100644
  		//IL_0072: Unknown result type (might be due to invalid IL or missing references)
  		//IL_008c: Unknown result type (might be due to invalid IL or missing references)
  		//IL_00ad: Unknown result type (might be due to invalid IL or missing references)
-@@ -1187,10 +2141,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1187,10 +2187,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		int num2 = (int)((float)((NativeWindow)window).ClientSize.Y * ssaaLevel);
  		if (num == 0 || num2 == 0)
  		{
@@ -1192,13 +1238,17 @@ index 6edf0c9..8b6214b 100644
 +		// the local flag keeps this platform from retrying a failed allocation
 +		// even if the process-wide config flag is ever reset.
 +		bool taaRequested = !optimumTaaDisabled && Vintagestory.API.Config.OptimumConfig.EffectiveTaa;
++		// Optimum (DLSS plan, Phase 2): the motion attachment serves both temporal
++		// consumers, so it is allocated whenever either wants it; the history slots
++		// and the sharpen target below stay TAA's alone.
++		bool temporalRequested = taaRequested || Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa;
 +		int motionAttachmentIndex = -1;
  		PixelFormat val = (PixelFormat)6408;
  		CheckGlError("sdfb-begin");
  		FrameBufferRef frameBufferRef = (list[0] = new FrameBufferRef
  		{
  			FboId = GL.GenFramebuffer(),
-@@ -1210,11 +2171,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1210,11 +2221,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -1215,13 +1265,13 @@ index 6edf0c9..8b6214b 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1251,10 +2216,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1251,10 +2266,40 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				(DrawBuffersEnum)36064,
  				(DrawBuffersEnum)36065
  			};
  			GL.DrawBuffers(2, array3);
  		}
-+		if (taaRequested)
++		if (temporalRequested)
 +		{
 +			// Optimum: TAA motion attachment, appended after the SSAO G-buffer
 +			// so every existing attachment index is unchanged. Deliberately not
@@ -1244,7 +1294,9 @@ index 6edf0c9..8b6214b 100644
 +			}
 +			catch (Exception error)
 +			{
++				// Both consumers lose their vectors, so both stand down.
 +				DisableOptimumTaa("Primary motion attachment (GL): " + error.Message);
++				DisableOptimumUpscaler("Primary motion attachment (GL): " + error.Message);
 +				motionAttachmentIndex = -1;
 +			}
 +		}
@@ -1254,7 +1306,7 @@ index 6edf0c9..8b6214b 100644
  		{
  			FboId = GL.GenFramebuffer(),
  			Width = num,
-@@ -1394,13 +2387,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1394,13 +2439,20 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num / 4, num2 / 4, 0, val, (PixelInternalFormat)32856);
@@ -1276,7 +1328,7 @@ index 6edf0c9..8b6214b 100644
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num / 4, num2 / 4, 0, val, (PixelInternalFormat)32856);
  		GL.DrawBuffer((DrawBufferMode)36064);
-@@ -1436,10 +2436,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +2488,75 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
@@ -1352,7 +1404,7 @@ index 6edf0c9..8b6214b 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1548,10 +2613,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1548,10 +2665,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		else
  		{
  			CurrentFrameBufferKeepVw = null;
@@ -1367,7 +1419,7 @@ index 6edf0c9..8b6214b 100644
  	}
  
  	private void setupAttachment(FrameBufferRef frameBuffer, int width, int height, int index, PixelFormat rgbaFormat, PixelInternalFormat dataFormat)
-@@ -1567,21 +2636,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1567,21 +2688,91 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBuffer.ColorTextureIds[index], 0);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, Convert.ToInt32((object)(TextureWrapMode)33071));
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
@@ -1381,7 +1433,7 @@ index 6edf0c9..8b6214b 100644
 +	/// member for it) attachments.
 +	/// </summary>
 +	private FrameBufferRef CreateOptimumHistoryTargetGl(int width, int height)
- 	{
++	{
 +		FrameBufferRef target = new FrameBufferRef
 +		{
 +			FboId = GL.GenFramebuffer(),
@@ -1433,7 +1485,7 @@ index 6edf0c9..8b6214b 100644
 +	}
 +
 +	public virtual void DisposeFrameBuffers(List<FrameBufferRef> buffers)
-+	{
+ 	{
 +		// Mono.Cecil transplant.
 +		// SetupOptimumFrameBuffers shares one depth texture between Primary and
 +		// Transparent, so the same handle appears in more than one FrameBufferRef.
@@ -1462,7 +1514,7 @@ index 6edf0c9..8b6214b 100644
  			}
  		}
  	}
-@@ -1591,11 +2730,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1591,11 +2782,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		ClearFrameBuffer(framebuffer, clearColor, clearDepth);
  	}
  
@@ -1481,35 +1533,13 @@ index 6edf0c9..8b6214b 100644
  			for (int i = 0; i < framebuffer.ColorTextureIds.Length; i++)
  			{
  				GL.ClearBuffer((ClearBuffer)6144, i, clearColor);
-@@ -1606,40 +2752,98 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
- 			float num = 1f;
- 			GL.ClearBuffer((ClearBuffer)6145, 0, ref num);
- 		}
+@@ -1617,29 +2815,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	public override void UnloadFrameBuffer(FrameBufferRef frameBuffer)
+ 	{
+ 		LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
--	public override void LoadFrameBuffer(FrameBufferRef frameBuffer, int textureId)
--	{
--		CurrentFrameBuffer = frameBuffer;
--		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, textureId, 0);
--	}
--
--	public override void UnloadFrameBuffer(FrameBufferRef frameBuffer)
--	{
--		LoadFrameBuffer(EnumFrameBuffer.Primary);
--	}
--
 -	public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)
-+	public override void LoadFrameBuffer(FrameBufferRef frameBuffer, int textureId)
-+	{
-+		CurrentFrameBuffer = frameBuffer;
-+		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, textureId, 0);
-+	}
-+
-+	public override void UnloadFrameBuffer(FrameBufferRef frameBuffer)
-+	{
-+		LoadFrameBuffer(EnumFrameBuffer.Primary);
-+	}
-+
 +	public override void ClearFrameBuffer(EnumFrameBuffer framebuffer)
 +	{
 +		// Mono.Cecil transplant.
@@ -1594,7 +1624,7 @@ index 6edf0c9..8b6214b 100644
  			break;
  		}
  		case EnumFrameBuffer.LiquidDepth:
-@@ -1670,71 +2874,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1670,71 +2926,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_0252: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01c8: Unknown result type (might be due to invalid IL or missing references)
  		//IL_01e7: Unknown result type (might be due to invalid IL or missing references)
@@ -1700,7 +1730,7 @@ index 6edf0c9..8b6214b 100644
  		}
  		case EnumFrameBuffer.ShadowmapFar:
  		case EnumFrameBuffer.ShadowmapNear:
-@@ -1752,40 +2970,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1752,40 +3022,87 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[(int)framebuffer];
  			break;
  		case EnumFrameBuffer.Primary:
@@ -1793,7 +1823,7 @@ index 6edf0c9..8b6214b 100644
  	public override void MergeTransparentRenderPass()
  	{
  		if (OffscreenBuffer)
-@@ -1793,22 +3058,256 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1793,22 +3110,276 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			CurrentFrameBufferKeepVw = frameBuffers[0];
  		}
  		else
@@ -1885,6 +1915,15 @@ index 6edf0c9..8b6214b 100644
 +	{
 +		OptimumRunPendingTaaShaderReload();
 +		optimumTaaResolvedThisFrame = false;
++		// Optimum (DLSS plan, Phase 2): an upscaler replaces this pass rather than
++		// running beside it - it is the temporal resolve, and two resolves over one
++		// history would blend the same frame twice. The jitter stays on, because the
++		// upscaler needs it; only this pass stands down.
++		if (Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa)
++		{
++			_taaHistoryValid = false;
++			return false;
++		}
 +		if (!TaaTargetsReady || !Vintagestory.API.Config.OptimumConfig.EffectiveTaa)
 +		{
 +			_taaHistoryValid = false;
@@ -1983,7 +2022,12 @@ index 6edf0c9..8b6214b 100644
 +	{
 +		ShaderProgram fsrEasu = ShaderPrograms.FsrEasu;
 +		ShaderProgram fsrRcas = ShaderPrograms.FsrRcas;
++		// Optimum (DLSS plan, Phase 2): FSR 1 is an upscaler too. With a temporal
++		// upscaler active it does not run at all - the frame is already at display
++		// resolution by the time the blit happens, and a second spatial upscale of
++		// it would be a resample of a reconstruction.
 +		return !optimumFsrDisabled
++			&& !Vintagestory.API.Config.OptimumConfig.UpscalerReplacesTaa
 +			&& ClientSettings.OptimumRenderScale < 1.0f
 +			&& frameBuffers[OptimumFsrFramebufferIndex] != null
 +			&& fsrEasu != null
@@ -2015,6 +2059,12 @@ index 6edf0c9..8b6214b 100644
 +	public override int RenderOptimumTaaSharpen(int resolvedScene)
 +	{
 +		if (!TaaResolvedThisFrame || OptimumConfig.TaaSharpness <= 0f)
++		{
++			return resolvedScene;
++		}
++		// Optimum (DLSS plan, Phase 2): an upscaler owns the resolve and its own
++		// sharpening; ours must not run on top of its output.
++		if (OptimumConfig.UpscalerReplacesTaa)
 +		{
 +			return resolvedScene;
 +		}
@@ -2054,7 +2104,7 @@ index 6edf0c9..8b6214b 100644
  	public override void RenderPostprocessingEffects(float[] projectMatrix)
  	{
  		//IL_000f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1823,77 +3322,106 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1823,77 +3394,106 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		//IL_05c9: Unknown result type (might be due to invalid IL or missing references)
  		if (!OffscreenBuffer)
  		{
@@ -2174,7 +2224,7 @@ index 6edf0c9..8b6214b 100644
  			ssao.SamplesArray(64, ssaoKernel);
  			RenderFullscreenTriangle(screenQuad);
  			ssao.Stop();
-@@ -1915,35 +3443,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1915,35 +3515,46 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				bilateralblur.InputTexture2D = frameBuffers[15].ColorTextureIds[0];
  				RenderFullscreenTriangle(screenQuad);
  			}
@@ -2225,7 +2275,7 @@ index 6edf0c9..8b6214b 100644
  		//IL_0149: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0167: Unknown result type (might be due to invalid IL or missing references)
  		if (OffscreenBuffer)
-@@ -1953,26 +3492,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1953,26 +3564,29 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			int primaryScene2D = frameBuffers[10].ColorTextureIds[0];
  			if (RenderBloom)
  			{
@@ -2260,7 +2310,7 @@ index 6edf0c9..8b6214b 100644
  			final.ContrastLevel = ShaderUniforms.ExtraContrastLevel;
  			final.BrightnessLevel = ClientSettings.BrightnessLevel + Math.Max(0f, ShaderUniforms.DropShadowIntensity * 2f - 1.66f) / 3f;
  			final.SepiaLevel = ShaderUniforms.SepiaLevel + ShaderUniforms.ExtraSepia;
-@@ -1987,24 +3529,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1987,24 +3601,43 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			final.DamageVignetting = ShaderUniforms.DamageVignetting;
  			final.DamageVignettingSide = ShaderUniforms.DamageVignettingSide;
  			final.FrostVignetting = ShaderUniforms.FrostVignetting;
@@ -2317,7 +2367,7 @@ index 6edf0c9..8b6214b 100644
  
  	private void DebugCallback(DebugSource source, DebugType type, int id, DebugSeverity severity, int length, nint message, nint userParam)
  	{
-@@ -2023,27 +3584,484 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,27 +3656,487 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -2412,8 +2462,9 @@ index 6edf0c9..8b6214b 100644
 +	public override bool BeginMotionWrite()
 +	{
 +		if (OptimumMotionWriteActive) return false;
-+		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		// Optimum (DLSS plan, Phase 2): one condition for both temporal consumers -
++		// the resolve with its history slots, or an upscaler that owns the resolve.
++		if (!OptimumMotionWritesReady) return false;
 +		// Optimum TAA (P4): the motion attachment only means anything inside the
 +		// temporal window. JitterActive is that window - ClientMain opens it in
 +		// MainRenderLoop and closes it in RenderAfterPostProcessing, before the
@@ -2535,8 +2586,9 @@ index 6edf0c9..8b6214b 100644
 +	public override bool BeginMotionOnlyWrite()
 +	{
 +		if (OptimumMotionWriteActive) return false;
-+		if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
++		// Optimum (DLSS plan, Phase 2): one condition for both temporal consumers -
++		// the resolve with its history slots, or an upscaler that owns the resolve.
++		if (!OptimumMotionWritesReady) return false;
 +		// Optimum TAA (P4): the motion attachment only means anything inside the
 +		// temporal window. JitterActive is that window - ClientMain opens it in
 +		// MainRenderLoop and closes it in RenderAfterPostProcessing, before the
@@ -2617,8 +2669,9 @@ index 6edf0c9..8b6214b 100644
 +	/// </summary>
 +	public override bool RenderOptimumSkyMotion()
 +	{
-+		if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;
-+		if (!TaaTargetsReady || MotionAttachmentIndex < 0) return false;
++		// Optimum (DLSS plan, Phase 2): the sky's motion vectors are written for
++		// whichever temporal consumer owns the frame, so the guard is the shared one.
++		if (!OptimumMotionWritesReady) return false;
 +		ShaderProgram skyMotion = ShaderPrograms.TaaSkyMotion;
 +		if (skyMotion == null || skyMotion.LoadError || skyMotion.Disposed) return false;
 +		if (frameBuffers == null || frameBuffers.Count <= 1) return false;
@@ -2803,7 +2856,7 @@ index 6edf0c9..8b6214b 100644
  		//IL_0001: Unknown result type (might be due to invalid IL or missing references)
  		CheckFboStatus(target, fbtype.ToString() ?? "");
  	}
-@@ -2202,32 +4220,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2202,32 +4295,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.Enable((EnableCap)3042);
  			switch (blendMode)
  			{
@@ -2843,7 +2896,7 @@ index 6edf0c9..8b6214b 100644
  		{
  			GL.Disable((EnableCap)3042);
  		}
-@@ -2593,15 +4618,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2593,15 +4693,52 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBufferBase((BufferRangeTarget)35345, bindingPoint, num);
  		ScreenManager.Platform.CheckGlError();
  		UBO uBO = new UBO();
@@ -2896,7 +2949,7 @@ index 6edf0c9..8b6214b 100644
  		//IL_0009: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0012: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0015: Unknown result type (might be due to invalid IL or missing references)
-@@ -2651,29 +4713,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2651,29 +4788,34 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		updateIndices(data.Indices, data.IndicesOffset, data.IndicesCount, vAO, persistent);
@@ -2941,7 +2994,7 @@ index 6edf0c9..8b6214b 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +4750,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +4825,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2962,7 +3015,7 @@ index 6edf0c9..8b6214b 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +4769,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +4844,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -2983,7 +3036,7 @@ index 6edf0c9..8b6214b 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +4788,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +4863,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3004,7 +3057,7 @@ index 6edf0c9..8b6214b 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +4807,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +4882,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -3025,7 +3078,7 @@ index 6edf0c9..8b6214b 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +4830,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +4905,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
@@ -3046,7 +3099,7 @@ index 6edf0c9..8b6214b 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34963, (IntPtr)IndicesOffset, 4 * IndicesCount, Indices);
-@@ -3320,16 +5392,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3320,16 +5467,17 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		}
  		GL.BindBuffer((BufferTarget)34962, 0);
  		vAO.IndicesCount = data.IndicesCount;
@@ -3070,7 +3123,7 @@ index 6edf0c9..8b6214b 100644
  
  	public override MeshRef AllocateEmptySSBOMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
  	{
-@@ -3678,10 +5751,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -3678,10 +5826,143 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	public override int GetUniformLocation(ShaderProgram program, string name)
  	{
  		return GL.GetUniformLocation(program.ProgramId, name);

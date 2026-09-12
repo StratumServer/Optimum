@@ -422,7 +422,7 @@ public class TaaSkyDecalMotionCoverageTests
             Assert.Contains("if (!OptimumTemporal.Frame.JitterActive) return false;", body);
             // The other two guards that were already there, kept together with
             // it so a refactor cannot drop one silently.
-            Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;", body);
+            Assert.Contains("if (!OptimumMotionWritesReady) return false;", body);
             Assert.Contains("if (!ReferenceEquals(CurrentFrameBuffer, frameBuffers[0])) return false;", body);
         }
 

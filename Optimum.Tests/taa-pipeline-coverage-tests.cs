@@ -226,7 +226,8 @@ public class TaaPipelineCoverageTests
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
 
         Assert.Contains(
-            "#define FXAA \" + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTaa ? 1 : 0)",
+            "#define FXAA \" + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && " +
+            "!OptimumConfig.EffectiveTemporalPipeline ? 1 : 0)",
             shaderRegistry);
     }
 
@@ -426,7 +427,7 @@ public class TaaPipelineCoverageTests
 
         // Later rebuilds read EffectiveTaa, which now honours the runtime flag.
         string registry = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
-        Assert.Contains("!OptimumConfig.EffectiveTaa ? 1 : 0", registry);
+        Assert.Contains("!OptimumConfig.EffectiveTemporalPipeline ? 1 : 0", registry);
 
         string patcher = Read("Optimum.Patcher/Program.cs");
         Assert.Contains("\"optimumTaaShaderReloadPending\"", patcher);

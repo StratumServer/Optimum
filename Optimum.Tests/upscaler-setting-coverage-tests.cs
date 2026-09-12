@@ -72,7 +72,7 @@ public class UpscalerSettingCoverageTests
         float renderScale = OptimumConfig.RenderScale;
         try
         {
-            OptimumConfig.SetUpscalerLodBias(-2.0f);
+            OptimumConfig.SetUpscalerPlan(0.5f, -2.0f);
             OptimumConfig.RenderScale = 0.5f;
 
             // Off: the render-scale term alone, exactly as before this phase.
@@ -84,12 +84,12 @@ public class UpscalerSettingCoverageTests
             Assert.Equal(-2.0f, OptimumConfig.EffectiveTerrainLodBias, 3);
 
             // Cleared (no feature): back to the old term.
-            OptimumConfig.SetUpscalerLodBias(0f);
+            OptimumConfig.ClearUpscalerPlan();
             Assert.Equal(-1.0f, OptimumConfig.EffectiveTerrainLodBias, 3);
         }
         finally
         {
-            OptimumConfig.SetUpscalerLodBias(0f);
+            OptimumConfig.ClearUpscalerPlan();
             OptimumConfig.Upscaler = upscaler;
             OptimumConfig.RenderScale = renderScale;
         }

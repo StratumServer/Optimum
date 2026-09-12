@@ -253,6 +253,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumRenderSsao",
         "OptimumAdoptFrameBufferSettings",
         "OptimumTaaRequested",
+        // DLSS plan, Phase 2: the temporal pipeline's two shared questions - who
+        // wants the motion attachment and the jitter, and who may open a write
+        // window - plus the upscaler's half of DisableOptimumTaa.
+        "OptimumTemporalRequested",
+        "OptimumMotionWritesReady",
+        "DisableOptimumUpscaler",
         "OptimumSsaoKernel",
         "SetOptimumMotionAttachmentIndex",
         "OptimumAdoptTaaTargets",

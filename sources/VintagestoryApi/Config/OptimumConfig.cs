@@ -512,6 +512,17 @@ public static class OptimumConfig
         string.Equals(EffectiveUpscaler, "dlss", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Whether the temporal pipeline runs at all this frame: the scene is
+    /// jittered and motion vectors are written, for whichever consumer owns the
+    /// resolve - the in-house TAA resolve or an upscaler that replaces it. This
+    /// is the flag every shader variant, UBO and motion writer is built against;
+    /// <see cref="EffectiveTaa" /> alone means "our own resolve runs", which is a
+    /// different question and the wrong one for anything that produces the
+    /// inputs.
+    /// </summary>
+    public static bool EffectiveTemporalPipeline => EffectiveTaa || UpscalerReplacesTaa;
+
+    /// <summary>
     /// Whether an upscaler owns the temporal resolve this session. It is the one
     /// question the render chain asks: with it true the in-house TAA resolve, the
     /// TAA sharpen pass and the FSR 1 blit do not run (the upscaler does all
@@ -668,10 +679,40 @@ public static class OptimumConfig
         return MathF.Log2((float)renderWidth / displayWidth) - 1.0f;
     }
 
-    /// <summary>Publishes the bias for the sizes the vendor query returned; 0 clears it.</summary>
-    public static void SetUpscalerLodBias(float bias)
+    /// <summary>
+    /// The render scale the active upscaler really runs at - its render width
+    /// over the display width, from the vendor's own query - and 0 when no
+    /// upscaler is running. Not persisted, for the same reason
+    /// <see cref="UpscalerLodBias" /> is not.
+    /// </summary>
+    public static float UpscalerRenderScale { get; private set; }
+
+    /// <summary>
+    /// The render scale the temporal pipeline runs at, which is what the jitter
+    /// sequence length is derived from (temporal contract §2: the phase count is
+    /// ceil(8 * upscale^2)). With an upscaler active that is the vendor's ratio,
+    /// not the config's render scale - the two are different numbers and only one
+    /// of them describes the frame that is actually being rendered.
+    /// </summary>
+    public static float EffectiveTemporalRenderScale =>
+        UpscalerReplacesTaa && UpscalerRenderScale > 0f ? UpscalerRenderScale : EffectiveRenderScale;
+
+    /// <summary>
+    /// Publishes the plan the vendor query answered - one call, because the scale
+    /// and the bias describe the same feature and a consumer that saw one without
+    /// the other would jitter at one ratio and sample mips at another.
+    /// </summary>
+    public static void SetUpscalerPlan(float renderScale, float lodBias)
     {
-        UpscalerLodBias = bias;
+        UpscalerRenderScale = renderScale;
+        UpscalerLodBias = lodBias;
+    }
+
+    /// <summary>Forgets the plan: no upscaler is running, so neither term applies.</summary>
+    public static void ClearUpscalerPlan()
+    {
+        UpscalerRenderScale = 0f;
+        UpscalerLodBias = 0f;
     }
 
     // Like the Vulkan renderer selection, TAA is a renderer-level feature: a

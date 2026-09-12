@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index 4a24e75..d077eb4 100644
+index 4a24e75..bfb2ab1 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -230,13 +230,13 @@ index 4a24e75..d077eb4 100644
  	{
  		Shader fragmentShader = program.FragmentShader;
 -		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA ? 1 : 0) + "\r\n";
-+		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTaa ? 1 : 0) + "\r\n";
++		fragmentShader.PrefixCode = fragmentShader.PrefixCode + "#define FXAA " + (ClientSettings.FXAA && OptimumConfig.EffectiveRenderScale >= 1.0f && !OptimumConfig.EffectiveTemporalPipeline ? 1 : 0) + "\r\n";
  		Shader fragmentShader2 = program.FragmentShader;
  		fragmentShader2.PrefixCode = fragmentShader2.PrefixCode + "#define SSAOLEVEL " + ClientSettings.SSAOQuality + "\r\n";
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +495,48 @@ public class ShaderRegistry
+@@ -333,10 +495,52 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
@@ -269,7 +269,11 @@ index 4a24e75..d077eb4 100644
 +		// whose size is (SetupSSAO ? 4 : 2) with SetupSSAO = ClientSettings.SSAOQuality > 0
 +		// - the same condition SSAOLEVEL above is stamped from, so the two can
 +		// never disagree.
-+		bool taaMotion = OptimumConfig.EffectiveTaa;
++		// Optimum (DLSS plan, Phase 2): the motion outputs exist for whichever
++		// temporal consumer owns the frame, so the variant is stamped for the
++		// pipeline, not for our own resolve. An upscaler with TAA off still needs
++		// every writer this define creates.
++		bool taaMotion = OptimumConfig.EffectiveTemporalPipeline;
 +		// The per-uniform hooks in ShaderProgramBase and the bone-upload hook in
 +		// UBO exist for the entity writer only; this is the single flag that tells
 +		// them whether any shader in the process was built with it.

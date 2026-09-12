@@ -314,7 +314,7 @@ internal sealed class DlssUpscaler : IDisposable
         Plan = plan;
         // The LOD bias belongs to the plan that was really created, not to the one
         // that was asked for, so the samplers follow a feature that fell back.
-        OptimumConfig.SetUpscalerLodBias(plan.LodBias);
+        OptimumConfig.SetUpscalerPlan(plan.RenderScale, plan.LodBias);
         _log("[Optimum] DLSS feature created: " + plan);
         return true;
     }
@@ -343,7 +343,7 @@ internal sealed class DlssUpscaler : IDisposable
         _feature = null;
         Plan = default;
         FeaturesRetired++;
-        OptimumConfig.SetUpscalerLodBias(0f);
+        OptimumConfig.ClearUpscalerPlan();
         if (_device != null) _device.RetireDlssFeature(feature);
         else feature.Dispose();
     }
@@ -376,7 +376,7 @@ internal sealed class DlssUpscaler : IDisposable
         _device = null;
         _vkDevice = IntPtr.Zero;
         Unavailable = "shut down";
-        OptimumConfig.SetUpscalerLodBias(0f);
+        OptimumConfig.ClearUpscalerPlan();
     }
 
     public void Dispose() => Shutdown();

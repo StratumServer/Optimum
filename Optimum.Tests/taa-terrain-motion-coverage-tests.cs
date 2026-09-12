@@ -192,7 +192,9 @@ public class TaaTerrainMotionCoverageTests
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
 
-        Assert.Contains("bool taaMotion = OptimumConfig.EffectiveTaa;", registry);
+        // DLSS plan, Phase 2: the variant is stamped for the temporal pipeline, not
+        // for our own resolve - an upscaler with TAA off needs every writer it creates.
+        Assert.Contains("bool taaMotion = OptimumConfig.EffectiveTemporalPipeline;", registry);
         // The location must follow the same condition SetupDefaultFrameBuffers
         // sizes Primary's colour attachments with (SetupSSAO), or the writer
         // emits into a slot the framebuffer does not have.
@@ -215,10 +217,13 @@ public class TaaTerrainMotionCoverageTests
         Assert.Contains("public override void EndMotionWrite()", platform);
         Assert.Contains("public override bool OptimumMotionWriteActive", platform);
 
-        // Guards: no motion attachment, no TAA targets, TAA switched off, or a
-        // window already open - all no-ops, so callers can wrap unconditionally.
-        Assert.Contains("if (MotionAttachmentIndex < 0 || !TaaTargetsReady) return false;", platform);
-        Assert.Contains("if (!Vintagestory.API.Config.OptimumConfig.EffectiveTaa) return false;", platform);
+        // Guards: nothing temporal wants motion vectors this frame, or a window is
+        // already open - all no-ops, so callers can wrap unconditionally. Since the
+        // DLSS plan's Phase 2 the first guard is one member, because the two consumers
+        // need different targets: our resolve needs its history slots, an upscaler
+        // needs none of ours, and both need the motion attachment.
+        Assert.Contains("if (!OptimumMotionWritesReady) return false;", platform);
+        Assert.Contains("public bool OptimumMotionWritesReady", platform);
         Assert.Contains("if (OptimumMotionWriteActive) return false;", platform);
 
         // Device path (VulkanClientPlatform since Phase 1A step 4): mask including the

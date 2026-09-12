@@ -150,7 +150,7 @@ public class DlssUpscalerTests
         {
             OptimumConfig.ResetUpscalerRuntimeDisabledForTests();
             OptimumConfig.Upscaler = upscaler;
-            OptimumConfig.SetUpscalerLodBias(0f);
+            OptimumConfig.ClearUpscalerPlan();
         }
     }
 
