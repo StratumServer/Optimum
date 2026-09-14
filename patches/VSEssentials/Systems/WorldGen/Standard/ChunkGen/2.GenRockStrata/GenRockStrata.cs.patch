@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs
-index cb9eefa..feaa325 100644
+index cb9eefa..7409b26 100644
 --- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs
 +++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/2.GenRockStrata/GenRockStrata.cs
 @@ -1,7 +1,8 @@
@@ -23,19 +23,12 @@ index cb9eefa..feaa325 100644
  
  
  
-@@ -134,24 +136,28 @@ namespace Vintagestory.ServerMods
+@@ -134,10 +136,30 @@ namespace Vintagestory.ServerMods
          }
  
  
          // Cheap ugly code for better performance :<
          #region
--        float[] rockGroupMaxThickness = new float[4];
--        int[] rockGroupCurrentThickness = new int[4];
--
--        IMapChunk mapChunk;
--        ushort[] heightMap;
--        int rdx;
--        int rdz;
 +        sealed class RockWorkspace
 +        {
 +            public readonly float[] RockGroupMaxThickness = new float[4];
@@ -50,21 +43,30 @@ index cb9eefa..feaa325 100644
 +            public float ChunkInRegionZ;
 +            public GeologicProvinces Provinces;
 +        }
- 
--        LerpedWeightedIndex2DMap map;
--        float lerpMapInv;
--        float chunkInRegionX;
--        float chunkInRegionZ;
++
 +        ThreadLocal<RockWorkspace> workspaces;
 +        readonly object provinceMapLock = new object();
++
++        // Compatibility fields for mods accessing GenRockStrataNew via Harmony/reflection
++        // (e.g. rockstratavariety, wilderlandsgeology). Optimum uses RockWorkspace for multithreading.
+         float[] rockGroupMaxThickness = new float[4];
+         int[] rockGroupCurrentThickness = new int[4];
  
--        GeologicProvinces provinces = NoiseGeoProvince.provinces;
+         IMapChunk mapChunk;
+         ushort[] heightMap;
+@@ -148,10 +170,11 @@ namespace Vintagestory.ServerMods
+         float lerpMapInv;
+         float chunkInRegionX;
+         float chunkInRegionZ;
+ 
+         GeologicProvinces provinces = NoiseGeoProvince.provinces;
++
          #endregion
  
          internal void GenChunkColumn(IChunkColumnGenerateRequest request)
          {
              var chunks = request.Chunks;
-@@ -169,25 +175,38 @@ namespace Vintagestory.ServerMods
+@@ -169,25 +192,48 @@ namespace Vintagestory.ServerMods
              }
          }
  
@@ -93,6 +95,16 @@ index cb9eefa..feaa325 100644
 +            workspace.ChunkInRegionZ = (chunkZ % regionChunkSize) * workspace.LerpMapInv * chunksize;
 +
 +            workspace.Provinces = NoiseGeoProvince.provinces;
++
++            this.mapChunk = workspace.MapChunk;
++            this.heightMap = workspace.HeightMap;
++            this.rdx = workspace.Rdx;
++            this.rdz = workspace.Rdz;
++            this.map = workspace.Map;
++            this.lerpMapInv = workspace.LerpMapInv;
++            this.chunkInRegionX = workspace.ChunkInRegionX;
++            this.chunkInRegionZ = workspace.ChunkInRegionZ;
++            this.provinces = workspace.Provinces;
          }
  
          public void genBlockColumn(IServerChunk[] chunks, int chunkX, int chunkZ, int lx, int lz)
@@ -114,7 +126,7 @@ index cb9eefa..feaa325 100644
              int yupper = surfaceY;
              int rockBlockId = this.rockBlockId;
  
-@@ -311,15 +330,17 @@ namespace Vintagestory.ServerMods
+@@ -311,15 +357,17 @@ namespace Vintagestory.ServerMods
          }
  
          LerpedWeightedIndex2DMap GetOrLoadLerpedProvinceMap(IMapChunk mapchunk, int chunkX, int chunkZ)
