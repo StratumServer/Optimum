@@ -40,7 +40,7 @@ endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
 .PHONY: help check check-patches check-compat check-shaders bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
+        package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
 help: ## Show available targets
@@ -191,6 +191,9 @@ worldgen-benchmark: build ## Run the 12-trial precise worldgen release suite
 
 package: build ## Build every package this host can produce (Linux/macOS/Windows)
 	bash scripts/package-all.sh --version $(VERSION)
+
+package-overlay: build ## Package patch overlay and manifest for RiftLauncher
+	bash scripts/package-overlay.sh --version $(VERSION)
 
 package-linux: build ## Package Linux x64 (tar.gz)
 	bash scripts/package-linux.sh --version $(VERSION)

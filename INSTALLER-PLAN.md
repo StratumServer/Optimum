@@ -246,15 +246,16 @@ user cache. `--source-cache <abs>` overrides the cache root. `preflight` and
 | `install` | `--package <abs>` `--install-dir <abs>` `[--data-path <abs>]` `[--shortcuts menu,desktop]` `[--json]` | Transactional deploy: stage the new tree beside the target, move an existing Optimum install aside, swap with one rename, delete the backup, roll back on any failure. Writes an install manifest, the requested shortcuts, and on Windows the uninstall registry entry. A non-empty directory that is not an Optimum install is refused. |
 | `validate` | `--package <abs>` `[--json]` | Run the runtime validation described in section 7. |
 | `uninstall` | `--install-dir <abs>` `[--json]` | Remove an install by its manifest. Manifest entries that resolve outside the install directory are refused, not followed. |
+| `patch` | `--game-dir <abs>` `[--overlay <abs>]` `[--backup|--no-backup]` `[--rollback]` `[--json]` | Apply Cecil patch and asset overlay in-place to an existing vanilla Vintage Story installation without requiring decompilation or SDK tools (resolving Optimum Issue #71 and RiftLauncher Issue #457). Idempotent across multiple runs by preserving pristine vanilla assemblies. Rollback restores vanilla assemblies from backups. |
 | `capabilities` | `[--repo-root <abs>]` `[--json]` | Report supported game versions and patch set ids. |
 | `--version` | none | Print one plain line and exit 0. |
 
-`build` is the verb RiftLauncher calls. Everything else exists for the GUI, for
+`build` and `patch` are the verbs RiftLauncher calls. Everything else exists for the GUI, for
 scripting, and for CI.
 
 ### NDJSON schema
 
-The operation verbs (`build`, `install`, `validate`, `uninstall`) carry a stream:
+The operation verbs (`build`, `install`, `patch`, `validate`, `uninstall`) carry a stream:
 with `--json`, stdout is one JSON object per line and nothing else, ending in
 exactly one terminal `result`. Without `--json` it is human-readable text. The
 query verbs (`preflight`, `capabilities`) answer with a single JSON document

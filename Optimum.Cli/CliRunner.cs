@@ -5,6 +5,7 @@ using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Licensing;
+using Optimum.Bootstrap.Core.Patch;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
 
@@ -32,7 +33,8 @@ public static class CliRunner
         ISystemProbe probe,
         IBuildDriver buildDriver,
         CancellationToken externalCancellation = default,
-        ISourceProvider? sourceProvider = null)
+        ISourceProvider? sourceProvider = null,
+        IGamePatcher? gamePatcher = null)
     {
         if (args.Count == 1 && args[0] == "--version")
         {
@@ -67,6 +69,7 @@ public static class CliRunner
             "capabilities" => Capabilities(rest, probe, stdout, stderr),
             "build" => await Build(rest, probe, buildDriver, sourceProvider ?? new GitSourceProvider(probe), output, cancellation.Token),
             "install" => Install(rest, probe, output),
+            "patch" => await Patch(rest, probe, gamePatcher ?? new GamePatcher(probe), output, cancellation.Token),
             "validate" => Validate(rest, probe, output),
             "uninstall" => Uninstall(rest, probe, output),
             _ => Unknown(verb, stderr),
@@ -250,6 +253,54 @@ public static class CliRunner
             : output.Failure(result.Reason ?? FailureReason.EngineInternal, result.Message ?? "install failed");
     }
 
+    private static async Task<int> Patch(
+        IReadOnlyList<string> args,
+        ISystemProbe probe,
+        IGamePatcher patcher,
+        EngineOutput output,
+        CancellationToken cancellationToken)
+    {
+        var parsed = new CliArgs(args, new HashSet<string> { "--game-dir", "--overlay" });
+        if (parsed.Errors.Count > 0)
+            return output.Failure(FailureReason.BadInput, string.Join("; ", parsed.Errors));
+
+        string? gameDir = RequireAbsolute(parsed.Get("--game-dir"), "--game-dir", output, out int gameDirError);
+        if (gameDir is null)
+            return gameDirError;
+
+        string? overlayDir = null;
+        string? rawOverlay = parsed.Get("--overlay");
+        if (rawOverlay is not null)
+        {
+            overlayDir = RequireAbsolute(rawOverlay, "--overlay", output, out int overlayError);
+            if (overlayDir is null)
+                return overlayError;
+        }
+
+        bool backup = !parsed.Has("--no-backup");
+        bool rollback = parsed.Has("--rollback");
+
+        var request = new PatchRequest(gameDir, overlayDir, backup, rollback);
+
+        PatchResult result;
+        try
+        {
+            result = await patcher.PatchAsync(request, output, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            result = PatchResult.Failure(FailureReason.Cancelled, "the patch operation was cancelled");
+        }
+        catch (Exception ex)
+        {
+            result = PatchResult.Failure(FailureReason.EngineInternal, $"patch failed: {ex.Message}");
+        }
+
+        return result.Ok
+            ? output.Success(result.GameDirectory!)
+            : output.Failure(result.Reason ?? FailureReason.EngineInternal, result.Message ?? "patch failed");
+    }
+
     private static int Validate(IReadOnlyList<string> args, ISystemProbe probe, EngineOutput output)
     {
         var parsed = new CliArgs(args, new HashSet<string> { "--package" });
@@ -328,6 +379,7 @@ public static class CliRunner
         stderr.WriteLine("  preflight     [--repo-root <dir>]");
         stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>] [--acquire-source [--source-cache <abs>]]");
         stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop]");
+        stderr.WriteLine("  patch         --game-dir <abs> [--overlay <abs>] [--backup|--no-backup] [--rollback]");
         stderr.WriteLine("  validate      --package <abs>");
         stderr.WriteLine("  uninstall     --install-dir <abs>");
         stderr.WriteLine("  capabilities  [--repo-root <dir>]");
