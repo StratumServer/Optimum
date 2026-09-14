@@ -5,13 +5,15 @@ using Optimum.Bootstrap.Core.Tests;
 using Optimum.Cli;
 using Xunit;
 
+using Optimum.Bootstrap.Core.Patch;
+
 namespace Optimum.Cli.Tests;
 
 public class CliRunnerTests
 {
     private static async Task<(int Code, string Stdout, string Stderr)> Run(
         string[] args, ISystemProbe? probe = null, IBuildDriver? driver = null, CancellationToken cancel = default,
-        ISourceProvider? sourceProvider = null)
+        ISourceProvider? sourceProvider = null, IGamePatcher? gamePatcher = null)
     {
         var stdout = new StringWriter();
         var stderr = new StringWriter();
@@ -20,7 +22,8 @@ public class CliRunnerTests
             probe ?? new FakeSystemProbe(),
             driver ?? new FakeBuildDriver(),
             cancel,
-            sourceProvider);
+            sourceProvider,
+            gamePatcher);
         return (code, stdout.ToString(), stderr.ToString());
     }
 
@@ -293,6 +296,77 @@ public class CliRunnerTests
             ["build", "--acknowledge-decompile", "--output", "/tmp/out", "--acquire-source", "--source-cache", "rel/cache"]);
         Assert.Equal(CliRunner.ExitUsage, code);
         Assert.Contains("absolute", stderr);
+    }
+
+    private sealed class FakeGamePatcher(PatchResult result) : IGamePatcher
+    {
+        public PatchRequest? LastRequest { get; private set; }
+
+        public Task<PatchResult> PatchAsync(
+            PatchRequest request, IBuildObserver? observer = null, CancellationToken cancellationToken = default)
+        {
+            LastRequest = request;
+            observer?.Phase(ProgressPhase.Patch, 50, "testing patch phase");
+            return Task.FromResult(result);
+        }
+    }
+
+    [Fact]
+    public async Task PatchRejectsMissingGameDir()
+    {
+        var (code, _, stderr) = await Run(["patch"]);
+        Assert.Equal(CliRunner.ExitUsage, code);
+        Assert.Contains("--game-dir is required", stderr);
+    }
+
+    [Fact]
+    public async Task PatchRejectsRelativeGameDir()
+    {
+        var (code, _, stderr) = await Run(["patch", "--game-dir", "rel/path"]);
+        Assert.Equal(CliRunner.ExitUsage, code);
+        Assert.Contains("absolute path", stderr);
+    }
+
+    [Fact]
+    public async Task PatchRejectsRelativeOverlay()
+    {
+        var (code, _, stderr) = await Run(["patch", "--game-dir", "/abs/game", "--overlay", "rel/overlay"]);
+        Assert.Equal(CliRunner.ExitUsage, code);
+        Assert.Contains("absolute path", stderr);
+    }
+
+    [Fact]
+    public async Task PatchJsonStreamMeetsTheContract()
+    {
+        var fakePatcher = new FakeGamePatcher(PatchResult.Success("/abs/game", ["VintagestoryLib.dll"]));
+        var (code, stdout, _) = await Run(
+            ["patch", "--game-dir", "/abs/game", "--json"],
+            gamePatcher: fakePatcher);
+
+        Assert.Equal(CliRunner.ExitOk, code);
+        Assert.NotNull(fakePatcher.LastRequest);
+        Assert.Equal("/abs/game", fakePatcher.LastRequest!.GameDirectory);
+        Assert.True(fakePatcher.LastRequest.Backup);
+
+        NdjsonStream stream = NdjsonStream.Parse(stdout);
+        stream.AssertContract();
+        Assert.True(stream.Terminal.GetProperty("ok").GetBoolean());
+        Assert.Equal("/abs/game", stream.Terminal.GetProperty("runtimePath").GetString());
+    }
+
+    [Fact]
+    public async Task PatchJsonFailurePropagatesReasonAndExitsCodeOne()
+    {
+        var fakePatcher = new FakeGamePatcher(PatchResult.Failure(FailureReason.PatchConflict, "simulated conflict"));
+        var (code, stdout, _) = await Run(
+            ["patch", "--game-dir", "/abs/game", "--json"],
+            gamePatcher: fakePatcher);
+
+        Assert.Equal(CliRunner.ExitError, code);
+        NdjsonStream stream = NdjsonStream.Parse(stdout);
+        stream.AssertContract();
+        Assert.False(stream.Terminal.GetProperty("ok").GetBoolean());
+        Assert.Equal("patch-conflict", stream.Terminal.GetProperty("reason").GetString());
     }
 
     private static FakeSystemProbe RepoProbe()
