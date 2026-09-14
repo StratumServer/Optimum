@@ -21,6 +21,8 @@ public sealed class WorldgenR1WorkspacePatchContractTests
         Assert.Contains("landformMapLock", terra);
         Assert.Contains("ThreadLocal<RockWorkspace> workspaces", rock);
         Assert.Contains("provinceMapLock", rock);
+        Assert.Contains("float[] rockGroupMaxThickness = new float[4];", rock);
+        Assert.Contains("IMapChunk mapChunk;", rock);
         Assert.Contains("ThreadLocal<LCGRandom> caveRandThreadLocal", caves);
         Assert.Contains("ThreadLocal<BlockLayerWorkspace> workspaces", layers);
         Assert.Contains("LCGRandom rnd;", layers);
@@ -43,6 +45,40 @@ public sealed class WorldgenR1WorkspacePatchContractTests
             instance).Compile();
 
         Assert.NotNull(getter);
+    }
+
+    [Fact]
+    public void ReflectiveRockStrataAdaptersCanResolveLegacyFields()
+    {
+        Type type = typeof(GenRockStrataNew);
+        string[] requiredFields = [
+            "rockGroupMaxThickness",
+            "rockGroupCurrentThickness",
+            "mapChunk",
+            "heightMap",
+            "rdx",
+            "rdz",
+            "map",
+            "lerpMapInv",
+            "chunkInRegionX",
+            "chunkInRegionZ",
+            "provinces"
+        ];
+
+        foreach (string fieldName in requiredFields)
+        {
+            FieldInfo? field = type.GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+            Assert.NotNull(field);
+
+            ParameterExpression instance = Expression.Parameter(type, "instance");
+            Expression getterBody = Expression.Field(instance, field);
+            LambdaExpression getter = Expression.Lambda(getterBody, instance);
+            Delegate compiled = getter.Compile();
+            Assert.NotNull(compiled);
+        }
     }
 
     [Fact]

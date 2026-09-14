@@ -6,6 +6,11 @@ namespace Optimum.Bootstrap.Core.Install;
 
 public sealed record RuntimeValidationResult(bool Ok, string? Detail);
 
+public interface IRuntimeValidator
+{
+    RuntimeValidationResult Validate(string packageDirectory);
+}
+
 /// <summary>
 /// Checks that a staged package is a complete runtime without running any game
 /// code (INSTALLER-PLAN.md section 7, option 2). The layout holds, the patched
@@ -14,7 +19,7 @@ public sealed record RuntimeValidationResult(bool Ok, string? Detail);
 /// with a static <c>Main</c>. The full JIT probe stays with
 /// <c>Optimum.exe --validate-only</c>, which those packages could ship later.
 /// </summary>
-public sealed class RuntimeValidator(ISystemProbe probe)
+public sealed class RuntimeValidator(ISystemProbe probe) : IRuntimeValidator
 {
     private static readonly string[] RequiredAssemblies =
     [

@@ -1051,7 +1051,7 @@ public static class OptimumConfig
     private static void LoadShaderCompatibilityReport()
     {
         _shaderCompatibilityDisabledFeatures.Clear();
-        _shaderCompatibilityScanFailed = true;
+        _shaderCompatibilityScanFailed = false;
         _shaderCompatibilityFingerprint = null;
         ResetShaderCompatibilityAfterReload();
 
@@ -1067,7 +1067,11 @@ public static class OptimumConfig
             {
                 PropertyNameCaseInsensitive = true
             });
-            if (report == null) return;
+            if (report == null)
+            {
+                _shaderCompatibilityScanFailed = true;
+                return;
+            }
 
             if (report.DisabledFeatures != null)
             {
@@ -1086,6 +1090,11 @@ public static class OptimumConfig
             _shaderCompatibilityScanFailed = true;
             _shaderCompatibilityFingerprint = null;
         }
+    }
+
+    public static void ReloadShaderCompatibilityReport()
+    {
+        LoadShaderCompatibilityReport();
     }
 
     private static string? _configPath;

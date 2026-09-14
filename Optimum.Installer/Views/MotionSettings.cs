@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Optimum.Installer.Views;
@@ -22,6 +23,12 @@ public static class MotionSettings
 
     private static bool Detect()
     {
+        if (Environment.GetEnvironmentVariable("OPTIMUM_REDUCE_MOTION") == "1")
+            return true;
+
+        if (AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name?.StartsWith("Avalonia.Headless", StringComparison.OrdinalIgnoreCase) == true))
+            return true;
+
         if (!OperatingSystem.IsWindows())
             return false;
         try
