@@ -190,7 +190,22 @@ public static class OptimumConfig
     /// </summary>
     public static bool IndirectDrawSupported = false;
 
-    public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported;
+    /// <summary>
+    /// Issue #85: Tracks whether the third-party Harmony mod Komet is loaded in the client.
+    /// Set dynamically by OptimumKometGuard during ModLoader startup or assembly scan.
+    /// Not persisted to optimum.json.
+    /// </summary>
+    public static bool KometDetected;
+
+    /// <summary>
+    /// Issue #85: When true (default), Optimum detects Komet and safely yields conflicting
+    /// host subsystems (e.g. MDI indirect rendering and SIMD frustum culling) to prevent
+    /// graphics pipeline crashes or corrupted state from Komet's cancelling Harmony prefixes.
+    /// Persisted to ModConfig/optimum.json.
+    /// </summary>
+    public static bool KometGuardEnabled = true;
+
+    public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported && (!KometDetected || !KometGuardEnabled);
 
     /// <summary>
     /// Issue #75: Enables SIMD-vectorized frustum culling on CPU (AVX2 / ARM NEON)
@@ -203,7 +218,7 @@ public static class OptimumConfig
     /// </summary>
     public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
 
-    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported;
+    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported && (!KometDetected || !KometGuardEnabled);
 
     /// <summary>
     /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)
@@ -752,6 +767,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
         (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
         (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
+        (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
     };
 
     /// <summary>
@@ -855,6 +871,7 @@ public static class OptimumConfig
             WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
             IndirectDrawEnabled = data.IndirectDraw;
             SimdCullingEnabled = data.SimdCulling;
+            KometGuardEnabled = data.KometGuard;
         }
         catch (Exception)
         {
@@ -928,6 +945,7 @@ public static class OptimumConfig
             WorldgenWorkerPolicy = WorldgenWorkerPolicy,
             IndirectDraw = IndirectDrawEnabled,
             SimdCulling = SimdCullingEnabled,
+            KometGuard = KometGuardEnabled,
         };
 
         try
@@ -1009,6 +1027,7 @@ internal sealed class OptimumConfigData
     public string WorldgenWorkerPolicy { get; set; } = "auto";
     public bool IndirectDraw { get; set; } = false;
     public bool SimdCulling { get; set; } = true;
+    public bool KometGuard { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -2098,7 +2117,8 @@ public static class OptimumDiagnostics
         double simdTestsPerFrame = frames == 0 ? 0 : (double)simdTests / frames;
         double simdCulledPerFrame = frames == 0 ? 0 : (double)simdCulled / frames;
 
-        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, submissionMs/frame={subMsPerFrame:0.###}, indirectDraws/frame={indDrawsPerFrame:0.0}, simdTests/frame={simdTestsPerFrame:0.0}, simdCulled/frame={simdCulledPerFrame:0.0}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}";
+        string kometNote = OptimumConfig.KometDetected ? ", kometOverride=true" : "";
+        return $"Optimum chunk render: frames={frames}, drawCalls/frame={drawsPerFrame:0.0}, poolsRendered/frame={poolsPerFrame:0.0}, poolsCulled/frame={culledPerFrame:0.0}, visibleGroups/frame={groupsPerFrame:0.0}, frustumCullMs/frame={cullMsPerFrame:0.###}, totalCullMs={cullMs:0.###}, submissionMs/frame={subMsPerFrame:0.###}, indirectDraws/frame={indDrawsPerFrame:0.0}, simdTests/frame={simdTestsPerFrame:0.0}, simdCulled/frame={simdCulledPerFrame:0.0}, windowFrames={windowFrames}, windowDrawCalls/frame={windowDrawsPerFrame:0.0}, windowPoolsRendered/frame={windowPoolsPerFrame:0.0}, windowPoolsCulled/frame={windowCulledPerFrame:0.0}, windowVisibleGroups/frame={windowGroupsPerFrame:0.0}, windowFrustumCullMs/frame={windowCullMsPerFrame:0.###}{kometNote}";
     }
 
     public static string GetCountersSummary()
@@ -2439,6 +2459,16 @@ public static class OptimumDiagnostics
         long columns = Interlocked.Read(ref _chunkDeserializeParallelColumns);
         long chunks = Interlocked.Read(ref _chunkDeserializeParallelChunks);
         return $"Optimum chunk deserialize parallel: columns={columns}, chunks={chunks}";
+    }
+
+    /// <summary>
+    /// Issue #85: Returns diagnostic summary of detected conflicting guest mods (e.g. Komet).
+    /// </summary>
+    public static string GetConflictingModsSummary()
+    {
+        return OptimumConfig.KometDetected
+            ? $"Optimum conflicting mods: {OptimumKometGuard.GetStatusLine()}"
+            : "Optimum conflicting mods: none detected";
     }
 }
 

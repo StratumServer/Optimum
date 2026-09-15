@@ -27,6 +27,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\optimum-worldgen-footprint-lease.cs" Link="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumChunkVisibilityBfs.cs" Link="Config\OptimumChunkVisibilityBfs.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumFrustumCullSimd.cs" Link="Config\OptimumFrustumCullSimd.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumKometGuard.cs" Link="Config\OptimumKometGuard.cs" />
     <Compile Include="optimum-api-bridge.cs" />
   </ItemGroup>
   <ItemGroup>
