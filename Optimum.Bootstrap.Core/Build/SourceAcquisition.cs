@@ -87,10 +87,20 @@ public static class SourceCache
         return v.Length > 1 && v[0] == 'v' && char.IsDigit(v[1]) ? v : null;
     }
 
-    /// <summary>True when a directory holds the two files the pipeline needs.</summary>
-    public static bool IsUsableCheckout(ISystemProbe probe, string directory) =>
-        probe.FileExists(Path.Combine(directory, "forks.json"))
-        && probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.sh"));
+    /// <summary>
+    /// True when a directory holds the manifest and the scripts required by the
+    /// platform's build and packaging pipeline.
+    /// </summary>
+    public static bool IsUsableCheckout(ISystemProbe probe, string directory)
+    {
+        if (!probe.FileExists(Path.Combine(directory, "forks.json")))
+            return false;
+
+        return probe.Os == OsKind.Windows
+            ? probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.ps1"))
+                && probe.FileExists(Path.Combine(directory, "scripts", "package.ps1"))
+            : probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.sh"));
+    }
 
     internal static IReadOnlyList<string> CloneArguments(string? tagRef, string targetDirectory)
     {

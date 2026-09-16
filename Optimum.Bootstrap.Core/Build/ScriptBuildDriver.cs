@@ -111,11 +111,11 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         }
     }
 
-    private (string Exe, IReadOnlyList<string> Args) BootstrapCommand(BuildRequest request)
+    internal (string Exe, IReadOnlyList<string> Args) BootstrapCommand(BuildRequest request)
     {
         if (probe.Os == OsKind.Windows)
         {
-            List<string> win = ["-File", "scripts/bootstrap.ps1"];
+            List<string> win = ["-File", ScriptPath(request.RepoRoot, "bootstrap.ps1")];
             if (request.ClientArchive is not null)
                 win.AddRange(["-ClientArchive", request.ClientArchive]);
             if (request.Version is not null)
@@ -131,13 +131,13 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         return ("bash", unix);
     }
 
-    private (string Exe, IReadOnlyList<string> Args) PackageCommand(BuildRequest request)
+    internal (string Exe, IReadOnlyList<string> Args) PackageCommand(BuildRequest request)
     {
         string output = request.OutputDirectory;
         switch (probe.Os)
         {
             case OsKind.Windows:
-                List<string> win = ["-File", "scripts/package.ps1", "-OutputDir", output];
+                List<string> win = ["-File", ScriptPath(request.RepoRoot, "package.ps1"), "-OutputDir", output];
                 if (request.ClientArchive is not null) win.AddRange(["-ClientArchive", request.ClientArchive]);
                 return (PwshExecutable(), win);
             case OsKind.MacOs:
@@ -153,6 +153,9 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                 return ("bash", linux);
         }
     }
+
+    private static string ScriptPath(string repoRoot, string scriptName) =>
+        Path.GetFullPath(Path.Combine(repoRoot, "scripts", scriptName));
 
     private string DotnetExecutable() => DotnetSdkProbe.Find(probe) ?? "dotnet";
 

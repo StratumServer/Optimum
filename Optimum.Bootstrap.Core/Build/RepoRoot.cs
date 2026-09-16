@@ -4,9 +4,9 @@ namespace Optimum.Bootstrap.Core.Build;
 
 /// <summary>
 /// Finds the Optimum checkout the engine has to drive: the nearest directory at
-/// or above a starting point that holds <c>forks.json</c> next to
-/// <c>scripts/bootstrap.sh</c>. Both front ends need this because the build
-/// pipeline is still the shell scripts (INSTALLER-PLAN.md section 2).
+/// or above a starting point that holds the manifest and the scripts required
+/// by the probed platform. Both front ends need this because the build pipeline
+/// is still the platform scripts (INSTALLER-PLAN.md section 2).
 /// </summary>
 public static class RepoRoot
 {
@@ -18,8 +18,7 @@ public static class RepoRoot
 
         for (string? dir = start; dir is not null; dir = Path.GetDirectoryName(dir))
         {
-            if (probe.FileExists(Path.Combine(dir, "forks.json"))
-                && probe.FileExists(Path.Combine(dir, "scripts", "bootstrap.sh")))
+            if (SourceCache.IsUsableCheckout(probe, dir))
                 return dir;
         }
 
