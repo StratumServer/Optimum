@@ -38,7 +38,11 @@
     <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Remove="Config\OptimumAnimLod.cs" />
+    <Compile Remove="Client\Model\Mesh\OptimumMeshPartPool.cs" />
     <Compile Remove="Config\OptimumConfig.cs" />
+    <Compile Remove="Config\OptimumCompatibilityGuard.cs" />
+    <Compile Remove="Config\OptimumFrustumCullSimd.cs" />
+    <Compile Remove="Config\OptimumKometGuard.cs" />
     <Compile Remove="Config\OptimumGreedyMesher.cs" />
     <Compile Remove="Config\OptimumThreadGuard.cs" />
     <Compile Remove="Config\OptimumWorkerInstances.cs" />
@@ -49,6 +53,7 @@
     <Compile Remove="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Remove="Config\optimum-api-bridge.cs" />
+    <Compile Remove="Config\OptimumChunkVisibilityBfs.cs" />
   </ItemGroup>
 
   <ItemGroup>

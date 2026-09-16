@@ -1465,7 +1465,7 @@ if [[ "${#ownership_conflicts[@]}" -gt 0 ]]; then
   exit 1
 fi
 
-if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print 2>/dev/null | head -n 1 | grep -q .; then
+if [[ -d "$patches_dir" ]] && find "$patches_dir" -name '*.patch' -print -quit >/dev/null 2>&1; then
 
   # ZIP downloads (non-clone) lack a .git/ directory. git add and git apply
   # both exit 128 without one. Create a temporary repo so patches can apply.
