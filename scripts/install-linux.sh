@@ -789,9 +789,10 @@ write_desktop_entry() {
 [Desktop Entry]
 Type=Application
 Name=Optimum
+GenericName=Vintage Story optimized client
 Comment=High-performance client for Vintage Story
-Exec="$launcher"
-Path=$INSTALL_DIR
+Keywords=vintage;story;vs;optimum;client;
+Exec=Optimum
 Icon=optimum
 Terminal=false
 Categories=Game;
