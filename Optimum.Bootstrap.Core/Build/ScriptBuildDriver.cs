@@ -115,7 +115,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
     {
         if (probe.Os == OsKind.Windows)
         {
-            List<string> win = ["-File", ScriptPath(request.RepoRoot, "bootstrap.ps1")];
+            List<string> win = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ScriptPath(request.RepoRoot, "bootstrap.ps1")];
             if (request.ClientArchive is not null)
                 win.AddRange(["-ClientArchive", request.ClientArchive]);
             if (request.Version is not null)
@@ -137,7 +137,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         switch (probe.Os)
         {
             case OsKind.Windows:
-                List<string> win = ["-File", ScriptPath(request.RepoRoot, "package.ps1"), "-OutputDir", output];
+                List<string> win = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ScriptPath(request.RepoRoot, "package.ps1"), "-OutputDir", output];
                 if (request.ClientArchive is not null) win.AddRange(["-ClientArchive", request.ClientArchive]);
                 return (PwshExecutable(), win);
             case OsKind.MacOs:

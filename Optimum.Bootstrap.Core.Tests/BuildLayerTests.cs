@@ -213,9 +213,12 @@ public class ScriptBuildDriverWindowsCommandTests
 
         var command = new ScriptBuildDriver(probe).BootstrapCommand(request);
 
-        Assert.Equal("-File", command.Args[0]);
-        Assert.Equal(Path.GetFullPath(Path.Combine(repo, "scripts", "bootstrap.ps1")), command.Args[1]);
-        Assert.True(Path.IsPathFullyQualified(command.Args[1]));
+        Assert.Equal("-NoProfile", command.Args[0]);
+        Assert.Equal("-ExecutionPolicy", command.Args[1]);
+        Assert.Equal("Bypass", command.Args[2]);
+        Assert.Equal("-File", command.Args[3]);
+        Assert.Equal(Path.GetFullPath(Path.Combine(repo, "scripts", "bootstrap.ps1")), command.Args[4]);
+        Assert.True(Path.IsPathFullyQualified(command.Args[4]));
     }
 
     [Fact]
@@ -228,9 +231,12 @@ public class ScriptBuildDriverWindowsCommandTests
 
         var command = new ScriptBuildDriver(probe).PackageCommand(request);
 
-        Assert.Equal("-File", command.Args[0]);
-        Assert.Equal(Path.GetFullPath(Path.Combine(repo, "scripts", "package.ps1")), command.Args[1]);
-        Assert.True(Path.IsPathFullyQualified(command.Args[1]));
-        Assert.Equal(output, command.Args[3]);
+        Assert.Equal("-NoProfile", command.Args[0]);
+        Assert.Equal("-ExecutionPolicy", command.Args[1]);
+        Assert.Equal("Bypass", command.Args[2]);
+        Assert.Equal("-File", command.Args[3]);
+        Assert.Equal(Path.GetFullPath(Path.Combine(repo, "scripts", "package.ps1")), command.Args[4]);
+        Assert.True(Path.IsPathFullyQualified(command.Args[4]));
+        Assert.Equal(output, command.Args[6]);
     }
 }
