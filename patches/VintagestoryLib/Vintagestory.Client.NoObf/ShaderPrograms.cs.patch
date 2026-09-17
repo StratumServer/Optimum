@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-index f19d524..64a9dd4 100644
+index f19d524..ee8435e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs
-@@ -40,10 +40,14 @@ public static class ShaderPrograms
+@@ -40,10 +40,45 @@ public static class ShaderPrograms
  
  	public static ShaderProgramEntityanimated Entityanimated;
  
@@ -11,6 +11,37 @@ index f19d524..64a9dd4 100644
 +	public static ShaderProgram FsrEasu;
 +
 +	public static ShaderProgram FsrRcas;
++
++	public static ShaderProgram TaaDebug;
++
++	public static ShaderProgram TaaResolve;
++
++	// Optimum TAA (P5): the post-resolve sharpen pass (taa-sharpen). Registered
++	// like the other Optimum-only programs, so a failed compile marks LoadError
++	// and the post chain simply keeps reading the unsharpened resolve.
++	public static ShaderProgram TaaSharpen;
++
++	// Optimum TAA: multiplies the jittered AO into the scene before the resolve
++	// (scene-ssao). A failed compile marks LoadError and Final keeps applying
++	// AO the vanilla way.
++	public static ShaderProgram SceneSsao;
++
++	// Optimum TAA (P4): the liquid velocity pass (TAA-PLAN.md accuracy rule 7).
++	// Registered like the other Optimum-only programs, so a failed compile marks
++	// LoadError instead of failing the whole shader load.
++	public static ShaderProgram ChunkLiquidMotion;
++
++	// Optimum TAA (P4): the sky / volumetric-cloud motion and reactive pass.
++	// Registered like the other Optimum-only programs, so a failed compile marks
++	// LoadError instead of failing the whole shader load.
++	public static ShaderProgram TaaSkyMotion;
++
++	// Optimum (Vulkan foundation, world/UI separation): the pass that composes the UI image
++	// over the display image under premultiplied-alpha blending. Its own program rather than
++	// ShaderPrograms.Blit because blit.fsh forces alpha to 1, which under premultiplied
++	// blending would cover the whole world with the UI image. Registered like the other
++	// Optimum-only programs, so a failed compile marks LoadError instead of failing the load.
++	public static ShaderProgram UiCompose;
 +
  	public static ShaderProgramFindbright Findbright;
  

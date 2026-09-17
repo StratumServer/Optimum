@@ -1,0 +1,325 @@
+#version 450
+// Optimum ambient occlusion, pass 2 of 3: the visibility term and the packed edges
+// (docs/research/ambient-occlusion.md C.2-C.10).
+//
+// The slice and step scaffold (R1 steps, s^2 + minS, pixel snapping, the working depth
+// levels, the edges and the noise) and the HORIZON_GTAO integration are ported from
+// XeGTAO's XeGTAO_MainPass:
+//
+//   Copyright (C) 2016-2021, Intel Corporation
+//   SPDX-License-Identifier: MIT
+//   https://github.com/GameTechDev/XeGTAO
+//
+// The visibility bitmask follows Bevy's ssao.wesl (Therrien, Levesque, Gilet 2023,
+// Algorithm 1):
+//
+//   Copyright (c) 2020 Carter Anderson
+//   SPDX-License-Identifier: MIT OR Apache-2.0
+//   https://github.com/bevyengine/bevy
+//
+// The optional normal-based edge factor is Intel ASSAO's, as carried by Godot:
+//
+//   Copyright (c) 2016, Intel Corporation
+//   2020-12-05: clayjohn: convert to Vulkan and Godot
+//
+// All three under the MIT licence:
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a copy
+//   of this software and associated documentation files (the "Software"), to deal
+//   in the Software without restriction, including without limitation the rights
+//   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//   copies of the Software, and to permit persons to whom the Software is
+//   furnished to do so, subject to the following conditions:
+//
+//   The above copyright notice and this permission notice shall be included in all
+//   copies or substantial portions of the Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//   SOFTWARE.
+//
+// What differs from those sources, and why (section C of the design):
+// - 32 sectors (the paper's banding threshold), not Bevy's "sectors = samples per slice".
+// - Bits set with the round criterion (a sector counts when its centre is covered), not ceil.
+// - BITMASK_COS distributes the sector boundaries by the cosine CDF, (1 + sin(phi)) / 2 on
+//   the normal-centred slice, so plain bit counting is cosine-weighted (C.4). Evaluated
+//   from the horizon cosines without acos: sin(phi) = sin(theta) cos(n) - cos(theta) sin(n).
+// - Slice visibilities are averaged with the projected-normal length as the weight (GTAO
+//   eq. 8), so grazing slices count less and an unoccluded surface is exactly 1.
+// - Thickness grows with view distance and is randomised per sample (C.5), with a thin
+//   thickness for samples on the thin class of gNormal.w.
+// - No falloff inside the bitmask (C.6); XeGTAO's small-screen-radius fade and a far fade.
+// - Sky and the hand view write visibility 1 and skip the loop (C.9).
+// - No FinalValuePower by default (1.0, C.11) and no floor or contrast: the term is the
+//   visibility, clamped to max(0.03, v).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "common.glsl"
+
+layout(constant_id = GTAO_SPEC_INTEGRATION) const uint INTEGRATION = 0u;
+layout(constant_id = GTAO_SPEC_SLICE_COUNT) const uint SLICE_COUNT = 2u;
+layout(constant_id = GTAO_SPEC_STEPS_PER_SLICE) const uint STEPS_PER_SLICE = 2u;
+layout(constant_id = GTAO_SPEC_THICKNESS) const uint THICKNESS = 2u;
+layout(constant_id = GTAO_SPEC_CLASS_CHANNEL) const uint CLASS_CHANNEL = 1u;
+layout(constant_id = GTAO_SPEC_NOISE_CYCLE) const uint NOISE_CYCLE = 64u;
+layout(constant_id = GTAO_SPEC_NORMAL_EDGES) const uint NORMAL_EDGES = 0u;
+
+layout(binding = 0) uniform sampler2D workingDepth; // five levels, nearest, nearest mip
+layout(binding = 1) uniform sampler2D sourceDepth;  // Primary depth: the sky test
+layout(binding = 2) uniform sampler2D gNormal;      // Primary colour 2: GL view-space normal, class in w
+layout(binding = 3) uniform sampler2D hilbertLut;   // 64x64, the index in r
+layout(binding = 4, GTAO_TERM_FORMAT) uniform writeonly image2D outWorkingTerm;
+layout(binding = 5, GTAO_TERM_FORMAT) uniform writeonly image2D outEdges;
+
+ivec2 imageExtent;
+
+float workingDepthAt(ivec2 texel)
+{
+    return texelFetch(workingDepth, clamp(texel, ivec2(0), imageExtent - 1), 0).r;
+}
+
+vec3 normalAt(ivec2 texel)
+{
+    vec3 n = texelFetch(gNormal, clamp(texel, ivec2(0), imageExtent - 1), 0).xyz;
+    float len = length(n);
+    return len > 1e-6 ? n / len : vec3(0.0, 0.0, 1.0);
+}
+
+// Where a horizon direction falls on the normal-centred slice, in [0, 1] sector units.
+// side is +1 for samples along the slice direction and -1 against it; horizonCos is
+// the cosine of the direction's angle to the view vector; (sinN, cosN) the signed
+// projected-normal angle. A direction past the hemisphere edge clamps to that side's end.
+float sectorCoordinate(float horizonCos, float side, float sinN, float cosN)
+{
+    float sinTheta = side * sqrt(max(0.0, 1.0 - horizonCos * horizonCos));
+    float sinPhi = sinTheta * cosN - horizonCos * sinN;
+    float cosPhi = horizonCos * cosN + sinTheta * sinN;
+    if (cosPhi < 0.0) return side > 0.0 ? 1.0 : 0.0;
+    if (INTEGRATION == GTAO_INTEGRATION_BITMASK_COS) return 0.5 + 0.5 * sinPhi;
+    return 0.5 + atan(sinPhi, cosPhi) / GTAO_PI;
+}
+
+// The sectors whose centres lie in [low, high].
+uint sectorBits(float low, float high)
+{
+    uint start = uint(floor(clamp(low, 0.0, 1.0) * float(GTAO_SECTORS) + 0.5));
+    uint end = uint(floor(clamp(high, 0.0, 1.0) * float(GTAO_SECTORS) + 0.5));
+    if (end <= start) return 0u;
+    uint count = end - start;
+    uint mask = count >= GTAO_SECTORS ? 0xFFFFFFFFu : ((1u << count) - 1u);
+    return mask << start;
+}
+
+void main()
+{
+    imageExtent = imageSize(outWorkingTerm);
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pix, imageExtent))) return;
+
+    vec2 pixelSize = 1.0 / vec2(imageExtent);
+    vec2 normalizedScreenPos = (vec2(pix) + 0.5) * pixelSize;
+    float surfaceClass = texelFetch(gNormal, pix, 0).w;
+
+    if (gtaoIsSky(texelFetch(sourceDepth, pix, 0).r) || gtaoIsHand(surfaceClass))
+    {
+        // Nothing to occlude (sky), or a projection the world reconstruction does not
+        // describe (the hand view). Edges fully cut, so the denoise never mixes them in.
+        imageStore(outWorkingTerm, pix, vec4(1.0 / GTAO_OCCLUSION_TERM_SCALE));
+        imageStore(outEdges, pix, vec4(0.0));
+        return;
+    }
+
+    float viewspaceZ = workingDepthAt(pix);
+    float pixLZ = workingDepthAt(pix + ivec2(-1, 0));
+    float pixRZ = workingDepthAt(pix + ivec2(1, 0));
+    float pixTZ = workingDepthAt(pix + ivec2(0, 1));
+    float pixBZ = workingDepthAt(pix + ivec2(0, -1));
+
+    vec4 edgesLRTB = gtaoCalculateEdges(viewspaceZ, pixLZ, pixRZ, pixTZ, pixBZ);
+    vec3 glNormal = normalAt(pix);
+    if (NORMAL_EDGES != 0u)
+    {
+        // ASSAO's SSAO_NORMAL_BASED_EDGES_DOT_THRESHOLD 0.5; neighbours one texel away at full resolution.
+        edgesLRTB *= clamp(vec4(dot(glNormal, normalAt(pix + ivec2(-1, 0))), dot(glNormal, normalAt(pix + ivec2(1, 0))),
+                                dot(glNormal, normalAt(pix + ivec2(0, 1))), dot(glNormal, normalAt(pix + ivec2(0, -1)))) + 0.5,
+                           0.0, 1.0);
+    }
+    imageStore(outEdges, pix, vec4(gtaoPackEdges(edgesLRTB)));
+
+    // Move the centre slightly towards the camera against depth imprecision (fp32 working depth).
+    viewspaceZ *= 0.99999;
+
+    vec3 pixCenterPos = gtaoViewPosition(normalizedScreenPos, viewspaceZ);
+    vec3 viewVec = normalize(-pixCenterPos);
+
+    // GL view space has z toward the viewer; the working frame has z forward (C.10).
+    vec3 viewspaceNormal = glNormal * vec3(1.0, 1.0, -1.0);
+    // Double-sided foliage stores the face's normal whichever side is seen (C.9).
+    if (dot(viewspaceNormal, viewVec) < 0.0) viewspaceNormal = -viewspaceNormal;
+
+    float effectRadius = gtao.effectRadius * gtao.radiusMultiplier;
+    float falloffRange = gtao.effectFalloffRange * effectRadius;
+    float falloffFrom = effectRadius * (1.0 - gtao.effectFalloffRange);
+    float falloffMul = -1.0 / falloffRange;
+    float falloffAdd = falloffFrom / falloffRange + 1.0;
+
+    uint hilbertIndex = uint(texelFetch(hilbertLut, pix % 64, 0).r + 0.5);
+    vec2 localNoise = gtaoNoise(hilbertIndex, gtao.noiseIndex, NOISE_CYCLE);
+    float noiseSlice = localNoise.x;
+    float noiseSample = localNoise.y;
+
+    const float pixelTooCloseThreshold = 1.3;
+    float pixelViewspaceSizeX = viewspaceZ * gtao.ndcToViewMulX * pixelSize.x;
+    float screenspaceRadius = effectRadius / pixelViewspaceSizeX;
+
+    float sliceCount = float(SLICE_COUNT);
+    float stepsPerSlice = float(STEPS_PER_SLICE);
+
+    // Fade out for small screen radii (XeGTAO); divided by the slice count below as XeGTAO does.
+    float smallRadiusFade = clamp((10.0 - screenspaceRadius) / 100.0, 0.0, 1.0) * 0.5;
+    float minS = pixelTooCloseThreshold / screenspaceRadius;
+
+    float thicknessScale = 1.0;
+    if (THICKNESS != GTAO_THICKNESS_CONST) thicknessScale += gtao.thicknessDistanceScale * viewspaceZ;
+
+    float horizonVisibility = 0.0;
+    float bitmaskVisibility = 0.0;
+    float bitmaskWeight = 0.0;
+
+    for (uint sliceIndex = 0u; sliceIndex < SLICE_COUNT; sliceIndex++)
+    {
+        float slice = float(sliceIndex);
+        float sliceK = (slice + noiseSlice) / sliceCount;
+        float phi = sliceK * GTAO_PI;
+        float cosPhi = cos(phi);
+        float sinPhi = sin(phi);
+        // Texel rows run up (GL order), the same way view y does, so the screen
+        // direction and the view direction share their sign.
+        vec2 omega = vec2(cosPhi, sinPhi) * screenspaceRadius;
+        vec3 directionVec = vec3(cosPhi, sinPhi, 0.0);
+        vec3 orthoDirectionVec = directionVec - dot(directionVec, viewVec) * viewVec;
+        vec3 axisVec = normalize(cross(orthoDirectionVec, viewVec));
+        vec3 projectedNormalVec = viewspaceNormal - axisVec * dot(viewspaceNormal, axisVec);
+        float signNorm = dot(orthoDirectionVec, projectedNormalVec) < 0.0 ? -1.0 : 1.0;
+        float projectedNormalVecLength = max(length(projectedNormalVec), 1e-6);
+        float cosNorm = clamp(dot(projectedNormalVec, viewVec) / projectedNormalVecLength, 0.0, 1.0);
+
+        if (INTEGRATION == GTAO_INTEGRATION_HORIZON)
+        {
+            float n = signNorm * gtaoFastACos(cosNorm);
+            float lowHorizonCos0 = cos(n + GTAO_PI_HALF);
+            float lowHorizonCos1 = cos(n - GTAO_PI_HALF);
+            float horizonCos0 = lowHorizonCos0;
+            float horizonCos1 = lowHorizonCos1;
+
+            for (uint stepIndex = 0u; stepIndex < STEPS_PER_SLICE; stepIndex++)
+            {
+                float stepBaseNoise = (slice + float(stepIndex) * stepsPerSlice) * 0.6180339887498948482;
+                float stepNoise = fract(noiseSample + stepBaseNoise);
+                float s = (float(stepIndex) + stepNoise) / stepsPerSlice;
+                s = pow(s, gtao.sampleDistributionPower);
+                s += minS;
+                vec2 sampleOffset = s * omega;
+                float mipLevel = clamp(log2(length(sampleOffset)) - gtao.depthMipSamplingOffset, 0.0, GTAO_DEPTH_MIP_LEVELS);
+                sampleOffset = floor(sampleOffset + 0.5) * pixelSize;
+
+                vec2 sampleScreenPos0 = normalizedScreenPos + sampleOffset;
+                vec3 samplePos0 = gtaoViewPosition(sampleScreenPos0, textureLod(workingDepth, sampleScreenPos0, mipLevel).r);
+                vec2 sampleScreenPos1 = normalizedScreenPos - sampleOffset;
+                vec3 samplePos1 = gtaoViewPosition(sampleScreenPos1, textureLod(workingDepth, sampleScreenPos1, mipLevel).r);
+
+                vec3 sampleDelta0 = samplePos0 - pixCenterPos;
+                vec3 sampleDelta1 = samplePos1 - pixCenterPos;
+                float sampleDist0 = length(sampleDelta0);
+                float sampleDist1 = length(sampleDelta1);
+                vec3 sampleHorizonVec0 = sampleDelta0 / sampleDist0;
+                vec3 sampleHorizonVec1 = sampleDelta1 / sampleDist1;
+
+                float weight0 = clamp(sampleDist0 * falloffMul + falloffAdd, 0.0, 1.0);
+                float weight1 = clamp(sampleDist1 * falloffMul + falloffAdd, 0.0, 1.0);
+                float shc0 = mix(lowHorizonCos0, dot(sampleHorizonVec0, viewVec), weight0);
+                float shc1 = mix(lowHorizonCos1, dot(sampleHorizonVec1, viewVec), weight1);
+                horizonCos0 = max(horizonCos0, shc0);
+                horizonCos1 = max(horizonCos1, shc1);
+            }
+
+            // XeGTAO's slope fudge, kept only on this path for parity with its numbers (C.11).
+            projectedNormalVecLength = mix(projectedNormalVecLength, 1.0, 0.05);
+            float h0 = -gtaoFastACos(horizonCos1);
+            float h1 = gtaoFastACos(horizonCos0);
+            float iarc0 = (cosNorm + 2.0 * h0 * sin(n) - cos(2.0 * h0 - n)) / 4.0;
+            float iarc1 = (cosNorm + 2.0 * h1 * sin(n) - cos(2.0 * h1 - n)) / 4.0;
+            horizonVisibility += projectedNormalVecLength * (iarc0 + iarc1);
+        }
+        else
+        {
+            float cosN = cosNorm;
+            float sinN = signNorm * sqrt(max(0.0, 1.0 - cosNorm * cosNorm));
+            uint occluded = 0u;
+
+            for (uint stepIndex = 0u; stepIndex < STEPS_PER_SLICE; stepIndex++)
+            {
+                float stepBaseNoise = (slice + float(stepIndex) * stepsPerSlice) * 0.6180339887498948482;
+                float stepNoise = fract(noiseSample + stepBaseNoise);
+                float s = (float(stepIndex) + stepNoise) / stepsPerSlice;
+                s = pow(s, gtao.sampleDistributionPower);
+                s += minS;
+                vec2 sampleOffset = s * omega;
+                float mipLevel = clamp(log2(length(sampleOffset)) - gtao.depthMipSamplingOffset, 0.0, GTAO_DEPTH_MIP_LEVELS);
+                vec2 texelOffset = floor(sampleOffset + 0.5);
+                sampleOffset = texelOffset * pixelSize;
+
+                // Randomised thickness (Bottosson): the binary mask would pop as a gap
+                // opens; a dithered thickness converges to a soft edge through TAA.
+                float sampleThicknessScale = thicknessScale;
+                if (THICKNESS == GTAO_THICKNESS_RANDOM) sampleThicknessScale *= 0.5 + fract(stepNoise * 7.0);
+
+                for (int sideIndex = 0; sideIndex < 2; sideIndex++)
+                {
+                    float side = sideIndex == 0 ? 1.0 : -1.0;
+                    vec2 sampleScreenPos = normalizedScreenPos + side * sampleOffset;
+                    float sampleZ = textureLod(workingDepth, sampleScreenPos, mipLevel).r;
+                    vec3 sampleDelta = gtaoViewPosition(sampleScreenPos, sampleZ) - pixCenterPos;
+
+                    float sampleThickness = gtao.thickness;
+                    if (CLASS_CHANNEL != 0u)
+                    {
+                        ivec2 sampleTexel = clamp(pix + ivec2(side * texelOffset), ivec2(0), imageExtent - 1);
+                        if (gtaoIsThin(texelFetch(gNormal, sampleTexel, 0).w)) sampleThickness = gtao.thicknessThin;
+                    }
+                    sampleThickness *= sampleThicknessScale;
+
+                    vec3 sampleDeltaBack = sampleDelta - viewVec * sampleThickness;
+                    float frontCos = dot(normalize(sampleDelta), viewVec);
+                    float backCos = dot(normalize(sampleDeltaBack), viewVec);
+                    float front = sectorCoordinate(frontCos, side, sinN, cosN);
+                    float back = sectorCoordinate(backCos, side, sinN, cosN);
+                    occluded |= sectorBits(min(front, back), max(front, back));
+                }
+            }
+
+            float sliceVisibility = 1.0 - float(bitCount(occluded)) / float(GTAO_SECTORS);
+            bitmaskVisibility += projectedNormalVecLength * sliceVisibility;
+            bitmaskWeight += projectedNormalVecLength;
+        }
+    }
+
+    float visibility = INTEGRATION == GTAO_INTEGRATION_HORIZON
+        ? (smallRadiusFade + horizonVisibility) / sliceCount
+        : smallRadiusFade / sliceCount + bitmaskVisibility / max(bitmaskWeight, 1e-6);
+
+    visibility = pow(max(visibility, 0.0), gtao.finalValuePower);
+    // A visible pixel cannot have zero visibility; it also guards the packing (XeGTAO).
+    visibility = max(0.03, visibility);
+
+    // Distant sub-pixel geometry is not darkened (vanilla ssao.fsh's fade numbers, C.6).
+    float farFade = clamp(gtao.farFadeBias - viewspaceZ * gtao.farFadeScale, 0.0, 1.0);
+    visibility = mix(1.0, visibility, farFade);
+
+    imageStore(outWorkingTerm, pix, vec4(clamp(visibility / GTAO_OCCLUSION_TERM_SCALE, 0.0, 1.0)));
+}

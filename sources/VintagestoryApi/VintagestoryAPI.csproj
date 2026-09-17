@@ -34,7 +34,12 @@
     <Compile Remove="Common\Entity\EntityType.cs" />
     <Compile Remove="Common\Effect\AmbientModifier.cs" />
     <Compile Remove="Client\optimum-entity-render-batch.cs" />
+<<<<<<< HEAD
+    <Compile Remove="Client\optimum-render-device.cs" />
+    <Compile Remove="Client\optimum-render-bootstrap.cs" />
+=======
     <Compile Remove="Client\Model\Mesh\OptimumMeshPartPool.cs" />
+>>>>>>> upstream/main
     <Compile Remove="Config\AdaptiveWorkerController.cs" />
     <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
@@ -50,10 +55,16 @@
     <Compile Remove="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Remove="Config\optimum-api-bridge.cs" />
+<<<<<<< HEAD
+    <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
+    <Compile Remove="Client\Render\OptimumTemporalFrame.cs" />
+    <Compile Remove="Client\Render\OptimumModPasses.cs" />
+=======
     <Compile Remove="Config\OptimumChunkVisibilityBfs.cs" />
     <Compile Remove="Config\OptimumFrustumCullSimd.cs" />
     <Compile Remove="Config\OptimumKometGuard.cs" />
     <Compile Remove="Config\OptimumCompatibilityGuard.cs" />
+>>>>>>> upstream/main
   </ItemGroup>
 
   <ItemGroup>

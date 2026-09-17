@@ -1,0 +1,27 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs
+@@ -145,7 +145,22 @@ public class FirepitContentsRenderer : I
+ 				.Values;
+ 			standardShader.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShader.ProjectionMatrix = render.CurrentProjectionMatrix;
+-			render.RenderMultiTextureMesh(meshref, "tex");
++			// Optimum TAA (P4): the cooked item's Transform is animated by the
++			// block entity (rotation and scale change while it cooks), so the
++			// previous model matrix is worth keeping. No-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShader, this, meshref, ModelMat.Values);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMultiTextureMesh(meshref, "tex");
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			standardShader.Stop();
+ 		}
+ 	}

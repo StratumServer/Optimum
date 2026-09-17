@@ -1,0 +1,9 @@
+{
+  "type": "code",
+  "modid": "optimummodpassfixture",
+  "name": "Optimum mod pass fixture",
+  "description": "Declares one Vulkan frame-graph pass and one motion writer, following docs/vulkan-mod-support.md.",
+  "version": "1.0.0",
+  "side": "Client",
+  "dependencies": { "game": "" }
+}

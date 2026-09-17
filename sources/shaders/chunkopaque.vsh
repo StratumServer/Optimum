@@ -56,6 +56,16 @@ out vec4 gnormal;
 
 flat out int renderFlags;
 
+// TAA motion vectors (Optimum P3). TAAMOTION is stamped by
+// ShaderRegistry.registerDefaultShaderCodePrefixes and is 1 only while TAA is
+// on, so with TAA off this shader preprocesses back to vanilla.
+#if TAAMOTION > 0
+uniform mat4 prevProjectionMatrix;   // previous frame's UNJITTERED world projection
+uniform mat4 prevModelViewMatrix;    // previous frame's CameraMatrixOrigin
+uniform vec3 cameraPosDelta;         // cameraPos(this frame) - cameraPos(previous frame)
+out vec4 taaPrevClip;
+#endif
+
 #include vertexflagbits.ash
 #include shadowcoords.vsh
 #include fogandlight.vsh
@@ -179,6 +189,30 @@ void main(void)
 		gl_Position.w += zOffset * 0.00025 / ((gl_Position.z + 3) * 0.05);
 	}
 	
+
+#if TAAMOTION > 0
+	// The same vertex, one frame ago, through the same code path: the chunk's
+	// camera-relative position moved by exactly the camera's own motion
+	// (accuracy rule 4), the warp is re-evaluated with the previous frame's
+	// counters, and the previous unjittered projection replaces this frame's
+	// jittered one. The warp noise consumes an absolute-ish position, which is
+	// prevRel + prevPlayerpos - that is what previousWarpState() carries.
+	{
+		WarpState taaPrev = previousWarpState();
+		vec4 taaPrevPos = vec4(truePos.xyz + cameraPosDelta, 1.0);
+		taaPrevPos = applyVertexWarpingState(taaPrev, renderFlags, taaPrevPos);
+		taaPrevPos = applyGlobalWarpingState(taaPrev, taaPrevPos);
+		taaPrevClip = prevProjectionMatrix * (prevModelViewMatrix * taaPrevPos);
+
+		// The z-fighting w-offset shifts where the fragment lands on screen, so
+		// leaving it off the previous position would report that shift as motion.
+		if (taaPrevClip.z > -1) {
+			int taaPrevZOffset = (renderFlags & ZOffsetBitMask) >> 8;
+			taaPrevClip.w += taaPrevZOffset * 0.00025 / ((taaPrevClip.z + 3) * 0.05);
+		}
+	}
+#endif
+
 
 	if ((renderFlags & Lod0BitMask) != 0) {
 		float b = clamp(10 * (1.05 - length(worldPos.xz) / viewDistanceLod0) - 2.5, 0.0, 1.0);

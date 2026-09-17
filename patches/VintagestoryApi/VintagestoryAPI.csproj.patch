@@ -1,0 +1,38 @@
+diff --git a/VintagestoryApi/VintagestoryAPI.csproj b/VintagestoryApi/VintagestoryAPI.csproj
+index a9314c6..7cd21c1 100644
+--- a/VintagestoryApi/VintagestoryAPI.csproj
++++ b/VintagestoryApi/VintagestoryAPI.csproj
+@@ -34,10 +34,11 @@
+     <Compile Remove="Common\Entity\EntityType.cs" />
+     <Compile Remove="Common\Effect\AmbientModifier.cs" />
+     <Compile Remove="Client\optimum-entity-render-batch.cs" />
+     <Compile Remove="Client\optimum-render-device.cs" />
+     <Compile Remove="Client\optimum-render-bootstrap.cs" />
++    <Compile Remove="Client\Model\Mesh\OptimumMeshPartPool.cs" />
+     <Compile Remove="Config\AdaptiveWorkerController.cs" />
+     <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
+     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
+     <Compile Remove="Config\OptimumAnimLod.cs" />
+     <Compile Remove="Config\OptimumConfig.cs" />
+@@ -49,18 +50,17 @@
+     <Compile Remove="Config\OptimumTesselationWorkerRegistry.cs" />
+     <Compile Remove="Config\OptimumTesselationSafetyGate.cs" />
+     <Compile Remove="Config\OptimumWorldgenSafetyGate.cs" />
+     <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
+     <Compile Remove="Config\optimum-api-bridge.cs" />
+-    <Compile Remove="Client\Model\Mesh\OptimumMeshPartPool.cs" />
++    <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
++    <Compile Remove="Client\Render\OptimumTemporalFrame.cs" />
++    <Compile Remove="Client\Render\OptimumModPasses.cs" />
+     <Compile Remove="Config\OptimumChunkVisibilityBfs.cs" />
+     <Compile Remove="Config\OptimumFrustumCullSimd.cs" />
+     <Compile Remove="Config\OptimumKometGuard.cs" />
+     <Compile Remove="Config\OptimumCompatibilityGuard.cs" />
+-    <Compile Remove="Client\Render\OptimumTemporalMath.cs" />
+-    <Compile Remove="Client\Render\OptimumTemporalFrame.cs" />
+-    <Compile Remove="Client\Render\OptimumModPasses.cs" />
+   </ItemGroup>
+ 
+   <ItemGroup>
+     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+     <PackageReference Include="protobuf-net" Version="2.4.9" />

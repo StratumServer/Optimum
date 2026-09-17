@@ -526,6 +526,9 @@ done
 forks_file="$repo_root/forks.json"
 if [[ -f "$forks_file" ]]; then
   while IFS=$'\t' read -r name url ref; do
+    # A Windows python3 writes CRLF into the pipe and read keeps the \r on the last
+    # field, so "git checkout <sha>\r" fails with an unknown pathspec.
+    ref="${ref%$'\r'}"
     base="$snapshot_dir/$name"
 
     if [[ ! -d "$base" || "$refresh" == "1" ]]; then
@@ -563,6 +566,7 @@ fi
 ref_dir="$repo_root/ref/source"
 if [[ -f "$forks_file" ]]; then
   while IFS=$'\t' read -r name url ref; do
+    ref="${ref%$'\r'}"
     dest="$ref_dir/$name"
     if [[ ! -d "$dest" ]]; then
       echo "Cloning reference: $name"
@@ -1607,11 +1611,12 @@ if [[ -d "$sources_dir" ]]; then
     rel="${src#$sources_dir/}"
     # For vanilla (decompiled) projects, the working tree is under build/.
     top_proj="$(echo "$rel" | cut -d/ -f1)"
-    # lang/ and shaders/ are deploy-time asset overlays, not project source.
-    # deploy and the package scripts read them from sources/ directly; copying
-    # them here dumped stray lang/ and shaders/ dirs at the repo root.
+    # lang/, shaders/, shaderincludes/ and shaders-vk/ are asset or native shader
+    # trees, not project source: deploy, the package scripts and the shader
+    # compiler read them from sources/ directly; copying them here dumped stray
+    # directories at the repo root that could be edited in place of the real ones.
     case "$top_proj" in
-      lang|shaders) continue ;;
+      lang|shaders|shaderincludes|shaders-vk) continue ;;
     esac
     if echo "$vanilla_patch_projects" | grep -qw "$top_proj"; then
       target="$repo_root/build/$rel"

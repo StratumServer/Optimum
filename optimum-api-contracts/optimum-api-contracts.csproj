@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\sources\VintagestoryApi\Client\optimum-entity-render-batch.cs" Link="Client\optimum-entity-render-batch.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\optimum-render-device.cs" Link="Client\optimum-render-device.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\optimum-render-bootstrap.cs" Link="Client\optimum-render-bootstrap.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveWorkerController.cs" Link="Config\AdaptiveWorkerController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveTessWorkerController.cs" Link="Config\AdaptiveTessWorkerController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAdaptiveRadiusController.cs" Link="Config\OptimumAdaptiveRadiusController.cs" />
@@ -25,6 +27,9 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumTesselationSafetyGate.cs" Link="Config\OptimumTesselationSafetyGate.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorldgenSafetyGate.cs" Link="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\optimum-worldgen-footprint-lease.cs" Link="Config\optimum-worldgen-footprint-lease.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalMath.cs" Link="Client\Render\OptimumTemporalMath.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumTemporalFrame.cs" Link="Client\Render\OptimumTemporalFrame.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Client\Render\OptimumModPasses.cs" Link="Client\Render\OptimumModPasses.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumChunkVisibilityBfs.cs" Link="Config\OptimumChunkVisibilityBfs.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumFrustumCullSimd.cs" Link="Config\OptimumFrustumCullSimd.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumKometGuard.cs" Link="Config\OptimumKometGuard.cs" />

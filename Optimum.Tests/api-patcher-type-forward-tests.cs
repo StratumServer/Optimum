@@ -39,7 +39,7 @@ public class ApiPatcherTypeForwardTests
     [Fact]
     public void ForkProject_ExcludesContractsTypes()
     {
-        string fork = Read("VintagestoryApi/VintagestoryAPI.csproj");
+        string fork = Read("sources/VintagestoryApi/VintagestoryAPI.csproj");
 
         // The fork excludes types that live in contracts to avoid CS0433.
         Assert.Contains("<Compile Remove=\"Config\\OptimumConfig.cs\"", fork);

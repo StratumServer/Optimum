@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
-index 11a0fd0..34d04b1 100644
+index 11a0fd0..7b21a9a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientEventManager.cs
 @@ -181,15 +181,21 @@ public class ClientEventManager : EventManager
@@ -26,3 +26,19 @@ index 11a0fd0..34d04b1 100644
  	public void TriggerLightingUpdate(int oldBlockId, int newBlockId, BlockPos pos, Dictionary<BlockPos, BlockUpdate> blockUpdatesBulk = null)
  	{
  		Trigger(OnUpdateLighting?.GetInvocationList(), "OnUpdateLighting", delegate(UpdateLightingDelegate dele)
+@@ -483,10 +489,15 @@ public class ClientEventManager : EventManager
+ 	{
+ 		if (ShaderRegistry.SupressShaderAndBufferReloads)
+ 		{
+ 			return true;
+ 		}
++		// Optimum TAA: every shader reload path funnels through here (escape menu,
++		// hotkey, .debug commands, ShaderAPI, the ssaoQuality/minbrightness watchers).
++		// Programs and often the framebuffers are rebuilt, so the temporal history no
++		// longer matches what the next frame writes.
++		OptimumTemporal.RequestReset(EnumTemporalResetReason.ShaderReload);
+ 		bool flag = true;
+ 		foreach (ActionBoolReturn onReloadShader in OnReloadShaders)
+ 		{
+ 			try
+ 			{

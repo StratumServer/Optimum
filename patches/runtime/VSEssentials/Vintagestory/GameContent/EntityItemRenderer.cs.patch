@@ -1,9 +1,7 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
 --- a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
-@@ -62,10 +62,16 @@ public class EntityItemRenderer : EntityRenderer
- 	{
- 		if ((isShadowPass && !entity.IsRendered) || entityitem.Itemstack == null)
+@@ -64,6 +64,12 @@ public class EntityItemRenderer : Entity
  		{
  			return;
  		}
@@ -16,5 +14,36 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs b/VSEss
  		if (RunWittySkipRenderAlgorithm)
  		{
  			int num = (int)entity.Pos.X;
- 			int num2 = (int)entity.Pos.InternalY;
- 			int num3 = (int)entity.Pos.Z;
+@@ -151,6 +157,10 @@ public class EntityItemRenderer : Entity
+ 			standardShaderProgram.ProjectionMatrix = render.CurrentProjectionMatrix;
+ 			standardShaderProgram.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShaderProgram.ModelMatrix = ModelMat;
++			// Optimum TAA (P3): this dropped item's previous transform. The renderer
++			// instance is the identity - one per entity, gone with it - and the item's
++			// mesh is the shape. A no-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShaderProgram, this, itemStackRenderInfo.ModelRef, ModelMat);
+ 			ItemStack itemstack = entityitem.Itemstack;
+ 			AdvancedParticleProperties[] array2 = itemstack.Block?.ParticleProperties;
+ 			if (itemstack.Block != null && !capi.IsGamePaused)
+@@ -174,7 +184,20 @@ public class EntityItemRenderer : Entity
+ 		{
+ 			render.GlDisableCullFace();
+ 		}
+-		render.RenderMultiTextureMesh(itemStackRenderInfo.ModelRef, textureSampleName);
++		// Optimum TAA (P3): the standard shader writes motion vectors, so the
++		// motion attachment joins Primary's draw-buffer mask for this one draw.
++		bool optimumMotionWrite = !isShadowPass && OptimumMotionWrite.Begin();
++		try
++		{
++			render.RenderMultiTextureMesh(itemStackRenderInfo.ModelRef, textureSampleName);
++		}
++		finally
++		{
++			if (optimumMotionWrite)
++			{
++				OptimumMotionWrite.End();
++			}
++		}
+ 		if (!itemStackRenderInfo.CullFaces)
+ 		{
+ 			render.GlEnableCullFace();

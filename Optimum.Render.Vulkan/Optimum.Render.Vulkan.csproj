@@ -1,0 +1,104 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Vulkan renderer backend. Referenced by nothing in the game: the
+       launcher loads it reflectively and OptimumRenderBootstrap.CreatePlatform
+       hands the client a VulkanClientPlatform, so no vanilla assembly ever gains
+       an assembly reference to a renderer implementation. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Optimum.Render.Vulkan</AssemblyName>
+    <RootNamespace>Optimum.Render.Vulkan</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <OutputPath>..\bin\$(Configuration)</OutputPath>
+    <Nullable>annotations</Nullable>
+    <!-- The packaging scripts copy this project's output beside the game, and
+         nothing else in the tree references it, so its NuGet dependencies have
+         to land in the output directory rather than being resolved from the
+         referencing project's graph. Without this the backend loads and then
+         fails on the first Silk.NET type. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+    <!-- The donor lib (Vulkan-native plan, Phase 1A): VulkanClientPlatform derives from
+         ClientPlatformWindows, which only the donor declares unsealed with the injected
+         virtuals. Compile-time only: at runtime the renderer binds to the Cecil-patched
+         VintagestoryLib.dll already loaded by the client (same unsigned identity), so
+         neither the lib nor anything it references is copied beside the renderer.
+         ExcludeAssets and DisableTransitiveProjectReferences keep the lib's NuGet and
+         project graph (fork VintagestoryAPI, OpenTK, SkiaSharp, Sqlite, ...) from flowing
+         in: CopyLocalLockFileAssemblies above would otherwise copy all of it into the
+         shared output that make deploy and the packagers read. -->
+    <ProjectReference Include="..\build\VintagestoryLib\VintagestoryLib.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>all</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The client already creates its window through OpenTK's GLFW bindings, so
+         the surface is created the same way rather than through a second
+         windowing stack. -->
+    <PackageReference Include="OpenTK.Windowing.GraphicsLibraryFramework" Version="4.9.4" />
+    <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.EXT" Version="2.23.0" />
+    <!-- Runtime GLSL to SPIR-V. Mod shaders are authored as GLSL and only exist
+         at runtime, so an offline compile step could never cover them. -->
+    <PackageReference Include="Silk.NET.Shaderc" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Shaderc.Native" Version="2.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI">
+      <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- VulkanClientPlatform overrides platform members whose signatures or bodies name
+         types from the game's own libraries (Cairo surfaces, OpenAL version query,
+         OpenTK PrimitiveType/Matrix4). Compile-time only: the client already loads them. -->
+    <Reference Include="cairo-sharp">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Audio.OpenAL">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Audio.OpenAL.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Windowing.Desktop">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Desktop.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Windowing.Common">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Windowing.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Mathematics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Mathematics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OpenTK.Graphics">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Graphics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Optimum.Render.Vulkan.Tests" />
+    <!-- tools/shader-compiler: a thin front end over Shaders/NativeShaderBuilder. -->
+    <InternalsVisibleTo Include="Optimum.Shaders.Compiler" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The ambient occlusion compute shaders (docs/research/ambient-occlusion.md section C)
+         travel inside the renderer assembly, so deploy and the packagers carry them with
+         the DLL; AmbientOcclusion/GtaoShaderSources.cs reads them by these names. -->
+    <EmbeddedResource Include="..\sources\shaders-vk\gtao\*.comp;..\sources\shaders-vk\gtao\*.glsl">
+      <LogicalName>shaders-vk/gtao/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+</Project>

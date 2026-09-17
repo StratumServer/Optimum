@@ -511,6 +511,137 @@ public static class OptimumConfig
     public static float RenderScale = 1.0f;
 
     /// <summary>
+    /// Temporal anti-aliasing. Off by default: with Taa false the render chain
+    /// must stay byte-identical to the pre-TAA one, so nothing here may change a
+    /// matrix, a target or a shader define unless it is on.
+    /// </summary>
+    public static bool Taa = false;
+
+    /// <summary>
+    /// Post-resolve sharpening strength, 0 (none) to 1. TAA trades sharpness for
+    /// stability; the sharpen pass buys some of it back. Kept separate from the
+    /// FSR1 RCAS strength so the two are never applied at full force together.
+    /// </summary>
+    public static float TaaSharpness = 0.2f;
+
+    /// <summary>
+    /// LOD bias applied to sampled textures while TAA is on. Jitter gives the
+    /// resolve sub-pixel samples, so mip selection can afford to be sharper than
+    /// the unjittered frame would allow. Negative sharpens.
+    /// </summary>
+    public static float TaaMipBias = -0.5f;
+
+    /// <summary>
+    /// Debug visualisation of the temporal pipeline: 0 off, higher values select
+    /// motion, reactive, validity and rejection views.
+    /// </summary>
+    public static int TaaDebugView = 0;
+
+    /// <summary>
+    /// Applies the jitter window without running a resolve. A developer switch for
+    /// isolating "is the shear correct" from "is the resolve correct": with it on,
+    /// a static scene must visibly shimmer by exactly one pixel. Not in the GUI.
+    /// </summary>
+    public static bool TaaJitterDev = false;
+
+    /// <summary>
+    /// Which ambient occlusion runs: "auto", "vanilla" or "gtao"
+    /// (docs/research/ambient-occlusion.md, section E).
+    ///
+    /// "auto" (the default) is the GTAO visibility-bitmask pass on the Vulkan backend
+    /// whenever TAA is active, and vanilla SSAO otherwise. "gtao" asks for it on Vulkan
+    /// without TAA too (a measurement configuration: two denoise passes, a still noise
+    /// index). "vanilla" keeps vanilla SSAO. The OpenGL backend ignores the setting and
+    /// always runs vanilla SSAO. Vanilla's own SSAO quality setting still switches AO off
+    /// entirely at 0 on both backends: the G-buffer both passes read exists only above 0.
+    ///
+    /// A string, like <see cref="Renderer" />: an unrecognised value degrades to "auto"
+    /// rather than failing the whole file.
+    /// </summary>
+    public static string AmbientOcclusion = "auto";
+
+    /// <summary>
+    /// The GTAO quality preset: "low" (1x2), "medium" (2x2), "high" (3x3) or "ultra" (9x3,
+    /// two denoise passes). Medium is the render-resolution handheld candidate; the handheld
+    /// default is decided by the section D measurements.
+    /// </summary>
+    public static string AmbientOcclusionPreset = "medium";
+
+    /// <summary>
+    /// The master switch for ambient occlusion, in the Optimum options tab: false skips both
+    /// the vanilla SSAO pass and the GTAO pass for the frame and changes nothing else in the
+    /// post chain.
+    ///
+    /// Orthogonal to <see cref="AmbientOcclusion" />, which decides which AO runs while this is
+    /// on. The shader defines (SSAOLEVEL, OPTIMUMAO) are stamped from the mode and the vanilla
+    /// SSAO quality, never from this, so flipping it needs no shader reload and no frame buffer
+    /// rebuild and the selected AO comes back exactly as it was - which is what makes it an A/B
+    /// comparison rather than a settings change.
+    /// </summary>
+    public static bool AmbientOcclusionEnabled = true;
+
+    /// <summary>
+    /// The ambient occlusion debug view (Optimum options tab): the final composition writes the
+    /// AO term alone as greyscale instead of the graded scene - white fully lit, dark fully
+    /// occluded. It shows whichever AO ran this frame, the platform's own visibility texture or
+    /// the vanilla blurred SSAO target, and does nothing while AO is off, because neither target
+    /// was written then. A view, not a render setting: one uniform per frame, no reload.
+    /// </summary>
+    public static bool AmbientOcclusionDebugView = false;
+
+    /// <summary>
+    /// Whether GTAO is selected for a backend: never on OpenGL; on Vulkan with "gtao", or
+    /// with "auto" while TAA is active.
+    /// </summary>
+    public static bool GtaoSelected(bool vulkanBackend, bool taaActive)
+    {
+        if (!vulkanBackend) return false;
+        if (string.Equals(AmbientOcclusion, "gtao", StringComparison.OrdinalIgnoreCase)) return true;
+        return taaActive && string.Equals(AmbientOcclusion, "auto", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>GTAO for the backend actually running and the TAA state actually in effect.</summary>
+    public static bool EffectiveGtao => GtaoSelected(OptimumRender.IsVulkan, EffectiveTaa);
+
+    /// <summary>
+    /// Stamped by ShaderRegistry when it builds the shader prefixes: true when the shaders were
+    /// compiled with <c>#define OPTIMUMAO 1</c> (the class channel writes and the GTAO compose
+    /// branch). The platform runs GTAO only while this holds, so the pass and the shaders
+    /// that feed and compose it can never disagree between two shader reloads.
+    /// </summary>
+    public static bool AmbientOcclusionShadersUseGtao { get; set; }
+
+    /// <summary>
+    /// Which renderer the client runs: "opengl", "vulkan", or "auto".
+    ///
+    /// OpenGL is the default and stays so until the Vulkan backend reaches
+    /// parity. "auto" means Vulkan where the vendor and driver are known good and
+    /// OpenGL everywhere else, so it can be switched on per-vendor as the matrix
+    /// goes green without asking anyone to change a setting.
+    ///
+    /// A string rather than an enum because it is persisted in optimum.json,
+    /// where an unrecognised value should degrade to OpenGL rather than fail to
+    /// parse the whole file.
+    /// </summary>
+    public static string Renderer = "opengl";
+
+    /// <summary>True when the configuration asks for Vulkan at all.</summary>
+    public static bool WantsVulkanRenderer =>
+        string.Equals(Renderer, "vulkan", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Renderer, "auto", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// True when Vulkan was reached through "auto" rather than asked for by name.
+    ///
+    /// The two are not the same decision. "vulkan" is a choice the player made and
+    /// is honoured wherever the backend runs at all; "auto" is a default they
+    /// never chose, so it only selects the backend on driver families it has been
+    /// exercised against and stays on OpenGL everywhere else.
+    /// </summary>
+    public static bool RendererSelectedAutomatically =>
+        string.Equals(Renderer, "auto", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// R4: cap the god-rays post-process at 100 texture samples when enabled.
     /// The disabled path sends the vanilla 180-sample limit. This option can
     /// change the post-process image, so it stays off by default.
@@ -526,6 +657,8 @@ public static class OptimumConfig
     // outside OptimumConfigData so a mod cannot make a runtime fallback
     // persistent by changing its shader files.
     private static readonly HashSet<string> _shaderCompatibilityDisabledFeatures = new(StringComparer.OrdinalIgnoreCase);
+    // "all" until a schema 2 report says otherwise: no report read yet is no report.
+    private static readonly HashSet<string> _shaderCompatibilityRewriterPrograms = new(StringComparer.OrdinalIgnoreCase) { AllShaderPrograms };
     private static bool _shaderCompatibilityScanFailed;
     private static bool _greedyMeshVertexShaderReady;
     private static bool _greedyMeshFragmentShaderReady;
@@ -541,6 +674,59 @@ public static class OptimumConfig
     public static bool EffectiveGodRaysSampleCap => GodRaysSampleCapEnabled &&
         !IsShaderFeatureDisabled("GodRaysSampleCap");
 
+    /// <summary>
+    /// The terrain texture LOD bias every atlas sampler runs with: the render
+    /// scale's own bias (log2 of the scale, so a half-resolution frame samples
+    /// one mip sharper) plus <see cref="TaaMipBias" /> while TAA is on.
+    ///
+    /// Both terms live here because two call sites apply them and must agree:
+    /// ChunkRenderer sets the parameter on each atlas texture, and ShaderRegistry
+    /// sets it on the chunkopaque/chunktopsoil sampler objects, which override
+    /// the texture parameter for the units they are bound to.
+    ///
+    /// 0 with TAA off and render scale 1.0 - the value that means "do not touch
+    /// the parameter at all", which is what keeps TAA off byte-identical.
+    /// </summary>
+    public static float EffectiveTerrainLodBias
+    {
+        get
+        {
+            float bias = 0f;
+            float scale = EffectiveRenderScale;
+            if (scale < 1.0f)
+            {
+                bias += MathF.Log2(Math.Clamp(scale, 0.5f, 1.0f));
+            }
+            if (EffectiveTaa)
+            {
+                bias += Math.Clamp(TaaMipBias, -2.0f, 1.0f);
+            }
+            return bias;
+        }
+    }
+
+    // Like the Vulkan renderer selection, TAA is a renderer-level feature: a
+    // missing launcher scan must not disable it (IsShaderFeatureDisabled reports
+    // everything disabled without a scan), only an explicit scan verdict does.
+    public static bool EffectiveTaa => Taa &&
+        !TaaRuntimeDisabled &&
+        !IsFeatureExplicitlyDisabled("Taa");
+
+    /// <summary>
+    /// Set by the platform when TAA's frame buffers or resolve shader could not
+    /// be created; TAA stays off for the rest of the session and the shaders
+    /// that compile against <see cref="EffectiveTaa" /> (final.fsh's FXAA branch)
+    /// are rebuilt so the FXAA fallback really runs.
+    /// </summary>
+    public static bool TaaRuntimeDisabled { get; private set; }
+
+    public static bool DisableTaaAtRuntime()
+    {
+        if (TaaRuntimeDisabled) return false;
+        TaaRuntimeDisabled = true;
+        return true;
+    }
+
     public static bool EffectiveEntityLightBatch => EntityLightBatchEnabled &&
         !IsShaderFeatureDisabled("EntityLightBatch");
 
@@ -554,6 +740,46 @@ public static class OptimumConfig
 
     public static bool IsShaderFeatureDisabled(string feature) =>
         _shaderCompatibilityScanFailed || _shaderCompatibilityDisabledFeatures.Contains(feature);
+
+    /// <summary>
+    /// Whether the launcher's mod compatibility scan actually produced a report.
+    ///
+    /// <see cref="IsShaderFeatureDisabled" /> deliberately treats a missing scan
+    /// as "everything disabled", which is the right fail-safe but makes the two
+    /// cases indistinguishable to a caller that wants to explain itself. The
+    /// renderer selection reports "the scan has not run" separately from "a mod
+    /// requires OpenGL", because the remedies are completely different.
+    /// </summary>
+    public static bool ShaderCompatibilityScanAvailable => !_shaderCompatibilityScanFailed;
+
+    /// <summary>
+    /// Whether the scan named this feature, ignoring the "scan failed means all
+    /// disabled" fallback that <see cref="IsShaderFeatureDisabled" /> applies.
+    ///
+    /// Only correct for decisions that are not shader features - the renderer
+    /// backend is the one such decision - because for a real shader feature the
+    /// conservative fallback is the whole point.
+    /// </summary>
+    public static bool IsFeatureExplicitlyDisabled(string feature) =>
+        _shaderCompatibilityDisabledFeatures.Contains(feature);
+
+    /// <summary>
+    /// The entry of the scan's <c>rewriterPrograms</c> (report schema 2) that stands for every program:
+    /// a shaderincludes override, or a scan that could not finish.
+    /// </summary>
+    public const string AllShaderPrograms = "all";
+
+    /// <summary>
+    /// Whether the launcher's scan found a mod replacing <paramref name="passName" />'s GLSL, so the Vulkan
+    /// renderer must build it through the rewriter from that source instead of linking the native SPIR-V
+    /// (docs/vulkan-native-shaders.md section 8). True when <c>rewriterPrograms</c> names the program
+    /// (case-insensitive, the scanner lowercases base names) or holds <see cref="AllShaderPrograms" />.
+    /// A missing, unreadable, failed or pre-schema-2 report counts as <see cref="AllShaderPrograms" />,
+    /// the scanner's own conservative rule. Asking for <see cref="AllShaderPrograms" /> itself answers
+    /// whether every program is rewriter-only.
+    /// </summary>
+    public static bool IsShaderProgramOverriddenByMods(string passName) =>
+        IsShaderProgramOverriddenBy(_shaderCompatibilityRewriterPrograms, passName);
 
     public static void SetGreedyMeshShaderAbi(bool vertexShaderReady, bool fragmentShaderReady)
     {
@@ -580,6 +806,7 @@ public static class OptimumConfig
         _shaderCompatibilityDisabledFeatures.Clear();
         _shaderCompatibilityScanFailed = false;
         _shaderCompatibilityFingerprint = null;
+        SetRewriterProgramsToAll();
         ResetShaderCompatibilityAfterReload();
 
         if (_dataPath == null) return;
@@ -608,6 +835,9 @@ public static class OptimumConfig
                 }
             }
 
+            _shaderCompatibilityRewriterPrograms.Clear();
+            foreach (string program in RewriterProgramsOf(report)) _shaderCompatibilityRewriterPrograms.Add(program);
+
             _shaderCompatibilityScanFailed = report.ScanFailed;
             _shaderCompatibilityFingerprint = report.Fingerprint;
         }
@@ -616,7 +846,67 @@ public static class OptimumConfig
             _shaderCompatibilityDisabledFeatures.Clear();
             _shaderCompatibilityScanFailed = true;
             _shaderCompatibilityFingerprint = null;
+            SetRewriterProgramsToAll();
         }
+    }
+
+    /// <summary>
+    /// The <c>rewriterPrograms</c> of a shader compatibility report's JSON, as <see cref="IsShaderProgramOverriddenByMods" />
+    /// reads them: the named programs, or the single <see cref="AllShaderPrograms" /> for a null, unreadable, pre-schema-2
+    /// or failed report and for one without the field. Pure; the loaded state is not touched.
+    /// </summary>
+    public static IReadOnlyCollection<string> ParseShaderRewriterPrograms(string? reportJson)
+    {
+        if (string.IsNullOrWhiteSpace(reportJson)) return new[] { AllShaderPrograms };
+        try
+        {
+            var report = JsonSerializer.Deserialize<ShaderCompatibilityState>(reportJson, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            });
+            return RewriterProgramsOf(report);
+        }
+        catch (Exception)
+        {
+            return new[] { AllShaderPrograms };
+        }
+    }
+
+    /// <summary>Whether <paramref name="rewriterPrograms" /> (see <see cref="ParseShaderRewriterPrograms" />) send <paramref name="passName" /> to the rewriter.</summary>
+    public static bool IsShaderProgramOverriddenBy(IEnumerable<string> rewriterPrograms, string passName)
+    {
+        foreach (string program in rewriterPrograms)
+        {
+            if (string.Equals(program, AllShaderPrograms, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(passName) && string.Equals(program, passName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Schema 2 carries the programs a mod's GLSL replaced. A v1 report, a report without the list, or a
+    // failed scan cannot say which programs are safe, so all of them stay rewriter-only.
+    private static List<string> RewriterProgramsOf(ShaderCompatibilityState? report)
+    {
+        var programs = new List<string>();
+        if (report == null || report.SchemaVersion < 2 || report.RewriterPrograms == null || report.ScanFailed)
+        {
+            programs.Add(AllShaderPrograms);
+            return programs;
+        }
+        foreach (string? program in report.RewriterPrograms)
+        {
+            if (!string.IsNullOrWhiteSpace(program)) programs.Add(program.Trim());
+        }
+        return programs;
+    }
+
+    private static void SetRewriterProgramsToAll()
+    {
+        _shaderCompatibilityRewriterPrograms.Clear();
+        _shaderCompatibilityRewriterPrograms.Add(AllShaderPrograms);
     }
 
     public static void ReloadShaderCompatibilityReport()
@@ -750,7 +1040,17 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshFarDistance), GreedyMeshFarDistance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
+        (nameof(OptimumConfigData.Renderer), Renderer),
         (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
+        (nameof(OptimumConfigData.Taa), Taa.ToString()),
+        (nameof(OptimumConfigData.TaaSharpness), TaaSharpness.ToString("F2")),
+        (nameof(OptimumConfigData.TaaMipBias), TaaMipBias.ToString("F2")),
+        (nameof(OptimumConfigData.TaaDebugView), TaaDebugView.ToString()),
+        (nameof(OptimumConfigData.TaaJitterDev), TaaJitterDev.ToString()),
+        (nameof(OptimumConfigData.AmbientOcclusion), AmbientOcclusion),
+        (nameof(OptimumConfigData.AmbientOcclusionPreset), AmbientOcclusionPreset),
+        (nameof(OptimumConfigData.AmbientOcclusionEnabled), AmbientOcclusionEnabled.ToString()),
+        (nameof(OptimumConfigData.AmbientOcclusionDebugView), AmbientOcclusionDebugView.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
         (nameof(OptimumConfigData.MapPageCacheBc7), MapPageCacheBc7.ToString()),
@@ -854,7 +1154,26 @@ public static class OptimumConfig
             GreedyMeshFarDistanceSq = (double)GreedyMeshFarDistance * GreedyMeshFarDistance;
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
+            // An unrecognised value means OpenGL rather than a parse failure, so
+            // a hand-edited config cannot leave the client unable to start.
+            string requestedRenderer = data.Renderer?.Trim() ?? "";
+            Renderer =
+                string.Equals(requestedRenderer, "vulkan", StringComparison.OrdinalIgnoreCase) ? "vulkan" :
+                string.Equals(requestedRenderer, "auto", StringComparison.OrdinalIgnoreCase) ? "auto" :
+                "opengl";
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
+            Taa = data.Taa;
+            TaaSharpness = Math.Clamp(data.TaaSharpness, 0f, 1f);
+            TaaMipBias = Math.Clamp(data.TaaMipBias, -2f, 1f);
+            TaaDebugView = Math.Max(0, data.TaaDebugView);
+            TaaJitterDev = data.TaaJitterDev;
+            // Unrecognised values degrade to the defaults rather than failing the file.
+            string requestedAo = data.AmbientOcclusion?.Trim().ToLowerInvariant() ?? "";
+            AmbientOcclusion = requestedAo is "vanilla" or "gtao" ? requestedAo : "auto";
+            string requestedAoPreset = data.AmbientOcclusionPreset?.Trim().ToLowerInvariant() ?? "";
+            AmbientOcclusionPreset = requestedAoPreset is "low" or "high" or "ultra" ? requestedAoPreset : "medium";
+            AmbientOcclusionEnabled = data.AmbientOcclusionEnabled;
+            AmbientOcclusionDebugView = data.AmbientOcclusionDebugView;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
             MapPageCacheBc7 = data.MapPageCacheBc7;
@@ -928,7 +1247,17 @@ public static class OptimumConfig
             GreedyMeshFarDistance = GreedyMeshFarDistance,
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
+            Renderer = Renderer,
             GodRaysSampleCap = GodRaysSampleCapEnabled,
+            Taa = Taa,
+            TaaSharpness = TaaSharpness,
+            TaaMipBias = TaaMipBias,
+            TaaDebugView = TaaDebugView,
+            TaaJitterDev = TaaJitterDev,
+            AmbientOcclusion = AmbientOcclusion,
+            AmbientOcclusionPreset = AmbientOcclusionPreset,
+            AmbientOcclusionEnabled = AmbientOcclusionEnabled,
+            AmbientOcclusionDebugView = AmbientOcclusionDebugView,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
             MapPageCacheBc7 = MapPageCacheBc7,
@@ -970,6 +1299,8 @@ public static class OptimumConfig
 
     private sealed class ShaderCompatibilityState
     {
+        public int SchemaVersion { get; set; }
+        public List<string>? RewriterPrograms { get; set; }
         public bool ScanFailed { get; set; }
         public string? Fingerprint { get; set; }
         public List<string>? DisabledFeatures { get; set; }
@@ -1010,7 +1341,17 @@ internal sealed class OptimumConfigData
     public int GreedyMeshFarDistance { get; set; } = 0;
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
+    public string Renderer { get; set; } = "opengl";
     public bool GodRaysSampleCap { get; set; } = false;
+    public bool Taa { get; set; } = false;
+    public float TaaSharpness { get; set; } = 0.2f;
+    public float TaaMipBias { get; set; } = -0.5f;
+    public int TaaDebugView { get; set; } = 0;
+    public bool TaaJitterDev { get; set; } = false;
+    public string AmbientOcclusion { get; set; } = "auto";
+    public string AmbientOcclusionPreset { get; set; } = "medium";
+    public bool AmbientOcclusionEnabled { get; set; } = true;
+    public bool AmbientOcclusionDebugView { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
     public bool MapPageCacheBc7 { get; set; } = true;

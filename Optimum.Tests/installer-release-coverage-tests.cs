@@ -657,6 +657,79 @@ public class InstallerReleaseCoverageTests
         Assert.True(process.ExitCode == 0, process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd());
     }
 
+    // Native SPIR-V (docs/vulkan-native-shaders.md section 6) ships beside the renderer DLL in
+    // shaders-vk/, never under assets/, is copied whole from the build output with its own
+    // completeness check, and is never fed to the GLSL text-corruption scan.
+
+    [Theory]
+    [InlineData("scripts/package-linux.sh", "$STAGE_DIR")]
+    [InlineData("scripts/package-macos.sh", "$APP_DIR")]
+    public void BashPackagesStageNativeShadersBesideTheRenderer(string relativePath, string stageRoot)
+    {
+        string script = Read(relativePath);
+
+        Assert.Contains("SHADERS_VK_SRC=\"$MOD_OUT/shaders-vk\"", script);
+        Assert.Contains($"SHADERS_VK_DST=\"{stageRoot}/shaders-vk\"", script);
+        Assert.Contains($"cp -f \"$MOD_OUT/Optimum.Render.Vulkan.dll\" \"{stageRoot}/\"", script);
+        Assert.Contains("[[ ! -f \"$SHADERS_VK_SRC/shaders.manifest.json\" ]]", script);
+        Assert.Contains("rm -rf \"$SHADERS_VK_DST\"", script);
+        Assert.Contains("cmp -s \"$f\" \"$SHADERS_VK_DST/$(basename \"$f\")\" || MISSING_SHADERS_VK=", script);
+        Assert.Contains("done < <(find \"$SHADERS_VK_SRC\" -maxdepth 1 -type f -print0)", script);
+        Assert.DoesNotContain("assets/game/shaders-vk", script);
+        Assert.DoesNotContain("sources/shaders-vk", script);
+
+        // The corruption scan reads only the GLSL overlay directory, by GLSL extension.
+        Assert.Equal("$SHADER_DST", Match(script, @"done < <\(find ""(\$[A-Z_]+)"" -maxdepth 1 -type f \\\( -name '\*\.vsh'"));
+        Assert.Equal($"\"{stageRoot}/assets/game/shaders\"", Match(script, @"\nSHADER_DST=(""[^""]+"")"));
+    }
+
+    [Fact]
+    public void WindowsPackageStagesNativeShadersBesideTheRenderer()
+    {
+        string script = Read("scripts/package.ps1");
+
+        Assert.Contains("$shadersVkSrc = Join-Path $apiOut 'shaders-vk'", script);
+        Assert.Contains("$shadersVkDst = Join-Path $stageDir 'shaders-vk'", script);
+        Assert.Contains("Copy-Item -Force (Join-Path $apiOut 'Optimum.Render.Vulkan.dll') $stageDir", script);
+        Assert.Contains("Test-Path (Join-Path $shadersVkSrc 'shaders.manifest.json')", script);
+        Assert.Contains("(Get-FileHash $stagedSpirv).Hash -ne (Get-FileHash $spirvFile.FullName).Hash", script);
+        Assert.Contains("throw \"Native shader file(s) never reached", script);
+        Assert.Contains("'shaders-vk/shaders.manifest.json',", script);
+        Assert.DoesNotContain("assets/game/shaders-vk", script);
+        Assert.Contains("$badShaders = @(Get-ChildItem -Path (Join-Path $stageAssets 'game/shaders') -File |", script);
+    }
+
+    [Fact]
+    public void DeployCopiesNativeShadersBesideTheRendererAndCheckShadersVkVerifiesThem()
+    {
+        string makefile = Read("Makefile");
+
+        Assert.Contains("check-shaders-vk", Match(makefile, @"(\.PHONY:[^\n]*)"));
+        Assert.Contains("dotnet $(SHADER_COMPILER) --verify sources/shaders-vk $(MOD_OUT)", makefile);
+        Assert.Contains("[ -f \"$(MOD_OUT)/shaders-vk/shaders.manifest.json\" ] || {", makefile);
+        foreach (string destination in new[] { "$(VANILLA_DIR)", "$(INSTALL_DIR)" })
+        {
+            Assert.Contains($"rm -rf \"{destination}/shaders-vk\" && mkdir -p \"{destination}/shaders-vk\" && cp -f $(MOD_OUT)/shaders-vk/* \"{destination}/shaders-vk/\"", makefile);
+            Assert.Contains($"for f in $(MOD_OUT)/shaders-vk/*; do d=\"{destination}/shaders-vk/$$(basename $$f)\"; cmp -s \"$$f\" \"$$d\" ||", makefile);
+        }
+        Assert.DoesNotContain("assets/game/shaders-vk", makefile);
+    }
+
+    [Fact]
+    public void TheShaderCompilerBuildsWithTheSolutionIncrementally()
+    {
+        Assert.Contains("<Project Path=\"tools/shader-compiler/Optimum.Shaders.Compiler.csproj\" />", Read("VintageStory.slnx"));
+
+        string project = Read("tools/shader-compiler/Optimum.Shaders.Compiler.csproj");
+        Assert.Contains("<ProjectReference Include=\"..\\..\\Optimum.Render.Vulkan\\Optimum.Render.Vulkan.csproj\" />", project);
+        Assert.Contains("AfterTargets=\"WriteNativeShaderInputList\"", project);
+        Assert.Contains("Inputs=\"@(NativeShaderSource);$(NativeShaderInputList);$(TargetPath);$(TargetDir)Optimum.Render.Vulkan.dll\"", project);
+        Assert.Contains("Outputs=\"$(NativeShaderStamp)\"", project);
+        Assert.Contains("<Delete Files=\"$(NativeShaderStamp)\" Condition=\"!Exists('$(NativeShaderManifest)')\" />", project);
+        Assert.Contains("--build &quot;$(NativeShaderSourceDir)&quot; &quot;$(NativeShaderOutputRoot)&quot;", project);
+        Assert.Contains("WriteOnlyWhenDifferent=\"true\"", project);
+    }
+
     private static string Match(string source, string pattern)
     {
         System.Text.RegularExpressions.Match match = Regex.Match(source, pattern);

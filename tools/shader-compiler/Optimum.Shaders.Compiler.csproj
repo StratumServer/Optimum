@@ -1,0 +1,72 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The offline native shader compiler (docs/vulkan-native-shaders.md section 6).
+       Compiles sources/shaders-vk into bin/<Configuration>/net10.0/shaders-vk: SPIR-V per program
+       and variant plus shaders.manifest.json. The work lives in the renderer
+       (Shaders/NativeShaderBuilder.cs), so the runtime development loop compiles the same way;
+       this project is the command line and the build hook.
+
+       The hook sits here rather than on Optimum.Render.Vulkan.csproj because this tool references
+       the renderer: a target on the renderer that ran the tool would be a build cycle. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Optimum.Shaders.Compiler</AssemblyName>
+    <RootNamespace>Optimum.Shaders.Compiler</RootNamespace>
+    <Nullable>annotations</Nullable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The renderer's own project references (the donor lib, compile-only there) must not
+         flow into a console tool; only its shader classes run here. -->
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Optimum.Render.Vulkan\Optimum.Render.Vulkan.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ShaderCompiler names EnumShaderType; the renderer references the API compile-only,
+         so the tool has to carry it to run. -->
+    <Reference Include="VintagestoryAPI">
+      <HintPath>..\..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OptimumRepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</OptimumRepositoryRoot>
+    <NativeShaderSourceDir>$(OptimumRepositoryRoot)sources$([System.IO.Path]::DirectorySeparatorChar)shaders-vk</NativeShaderSourceDir>
+    <!-- The shared output make deploy and the packagers read (MOD_OUT). -->
+    <NativeShaderOutputRoot>$(OptimumRepositoryRoot)bin$([System.IO.Path]::DirectorySeparatorChar)$(Configuration)$([System.IO.Path]::DirectorySeparatorChar)net10.0</NativeShaderOutputRoot>
+    <NativeShaderManifest>$(NativeShaderOutputRoot)$([System.IO.Path]::DirectorySeparatorChar)shaders-vk$([System.IO.Path]::DirectorySeparatorChar)shaders.manifest.json</NativeShaderManifest>
+    <NativeShaderInputList>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)shaders-vk.inputs</NativeShaderInputList>
+    <NativeShaderStamp>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)shaders-vk.stamp</NativeShaderStamp>
+    <NativeShaderDotnet>$(DOTNET_HOST_PATH)</NativeShaderDotnet>
+    <NativeShaderDotnet Condition="'$(NativeShaderDotnet)' == ''">dotnet</NativeShaderDotnet>
+  </PropertyGroup>
+
+  <!-- The file list is an input of its own: deleting or renaming a source makes no file newer,
+       so without it a removed program would stay in the manifest until something else changed. -->
+  <Target Name="WriteNativeShaderInputList" AfterTargets="Build" Condition="'$(OptimumSkipNativeShaders)' != 'true' And Exists('$(NativeShaderSourceDir)')">
+    <ItemGroup>
+      <NativeShaderSource Include="$(NativeShaderSourceDir)\**\*" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(NativeShaderInputList)" Lines="@(NativeShaderSource->'%(RecursiveDir)%(Filename)%(Extension)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <!-- The manifest cannot be an output itself: the tool rewrites only files whose bytes changed,
+         so an unchanged manifest keeps an old timestamp and would make the target rerun forever.
+         A missing manifest invalidates the stamp instead. -->
+    <Delete Files="$(NativeShaderStamp)" Condition="!Exists('$(NativeShaderManifest)')" />
+  </Target>
+
+  <!-- Incremental: reruns when a source, the source list, the tool or the renderer changed, or when
+       the manifest is gone. An empty tree (include/ only) yields an empty manifest, not a failure;
+       a program that does not compile fails the build. -->
+  <Target Name="BuildNativeShaders" AfterTargets="WriteNativeShaderInputList" Condition="'$(OptimumSkipNativeShaders)' != 'true' And Exists('$(NativeShaderSourceDir)')"
+          Inputs="@(NativeShaderSource);$(NativeShaderInputList);$(TargetPath);$(TargetDir)Optimum.Render.Vulkan.dll"
+          Outputs="$(NativeShaderStamp)">
+    <Exec Command="&quot;$(NativeShaderDotnet)&quot; &quot;$(TargetPath)&quot; --build &quot;$(NativeShaderSourceDir)&quot; &quot;$(NativeShaderOutputRoot)&quot;" />
+    <Touch Files="$(NativeShaderStamp)" AlwaysCreate="true" />
+  </Target>
+
+</Project>

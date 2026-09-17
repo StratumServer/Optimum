@@ -39,7 +39,7 @@ ifneq ($(CLIENT_ARCHIVE),)
 endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
-.PHONY: help check check-patches check-compat check-shaders bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
+.PHONY: help check check-patches check-compat check-shaders check-shaders-vk bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
@@ -57,6 +57,12 @@ check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
 
 check-shaders: ## Verify optimized shader overlays are not truncated
 	bash scripts/validate-shader-assets.sh sources/shaders
+
+SHADER_COMPILER = tools/shader-compiler/bin/$(CONFIGURATION)/net10.0/Optimum.Shaders.Compiler.dll
+
+check-shaders-vk: ## Recompile sources/shaders-vk and fail on any SPIR-V or manifest difference from the build output
+	dotnet build tools/shader-compiler/Optimum.Shaders.Compiler.csproj -c $(CONFIGURATION) --nologo -v quiet -p:OptimumSkipNativeShaders=true
+	dotnet $(SHADER_COMPILER) --verify sources/shaders-vk $(MOD_OUT)
 
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)
@@ -102,7 +108,39 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@cp $(MOD_OUT)/VSSurvivalMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
-	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
+	@# The Vulkan renderer and its dependencies, loaded by name at startup; a
+	@# stale copy here makes the probe throw and the client fall back to OpenGL.
+	@cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(VANILLA_DIR)/
+	@cp $(MOD_OUT)/Silk.NET.*.dll $(VANILLA_DIR)/
+	@# shaderc goes into the application root: Silk.NET.Shaderc probes the application
+	@# directory and LD_LIBRARY_PATH, not Lib/, and a copy it cannot find makes the
+	@# renderer fall back to OpenGL silently.
+	@if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(VANILLA_DIR)/; fi
+	@# Native SPIR-V and its manifest (docs/vulkan-native-shaders.md section 6), beside the
+	@# renderer and never under assets/: the asset manager must not read SPIR-V and a mod must
+	@# not shadow engine shaders by asset priority. The build always writes the manifest, even
+	@# for an empty source tree, so a missing one means tools/shader-compiler never ran. The
+	@# directory is replaced whole, so a removed program does not linger, and checked file by
+	@# file like the overlays below.
+	@[ -f "$(MOD_OUT)/shaders-vk/shaders.manifest.json" ] || { echo "Error: $(MOD_OUT)/shaders-vk/shaders.manifest.json missing; build tools/shader-compiler (dotnet build VintageStory.slnx)"; exit 1; }
+	@rm -rf "$(VANILLA_DIR)/shaders-vk" && mkdir -p "$(VANILLA_DIR)/shaders-vk" && cp -f $(MOD_OUT)/shaders-vk/* "$(VANILLA_DIR)/shaders-vk/"
+	@for f in $(MOD_OUT)/shaders-vk/*; do d="$(VANILLA_DIR)/shaders-vk/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done
+	@# Every file, not *.fsh plus *.vsh: the packagers copy the whole directory,
+	@# and a stage that ships only on one of the two paths is the bug the
+	@# completeness check below exists to catch.
+	@for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(VANILLA_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done
+	@# Shader includes (TAA P3: the WarpState vertexwarp.vsh). Same override
+	@# mechanism as shaders - ShaderRegistry merges both asset categories into one
+	@# include dictionary - but a separate directory, so it needs its own copy.
+	@if [ -d "sources/shaderincludes" ]; then mkdir -p $(VANILLA_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(VANILLA_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi
+	@# Both copies above are wildcards, so a file that never arrives means a moved
+	@# source path or a missing destination directory, not a forgotten list entry -
+	@# and the symptom is silent, vanilla's shader running in place of Optimum's.
+	@# TAA fails worst that way: its stages (taa-resolve, taa-debug, taa-skymotion,
+	@# taa-sharpen), the liquid velocity pass and the includes the motion writers
+	@# compile against have to arrive together or the resolve reads vectors nobody
+	@# wrote. Fail the deploy instead.
+	@for f in sources/shaders/* sources/shaderincludes/*; do [ -f "$$f" ] || continue; d="$(VANILLA_DIR)/assets/game/$$(echo $$f | cut -d/ -f2)/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done
 	@if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(VANILLA_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi
 	@if [ -d "$(INSTALL_DIR)" ]; then \
 		echo "Deploying to $(INSTALL_DIR)..."; \
@@ -115,7 +153,13 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/VSSurvivalMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
-		cp sources/shaders/*.fsh sources/shaders/*.vsh $(INSTALL_DIR)/assets/game/shaders/; \
+		cp $(MOD_OUT)/Optimum.Render.Vulkan.dll $(INSTALL_DIR)/; cp $(MOD_OUT)/Silk.NET.*.dll $(INSTALL_DIR)/; \
+		if [ -f "$(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so" ]; then cp $(MOD_OUT)/runtimes/linux-x64/native/libshaderc_shared.so $(INSTALL_DIR)/; fi; \
+		rm -rf "$(INSTALL_DIR)/shaders-vk" && mkdir -p "$(INSTALL_DIR)/shaders-vk" && cp -f $(MOD_OUT)/shaders-vk/* "$(INSTALL_DIR)/shaders-vk/" || exit 1; \
+		for f in $(MOD_OUT)/shaders-vk/*; do d="$(INSTALL_DIR)/shaders-vk/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \
+		for f in sources/shaders/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaders/$$(basename $$f)" || exit 1; done; \
+		if [ -d "sources/shaderincludes" ]; then mkdir -p $(INSTALL_DIR)/assets/game/shaderincludes; for f in sources/shaderincludes/*; do [ -f "$$f" ] || continue; cp -f "$$f" "$(INSTALL_DIR)/assets/game/shaderincludes/$$(basename $$f)" || exit 1; done; fi; \
+		for f in sources/shaders/* sources/shaderincludes/*; do [ -f "$$f" ] || continue; d="$(INSTALL_DIR)/assets/game/$$(echo $$f | cut -d/ -f2)/$$(basename $$f)"; cmp -s "$$f" "$$d" || { echo "Error: $$f did not reach $$d (missing or content differs)"; exit 1; }; done; \
 		if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(INSTALL_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi; \
 	fi
 	@echo "Deploy complete."

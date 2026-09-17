@@ -1,0 +1,110 @@
+#version 450
+// Optimum ambient occlusion, pass 3 of 3: the edge-aware 3x3 denoise
+// (docs/research/ambient-occlusion.md C.8).
+//
+// One pass with TAA; the final pass scales the term back from the 1.5 packing.
+// Ported from XeGTAO's XeGTAO_Denoise (centre weight DenoiseBlurBeta on the final pass
+// and beta / 5 before it, symmetric 2-bit edges, diagonal weights and the leak term):
+//
+//   Copyright (C) 2016-2021, Intel Corporation
+//   SPDX-License-Identifier: MIT
+//   https://github.com/GameTechDev/XeGTAO
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a copy
+//   of this software and associated documentation files (the "Software"), to deal
+//   in the Software without restriction, including without limitation the rights
+//   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//   copies of the Software, and to permit persons to whom the Software is
+//   furnished to do so, subject to the following conditions:
+//
+//   The above copyright notice and this permission notice shall be included in all
+//   copies or substantial portions of the Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//   SOFTWARE.
+//
+// XeGTAO gathers two horizontal pixels per invocation through textureGather; this
+// port reads one pixel per invocation with texelFetch (Bevy's spatial_denoise.wesl
+// shape). Sky and hand-view pixels pass visibility 1 through untouched (C.9), so the
+// hand class never receives AO and the sky is never darkened.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "common.glsl"
+
+layout(constant_id = GTAO_SPEC_FINAL_APPLY) const uint FINAL_APPLY = 1u;
+
+layout(binding = 0) uniform sampler2D sourceTerm;
+layout(binding = 1) uniform sampler2D sourceEdges;
+layout(binding = 2) uniform sampler2D sourceDepth;
+layout(binding = 3) uniform sampler2D gNormal;
+layout(binding = 4, GTAO_TERM_FORMAT) uniform writeonly image2D outTerm;
+
+ivec2 imageExtent;
+
+float termAt(ivec2 texel)
+{
+    return texelFetch(sourceTerm, clamp(texel, ivec2(0), imageExtent - 1), 0).r;
+}
+
+vec4 edgesAt(ivec2 texel)
+{
+    return gtaoUnpackEdges(texelFetch(sourceEdges, clamp(texel, ivec2(0), imageExtent - 1), 0).r);
+}
+
+void main()
+{
+    imageExtent = imageSize(outTerm);
+    ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pix, imageExtent))) return;
+
+    float scale = FINAL_APPLY != 0u ? GTAO_OCCLUSION_TERM_SCALE : 1.0;
+    if (gtaoIsSky(texelFetch(sourceDepth, pix, 0).r) || gtaoIsHand(texelFetch(gNormal, pix, 0).w))
+    {
+        imageStore(outTerm, pix, vec4(scale / GTAO_OCCLUSION_TERM_SCALE));
+        return;
+    }
+
+    float blurAmount = FINAL_APPLY != 0u ? gtao.denoiseBlurBeta : gtao.denoiseBlurBeta / 5.0;
+    const float diagWeight = 0.85 * 0.5;
+
+    // L, R, T, B are -x, +x, +y, -y: the same convention the main pass's edges use.
+    vec4 edgesL = edgesAt(pix + ivec2(-1, 0));
+    vec4 edgesR = edgesAt(pix + ivec2(1, 0));
+    vec4 edgesT = edgesAt(pix + ivec2(0, 1));
+    vec4 edgesB = edgesAt(pix + ivec2(0, -1));
+    vec4 edgesC = edgesAt(pix);
+
+    // Edges are not perfectly symmetric; this enforces it ("Works real nice with TAA").
+    edgesC *= vec4(edgesL.y, edgesR.x, edgesT.w, edgesB.z);
+
+    // Some leaking from neighbours when 3 or 4 edges are set, against spatial and temporal aliasing.
+    const float leakThreshold = 2.5;
+    const float leakStrength = 0.5;
+    float edginess = (clamp(4.0 - leakThreshold - dot(edgesC, vec4(1.0)), 0.0, 1.0) / (4.0 - leakThreshold)) * leakStrength;
+    edgesC = clamp(edgesC + edginess, 0.0, 1.0);
+
+    float weightTL = diagWeight * (edgesC.x * edgesL.z + edgesC.z * edgesT.x);
+    float weightTR = diagWeight * (edgesC.z * edgesT.y + edgesC.y * edgesR.z);
+    float weightBL = diagWeight * (edgesC.w * edgesB.x + edgesC.x * edgesL.w);
+    float weightBR = diagWeight * (edgesC.y * edgesR.w + edgesC.w * edgesB.y);
+
+    float sumWeight = blurAmount;
+    float sum = termAt(pix) * sumWeight;
+    sum += termAt(pix + ivec2(-1, 0)) * edgesC.x; sumWeight += edgesC.x;
+    sum += termAt(pix + ivec2(1, 0)) * edgesC.y;  sumWeight += edgesC.y;
+    sum += termAt(pix + ivec2(0, 1)) * edgesC.z;  sumWeight += edgesC.z;
+    sum += termAt(pix + ivec2(0, -1)) * edgesC.w; sumWeight += edgesC.w;
+    sum += termAt(pix + ivec2(-1, 1)) * weightTL; sumWeight += weightTL;
+    sum += termAt(pix + ivec2(1, 1)) * weightTR;  sumWeight += weightTR;
+    sum += termAt(pix + ivec2(-1, -1)) * weightBL; sumWeight += weightBL;
+    sum += termAt(pix + ivec2(1, -1)) * weightBR; sumWeight += weightBR;
+
+    float denoised = sum / sumWeight;
+    imageStore(outTerm, pix, vec4(clamp(denoised * scale, 0.0, 1.0)));
+}

@@ -162,6 +162,46 @@ cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$APP_DIR/Mods/"
 
+# The Vulkan renderer. macOS has no Vulkan driver of its own, so this only ever
+# runs through MoltenVK; it ships so the assembly is present and the backend can
+# report a real reason when it is not selectable, rather than failing to load.
+cp -f "$MOD_OUT/Optimum.Render.Vulkan.dll" "$APP_DIR/"
+for silk_dll in "$MOD_OUT"/Silk.NET.*.dll; do
+    [[ -f "$silk_dll" ]] && cp -f "$silk_dll" "$APP_DIR/"
+done
+# shaderc goes into the application directory, where Silk.NET.Shaderc probes; not Lib/.
+SHADERC_NATIVE="$MOD_OUT/runtimes/osx-x64/native/libshaderc_shared.dylib"
+if [[ -f "$SHADERC_NATIVE" ]]; then
+    cp -f "$SHADERC_NATIVE" "$APP_DIR/"
+else
+    echo "warning: no native shaderc at $SHADERC_NATIVE; the Vulkan renderer will not load" >&2
+fi
+
+# Native SPIR-V programs and their manifest (docs/vulkan-native-shaders.md section 6),
+# beside Optimum.Render.Vulkan.dll and never under assets/: the asset manager must not
+# read SPIR-V and a mod must not shadow engine shaders by asset priority. The build
+# always writes the manifest, even for an empty source tree, so a missing one means
+# tools/shader-compiler never ran. SPIR-V is binary: the "void main" corruption scan
+# below covers the GLSL overlay in assets/game/shaders only and must never be pointed
+# at this directory.
+SHADERS_VK_SRC="$MOD_OUT/shaders-vk"
+SHADERS_VK_DST="$APP_DIR/shaders-vk"
+if [[ ! -f "$SHADERS_VK_SRC/shaders.manifest.json" ]]; then
+    echo "Error: $SHADERS_VK_SRC/shaders.manifest.json missing; build tools/shader-compiler (dotnet build VintageStory.slnx -c Release)" >&2
+    exit 1
+fi
+rm -rf "$SHADERS_VK_DST"
+mkdir -p "$SHADERS_VK_DST"
+find "$SHADERS_VK_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADERS_VK_DST/" \;
+MISSING_SHADERS_VK=""
+while IFS= read -r -d '' f; do
+    cmp -s "$f" "$SHADERS_VK_DST/$(basename "$f")" || MISSING_SHADERS_VK="$MISSING_SHADERS_VK $f"
+done < <(find "$SHADERS_VK_SRC" -maxdepth 1 -type f -print0)
+if [[ -n "$MISSING_SHADERS_VK" ]]; then
+    echo "Error: native shader file(s) never reached $SHADERS_VK_DST:$MISSING_SHADERS_VK" >&2
+    exit 1
+fi
+
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
 # It also needs the vanilla mod DLLs in .optimum/vanilla/Mods/ as baselines.
@@ -186,6 +226,40 @@ SHADER_SRC="$REPO_ROOT/sources/shaders"
 SHADER_DST="$APP_DIR/assets/game/shaders"
 if [[ -d "$SHADER_SRC" ]]; then
     find "$SHADER_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_DST/" \;
+fi
+
+# 5b-2. Overlay optimized shader includes (TAA P3). Same asset-name override
+# mechanism as shaders, separate directory.
+SHADER_INC_SRC="$REPO_ROOT/sources/shaderincludes"
+SHADER_INC_DST="$APP_DIR/assets/game/shaderincludes"
+if [[ -d "$SHADER_INC_SRC" ]]; then
+    # The vanilla tree may not have this directory at all - cp into a missing
+    # destination would drop the includes silently.
+    mkdir -p "$SHADER_INC_DST"
+    find "$SHADER_INC_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_INC_DST/" \;
+fi
+
+# 5b-3. Verify the overlay actually landed. Both copies above are wildcards, so
+# what fails is never "a file is missing from a list" but a source path that
+# moved or a destination directory that does not exist - and the symptom in
+# game is silent: vanilla's shader runs instead of Optimum's. TAA is the worst
+# case, because its own stages (taa-resolve, taa-debug, taa-skymotion,
+# taa-sharpen), the liquid velocity pass (chunkliquidmotion), the FSR pair the
+# sharpen shares its maths with and every shaderinclude the motion writers
+# compile against all have to ship together or the resolve reads vectors nobody
+# wrote. Fail the package instead.
+MISSING_SHADERS=""
+for pair in "$SHADER_SRC|$SHADER_DST" "$SHADER_INC_SRC|$SHADER_INC_DST"; do
+    src="${pair%%|*}"
+    dst="${pair##*|}"
+    [[ -d "$src" ]] || continue
+    while IFS= read -r -d '' f; do
+        [[ -f "$dst/$(basename "$f")" ]] || MISSING_SHADERS="$MISSING_SHADERS $f"
+    done < <(find "$src" -maxdepth 1 -type f -print0)
+done
+if [[ -n "$MISSING_SHADERS" ]]; then
+    echo "Error: shader source file(s) never reached the staged assets:$MISSING_SHADERS" >&2
+    exit 1
 fi
 
 # 5c. Merge translation strings.

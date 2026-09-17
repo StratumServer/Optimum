@@ -43,7 +43,10 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitRevealAttachesToColorAttachment0_NotOverwritingVanilla()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: SystemRenderOITLayers calls the platform; the GL lines are the
+        // ClientPlatformWindows override bodies.
+        Assert.Contains("CreateOitTargets(transparentfb, layers, out revealTextureId, out accumTextureId);", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs"));
+        string source = OitPlatformBodies();
 
         // OIT reveal texture attaches to ColorAttachment0 (36064). This is by design:
         // the oit.fsh shader writes to layout(location = 0) which IS ColorAttachment0.
@@ -56,7 +59,10 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitAccumulationLayersAttachToSlots3Through5()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: SystemRenderOITLayers calls the platform; the GL lines are the
+        // ClientPlatformWindows override bodies.
+        Assert.Contains("CreateOitTargets(transparentfb, layers, out revealTextureId, out accumTextureId);", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs"));
+        string source = OitPlatformBodies();
 
         // Accumulation layers attach to ColorAttachment3-5 (36067, 36068, 36069)
         // matching oit.fsh layout(location = 3/4/5).
@@ -68,7 +74,10 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitDrawBuffersMatchesShaderOutputLocations()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: SystemRenderOITLayers calls the platform; the GL lines are the
+        // ClientPlatformWindows override bodies.
+        Assert.Contains("BeginOitAccumulation(currentTransparentfb);", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs"));
+        string source = OitPlatformBodies();
 
         // DrawBuffers must declare 6 attachments (0-5) matching oit.fsh outputs.
         // Using 6, not 7: attachment 6 would be unused by shaders.
@@ -90,7 +99,10 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitBlendFuncPreservesVanillaAttachments0And1()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: SystemRenderOITLayers calls the platform; the GL lines are the
+        // ClientPlatformWindows override bodies.
+        Assert.Contains("BeginOitAccumulation(currentTransparentfb);", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs"));
+        string source = OitPlatformBodies();
 
         // Attachments 0 and 1 use DST_COLOR * ZERO blend (774 = GL_DST_COLOR, 0 = GL_ZERO).
         // This multiplies existing content by incoming fragment, preserving reveal semantics.
@@ -101,12 +113,24 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitAccumulationBlendFuncUsesAdditiveBlend()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        // Phase 1A step 5: SystemRenderOITLayers calls the platform; the GL lines are the
+        // ClientPlatformWindows override bodies.
+        Assert.Contains("BeginOitAccumulation(currentTransparentfb);", Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs"));
+        string source = OitPlatformBodies();
 
         // Attachments 3-5 use ONE + ONE additive blend (1 = GL_ONE).
         Assert.Contains("GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1)", source);
         Assert.Contains("GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1)", source);
         Assert.Contains("GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1)", source);
+    }
+
+    private static string OitPlatformBodies()
+    {
+        string windows = VulkanPlatformSource.ReadClientPlatformWindows();
+        int start = windows.IndexOf("public override void CreateOitTargets(", StringComparison.Ordinal);
+        int end = windows.IndexOf("public override int GenOcclusionQuery()", StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "the GL OIT overrides are missing from ClientPlatformWindows");
+        return windows.Substring(start, end - start);
     }
 
     private static string Read(string relativePath)

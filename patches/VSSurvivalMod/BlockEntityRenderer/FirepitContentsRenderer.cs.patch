@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
+index e2f1f8f..f4dae3d 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
+@@ -159,11 +159,23 @@ namespace Vintagestory.GameContent
+             ;
+ 
+             prog.ViewMatrix = rpi.CameraMatrixOriginf;
+             prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+ 
+-            rpi.RenderMultiTextureMesh(meshref, "tex");
++            // Optimum TAA (P4): the cooked item's Transform is animated by the
++            // block entity (rotation and scale change while it cooks), so the
++            // previous model matrix is worth keeping. No-op when TAA is off.
++            OptimumStandardMotion.Apply(prog, this, meshref, ModelMat.Values);
++            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            try
++            {
++                rpi.RenderMultiTextureMesh(meshref, "tex");
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+ 
+             prog.Stop();
+         }
+ 
+         public void Dispose()

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
-index 7720d30..290c610 100644
+index 133e26d..f09c7bc 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
 @@ -17,10 +17,32 @@ public class GuiManager : ClientSystem

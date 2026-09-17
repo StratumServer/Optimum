@@ -53,7 +53,20 @@ public sealed class OptimumMapTextureArray : IDisposable
             _freeList.Push(i);
         }
 
-        // Create the GL texture array
+        // Create the texture array. On the Vulkan backend the window has no GL
+        // context, so the device owns the array; the GL body stays for OpenGL.
+        OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
+        if (optimumGraphics != null)
+        {
+            TextureId = optimumGraphics.CreateTexture2DArray(PageSize, PageSize, maxLayers,
+                EnumTextureInternalFormat.Rgba8, EnumTexturePixelFormat.Rgba);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            optimumGraphics.SetTextureParameter(TextureId, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            return;
+        }
+
         TextureId = GL.GenTexture();
         GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, TextureId);
         GL.TexImage3D(
@@ -151,7 +164,9 @@ public sealed class OptimumMapTextureArray : IDisposable
 
         if (TextureId != 0)
         {
-            GL.DeleteTexture(TextureId);
+            OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
+            if (optimumGraphics != null) optimumGraphics.DeleteTexture(TextureId);
+            else GL.DeleteTexture(TextureId);
             TextureId = 0;
         }
 
@@ -163,6 +178,19 @@ public sealed class OptimumMapTextureArray : IDisposable
 
     private void UploadToLayer(int layer, int[] pixels)
     {
+        OptimumForkGraphics optimumGraphics = OptimumForkGraphics.Active;
+        if (optimumGraphics != null)
+        {
+            unsafe
+            {
+                fixed (int* ptr = pixels)
+                {
+                    optimumGraphics.UploadTexture2DArrayLayer(TextureId, layer, 0, 0, PageSize, PageSize, (IntPtr)ptr);
+                }
+            }
+            return;
+        }
+
         GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, TextureId);
         GL.TexSubImage3D(
             (TextureTarget)GL_TEXTURE_2D_ARRAY,

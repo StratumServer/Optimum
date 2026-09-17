@@ -1,0 +1,43 @@
+diff --git a/VSEssentials/EntityRenderer/EntityItemRenderer.cs b/VSEssentials/EntityRenderer/EntityItemRenderer.cs
+index 30357cd..4a4be3f 100644
+--- a/VSEssentials/EntityRenderer/EntityItemRenderer.cs
++++ b/VSEssentials/EntityRenderer/EntityItemRenderer.cs
+@@ -202,10 +202,15 @@ namespace Vintagestory.GameContent
+ 
+                 prog.ProjectionMatrix = rapi.CurrentProjectionMatrix;
+                 prog.ViewMatrix = rapi.CameraMatrixOriginf;
+                 prog.ModelMatrix = ModelMat;
+ 
++                // Optimum TAA (P3): this dropped item's previous transform. The renderer
++                // instance is the identity - one per entity, gone with it - and the item's
++                // mesh is the shape. A no-op when TAA is off.
++                OptimumStandardMotion.Apply(prog, this, renderInfo.ModelRef, ModelMat);
++
+ 
+                 ItemStack stack = entityitem.Itemstack;
+                 AdvancedParticleProperties[] ParticleProperties = stack.Block?.ParticleProperties;
+ 
+                 if (stack.Block != null && !capi.IsGamePaused)
+@@ -234,11 +239,21 @@ namespace Vintagestory.GameContent
+             if (!renderInfo.CullFaces)
+             {
+                 rapi.GlDisableCullFace();
+             }
+ 
+-            rapi.RenderMultiTextureMesh(renderInfo.ModelRef, textureSampleName);
++            // Optimum TAA (P3): the standard shader writes motion vectors, so the
++            // motion attachment joins Primary's draw-buffer mask for this one draw.
++            bool optimumMotionWrite = !isShadowPass && OptimumMotionWrite.Begin();
++            try
++            {
++                rapi.RenderMultiTextureMesh(renderInfo.ModelRef, textureSampleName);
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+ 
+             if (!renderInfo.CullFaces)
+             {
+                 rapi.GlEnableCullFace();
+             }

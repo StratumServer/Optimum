@@ -19,51 +19,6 @@ public class OptimumStatusModSystem : ModSystem
         this.api = api;
         api.Event.LevelFinalize += LogGameLaunchTaskSummary;
 
-        // Issue #72 measurement hook: OPTIMUM_CULL_WALK_LOG=1 makes ChunkCuller
-        // log a raycast-vs-BFS walk-timing summary to the client log every
-        // CullWalkLogEvery recomputes, so a timed headless run captures the
-        // number without in-game chat input.
-        if (System.Environment.GetEnvironmentVariable("OPTIMUM_CULL_WALK_LOG") == "1")
-        {
-            OptimumDiagnostics.CullWalkLogEnabled = true;
-        }
-
-        if (System.Environment.GetEnvironmentVariable("OPTIMUM_CHUNK_RENDER_LOG") == "1")
-        {
-            api.Event.RegisterGameTickListener(_ =>
-            {
-                api.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkRenderSummary());
-            }, 5000);
-            api.Event.LeaveWorld += () =>
-            {
-                api.Logger.Notification("[Optimum] Final " + OptimumDiagnostics.GetChunkRenderSummary());
-            };
-        }
-
-        // Issue #73 mesh-construction profiler hook: OPTIMUM_MESH_PROFILE=1 makes
-        // ChunkTesselator.NowProcessChunk record per-chunk tess/finalize timing
-        // and thread-allocated bytes, logging a summary every MeshProfileLogEvery
-        // chunks so a scripted run captures the bottleneck without chat input.
-        if (System.Environment.GetEnvironmentVariable("OPTIMUM_MESH_PROFILE") == "1")
-        {
-            OptimumDiagnostics.MeshProfileEnabled = true;
-        }
-
-        // Issue #74 item-render profiler hook: OPTIMUM_ITEM_PROFILE=1 counts
-        // GetItemStackRenderInfo calls/frame and their allocation, logged every
-        // ItemRenderProfileLogEvery frames, to confirm whether per-slot item
-        // rendering (inventory/chest open) is a real per-frame CPU/GC hotspot.
-        if (System.Environment.GetEnvironmentVariable("OPTIMUM_ITEM_PROFILE") == "1")
-        {
-            OptimumDiagnostics.ItemRenderProfileEnabled = true;
-            api.Logger.Notification("[Optimum] item-render profiler ENABLED (OPTIMUM_ITEM_PROFILE=1)");
-        }
-
-        // Issue #85: detect performance ecosystem mods (Komet, OptiTime, Tungsten, Synergy)
-        OptimumCompatibilityGuard.RunDetection(api);
-        api.Event.PlayerJoin += _ => OptimumCompatibilityGuard.NotifyPlayerOnJoin(api);
-        api.Event.LeaveWorld += OptimumCompatibilityGuard.ResetSession;
-
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
@@ -373,7 +328,6 @@ public class OptimumStatusModSystem : ModSystem
             sb.AppendLine($"  {name}: {value}");
         }
         sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}->{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}->{TyronThreadPool.SetMaxThreadsIoAfter}");
-        sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
         sb.AppendLine(OptimumDiagnostics.GetCountersSummary());
         sb.AppendLine(OptimumDiagnostics.GetTessellationSummary());
         sb.AppendLine(OptimumDiagnostics.GetChiselLodSummary());
@@ -415,8 +369,6 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Greedy mesh: ON (maxWidth={0})", OptimumConfig.GreedyMeshMaxMergeWidth);
         if (OptimumConfig.OcclusionCullingScaleEnabled)
             api.Logger.Debug("[Optimum] Occlusion culling scale: ON");
-        if (OptimumConfig.BfsChunkVisibilityEnabled)
-            api.Logger.Debug("[Optimum] BFS chunk visibility: ON");
         if (OptimumConfig.DynamicLightCacheEnabled)
             api.Logger.Debug("[Optimum] Dynamic light cache: ON");
         if (OptimumConfig.EntityLightBatchEnabled)
@@ -437,18 +389,5 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Worldgen work stealing: SUSPENDED (serial policy pending R1)");
         if (OptimumConfig.ChunkReadPoolEnabled)
             api.Logger.Debug("[Optimum] Chunk read pool: ON (server-side)");
-        if (OptimumConfig.EffectiveIndirectDraw)
-            api.Logger.Debug("[Optimum] Indirect draw (glMultiDrawElementsIndirect): ON");
-        else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
-            api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
-
-        if (OptimumConfig.KometDetected)
-            api.Logger.Warning(OptimumCompatibilityGuard.KometAdvisoryWarning);
-        if (OptimumConfig.OptiTimeDetected)
-            api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);
-        if (OptimumConfig.TungstenDetected)
-            api.Logger.Notification("[Optimum] Tungsten mod detected: server-side optimizations active.");
-        if (OptimumConfig.SynergyDetected)
-            api.Logger.Notification("[Optimum] Synergy mod detected: client-server synchronization active.");
     }
 }
