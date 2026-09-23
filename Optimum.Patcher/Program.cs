@@ -155,6 +155,13 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
     {
         "oButtonBounds",
+        "optimumContentBounds",
+        "optimumRowY",
+        "OnOptimumScrollChanged",
+        "AddOptimumLabelRow",
+        "AddOptimumSwitchRow",
+        "AddOptimumSliderRow",
+        "AddOptimumDropdownRow",
         "OnOptimumOptions",
         "_AddOptimumTab",
         "onOptimumBackgroundFpsChanged",

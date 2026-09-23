@@ -135,26 +135,6 @@ public class IssueTrackerBugfixBatchCoverageTests
         Assert.DoesNotContain("oButtonBounds.ParentBounds.fixedWidth = needed + 2.0 * GuiStyle.ElementToDialogPadding;", source);
     }
 
-    [Fact]
-    public void OptimumExtraTabSwitchesAreVerticallyCenteredOnTheirLabelRow()
-    {
-        // Measured pixel-for-pixel against a vanilla settings tab (Interface)
-        // and the Optimum Extra tab from real screenshots: vanilla's own
-        // AddSwitch/label pairs land within ~2px of each other vertically,
-        // but OnOptimumOptions's original "+2" row offset put every switch
-        // ~5-7px (displayed) below its label's center - consistent across
-        // all 14 switch rows, not a progressive drift. Row spacing measured
-        // at ~30 design units -> ~34px displayed (scale ~1.13), so the
-        // needed correction is ~5 design units: "+2" -> "-3". Sliders
-        // (measured ~1px off already) are untouched.
-        string source = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch");
-
-        Assert.DoesNotMatch(new Regex(@"AddSwitch\(onOptimum\w+Changed, ElementBounds\.Fixed\(450, y0[^)]*\+ 2, 200, 20\)"), source);
-        Assert.Contains("AddSwitch(onOptimumBackgroundFpsChanged, ElementBounds.Fixed(450, y0 - 3, 200, 20), \"optBgFps\")", source);
-        Assert.Contains("AddSwitch(onOptimumEntityShaderCacheChanged, ElementBounds.Fixed(450, y0 + rowH * 16 - 3, 200, 20), \"optEntityShaderCache\")", source);
-        // Sliders were already close to vanilla's alignment - untouched.
-        Assert.Contains("AddSlider(onOptimumShadowDistChanged, ElementBounds.Fixed(450, y0 + rowH * 3 + 2, 200, 20), \"optShadowDist\")", source);
-    }
 
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
