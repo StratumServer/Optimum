@@ -80,6 +80,10 @@ jobs:
           restore-keys: |
             nuget-windows-
 
+      - name: Seed incomplete decompile cache
+        shell: bash
+        run: mkdir -p build/snapshot/VintagestoryLib
+
       - name: Bootstrap
         timeout-minutes: 20
         shell: pwsh
@@ -367,6 +371,10 @@ jobs:
           key: nuget-linux-${{ hashFiles('**/*.csproj', '**/*.slnx') }}
           restore-keys: |
             nuget-linux-
+
+      - name: Seed incomplete decompile cache
+        shell: bash
+        run: mkdir -p build/snapshot/VintagestoryLib
 
       - name: Bootstrap
         timeout-minutes: 20

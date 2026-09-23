@@ -769,25 +769,37 @@ try {
         if (-not $dllPath) { Write-Warning "Skipping $dllBase.dll (not found)"; continue }
 
         $out = Join-Path $snapshotDir $dllBase
-        if (-not (Test-Path $out) -or $Refresh) {
-            $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
+        $manifest = Join-Path (Join-Path $snapshotDir '.decompile-manifests') "$dllBase.manifest"
+        $dllHash = (Get-FileHash -LiteralPath $dllPath.FullName -Algorithm SHA256).Hash
+        $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
+        $expectedManifest = "$dllHash`n$verLine"
+
+        $cachedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
+        $cachedSource = @(Get-ChildItem -Path $out -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+        $cacheValid = $cachedProjects.Count -gt 0 -and $cachedSource.Count -gt 0 -and (Test-Path -LiteralPath $manifest -PathType Leaf)
+        if ($cacheValid) {
+            $cacheValid = (Get-Content -LiteralPath $manifest -Raw).TrimEnd() -eq $expectedManifest
+        }
+
+        if (-not $cacheValid -or $Refresh) {
             Write-Host "Decompiling $dllBase.dll with $verLine"
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
             Invoke-NativeStep { ilspycmd $dllPath.FullName --project -o $out 2>$null | Out-Null }
-            # Don't trust ilspycmd's exit code alone: it has a known bug
-            # (icsharpcode/ILSpy#3101) where it reports failure via a bogus
-            # "not using the latest version" self-check even after a fully
-            # successful decompile. Verify the real artifact instead.
+            # ILSpy can report a spurious version warning after successful output;
+            # validate both the project and source before stamping this cache.
             $producedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
-            if ($producedProjects.Count -eq 0) {
-                throw "ilspycmd produced no .csproj for $dllBase.dll (exit code $LASTEXITCODE). Delete $out and retry, or reinstall ilspycmd."
+            $producedSource = @(Get-ChildItem -Path $out -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($producedProjects.Count -eq 0 -or $producedSource.Count -eq 0) {
+                throw "ilspycmd produced an incomplete source tree for $dllBase.dll (exit code $LASTEXITCODE). Delete $out and retry, or reinstall ilspycmd."
             }
             $producedProjects | ForEach-Object {
                 Update-FileInPlace $_.FullName { param($t) $t -creplace '<LangVersion>15\.0</LangVersion>', '<LangVersion>latest</LangVersion>' }
             }
+            $manifestDirectory = Split-Path -Parent $manifest
+            New-Item -ItemType Directory -Force -Path $manifestDirectory | Out-Null
+            [System.IO.File]::WriteAllText($manifest, $expectedManifest, [System.Text.Encoding]::UTF8)
         }
-
         Convert-ToLf $out
         Copy-TreeFresh $out (Join-Path $repoRoot $workDir)
         Convert-ToLf (Join-Path $repoRoot $workDir)

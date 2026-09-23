@@ -509,12 +509,25 @@ for entry in "${decompile_targets[@]}"; do
   fi
 
   out="$snapshot_dir/$dll_base"
-  if [[ ! -d "$out" || "$refresh" == "1" ]]; then
-    echo "Decompiling $dll_base.dll with $(ilspycmd --version | head -1)"
+  manifest="$snapshot_dir/.decompile-manifests/$dll_base.manifest"
+  dll_hash="$(hash_files "$dll_path" | cut -d ' ' -f1)"
+  ilspy_version="$(ilspycmd --version | head -1)"
+  if [[ "$refresh" == "1" || ! -d "$out" || ! -f "$manifest" ]] ||
+    ! cmp -s "$manifest" <(printf '%s\n' "$dll_hash" "$ilspy_version"); then
+    echo "Decompiling $dll_base.dll with $ilspy_version"
     rm -rf "$out"
     mkdir -p "$out"
     ilspycmd "$dll_path" --project -o "$out" >/dev/null 2>&1
-    find "$out" -maxdepth 1 -name '*.csproj' -exec perl -0pi -e 's#<LangVersion>15\.0</LangVersion>#<LangVersion>latest</LangVersion>#g' {} \;
+    if [[ ! -f "$out/$dll_base.csproj" ]]; then
+      echo "ILSpy produced no project for $dll_base.dll; the decompile cache will not be reused." >&2
+      exit 1
+    fi
+    if [[ -z "$(find "$out" -type f -name '*.cs' -print -quit)" ]]; then
+      echo "ILSpy produced no source files for $dll_base.dll; the decompile cache will not be reused." >&2
+      exit 1
+    fi
+    mkdir -p "$(dirname "$manifest")"
+    printf '%s\n' "$dll_hash" "$ilspy_version" > "$manifest"
   fi
 
   normalize_lf "$out"
