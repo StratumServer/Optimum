@@ -54,6 +54,8 @@
     <Compile Remove="Config\OptimumFrustumCullSimd.cs" />
     <Compile Remove="Config\OptimumKometGuard.cs" />
     <Compile Remove="Config\OptimumCompatibilityGuard.cs" />
+    <Compile Remove="Config\OptimumInterop.cs" />
+    <Compile Remove="Config\ModInterop.cs" />
   </ItemGroup>
 
   <ItemGroup>

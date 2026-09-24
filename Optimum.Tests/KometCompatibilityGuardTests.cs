@@ -34,7 +34,7 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void DetectViaModLoader_SetsDetectedAndLogsAdvisory()
+    public void DetectViaModLoader_SetsDetected_AndRecognizesProtocolProvider()
     {
         var logs = new List<string>();
         var loader = new FakeModLoader(hasKomet: true, kometVersion: "2.0.0");
@@ -46,13 +46,13 @@ public sealed class KometCompatibilityGuardTests : IDisposable
         Assert.True(OptimumKometGuard.IsDetected);
         Assert.Equal("ModLoader", OptimumKometGuard.DetectionSource);
         Assert.Equal("2.0.0", OptimumKometGuard.DetectedVersion);
-        Assert.Single(logs);
-        Assert.Contains("Komet mod detected", logs[0]);
-        Assert.Contains("glMultiDrawElementsIndirect", logs[0]);
+        Assert.Empty(logs);
+        OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
+        Assert.Empty(logs);
 
         string status = OptimumKometGuard.GetStatusLine();
         Assert.Contains("Komet v2.0.0", status);
-        Assert.Contains("ACTIVE (safely yielding MDI/SIMD)", status);
+        Assert.Contains("interop protocol available", status);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void EffectiveIndirectDraw_SafelyYieldsWhenKometDetected()
+    public void EffectiveIndirectDraw_RemainsEnabledForProtocolAwareKomet()
     {
         bool origSupported = OptimumConfig.IndirectDrawSupported;
         bool origEnabled = OptimumConfig.IndirectDrawEnabled;
@@ -85,9 +85,9 @@ public sealed class KometCompatibilityGuardTests : IDisposable
             OptimumConfig.KometGuardEnabled = true;
             Assert.True(OptimumConfig.EffectiveIndirectDraw);
 
-            // With Komet detected and guard enabled: yields MDI to avoid conflict with Harmony prefix
+            // Protocol-aware Komet nightly has no evidenced MDI replacement path.
             OptimumConfig.KometDetected = true;
-            Assert.False(OptimumConfig.EffectiveIndirectDraw);
+            Assert.True(OptimumConfig.EffectiveIndirectDraw);
 
             // User explicitly disables guard: force MDI despite Komet
             OptimumConfig.KometGuardEnabled = false;
@@ -101,7 +101,7 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void EffectiveSimdCulling_SafelyYieldsWhenKometDetected()
+    public void EffectiveSimdCulling_RemainsEnabledForProtocolAwareKomet()
     {
         bool origEnabled = OptimumConfig.SimdCullingEnabled;
 
@@ -114,9 +114,9 @@ public sealed class KometCompatibilityGuardTests : IDisposable
             OptimumConfig.KometGuardEnabled = true;
             Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
 
-            // With Komet detected and guard enabled: yields SIMD culling to avoid racing against FastCuller
+            // Protocol-aware Komet nightly has no evidenced SIMD culling replacement path.
             OptimumConfig.KometDetected = true;
-            Assert.False(OptimumConfig.EffectiveSimdCulling);
+            Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
 
             // User explicitly disables guard: force SIMD despite Komet
             OptimumConfig.KometGuardEnabled = false;
@@ -162,25 +162,24 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void NotifyPlayerOnJoin_NotifiesOnlyOncePerSession()
+    public void NotifyPlayerOnJoin_StaysQuietForProtocolAwarePeer()
     {
         var messages = new List<string>();
         OptimumConfig.KometDetected = true;
         OptimumConfig.KometGuardEnabled = true;
 
-        // First join in session notifies
+        // Protocol-aware Komet has no unresolved compatibility advisory.
         OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
-        Assert.Single(messages);
-        Assert.Contains("Komet mod detected", messages[0]);
+        Assert.Empty(messages);
 
-        // Second join in same session does not repeat
+        // Repeated joins stay quiet as well.
         OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
-        Assert.Single(messages);
+        Assert.Empty(messages);
 
         // ResetSession simulates leaving and rejoining world
         OptimumKometGuard.ResetSession();
         OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
-        Assert.Equal(2, messages.Count);
+        Assert.Empty(messages);
     }
 
     private sealed class FakeModLoader : IModLoader

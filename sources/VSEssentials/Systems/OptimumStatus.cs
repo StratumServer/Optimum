@@ -61,6 +61,19 @@ public class OptimumStatusModSystem : ModSystem
 
         // Issue #85: detect performance ecosystem mods (Komet, OptiTime, Tungsten, Synergy)
         OptimumCompatibilityGuard.RunDetection(api);
+        OptimumConfig.KometAdaptiveChunkInflowEnabled =
+            OptimumCompatibilityGuard.IsKometAdaptiveChunkInflowEnabled();
+        if (OptimumConfig.KometAdaptiveChunkInflowEnabled && !OptimumCompatibilityGuard.HasKometInteropProvider)
+        {
+            // Do this before startup diagnostics: status must not briefly claim the radius is
+            // active while Komet's inflow brake is already steering the same backlog.
+            VsModInterop.TryYield(VsModInterop.FeatureAdaptiveRadius,
+                VsModInterop.RequesterLegacyKometFallback, VsModInterop.ReasonKometInflow, out _);
+        }
+        else
+        {
+            VsModInterop.Release(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback);
+        }
         api.Event.PlayerJoin += _ => OptimumCompatibilityGuard.NotifyPlayerOnJoin(api);
         api.Event.LeaveWorld += OptimumCompatibilityGuard.ResetSession;
 
@@ -374,6 +387,9 @@ public class OptimumStatusModSystem : ModSystem
         }
         sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}->{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}->{TyronThreadPool.SetMaxThreadsIoAfter}");
         sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
+        // Issue #119 follow-up: what the interop protocol agreed with a peer this session, so a
+        // field log says whether the negotiation ran and who holds what down.
+        sb.AppendLine(VsModInterop.DescribeInterop());
         sb.AppendLine(OptimumDiagnostics.GetCountersSummary());
         sb.AppendLine(OptimumDiagnostics.GetTessellationSummary());
         sb.AppendLine(OptimumDiagnostics.GetChiselLodSummary());
@@ -429,8 +445,10 @@ public class OptimumStatusModSystem : ModSystem
         if (OptimumConfig.EffectiveMapPageCache)
             api.Logger.Debug("[Optimum] Map page cache (FastMap): ON (maxLayers={0}, bc7={1})",
                 OptimumConfig.MapPageCacheMaxLayers, OptimumConfig.MapPageCacheBc7);
-        if (OptimumConfig.AdaptiveRadiusEnabled)
+        if (OptimumConfig.EffectiveAdaptiveRadiusEnabled)
             api.Logger.Debug("[Optimum] Adaptive radius: ON");
+        else if (OptimumConfig.AdaptiveRadiusEnabled && OptimumConfig.KometAdaptiveChunkInflowEnabled)
+            api.Logger.Notification("[Optimum] Adaptive radius disabled while Komet adaptive chunk inflow is active.");
         if (OptimumConfig.RandomTickSliceEnabled)
             api.Logger.Debug("[Optimum] Random tick slice: ON (server-side)");
         if (OptimumConfig.WorldgenWorkStealingEnabled)
@@ -442,8 +460,6 @@ public class OptimumStatusModSystem : ModSystem
         else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
             api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
 
-        if (OptimumConfig.KometDetected)
-            api.Logger.Warning(OptimumCompatibilityGuard.KometAdvisoryWarning);
         if (OptimumConfig.OptiTimeDetected)
             api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);
         if (OptimumConfig.TungstenDetected)

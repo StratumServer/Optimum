@@ -10,9 +10,9 @@ namespace Vintagestory.API.Config;
 /// <summary>
 /// Issue #85: Unified compatibility posture, host detection, and defensive guards
 /// for performance mods in the Vintage Story ecosystem:
-/// 1. Komet (komet): Third-party client rendering mod (xToast). Overrides host .NET 10
-///    MDI indirect draw and SIMD culling via cancelling Harmony prefixes. Yields safely
-///    under KometGuard toggle to prevent graphics pipeline crashes.
+/// 1. Komet (komet): Third-party client optimization mod (xToast). Optimum coordinates
+///    reported runtime features through the generic provider contract and retains conservative
+///    MDI/SIMD and adaptive-radius fallbacks for Komet builds without that provider.
 /// 2. OptiTime (optitime): Client optimization mod (Zaldaryon). Optimum natively integrates
 ///    all OptiTime optimizations ahead-of-time in IL and source code.
 /// 3. Tungsten (tungsten): Server-side performance optimizations (Zaldaryon). Fully compatible.
@@ -27,12 +27,11 @@ public static class OptimumCompatibilityGuard
     public const string SynergyModId = "synergy";
 
     public const string KometAdvisoryWarning =
-        "[Optimum] Advisory: Komet mod detected. Komet is a third-party guest mod engineered for vanilla Vintage Story. " +
-        "Its Harmony prefixes override Optimum's native .NET 10 render pipeline (including glMultiDrawElementsIndirect " +
-        "and SIMD frustum culling), which degrades performance and may cause instability. Running both simultaneously is not recommended.";
+        "[Optimum] Advisory: Komet was detected, but it does not expose a compatible VS mod interop provider. " +
+        "Some runtime patches may overlap; compatibility has not been negotiated.";
 
     public const string KometPlayerJoinNotification =
-        "[Optimum] Advisory: Komet mod detected. Komet overrides Optimum's native GPU indirect draw and SIMD culling pipelines. " +
+        "[Optimum] Advisory: Komet does not expose a compatible VS mod interop provider. Runtime patch overlap is unverified. " +
         "Type '.optimum status' for details.";
 
     public const string OptiTimeAdvisoryWarning =
@@ -48,6 +47,9 @@ public static class OptimumCompatibilityGuard
     public static bool KometAdvisoryLogged { get; private set; }
     public static bool OptiTimeAdvisoryLogged { get; private set; }
     public static bool WorldJoinAdvisorySent { get; private set; }
+
+    private static FieldInfo? _kometInflowEnabledField;
+    private static bool _kometInflowFieldLookupComplete;
 
     /// <summary>
     /// Detects all 4 performance mods via ModLoader.
@@ -65,7 +67,6 @@ public static class OptimumCompatibilityGuard
                 KometDetectionSource = "ModLoader";
                 var mod = modLoader.GetMod(KometModId);
                 KometDetectedVersion = mod?.Info?.Version ?? "unknown";
-                LogKometAdvisoryOnce(logger);
             }
 
             // 2. OptiTime
@@ -108,7 +109,6 @@ public static class OptimumCompatibilityGuard
                         OptimumConfig.KometDetected = true;
                         KometDetectionSource = "ModLoader";
                         KometDetectedVersion = mod.Info.Version ?? "unknown";
-                        LogKometAdvisoryOnce(logger);
                     }
 
                     if (!OptimumConfig.OptiTimeDetected && (string.Equals(modId, OptiTimeModId, StringComparison.OrdinalIgnoreCase) ||
@@ -159,7 +159,6 @@ public static class OptimumCompatibilityGuard
                     OptimumConfig.KometDetected = true;
                     KometDetectionSource = "AppDomain";
                     KometDetectedVersion = asm.GetName().Version?.ToString() ?? "unknown";
-                    LogKometAdvisoryOnce(logger);
                 }
 
                 if (!OptimumConfig.OptiTimeDetected &&
@@ -192,6 +191,74 @@ public static class OptimumCompatibilityGuard
     }
 
     /// <summary>
+    /// Reads Komet's live inflow-brake switch. Two sources, in this order:
+    ///
+    /// 1. The interop protocol. Komet answers for its own feature, so this is the live state as
+    ///    Komet defines it, and it keeps working if the implementation detail below is renamed.
+    /// 2. The public <c>Komet.Runtime.InflowBrake.Enabled</c> field, read reflectively, for a
+    ///    Komet that predates the protocol.
+    ///
+    /// If Komet is loaded but neither source can be read, return true so Optimum fails closed
+    /// and does not apply a second chunk-pressure controller.
+    /// </summary>
+    public static bool IsKometAdaptiveChunkInflowEnabled()
+    {
+        if (!OptimumConfig.KometDetected) return false;
+
+        if (ModInterop.TryGetFeatureState(VsModInterop.RequesterKomet, VsModInterop.ReasonKometInflow, out bool viaProtocol))
+            return viaProtocol;
+
+        if (!_kometInflowFieldLookupComplete)
+        {
+            _kometInflowEnabledField = FindKometInflowEnabledField();
+            _kometInflowFieldLookupComplete = true;
+        }
+
+        FieldInfo? enabledField = _kometInflowEnabledField;
+        if (enabledField == null || enabledField.FieldType != typeof(bool)) return true;
+
+        try
+        {
+            object? value = enabledField.GetValue(null);
+            return value is bool enabled ? enabled : true;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    public static bool HasKometInteropProvider => ModInterop.IsProviderAvailable("komet");
+
+    public static bool IsLegacyKometFallbackActive =>
+        OptimumConfig.KometDetected && OptimumConfig.KometGuardEnabled && !HasKometInteropProvider;
+
+    public static void LogKometAdvisoryIfUncoordinated(Action<string>? logger = null)
+    {
+        if (OptimumConfig.KometDetected && !HasKometInteropProvider)
+            LogKometAdvisoryOnce(logger);
+    }
+
+    private static FieldInfo? FindKometInflowEnabledField()
+    {
+        try
+        {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type? inflowBrake = assembly.GetType("Komet.Runtime.InflowBrake", throwOnError: false);
+                FieldInfo? enabled = inflowBrake?.GetField("Enabled", BindingFlags.Public | BindingFlags.Static);
+                if (enabled != null) return enabled;
+            }
+        }
+        catch (Exception)
+        {
+            // Treat an unreadable Komet runtime state as enabled (fail closed).
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Runs full detection pipeline against the game API.
     /// </summary>
     public static void RunDetection(ICoreAPI? api)
@@ -216,7 +283,7 @@ public static class OptimumCompatibilityGuard
     public static void NotifyPlayerOnJoin(Action<string>? showChat)
     {
         if (showChat == null) return;
-        if (OptimumConfig.KometDetected && OptimumConfig.KometGuardEnabled && !WorldJoinAdvisorySent)
+        if (OptimumConfig.KometDetected && OptimumConfig.KometGuardEnabled && !HasKometInteropProvider && !WorldJoinAdvisorySent)
         {
             showChat(KometPlayerJoinNotification);
             WorldJoinAdvisorySent = true;
@@ -227,8 +294,10 @@ public static class OptimumCompatibilityGuard
     {
         if (!OptimumConfig.KometDetected) return "none detected";
         string ver = !string.IsNullOrEmpty(KometDetectedVersion) ? $" v{KometDetectedVersion}" : "";
-        string guardState = OptimumConfig.KometGuardEnabled ? "ACTIVE (safely yielding MDI/SIMD)" : "UNGUARDED (MDI/SIMD force-enabled)";
-        return $"Komet{ver} ({guardState})";
+        string state = HasKometInteropProvider
+            ? "interop protocol available"
+            : OptimumConfig.KometGuardEnabled ? "legacy compatibility fallback" : "legacy compatibility guard disabled";
+        return $"Komet{ver} ({state})";
     }
 
     public static string GetOptiTimeStatusLine()
@@ -301,6 +370,9 @@ public static class OptimumCompatibilityGuard
         KometAdvisoryLogged = false;
         OptiTimeAdvisoryLogged = false;
         WorldJoinAdvisorySent = false;
+        OptimumConfig.KometAdaptiveChunkInflowEnabled = false;
+        _kometInflowEnabledField = null;
+        _kometInflowFieldLookupComplete = false;
     }
 
     private static void LogKometAdvisoryOnce(Action<string>? logger)

@@ -29,6 +29,8 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumFrustumCullSimd.cs" Link="Config\OptimumFrustumCullSimd.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumKometGuard.cs" Link="Config\OptimumKometGuard.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumCompatibilityGuard.cs" Link="Config\OptimumCompatibilityGuard.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumInterop.cs" Link="Config\OptimumInterop.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\ModInterop.cs" Link="Config\ModInterop.cs" />
     <Compile Include="optimum-api-bridge.cs" />
   </ItemGroup>
   <ItemGroup>

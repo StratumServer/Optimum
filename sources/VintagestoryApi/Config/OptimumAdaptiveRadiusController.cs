@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading;
 
 namespace Vintagestory.API.Config;
@@ -21,11 +22,14 @@ namespace Vintagestory.API.Config;
 public sealed class OptimumAdaptiveRadiusController
 {
     private const double EwmaAlpha = 0.15;
+    private static readonly long KometProbeIntervalTicks = Stopwatch.Frequency / 4;
 
     private int _effectiveRadius;
     private int _configuredMax;
     private double _smoothedQueueDepth;
     private bool _warmedUp;
+    private long _lastKometProbeTicks;
+    private bool _hasKometProbe;
 
     /// <summary>Current effective radius in chunk columns. Thread-safe read.</summary>
     public int EffectiveRadius => Volatile.Read(ref _effectiveRadius);
@@ -62,10 +66,12 @@ public sealed class OptimumAdaptiveRadiusController
     /// <param name="maxRadius">Current Config.MaxChunkRadius (may change in SP)</param>
     public void Tick(int queueDepth, int maxRadius)
     {
+        RefreshKometAdaptiveChunkInflowState();
+
         // Track dynamic MaxChunkRadius changes (singleplayer view distance)
         _configuredMax = Math.Max(1, maxRadius);
 
-        if (!OptimumConfig.AdaptiveRadiusEnabled)
+        if (!OptimumConfig.EffectiveAdaptiveRadiusEnabled)
         {
             // Disabled: pin to max and skip all math.
             Volatile.Write(ref _effectiveRadius, _configuredMax);
@@ -108,6 +114,40 @@ public sealed class OptimumAdaptiveRadiusController
         OptimumConfig.AdaptiveRadiusEffective = Volatile.Read(ref _effectiveRadius);
     }
 
+    private void RefreshKometAdaptiveChunkInflowState()
+    {
+        if (!OptimumConfig.KometDetected)
+        {
+            OptimumConfig.KometAdaptiveChunkInflowEnabled = false;
+            VsModInterop.Release(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback);
+            _hasKometProbe = false;
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (_hasKometProbe && now - _lastKometProbeTicks < KometProbeIntervalTicks) return;
+
+        _lastKometProbeTicks = now;
+        _hasKometProbe = true;
+
+        bool inflow = OptimumCompatibilityGuard.IsKometAdaptiveChunkInflowEnabled();
+        OptimumConfig.KometAdaptiveChunkInflowEnabled = inflow;
+
+        // Hold the adaptive radius down while Komet brakes the chunk inflow itself: two
+        // controllers steering one backlog is what this guard exists to prevent. The hold goes
+        // through the interop registry rather than a private flag, so it is visible in
+        // .optimum status and in Komet's own report, and it is dropped the moment the brake is
+        // off or Komet is gone. The user's saved AdaptiveRadius preference is never touched.
+        if (inflow && !OptimumCompatibilityGuard.HasKometInteropProvider)
+        {
+            VsModInterop.TryYield(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback, VsModInterop.ReasonKometInflow, out _);
+        }
+        else
+        {
+            VsModInterop.Release(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback);
+        }
+    }
+
     /// <summary>
     /// Reset state. Used when the world reloads or for testing.
     /// </summary>
@@ -117,5 +157,8 @@ public sealed class OptimumAdaptiveRadiusController
         _effectiveRadius = _configuredMax;
         _smoothedQueueDepth = 0;
         _warmedUp = false;
+        _lastKometProbeTicks = 0;
+        _hasKometProbe = false;
+        VsModInterop.Release(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback);
     }
 }

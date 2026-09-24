@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[Collection("OptimumConfig")]
 public sealed class ShaderCompatibilityReportTests : IDisposable
 {
     private readonly string _tempDataDir;
