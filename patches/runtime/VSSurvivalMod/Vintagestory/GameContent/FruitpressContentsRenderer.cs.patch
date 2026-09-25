@@ -1,0 +1,27 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/FruitpressContentsRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/FruitpressContentsRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/FruitpressContentsRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/FruitpressContentsRenderer.cs
+@@ -142,7 +142,22 @@ public class FruitpressContentsRenderer
+ 				.Values;
+ 			standardShader.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShader.ProjectionMatrix = render.CurrentProjectionMatrix;
+-			render.RenderMultiTextureMesh(mashMeshref, "tex");
++			// Optimum TAA (P4): the mash is squeezed - the model matrix's Y scale
++			// follows squeezeRel while the press is worked - so its previous model
++			// matrix is worth keeping. No-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShader, this, mashMeshref, ModelMat.Values);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMultiTextureMesh(mashMeshref, "tex");
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			standardShader.Stop();
+ 		}
+ 	}

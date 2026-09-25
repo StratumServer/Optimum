@@ -1,0 +1,128 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
+index f52d0f6..b0ceebf 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderDecals.cs
+@@ -387,10 +387,34 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
+ 		{
+ 			UpdateDecal(item);
+ 		}
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P4): the previous-frame uniforms the decal motion writer
++	/// reads. The same set ChunkRenderer hands its terrain writers - decals sit
++	/// on terrain and follow accuracy rule 4's previous path exactly - kept here
++	/// rather than shared because the patcher transplants per type.
++	///
++	/// The projection and the view are set by name because the decal program
++	/// declares them only while TAA is on; everything else goes through the frame
++	/// contract's guarded setter.
++	/// </summary>
++	private void SetOptimumMotionUniforms(IShaderProgram program)
++	{
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		if (program.HasUniform("prevProjectionMatrix"))
++		{
++			program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(EnumTemporalView.World));
++		}
++		if (program.HasUniform("prevModelViewMatrix"))
++		{
++			program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);
++		}
++		frame.ApplyMotionUniforms(program);
++	}
++
+ 	public void OnRenderFrame3D(float deltaTime)
+ 	{
+ 		Vec3d cameraPos = game.EntityPlayer.CameraPos;
+ 		if (decalOrigin.SquareDistanceTo(cameraPos) > 1000000f)
+ 		{
+@@ -399,27 +423,71 @@ public class SystemRenderDecals : ClientSystem, IDecalApi
+ 		}
+ 		if (decals.Count > 0)
+ 		{
+ 			game.GlPushMatrix();
+ 			game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
+-			game.Platform.GlToggleBlend(on: true);
+-			game.Platform.GlDisableCullFace();
+-			ShaderProgramDecals shaderProgramDecals = ShaderPrograms.Decals;
+-			shaderProgramDecals.Use();
+-			shaderProgramDecals.WindWaveCounter = game.shUniforms.WindWaveCounter;
+-			shaderProgramDecals.WindWaveCounterHighFreq = game.shUniforms.WindWaveCounterHighFreq;
+-			shaderProgramDecals.BlockTexture2D = game.BlockAtlasManager.AtlasTextures[0].TextureId;
+-			shaderProgramDecals.DecalTexture2D = decalTextureAtlas.TextureId;
+-			shaderProgramDecals.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-			shaderProgramDecals.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-			shaderProgramDecals.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-			shaderProgramDecals.FogMinIn = game.AmbientManager.BlendedFogMin;
+-			shaderProgramDecals.Origin = new Vec3f((float)(decalOrigin.X - cameraPos.X), (float)(decalOrigin.Y - cameraPos.Y), (float)(decalOrigin.Z - cameraPos.Z));
+-			shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;
+-			shaderProgramDecals.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
+-			shaderProgramDecals.Stop();
++			// Optimum TAA (P4): a decal overwrites the depth buffer with a value
++			// slightly nearer than the block it sits on (decals.vsh's zOffset
++			// w-offset), so the block's own motion vector - whose writer depth is
++			// the block's - stops matching and the resolve demotes the pixel to
++			// its camera fallback. The decal therefore writes the surface's
++			// motion itself, with its own depth, and the motion attachment joins
++			// Primary's draw-buffer mask for this one pass.
++			//
++			// The window is opened BEFORE GlToggleBlend, because that call is
++			// what forces replace blending onto the motion attachment: this pass
++			// blends colour, and a blended motion vector belongs to neither
++			// surface. A no-op when TAA is off.
++			ClientPlatformAbstract optimumPlatform = game.Platform;
++			bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
++			try
++			{
++				// Everything between the window opening and EndMotionWrite lives
++				// inside the try: a throw in the GL setup, the shader activation,
++				// the uniform setup or the draw would otherwise leave the motion
++				// attachment in Primary's draw-buffer mask for the rest of the frame.
++				game.Platform.GlToggleBlend(on: true);
++				game.Platform.GlDisableCullFace();
++				ShaderProgramDecals shaderProgramDecals = ShaderPrograms.Decals;
++				shaderProgramDecals.Use();
++				shaderProgramDecals.WindWaveCounter = game.shUniforms.WindWaveCounter;
++				shaderProgramDecals.WindWaveCounterHighFreq = game.shUniforms.WindWaveCounterHighFreq;
++				shaderProgramDecals.BlockTexture2D = game.BlockAtlasManager.AtlasTextures[0].TextureId;
++				shaderProgramDecals.DecalTexture2D = decalTextureAtlas.TextureId;
++				shaderProgramDecals.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++				shaderProgramDecals.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++				shaderProgramDecals.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++				shaderProgramDecals.FogMinIn = game.AmbientManager.BlendedFogMin;
++				shaderProgramDecals.Origin = new Vec3f((float)(decalOrigin.X - cameraPos.X), (float)(decalOrigin.Y - cameraPos.Y), (float)(decalOrigin.Z - cameraPos.Z));
++				shaderProgramDecals.ProjectionMatrix = game.CurrentProjectionMatrix;
++				shaderProgramDecals.ModelViewMatrix = game.CurrentModelViewMatrix;
++				if (optimumMotionWrite)
++				{
++					SetOptimumMotionUniforms(shaderProgramDecals);
++				}
++				// Optimum (Phase 3b): the pool's multi-draw goes through the platform's decal
++				// scope seam. The draw itself stays vanilla MeshDataPool.Draw - it culls and
++				// calls the platform's own RenderMesh multi-draw - and a native platform takes
++				// that multi-draw natively while the scope is open. The scope carries the two
++				// atlas textures as handles, because a native pass resolves what it samples from
++				// handles rather than from the units the program's setters bound them to; the
++				// pool's mesh handle never leaves the pool, which is internal in the vanilla API.
++				game.Platform.BeginDecalPass(decalTextureAtlas.TextureId, game.BlockAtlasManager.AtlasTextures[0].TextureId);
++				decalPool.Draw(game.api, game.frustumCuller, EnumFrustumCullMode.CullInstant);
++				shaderProgramDecals.Stop();
++			}
++			finally
++			{
++				// The decal scope closes before the motion window it sits inside, in the same
++				// finally: a throw in the draw must not leave a native platform recording into
++				// a pass the window is about to take the motion attachment out of.
++				game.Platform.EndDecalPass();
++				if (optimumMotionWrite)
++				{
++					optimumPlatform.EndMotionWrite();
++				}
++			}
+ 			game.Platform.GlToggleBlend(on: true);
+ 			game.Platform.GlEnableCullFace();
+ 			game.GlPopMatrix();
+ 		}
+ 	}

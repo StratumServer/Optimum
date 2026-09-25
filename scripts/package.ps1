@@ -276,6 +276,50 @@ try {
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Api.Contracts.dll') $stageDir
     Copy-Item -Force (Join-Path $apiOut 'Optimum.GameContent.dll') $stageDir
 
+    # The Vulkan renderer and its dependencies. Loaded by name at startup and
+    # only when the renderer setting asks for it, so its absence costs nothing on
+    # the OpenGL path - but a missing dependency would make the backend
+    # unselectable with a load error rather than a clear reason.
+    Copy-Item -Force (Join-Path $apiOut 'Optimum.Render.Vulkan.dll') $stageDir
+    Get-ChildItem -Path $apiOut -Filter 'Silk.NET.*.dll' |
+        ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
+
+    # shaderc is a native library loaded by Silk.NET.Shaderc, which probes the
+    # application directory, not Lib\ - a copy it cannot find makes the renderer
+    # fall back to OpenGL silently.
+    $shadercNative = Join-Path $apiOut (Join-Path 'runtimes' (Join-Path 'win-x64' (Join-Path 'native' 'shaderc_shared.dll')))
+    if (Test-Path $shadercNative) {
+        Copy-Item -Force $shadercNative $stageDir
+    } else {
+        Write-Warning "No native shaderc at $shadercNative; the Vulkan renderer will not load"
+    }
+
+    # Native SPIR-V programs and their manifest (docs/vulkan.md),
+    # beside Optimum.Render.Vulkan.dll and never under assets\: the asset manager must not
+    # read SPIR-V and a mod must not shadow engine shaders by asset priority. The build
+    # always writes the manifest, even for an empty source tree, so a missing one means
+    # tools/shader-compiler never ran. SPIR-V is binary: the "void main" corruption scan
+    # below covers the GLSL overlay in assets/game/shaders only and must never be pointed
+    # at this directory.
+    $shadersVkSrc = Join-Path $apiOut 'shaders-vk'
+    $shadersVkDst = Join-Path $stageDir 'shaders-vk'
+    if (-not (Test-Path (Join-Path $shadersVkSrc 'shaders.manifest.json'))) {
+        throw "Native shader manifest missing at $shadersVkSrc; build tools/shader-compiler (dotnet build VintageStory.slnx -c Release)"
+    }
+    if (Test-Path $shadersVkDst) { Remove-Item -Recurse -Force $shadersVkDst }
+    New-Item -ItemType Directory -Force -Path $shadersVkDst | Out-Null
+    Get-ChildItem $shadersVkSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shadersVkDst }
+    $missingShadersVk = @()
+    foreach ($spirvFile in (Get-ChildItem $shadersVkSrc -File)) {
+        $stagedSpirv = Join-Path $shadersVkDst $spirvFile.Name
+        if (-not (Test-Path $stagedSpirv) -or (Get-FileHash $stagedSpirv).Hash -ne (Get-FileHash $spirvFile.FullName).Hash) {
+            $missingShadersVk += $spirvFile.FullName
+        }
+    }
+    if ($missingShadersVk.Count -gt 0) {
+        throw "Native shader file(s) never reached ${shadersVkDst}: $($missingShadersVk -join ', ')"
+    }
+
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }
@@ -332,6 +376,40 @@ try {
     $shaderDst = Join-Path $stageDir 'assets/game/shaders'
     if (Test-Path $shaderSrc) {
         Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
+    }
+
+    # Apply optimized shader includes (TAA P3). Same asset-name override
+    # mechanism as shaders, separate directory - without it the shipped
+    # chunkopaque/chunktopsoil/entityanimated/standard/instanced overrides call
+    # WarpState overloads the vanilla vertexwarp.vsh does not declare, and every
+    # one of those programs fails to compile with TAA on.
+    $shaderIncSrc = Join-Path $repoRoot 'sources/shaderincludes'
+    $shaderIncDst = Join-Path $stageDir 'assets/game/shaderincludes'
+    if (Test-Path $shaderIncSrc) {
+        # The vanilla tree may not have this directory - Copy-Item into a missing
+        # destination writes a file named after it instead of the includes.
+        New-Item -ItemType Directory -Force -Path $shaderIncDst | Out-Null
+        Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
+    }
+
+    # 5b-3. Verify the overlay actually landed. Both copies above are wildcards,
+    # so what fails is never "a file is missing from a list" but a source path
+    # that moved or a destination directory that does not exist - and the symptom
+    # in game is silent: vanilla's shader runs instead of Optimum's. TAA is the
+    # worst case, because its own stages (taa-resolve, taa-debug, taa-skymotion,
+    # taa-sharpen), the liquid velocity pass (chunkliquidmotion), the FSR pair the
+    # sharpen shares its maths with and every shaderinclude the motion writers
+    # compile against all have to ship together or the resolve reads vectors
+    # nobody wrote. Fail the package instead.
+    $missingShaders = @()
+    foreach ($pair in @(@($shaderSrc, $shaderDst), @($shaderIncSrc, $shaderIncDst))) {
+        if (-not (Test-Path $pair[0])) { continue }
+        foreach ($srcShader in (Get-ChildItem $pair[0] -File)) {
+            if (-not (Test-Path (Join-Path $pair[1] $srcShader.Name))) { $missingShaders += $srcShader.FullName }
+        }
+    }
+    if ($missingShaders.Count -gt 0) {
+        throw "Shader source file(s) never reached the staged assets: $($missingShaders -join ', ')"
     }
 
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
@@ -394,13 +472,45 @@ try {
         'Optimum.Patcher.dll',
         'uninstall.ps1',
         'Vintagestory.exe',
+        'shaders-vk/shaders.manifest.json',
         '.optimum/donors/VintagestoryLib.Donor.dll',
         '.optimum/donors/VintagestoryAPI.Contracts.dll',
         '.optimum/donors/VSEssentials.Donor.dll',
         '.optimum/donors/VSSurvivalMod.Donor.dll',
         '.optimum/vanilla/Mods/VSEssentials.dll',
         '.optimum/vanilla/Mods/VSSurvivalMod.dll',
-        '.optimum/standalone-install'
+        '.optimum/standalone-install',
+        'assets/game/shaderincludes/vertexwarp.vsh',
+        # TAA: the resolve and its debug views, the sky-motion pass, the liquid
+        # velocity pass and the FSR pair the post-resolve sharpen shares its
+        # vertex stage and lobe maths with. Named one by one rather than left to
+        # the wildcard overlay because this list is what a reviewer reads to see
+        # what a release is supposed to contain.
+        'assets/game/shaders/taa-resolve.vsh',
+        'assets/game/shaders/taa-resolve.fsh',
+        'assets/game/shaders/taa-debug.vsh',
+        'assets/game/shaders/taa-debug.fsh',
+        'assets/game/shaders/taa-skymotion.vsh',
+        'assets/game/shaders/taa-skymotion.fsh',
+        'assets/game/shaders/taa-sharpen.vsh',
+        'assets/game/shaders/taa-sharpen.fsh',
+        'assets/game/shaders/chunkliquidmotion.vsh',
+        'assets/game/shaders/chunkliquidmotion.fsh',
+        'assets/game/shaders/fsr-easu.vsh',
+        'assets/game/shaders/fsr-easu.fsh',
+        'assets/game/shaders/fsr-rcas.vsh',
+        'assets/game/shaders/fsr-rcas.fsh',
+        # TAA: the jittered AO multiplied into the scene before the resolve.
+        # Without it Final applies AO after the resolve and the whole frame
+        # carries the raw camera jitter.
+        'assets/game/shaders/scene-ssao.vsh',
+        'assets/game/shaders/scene-ssao.fsh',
+        # SSAO: Optimum's override only adds the temporally varying dither
+        # (GTAO roadmap step 2) and preprocesses back to vanilla without a
+        # temporal consumer - but if it never ships, vanilla's screen-locked
+        # dither runs under a jittered camera, which is the failure the
+        # override exists to remove and is silent on screen.
+        'assets/game/shaders/ssao.fsh'
     )) {
         if (-not (Test-Path (Join-Path $stageDir $requiredStageFile))) {
             throw "Required package file not found: $requiredStageFile"

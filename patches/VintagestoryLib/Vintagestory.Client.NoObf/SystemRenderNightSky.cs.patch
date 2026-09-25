@@ -1,0 +1,20 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs
+index acce146..8afcd88 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderNightSky.cs
+@@ -94,11 +94,14 @@ internal class SystemRenderNightSky : ClientSystem
+ 			});
+ 			nightsky.ModelMatrix = modelMatrix;
+ 			game.GlPushMatrix();
+ 			MatrixToolsd.MatFollowPlayer(game.MvMatrix.Top);
+ 			nightsky.ViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(nightSkyBox);
++			// Optimum (Phase 3b): the star box's draw goes through the platform's night-sky seam,
++			// whose neutral body is this RenderMesh call. A native platform records the pass
++			// itself and needs the cube map as a handle, not as a bound texture unit.
++			game.Platform.RenderNightSkyBox(nightSkyBox, textureId);
+ 			game.GlPopMatrix();
+ 			nightsky.Stop();
+ 			game.Platform.GlEnableDepthTest();
+ 			game.Platform.UnBindTextureCubeMap();
+ 		}

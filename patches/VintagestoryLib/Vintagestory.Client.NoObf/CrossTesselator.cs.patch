@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs
+index e3b63b9..62a2c2d 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs
+@@ -21,11 +21,11 @@ public class CrossTesselator : IBlockTesselator
+ 		Block block = vars.block;
+ 		TextureAtlasPosition[] textureAtlasPositionsByTextureSubId = vars.textureAtlasPositionsByTextureSubId;
+ 		int[] fastBlockTextureSubidsByFace = vars.fastBlockTextureSubidsByFace;
+ 		bool hasAlternates = block.HasAlternates;
+ 		bool randomizeRotations = block.RandomizeRotations;
+-		int value = vars.ColorMapData.Value;
++		int value = OptimumAoClass.PackCross(vars.ColorMapData.Value, block);
+ 		int num = block.VertexFlags.All & -503316481;
+ 		int all = block.VertexFlags.All;
+ 		num |= BlockFacing.UP.NormalPackedFlags;
+ 		all |= BlockFacing.UP.NormalPackedFlags;
+ 		int color = vars.tct.currentChunkRgbsExt[vars.extIndex3d];

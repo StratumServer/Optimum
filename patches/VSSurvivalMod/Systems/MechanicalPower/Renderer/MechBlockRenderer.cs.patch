@@ -1,0 +1,44 @@
+diff --git a/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechBlockRenderer.cs b/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechBlockRenderer.cs
+index f092853..530ef36 100644
+--- a/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechBlockRenderer.cs
++++ b/VSSurvivalMod/Systems/MechanicalPower/Renderer/MechBlockRenderer.cs
+@@ -51,10 +51,15 @@ namespace Vintagestory.GameContent.Mechanics
+             {
+                 //double precision int-double subtraction is needed here (even though the desired result is a float).  
+                 // It's needed to have enough significant figures in the result, as the integer size could be large e.g. 50000 but the difference should be small (can easily be less than 5)
+                 tmp.Set((float)(dev.Position.X - pos.X), (float)(dev.Position.InternalY - pos.Y), (float)(dev.Position.Z - pos.Z));  
+ 
++                // Optimum TAA (P3): name the device whose instances are written next, so
++                // the previous transforms below are matched to the same gear rather than
++                // to whatever ended up in the same buffer slot last frame.
++                OptimumInstanceMotion.NoteDevice(dev);
++
+                 UpdateLightAndTransformMatrix(i, tmp, dev.AngleRad % GameMath.TWOPI, dev);
+                 i++;
+             }
+         }
+ 
+@@ -76,20 +81,13 @@ namespace Vintagestory.GameContent.Mechanics
+ 
+             Mat4f.MulQuat(tmpMat, quat);
+ 
+             Mat4f.Translate(tmpMat, tmpMat, -0.5f, -0.5f, -0.5f);
+ 
+-            int j = index * 20;
+-            values[j] = lightRgba.R;
+-            values[++j] = lightRgba.G;
+-            values[++j] = lightRgba.B;
+-            values[++j] = lightRgba.A;
+-
+-            for (int i = 0; i < 16; i++)
+-            {
+-                values[++j] = tmpMat[i];
+-            }
++            // Optimum TAA (P3): writes the light and this frame's transform exactly as
++            // vanilla did, and the same device's previous transform beside it.
++            OptimumInstanceMotion.WriteInstance(values, index, lightRgba, tmpMat);
+         }
+ 
+ 
+         public virtual void OnRenderFrame(float deltaTime, IShaderProgram prog)
+         {

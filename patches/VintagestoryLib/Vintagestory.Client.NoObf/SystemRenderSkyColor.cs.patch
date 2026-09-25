@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
-index 8efc392..e1647f0 100644
+index 8efc392..8f15a67 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs
 @@ -1,20 +1,28 @@
@@ -57,3 +57,19 @@ index 8efc392..e1647f0 100644
  			sky.PlayerToSealevelOffset = (float)game.EntityPlayer.Pos.Y - (float)game.SeaLevel;
  			sky.RgbaFogIn = game.AmbientManager.BlendedFogColor;
  			sky.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+@@ -70,11 +82,14 @@ internal class SystemRenderSkyColor : ClientSystem
+ 			calcSunColor(sunPositionNormalized, viewVector);
+ 			game.Platform.GlDisableDepthTest();
+ 			game.GlPushMatrix();
+ 			MatrixToolsd.MatFollowPlayer(game.MvMatrix.Top);
+ 			sky.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(skyIcosahedron);
++			// Optimum (Phase 3b): the dome's draw goes through the platform's sky seam, whose
++			// neutral body is this RenderMesh call. A native platform records the pass itself
++			// and needs the two textures and the matrix as values, not as bound units.
++			game.Platform.RenderSkyDome(skyIcosahedron, game.skyTextureId, game.skyGlowTextureId, game.CurrentModelViewMatrix);
+ 			game.GlPopMatrix();
+ 			game.Reset3DProjection();
+ 			sky.Stop();
+ 			game.Platform.GlEnableDepthTest();
+ 		}

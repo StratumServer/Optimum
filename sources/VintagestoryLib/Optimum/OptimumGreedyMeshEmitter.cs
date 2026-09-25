@@ -611,7 +611,7 @@ public static class OptimumGreedyMeshEmitter
             mesh.AddVertexWithFlags(x, y, z, u, vv, lightRgb, flags);
         }
 
-        mesh.CustomInts.Add4(0);
+        mesh.CustomInts.Add4(OptimumAoClass.Pack(0, block));
         mesh.AddQuadIndices(vertBase);
 
         // Chunk-local coordinates (B9), matching vanilla's own

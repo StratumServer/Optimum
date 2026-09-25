@@ -6,6 +6,8 @@ uniform sampler2D glowParts;
 uniform sampler2D bloomParts;
 uniform sampler2D godrayParts;
 uniform sampler2D ssaoScene;
+uniform int optimumSsaoInScene;
+uniform int optimumAoDebug;
 
 uniform float gammaLevel;
 uniform float brightnessLevel;
@@ -102,12 +104,16 @@ void main(void)
 	#endif
 
 	#if SSAOLEVEL > 0
+	// Optimum TAA: skipped when the AO was already multiplied into the scene
+	// before the resolve, so it is never applied twice.
+	if (optimumSsaoInScene == 0) {
 		#if SSAOLEVEL > 1
 			float ssao = min(texture(ssaoScene, texCoord).r, texture(ssaoScene, texCoord - vec2(0, invFrameSize.y*1)).r);
 		#else
 			float ssao = texture(ssaoScene, texCoord).r;
 		#endif
 		color.rgb *= min(1, ssao + bloomSub);
+	}
 	#endif
 
 	#if GODRAYS > 0
@@ -116,6 +122,16 @@ void main(void)
 		color.rgb = min(color.rgb, vec3(1));
 		color.a=1;
 	#endif
+
+	// Optimum AO debug view: the ambient occlusion term alone, as greyscale, before colour
+	// grading and vignetting. ssaoScene holds whichever AO ran this frame (the vanilla blurred
+	// SSAO target, or the platform's own visibility texture), so white is fully lit and dark is
+	// fully occluded - the picture of what AO contributes, with nothing else in it.
+	if (optimumAoDebug != 0) {
+		float aoDebugTerm = texture(ssaoScene, texCoord).r;
+		outColor = vec4(vec3(aoDebugTerm), 1.0);
+		return;
+	}
 
 	vec4 gradedColor = ColorGrade(color);
 	outColor = mix(color, gradedColor, gradedColor.a);

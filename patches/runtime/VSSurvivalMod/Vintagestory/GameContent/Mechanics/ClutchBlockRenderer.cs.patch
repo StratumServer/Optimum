@@ -1,0 +1,65 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/ClutchBlockRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/ClutchBlockRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/ClutchBlockRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/ClutchBlockRenderer.cs
+@@ -24,24 +24,10 @@ public class ClutchBlockRenderer : MechB
+ 		meshRotationDeg = new Vec3f(shapeLoc.rotateX, shapeLoc.rotateY, shapeLoc.rotateZ);
+ 		Shape shape2 = Shape.TryGet(capi, new AssetLocation("shapes/block/wood/mechanics/clutch-drum.json"));
+ 		capi.Tesselator.TesselateShape(textureSoureBlock, shape2, out var modeldata2, meshRotationDeg);
+-		modeldata.CustomFloats = (matrixAndLightFloats1 = new CustomMeshDataPartFloat(202000)
+-		{
+-			Instanced = true,
+-			InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 },
+-			InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 },
+-			InterleaveStride = 80,
+-			StaticDraw = false
+-		});
+-		modeldata.CustomFloats.SetAllocationSize(202000);
+-		modeldata2.CustomFloats = (matrixAndLightFloats2 = new CustomMeshDataPartFloat(202000)
+-		{
+-			Instanced = true,
+-			InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 },
+-			InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 },
+-			InterleaveStride = 80,
+-			StaticDraw = false
+-		});
+-		modeldata2.CustomFloats.SetAllocationSize(202000);
++		// 16 floats matrix, 4 floats light rgbs, and the TAA writer's previous
++		// transform and metadata beside them (Optimum P3, OptimumInstanceMotion).
++		modeldata.CustomFloats = (matrixAndLightFloats1 = OptimumInstanceMotion.CreateInstanceFloats(10100));
++		modeldata2.CustomFloats = (matrixAndLightFloats2 = OptimumInstanceMotion.CreateInstanceFloats(10100));
+ 		blockMeshRef1 = capi.Render.UploadMesh(modeldata);
+ 		blockMeshRef2 = capi.Render.UploadMesh(modeldata2);
+ 	}
+@@ -92,15 +78,9 @@ public class ClutchBlockRenderer : MechB
+ 		}
+ 		Mat4f.MulQuat(tmpMat, quat);
+ 		Mat4f.Translate(tmpMat, tmpMat, 0f - axis.X, 0f - axis.Y, 0f - axis.Z);
+-		int num = index * 20;
+-		values[num] = lightRgba.R;
+-		values[++num] = lightRgba.G;
+-		values[++num] = lightRgba.B;
+-		values[++num] = lightRgba.A;
+-		for (int i = 0; i < 16; i++)
+-		{
+-			values[++num] = tmpMat[i];
+-		}
++		// Optimum TAA (P3): light and this frame's transform as vanilla wrote them,
++		// plus the same device's previous transform for the motion writer.
++		OptimumInstanceMotion.WriteInstance(values, index, lightRgba, tmpMat);
+ 		return tmpMat;
+ 	}
+ 
+@@ -109,11 +89,11 @@ public class ClutchBlockRenderer : MechB
+ 		UpdateCustomFloatBuffer();
+ 		if (quantityBlocks > 0)
+ 		{
+-			matrixAndLightFloats1.Count = quantityBlocks * 20;
++			matrixAndLightFloats1.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats1;
+ 			capi.Render.UpdateMesh(blockMeshRef1, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef1, quantityBlocks);
+-			matrixAndLightFloats2.Count = quantityBlocks * 20;
++			matrixAndLightFloats2.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats2;
+ 			capi.Render.UpdateMesh(blockMeshRef2, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef2, quantityBlocks);

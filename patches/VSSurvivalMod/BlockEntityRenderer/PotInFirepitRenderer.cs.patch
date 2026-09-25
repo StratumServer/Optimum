@@ -1,0 +1,57 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs
+index 76886d6..f763a9e 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs
+@@ -89,11 +89,24 @@ namespace Vintagestory.GameContent
+             ;
+ 
+             prog.ViewMatrix = rpi.CameraMatrixOriginf;
+             prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+ 
+-            rpi.RenderMultiTextureMesh(potRef == null ? potWithFoodRef : potRef, "tex");
++            // Optimum TAA (P4): the pot body itself is static, but it shares the
++            // renderer with the lid below and both draws have to be inside a window
++            // or the lid's vector would sit on top of the body's unwritten pixels.
++            // Identity is the renderer, shape the mesh actually drawn.
++            OptimumStandardMotion.Apply(prog, this, potRef == null ? potWithFoodRef : potRef, ModelMat.Values);
++            bool optimumPotMotionWrite = OptimumMotionWrite.Begin();
++            try
++            {
++                rpi.RenderMultiTextureMesh(potRef == null ? potWithFoodRef : potRef, "tex");
++            }
++            finally
++            {
++                if (optimumPotMotionWrite) OptimumMotionWrite.End();
++            }
+ 
+             if (!isInOutputSlot)
+             {
+                 float origx = GameMath.Sin(capi.World.ElapsedMilliseconds / 300f) * 5 / 16f;
+                 float origz = GameMath.Cos(capi.World.ElapsedMilliseconds / 300f) * 5 / 16f;
+@@ -112,11 +125,25 @@ namespace Vintagestory.GameContent
+                 ;
+                 prog.ViewMatrix = rpi.CameraMatrixOriginf;
+                 prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+ 
+ 
+-                rpi.RenderMultiTextureMesh(lidRef, "tex");
++                // Optimum TAA (P4): the lid rattles while the pot cooks - its origin
++                // orbits and it rocks on X and Z, all driven by elapsed time - so it
++                // is a real mover. It needs its own identity because the renderer's
++                // is already taken by the pot body, and lidRef is exactly as
++                // long-lived as the lid it draws. No-op when TAA is off.
++                OptimumStandardMotion.Apply(prog, lidRef, lidRef, ModelMat.Values);
++                bool optimumLidMotionWrite = OptimumMotionWrite.Begin();
++                try
++                {
++                    rpi.RenderMultiTextureMesh(lidRef, "tex");
++                }
++                finally
++                {
++                    if (optimumLidMotionWrite) OptimumMotionWrite.End();
++                }
+             }
+ 
+             prog.Stop();
+         }
+ 

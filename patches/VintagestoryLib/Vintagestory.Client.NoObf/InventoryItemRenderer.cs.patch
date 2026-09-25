@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-index 35bb9ac..8193b14 100644
+index 35bb9ac..3f0e322 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 @@ -13,10 +13,16 @@ namespace Vintagestory.Client.NoObf;
@@ -19,7 +19,23 @@ index 35bb9ac..8193b14 100644
  	private MeshRef quadModelRef;
  
  	private CairoFont stackSizeFont;
-@@ -243,11 +249,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -195,11 +201,14 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+ 		if (clearPixels == null || clearPixels.Length < size * size)
+ 		{
+ 			clearPixels = new int[size * size];
+ 		}
+ 		game.guiShaderProg.SepiaLevel = task.SepiaLevel;
+-		GL.TexSubImage2D<int>((TextureTarget)3553, 0, (int)num, (int)num2, size, size, (PixelFormat)32993, (PixelType)5121, clearPixels);
++		// Blanks this item's slot in the atlas before drawing into it. The GL form
++		// writes to whatever CreateFrameBuffer left bound; the atlas texture id,
++		// which TexPos carries, is for platforms that address textures directly.
++		game.Platform.ClearTextureRegion(task.TexPos.atlasTextureId, (int)num, (int)num2, size, size, clearPixels);
+ 		game.api.renderapi.inventoryItemRenderer.RenderItemstackToGui(dummySlot, num + (float)size / 2f, num2 + (float)size / 2f, 500.0, (float)(size / 2) * task.Scale, task.Color, shading: true, origRotate: false, showStackSize: false);
+ 	}
+ 
+ 	public void DisposeFrameBuffer(FrameBufferRef fb)
+ 	{
+@@ -243,11 +252,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  	public void RenderItemstackToGui(ItemSlot inSlot, double posX, double posY, double posZ, float size, int color, float dt, bool shading = true, bool origRotate = false, bool showStackSize = true)
  	{
  		try
@@ -54,7 +70,7 @@ index 35bb9ac..8193b14 100644
  				return;
  			}
  			bool flag = dt == -1.0125f;
-@@ -352,17 +380,31 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -352,17 +383,31 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  		cairoFont.UnscaledFontsize *= fontSizeMultiplier;
  		return game.api.guiapi.TextTexture.GenTextTexture(stackSize.ToString() ?? "", cairoFont);
  	}
@@ -88,7 +104,7 @@ index 35bb9ac..8193b14 100644
  		{
  		case EnumItemRenderTarget.Ground:
  			renderinfo.Transform = itemstack.Collectible.GroundTransform;
-@@ -431,10 +473,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -431,10 +476,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  		inSlot.OnBeforeRender(renderinfo);
  		itemstack.Collectible.OnBeforeRender(game.api, itemstack, target, ref renderinfo);
  		return renderinfo;

@@ -72,15 +72,23 @@ public class FsrPipelineCoverageTests
         string shaderRegistry = ReadPatchedOrSource(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch",
             "build/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs");
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string config = File.ReadAllText(PatchReader.FindRepositoryFile("sources/VintagestoryApi/Config/OptimumConfig.cs"));
 
-        // Bias must be skipped entirely at native res (RenderScale >= 1.0) so
-        // rendering matches vanilla exactly - vanilla never sets these
-        // TexParameter/SamplerParameter calls at all.
-        Assert.Contains("if (ClientSettings.OptimumRenderScale >= 1.0f)", chunkRenderer);
-        Assert.Contains("MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f))", chunkRenderer);
-        Assert.Contains("(TextureParameterName)34049, textureLodBias", chunkRenderer);
-        Assert.Contains("if (OptimumConfig.EffectiveRenderScale < 1.0f)", shaderRegistry);
-        Assert.Contains("(SamplerParameterName)34049, terrainLodBias", shaderRegistry);
+        // One effective value drives both texture and sampler parameters, including
+        // the zero-bias path at native scale with TAA disabled.
+        Assert.Contains("if (scale < 1.0f)", config);
+        Assert.Contains("MathF.Log2(Math.Clamp(scale, 0.5f, 1.0f))", config);
+        Assert.Contains("float textureLodBias = Vintagestory.API.Config.OptimumConfig.EffectiveTerrainLodBias", chunkRenderer);
+        Assert.Contains("if (textureLodBias == 0f)", chunkRenderer);
+        Assert.Contains("game.Platform.SetTextureLodBias(textureIds, bias)", chunkRenderer);
+        Assert.Contains("float terrainLodBias = OptimumConfig.EffectiveTerrainLodBias", shaderRegistry);
+        Assert.Contains("if (terrainLodBias != 0f)", shaderRegistry);
+        Assert.Contains("platform.SetSamplerLodBias(sampler, bias)", shaderRegistry);
+        Assert.Contains("(TextureParameterName)34049, bias", platform);
+        Assert.Contains("(SamplerParameterName)34049, bias", platform);
         Assert.Contains("terrainTexLinear", shaderRegistry);
     }
 

@@ -1,0 +1,38 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
+index b5000e7..d0c7850 100644
+--- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
++++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
+@@ -731,23 +731,31 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 		Platform.CheckGlError();
+ 		FrameProfiler.Mark("doneRender2Default");
+ 		Mat4f.Identity(api.renderapi.pMatrix);
+ 		Mat4f.Ortho(api.renderapi.pMatrix, 0f, Platform.WindowSize.Width, Platform.WindowSize.Height, 0f, 0f, 20001f);
+ 		Platform.GlDepthFunc(EnumDepthFunction.Lequal);
++		// Mono.Cecil transplant.
+ 		float num = 20000f;
+-		GL.ClearBuffer((ClearBuffer)6145, 0, ref num);
+-		GL.DepthRange(0f, 20000f);
++		Platform.ClearDefaultDepth(num);
++		Platform.SetDepthRange(0f, 20000f);
+ 		Platform.GlEnableDepthTest();
+ 		Platform.GlDisableCullFace();
+ 		Platform.GlToggleBlend(on: true);
+ 		CurrentScreen.RenderAfterBlit(dt);
+ 		if (CurrentScreen.RenderBg && !Platform.IsShuttingDown)
+ 		{
+ 			guiMainmenuLeft?.RenderBg(dt, withMainMenu);
+ 			withMainMenu = false;
+ 		}
+ 		CurrentScreen.RenderToDefaultFramebuffer(dt);
++		// Optimum (Vulkan foundation, world/UI separation): ClientMain.RenderToDefaultFramebuffer
++		// composes the UI image before its Done stage, but it is reached only through
++		// GuiScreenRunningGame while the game is not exiting to the menu - every menu screen runs
++		// GuiScreen.RenderToDefaultFramebuffer, which has neither a Done stage nor a compose.
++		// Without this call the whole main menu would stay in the UI image and never reach the
++		// window. A frame ClientMain already composed has nothing left to compose here.
++		Platform.OptimumComposeUiTarget();
+ 		Platform.GlDepthFunc(EnumDepthFunction.Less);
+ 		FrameProfiler.Mark("doneAfterRender");
+ 		Platform.CheckGlError();
+ 	}
+ 

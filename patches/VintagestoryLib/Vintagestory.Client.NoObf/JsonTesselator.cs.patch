@@ -1,0 +1,16 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs
+index c6ec31a..dbbf040 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs
+@@ -822,10 +822,11 @@ public class JsonTesselator : IBlockTesselator
+ 				{
+ 					continue;
+ 				}
+ 				value = vars.OverlayColorMapData;
+ 			}
++			value = OptimumAoClass.Pack(value, vars.block);
+ 			int[] array10 = null;
+ 			float num18 = 0f;
+ 			int[] array11 = jsonLightRGB;
+ 			if (num13 < 0)
+ 			{

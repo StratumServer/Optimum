@@ -12,3 +12,9 @@
 *.cmd text eol=lf
 *.slnx text eol=lf
 *.list text eol=lf
+*.glsl text eol=lf
+*.vert text eol=lf
+*.frag text eol=lf
+*.comp text eol=lf
+*.vsh text eol=lf
+*.fsh text eol=lf

@@ -126,6 +126,37 @@ try {
         Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
     }
 
+    # 5b-2. Overlay optimized shader includes (TAA P3). Same asset-name override
+    # mechanism as shaders, separate directory.
+    $shaderIncSrc = Join-Path $repoRoot 'sources/shaderincludes'
+    $shaderIncDst = Join-Path $appDir 'assets/game/shaderincludes'
+    if (Test-Path $shaderIncSrc) {
+        # The vanilla tree may not have this directory - Copy-Item into a missing
+        # destination writes a file named after it instead of the includes.
+        New-Item -ItemType Directory -Force -Path $shaderIncDst | Out-Null
+        Get-ChildItem $shaderIncSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderIncDst }
+    }
+
+    # 5b-3. Verify the overlay actually landed. Both copies above are wildcards,
+    # so what fails is never "a file is missing from a list" but a source path
+    # that moved or a destination directory that does not exist - and the symptom
+    # in game is silent: vanilla's shader runs instead of Optimum's. TAA is the
+    # worst case, because its own stages (taa-resolve, taa-debug, taa-skymotion,
+    # taa-sharpen), the liquid velocity pass (chunkliquidmotion), the FSR pair the
+    # sharpen shares its maths with and every shaderinclude the motion writers
+    # compile against all have to ship together or the resolve reads vectors
+    # nobody wrote. Fail the package instead.
+    $missingShaders = @()
+    foreach ($pair in @(@($shaderSrc, $shaderDst), @($shaderIncSrc, $shaderIncDst))) {
+        if (-not (Test-Path $pair[0])) { continue }
+        foreach ($srcShader in (Get-ChildItem $pair[0] -File)) {
+            if (-not (Test-Path (Join-Path $pair[1] $srcShader.Name))) { $missingShaders += $srcShader.FullName }
+        }
+    }
+    if ($missingShaders.Count -gt 0) {
+        throw "Shader source file(s) never reached the staged assets: $($missingShaders -join ', ')"
+    }
+
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
     # Read/write explicitly as UTF-8 via .NET, not Get-Content/Set-Content:
     # on Windows PowerShell 5.1 those cmdlets default to the system codepage

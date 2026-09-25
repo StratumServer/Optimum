@@ -1,0 +1,30 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/RenderAPIGame.cs b/VintagestoryLib/Vintagestory.Client.NoObf/RenderAPIGame.cs
+index 142286d..acf8f17 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/RenderAPIGame.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/RenderAPIGame.cs
+@@ -51,10 +51,25 @@ public class RenderAPIGame : RenderAPIBase
+ 
+ 	public override float[] CurrentModelviewMatrix => game.CurrentModelViewMatrix;
+ 
+ 	public override float[] CurrentProjectionMatrix => game.CurrentProjectionMatrix;
+ 
++	/// <summary>
++	/// Optimum TAA: the projection as loaded, without the temporal jitter shear.
++	/// New member rather than an IRenderAPI change - the interface is implemented by
++	/// mods, so it cannot grow.
++	/// </summary>
++	public float[] CurrentProjectionMatrixUnjittered => game.CurrentProjectionMatrixUnjittered;
++
++	/// <summary>
++	/// Optimum TAA: read-only access to this frame's temporal contract (jitter, the
++	/// per-view current and previous camera constants, warp state, reset reason).
++	/// Reached from a mod through <c>(capi.Render as RenderAPIGame)?.TemporalContext</c>
++	/// or, without a cast, through the static <c>OptimumTemporal.Context</c>.
++	/// </summary>
++	public IOptimumTemporalContext TemporalContext => OptimumTemporal.Context;
++
+ 	public override EnumRenderStage CurrentRenderStage => game.currentRenderStage;
+ 
+ 	public override float[] CurrentShadowProjectionMatrix => game.shadowMvpMatrix;
+ 
+ 	public override FrustumCulling DefaultFrustumCuller => game.frustumCuller;

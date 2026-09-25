@@ -6,6 +6,9 @@ baseline/
 build/
 .baseline/
 
+# Decompiled vanilla reference tree (proprietary; local read-only aid, never committed)
+/_ref/
+
 # Anchored to repo root: reconstructed fork trees (patches stay tracked)
 /VintagestoryApi/
 /Cairo/
@@ -63,7 +66,35 @@ graphify-out/
 __pycache__/
 
 # Private development artifacts
-docs/
+# (docs/* rather than docs/, so the one tracked deliverable below can be excepted -
+# a negation inside a fully excluded directory is never reconsidered by git.)
+docs/*
+# ...except the TAA acceptance checklist: it is a deliverable the P5 coverage test
+# (Optimum.Tests/Temporal/AcceptanceTests.cs) reads, so it has to be tracked.
+!docs/vulkan.md
+# ...and the frozen temporal frame contract, for the same reason: the P6 stability
+# test (Optimum.Tests/Temporal/ContractTests.cs) reads it.
+!docs/vulkan.md
+# ...and the Vulkan acceptance checklist and the parity allowlist: ssim.py reads the
+# allowlist, and Optimum.Tests/parity-dump-coverage-tests.cs reads both.
+!docs/vulkan.md
+!docs/vulkan.md
+# ...and the research notes the plan and its designs cite.
+!docs/research/
+# ...and the native shader interface contract every program family is written against.
+!docs/vulkan.md
+# ...and the native render systems design (Phase 3b) the system stages follow.
+!docs/vulkan.md
+# ...and the modder documentation for Vulkan-native mod support (passes, motion writers, shaders).
+!docs/vulkan.md
 build-linux.sh
 build-macos.sh
 build-windows.ps1
+
+# Working notes for assistants and the local plan and status files: kept beside the checkout, never in it.
+AGENTS.md
+CLAUDE.md
+.claude/
+docs/vulkan-native-plan.md
+docs/vulkan-branch-progress.md
+scripts/dev/harvest-maps.py

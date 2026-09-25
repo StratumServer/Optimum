@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
-index bfae02c..2f624fb 100644
+index bfae02c..d129090 100644
 --- a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
 +++ b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
-@@ -290,13 +290,21 @@ public abstract class RenderAPIBase : IRenderAPI
+@@ -290,15 +290,28 @@ public abstract class RenderAPIBase : IRenderAPI
  		plat.RenderMesh(meshRef);
  	}
  
@@ -20,7 +20,15 @@ index bfae02c..2f624fb 100644
  			MeshRef vao = mmr.meshrefs[i];
 +			if (vao == null || vao.Disposed) continue;
  			CurrentActiveShader.BindTexture2D(textureSampleName, mmr.textureids[i], textureNumber);
- 			plat.RenderMesh(vao);
+-			plat.RenderMesh(vao);
++			// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the draw
++			// goes through the seam, not RenderMesh, so a native platform can record the
++			// entity passes itself. The neutral body IS RenderMesh(vao), so the OpenGL path
++			// is unchanged; the sampler name and texture id are what a native pass needs to
++			// resolve this draw's texture from a handle instead of from a texture unit.
++			plat.RenderEntityMesh(vao, textureSampleName, mmr.textureids[i]);
  		}
  	}
  
+ 	public void RenderMesh(MeshRef meshRef, int[] indicesStarts, int[] indicesSizes, int groupCount)
+ 	{

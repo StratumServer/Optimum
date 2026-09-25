@@ -1,0 +1,27 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BloomeryContentsRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/BloomeryContentsRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BloomeryContentsRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BloomeryContentsRenderer.cs
+@@ -59,7 +59,22 @@ public class BloomeryContentsRenderer :
+ 			standardShaderProgram.ModelMatrix = ModelMat.Identity().Translate((double)(0.5f + (float)pos.X) - cameraPos.X, (double)pos.Y - cameraPos.Y + (double)(voxelHeight / 32f), (double)(0.5f + (float)pos.Z) - cameraPos.Z).Values;
+ 			standardShaderProgram.ViewMatrix = render.CameraMatrixOriginf;
+ 			standardShaderProgram.ProjectionMatrix = render.CurrentProjectionMatrix;
+-			render.RenderMesh(cubeModelRef);
++			// Optimum TAA (P4): the contents sink as the bloomery burns down -
++			// voxelHeight drops, and the model matrix's Y translation with it - so
++			// the previous model matrix is worth keeping. No-op when TAA is off.
++			OptimumStandardMotion.Apply(standardShaderProgram, this, cubeModelRef, ModelMat.Values);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				render.RenderMesh(cubeModelRef);
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			standardShaderProgram.Stop();
+ 		}
+ 	}

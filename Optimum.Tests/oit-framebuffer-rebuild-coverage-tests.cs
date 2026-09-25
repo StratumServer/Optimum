@@ -43,7 +43,8 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitRevealAttachesToColorAttachment0_NotOverwritingVanilla()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
 
         // OIT reveal texture attaches to ColorAttachment0 (36064). This is by design:
         // the oit.fsh shader writes to layout(location = 0) which IS ColorAttachment0.
@@ -51,24 +52,30 @@ public class OitFramebufferRebuildCoverageTests
         // from the FBO, but MergeTransparentRenderPass reads it by texture ID from
         // the shader uniform (not from attachment), so it reads the Optimum reveal data.
         Assert.Contains("(FramebufferAttachment)36064", source);
+        Assert.Contains("EnumFramebufferAttachment.ColorAttachment0, revealTexture", native);
     }
 
     [Fact]
     public void OitAccumulationLayersAttachToSlots3Through5()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
 
         // Accumulation layers attach to ColorAttachment3-5 (36067, 36068, 36069)
         // matching oit.fsh layout(location = 3/4/5).
         Assert.Contains("(FramebufferAttachment)36067", source);
         Assert.Contains("(FramebufferAttachment)36068", source);
         Assert.Contains("(FramebufferAttachment)36069", source);
+        Assert.Contains("EnumFramebufferAttachment.ColorAttachment3, accumTexture, 0", native);
+        Assert.Contains("EnumFramebufferAttachment.ColorAttachment4, accumTexture, 1", native);
+        Assert.Contains("(EnumFramebufferAttachment)36069, accumTexture, 2", native);
     }
 
     [Fact]
     public void OitDrawBuffersMatchesShaderOutputLocations()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
 
         // DrawBuffers must declare 6 attachments (0-5) matching oit.fsh outputs.
         // Using 6, not 7: attachment 6 would be unused by shaders.
@@ -76,6 +83,7 @@ public class OitFramebufferRebuildCoverageTests
         Assert.Contains("DrawBuffersEnum.ColorAttachment0", source);
         Assert.Contains("DrawBuffersEnum.ColorAttachment5", source);
         Assert.DoesNotContain("DrawBuffersEnum.ColorAttachment6", source);
+        Assert.Contains("StateDrawBuffers(transparent.FboId, 0x3F)", native);
     }
 
     [Fact]
@@ -90,23 +98,30 @@ public class OitFramebufferRebuildCoverageTests
     [Fact]
     public void OitBlendFuncPreservesVanillaAttachments0And1()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
 
         // Attachments 0 and 1 use DST_COLOR * ZERO blend (774 = GL_DST_COLOR, 0 = GL_ZERO).
         // This multiplies existing content by incoming fragment, preserving reveal semantics.
         Assert.Contains("GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0)", source);
         Assert.Contains("GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0)", source);
+        Assert.Contains("StateSlotBlendFunc(0, 774, 0, 774, 0)", native);
+        Assert.Contains("StateSlotBlendFunc(1, 774, 0, 774, 0)", native);
     }
 
     [Fact]
     public void OitAccumulationBlendFuncUsesAdditiveBlend()
     {
-        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs");
+        string source = Read("build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+        string native = Read("Optimum.Render.Vulkan/Platform/VulkanClientPlatform.Leaf.cs");
 
         // Attachments 3-5 use ONE + ONE additive blend (1 = GL_ONE).
         Assert.Contains("GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1)", source);
         Assert.Contains("GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1)", source);
         Assert.Contains("GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1)", source);
+        Assert.Contains("StateSlotBlendFunc(3, 1, 1, 1, 1)", native);
+        Assert.Contains("StateSlotBlendFunc(4, 1, 1, 1, 1)", native);
+        Assert.Contains("StateSlotBlendFunc(5, 1, 1, 1, 1)", native);
     }
 
     private static string Read(string relativePath)

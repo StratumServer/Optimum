@@ -1,0 +1,31 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/ForgeContentsRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/ForgeContentsRenderer.cs
+index aa1d785..16466c2 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/ForgeContentsRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/ForgeContentsRenderer.cs
+@@ -245,11 +245,25 @@ namespace Vintagestory.GameContent
+                 prog.ExtraGlow = burning ? glow : 0;
+                 prog.ModelMatrix = ModelMat.Identity().Translate(pos.X - camPos.X, pos.Y - camPos.Y + (fuelLevel - 1) / 16f / 4f, pos.Z - camPos.Z).Values;
+                 prog.ViewMatrix = rpi.CameraMatrixOriginf;
+                 prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+ 
+-                rpi.RenderMultiTextureMesh(coalMeshRef, "tex");
++                // Optimum TAA (P4): the coal bed sinks as fuel is consumed - the
++                // model matrix's Y translation follows fuelLevel - so the previous
++                // model matrix is worth keeping. The work-item draw above runs the
++                // mod's own smithing program, which declares no motion output, so it
++                // stays outside the window. No-op when TAA is off.
++                OptimumStandardMotion.Apply(prog, this, coalMeshRef, ModelMat.Values);
++                bool optimumMotionWrite = OptimumMotionWrite.Begin();
++                try
++                {
++                    rpi.RenderMultiTextureMesh(coalMeshRef, "tex");
++                }
++                finally
++                {
++                    if (optimumMotionWrite) OptimumMotionWrite.End();
++                }
+ 
+                 prog.Stop();
+             }            
+         }
+ 
