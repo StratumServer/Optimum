@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..9df32b9 100644
+index 5714490..745c1ad 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 @@ -1,22 +1,46 @@
@@ -51,7 +51,7 @@ index 5714490..9df32b9 100644
  
  	private Vec3i chunkPos = new Vec3i();
  
-@@ -24,20 +48,32 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -24,20 +48,38 @@ public class ChunkTesselatorManager : ClientSystem
  
  	private int singleUploadDelayCounter;
  
@@ -60,6 +60,12 @@ index 5714490..9df32b9 100644
 +	// Optimum: skip RecalcPriority+Sort when the player has barely moved
 +	// since the last pass. Stale order only changes upload order for one
 +	// frame, never which chunks get uploaded, so this is safe to skip.
++	// A missing EntityPlayer also keeps the existing queue order: the
++	// priority pass reads game.player too, so there is nothing better to
++	// sort by, and the upload loop below still drains the queue. That case
++	// happens on headless/mock worlds and while a player object is being
++	// torn down, where the previous unconditional game.EntityPlayer.Pos
++	// read threw and stalled tessellation.
 +	private Vec3d _lastSortPlayerPos;
 +	private float _lastSortYaw;
 +	private Action<TesselatedChunk> _optimumRecalcPriority;
@@ -84,7 +90,7 @@ index 5714490..9df32b9 100644
  
  	public override void Dispose(ClientMain game)
  	{
-@@ -50,39 +86,42 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -50,39 +92,42 @@ public class ChunkTesselatorManager : ClientSystem
  		lock (tessChunksQueuePriorityLock)
  		{
  			tessChunksQueuePriority?.Clear();
@@ -129,17 +135,18 @@ index 5714490..9df32b9 100644
  						num2 += tesselatedChunk.VerticesCount;
  						tmpPos.Set(tesselatedChunk.positionX / 32, tesselatedChunk.positionYAndDimension / 32, tesselatedChunk.positionZ / 32);
  						game.eventManager?.TriggerChunkRetesselated(tmpPos, chunkAtBlockPos);
-@@ -102,22 +141,35 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -102,22 +147,36 @@ public class ChunkTesselatorManager : ClientSystem
  			return;
  		}
  		singleUploadDelayCounter = 0;
  		lock (tessChunksQueueLock)
  		{
 -			tessChunksQueue.RunForEach(delegate(TesselatedChunk eachTC)
-+			EntityPos plrPos = game.EntityPlayer.Pos;
-+			bool moved = _lastSortPlayerPos == null
-+				|| plrPos.SquareDistanceTo(_lastSortPlayerPos) >= SortMoveThresholdSq
-+				|| Math.Abs(GameMath.AngleRadDistance(_lastSortYaw, plrPos.Yaw)) >= SortYawThreshold;
++			var plr = game.EntityPlayer;
++			bool moved = plr != null
++				&& (_lastSortPlayerPos == null
++					|| plr.Pos.SquareDistanceTo(_lastSortPlayerPos) >= SortMoveThresholdSq
++					|| Math.Abs(GameMath.AngleRadDistance(_lastSortYaw, plr.Pos.Yaw)) >= SortYawThreshold);
 +			if (moved)
  			{
 -				eachTC.RecalcPriority(game.player);
@@ -147,8 +154,8 @@ index 5714490..9df32b9 100644
 -			tessChunksQueue.Sort();
 +				tessChunksQueue.RunForEach(_optimumRecalcPriority ??= OptimumRecalcPriority);
 +				tessChunksQueue.Sort();
-+				_lastSortPlayerPos = (_lastSortPlayerPos ?? new Vec3d()).Set(plrPos.X, plrPos.Y, plrPos.Z);
-+				_lastSortYaw = plrPos.Yaw;
++				_lastSortPlayerPos = (_lastSortPlayerPos ?? new Vec3d()).Set(plr.Pos.X, plr.Pos.Y, plr.Pos.Z);
++				_lastSortYaw = plr.Pos.Yaw;
 +				OptimumDiagnostics.ChunkUploadSort.Hit();
 +			}
 +			else
@@ -169,7 +176,7 @@ index 5714490..9df32b9 100644
  					tmpPos.Set(tesselatedChunk.positionX / 32, tesselatedChunk.positionYAndDimension / 32, tesselatedChunk.positionZ / 32);
  					game.eventManager?.TriggerChunkRetesselated(tmpPos, chunkAtBlockPos2);
  				}
-@@ -127,13 +179,18 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -127,13 +186,18 @@ public class ChunkTesselatorManager : ClientSystem
  				}
  			}
  		}
@@ -189,7 +196,7 @@ index 5714490..9df32b9 100644
  		}
  		MeshDataRecycler recycler = MeshData.Recycler;
  		if (!game.ShouldTesselateTerrain)
-@@ -244,21 +301,22 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -244,21 +308,22 @@ public class ChunkTesselatorManager : ClientSystem
  	}
  
  	public int TesselateChunk(int chunkX, int chunkY, int chunkZ, bool priority, bool skipChunkCenter, out bool requeue)
@@ -213,7 +220,7 @@ index 5714490..9df32b9 100644
  			if (!clientChunk.loadedFromServer)
  			{
  				requeue = true;
-@@ -308,27 +366,101 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -308,27 +373,101 @@ public class ChunkTesselatorManager : ClientSystem
  			num = terrainChunkTesselator.NowProcessChunk(chunkX, chunkY, chunkZ, tesselatedChunk, skipChunkCenter);
  		}
  		catch (RetryTesselationException)
