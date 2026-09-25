@@ -41,22 +41,21 @@ public sealed class ModCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void DetectKomet_SetsDetectedAndLogsAdvisory()
+    public void DetectKomet_UsesProtocolProviderWithoutAdvisory()
     {
         var logs = new List<string>();
         var loader = new MultiModLoader(("komet", "Komet", "2.0.0"));
 
         OptimumCompatibilityGuard.DetectFromModLoader(loader, msg => logs.Add(msg));
+        OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
 
         Assert.True(OptimumConfig.KometDetected);
         Assert.Equal("2.0.0", OptimumCompatibilityGuard.KometDetectedVersion);
-        Assert.Single(logs);
-        Assert.Contains("Komet mod detected", logs[0]);
-        Assert.Contains("glMultiDrawElementsIndirect", logs[0]);
+        Assert.Empty(logs);
 
         string status = OptimumCompatibilityGuard.GetKometStatusLine();
         Assert.Contains("Komet v2.0.0", status);
-        Assert.Contains("ACTIVE (safely yielding MDI/SIMD)", status);
+        Assert.Contains("interop protocol available", status);
     }
 
     [Fact]
@@ -124,17 +123,18 @@ public sealed class ModCompatibilityGuardTests : IDisposable
         );
 
         OptimumCompatibilityGuard.DetectFromModLoader(loader, msg => logs.Add(msg));
+        OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
 
         Assert.True(OptimumConfig.KometDetected);
         Assert.True(OptimumConfig.OptiTimeDetected);
         Assert.True(OptimumConfig.TungstenDetected);
         Assert.True(OptimumConfig.SynergyDetected);
 
-        // Komet warning and OptiTime redundancy advisory are both logged
-        Assert.Equal(2, logs.Count);
+        // Komet speaks the interop protocol; only the independent OptiTime advisory remains.
+        Assert.Single(logs);
 
         string report = OptimumCompatibilityGuard.GetPerformanceModsReport();
-        Assert.Contains("Komet:    Komet v2.0.0 (ACTIVE (safely yielding MDI/SIMD))", report);
+        Assert.Contains("Komet:    Komet v2.0.0 (interop protocol available)", report);
         Assert.Contains("OptiTime: OptiTime v1.4.0 (REDUNDANT - natively integrated in Optimum)", report);
         Assert.Contains("Tungsten: Tungsten v1.3.7 (COMPATIBLE - server-side optimizations active)", report);
         Assert.Contains("Synergy:  Synergy v1.1.25 (COMPATIBLE - client-server synchronization active)", report);
@@ -147,7 +147,7 @@ public sealed class ModCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void KometGuard_YieldsMdiAndSimdCullingSafely()
+    public void KometGuard_DoesNotDisableUnverifiedFeaturesForProtocolAwarePeer()
     {
         bool origSupported = OptimumConfig.IndirectDrawSupported;
         bool origEnabled = OptimumConfig.IndirectDrawEnabled;
@@ -165,10 +165,10 @@ public sealed class ModCompatibilityGuardTests : IDisposable
             Assert.True(OptimumConfig.EffectiveIndirectDraw);
             Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
 
-            // With Komet detected and guard enabled: safely yields
+            // Protocol-aware Komet nightly has no evidenced replacement path for these features.
             OptimumConfig.KometDetected = true;
-            Assert.False(OptimumConfig.EffectiveIndirectDraw);
-            Assert.False(OptimumConfig.EffectiveSimdCulling);
+            Assert.True(OptimumConfig.EffectiveIndirectDraw);
+            Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
 
             // With KometGuard disabled by user: forces active
             OptimumConfig.KometGuardEnabled = false;

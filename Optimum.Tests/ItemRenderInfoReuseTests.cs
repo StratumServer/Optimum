@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[Collection("OptimumConfig")]
 /// <summary>
 /// Issue #74: the GUI item render path reuses a per-thread scratch ItemRenderInfo
 /// instead of allocating one per visible slot per frame (measured ~104 B/slot,

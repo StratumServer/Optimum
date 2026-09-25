@@ -1,8 +1,10 @@
 using Vintagestory.API.Config;
 using Xunit;
+using OptimumInterop = Vintagestory.API.Config.VsModInterop;
 
 namespace Optimum.Tests;
 
+[Collection("OptimumConfig")]
 public class AdaptiveRadiusControllerTests
 {
     private static void SetAdaptiveRadiusConfig(bool enabled = true, int floor = 4, int high = 60, int low = 20)
@@ -11,6 +13,9 @@ public class AdaptiveRadiusControllerTests
         OptimumConfig.AdaptiveRadiusFloor = floor;
         OptimumConfig.AdaptiveRadiusHighThreshold = high;
         OptimumConfig.AdaptiveRadiusLowThreshold = low;
+        OptimumConfig.KometDetected = false;
+        OptimumConfig.KometAdaptiveChunkInflowEnabled = false;
+        OptimumInterop.ResetYieldsForTests();
         OptimumConfig.AdaptiveRadiusEffective = int.MaxValue;
     }
 

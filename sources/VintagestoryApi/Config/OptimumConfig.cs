@@ -201,14 +201,21 @@ public static class OptimumConfig
     public static bool SynergyDetected;
 
     /// <summary>
-    /// Issue #85: When true (default), Optimum detects Komet and safely yields conflicting
-    /// host subsystems (e.g. MDI indirect rendering and SIMD frustum culling) to prevent
-    /// graphics pipeline crashes or corrupted state from Komet's cancelling Harmony prefixes.
-    /// Persisted to ModConfig/optimum.json.
+    /// Runtime-only compatibility state refreshed from Komet's protocol feature
+    /// state or the legacy InflowBrake.Enabled field. Not persisted: AdaptiveRadius
+    /// remains the user's preference while the effective state follows negotiation.
+    /// </summary>
+    public static volatile bool KometAdaptiveChunkInflowEnabled;
+
+    /// <summary>
+    /// Issue #85: When true (default), Optimum applies its MDI/SIMD fallback for detected
+    /// Komet builds that do not expose the interop provider. Protocol-aware builds coordinate
+    /// only features they actually report. Persisted to ModConfig/optimum.json.
     /// </summary>
     public static bool KometGuardEnabled = true;
 
-    public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported && (!KometDetected || !KometGuardEnabled);
+    public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported &&
+        !OptimumCompatibilityGuard.IsLegacyKometFallbackActive;
 
     /// <summary>
     /// Issue #75: Enables SIMD-vectorized frustum culling on CPU (AVX2 / ARM NEON)
@@ -221,7 +228,8 @@ public static class OptimumConfig
     /// </summary>
     public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
 
-    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported && (!KometDetected || !KometGuardEnabled);
+    public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported &&
+        !OptimumCompatibilityGuard.IsLegacyKometFallbackActive;
 
     /// <summary>
     /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)
@@ -439,6 +447,15 @@ public static class OptimumConfig
     /// gen threads and a capped MaxChunkRadius, so this mostly helps SP.
     /// </summary>
     public static bool AdaptiveRadiusEnabled = true;
+
+    /// <summary>
+    /// Effective state used by the radius controller: the user's preference, minus any hold an
+    /// interop requester (Komet's adaptive chunk inflow, or Optimum's own probe of it) put on
+    /// the feature. The persisted preference is never rewritten, so releasing the request
+    /// restores the configured behaviour on the next tick.
+    /// </summary>
+    public static bool EffectiveAdaptiveRadiusEnabled =>
+        AdaptiveRadiusEnabled && !VsModInterop.IsYielded(VsModInterop.FeatureAdaptiveRadius);
 
     /// <summary>
     /// Floor radius in chunks: the controller never drops below this value.
@@ -716,6 +733,16 @@ public static class OptimumConfig
     /// Drives .optimum status and the coverage test that keeps this in sync
     /// with OptimumConfigData whenever a field gets added or removed.
     /// </summary>
+    private static string GetAdaptiveRadiusToggleValue()
+    {
+        if (!AdaptiveRadiusEnabled) return "False";
+
+        // Name who holds it down: the toggle shows the effective state, and "False" alone reads
+        // like the user's own setting was ignored.
+        string held = VsModInterop.DescribeHold(VsModInterop.FeatureAdaptiveRadius);
+        return held.Length == 0 ? "True" : "False (yielded to " + held + ")";
+    }
+
     public static (string Name, string Value)[] DescribeToggles() => new (string, string)[]
     {
         (nameof(OptimumConfigData.EntityShadowCull), EntityShadowCull.ToString()),
@@ -758,7 +785,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.WorldgenWorkStealing), WorldgenWorkStealingEnabled.ToString()),
         (nameof(OptimumConfigData.ChunkReadPoolEnabled), ChunkReadPoolEnabled.ToString()),
         (nameof(OptimumConfigData.ChunkReadPoolWorkers), ChunkReadPoolWorkers.ToString()),
-        (nameof(OptimumConfigData.AdaptiveRadius), AdaptiveRadiusEnabled.ToString()),
+        (nameof(OptimumConfigData.AdaptiveRadius), GetAdaptiveRadiusToggleValue()),
         (nameof(OptimumConfigData.AdaptiveRadiusFloor), AdaptiveRadiusFloor.ToString()),
         (nameof(OptimumConfigData.AdaptiveRadiusHighThreshold), AdaptiveRadiusHighThreshold.ToString()),
         (nameof(OptimumConfigData.AdaptiveRadiusLowThreshold), AdaptiveRadiusLowThreshold.ToString()),
