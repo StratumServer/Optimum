@@ -385,7 +385,7 @@ public class OptimumStatusModSystem : ModSystem
         {
             sb.AppendLine($"  {name}: {value}");
         }
-        sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}->{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}->{TyronThreadPool.SetMaxThreadsIoAfter}");
+        sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}-&gt;{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}-&gt;{TyronThreadPool.SetMaxThreadsIoAfter}");
         sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
         // Issue #119 follow-up: what the interop protocol agreed with a peer this session, so a
         // field log says whether the negotiation ran and who holds what down.
