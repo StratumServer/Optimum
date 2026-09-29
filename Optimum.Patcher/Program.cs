@@ -53,6 +53,7 @@ var typesToInject = new List<string>
     "Optimum.OptimumUpdateChecker",
     "Optimum.EntityLightBatchBuffer",
     "Optimum.OptimumOptiTimeGuard",
+    "Optimum.PhysicsListReuseGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
