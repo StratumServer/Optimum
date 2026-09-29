@@ -8,7 +8,7 @@
 #   - Optimum.Api.Contracts.dll
 #   - .optimum/donors/ (VintagestoryLib.Donor.dll, VintagestoryAPI.Contracts.dll, etc.)
 #   - Shaders and language strings
-#   - optimum-manifest.json (hashes, supported game versions, targets)
+#   - optimum-manifest-<rid>.json sidecar (hashes, supported game versions, targets)
 #
 # DOES NOT contain any proprietary Anego game binaries or decompiled vanilla code.
 #
@@ -36,6 +36,11 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+case "$RID" in
+    linux-x64|win-x64) ;;
+    *) echo "Unsupported overlay RID: $RID" >&2; exit 1 ;;
+esac
 
 echo "Packaging Optimum patch overlay:"
 echo "  Optimum version: $OPT_VER"
@@ -111,6 +116,42 @@ if [[ -f "$STAGE_DIR/optimum" ]]; then
     chmod +x "$STAGE_DIR/optimum"
 fi
 
+# The apphost is built for the machine that built it, not for --rid: the builds
+# above pass no -r, so the compiler emits an ELF on Linux and a PE on Windows.
+# Staging a Linux ELF under a manifest that declares win-x64 would produce an
+# archive with a correct name and a correct sha256 that only fails once the
+# launcher tries to exec it, so refuse to build it at all.
+APPHOST="$STAGE_DIR/optimum"
+case "$RID" in
+    win-*) APPHOST="$STAGE_DIR/optimum.exe" ;;
+esac
+if [[ ! -f "$APPHOST" ]]; then
+    echo "Error: expected the Optimum CLI apphost at $APPHOST but it is missing." >&2
+    echo "       Build this overlay on a runner matching --rid $RID." >&2
+    exit 1
+fi
+python3 - "$APPHOST" "$RID" <<'PY'
+import sys
+
+apphost, rid = sys.argv[1], sys.argv[2]
+with open(apphost, "rb") as fp:
+    magic = fp.read(4)
+
+windows = rid.startswith("win-")
+is_pe = magic[:2] == b"MZ"
+is_elf = magic == b"\x7fELF"
+if windows and not is_pe:
+    kind = "PE" if is_elf else magic.hex()
+    print(f"Error: {apphost} is not a Windows PE executable (found {kind}).", file=sys.stderr)
+    print(f"       --rid {rid} was requested, so build the overlay on a Windows runner.", file=sys.stderr)
+    sys.exit(1)
+if not windows and not is_elf:
+    kind = "PE" if is_pe else magic.hex()
+    print(f"Error: {apphost} is not a Linux ELF executable (found {kind}).", file=sys.stderr)
+    print(f"       --rid {rid} was requested, so build the overlay on a Linux runner.", file=sys.stderr)
+    sys.exit(1)
+PY
+
 # 5. Shaders
 if [[ -d "$REPO_ROOT/sources/shaders" ]]; then
     find "$REPO_ROOT/sources/shaders" -maxdepth 1 -type f -exec cp -f {} "$STAGE_DIR/assets/game/shaders/" \;
@@ -133,8 +174,8 @@ for forbidden in "${FORBIDDEN_FILES[@]}"; do
     fi
 done
 
-# 9. Compute hashes and generate optimum-manifest.json
-echo "Generating optimum-manifest.json..."
+# 9. Compute hashes and generate the manifest for the overlay
+echo "Generating manifest for $RID..."
 python3 - <<PY
 import os
 import sys
@@ -230,8 +271,9 @@ manifest["archive"]["sha256"] = "$ARCHIVE_SHA256"
 with open(manifest_path, "w", encoding="utf-8") as fp:
     json.dump(manifest, fp, indent=2)
 
-# Also write to dist/optimum-manifest.json next to the tarball
-dist_manifest = "$OUTPUT_DIR/optimum-manifest.json"
+# Also write a per-RID manifest to dist/ next to the tarball. The release
+# workflow attaches this platform-specific sidecar beside the matching archive.
+dist_manifest = "$OUTPUT_DIR/optimum-manifest-${RID}.json"
 with open(dist_manifest, "w", encoding="utf-8") as fp:
     json.dump(manifest, fp, indent=2)
 PY
@@ -239,4 +281,4 @@ PY
 echo ""
 echo "Done! Produced overlay archive and manifest:"
 echo "  Archive:  $ARCHIVE_PATH ($ARCHIVE_SIZE bytes, $ARCHIVE_SHA256)"
-echo "  Manifest: $OUTPUT_DIR/optimum-manifest.json"
+echo "  Manifest: $OUTPUT_DIR/optimum-manifest-${RID}.json"

@@ -1,0 +1,185 @@
+name: Release RiftLauncher overlays
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-overlay-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: Build linux-x64 overlay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Resolve release and client versions
+        id: versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="$RELEASE_TAG"
+          if [ "$tag" != "v$version" ]; then
+            echo "Release tag $tag does not match VERSION $version." >&2
+            exit 1
+          fi
+          game_version="$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")"
+          archive="vs_client_linux-x64_${game_version}.tar.gz"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "game_version=$game_version" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Download Vintage Story client archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o ".vanilla/archives/${{ steps.versions.outputs.archive }}.part" \
+            "https://cdn.vintagestory.at/gamefiles/stable/${{ steps.versions.outputs.archive }}"
+          mv ".vanilla/archives/${{ steps.versions.outputs.archive }}.part" ".vanilla/archives/${{ steps.versions.outputs.archive }}"
+
+      - name: Bootstrap, build, and check patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/snapshot/VintagestoryLib
+          bash scripts/bootstrap.sh --client-archive ".vanilla/archives/${{ steps.versions.outputs.archive }}"
+          dotnet build VintageStory.slnx -c Release --nologo
+          bash scripts/check-patches.sh --strict-unavailable
+          bash scripts/validate-shader-assets.sh sources/shaders
+          bash scripts/prepare-runtime-donors.sh
+
+      - name: Package overlay
+        shell: bash
+        run: bash scripts/package-overlay.sh --rid linux-x64 --version "${{ steps.versions.outputs.version }}" --game-version "${{ steps.versions.outputs.game_version }}" --output dist
+
+      - name: Upload overlay artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: overlay-linux-x64
+          path: |
+            dist/Optimum-v*-linux-x64-overlay.tar.gz
+            dist/optimum-manifest-linux-x64.json
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Build win-x64 overlay
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Resolve release and client versions
+        id: versions
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="$RELEASE_TAG"
+          if [ "$tag" != "v$version" ]; then
+            echo "Release tag $tag does not match VERSION $version." >&2
+            exit 1
+          fi
+          game_version="$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")"
+          archive="vs_install_win-x64_${game_version}.exe"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "game_version=$game_version" >> "$GITHUB_OUTPUT"
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Download Vintage Story client installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o ".vanilla/archives/${{ steps.versions.outputs.archive }}.part" \
+            "https://cdn.vintagestory.at/gamefiles/stable/${{ steps.versions.outputs.archive }}"
+          mv ".vanilla/archives/${{ steps.versions.outputs.archive }}.part" ".vanilla/archives/${{ steps.versions.outputs.archive }}"
+
+      - name: Bootstrap
+        shell: pwsh
+        run: scripts/bootstrap.ps1 -ClientArchive ".vanilla/archives/${{ steps.versions.outputs.archive }}"
+
+      - name: Build, check patches, and prepare runtime donors
+        shell: pwsh
+        run: |
+          dotnet build VintageStory.slnx -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
+          bash scripts/check-patches.sh --strict-unavailable
+          if ($LASTEXITCODE -ne 0) { throw "Patch check failed with exit code $LASTEXITCODE." }
+          bash scripts/validate-shader-assets.sh sources/shaders
+          if ($LASTEXITCODE -ne 0) { throw "Shader validation failed with exit code $LASTEXITCODE." }
+          scripts/prepare-runtime-donors.ps1
+
+      - name: Package overlay
+        shell: bash
+        run: bash scripts/package-overlay.sh --rid win-x64 --version "${{ steps.versions.outputs.version }}" --game-version "${{ steps.versions.outputs.game_version }}" --output dist
+
+      - name: Upload overlay artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: overlay-win-x64
+          path: |
+            dist/Optimum-v*-win-x64-overlay.tar.gz
+            dist/optimum-manifest-win-x64.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Attach overlays to the release
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: overlay-*
+          path: dist
+          merge-multiple: true
+
+      - name: Validate and upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_TAG"
+          test -f dist/optimum-manifest-linux-x64.json
+          test -f dist/optimum-manifest-win-x64.json
+          test "$(find dist -maxdepth 1 -name 'Optimum-v*-linux-x64-overlay.tar.gz' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -name 'Optimum-v*-win-x64-overlay.tar.gz' | wc -l)" -eq 1
+          gh release upload "$tag" dist/Optimum-v*-overlay.tar.gz dist/optimum-manifest-*.json \
+            --clobber --repo "$GITHUB_REPOSITORY"
