@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Intrinsics;
 using System.Text.Json;
+using Komet.Interop;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Xunit;
@@ -15,11 +16,15 @@ public sealed class ModCompatibilityGuardTests : IDisposable
     public ModCompatibilityGuardTests()
     {
         OptimumCompatibilityGuard.ResetForTests();
+        KometInterop.AnswersFeature = true;
+        KometInterop.OverrideState = null;
+        ModInterop.ResetCacheForTests();
     }
 
     public void Dispose()
     {
         OptimumCompatibilityGuard.ResetForTests();
+        ModInterop.ResetCacheForTests();
     }
 
     [Fact]
@@ -41,21 +46,40 @@ public sealed class ModCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void DetectKomet_UsesProtocolProviderWithoutAdvisory()
+    public void DetectKomet_UsesProtocolProviderAndLogsUnresolvedRenderOverlap()
     {
         var logs = new List<string>();
         var loader = new MultiModLoader(("komet", "Komet", "2.0.0"));
 
         OptimumCompatibilityGuard.DetectFromModLoader(loader, msg => logs.Add(msg));
+        Assert.True(OptimumCompatibilityGuard.HasKometInteropProvider);
         OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
 
         Assert.True(OptimumConfig.KometDetected);
         Assert.Equal("2.0.0", OptimumCompatibilityGuard.KometDetectedVersion);
-        Assert.Empty(logs);
+        Assert.Single(logs);
+        Assert.Contains("Adaptive-radius coordination does not resolve render-path overlap", logs[0]);
 
         string status = OptimumCompatibilityGuard.GetKometStatusLine();
         Assert.Contains("Komet v2.0.0", status);
-        Assert.Contains("interop protocol available", status);
+        Assert.Contains("adaptive-radius interop available", status);
+        Assert.Contains("render-path overlap unresolved", status);
+    }
+
+    [Fact]
+    public void RunDetection_LogsUnresolvedKometOverlapEvenWithProtocolProvider()
+    {
+        var logs = new List<string>();
+        var loader = new MultiModLoader(("komet", "Komet", "2.0.0"));
+
+        OptimumCompatibilityGuard.RunDetection(loader, logs.Add);
+
+        Assert.True(OptimumCompatibilityGuard.HasKometInteropProvider);
+        Assert.Single(logs);
+        Assert.Contains("Adaptive-radius coordination does not resolve render-path overlap", logs[0]);
+
+        OptimumCompatibilityGuard.RunDetection(loader, logs.Add);
+        Assert.Single(logs);
     }
 
     [Fact]
@@ -123,6 +147,7 @@ public sealed class ModCompatibilityGuardTests : IDisposable
         );
 
         OptimumCompatibilityGuard.DetectFromModLoader(loader, msg => logs.Add(msg));
+        Assert.True(OptimumCompatibilityGuard.HasKometInteropProvider);
         OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
 
         Assert.True(OptimumConfig.KometDetected);
@@ -130,11 +155,11 @@ public sealed class ModCompatibilityGuardTests : IDisposable
         Assert.True(OptimumConfig.TungstenDetected);
         Assert.True(OptimumConfig.SynergyDetected);
 
-        // Komet speaks the interop protocol; only the independent OptiTime advisory remains.
-        Assert.Single(logs);
+        // Komet render-overlap and independent OptiTime advisories are both logged.
+        Assert.Equal(2, logs.Count);
 
         string report = OptimumCompatibilityGuard.GetPerformanceModsReport();
-        Assert.Contains("Komet:    Komet v2.0.0 (interop protocol available)", report);
+        Assert.Contains("Komet:    Komet v2.0.0 (render paths guarded; adaptive-radius interop available; render-path overlap unresolved)", report);
         Assert.Contains("OptiTime: OptiTime v1.4.0 (REDUNDANT - natively integrated in Optimum)", report);
         Assert.Contains("Tungsten: Tungsten v1.3.7 (COMPATIBLE - server-side optimizations active)", report);
         Assert.Contains("Synergy:  Synergy v1.1.25 (COMPATIBLE - client-server synchronization active)", report);
@@ -147,7 +172,7 @@ public sealed class ModCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void KometGuard_DoesNotDisableUnverifiedFeaturesForProtocolAwarePeer()
+    public void KometGuard_GuardsRenderFeaturesEvenWithProtocolProvider()
     {
         bool origSupported = OptimumConfig.IndirectDrawSupported;
         bool origEnabled = OptimumConfig.IndirectDrawEnabled;
@@ -165,10 +190,10 @@ public sealed class ModCompatibilityGuardTests : IDisposable
             Assert.True(OptimumConfig.EffectiveIndirectDraw);
             Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
 
-            // Protocol-aware Komet nightly has no evidenced replacement path for these features.
+            // Provider presence does not establish render-path compatibility.
             OptimumConfig.KometDetected = true;
-            Assert.True(OptimumConfig.EffectiveIndirectDraw);
-            Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
+            Assert.False(OptimumConfig.EffectiveIndirectDraw);
+            Assert.False(OptimumConfig.EffectiveSimdCulling);
 
             // With KometGuard disabled by user: forces active
             OptimumConfig.KometGuardEnabled = false;

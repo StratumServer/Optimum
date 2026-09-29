@@ -12,7 +12,7 @@ namespace Vintagestory.API.Config;
 /// for performance mods in the Vintage Story ecosystem:
 /// 1. Komet (komet): Third-party client optimization mod (xToast). Optimum coordinates
 ///    reported runtime features through the generic provider contract and retains conservative
-///    MDI/SIMD and adaptive-radius fallbacks for Komet builds without that provider.
+///    MDI/SIMD guards independently; provider coordination is limited to adaptive radius.
 /// 2. OptiTime (optitime): Client optimization mod (Zaldaryon). Optimum natively integrates
 ///    all OptiTime optimizations ahead-of-time in IL and source code.
 /// 3. Tungsten (tungsten): Server-side performance optimizations (Zaldaryon). Fully compatible.
@@ -27,11 +27,11 @@ public static class OptimumCompatibilityGuard
     public const string SynergyModId = "synergy";
 
     public const string KometAdvisoryWarning =
-        "[Optimum] Advisory: Komet was detected, but it does not expose a compatible VS mod interop provider. " +
-        "Some runtime patches may overlap; compatibility has not been negotiated.";
+        "[Optimum] Advisory: Komet was detected. Adaptive-radius coordination does not resolve render-path overlap; " +
+        "MDI/SIMD compatibility has not been negotiated.";
 
     public const string KometPlayerJoinNotification =
-        "[Optimum] Advisory: Komet does not expose a compatible VS mod interop provider. Runtime patch overlap is unverified. " +
+        "[Optimum] Advisory: Adaptive-radius coordination does not resolve Komet render-path overlap. MDI/SIMD compatibility is unverified. " +
         "Type '.optimum status' for details.";
 
     public const string OptiTimeAdvisoryWarning =
@@ -230,12 +230,20 @@ public static class OptimumCompatibilityGuard
 
     public static bool HasKometInteropProvider => ModInterop.IsProviderAvailable("komet");
 
+    /// <summary>Legacy adaptive-radius fallback applies only when Komet has no protocol provider.</summary>
     public static bool IsLegacyKometFallbackActive =>
         OptimumConfig.KometDetected && OptimumConfig.KometGuardEnabled && !HasKometInteropProvider;
 
+    /// <summary>
+    /// Render-path guard remains active for every detected Komet build until those overlaps are
+    /// negotiated explicitly. The current provider coordinates adaptive radius only.
+    /// </summary>
+    public static bool IsKometRenderGuardActive =>
+        OptimumConfig.KometDetected && OptimumConfig.KometGuardEnabled;
+
     public static void LogKometAdvisoryIfUncoordinated(Action<string>? logger = null)
     {
-        if (OptimumConfig.KometDetected && !HasKometInteropProvider)
+        if (OptimumConfig.KometDetected)
             LogKometAdvisoryOnce(logger);
     }
 
@@ -264,8 +272,14 @@ public static class OptimumCompatibilityGuard
     public static void RunDetection(ICoreAPI? api)
     {
         Action<string>? logger = api?.Logger != null ? msg => api.Logger.Warning(msg) : null;
-        DetectFromModLoader(api?.ModLoader, logger);
+        RunDetection(api?.ModLoader, logger);
+    }
+
+    internal static void RunDetection(IModLoader? modLoader, Action<string>? logger)
+    {
+        DetectFromModLoader(modLoader, logger);
         DetectFromAssemblies(logger);
+        LogKometAdvisoryIfUncoordinated(logger);
     }
 
     /// <summary>
@@ -283,7 +297,7 @@ public static class OptimumCompatibilityGuard
     public static void NotifyPlayerOnJoin(Action<string>? showChat)
     {
         if (showChat == null) return;
-        if (OptimumConfig.KometDetected && OptimumConfig.KometGuardEnabled && !HasKometInteropProvider && !WorldJoinAdvisorySent)
+        if (OptimumConfig.KometDetected && !WorldJoinAdvisorySent)
         {
             showChat(KometPlayerJoinNotification);
             WorldJoinAdvisorySent = true;
@@ -294,10 +308,9 @@ public static class OptimumCompatibilityGuard
     {
         if (!OptimumConfig.KometDetected) return "none detected";
         string ver = !string.IsNullOrEmpty(KometDetectedVersion) ? $" v{KometDetectedVersion}" : "";
-        string state = HasKometInteropProvider
-            ? "interop protocol available"
-            : OptimumConfig.KometGuardEnabled ? "legacy compatibility fallback" : "legacy compatibility guard disabled";
-        return $"Komet{ver} ({state})";
+        string state = OptimumConfig.KometGuardEnabled ? "render paths guarded" : "render guard disabled";
+        string coordination = HasKometInteropProvider ? "adaptive-radius interop available" : "no adaptive-radius interop provider";
+        return $"Komet{ver} ({state}; {coordination}; render-path overlap unresolved)";
     }
 
     public static string GetOptiTimeStatusLine()

@@ -208,14 +208,14 @@ public static class OptimumConfig
     public static volatile bool KometAdaptiveChunkInflowEnabled;
 
     /// <summary>
-    /// Issue #85: When true (default), Optimum applies its MDI/SIMD fallback for detected
-    /// Komet builds that do not expose the interop provider. Protocol-aware builds coordinate
-    /// only features they actually report. Persisted to ModConfig/optimum.json.
+    /// Issue #85: When true (default), Optimum guards its MDI/SIMD render paths for every
+    /// detected Komet build. The current interop provider coordinates adaptive radius only;
+    /// render-path overlaps remain unnegotiated. Persisted to ModConfig/optimum.json.
     /// </summary>
     public static bool KometGuardEnabled = true;
 
     public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported &&
-        !OptimumCompatibilityGuard.IsLegacyKometFallbackActive;
+        !OptimumCompatibilityGuard.IsKometRenderGuardActive;
 
     /// <summary>
     /// Issue #75: Enables SIMD-vectorized frustum culling on CPU (AVX2 / ARM NEON)
@@ -229,7 +229,7 @@ public static class OptimumConfig
     public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
 
     public static bool EffectiveSimdCulling => SimdCullingEnabled && SimdCullingSupported &&
-        !OptimumCompatibilityGuard.IsLegacyKometFallbackActive;
+        !OptimumCompatibilityGuard.IsKometRenderGuardActive;
 
     /// <summary>
     /// Caps how many entities may re-tesselate their shape (EntityShapeRenderer.TesselateShape)

@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Intrinsics;
 using System.Text.Json;
+using Komet.Interop;
+using Vintagestory.API.Config;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
-using Vintagestory.API.Config;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -16,11 +17,15 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     public KometCompatibilityGuardTests()
     {
         OptimumKometGuard.ResetForTests();
+        KometInterop.AnswersFeature = true;
+        KometInterop.OverrideState = null;
+        ModInterop.ResetCacheForTests();
     }
 
     public void Dispose()
     {
         OptimumKometGuard.ResetForTests();
+        ModInterop.ResetCacheForTests();
     }
 
     [Fact]
@@ -34,25 +39,29 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void DetectViaModLoader_SetsDetected_AndRecognizesProtocolProvider()
+    public void DetectViaModLoader_SetsDetected_AndWarnsAboutUnresolvedRenderOverlap()
     {
         var logs = new List<string>();
         var loader = new FakeModLoader(hasKomet: true, kometVersion: "2.0.0");
 
         bool detected = OptimumKometGuard.Detect(loader, msg => logs.Add(msg));
+        Assert.True(OptimumCompatibilityGuard.HasKometInteropProvider);
+        OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
 
         Assert.True(detected);
         Assert.True(OptimumConfig.KometDetected);
         Assert.True(OptimumKometGuard.IsDetected);
         Assert.Equal("ModLoader", OptimumKometGuard.DetectionSource);
         Assert.Equal("2.0.0", OptimumKometGuard.DetectedVersion);
-        Assert.Empty(logs);
+        Assert.Single(logs);
+        Assert.Contains("Adaptive-radius coordination does not resolve render-path overlap", logs[0]);
         OptimumCompatibilityGuard.LogKometAdvisoryIfUncoordinated(logs.Add);
-        Assert.Empty(logs);
+        Assert.Single(logs);
 
         string status = OptimumKometGuard.GetStatusLine();
         Assert.Contains("Komet v2.0.0", status);
-        Assert.Contains("interop protocol available", status);
+        Assert.Contains("adaptive-radius interop available", status);
+        Assert.Contains("render-path overlap unresolved", status);
     }
 
     [Fact]
@@ -70,7 +79,7 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void EffectiveIndirectDraw_RemainsEnabledForProtocolAwareKomet()
+    public void EffectiveIndirectDraw_IsGuardedForKometUnlessOptedOut()
     {
         bool origSupported = OptimumConfig.IndirectDrawSupported;
         bool origEnabled = OptimumConfig.IndirectDrawEnabled;
@@ -85,9 +94,9 @@ public sealed class KometCompatibilityGuardTests : IDisposable
             OptimumConfig.KometGuardEnabled = true;
             Assert.True(OptimumConfig.EffectiveIndirectDraw);
 
-            // Protocol-aware Komet nightly has no evidenced MDI replacement path.
+            // Provider availability does not negotiate render-path compatibility.
             OptimumConfig.KometDetected = true;
-            Assert.True(OptimumConfig.EffectiveIndirectDraw);
+            Assert.False(OptimumConfig.EffectiveIndirectDraw);
 
             // User explicitly disables guard: force MDI despite Komet
             OptimumConfig.KometGuardEnabled = false;
@@ -101,7 +110,7 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void EffectiveSimdCulling_RemainsEnabledForProtocolAwareKomet()
+    public void EffectiveSimdCulling_IsGuardedForKometUnlessOptedOut()
     {
         bool origEnabled = OptimumConfig.SimdCullingEnabled;
 
@@ -114,9 +123,9 @@ public sealed class KometCompatibilityGuardTests : IDisposable
             OptimumConfig.KometGuardEnabled = true;
             Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
 
-            // Protocol-aware Komet nightly has no evidenced SIMD culling replacement path.
+            // Provider availability does not negotiate render-path compatibility.
             OptimumConfig.KometDetected = true;
-            Assert.Equal(Vector128.IsHardwareAccelerated, OptimumConfig.EffectiveSimdCulling);
+            Assert.False(OptimumConfig.EffectiveSimdCulling);
 
             // User explicitly disables guard: force SIMD despite Komet
             OptimumConfig.KometGuardEnabled = false;
@@ -162,24 +171,38 @@ public sealed class KometCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void NotifyPlayerOnJoin_StaysQuietForProtocolAwarePeer()
+    public void NotifyPlayerOnJoin_ReportsProtocolDoesNotResolveRenderOverlap()
     {
         var messages = new List<string>();
         OptimumConfig.KometDetected = true;
         OptimumConfig.KometGuardEnabled = true;
 
-        // Protocol-aware Komet has no unresolved compatibility advisory.
         OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
-        Assert.Empty(messages);
+        Assert.Single(messages);
+        Assert.Contains("Adaptive-radius coordination does not resolve Komet render-path overlap", messages[0]);
 
-        // Repeated joins stay quiet as well.
+        // Repeated joins are deduplicated for the session.
         OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
-        Assert.Empty(messages);
+        Assert.Single(messages);
 
         // ResetSession simulates leaving and rejoining world
         OptimumKometGuard.ResetSession();
         OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
-        Assert.Empty(messages);
+        Assert.Equal(2, messages.Count);
+    }
+
+    [Fact]
+    public void NotifyPlayerOnJoin_StillReportsOverlapWhenRenderGuardIsDisabled()
+    {
+        var messages = new List<string>();
+        OptimumConfig.KometDetected = true;
+        OptimumConfig.KometGuardEnabled = false;
+
+        OptimumKometGuard.NotifyPlayerOnJoin(msg => messages.Add(msg));
+
+        Assert.Single(messages);
+        Assert.Contains("render-path overlap", messages[0]);
+        Assert.Contains("render guard disabled", OptimumKometGuard.GetStatusLine());
     }
 
     private sealed class FakeModLoader : IModLoader
