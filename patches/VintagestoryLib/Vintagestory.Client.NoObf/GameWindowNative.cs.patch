@@ -1,0 +1,30 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs
+index 08ca0c1..c6f3b01 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GameWindowNative.cs
+@@ -20,13 +20,22 @@ public class GameWindowNative : GameWindow
+ 		//IL_00c0: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_00ca: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_00d0: Expected O, but got Unknown
+ 		//IL_00d0: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_00da: Expected O, but got Unknown
+-		GL.ClearColor(0f, 0f, 0f, 1f);
+-		GL.Clear((ClearBufferMask)16384);
+-		((IGraphicsContext)((NativeWindow)this).Context).SwapBuffers();
++		// Mono.Cecil transplant.
++		// This paints one black frame so the window is not transparent while the
++		// game loads. On the Vulkan path there is no GL binding and no context to
++		// swap, and the device that would clear the window does not exist yet -
++		// it is created against this window once the constructor returns. The
++		// first Vulkan present takes over the job.
++		if (!OptimumRender.NoGraphicsApiWindow)
++		{
++			GL.ClearColor(0f, 0f, 0f, 1f);
++			GL.Clear((ClearBufferMask)16384);
++			((IGraphicsContext)((NativeWindow)this).Context).SwapBuffers();
++		}
+ 		if (RuntimeEnv.OS == OS.Mac || RuntimeEnv.IsWaylandSession)
+ 		{
+ 			return;
+ 		}
+ 		try

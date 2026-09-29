@@ -1,8 +1,81 @@
 diff --git a/VSEssentials/Entities/EntityBlockFalling.cs b/VSEssentials/Entities/EntityBlockFalling.cs
-index 0615808..7f72be4 100644
+index 0615808..24b806d 100644
 --- a/VSEssentials/Entities/EntityBlockFalling.cs
 +++ b/VSEssentials/Entities/EntityBlockFalling.cs
-@@ -108,10 +108,12 @@ namespace Vintagestory.GameContent
+@@ -71,47 +71,63 @@ namespace Vintagestory.GameContent
+             plrPos = capi.World.Player.Entity.Pos.XYZ;
+ 
+             Vec3d curPos = new Vec3d();
+             
+ 
+-            foreach (var entity in fallingBlocks.Values)
++            // Optimum TAA (P4): falling blocks translate and tumble every frame, so
++            // each one keeps its own previous model matrix keyed on the entity - the
++            // renderer is shared by all of them, so it cannot be the identity. One
++            // window around the whole loop rather than one per block: the draw-buffer
++            // mask is the same for every draw in it. No-op when TAA is off.
++            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            try
+             {
+-                if (!IsRendered(entity)) continue;
+-                if (entity.meshRef == null)
++                foreach (var entity in fallingBlocks.Values)
+                 {
+-                    genMesh(entity);
+-                }
++                    if (!IsRendered(entity)) continue;
++                    if (entity.meshRef == null)
++                    {
++                        genMesh(entity);
++                    }
+ 
+-                Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs((int)entity.Pos.X, (int)entity.Pos.Y, (int)entity.Pos.Z);
+-                prog.RgbaLightIn = lightrgbs;
++                    Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs((int)entity.Pos.X, (int)entity.Pos.Y, (int)entity.Pos.Z);
++                    prog.RgbaLightIn = lightrgbs;
+ 
+-                curPos.Set(entity.Pos.X + entity.SelectionBox.X1, entity.Pos.Y + entity.SelectionBox.Y1, entity.Pos.Z + entity.SelectionBox.Z1);
++                    curPos.Set(entity.Pos.X + entity.SelectionBox.X1, entity.Pos.Y + entity.SelectionBox.Y1, entity.Pos.Z + entity.SelectionBox.Z1);
+ 
+-                float div = entity.Collided ? 4f : 1.5f;
++                    float div = entity.Collided ? 4f : 1.5f;
+ 
+-                double rotaccumThis = rotaccum + (entity.EntityId.GetHashCode() % 1000) / 1000f * GameMath.TWOPI;
++                    double rotaccumThis = rotaccum + (entity.EntityId.GetHashCode() % 1000) / 1000f * GameMath.TWOPI;
+ 
+-                prog.ModelMatrix = ModelMat
+-                    .Identity()
+-                    .Translate(
+-                        curPos.X - camPos.X + GameMath.Sin(capi.InWorldEllapsedMilliseconds / 120f + 30) / 20f / div,
+-                        curPos.Y - camPos.Y,
+-                        curPos.Z - camPos.Z + GameMath.Cos(capi.InWorldEllapsedMilliseconds / 110f + 20) / 20f / div
+-                    )
+-                    .RotateX((float)(Math.Sin(rotaccumThis * 10) / 10.0 / div))
+-                    .RotateZ((float)(Math.Cos(10 + rotaccumThis * 9.0) / 10.0 / div))
+-                    .Values
+-                ;
++                    prog.ModelMatrix = ModelMat
++                        .Identity()
++                        .Translate(
++                            curPos.X - camPos.X + GameMath.Sin(capi.InWorldEllapsedMilliseconds / 120f + 30) / 20f / div,
++                            curPos.Y - camPos.Y,
++                            curPos.Z - camPos.Z + GameMath.Cos(capi.InWorldEllapsedMilliseconds / 110f + 20) / 20f / div
++                        )
++                        .RotateX((float)(Math.Sin(rotaccumThis * 10) / 10.0 / div))
++                        .RotateZ((float)(Math.Cos(10 + rotaccumThis * 9.0) / 10.0 / div))
++                        .Values
++                    ;
+ 
+-                rapi.RenderMultiTextureMesh(entity.meshRef, "tex");
++                    OptimumStandardMotion.Apply(prog, entity, entity.meshRef, ModelMat.Values);
++                    rapi.RenderMultiTextureMesh(entity.meshRef, "tex");
++                }
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
+             }
+ 
              prog.Stop();
          }
  
@@ -15,7 +88,7 @@ index 0615808..7f72be4 100644
              int posz = entity.blockEntityAttributes?.GetInt("posz", entity.initialPos.Z) ?? entity.initialPos.Z;
              BlockEntity be = capi.World.BlockAccessor.GetBlockEntity(new BlockPos(posx, posy, posz));
  
-@@ -140,27 +142,35 @@ namespace Vintagestory.GameContent
+@@ -140,27 +156,35 @@ namespace Vintagestory.GameContent
                  }
  
                  entity.reusedMeshRef = true;

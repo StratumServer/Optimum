@@ -1,0 +1,80 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/PulverizerRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/PulverizerRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/PulverizerRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/PulverizerRenderer.cs
+@@ -50,7 +50,9 @@ public class PulverizerRenderer : MechBl
+ 	public PulverizerRenderer(ICoreClientAPI capi, MechanicalPowerMod mechanicalPowerMod, Block textureSoureBlock, CompositeShape shapeLoc)
+ 		: base(capi, mechanicalPowerMod)
+ 	{
+-		int count = 4000;
++		// 16 floats matrix, 4 floats light rgbs, plus the TAA writer's previous
++		// transform and metadata (Optimum P3, OptimumInstanceMotion).
++		int count = 200;
+ 		AssetLocation shapePath = new AssetLocation("shapes/block/wood/mechanics/pulverizer-moving.json");
+ 		Shape shape = Shape.TryGet(capi, shapePath);
+ 		Vec3f meshRotationDeg = new Vec3f(shapeLoc.rotateX, shapeLoc.rotateY + 90f, shapeLoc.rotateZ);
+@@ -76,16 +78,11 @@ public class PulverizerRenderer : MechBl
+ 		}
+ 	}
+ 
+-	private CustomMeshDataPartFloat createCustomFloats(int count)
++	// Optimum TAA (P3): the instance layout is OptimumInstanceMotion's, which adds
++	// the previous transform and the TAA metadata to vanilla's light and transform.
++	private CustomMeshDataPartFloat createCustomFloats(int instanceCapacity)
+ 	{
+-		CustomMeshDataPartFloat customMeshDataPartFloat = new CustomMeshDataPartFloat(count);
+-		customMeshDataPartFloat.Instanced = true;
+-		customMeshDataPartFloat.InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 };
+-		customMeshDataPartFloat.InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 };
+-		customMeshDataPartFloat.InterleaveStride = 80;
+-		customMeshDataPartFloat.StaticDraw = false;
+-		customMeshDataPartFloat.SetAllocationSize(count);
+-		return customMeshDataPartFloat;
++		return OptimumInstanceMotion.CreateInstanceFloats(instanceCapacity);
+ 	}
+ 
+ 	protected override void UpdateLightAndTransformMatrix(int index, Vec3f distToCamera, float rotation, IMechanicalPowerRenderable dev)
+@@ -188,15 +185,9 @@ public class PulverizerRenderer : MechBl
+ 		}
+ 		Mat4f.MulQuat(tmpMat, quat);
+ 		Mat4f.Translate(tmpMat, tmpMat, 0f - axis.X, 0f - axis.Y, 0f - axis.Z);
+-		int num = index * 20;
+-		values[num] = lightRgba.R;
+-		values[++num] = lightRgba.G;
+-		values[++num] = lightRgba.B;
+-		values[++num] = lightRgba.A;
+-		for (int i = 0; i < 16; i++)
+-		{
+-			values[++num] = tmpMat[i];
+-		}
++		// Optimum TAA (P3): light and this frame's transform as vanilla wrote them,
++		// plus the same device's previous transform for the motion writer.
++		OptimumInstanceMotion.WriteInstance(values, index, lightRgba, tmpMat);
+ 	}
+ 
+ 	public override void OnRenderFrame(float deltaTime, IShaderProgram prog)
+@@ -210,7 +201,7 @@ public class PulverizerRenderer : MechBl
+ 		UpdateCustomFloatBuffer();
+ 		if (quantityAxles > 0)
+ 		{
+-			matrixAndLightFloatsAxle.Count = quantityAxles * 20;
++			matrixAndLightFloatsAxle.Count = quantityAxles * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloatsAxle;
+ 			capi.Render.UpdateMesh(toggleMeshref, updateMesh);
+ 			capi.Render.RenderMeshInstanced(toggleMeshref, quantityAxles);
+@@ -221,14 +212,14 @@ public class PulverizerRenderer : MechBl
+ 			int num2 = quantityRPounders[j];
+ 			if (num > 0)
+ 			{
+-				matrixAndLightFloatsLPounder[j].Count = num * 20;
++				matrixAndLightFloatsLPounder[j].Count = num * OptimumInstanceMotion.InstanceFloats;
+ 				updateMesh.CustomFloats = matrixAndLightFloatsLPounder[j];
+ 				capi.Render.UpdateMesh(lPoundMeshrefs[j], updateMesh);
+ 				capi.Render.RenderMeshInstanced(lPoundMeshrefs[j], num);
+ 			}
+ 			if (num2 > 0)
+ 			{
+-				matrixAndLightFloatsRPounder[j].Count = num2 * 20;
++				matrixAndLightFloatsRPounder[j].Count = num2 * OptimumInstanceMotion.InstanceFloats;
+ 				updateMesh.CustomFloats = matrixAndLightFloatsRPounder[j];
+ 				capi.Render.UpdateMesh(rPounderMeshrefs[j], updateMesh);
+ 				capi.Render.RenderMeshInstanced(rPounderMeshrefs[j], num2);

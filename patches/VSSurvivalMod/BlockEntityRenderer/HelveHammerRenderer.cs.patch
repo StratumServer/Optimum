@@ -1,0 +1,32 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/HelveHammerRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/HelveHammerRenderer.cs
+index 6321a20..f9dbd1d 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/HelveHammerRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/HelveHammerRenderer.cs
+@@ -72,11 +72,26 @@ namespace Vintagestory.GameContent
+             {
+                 IStandardShaderProgram prog = rpi.PreparedStandardShader(pos.X, pos.Y, pos.Z);
+                 prog.ModelMatrix = ModelMat.Values;
+                 prog.ViewMatrix = rpi.CameraMatrixOriginf;
+                 prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+-                rpi.RenderMultiTextureMesh(meshref, "tex");
++
++                // Optimum TAA (P4): the helve hammer swings every frame it is
++                // powered, so the camera fallback would ghost the head across the
++                // screen. The renderer instance is the identity, the uploaded mesh
++                // the shape. The shadow branch below never opens a window: it runs
++                // a program with no motion output. No-op when TAA is off.
++                OptimumStandardMotion.Apply(prog, this, meshref, ModelMat.Values);
++                bool optimumMotionWrite = OptimumMotionWrite.Begin();
++                try
++                {
++                    rpi.RenderMultiTextureMesh(meshref, "tex");
++                }
++                finally
++                {
++                    if (optimumMotionWrite) OptimumMotionWrite.End();
++                }
+                 prog.Stop();
+ 
+                 AngleRad = be.Angle;
+             } else
+             {

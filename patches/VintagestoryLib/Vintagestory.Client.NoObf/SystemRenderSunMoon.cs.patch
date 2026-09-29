@@ -1,0 +1,116 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
+index ac7f262..cfb8ae6 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSunMoon.cs
+@@ -52,11 +52,11 @@ public class SystemRenderSunMoon : ClientSystem
+ 		MeshData customQuadModelData = QuadMeshUtilExt.GetCustomQuadModelData(0f, 0f, 0f, ImageSize, ImageSize, byte.MaxValue, byte.MaxValue, byte.MaxValue, byte.MaxValue);
+ 		customQuadModelData.Flags = new int[4];
+ 		quadModel = game.Platform.UploadMesh(customQuadModelData);
+ 		game.eventManager.RegisterRenderer(OnRenderFrame3D, EnumRenderStage.Opaque, Name, 0.3);
+ 		game.eventManager.RegisterRenderer(OnRenderFrame3DPost, EnumRenderStage.Opaque, Name, 999.0);
+-		GL.GenQueries(1, out occlQueryId);
++		occlQueryId = game.Platform.GenOcclusionQuery();
+ 	}
+ 
+ 	private void OnRenderFrame3DPost(float obj)
+ 	{
+ 		//IL_0052: Unknown result type (might be due to invalid IL or missing references)
+@@ -75,11 +75,11 @@ public class SystemRenderSunMoon : ClientSystem
+ 		ClientPlatformAbstract platform = game.Platform;
+ 		platform.GlEnableDepthTest();
+ 		platform.GlToggleBlend(on: true);
+ 		platform.GlDisableCullFace();
+ 		platform.GlDepthMask(flag: false);
+-		GL.ColorMask(false, false, false, false);
++		platform.GlColorMask(false, false, false, false);
+ 		Vec3f sunPosition = game.Calendar.SunPosition;
+ 		Quaternion val = CreateLookRotation(new Vector3(sunPosition.X, sunPosition.Y, sunPosition.Z));
+ 		sunmat = Matrix4.CreateTranslation((float)(-ImageSize / 2), (float)(-ImageSize), (float)(-ImageSize / 2)) * Matrix4.CreateScale(sunScale, sunScale * 7f, sunScale) * Matrix4.CreateFromQuaternion(val) * Matrix4.CreateTranslation(new Vector3(sunPosition.X, sunPosition.Y, sunPosition.Z));
+ 		ShaderProgramStandard standard = ShaderPrograms.Standard;
+ 		standard.Use();
+@@ -100,36 +100,33 @@ public class SystemRenderSunMoon : ClientSystem
+ 		standard.ViewMatrix = game.api.renderapi.CameraMatrixOriginf;
+ 		standard.ProjectionMatrix = game.api.renderapi.CurrentProjectionMatrix;
+ 		standard.Tex2D = suntextureId;
+ 		if (firstTickDone)
+ 		{
+-			int num = default(int);
+-			GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34919, out num);
+-			if (num > 0)
++			int num2 = default(int);
++			if (platform.TryGetOcclusionQueryResult(occlQueryId, out num2))
+ 			{
+-				int num2 = default(int);
+-				GL.GetQueryObject(occlQueryId, (GetQueryObjectParam)34918, out num2);
+ 				targetSunSpec = GameMath.Clamp((float)num2 / 1500f, 0f, 1f);
+ 				nowQuerying = false;
+ 			}
+ 		}
+ 		firstTickDone = true;
+ 		bool flag = false;
+ 		if (!nowQuerying)
+ 		{
+-			GL.BeginQuery((QueryTarget)35092, occlQueryId);
++			platform.BeginOcclusionQuery(occlQueryId);
+ 			nowQuerying = true;
+ 			flag = true;
+ 		}
+ 		platform.RenderMesh(quadModel);
+ 		standard.Stop();
+ 		if (flag)
+ 		{
+-			GL.EndQuery((QueryTarget)35092);
++			platform.EndOcclusionQuery(occlQueryId);
+ 		}
+ 		platform.GlDepthMask(flag: true);
+-		GL.ColorMask(true, true, true, true);
++		platform.GlColorMask(true, true, true, true);
+ 	}
+ 
+ 	public void OnRenderFrame3D(float dt)
+ 	{
+ 		ClientPlatformAbstract platform = game.Platform;
+@@ -207,11 +204,13 @@ public class SystemRenderSunMoon : ClientSystem
+ 		standard.AlphaTest = 0.01f;
+ 		standard.UniformMatrix("modelMatrix", ref sunmat);
+ 		standard.ViewMatrix = game.api.renderapi.CameraMatrixOriginf;
+ 		standard.ProjectionMatrix = game.api.renderapi.CurrentProjectionMatrix;
+ 		standard.Tex2D = suntextureId;
+-		platform.RenderMesh(quadModel);
++		// Optimum (Phase 3b stage 2): the visible sun through its seam; the neutral body is this
++		// RenderMesh. The occlusion-query probe in OnRenderFrame3DPost stays on RenderMesh.
++		platform.RenderSunQuad(quadModel, suntextureId);
+ 		standard.Uniform("skyShaded", 0);
+ 		standard.ExtraGodray = 0f;
+ 		standard.ApplySsao = 1;
+ 		standard.FadeFromSpheresFog = 0;
+ 		standard.Stop();
+@@ -266,11 +265,14 @@ public class SystemRenderSunMoon : ClientSystem
+ 		celestialobject.ExtraGodray = 0.5f;
+ 		celestialobject.UniformMatrix("modelMatrix", ref moonmat);
+ 		celestialobject.ViewMatrix = game.api.renderapi.CameraMatrixOriginf;
+ 		celestialobject.ProjectionMatrix = game.api.renderapi.CurrentProjectionMatrix;
+ 		celestialobject.Tex2D = moontextureIds[4];
+-		platform.RenderMesh(quadModel);
++		// Optimum (Phase 3b): the moon's draw goes through the platform's celestial seam, whose
++		// neutral body is this RenderMesh call. The sun's draw above keeps RenderMesh, because it
++		// runs under the shared "standard" program that the entity stage owns.
++		platform.RenderCelestialQuad(quadModel, moontextureIds[4], game.skyTextureId, game.skyGlowTextureId);
+ 		celestialobject.WeirdMathToMakeMoonLookNicer = 0;
+ 		celestialobject.Stop();
+ 		platform.GlToggleBlend(on: false);
+ 		platform.GlEnableDepthTest();
+ 	}
+@@ -420,11 +422,11 @@ public class SystemRenderSunMoon : ClientSystem
+ 		game.Platform.GLDeleteTexture(suntextureId);
+ 		for (int i = 0; i < moontextureIds.Length; i++)
+ 		{
+ 			game.Platform.GLDeleteTexture(moontextureIds[i]);
+ 		}
+-		GL.DeleteQuery(occlQueryId);
++		game.Platform.DeleteOcclusionQuery(occlQueryId);
+ 	}
+ 
+ 	public override EnumClientSystemType GetSystemType()
+ 	{
+ 		return EnumClientSystemType.Render;

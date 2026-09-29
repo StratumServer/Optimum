@@ -1,0 +1,251 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs
+index 815363d..03ca28a 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderProgramBase.cs
+@@ -109,103 +109,117 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+ 	{
+ 		int value = ScreenManager.Platform.GenSampler(isLinear);
+ 		customSamplers.Add(uniformName, value);
+ 	}
+ 
++	// Optimum (Vulkan-native plan, Phase 1A step 3): the uniform setters, texture binds
++	// and program lifecycle call the platform, which issues them on its backend.
++	// uniformLocations holds whatever the platform's GetUniformLocation handed out.
+ 	public void Uniform(string uniformName, float value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform1(uniformLocations[uniformName], value);
++		// Optimum TAA (P3): windWaveIntensity and waterWaveCounter are the two warp
++		// uniforms an entity draw overrides for itself, so the previous frame's
++		// values for them have to be remembered per entity rather than taken from
++		// the global previous warp state. One static bool read when TAA is off.
++		if (OptimumEntityMotion.Enabled) OptimumEntityMotion.NoteWarpUniform(uniformName, value);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], value);
+ 	}
+ 
+ 	public void Uniform(string uniformName, int count, float[] value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform1(uniformLocations[uniformName], count, value);
++		ScreenManager.Platform.SetUniformArray1(ProgramId, uniformLocations[uniformName], count, value);
+ 	}
+ 
+ 	public void Uniform(string uniformName, int value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform1(uniformLocations[uniformName], value);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], value);
+ 	}
+ 
+ 	public void Uniform(string uniformName, Vec2f value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform2(uniformLocations[uniformName], value.X, value.Y);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], value.X, value.Y);
+ 	}
+ 
+ 	public void Uniform(string uniformName, Vec2i value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform2(uniformLocations[uniformName], (float)value.X, (float)value.Y);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], (float)value.X, (float)value.Y);
+ 	}
+ 
+ 	public void Uniform(string uniformName, float valueX, float valueY)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform2(uniformLocations[uniformName], valueX, valueY);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], valueX, valueY);
+ 	}
+ 
+ 	public void Uniform(string uniformName, Vec3f value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform3(uniformLocations[uniformName], value.X, value.Y, value.Z);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], value.X, value.Y, value.Z);
+ 	}
+ 
+ 	public void Uniform(string uniformName, float valueX, float valueY, float valueZ)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform3(uniformLocations[uniformName], valueX, valueY, valueZ);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], valueX, valueY, valueZ);
+ 	}
+ 
+ 	public void Uniform(string uniformName, float valueX, float valueY, float valueZ, float valueW)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform4(uniformLocations[uniformName], valueX, valueY, valueZ, valueW);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], valueX, valueY, valueZ, valueW);
+ 	}
+ 
+ 	public void Uniform(string uniformName, Vec3i value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform3(uniformLocations[uniformName], value.X, value.Y, value.Z);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], value.X, value.Y, value.Z);
+ 	}
+ 
+ 	public void Uniforms2(string uniformName, int count, float[] values)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform2(uniformLocations[uniformName], count, values);
++		ScreenManager.Platform.SetUniformArray2(ProgramId, uniformLocations[uniformName], count, values);
+ 	}
+ 
+ 	public void Uniforms3(string uniformName, int count, float[] values)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform3(uniformLocations[uniformName], count, values);
++		ScreenManager.Platform.SetUniformArray3(ProgramId, uniformLocations[uniformName], count, values);
+ 	}
+ 
+ 	public void Uniform(string uniformName, Vec4f value)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform4(uniformLocations[uniformName], value.X, value.Y, value.Z, value.W);
++		ScreenManager.Platform.SetUniform(ProgramId, uniformLocations[uniformName], value.X, value.Y, value.Z, value.W);
+ 	}
+ 
+ 	public void Uniforms4(string uniformName, int count, float[] values)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.Uniform4(uniformLocations[uniformName], count, values);
++		ScreenManager.Platform.SetUniformArray4(ProgramId, uniformLocations[uniformName], count, values);
+ 	}
+ 
+ 	public void UniformMatrix(string uniformName, float[] matrix)
+ 	{
+ 		CheckShaderIsActive();
+-		GL.UniformMatrix4(uniformLocations[uniformName], 1, false, matrix);
++		// Optimum TAA (P3): the model matrix a draw is about to use, kept so the
++		// bone upload that follows can store it as that entity's previous model
++		// matrix. Recorded here because every entity renderer - the shared pass,
++		// the first-person hands, the echo chamber, any mod - sets it by this name
++		// through this one method.
++		if (OptimumEntityMotion.Enabled && uniformName == "modelMatrix") OptimumEntityMotion.NoteModelMatrix(matrix);
++		ScreenManager.Platform.SetUniformMatrix(ProgramId, uniformLocations[uniformName], matrix);
+ 	}
+ 
+ 	public void UniformMatrix(string uniformName, ref Matrix4 matrix)
+ 	{
+-		GL.UniformMatrix4(uniformLocations[uniformName], false, ref matrix);
++		ScreenManager.Platform.SetUniformMatrix(ProgramId, uniformLocations[uniformName], ref matrix);
+ 	}
+ 
+ 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+ 	protected void CheckShaderIsActive()
+ 	{
+@@ -220,47 +234,31 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+ 		return uniformLocations.ContainsKey(uniformName);
+ 	}
+ 
+ 	public void BindTexture2D(string samplerName, int textureId, int textureNumber)
+ 	{
+-		GL.Uniform1(uniformLocations[samplerName], textureNumber);
+-		GL.ActiveTexture((TextureUnit)(33984 + textureNumber));
+-		GL.BindTexture((TextureTarget)3553, textureId);
+-		if (customSamplers.TryGetValue(samplerName, out var value))
+-		{
+-			GL.BindSampler(textureNumber, value);
+-		}
+-		if (clampTToEdge)
+-		{
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
+-		}
++		ScreenManager.Platform.BindProgramTexture2D(this, samplerName, textureId, textureNumber);
+ 	}
+ 
+ 	public void BindTexture2D(string samplerName, int textureId)
+ 	{
+ 		BindTexture2D(samplerName, textureId, textureLocations[samplerName]);
+ 	}
+ 
+ 	public void BindTextureCube(string samplerName, int textureId, int textureNumber)
+ 	{
+-		GL.Uniform1(uniformLocations[samplerName], textureNumber);
+-		GL.ActiveTexture((TextureUnit)(33984 + textureNumber));
+-		GL.BindTexture((TextureTarget)34067, textureId);
+-		if (clampTToEdge)
+-		{
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, Convert.ToInt32((object)(TextureWrapMode)33071));
+-		}
++		ScreenManager.Platform.BindProgramTextureCube(this, samplerName, textureId, textureNumber);
+ 	}
+ 
+ 	public void UniformMatrices4x3(string uniformName, int count, float[] matrix)
+ 	{
+-		GL.UniformMatrix4x3(uniformLocations[uniformName], count, false, matrix);
++		ScreenManager.Platform.SetUniformMatrices4x3(ProgramId, uniformLocations[uniformName], count, matrix);
+ 	}
+ 
+ 	public void UniformMatrices(string uniformName, int count, float[] matrix)
+ 	{
+-		GL.UniformMatrix4(uniformLocations[uniformName], count, false, matrix);
++		ScreenManager.Platform.SetUniformMatrices(ProgramId, uniformLocations[uniformName], count, matrix);
+ 	}
+ 
+ 	public void Use()
+ 	{
+ 		if (CurrentShaderProgram != null && CurrentShaderProgram != this)
+@@ -269,11 +267,11 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+ 		}
+ 		if (disposed)
+ 		{
+ 			throw new InvalidOperationException("Can't use a disposed shader!");
+ 		}
+-		GL.UseProgram(ProgramId);
++		ScreenManager.Platform.UseShaderProgram(ProgramId);
+ 		CurrentShaderProgram = this;
+ 		DefaultShaderUniforms shaderUniforms = ScreenManager.Platform.ShaderUniforms;
+ 		if (includes.Contains("fogandlight.fsh"))
+ 		{
+ 			Uniform("zNear", shaderUniforms.ZNear);
+@@ -369,14 +367,14 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+ 		}
+ 	}
+ 
+ 	public void Stop()
+ 	{
+-		GL.UseProgram(0);
++		ScreenManager.Platform.UseShaderProgram(0);
+ 		for (int i = 0; i < customSamplers.Count; i++)
+ 		{
+-			GL.BindSampler(i, 0);
++			ScreenManager.Platform.BindSampler(i, 0);
+ 		}
+ 		foreach (KeyValuePair<string, UBORef> ubo in ubos)
+ 		{
+ 			ubo.Value.Unbind();
+ 		}
+@@ -388,29 +386,10 @@ public abstract class ShaderProgramBase : IShaderProgram, IDisposable
+ 		if (disposed)
+ 		{
+ 			return;
+ 		}
+ 		disposed = true;
+-		if (VertexShader != null)
+-		{
+-			GL.DetachShader(ProgramId, VertexShader.ShaderId);
+-			GL.DeleteShader(VertexShader.ShaderId);
+-		}
+-		if (FragmentShader != null)
+-		{
+-			GL.DetachShader(ProgramId, FragmentShader.ShaderId);
+-			GL.DeleteShader(FragmentShader.ShaderId);
+-		}
+-		if (GeometryShader != null)
+-		{
+-			GL.DetachShader(ProgramId, GeometryShader.ShaderId);
+-			GL.DeleteShader(GeometryShader.ShaderId);
+-		}
+-		foreach (KeyValuePair<string, int> customSampler in customSamplers)
+-		{
+-			GL.DeleteSampler(customSampler.Value);
+-		}
+-		GL.DeleteProgram(ProgramId);
++		ScreenManager.Platform.DisposeShaderProgram(this);
+ 	}
+ 
+ 	public abstract bool Compile();
+ }

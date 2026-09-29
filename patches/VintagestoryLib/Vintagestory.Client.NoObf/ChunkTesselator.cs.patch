@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-index 9592e54..d8731ca 100644
+index 42fad1f..55b8154 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -328,7 +328,22 @@ index 9592e54..d8731ca 100644
  			tCTCache.index3d = num5;
  			Vec3i normali = blockFacing.Normali;
  			num7 += normali.Y;
-@@ -1194,16 +1312,17 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -1043,10 +1161,14 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		}
+ 		else
+ 		{
+ 			vars.ColorMapData = defaultColorMapData;
+ 		}
++		// Optimum GTAO: carry an explicit per-block thin-occluder class in the
++		// non-wind colour-map spare bit. Cross quads stamp their own vertices so
++		// a shared snow-layer mesh remains solid.
++		vars.ColorMapData.Value = OptimumAoClass.Pack(vars.ColorMapData.Value, block);
+ 		if (block.DrawType == EnumDrawType.Liquid)
+ 		{
+ 			if (vars.posY == seaLevel - 1)
+ 			{
+ 				Block block2 = currentChunkFluidBlocksExt[vars.extIndex3d + TileSideEnum.MoveIndex[0]];
+@@ -1194,16 +1316,17 @@ public class ChunkTesselator : IMeshPoolSupplier
  	}
  
  	[MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -111,9 +111,33 @@ if [[ -f "$STAGE_DIR/optimum" ]]; then
     chmod +x "$STAGE_DIR/optimum"
 fi
 
-# 5. Shaders
-if [[ -d "$REPO_ROOT/sources/shaders" ]]; then
-    find "$REPO_ROOT/sources/shaders" -maxdepth 1 -type f -exec cp -f {} "$STAGE_DIR/assets/game/shaders/" \;
+# 5. Shaders and the includes they compile against. The TAA resolve, the liquid velocity
+# pass and every motion writer include the same files, so a shader that ships without its
+# include reads vectors nobody wrote: the two directories go together, and a source file
+# that never reached the staged assets fails the package.
+SHADER_SRC="$REPO_ROOT/sources/shaders"
+SHADER_DST="$STAGE_DIR/assets/game/shaders"
+SHADER_INC_SRC="$REPO_ROOT/sources/shaderincludes"
+SHADER_INC_DST="$STAGE_DIR/assets/game/shaderincludes"
+mkdir -p "$SHADER_INC_DST"
+if [[ -d "$SHADER_SRC" ]]; then
+    find "$SHADER_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_DST/" \;
+fi
+if [[ -d "$SHADER_INC_SRC" ]]; then
+    find "$SHADER_INC_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_INC_DST/" \;
+fi
+MISSING_SHADERS=""
+for pair in "$SHADER_SRC|$SHADER_DST" "$SHADER_INC_SRC|$SHADER_INC_DST"; do
+    src="${pair%%|*}"
+    dst="${pair##*|}"
+    [[ -d "$src" ]] || continue
+    while IFS= read -r -d '' f; do
+        [[ -f "$dst/$(basename "$f")" ]] || MISSING_SHADERS="$MISSING_SHADERS $f"
+    done < <(find "$src" -maxdepth 1 -type f -print0)
+done
+if [[ -n "$MISSING_SHADERS" ]]; then
+    echo "Error: shader source file(s) never reached the staged assets:$MISSING_SHADERS" >&2
+    exit 1
 fi
 
 # 6. Language strings

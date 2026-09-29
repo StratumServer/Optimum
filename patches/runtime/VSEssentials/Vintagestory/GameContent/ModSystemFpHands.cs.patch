@@ -1,0 +1,21 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/ModSystemFpHands.cs b/VSEssentials/Vintagestory/GameContent/ModSystemFpHands.cs
+--- a/VSEssentials/Vintagestory/GameContent/ModSystemFpHands.cs
++++ b/VSEssentials/Vintagestory/GameContent/ModSystemFpHands.cs
+@@ -40,6 +40,17 @@ public class ModSystemFpHands : ModSyste
+ 			}
+ 			fpModeHandShader.UBOs.Clear();
+ 			fpModeHandShader.UBOs["Animation"] = capi.Render.CreateUBO(fpModeHandShader, 0, "Animation", GlobalConstants.MaxAnimatedElements * 16 * 4);
++			// Optimum TAA (P3): this program is its own copy of entityanimated,
++			// so it needs its own copy of the previous-pose block too - the one
++			// ShaderProgramEntityanimated.initUbos creates belongs to the shared
++			// program and the clear above would have thrown it away anyway.
++			// The block only exists while TAA is on (TAAMOTION), which is what
++			// EffectiveTaa reports; asking for a block that is not declared is a
++			// GL error.
++			if (OptimumConfig.EffectiveTaa)
++			{
++				fpModeHandShader.UBOs["AnimationPrev"] = capi.Render.CreateUBO(fpModeHandShader, 1, "AnimationPrev", GlobalConstants.MaxAnimatedElements * 16 * 4);
++			}
+ 		}
+ 		return flag;
+ 	}

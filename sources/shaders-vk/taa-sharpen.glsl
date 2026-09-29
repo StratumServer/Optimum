@@ -1,0 +1,127 @@
+#version 450
+#if defined(OPTIMUM_VERTEX)
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_GOOGLE_include_directive : require
+// Native port of taa-sharpen.vsh (docs/vulkan.md).
+#include "bindings.glsl"
+#include "frame.glsl"
+#include "specialization.glsl"
+#elif defined(OPTIMUM_FRAGMENT)
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_GOOGLE_include_directive : require
+// Native port of taa-sharpen.fsh (docs/vulkan.md).
+//
+// Optimum TAA (P5): post-resolve sharpening.
+//
+// AMD FidelityFX Super Resolution 1 RCAS, adapted for a fragment pass exactly
+// as fsr-rcas.fsh is, with two differences that the TAA placement requires.
+// FidelityFX FSR 1 source carries the MIT license, AMD 2021.
+//
+//  1. The lobe strength is a uniform instead of the baked exp2(-0.2) constant,
+//     so OptimumConfig.TaaSharpness drives it. sharpness <= 0 is a TRUE bypass:
+//     the centre texel is returned untouched, bit for bit, without going
+//     through the filter or any clamp. That is what makes "TAA sharpen off"
+//     indistinguishable from not running the pass at all.
+//  2. This pass runs on the resolved HDR colour (RGBA16F), not on the LDR
+//     image RCAS normally finishes. Clamping the result to [0,1] the way
+//     fsr-rcas.fsh does would crush every highlight above 1, so only the
+//     lower bound is kept. RCAS's own lobe term already guards the upper end:
+//     above 1 its hitMaximum turns positive, the lobe clamps to 0 and such a
+//     pixel is passed through unsharpened rather than being driven anywhere.
+//
+// sharpness (record): 0 = bypass (see above), 1 = full RCAS strength. Mapped onto RCAS's own
+// attenuation in stops: sharpness 1 is 0 stops of attenuation, and the linear
+// factor in front takes the lobe continuously to zero as sharpness does, so
+// there is no step between "almost off" and the bypass.
+#include "bindings.glsl"
+#include "frame.glsl"
+#include "specialization.glsl"
+#else
+#error Select OPTIMUM_VERTEX or OPTIMUM_FRAGMENT
+#endif
+
+// Program interface of taa-sharpen (docs/vulkan.md). A fullscreen pass: one draw per
+// Use(), so the push block holds only the sampler slot and every other uniform is a record member.
+layout(push_constant, scalar) uniform OptimumDraw
+{
+    OPTIMUM_SAMPLER_SLOT(sampler2D, inputScene);
+};
+
+layout(set = OPTIMUM_SET_STORAGE, binding = OPTIMUM_BINDING_PROGRAM_RECORD, scalar) uniform OptimumProgram
+{
+    vec2 inputTexelSize;
+    float sharpness;
+};
+
+#if defined(OPTIMUM_VERTEX)
+
+
+// Optimum TAA (P5): the sharpen pass's vertex stage - the same fullscreen
+// triangle fsr-rcas.vsh generates from gl_VertexID, with no vertex inputs.
+
+layout(location = 0) out vec2 texCoord;
+
+void main(void)
+{
+	float x = -1.0 + float((gl_VertexIndex & 1) << 2);
+	float y = -1.0 + float((gl_VertexIndex & 2) << 1);
+	gl_Position = vec4(x, y, 0.0, 1.0);
+	texCoord = vec2((x + 1.0) * 0.5, (y + 1.0) * 0.5);
+
+	// GL clip depth [-w, w] to Vulkan's [0, w]: the statement ShaderRewriter appends to every GLSL 330 vertex stage.
+	gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;
+}
+
+#elif defined(OPTIMUM_FRAGMENT)
+
+
+layout(location = 0) in vec2 texCoord;
+
+layout(location = 0) out vec4 outColor;
+
+void main(void)
+{
+	vec4 center = texture(optimumTextures2D[inputScene], texCoord);
+	if (!(sharpness > 0.0))
+	{
+		outColor = center;
+		return;
+	}
+
+	vec3 b = texture(optimumTextures2D[inputScene], texCoord + vec2(0.0, -inputTexelSize.y)).rgb;
+	vec3 d = texture(optimumTextures2D[inputScene], texCoord + vec2(-inputTexelSize.x, 0.0)).rgb;
+	vec3 e = center.rgb;
+	vec3 f = texture(optimumTextures2D[inputScene], texCoord + vec2(inputTexelSize.x, 0.0)).rgb;
+	vec3 h = texture(optimumTextures2D[inputScene], texCoord + vec2(0.0, inputTexelSize.y)).rgb;
+
+	vec3 minimumRing = min(min(b, d), min(f, h));
+	vec3 maximumRing = max(max(b, d), max(f, h));
+	vec3 hitMinimum = min(minimumRing, e) / max(4.0 * maximumRing, vec3(1.0 / 65536.0));
+	vec3 hitMaximumDenominator = min(4.0 * minimumRing - vec3(4.0), vec3(-1.0 / 65536.0));
+	vec3 hitMaximum = (vec3(1.0) - max(maximumRing, e)) / hitMaximumDenominator;
+	vec3 lobeChannels = max(-hitMinimum, hitMaximum);
+	float lobe = max(-0.1875, min(max(max(lobeChannels.r, lobeChannels.g), lobeChannels.b), 0.0));
+	// Noise limiting (AMD FidelityFX RCAS, FSR_RCAS_DENOISE, which FSR 3 ships enabled):
+	// the centre's deviation from the mean of its four neighbours, over the ring's range,
+	// says how much of the local contrast is a lone pixel rather than an edge. A lone
+	// deviation gets half the lobe, an edge keeps all of it. Without it the sharpen
+	// multiplied the TAA-converged residual of the GTAO term 2.7x on flat faces (2026-09-17:
+	// per-pixel temporal std 0.24 -> 0.64 of 255) and drew it as grain.
+	float bL = b.b * 0.5 + (b.r * 0.5 + b.g);
+	float dL = d.b * 0.5 + (d.r * 0.5 + d.g);
+	float eL = e.b * 0.5 + (e.r * 0.5 + e.g);
+	float fL = f.b * 0.5 + (f.r * 0.5 + f.g);
+	float hL = h.b * 0.5 + (h.r * 0.5 + h.g);
+	float maxL = max(max(max(bL, dL), max(eL, fL)), hL);
+	float minL = min(min(min(bL, dL), min(eL, fL)), hL);
+	float nz = 0.25 * (bL + dL + fL + hL) - eL;
+	nz = clamp(abs(nz) / max(maxL - minL, 1.0 / 65536.0), 0.0, 1.0);
+	nz = -0.5 * nz + 1.0;
+	float strength = clamp(sharpness, 0.0, 1.0);
+	lobe *= nz * strength * exp2(-2.0 * (1.0 - strength));
+
+	vec3 sharpened = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);
+	outColor = vec4(max(sharpened, vec3(0.0)), center.a);
+}
+
+#endif

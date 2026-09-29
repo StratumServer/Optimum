@@ -20,6 +20,21 @@ public static class OptimumApiBridge
         ?? throw new MissingFieldException(typeof(FrustumCulling).FullName, "playerPos");
     private static int inventoryDirty = 1;
 
+    /// <summary>
+    /// Selects the texture that the final presentation pass is allowed to sample.
+    /// The sharpen target is valid only when this frame resolved TAA, sharpening is enabled,
+    /// and the target was actually produced. FSR owns sharpening and therefore always samples
+    /// the post-overlay Primary image instead.
+    /// </summary>
+    public static int SelectTaaPresentationTexture(
+        int primaryTexture, int sharpenedTexture, bool fsrActive, bool taaResolvedThisFrame,
+        float sharpness, bool sharpenTargetAvailable)
+    {
+        return fsrActive || !taaResolvedThisFrame || sharpness <= 0f || !sharpenTargetAvailable
+            ? primaryTexture
+            : sharpenedTexture;
+    }
+
     public static void RgbToHsvInts(int red, int green, int blue, int[] destination)
     {
         float k = 0f;

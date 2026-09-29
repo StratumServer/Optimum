@@ -204,6 +204,24 @@ after editing it. When troubleshooting world-generation problems, the four
 relevant keys are `ChunkReadPoolEnabled`, `ChunkReadPoolWorkers`,
 `ChunkDeserializeParallel`, and `ChunkDeserializeParallelMinY`.
 
+### Experimental Vulkan renderer
+
+The Vulkan backend is opt-in on this branch. Set `"Renderer": "vulkan"` in the
+active data path's `ModConfig/optimum.json` and restart the client. The startup
+log must contain `[Optimum] Vulkan renderer`; if Vulkan initialization fails,
+the client may reopen with OpenGL. Set `"Renderer": "opengl"` to return to the
+default backend.
+
+`"Taa": true` enables temporal antialiasing. With `"AmbientOcclusion": "auto"`,
+Vulkan selects GTAO while TAA is active and uses the game's SSAO otherwise;
+OpenGL continues to use the game's SSAO. The TAA sharpen runs after bloom, god
+rays and final composition. FSR 1's RCAS takes its place when FSR is active.
+GPU pass timings can be logged with `OPTIMUM_VULKAN_PASS_TIMES=1`; Vulkan
+validation can be enabled with `OPTIMUM_VULKAN_VALIDATION=1` and
+`OPTIMUM_VULKAN_VALIDATION_FEATURES=sync,best` when the validation layer is
+installed. See [Vulkan acceptance](docs/vulkan.md) for the renderer
+confirmation, parity and pacing procedures.
+
 ## Build
 
 ### Targeting a Vintage Story version

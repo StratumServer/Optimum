@@ -22,6 +22,7 @@ namespace Optimum.Tests;
 ///      call it and may retain the result), only the internal per-slot path reuses.
 /// Plus the config round-trip and the patch/patcher wiring.
 /// </summary>
+[Collection("OptimumConfig")]
 public class ItemRenderInfoReuseTests
 {
     private static string RepoRoot()
@@ -110,6 +111,7 @@ public class ItemRenderInfoReuseTests
         finally
         {
             OptimumConfig.ItemRenderInfoReuseEnabled = true;
+            OptimumConfig.SetDataPath(null);
             try { Directory.Delete(dir, true); } catch { }
         }
     }

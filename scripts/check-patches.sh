@@ -166,7 +166,7 @@ check_cecil_cross_reference() {
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.(Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
+  done < <(grep -oE '"Vintagestory\.(ClientNative|Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
   for rel in "${!cecil_owned[@]}"; do
     if [[ -z "${expected["$rel"]:-}" ]]; then
@@ -296,8 +296,7 @@ if [[ "$runtime_total" -gt 0 ]]; then
   # sibling of VANILLA_DIR). A developer who exports VANILLA_DIR to point at
   # an external/live Vintage Story install would otherwise silently validate
   # against a nonexistent or unrelated directory instead of the protected
-  # snapshot - the same isolation bug fixed for the Windows packaging path
-  # in scripts/package.ps1 (see research/runtime-donor-mismatch-investigation-2026-08-14.md).
+  # snapshot. Windows packaging uses the same pinned donor location.
   if VANILLA_DIR="${VANILLA_DIR:-$repo_root/.vanilla/win-x64/vintagestory}" \
       RUNTIME_DONOR_DIR="${RUNTIME_DONOR_DIR:-$repo_root/.vanilla/win-x64/runtime-donors}" \
       CONFIGURATION="${CONFIGURATION:-Release}" \

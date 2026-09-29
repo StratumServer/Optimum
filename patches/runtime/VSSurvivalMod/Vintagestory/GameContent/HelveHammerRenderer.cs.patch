@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/HelveHammerRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/HelveHammerRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/HelveHammerRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/HelveHammerRenderer.cs
+@@ -61,7 +61,24 @@ public class HelveHammerRenderer : IRend
+ 				standardShaderProgram.ModelMatrix = ModelMat.Values;
+ 				standardShaderProgram.ViewMatrix = render.CameraMatrixOriginf;
+ 				standardShaderProgram.ProjectionMatrix = render.CurrentProjectionMatrix;
+-				render.RenderMultiTextureMesh(meshref, "tex");
++				// Optimum TAA (P4): the helve hammer swings every frame it is
++				// powered, so the camera fallback would ghost the head across the
++				// screen. The renderer instance is the identity, the uploaded mesh
++				// the shape. The shadow branch below never opens a window: it runs
++				// a program with no motion output. No-op when TAA is off.
++				OptimumStandardMotion.Apply(standardShaderProgram, this, meshref, ModelMat.Values);
++				bool optimumMotionWrite = OptimumMotionWrite.Begin();
++				try
++				{
++					render.RenderMultiTextureMesh(meshref, "tex");
++				}
++				finally
++				{
++					if (optimumMotionWrite)
++					{
++						OptimumMotionWrite.End();
++					}
++				}
+ 				standardShaderProgram.Stop();
+ 				AngleRad = be.Angle;
+ 			}

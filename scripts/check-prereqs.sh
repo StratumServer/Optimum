@@ -17,6 +17,7 @@ checks=(
   "git|1|bootstrap.sh, extract-patches.sh, package-macos.ps1|apt-get install git"
   "perl|1|bootstrap.sh, extract-patches.sh|apt-get install perl"
   "python3|1|bootstrap.sh|apt-get install python3"
+  "numpy|0|scripts/dev/ssim.py, taa-rejection.py and their Optimum.Tests self-tests|apt-get install python3-numpy  (or: python3 -m pip install numpy)"
   "curl|1|bootstrap.sh, package-*.ps1|apt-get install curl"
   "tar|1|bootstrap.sh, package-*.ps1|apt-get install tar"
   "unzip|0|bootstrap.sh (zip archives; python3 fallback exists)|apt-get install unzip"
@@ -35,6 +36,17 @@ printf '%-14s %-10s %s\n' "----" "------" "-------"
 
 for entry in "${checks[@]}"; do
   IFS='|' read -r name required used hint <<< "$entry"
+  # numpy is a python module, not a command: probe it through python3.
+  if [[ "$name" == "numpy" ]]; then
+    if python3 -c "import numpy" >/dev/null 2>&1; then
+      printf '%-14s %s%-8s %s\n' "$name" "$(green OK)" "" "$used"
+    else
+      printf '%-14s %s%-2s %s\n' "$name" "$(yellow optional)" "" "$used"
+      printf '               %s %s\n' "$(yellow '→ install only if needed:')" "$hint"
+      missing_optional=$((missing_optional + 1))
+    fi
+    continue
+  fi
   if command -v "$name" >/dev/null 2>&1; then
     if [[ "$name" == "innoextract" ]]; then
       inno_version="$(innoextract --version 2>/dev/null | sed -n 's/^innoextract \([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1.\2/p' | head -n 1 || true)"

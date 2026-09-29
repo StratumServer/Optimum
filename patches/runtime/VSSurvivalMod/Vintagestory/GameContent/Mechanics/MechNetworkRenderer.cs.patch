@@ -1,0 +1,35 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechNetworkRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechNetworkRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechNetworkRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechNetworkRenderer.cs
+@@ -115,10 +115,27 @@ public class MechNetworkRenderer : IRend
+ 			prog.Uniform("fogDensityIn", capi.Render.FogDensity);
+ 			prog.UniformMatrix("projectionMatrix", capi.Render.CurrentProjectionMatrix);
+ 			prog.UniformMatrix("modelViewMatrix", capi.Render.CameraMatrixOriginf);
+-			for (int i = 0; i < MechBlockRenderer.Count; i++)
+-			{
+-				MechBlockRenderer[i].OnRenderFrame(deltaTime, prog);
+-			}
++			// Optimum TAA (P3): the previous camera for the motion writer, then the
++			// draw-buffer window that lets these draws into Primary's motion
++			// attachment. The window stays around this loop only - every draw inside
++			// it is the instanced program, which writes the attachment; a draw that
++			// does not write it would leave the previous surface's vector standing.
++			OptimumInstanceMotion.ApplyPassUniforms(prog);
++			bool optimumMotionWrite = OptimumMotionWrite.Begin();
++			try
++			{
++				for (int i = 0; i < MechBlockRenderer.Count; i++)
++				{
++					MechBlockRenderer[i].OnRenderFrame(deltaTime, prog);
++				}
++			}
++			finally
++			{
++				if (optimumMotionWrite)
++				{
++					OptimumMotionWrite.End();
++				}
++			}
+ 			prog.Stop();
+ 		}
+ 		capi.Render.GlEnableCullFace();

@@ -1,0 +1,29 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityPlayerShapeRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityPlayerShapeRenderer.cs
+--- a/VSEssentials/Vintagestory/GameContent/EntityPlayerShapeRenderer.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityPlayerShapeRenderer.cs
+@@ -297,7 +297,24 @@ public class EntityPlayerShapeRenderer :
+ 				fpModeHandShader.Uniform("depthOffset", -0.3f - GameMath.Max(0f, (float)capi.Settings.Int["fieldOfView"] / 90f - 1f) / 2f);
+ 				capi.Render.GlPushMatrix();
+ 				capi.Render.GlLoadMatrix(capi.Render.CameraMatrixOrigin);
+-				base.DoRender3DOpaqueBatched(dt, false);
++				// Optimum TAA (P3): the hands are drawn outside the shared
++				// entity pass, with their own program and their own FOV, so
++				// they open the motion-attachment window themselves. The view
++				// this draw belongs to is already recorded by the
++				// Set3DProjection above, which is what makes the writer pick
++				// the hand FOV's previous projection rather than the world's.
++				bool optimumMotionWrite = OptimumMotionWrite.Begin();
++				try
++				{
++					base.DoRender3DOpaqueBatched(dt, false);
++				}
++				finally
++				{
++					if (optimumMotionWrite)
++					{
++						OptimumMotionWrite.End();
++					}
++				}
+ 				capi.Render.GlPopMatrix();
+ 				fpModeHandShader.Stop();
+ 			}

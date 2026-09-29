@@ -1,0 +1,92 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
+index a9db192..c1e1a3a 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderParticles.cs
+@@ -127,15 +127,65 @@ public class SystemRenderParticles : ClientSystem, IAsyncParticleManager
+ 	public void OnRenderFrame3D(float deltaTime)
+ 	{
+ 		UpdateParticleFountain();
+ 		ShaderProgramParticlescube particlescube = ShaderPrograms.Particlescube;
+ 		particlescube.Use();
+-		game.Platform.GlToggleBlend(on: true);
+-		Render(1, deltaTime);
++		// Optimum TAA (P4): cube particles are the one particle class drawn on
++		// Primary, so they write the motion attachment themselves - the quad
++		// particles go into the Transparent target and get their reactive value
++		// from the OIT merge instead. The window has to be opened before
++		// GlToggleBlend, because that call is what forces replace blending onto
++		// the motion attachment (a blended vector belongs to neither surface).
++		// Everything here is a no-op with TAA off: BeginMotionWrite returns false
++		// and the shader preprocesses back to vanilla.
++		ClientPlatformAbstract optimumPlatform = game.Platform;
++		bool optimumMotionWrite = optimumPlatform != null && optimumPlatform.BeginMotionWrite();
++		try
++		{
++			game.Platform.GlToggleBlend(on: true);
++			if (optimumMotionWrite)
++			{
++				SetOptimumMotionUniforms(particlescube);
++			}
++			Render(1, deltaTime);
++		}
++		finally
++		{
++			if (optimumMotionWrite)
++			{
++				optimumPlatform.EndMotionWrite();
++			}
++		}
+ 		particlescube.Stop();
+ 	}
+ 
++	/// <summary>
++	/// Optimum TAA (P4): the previous-frame half of the cube-particle writer's
++	/// uniforms - the previous unjittered world projection and the previous
++	/// CameraMatrixOrigin, plus the render size, this frame's jitter, the camera
++	/// delta and the previous warp state that ApplyMotionUniforms carries.
++	///
++	/// The same set ChunkRenderer.SetOptimumMotionUniforms hands the terrain
++	/// writers; particle instance positions are camera-relative against
++	/// EntityPlayer.CameraPos, which is the origin cameraPosDelta is measured in,
++	/// so the previous position is truePos + cameraPosDelta exactly as for a
++	/// chunk vertex. No allocation: every value is a cached array or a scalar.
++	/// </summary>
++	private void SetOptimumMotionUniforms(IShaderProgram program)
++	{
++		OptimumTemporalFrame frame = OptimumTemporal.Frame;
++		if (program.HasUniform("prevProjectionMatrix"))
++		{
++			program.UniformMatrix("prevProjectionMatrix", frame.GetPrevProjection(EnumTemporalView.World));
++		}
++		if (program.HasUniform("prevModelViewMatrix"))
++		{
++			program.UniformMatrix("prevModelViewMatrix", frame.PrevCameraMatrixOrigin);
++		}
++		frame.ApplyMotionUniforms(program);
++	}
++
+ 	public void OnRenderFrame3DOIT(float deltaTime)
+ 	{
+ 		ShaderProgramParticlesquad particlesquad = ShaderPrograms.Particlesquad;
+ 		particlesquad.Use();
+ 		Render(0, deltaTime);
+@@ -157,12 +207,17 @@ public class SystemRenderParticles : ClientSystem, IAsyncParticleManager
+ 			((IShaderProgram)currentShaderProgram).UniformMatrix("modelViewMatrix", game.CurrentModelViewMatrix);
+ 			IParticlePool particlePool = mainthreadpools[poolindex];
+ 			IParticlePool particlePool2 = offthreadpools[poolindex];
+ 			particlePool.OnNewFrame(dt, game.EntityPlayer.CameraPos);
+ 			particlePool2.OnNewFrame(dt, game.EntityPlayer.CameraPos);
+-			game.Platform.RenderMeshInstanced(particlePool.Model, particlePool.QuantityAlive);
+-			game.Platform.RenderMeshInstanced(particlePool2.Model, particlePool2.QuantityAlive);
++			// Optimum (Phase 3b): the two pools' instanced draws go through the platform's
++			// particle seam, whose neutral body is the RenderMeshInstanced call it replaced. A
++			// native platform records the pass itself; the cube program samples nothing and the
++			// quad program's particleTex is never bound by the game, so the texture the seam
++			// carries is 0 and resolves to the bindless placeholder on both routes.
++			game.Platform.RenderParticles(particlePool.Model, particlePool.QuantityAlive, 0);
++			game.Platform.RenderParticles(particlePool2.Model, particlePool2.QuantityAlive, 0);
+ 			((IShaderProgram)currentShaderProgram).Stop();
+ 			game.GlPopMatrix();
+ 		}
+ 	}
+ 

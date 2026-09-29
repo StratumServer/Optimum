@@ -1,0 +1,44 @@
+diff --git a/VSEssentials/EntityRenderer/EntityShapeRenderer.cs b/VSEssentials/EntityRenderer/EntityShapeRenderer.cs
+index 83b9fc0..8cb8da5 100644
+--- a/VSEssentials/EntityRenderer/EntityShapeRenderer.cs
++++ b/VSEssentials/EntityRenderer/EntityShapeRenderer.cs
+@@ -522,19 +522,38 @@ namespace Vintagestory.GameContent
+                 prog.Uniform("normalShaded", renderInfo.NormalShaded ? 1 : 0);
+ 
+                 prog.UniformMatrix("projectionMatrix", rapi.CurrentProjectionMatrix);
+                 prog.UniformMatrix("viewMatrix", rapi.CameraMatrixOriginf);
+                 prog.UniformMatrix("modelMatrix", ItemModelMat.Values);
++
++                // Optimum TAA (P3): the held item's previous transform. The attachment
++                // point pose is the identity - one per hand, replaced whenever the
++                // animator is - and the item's mesh is the shape, so swapping the held
++                // stack voids the history instead of reprojecting the new item by the
++                // old one's motion. A no-op when TAA is off.
++                OptimumStandardMotion.Apply(prog, apap, renderInfo.ModelRef, ItemModelMat.Values);
+             }
+ 
+ 
+             if (!renderInfo.CullFaces)
+             {
+                 rapi.GlDisableCullFace();
+             }
+ 
+-            rapi.RenderMultiTextureMesh(renderInfo.ModelRef, samplername);
++            // Optimum TAA (P3): the standard shader writes motion vectors, so the
++            // motion attachment joins Primary's draw-buffer mask for this one draw.
++            // A narrow window, because the standard-shader users that are not
++            // instrumented must stay outside it.
++            bool optimumMotionWrite = !isShadowPass && OptimumMotionWrite.Begin();
++            try
++            {
++                rapi.RenderMultiTextureMesh(renderInfo.ModelRef, samplername);
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+ 
+             if (!isShadowPass) prog.Uniform("tempGlowMode", 0);
+             if (!renderInfo.CullFaces)
+             {
+                 rapi.GlEnableCullFace();

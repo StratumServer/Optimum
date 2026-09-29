@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..8414cd7 100644
+index bba43f6..18d1f36 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -18,45 +18,95 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -18,85 +18,107 @@ public class SystemRenderOITLayers : ClientSystem
  		public int RenderRange => 1;
  
  		public BeforeOIT(ICoreClientAPI capi)
@@ -57,7 +57,9 @@ index bba43f6..8414cd7 100644
 +				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Stop();
 +				program.Use();
 +				program.Uniform("OITreveal", 6);
-+				GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
++				// The accumulation sampler has no typed setter on IShaderProgram,
++				// so it is pointed at its unit directly.
++				ScreenManager.Platform.SetProgramSamplerUnit(program.ProgramId, "OITaccumulation", 7);
 +				program.Stop();
 +				programByName.Use();
 +				programByName.Uniform("liquidDepth", 4);
@@ -73,20 +75,7 @@ index bba43f6..8414cd7 100644
 +						return;
 +					}
 +				}
-+				DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
-+				GL.DrawBuffers(array2.Length, array2);
-+				GL.BlendFunc(0, (BlendingFactorSrc)774, (BlendingFactorDest)0);
-+				GL.BlendFunc(1, (BlendingFactorSrc)774, (BlendingFactorDest)0);
-+				GL.BlendFunc(3, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-+				GL.BlendFunc(4, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-+				GL.BlendFunc(5, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-+				float[] array3 = new float[4];
-+				float[] array4 = new float[4] { 1f, 1f, 1f, 1f };
-+				GL.ClearBuffer((ClearBuffer)6144, 0, array4);
-+				GL.ClearBuffer((ClearBuffer)6144, 1, array4);
-+				GL.ClearBuffer((ClearBuffer)6144, 3, array3);
-+				GL.ClearBuffer((ClearBuffer)6144, 4, array3);
-+				GL.ClearBuffer((ClearBuffer)6144, 5, array3);
++				ScreenManager.Platform.BeginOitAccumulation(currentTransparentfb);
 +			}
 +			catch (Exception e)
  			{
@@ -125,8 +114,11 @@ index bba43f6..8414cd7 100644
  
  		private void freeResources()
  		{
- 			GL.DeleteTexture(accumTextureId);
-@@ -65,11 +114,11 @@ public class SystemRenderOITLayers : ClientSystem
+-			GL.DeleteTexture(accumTextureId);
+-			GL.DeleteTexture(revealTextureId);
++			ScreenManager.Platform.GLDeleteTexture(accumTextureId);
++			ScreenManager.Platform.GLDeleteTexture(revealTextureId);
+ 			accumTextureId = 0;
  			revealTextureId = 0;
  		}
  
@@ -136,10 +128,41 @@ index bba43f6..8414cd7 100644
 +			try { freeResources(); } catch (Exception e) { SystemRenderOITLayers.DisableOptimumOit(capi, "OIT resource cleanup failed", e); }
  		}
  
++
  		private void rebuild()
  		{
  			freeResources();
-@@ -104,15 +153,24 @@ public class SystemRenderOITLayers : ClientSystem
+ 			transparentfb = capi.Render.FrameBuffers[1];
+-			int width = transparentfb.Width;
+-			int height = transparentfb.Height;
+-			GL.BindFramebuffer((FramebufferTarget)36160, transparentfb.FboId);
+-			revealTextureId = GL.GenTexture();
+-			GL.BindTexture((TextureTarget)3553, revealTextureId);
+-			GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32849, width, height, 0, (PixelFormat)6407, (PixelType)5121, (IntPtr)0);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9728);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
+-			GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
+-			accumTextureId = GL.GenTexture();
+-			GL.BindTexture((TextureTarget)35866, accumTextureId);
+-			GL.TexImage3D((TextureTarget)35866, 0, (PixelInternalFormat)34842, width, height, 3, 0, (PixelFormat)6408, (PixelType)5126, (IntPtr)0);
+-			GL.TexParameter((TextureTarget)35866, (TextureParameterName)10241, 9728);
+-			GL.TexParameter((TextureTarget)35866, (TextureParameterName)10240, 9728);
+-			GL.TexParameter((TextureTarget)35866, (TextureParameterName)10242, 33071);
+-			GL.TexParameter((TextureTarget)35866, (TextureParameterName)10243, 33071);
+-			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, revealTextureId, 0);
+-			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36067, accumTextureId, 0, 0);
+-			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36068, accumTextureId, 0, 1);
+-			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36069, accumTextureId, 0, 2);
++			// The reveal target and the three-layer accumulation array, attached to the
++			// transparent framebuffer at colour attachments 0 and 3-5.
++			ScreenManager.Platform.CreateOitTargets(transparentfb, layers, out revealTextureId, out accumTextureId);
+ 		}
+ 	}
+ 
+ 	public class AfterOIT : IRenderer, IDisposable
+ 	{
+@@ -104,15 +126,21 @@ public class SystemRenderOITLayers : ClientSystem
  
  		public int RenderRange => 1;
  
@@ -153,11 +176,8 @@ index bba43f6..8414cd7 100644
 +			if (SystemRenderOITLayers.optimumOitDisabled || revealTextureId == 0 || accumTextureId == 0) return;
 +			try
 +			{
-+				GL.ActiveTexture((TextureUnit)33990);
-+				GL.BindTexture((TextureTarget)3553, revealTextureId);
-+				GL.ActiveTexture((TextureUnit)33991);
-+				GL.BindTexture((TextureTarget)35866, accumTextureId);
-+				GL.ActiveTexture((TextureUnit)33984);
++				// Units 6 and 7, matching the sampler assignments BeforeOIT made.
++				ScreenManager.Platform.BindOitTextures(revealTextureId, accumTextureId);
 +			}
 +			catch (Exception e)
 +			{
@@ -169,7 +189,7 @@ index bba43f6..8414cd7 100644
  		public void Dispose()
  		{
  		}
-@@ -122,19 +180,50 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -122,19 +150,58 @@ public class SystemRenderOITLayers : ClientSystem
  
  	private static int accumTextureId;
  
@@ -177,20 +197,28 @@ index bba43f6..8414cd7 100644
  
 +	private static bool optimumOitDisabled;
 +
++	/// <summary>
++	/// Optimum (Vulkan-native render systems, Phase 3b): the OIT reveal target the merge
++	/// samples, for a native render system that binds textures by handle instead of by unit.
++	/// 0 when the OIT renderer is off or its targets are gone, which is the placeholder the
++	/// unit tables would have held.
++	/// </summary>
++	public static int OptimumOitRevealTexture => (optimumOitDisabled ? 0 : revealTextureId);
++
++	/// <summary>Optimum (Phase 3b): the OIT accumulation array, same contract.</summary>
++	public static int OptimumOitAccumTexture => (optimumOitDisabled ? 0 : accumTextureId);
++
 +	private static bool optimumOitFailureLogged;
 +
 +	private static void RestoreVanillaTransparentState()
 +	{
-+		DrawBuffersEnum[] vanillaBuffers = new DrawBuffersEnum[3]
++		// Back to the three attachments and blend state LoadFrameBuffer sets up for
++		// the vanilla transparent pass, through the same platform member it uses.
++		ClientPlatformAbstract platform = ScreenManager.Platform;
++		if (platform != null)
 +		{
-+			DrawBuffersEnum.ColorAttachment0,
-+			DrawBuffersEnum.ColorAttachment1,
-+			DrawBuffersEnum.ColorAttachment2
-+		};
-+		GL.DrawBuffers(vanillaBuffers.Length, vanillaBuffers);
-+		GL.BlendFunc(0, (BlendingFactorSrc)1, (BlendingFactorDest)1);
-+		GL.BlendFunc(1, (BlendingFactorSrc)0, (BlendingFactorDest)769);
-+		GL.BlendFunc(2, (BlendingFactorSrc)770, (BlendingFactorDest)771);
++			platform.ApplyTransparentPassBlendState();
++		}
 +	}
 +
 +	private static void DisableOptimumOit(ICoreClientAPI capi, string reason, Exception error = null)

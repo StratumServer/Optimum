@@ -1,0 +1,31 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledCageGearRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledCageGearRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledCageGearRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledCageGearRenderer.cs
+@@ -28,15 +28,9 @@ public class AngledCageGearRenderer : Me
+ 				modeldata.AddMeshData(modeldata2);
+ 			}
+ 		}
+-		modeldata.CustomFloats = (matrixAndLightFloats = new CustomMeshDataPartFloat(202000)
+-		{
+-			Instanced = true,
+-			InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 },
+-			InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 },
+-			InterleaveStride = 80,
+-			StaticDraw = false
+-		});
+-		modeldata.CustomFloats.SetAllocationSize(202000);
++		// 16 floats matrix, 4 floats light rgbs, and the TAA writer's previous
++		// transform and metadata beside them (Optimum P3, OptimumInstanceMotion).
++		modeldata.CustomFloats = (matrixAndLightFloats = OptimumInstanceMotion.CreateInstanceFloats(10100));
+ 		blockMeshRef = capi.Render.UploadMesh(modeldata);
+ 	}
+ 
+@@ -54,7 +48,7 @@ public class AngledCageGearRenderer : Me
+ 		UpdateCustomFloatBuffer();
+ 		if (quantityBlocks > 0)
+ 		{
+-			matrixAndLightFloats.Count = quantityBlocks * 20;
++			matrixAndLightFloats.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats;
+ 			capi.Render.UpdateMesh(blockMeshRef, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef, quantityBlocks);

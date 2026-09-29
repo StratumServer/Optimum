@@ -18,9 +18,21 @@
     <Project Path="VSSurvivalMod/VSSurvivalMod.csproj" />
     <Project Path="VSCreativeMod/VSCreativeMod.csproj" />
   </Folder>
+  <Folder Name="/Renderer/">
+    <!-- The Vulkan backend. Nothing in the game references it: the launcher
+         loads it reflectively and substitutes its VulkanClientPlatform, so
+         no vanilla assembly gains a reference to a renderer implementation.
+         See docs/vulkan.md. -->
+    <Project Path="Optimum.Render.Vulkan/Optimum.Render.Vulkan.csproj" />
+    <!-- Offline compiler for sources/shaders-vk: SPIR-V and shaders.manifest.json into
+         bin/<Configuration>/net10.0/shaders-vk, which make deploy and the packagers copy
+         beside the renderer. See docs/vulkan.md. -->
+    <Project Path="tools/shader-compiler/Optimum.Shaders.Compiler.csproj" />
+  </Folder>
   <Folder Name="/Tests/">
     <Project Path="Optimum.Tests/Optimum.Tests.csproj" />
     <Project Path="Optimum.Launcher.Tests/Optimum.Launcher.Tests.csproj" />
+    <Project Path="Optimum.Render.Vulkan.Tests/Optimum.Render.Vulkan.Tests.csproj" />
   </Folder>
   <Folder Name="/Launcher/">
     <!-- Runtime patcher: applies Cecil patches at launch, caches result.

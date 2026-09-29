@@ -1,0 +1,33 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledGearsBlockRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledGearsBlockRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledGearsBlockRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/AngledGearsBlockRenderer.cs
+@@ -20,15 +20,9 @@ public class AngledGearsBlockRenderer :
+ 		Vec3f meshRotationDeg = new Vec3f(shapeLoc.rotateX, shapeLoc.rotateY, shapeLoc.rotateZ);
+ 		capi.Tesselator.TesselateShape(textureSoureBlock, Shape.TryGet(capi, "shapes/block/wood/mechanics/angledgearbox-cage.json"), out var modeldata, meshRotationDeg);
+ 		capi.Tesselator.TesselateShape(textureSoureBlock, Shape.TryGet(capi, "shapes/block/wood/mechanics/angledgearbox-peg.json"), out var modeldata2, meshRotationDeg);
+-		modeldata2.CustomFloats = (floatsPeg = new CustomMeshDataPartFloat(202000)
+-		{
+-			Instanced = true,
+-			InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 },
+-			InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 },
+-			InterleaveStride = 80,
+-			StaticDraw = false
+-		});
+-		modeldata2.CustomFloats.SetAllocationSize(202000);
++		// 16 floats matrix, 4 floats light rgbs, and the TAA writer's previous
++		// transform and metadata beside them (Optimum P3, OptimumInstanceMotion).
++		modeldata2.CustomFloats = (floatsPeg = OptimumInstanceMotion.CreateInstanceFloats(10100));
+ 		modeldata.CustomFloats = (floatsCage = floatsPeg.Clone());
+ 		gearboxPeg = capi.Render.UploadMesh(modeldata2);
+ 		gearboxCage = capi.Render.UploadMesh(modeldata);
+@@ -62,8 +56,8 @@ public class AngledGearsBlockRenderer :
+ 		UpdateCustomFloatBuffer();
+ 		if (quantityBlocks > 0)
+ 		{
+-			floatsPeg.Count = quantityBlocks * 20;
+-			floatsCage.Count = quantityBlocks * 20;
++			floatsPeg.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
++			floatsCage.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = floatsPeg;
+ 			capi.Render.UpdateMesh(gearboxPeg, updateMesh);
+ 			updateMesh.CustomFloats = floatsCage;

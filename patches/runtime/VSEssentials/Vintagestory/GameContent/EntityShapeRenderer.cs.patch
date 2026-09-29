@@ -1,5 +1,4 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
-index acdf1b9..729e14d 100644
 --- a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
 @@ -1,16 +1,18 @@
@@ -22,7 +21,7 @@ index acdf1b9..729e14d 100644
  {
  	protected long listenerId;
  
-@@ -38,6 +40,46 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -38,6 +40,46 @@ public class EntityShapeRenderer : Entit
  
  	protected Vec4f lightrgbs;
  
@@ -69,7 +68,7 @@ index acdf1b9..729e14d 100644
  	protected float intoxIntensity;
  
  	public bool DoRenderHeldItem;
-@@ -130,10 +172,20 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -130,10 +172,20 @@ public class EntityShapeRenderer : Entit
  
  	public virtual TextureAtlasPosition this[string textureCode] => defaultTexSource[textureCode] ?? skinTexPos;
  
@@ -90,7 +89,7 @@ index acdf1b9..729e14d 100644
  		eagent = entity as EntityAgent;
  		DoRenderHeldItem = true;
  		glitchAffected = true;
-@@ -353,16 +405,43 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -363,16 +415,43 @@ public class EntityShapeRenderer : Entit
  	{
  		if (!entity.ShapeFresh)
  		{
@@ -120,13 +119,13 @@ index acdf1b9..729e14d 100644
 +		int lightZ = (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1);
 +		bool needsUpperSample = entity.SelectionBox.Y2 > 1f;
 +		if (TryUseOptimumLightSamples(lightX, lightY, lightZ, needsUpperSample, out lightrgbs))
- 		{
--			Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY + 1, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
--			if (lightRGBs.W > lightrgbs.W)
++		{
 +			OptimumDiagnostics.EntityLightBatch.Skip();
 +		}
 +		else
-+		{
+ 		{
+-			Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY + 1, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
+-			if (lightRGBs.W > lightrgbs.W)
 +			OptimumDiagnostics.EntityLightBatch.Hit();
 +			lightrgbs = capi.World.BlockAccessor.GetLightRGBs(lightX, lightY, lightZ);
 +			if (needsUpperSample)
@@ -140,7 +139,42 @@ index acdf1b9..729e14d 100644
  			}
  		}
  		if (meshRefOpaque == null)
-@@ -600,6 +679,7 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -528,12 +607,33 @@ public class EntityShapeRenderer : Entit
+ 			shaderProgram.UniformMatrix("projectionMatrix", render.CurrentProjectionMatrix);
+ 			shaderProgram.UniformMatrix("viewMatrix", render.CameraMatrixOriginf);
+ 			shaderProgram.UniformMatrix("modelMatrix", ItemModelMat.Values);
++			// Optimum TAA (P3): the held item's previous transform. The attachment
++			// point pose is the identity - one per hand, replaced whenever the
++			// animator is - and the item's mesh is the shape, so swapping the held
++			// stack voids the history instead of reprojecting the new item by the
++			// old one's motion. A no-op when TAA is off.
++			OptimumStandardMotion.Apply(shaderProgram, apap, renderInfo.ModelRef, ItemModelMat.Values);
+ 		}
+ 		if (!renderInfo.CullFaces)
+ 		{
+ 			render.GlDisableCullFace();
+ 		}
+-		render.RenderMultiTextureMesh(renderInfo.ModelRef, textureSampleName);
++		// Optimum TAA (P3): the standard shader writes motion vectors, so the
++		// motion attachment joins Primary's draw-buffer mask for this one draw.
++		// A narrow window, because the standard-shader users that are not
++		// instrumented must stay outside it.
++		bool optimumMotionWrite = !isShadowPass && OptimumMotionWrite.Begin();
++		try
++		{
++			render.RenderMultiTextureMesh(renderInfo.ModelRef, textureSampleName);
++		}
++		finally
++		{
++			if (optimumMotionWrite)
++			{
++				OptimumMotionWrite.End();
++			}
++		}
+ 		if (!isShadowPass)
+ 		{
+ 			shaderProgram.Uniform("tempGlowMode", 0);
+@@ -610,6 +710,7 @@ public class EntityShapeRenderer : Entit
  		if (!isSpectator && meshRefOpaque != null && entity.AnimManager?.Animator != null)
  		{
  			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
@@ -148,7 +182,7 @@ index acdf1b9..729e14d 100644
  			if (isShadowPass)
  			{
  				Mat4f.Mul(tmpMvMat, capi.Render.CurrentModelviewMatrix, ModelMat);
-@@ -612,7 +692,15 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -622,7 +723,15 @@ public class EntityShapeRenderer : Entit
  				currentActiveShader.Uniform("rgbaLightIn", lightrgbs);
  				currentActiveShader.Uniform("extraGlow", entity.Properties.Client.GlowLevel);
  				currentActiveShader.UniformMatrix("modelMatrix", ModelMat);
@@ -165,7 +199,7 @@ index acdf1b9..729e14d 100644
  				currentActiveShader.Uniform("addRenderFlags", AddRenderFlags);
  				currentActiveShader.Uniform("windWaveIntensity", (float)WindWaveIntensity);
  				currentActiveShader.Uniform("entityId", (int)entity.EntityId);
-@@ -630,7 +718,11 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -640,7 +749,11 @@ public class EntityShapeRenderer : Entit
  				float value2 = (float)(glitchAffected ? Math.Max(0.0, 1.0 - 2.5 * num) : 0.0);
  				currentActiveShader.Uniform("glitchEffectStrength", value2);
  			}
@@ -178,7 +212,7 @@ index acdf1b9..729e14d 100644
  			if (meshRefOpaque != null)
  			{
  				capi.Render.RenderMultiTextureMesh(meshRefOpaque, "entityTex");
-@@ -638,6 +730,103 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+@@ -648,6 +761,103 @@ public class EntityShapeRenderer : Entit
  		}
  	}
  

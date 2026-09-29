@@ -1,0 +1,46 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/TransmissionBlockRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/TransmissionBlockRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/TransmissionBlockRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/TransmissionBlockRenderer.cs
+@@ -28,24 +28,10 @@ public class TransmissionBlockRenderer :
+ 		meshRotationDeg = new Vec3f(shapeLoc.rotateX, shapeLoc.rotateY, shapeLoc.rotateZ);
+ 		Shape shape2 = Shape.TryGet(capi, compositeShape.Base.Clone().WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"));
+ 		capi.Tesselator.TesselateShape(textureSoureBlock, shape2, out var modeldata2, meshRotationDeg);
+-		modeldata.CustomFloats = (matrixAndLightFloats1 = new CustomMeshDataPartFloat(202000)
+-		{
+-			Instanced = true,
+-			InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 },
+-			InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 },
+-			InterleaveStride = 80,
+-			StaticDraw = false
+-		});
+-		modeldata.CustomFloats.SetAllocationSize(202000);
+-		modeldata2.CustomFloats = (matrixAndLightFloats2 = new CustomMeshDataPartFloat(202000)
+-		{
+-			Instanced = true,
+-			InterleaveOffsets = new int[5] { 0, 16, 32, 48, 64 },
+-			InterleaveSizes = new int[5] { 4, 4, 4, 4, 4 },
+-			InterleaveStride = 80,
+-			StaticDraw = false
+-		});
+-		modeldata2.CustomFloats.SetAllocationSize(202000);
++		// 16 floats matrix, 4 floats light rgbs, and the TAA writer's previous
++		// transform and metadata beside them (Optimum P3, OptimumInstanceMotion).
++		modeldata.CustomFloats = (matrixAndLightFloats1 = OptimumInstanceMotion.CreateInstanceFloats(10100));
++		modeldata2.CustomFloats = (matrixAndLightFloats2 = OptimumInstanceMotion.CreateInstanceFloats(10100));
+ 		blockMeshRef1 = capi.Render.UploadMesh(modeldata);
+ 		blockMeshRef2 = capi.Render.UploadMesh(modeldata2);
+ 	}
+@@ -69,11 +55,11 @@ public class TransmissionBlockRenderer :
+ 		UpdateCustomFloatBuffer();
+ 		if (quantityBlocks > 0)
+ 		{
+-			matrixAndLightFloats1.Count = quantityBlocks * 20;
++			matrixAndLightFloats1.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats1;
+ 			capi.Render.UpdateMesh(blockMeshRef1, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef1, quantityBlocks);
+-			matrixAndLightFloats2.Count = quantityBlocks * 20;
++			matrixAndLightFloats2.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+ 			updateMesh.CustomFloats = matrixAndLightFloats2;
+ 			capi.Render.UpdateMesh(blockMeshRef2, updateMesh);
+ 			capi.Render.RenderMeshInstanced(blockMeshRef2, quantityBlocks);

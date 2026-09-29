@@ -1,0 +1,57 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs b/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs
+--- a/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs
++++ b/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs
+@@ -75,23 +75,40 @@ public class ModSystemRenderFallingBlock
+ 		plrDim = capi.World.Player.Entity.Pos.Dimension;
+ 		plrPos = capi.World.Player.Entity.Pos.XYZ;
+ 		Vec3d vec3d = new Vec3d();
+-		foreach (EntityBlockFalling value in fallingBlocks.Values)
++		// Optimum TAA (P4): falling blocks translate and tumble every frame, so
++		// each one keeps its own previous model matrix keyed on the entity - the
++		// renderer is shared by all of them, so it cannot be the identity. One
++		// window around the whole loop rather than one per block: the draw-buffer
++		// mask is the same for every draw in it. No-op when TAA is off.
++		bool optimumMotionWrite = OptimumMotionWrite.Begin();
++		try
+ 		{
+-			if (IsRendered(value))
++			foreach (EntityBlockFalling value in fallingBlocks.Values)
+ 			{
+-				if (value.meshRef == null)
++				if (IsRendered(value))
+ 				{
+-					genMesh(value);
++					if (value.meshRef == null)
++					{
++						genMesh(value);
++					}
++					Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)value.Pos.X, (int)value.Pos.Y, (int)value.Pos.Z);
++					standardShaderProgram.RgbaLightIn = lightRGBs;
++					vec3d.Set(value.Pos.X + (double)value.SelectionBox.X1, value.Pos.Y + (double)value.SelectionBox.Y1, value.Pos.Z + (double)value.SelectionBox.Z1);
++					float num = (value.Collided ? 4f : 1.5f);
++					double num2 = rotaccum + (double)((float)(value.EntityId.GetHashCode() % 1000) / 1000f * ((float)Math.PI * 2f));
++					standardShaderProgram.ModelMatrix = ModelMat.Identity().Translate(vec3d.X - cameraPos.X + (double)(GameMath.Sin((float)capi.InWorldEllapsedMilliseconds / 120f + 30f) / 20f / num), vec3d.Y - cameraPos.Y, vec3d.Z - cameraPos.Z + (double)(GameMath.Cos((float)capi.InWorldEllapsedMilliseconds / 110f + 20f) / 20f / num)).RotateX((float)(Math.Sin(num2 * 10.0) / 10.0 / (double)num))
++						.RotateZ((float)(Math.Cos(10.0 + num2 * 9.0) / 10.0 / (double)num))
++						.Values;
++					OptimumStandardMotion.Apply(standardShaderProgram, value, value.meshRef, ModelMat.Values);
++					render.RenderMultiTextureMesh(value.meshRef, "tex");
+ 				}
+-				Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)value.Pos.X, (int)value.Pos.Y, (int)value.Pos.Z);
+-				standardShaderProgram.RgbaLightIn = lightRGBs;
+-				vec3d.Set(value.Pos.X + (double)value.SelectionBox.X1, value.Pos.Y + (double)value.SelectionBox.Y1, value.Pos.Z + (double)value.SelectionBox.Z1);
+-				float num = (value.Collided ? 4f : 1.5f);
+-				double num2 = rotaccum + (double)((float)(value.EntityId.GetHashCode() % 1000) / 1000f * ((float)Math.PI * 2f));
+-				standardShaderProgram.ModelMatrix = ModelMat.Identity().Translate(vec3d.X - cameraPos.X + (double)(GameMath.Sin((float)capi.InWorldEllapsedMilliseconds / 120f + 30f) / 20f / num), vec3d.Y - cameraPos.Y, vec3d.Z - cameraPos.Z + (double)(GameMath.Cos((float)capi.InWorldEllapsedMilliseconds / 110f + 20f) / 20f / num)).RotateX((float)(Math.Sin(num2 * 10.0) / 10.0 / (double)num))
+-					.RotateZ((float)(Math.Cos(10.0 + num2 * 9.0) / 10.0 / (double)num))
+-					.Values;
+-				render.RenderMultiTextureMesh(value.meshRef, "tex");
++			}
++		}
++		finally
++		{
++			if (optimumMotionWrite)
++			{
++				OptimumMotionWrite.End();
+ 			}
+ 		}
+ 		standardShaderProgram.Stop();

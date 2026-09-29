@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/BloomeryContentsRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/BloomeryContentsRenderer.cs
+index 130ea55..a981d67 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/BloomeryContentsRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/BloomeryContentsRenderer.cs
+@@ -68,11 +68,23 @@ namespace Vintagestory.GameContent
+                 .Translate(8 / 16f + pos.X - camPos.X, pos.Y - camPos.Y + voxelHeight / 32f, 8 / 16f + pos.Z - camPos.Z)
+                 .Values
+             ;
+             prog.ViewMatrix = rpi.CameraMatrixOriginf;
+             prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+-            rpi.RenderMesh(cubeModelRef);            
++            // Optimum TAA (P4): the contents sink as the bloomery burns down -
++            // voxelHeight drops, and the model matrix's Y translation with it - so
++            // the previous model matrix is worth keeping. No-op when TAA is off.
++            OptimumStandardMotion.Apply(prog, this, cubeModelRef, ModelMat.Values);
++            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            try
++            {
++                rpi.RenderMesh(cubeModelRef);
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+             prog.Stop();
+         }
+ 
+ 
+         public void Dispose()

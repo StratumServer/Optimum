@@ -1,0 +1,103 @@
+diff --git a/VSSurvivalMod/Systems/MechanicalPower/Renderer/CreativeRotorRenderer.cs b/VSSurvivalMod/Systems/MechanicalPower/Renderer/CreativeRotorRenderer.cs
+index c72a8ba..89fa069 100644
+--- a/VSSurvivalMod/Systems/MechanicalPower/Renderer/CreativeRotorRenderer.cs
++++ b/VSSurvivalMod/Systems/MechanicalPower/Renderer/CreativeRotorRenderer.cs
+@@ -41,12 +41,13 @@ namespace Vintagestory.GameContent.Mechanics
+             //blockMesh1.Rgba2 = null;
+             //blockMesh2.Rgba2 = null;
+             //blockMesh3.Rgba2 = null;
+             //blockMesh4.Rgba2 = null;
+ 
+-            int count = (16 + 4) * 2100;
+-            // 16 floats matrix, 4 floats light rgbs
++            // 16 floats matrix, 4 floats light rgbs, plus the TAA writer's previous
++            // transform and metadata (Optimum P3, OptimumInstanceMotion).
++            int count = 2100;
+             blockMesh1.CustomFloats = matrixAndLightFloats1 = createCustomFloats(count);
+             blockMesh2.CustomFloats = matrixAndLightFloats2 = createCustomFloats(count);
+             blockMesh3.CustomFloats = matrixAndLightFloats3 = createCustomFloats(count);
+             blockMesh4.CustomFloats = matrixAndLightFloats4 = createCustomFloats(count);
+             matrixAndLightFloats5 = createCustomFloats(count);
+@@ -55,22 +56,15 @@ namespace Vintagestory.GameContent.Mechanics
+             this.blockMeshRef2 = capi.Render.UploadMesh(blockMesh2);
+             this.blockMeshRef3 = capi.Render.UploadMesh(blockMesh3);
+             this.blockMeshRef4 = capi.Render.UploadMesh(blockMesh4);
+         }
+ 
+-        private CustomMeshDataPartFloat createCustomFloats(int count)
++        // Optimum TAA (P3): the instance layout is OptimumInstanceMotion's, which adds
++        // the previous transform and the TAA metadata to vanilla's light and transform.
++        private CustomMeshDataPartFloat createCustomFloats(int instanceCapacity)
+         {
+-            CustomMeshDataPartFloat result = new CustomMeshDataPartFloat(count)
+-            {
+-                Instanced = true,
+-                InterleaveOffsets = new int[] { 0, 16, 32, 48, 64 },
+-                InterleaveSizes = new int[] { 4, 4, 4, 4, 4 },
+-                InterleaveStride = 16 + 4 * 16,
+-                StaticDraw = false,
+-            };
+-            result.SetAllocationSize(count);
+-            return result;
++            return OptimumInstanceMotion.CreateInstanceFloats(instanceCapacity);
+         }
+ 
+         protected override void UpdateLightAndTransformMatrix(int index, Vec3f distToCamera, float rotation, IMechanicalPowerRenderable dev)
+         {
+             float rot1 = dev.AngleRad;
+@@ -154,47 +148,40 @@ namespace Vintagestory.GameContent.Mechanics
+ 
+             Mat4f.MulQuat(tmpMat, quat);
+ 
+             Mat4f.Translate(tmpMat, tmpMat, -axis.X, -axis.Y, -axis.Z);
+ 
+-            int j = index * 20;
+-            values[j] = lightRgba.R;
+-            values[++j] = lightRgba.G;
+-            values[++j] = lightRgba.B;
+-            values[++j] = lightRgba.A;
+-
+-            for (int i = 0; i < 16; i++)
+-            {
+-                values[++j] = tmpMat[i];
+-            }
++            // Optimum TAA (P3): light and this frame's transform as vanilla wrote them,
++            // plus the same device's previous transform for the motion writer.
++            OptimumInstanceMotion.WriteInstance(values, index, lightRgba, tmpMat);
+         }
+ 
+         public override void OnRenderFrame(float deltaTime, IShaderProgram prog)
+         {
+             UpdateCustomFloatBuffer();
+ 
+             if (quantityBlocks > 0)
+             {
+-                matrixAndLightFloats1.Count = quantityBlocks * 20;
++                matrixAndLightFloats1.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats1;
+                 capi.Render.UpdateMesh(blockMeshRef1, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef1, quantityBlocks);
+-                matrixAndLightFloats2.Count = quantityBlocks * 20;
++                matrixAndLightFloats2.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats2;
+                 capi.Render.UpdateMesh(blockMeshRef2, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef2, quantityBlocks);
+-                matrixAndLightFloats3.Count = quantityBlocks * 20;
++                matrixAndLightFloats3.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats3;
+                 capi.Render.UpdateMesh(blockMeshRef3, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef3, quantityBlocks);
+ 
+                 //Sub elements 4 and 5 are the two spinbar balls, each has the exact same mesh (blockMeshRef4) but a different transform
+-                matrixAndLightFloats4.Count = quantityBlocks * 20;
++                matrixAndLightFloats4.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats4;
+                 capi.Render.UpdateMesh(blockMeshRef4, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef4, quantityBlocks);
+-                matrixAndLightFloats5.Count = quantityBlocks * 20;
++                matrixAndLightFloats5.Count = quantityBlocks * OptimumInstanceMotion.InstanceFloats;
+                 updateMesh.CustomFloats = matrixAndLightFloats5;
+                 capi.Render.UpdateMesh(blockMeshRef4, updateMesh);
+                 capi.Render.RenderMeshInstanced(blockMeshRef4, quantityBlocks);
+             }
+         }

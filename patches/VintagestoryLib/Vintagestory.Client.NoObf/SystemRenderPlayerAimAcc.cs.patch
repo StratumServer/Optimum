@@ -1,0 +1,42 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerAimAcc.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerAimAcc.cs
+index 46eb353..f15c56e 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerAimAcc.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerAimAcc.cs
+@@ -44,28 +44,32 @@ public class SystemRenderPlayerAimAcc : ClientSystem
+ 			game.GlTranslate(game.Width / 2, game.Height / 2, 50.0);
+ 			float num = Math.Max(0.01f, 1f - game.EntityPlayer.Attributes.GetFloat("aimingAccuracy"));
+ 			float num2 = 800f * num;
+ 			game.GlScale(num2, num2, 0.0);
+ 			game.guiShaderProg.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(aimRectangleRef);
++			// Optimum (Vulkan-native render systems, Phase 3b decision 5 stage 2): the draw is a
++			// seam, so a native platform records this pass itself. The neutral body is the
++			// RenderMesh call it replaced; the line width and the blend state are the ones this
++			// method just set, passed on rather than read back off tracked GL state.
++			game.Platform.RenderOverlayLines(aimRectangleRef, 0, 0.5f, blend: true);
+ 			game.GlPopMatrix();
+ 			game.Platform.GLLineWidth(1f);
+ 			game.GlPushMatrix();
+ 			game.GlTranslate(game.Width / 2, game.Height / 2, 50.0);
+ 			game.GlScale(20.0, 20.0, 0.0);
+ 			game.GlTranslate(0.0, -10f * num + 0.5f, 0.0);
+ 			game.guiShaderProg.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(aimLinesRef[0]);
++			game.Platform.RenderOverlayLines(aimLinesRef[0], 0, 1f, blend: true);
+ 			game.GlTranslate(0.0, 20f * num - 1f, 0.0);
+ 			game.guiShaderProg.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(aimLinesRef[1]);
++			game.Platform.RenderOverlayLines(aimLinesRef[1], 0, 1f, blend: true);
+ 			game.GlTranslate(-10f * num + 0.5f, -10f * num + 0.5f, 0.0);
+ 			game.guiShaderProg.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(aimLinesRef[2]);
++			game.Platform.RenderOverlayLines(aimLinesRef[2], 0, 1f, blend: true);
+ 			game.GlTranslate(20f * num - 1f, 0.0, 0.0);
+ 			game.guiShaderProg.ModelViewMatrix = game.CurrentModelViewMatrix;
+-			game.Platform.RenderMesh(aimLinesRef[3]);
++			game.Platform.RenderOverlayLines(aimLinesRef[3], 0, 1f, blend: true);
+ 			game.GlPopMatrix();
+ 		}
+ 	}
+ 
+ 	public void GenAim()

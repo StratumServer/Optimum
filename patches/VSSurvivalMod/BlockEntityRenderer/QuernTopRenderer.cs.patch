@@ -1,0 +1,32 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/QuernTopRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/QuernTopRenderer.cs
+index 16752ee..4b40d3e 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/QuernTopRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/QuernTopRenderer.cs
+@@ -63,11 +63,26 @@ namespace Vintagestory.GameContent
+                 .Values
+             ;
+ 
+             prog.ViewMatrix = rpi.CameraMatrixOriginf;
+             prog.ProjectionMatrix = rpi.CurrentProjectionMatrix;
+-            rpi.RenderMesh(meshref);
++
++            // Optimum TAA (P3): the quern top is the one block-entity model that
++            // really moves - it spins - so its previous model matrix is worth
++            // keeping. The renderer instance is the identity, the uploaded mesh the
++            // shape. The motion attachment joins Primary's draw-buffer mask for this
++            // one draw. Both are no-ops when TAA is off.
++            OptimumStandardMotion.Apply(prog, this, meshref, ModelMat.Values);
++            bool optimumMotionWrite = OptimumMotionWrite.Begin();
++            try
++            {
++                rpi.RenderMesh(meshref);
++            }
++            finally
++            {
++                if (optimumMotionWrite) OptimumMotionWrite.End();
++            }
+             prog.Stop();
+ 
+ 
+ 
+             if (ShouldRotateManual)

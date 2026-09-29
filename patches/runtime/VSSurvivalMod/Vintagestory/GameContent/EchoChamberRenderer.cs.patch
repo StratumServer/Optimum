@@ -1,0 +1,39 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/EchoChamberRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/EchoChamberRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/EchoChamberRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/EchoChamberRenderer.cs
+@@ -197,12 +197,29 @@ public class EchoChamberRenderer : Entit
+ 			capi.Render.GlPopMatrix();
+ 			if (meshRef1 != null)
+ 			{
+-				program.BindTexture2D("entityTex", echoTexture1.TextureId, 0);
+-				capi.Render.RenderMesh(meshRef1);
+-				program.BindTexture2D("entityTex", echoTexture2.TextureId, 0);
+-				capi.Render.RenderMesh(meshRef2);
+-				program.BindTexture2D("entityTex", echoTexture3.TextureId, 0);
+-				capi.Render.RenderMesh(meshRef3);
++				// Optimum TAA (P3): three meshes, one pose, one model matrix - and
++				// drawn from DoRender3DOpaque rather than the shared batched pass,
++				// so this renderer opens the motion-attachment window itself. The
++				// previous pose came from the Animation UBO update above; all three
++				// draws reuse it, which is exactly right because they share the
++				// transform.
++				bool optimumMotionWrite = OptimumMotionWrite.Begin();
++				try
++				{
++					program.BindTexture2D("entityTex", echoTexture1.TextureId, 0);
++					capi.Render.RenderMesh(meshRef1);
++					program.BindTexture2D("entityTex", echoTexture2.TextureId, 0);
++					capi.Render.RenderMesh(meshRef2);
++					program.BindTexture2D("entityTex", echoTexture3.TextureId, 0);
++					capi.Render.RenderMesh(meshRef3);
++				}
++				finally
++				{
++					if (optimumMotionWrite)
++					{
++						OptimumMotionWrite.End();
++					}
++				}
+ 			}
+ 			program.Stop();
+ 		}
