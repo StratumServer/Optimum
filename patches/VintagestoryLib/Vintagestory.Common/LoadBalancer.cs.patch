@@ -1,8 +1,18 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs b/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs
-index 66d9771..e70f22b 100644
+index 66d9771..7d1e18c 100644
 --- a/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs
 +++ b/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs
-@@ -32,11 +32,11 @@ internal class LoadBalancer
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Threading;
++using Optimum;
+ using Vintagestory.API.Common;
+ 
+ namespace Vintagestory.Common;
+ 
+ internal class LoadBalancer
+@@ -32,11 +33,11 @@ internal class LoadBalancer
  	{
  		Thread thread = TyronThreadPool.CreateDedicatedThread(delegate
  		{
@@ -15,3 +25,34 @@ index 66d9771..e70f22b 100644
  	}
  
  	internal void SynchroniseWorkToMainThread(object source)
+@@ -110,18 +111,30 @@ internal class LoadBalancer
+ 		}
+ 	}
+ 
+ 	internal void AwaitCompletionOnAllThreads(int threadsCount)
+ 	{
++		// Optimum: a worker that outlives this call is still enumerating
++		// PhysicsManager.ClientList, so the next tick must not reuse it.
++		bool joined = true;
+ 		long num = Environment.TickCount + 1000;
+ 		SpinWait spinWait = default(SpinWait);
+ 		while (Interlocked.CompareExchange(ref threadCompletionCounter, 0, threadsCount) != threadsCount)
+ 		{
+ 			spinWait.SpinOnce();
+ 			if (Environment.TickCount > num)
+ 			{
++				joined = false;
+ 				break;
+ 			}
+ 		}
++		if (joined)
++		{
++			PhysicsListReuseGuard.MarkJoinComplete();
++		}
++		else
++		{
++			PhysicsListReuseGuard.MarkJoinIncomplete();
++		}
+ 		threadCompletionCounter = 0;
+ 	}
+ }
