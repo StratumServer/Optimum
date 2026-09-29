@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Text;
 using Vintagestory.API.Client;
@@ -84,7 +85,6 @@ public class OptimumStatusModSystem : ModSystem
         CommandArgumentParsers parsers = api.ChatCommands.Parsers;
         api.ChatCommands.GetOrCreate("optimum")
             .WithDescription(Lang.Get("optimum-cmd-description"))
-            .RequiresPrivilege(Privilege.chat)
             .BeginSubCommand("stutterwatch")
                 .WithDescription("Toggle per-frame stutter diagnostics: logs an Optimum subsystem breakdown for every frame at or above the given threshold (ms, default 25) to the client log")
                 .WithArgs(parsers.OptionalInt("thresholdMs", 25))
@@ -102,7 +102,13 @@ public class OptimumStatusModSystem : ModSystem
             .EndSubCommand()
             .BeginSubCommand("status")
                 .WithDescription(Lang.Get("optimum-cmd-status"))
-                .HandleWith(_ => TextCommandResult.Success(BuildStatus()))
+                .HandleWith(_ =>
+                {
+                    string status = BuildStatus();
+                    api.Logger.Notification("[Optimum] Full status requested:\n" + status);
+                    api.ShowChatMessage(EscapeChatMarkup(status));
+                    return new TextCommandResult { Status = EnumCommandStatus.Success };
+                })
             .EndSubCommand()
             .BeginSubCommand("reset")
                 .WithDescription(Lang.Get("optimum-cmd-reset"))
@@ -396,6 +402,12 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetAnimBlockSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
+    }
+
+    private static string EscapeChatMarkup(string text)
+    {
+        return text.Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal);
     }
 
     private static void LogFeatureStatus(ICoreClientAPI api)
