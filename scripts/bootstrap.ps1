@@ -1104,11 +1104,10 @@ try {
     $vsEntryCsproj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
     Update-FileInPlace $vsEntryCsproj {
         param($t)
-        $t = $t -creplace '<Reference Include="VintagestoryLib">', '<ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj">'
-        $t = [regex]::Replace($t, '<HintPath>[^<]*VintagestoryLib.dll</HintPath>', '')
-        $t = $t -creplace '</Reference>', '</ProjectReference>'
+        $t = [regex]::Replace($t, '<Reference Include="VintagestoryLib">(?s:.*?)</Reference>', '<ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />')
         $t
     }
+    $null = [xml](Get-Content -LiteralPath $vsEntryCsproj -Raw)
 
     # 6h: Restore serialization metadata lost by ILSpy.
     # ILSpy fails to decode attribute arguments for JsonObject(MemberSerialization.OptIn) and
