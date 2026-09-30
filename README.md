@@ -54,7 +54,7 @@ Optimum compiles from source because Vintage Story is proprietary. The first bui
 
 `Optimum.Installer` is a cross-platform Avalonia wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build.
 
-The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.18-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.18-linux-x64-Installer.AppImage`). The macOS builds are archival only. Nothing is code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first run; on macOS the installer runs from a source build.
+The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.19-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.19-linux-x64-Installer.AppImage`). The macOS builds are archival only. Nothing is code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first run; on macOS the installer runs from a source build.
 
 When a GitHub release is published, `release-overlay.yml` builds native Linux and Windows overlays and attaches each archive with its matching `optimum-manifest-<rid>.json`. RiftLauncher uses the manifest for that platform to verify the archive and every staged file before patching a game installation.
 
@@ -99,8 +99,8 @@ The installer shows a ✓/✗ checklist of required tools, offers to install any
 git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 make package-appimage
-chmod +x Optimum-v0.3.18-linux-x64.AppImage
-./Optimum-v0.3.18-linux-x64.AppImage
+chmod +x Optimum-v0.3.19-linux-x64.AppImage
+./Optimum-v0.3.19-linux-x64.AppImage
 ```
 
 If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/`.
@@ -164,7 +164,7 @@ The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story inst
 ```powershell
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.3.18-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.3.19-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
@@ -249,9 +249,9 @@ make package-win          # Windows zip (native Windows or off-platform with inn
 Or call the scripts directly:
 
 ```bash
-./scripts/package-linux.sh                     # Optimum-v0.3.18-linux-x64.tar.gz
+./scripts/package-linux.sh                     # Optimum-v0.3.19-linux-x64.tar.gz
 ./scripts/package-linux.sh --format zip
-./scripts/package-linux.sh --format appimage   # Optimum-v0.3.18-linux-x64.AppImage
+./scripts/package-linux.sh --format appimage   # Optimum-v0.3.19-linux-x64.AppImage
 ./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
 ./scripts/package-macos.sh --arch x64          # Intel .dmg
 ./scripts/package-all.sh                       # all capable targets at once

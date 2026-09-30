@@ -839,9 +839,8 @@ python3 "$script_dir/fix-base-ctor-calls.py" "$repo_root/build/VintagestoryLib" 
 # The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
 vs_entry_csproj="$repo_root/build/Vintagestory/Vintagestory.csproj"
 if [[ -f "$vs_entry_csproj" ]]; then
-  perl -pi -e 's|<Reference Include="VintagestoryLib">|<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj">|' "$vs_entry_csproj"
-  perl -pi -e 's|<HintPath>[^<]*VintagestoryLib\.dll</HintPath>||' "$vs_entry_csproj"
-  perl -pi -e 's|</Reference>|</ProjectReference>|' "$vs_entry_csproj"
+  perl -0pi -e 's{<Reference Include="VintagestoryLib">.*?</Reference>}{<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj" />}s' "$vs_entry_csproj"
+  python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$vs_entry_csproj"
 fi
 
 # 6h: Restore serialization metadata lost by ILSpy.

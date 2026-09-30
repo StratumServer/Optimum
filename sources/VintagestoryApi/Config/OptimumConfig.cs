@@ -23,7 +23,7 @@ public static class OptimumConfig
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
     /// </summary>
-    public const string Version = "0.3.18";
+    public const string Version = "0.3.19";
 
     public static bool RepulsionGateEnabled = true;
     public static int RepulsionDistance = 64;
