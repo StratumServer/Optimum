@@ -1,3 +1,4 @@
+using System.Linq;
 using Vintagestory.API.Config;
 using Xunit;
 
@@ -110,5 +111,69 @@ public class OptimumDiagnosticsCountersTests
 
         OptimumDiagnostics.ResetTessellation();
         Assert.Contains("workers=0 [ids=]", OptimumDiagnostics.GetTessellationSummary());
+    }
+
+    [Fact]
+    public void BenchmarkMetricsAreVersionedStableAndNumeric()
+    {
+        Assert.Equal(2, OptimumDiagnostics.BenchmarkMetricsSchemaVersion);
+
+        var first = OptimumDiagnostics.CaptureBenchmarkMetrics();
+        var second = OptimumDiagnostics.CaptureBenchmarkMetrics();
+
+        Assert.NotEmpty(first);
+        Assert.Equal(first.Keys.OrderBy(key => key), second.Keys.OrderBy(key => key));
+        Assert.All(first.Values, value => Assert.True(double.IsFinite(value)));
+        Assert.Contains("counters.EntityShadowCull.hits", first.Keys);
+        Assert.Contains("counters.EntityShadowCull.skips", first.Keys);
+        Assert.Contains("mesh.greedy.chunks.count", first.Keys);
+        Assert.Contains("mesh.chiselLod.tessellation.stopwatchTicks", first.Keys);
+        Assert.Contains("tessellation.chunksProcessed.count", first.Keys);
+        Assert.Contains("render.chunk.drawCalls.count", first.Keys);
+        Assert.Contains("worldgen.Terrain.elapsed.stopwatchTicks", first.Keys);
+        Assert.Contains("runtime.process.cpuTime.timeSpanTicks", first.Keys);
+        Assert.Contains("runtime.process.memory.workingSet.bytes", first.Keys);
+        Assert.Contains("runtime.process.memory.private.bytes", first.Keys);
+        Assert.Contains("runtime.gc.totalAllocated.bytes", first.Keys);
+        foreach (var name in OptimumDiagnostics.Counters.Keys)
+        {
+            Assert.Contains("counters." + name + ".hits", first.Keys);
+            Assert.Contains("counters." + name + ".skips", first.Keys);
+        }
+    }
+
+    [Fact]
+    public void BenchmarkMetricsReflectRecordedCounterAndTimingThenReset()
+    {
+        var counter = OptimumDiagnostics.EntityOutfitAnimatorCache;
+        OptimumDiagnostics.ResetChiselShadowCull();
+        counter.Reset();
+
+        try
+        {
+            counter.Hit();
+            counter.Skip();
+            OptimumDiagnostics.RecordChiselShadowCull(321);
+
+            var recorded = OptimumDiagnostics.CaptureBenchmarkMetrics();
+            Assert.Equal(1d, recorded["counters.EntityOutfitAnimatorCache.hits"]);
+            Assert.Equal(1d, recorded["counters.EntityOutfitAnimatorCache.skips"]);
+            Assert.Equal(1d, recorded["render.chiselShadowCull.calls.count"]);
+            Assert.Equal(321d, recorded["render.chiselShadowCull.elapsed.stopwatchTicks"]);
+
+            counter.Reset();
+            OptimumDiagnostics.ResetChiselShadowCull();
+
+            var reset = OptimumDiagnostics.CaptureBenchmarkMetrics();
+            Assert.Equal(0d, reset["counters.EntityOutfitAnimatorCache.hits"]);
+            Assert.Equal(0d, reset["counters.EntityOutfitAnimatorCache.skips"]);
+            Assert.Equal(0d, reset["render.chiselShadowCull.calls.count"]);
+            Assert.Equal(0d, reset["render.chiselShadowCull.elapsed.stopwatchTicks"]);
+        }
+        finally
+        {
+            counter.Reset();
+            OptimumDiagnostics.ResetChiselShadowCull();
+        }
     }
 }

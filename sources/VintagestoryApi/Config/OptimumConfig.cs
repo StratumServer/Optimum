@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.CompilerServices;
@@ -1062,6 +1063,12 @@ internal sealed class OptimumConfigData
 
 public static class OptimumDiagnostics
 {
+    /// <summary>
+    /// Version of the stable, numeric benchmark metrics contract. Bump when
+    /// metric keys or their meanings change.
+    /// </summary>
+    public const int BenchmarkMetricsSchemaVersion = 2;
+
     // Stratum-ported optimization counters (server-side ports)
     private static long _serverTickCount;
     private static long _collisionFastPathHits;
@@ -1442,6 +1449,153 @@ public static class OptimumDiagnostics
         long ticks = Interlocked.Read(ref _chiselShadowCullTicks);
         double elapsedMs = ticks * 1000.0 / Stopwatch.Frequency;
         return $"Optimum chisel shadow cull: calls={calls}, elapsedMs={elapsedMs:0.###}";
+    }
+
+    /// <summary>
+    /// Captures available numeric benchmark metrics on demand. Values are counts,
+    /// bytes, queue sizes, or raw Stopwatch ticks as indicated by stable key names;
+    /// <c>timing.stopwatchFrequencyHz</c> converts tick values to durations.
+    /// Metrics without instrumentation are omitted. Capture allocates only when
+    /// requested; existing counter recording and per-frame paths are unchanged.
+    /// </summary>
+    public static IReadOnlyDictionary<string, double> CaptureBenchmarkMetrics()
+    {
+        using Process process = Process.GetCurrentProcess();
+        process.Refresh();
+        var values = new Dictionary<string, double>(208, StringComparer.Ordinal)
+        {
+            ["timing.stopwatchFrequencyHz"] = Stopwatch.Frequency,
+            ["runtime.processorCount.count"] = Environment.ProcessorCount,
+            ["runtime.process.cpuTime.timeSpanTicks"] = process.TotalProcessorTime.Ticks,
+            ["runtime.process.threadCount.count"] = process.Threads.Count,
+            ["runtime.process.memory.workingSet.bytes"] = process.WorkingSet64,
+            ["runtime.process.memory.private.bytes"] = process.PrivateMemorySize64,
+            ["runtime.process.memory.virtual.bytes"] = process.VirtualMemorySize64,
+            ["runtime.gc.heap.bytes"] = GC.GetTotalMemory(forceFullCollection: false),
+            ["runtime.gc.totalAllocated.bytes"] = GC.GetTotalAllocatedBytes(precise: false),
+            ["runtime.gc.collections.gen0.count"] = GC.CollectionCount(0),
+            ["runtime.gc.collections.gen1.count"] = GC.CollectionCount(1),
+            ["runtime.gc.collections.gen2.count"] = GC.CollectionCount(2),
+            ["counters.stratum.serverTicks.count"] = Interlocked.Read(ref _serverTickCount),
+            ["counters.stratum.collisionFastPath.hits"] = Interlocked.Read(ref _collisionFastPathHits),
+            ["counters.stratum.collisionFastPath.skips"] = Interlocked.Read(ref _collisionFastPathSkips),
+            ["counters.stratum.pathNodePool.rents"] = Interlocked.Read(ref _pathNodePoolRents),
+            ["counters.stratum.pathNodePool.overflows"] = Interlocked.Read(ref _pathNodePoolOverflows),
+            ["counters.stratum.collectEntities.stridedSkips"] = Interlocked.Read(ref _collectEntitiesStridedSkips),
+            ["counters.stratum.mechPower.ticks"] = Interlocked.Read(ref _mechPowerTickCount),
+
+            ["mesh.chiselLod.blocks.count"] = Interlocked.Read(ref _chiselLodBlocks),
+            ["mesh.chiselLod.fullMeshContributions.count"] = Interlocked.Read(ref _chiselLodFullMeshContributions),
+            ["mesh.chiselLod.proxyMeshContributions.count"] = Interlocked.Read(ref _chiselLodProxyMeshContributions),
+            ["mesh.chiselLod.fallbackMeshContributions.count"] = Interlocked.Read(ref _chiselLodFallbackMeshContributions),
+            ["mesh.chiselLod.fullTriangles.count"] = Interlocked.Read(ref _chiselLodFullTriangles),
+            ["mesh.chiselLod.proxyTriangles.count"] = Interlocked.Read(ref _chiselLodProxyTriangles),
+            ["mesh.chiselLod.tessellation.stopwatchTicks"] = Interlocked.Read(ref _chiselLodTesselationTicks),
+            ["render.chiselShadowCull.calls.count"] = Interlocked.Read(ref _chiselShadowCullCalls),
+            ["render.chiselShadowCull.elapsed.stopwatchTicks"] = Interlocked.Read(ref _chiselShadowCullTicks),
+
+            ["mesh.greedy.chunks.count"] = Interlocked.Read(ref _greedyMeshChunks),
+            ["mesh.greedy.quads.count"] = Interlocked.Read(ref _greedyMeshQuads),
+            ["mesh.greedy.blocksConsumed.count"] = Interlocked.Read(ref _greedyMeshBlocksConsumed),
+
+            ["render.entityLightBatch.frames.count"] = Interlocked.Read(ref _entityLightBatchFrames),
+            ["render.entityLightBatch.samples.count"] = Interlocked.Read(ref _entityLightSamples),
+            ["render.entityLightBatch.preparedSamples.count"] = Interlocked.Read(ref _entityLightPreparedSamples),
+            ["render.entityLightBatch.chunkGroups.count"] = Interlocked.Read(ref _entityLightChunkGroups),
+            ["render.entityLightBatch.failedChunkGroups.count"] = Interlocked.Read(ref _entityLightFailedChunkGroups),
+            ["render.entityLightBatch.coordinateMismatches.count"] = Interlocked.Read(ref _entityLightCoordinateMismatches),
+            ["render.entityLightBatch.chunkInvalidations.count"] = Interlocked.Read(ref _entityLightChunkInvalidations),
+            ["render.entityLightBatch.lockBatches.count"] = Interlocked.Read(ref _entityLightLockBatches),
+            ["render.entityLightBatch.maxBatchSize.count"] = Interlocked.Read(ref _entityLightMaxBatchSize),
+            ["render.entityLightBatch.timedFrames.count"] = Interlocked.Read(ref _entityLightTimedFrames),
+            ["render.entityLightBatch.elapsed.stopwatchTicks"] = Interlocked.Read(ref _entityLightBatchTicks),
+            ["render.entityShaderStateCache.segments.count"] = Interlocked.Read(ref _entityShaderSegments),
+            ["render.entityShaderStateCache.uses.count"] = Interlocked.Read(ref _entityShaderUses),
+            ["render.entityShaderStateCache.uniformUploadsAvoided.count"] = Interlocked.Read(ref _entityShaderUniformUploadsAvoided),
+            ["render.entityShaderStateCache.uboLookupsAvoided.count"] = Interlocked.Read(ref _entityShaderUboLookupsAvoided),
+
+            ["render.animBlock.runs.count"] = Interlocked.Read(ref _animBlockRuns),
+            ["render.animBlock.elapsed.stopwatchTicks"] = Interlocked.Read(ref _animBlockTicks),
+            ["render.entityAnimation.matrixBuilds.elapsed.stopwatchTicks"] = Interlocked.Read(ref _entityAnimationMatrixTicks),
+
+            ["launch.frames.count"] = Interlocked.Read(ref _gameLaunchTaskFrames),
+            ["launch.tasks.count"] = Interlocked.Read(ref _gameLaunchTaskCount),
+            ["launch.tasks.elapsed.stopwatchTicks"] = Interlocked.Read(ref _gameLaunchTaskTicks),
+            ["launch.tasks.max.stopwatchTicks"] = Interlocked.Read(ref _gameLaunchTaskMaxTicks),
+            ["launch.queue.peakDepth.count"] = Interlocked.Read(ref _gameLaunchTaskPeakDepth),
+
+            ["render.chunk.frames.count"] = Interlocked.Read(ref _chunkRenderFrames),
+            ["render.chunk.drawCalls.count"] = Interlocked.Read(ref _chunkDrawCalls),
+            ["render.chunk.poolsRendered.count"] = Interlocked.Read(ref _chunkPoolsRendered),
+            ["render.chunk.poolsCulled.count"] = Interlocked.Read(ref _chunkPoolsCulled),
+            ["render.chunk.visibleGroups.count"] = Interlocked.Read(ref _chunkVisibleGroups),
+            ["render.chunk.frustumCull.elapsed.stopwatchTicks"] = Interlocked.Read(ref _chunkFrustumCullTicks),
+            ["render.chunk.window.samples.count"] = Interlocked.Read(ref _chunkWindowSampleCount),
+            ["render.chunk.window.drawCalls.count"] = Interlocked.Read(ref _chunkWindowDrawCallsTotal),
+            ["render.chunk.window.poolsRendered.count"] = Interlocked.Read(ref _chunkWindowPoolsRenderedTotal),
+            ["render.chunk.window.poolsCulled.count"] = Interlocked.Read(ref _chunkWindowPoolsCulledTotal),
+            ["render.chunk.window.visibleGroups.count"] = Interlocked.Read(ref _chunkWindowVisibleGroupsTotal),
+            ["render.chunk.window.frustumCull.elapsed.stopwatchTicks"] = Interlocked.Read(ref _chunkWindowFrustumCullTicksTotal),
+
+            ["render.chunkUpload.frames.count"] = Interlocked.Read(ref _chunkUploadFrames),
+            ["render.chunkUpload.bytes.count"] = Interlocked.Read(ref _chunkUploadBytes),
+            ["render.chunkUpload.calls.count"] = Interlocked.Read(ref _chunkUploadCalls),
+            ["render.chunkUpload.elapsed.stopwatchTicks"] = Interlocked.Read(ref _chunkUploadTicks),
+
+            ["tessellation.chunksProcessed.count"] = Interlocked.Read(ref _tessChunksProcessed),
+            ["tessellation.elapsed.stopwatchTicks"] = Interlocked.Read(ref _tessTotalTicks),
+            ["tessellation.queue.peakDepth.count"] = Interlocked.Read(ref _tessPeakQueueDepth),
+            ["tessellation.queue.currentDepth.count"] = Volatile.Read(ref _tessCurrentQueueDepth),
+            ["tessellation.readyToUpload.count"] = Interlocked.Read(ref _tessReadyToUploadCount),
+            ["tessellation.readyToUpload.elapsed.stopwatchTicks"] = Interlocked.Read(ref _tessReadyToUploadTicks),
+            ["tessellation.retries.count"] = Interlocked.Read(ref _tessRetryRequeueTotal),
+            ["tessellation.retries.worstPerChunk.count"] = Interlocked.Read(ref _tessRetryRequeueWorst),
+            ["tessellation.backpressure.count"] = Interlocked.Read(ref _tessBackpressureCount),
+            ["tessellation.handoff.capacity.count"] = Interlocked.Read(ref _tessHandoffCapacity),
+            ["tessellation.handoff.peakReserved.count"] = Interlocked.Read(ref _tessHandoffPeak),
+            ["tessellation.workers.registered.count"] = GetTessWorkerCount(),
+
+            ["worldgen.columns.count"] = Interlocked.Read(ref _worldgenTotalColumns),
+            ["chunkDeserializeParallel.columns.count"] = Interlocked.Read(ref _chunkDeserializeParallelColumns),
+            ["chunkDeserializeParallel.chunks.count"] = Interlocked.Read(ref _chunkDeserializeParallelChunks),
+        };
+
+        foreach (var (name, counter) in Counters)
+        {
+            var (hits, skips) = counter.Snapshot();
+            values["counters." + name + ".hits"] = hits;
+            values["counters." + name + ".skips"] = skips;
+        }
+
+        for (int band = 0; band < EntityAnimationBandCount; band++)
+        {
+            string prefix = "render.entityAnimation." + EntityAnimationBandNames[band] + ".";
+            values[prefix + "managerCalls.count"] = Interlocked.Read(ref _entityAnimationManagerCalls[band]);
+            values[prefix + "managerSkips.count"] = Interlocked.Read(ref _entityAnimationManagerSkips[band]);
+            values[prefix + "headUpdates.count"] = Interlocked.Read(ref _entityAnimationHeadUpdates[band]);
+            values[prefix + "poseUpdates.count"] = Interlocked.Read(ref _entityAnimationPoseUpdates[band]);
+            values[prefix + "poseSkips.count"] = Interlocked.Read(ref _entityAnimationPoseSkips[band]);
+            values[prefix + "matrixBuilds.count"] = Interlocked.Read(ref _entityAnimationMatrixBuilds[band]);
+            values[prefix + "matrixSkips.count"] = Interlocked.Read(ref _entityAnimationMatrixSkips[band]);
+            values[prefix + "loopingSoundPasses.count"] = Interlocked.Read(ref _entityAnimationLoopingSoundPasses[band]);
+        }
+
+        for (int pass = 0; pass < WorldgenPassCount; pass++)
+        {
+            string prefix = "worldgen." + WorldgenPassNames[pass] + ".";
+            values[prefix + "columns.count"] = Interlocked.Read(ref _worldgenPassColumns[pass]);
+            values[prefix + "elapsed.stopwatchTicks"] = Interlocked.Read(ref _worldgenPassTicks[pass]);
+        }
+
+        return new ReadOnlyDictionary<string, double>(values);
+    }
+
+    private static long GetTessWorkerCount()
+    {
+        lock (_tessWorkerGate)
+        {
+            return _tessWorkerIds.Count;
+        }
     }
 
     /// <summary>
