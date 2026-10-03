@@ -280,7 +280,7 @@ cp --remove-destination "$PATCHED_DLLS/Optimum.GameContent.dll" "$PATCHED_SERVER
 cp --remove-destination "$PATCHED_DLLS/VSEssentials.dll" "$PATCHED_SERVER/Mods/VSEssentials.dll"
 cp --remove-destination "$PATCHED_DLLS/VSSurvivalMod.dll" "$PATCHED_SERVER/Mods/VSSurvivalMod.dll"
 echo "  Overlaid: VintagestoryAPI.dll (ABI-preserving Cecil patch)"
-echo "  Overlaid: Optimum.Api.Contracts.dll"
+echo "  Overlaid: Optimum.Api.Contracts.dll, Optimum.GameContent.dll"
 echo "  Overlaid: exact Cecil-patched official mod assemblies"
 
 # VintagestoryLib ships Cecil-patched, never recompiled (see Current Status

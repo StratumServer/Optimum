@@ -98,6 +98,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@cp $(BUILD_OUT)/Vintagestory.runtimeconfig.json $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/VintagestoryAPI-patched.dll $(VANILLA_DIR)/VintagestoryAPI.dll
 	@cp $(MOD_OUT)/Optimum.Api.Contracts.dll $(VANILLA_DIR)/
+	@cp $(MOD_OUT)/Optimum.GameContent.dll $(VANILLA_DIR)/
 	@cp $(MOD_OUT)/VSEssentials.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSSurvivalMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
@@ -111,6 +112,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(BUILD_OUT)/Vintagestory.runtimeconfig.json $(INSTALL_DIR)/; \
 		cp $(MOD_OUT)/VintagestoryAPI-patched.dll $(INSTALL_DIR)/VintagestoryAPI.dll; \
 		cp $(MOD_OUT)/Optimum.Api.Contracts.dll $(INSTALL_DIR)/; \
+		cp $(MOD_OUT)/Optimum.GameContent.dll $(INSTALL_DIR)/; \
 		cp $(MOD_OUT)/VSEssentials.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/VSSurvivalMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \

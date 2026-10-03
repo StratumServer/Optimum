@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
+using Optimum.Bootstrap.Core.Patch;
 using Optimum.Bootstrap.Core.Platform;
 
 namespace Optimum.Bootstrap.Core.Install;
@@ -13,8 +14,8 @@ public interface IRuntimeValidator
 
 /// <summary>
 /// Checks that a staged package is a complete runtime without running any game
-/// code (INSTALLER-PLAN.md section 7, option 2). The layout holds, the patched
-/// engine assemblies exist and parse, and a metadata-only load of
+/// code (INSTALLER-PLAN.md section 7, option 2). The layout holds, required
+/// runtime assemblies exist, patched assembly references resolve, and a metadata-only load of
 /// <c>VintagestoryLib.dll</c> still exposes <c>Vintagestory.Client.ClientProgram</c>
 /// with a static <c>Main</c>. The full JIT probe stays with
 /// <c>Optimum.exe --validate-only</c>, which those packages could ship later.
@@ -26,6 +27,15 @@ public sealed class RuntimeValidator(ISystemProbe probe) : IRuntimeValidator
         "VintagestoryLib.dll",
         "VintagestoryAPI.dll",
         "Vintagestory.dll",
+        "Optimum.GameContent.dll",
+    ];
+
+    private static readonly string[] FallbackPatchedAssemblies =
+    [
+        "VintagestoryLib.dll",
+        "VintagestoryAPI.dll",
+        "Mods/VSEssentials.dll",
+        "Mods/VSSurvivalMod.dll",
     ];
 
     public RuntimeValidationResult Validate(string packageDirectory)
@@ -55,7 +65,114 @@ public sealed class RuntimeValidator(ISystemProbe probe) : IRuntimeValidator
             }
         }
 
+        RuntimeValidationResult references = CheckPatchedReferences(packageDirectory);
+        if (!references.Ok)
+            return references;
+
         return CheckEntryPoint(packageDirectory);
+    }
+
+    private static RuntimeValidationResult CheckPatchedReferences(string packageDirectory)
+    {
+        string manifestPath = Path.Combine(packageDirectory, PatchInstallManifest.RelativePath);
+        IReadOnlyList<string> patchedAssemblies = FallbackPatchedAssemblies;
+        bool targetsFromManifest = false;
+        if (File.Exists(manifestPath))
+        {
+            try
+            {
+                PatchInstallManifest? manifest = PatchInstallManifest.Deserialize(File.ReadAllText(manifestPath));
+                if (manifest is { Targets.Count: > 0 })
+                {
+                    patchedAssemblies = manifest.Targets.Select(target => target.Assembly).ToArray();
+                    targetsFromManifest = true;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return new RuntimeValidationResult(false, $"could not read patch manifest: {ex.Message}");
+            }
+        }
+
+        var searchDirectories = new List<string>
+        {
+            packageDirectory,
+            Path.Combine(packageDirectory, "Lib"),
+            Path.Combine(packageDirectory, "Mods"),
+            RuntimeEnvironment.GetRuntimeDirectory(),
+        };
+
+        var availableAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var assemblyPaths = new List<string>();
+        try
+        {
+            foreach (string directory in searchDirectories.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!Directory.Exists(directory))
+                    continue;
+
+                foreach (string path in Directory.EnumerateFiles(directory, "*.dll"))
+                {
+                    try
+                    {
+                        string? name = AssemblyName.GetAssemblyName(path).Name;
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            availableAssemblies.Add(name);
+                            assemblyPaths.Add(path);
+                        }
+                    }
+                    catch (BadImageFormatException)
+                    {
+                        // Native DLLs do not satisfy managed assembly references.
+                    }
+                    catch (Exception ex) when (ex is IOException or FileLoadException or UnauthorizedAccessException)
+                    {
+                        // An unreadable candidate cannot satisfy a reference.
+                    }
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return new RuntimeValidationResult(false, $"could not inspect runtime assemblies: {ex.Message}");
+        }
+
+        using var context = new MetadataLoadContext(
+            new PathAssemblyResolver(assemblyPaths.Distinct(StringComparer.OrdinalIgnoreCase)));
+        foreach (string relativePath in patchedAssemblies)
+        {
+            string path = Path.Combine(packageDirectory, relativePath);
+            if (!File.Exists(path))
+            {
+                if (targetsFromManifest)
+                    return new RuntimeValidationResult(false, $"patched assembly is missing: {relativePath}");
+                continue;
+            }
+
+            AssemblyName[] references;
+            try
+            {
+                references = context.LoadFromAssemblyPath(path).GetReferencedAssemblies();
+            }
+            catch (BadImageFormatException)
+            {
+                return new RuntimeValidationResult(false, $"patched assembly is not managed: {relativePath}");
+            }
+            catch (Exception ex) when (ex is IOException or FileLoadException or UnauthorizedAccessException)
+            {
+                return new RuntimeValidationResult(false, $"could not inspect {relativePath}: {ex.Message}");
+            }
+
+            foreach (AssemblyName reference in references)
+            {
+                if (!string.IsNullOrWhiteSpace(reference.Name) && !availableAssemblies.Contains(reference.Name))
+                    return new RuntimeValidationResult(false,
+                        $"{relativePath} references missing assembly: {reference.Name}");
+            }
+        }
+
+        return new RuntimeValidationResult(true, null);
     }
 
     private static RuntimeValidationResult CheckEntryPoint(string packageDirectory)

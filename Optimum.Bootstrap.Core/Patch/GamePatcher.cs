@@ -394,6 +394,8 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             restored.Add("Mods/VSSurvivalMod.dll");
         }
 
+        RestoreGameContentAsset(gameDir);
+
         observer?.Log(LogLevel.Info, $"rollback complete: restored {restored.Count} vanilla assemblies");
         return PatchResult.Success(gameDir, restored);
     }
@@ -407,7 +409,16 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             CopyFile(contractsSrc, Path.Combine(gameDir, "Optimum.Api.Contracts.dll"));
         }
 
-        // 2. Overlay shaders
+        // 2. Copy the assembly referenced by the patched VSEssentials.dll.
+        string? gameContentSrc = FindFile(overlayDir, "Optimum.GameContent.dll");
+        if (gameContentSrc is not null && probe.FileExists(gameContentSrc))
+        {
+            string gameContentDst = Path.Combine(gameDir, "Optimum.GameContent.dll");
+            BackupGameContentAsset(gameDir, gameContentDst);
+            CopyFile(gameContentSrc, gameContentDst);
+        }
+
+        // 3. Overlay shaders
         string? shadersSrc = FindDirectory(overlayDir, "assets/game/shaders", "shaders");
         if (shadersSrc is not null && probe.DirectoryExists(shadersSrc))
         {
@@ -419,7 +430,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             }
         }
 
-        // 3. Merge language files
+        // 4. Merge language files
         string? langSrc = FindDirectory(overlayDir, "assets/game/lang", "lang");
         if (langSrc is not null && probe.DirectoryExists(langSrc))
         {
@@ -432,7 +443,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             }
         }
 
-        // 4. Launcher wrapper
+        // 5. Launcher wrapper
         string launcherName = probe.Os == OsKind.Windows ? "Optimum.exe" : "Optimum";
         string? launcherSrc = FindFile(overlayDir, launcherName);
         if (launcherSrc is not null && probe.FileExists(launcherSrc))
@@ -448,6 +459,41 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         {
             MakeExecutable(runSh);
         }
+    }
+
+    private void BackupGameContentAsset(string gameDir, string gameContentPath)
+    {
+        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla");
+        string backupPath = Path.Combine(vanillaDir, "Optimum.GameContent.dll");
+        string absentMarker = Path.Combine(vanillaDir, "Optimum.GameContent.dll.absent");
+        if (probe.FileExists(backupPath) || probe.FileExists(absentMarker))
+            return;
+
+        EnsureDirectory(vanillaDir);
+        if (probe.FileExists(gameContentPath))
+            CopyFile(gameContentPath, backupPath);
+        else
+            WriteText(absentMarker, string.Empty);
+    }
+
+    private void RestoreGameContentAsset(string gameDir)
+    {
+        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla");
+        string gameContentPath = Path.Combine(gameDir, "Optimum.GameContent.dll");
+        string backupPath = Path.Combine(vanillaDir, "Optimum.GameContent.dll");
+        string absentMarker = Path.Combine(vanillaDir, "Optimum.GameContent.dll.absent");
+
+        if (probe.FileExists(backupPath))
+        {
+            CopyFile(backupPath, gameContentPath);
+            TryDeleteFile(backupPath);
+        }
+        else if (probe.FileExists(absentMarker))
+        {
+            TryDeleteFile(gameContentPath);
+        }
+
+        TryDeleteFile(absentMarker);
     }
 
     private void MergeJsonFile(string srcFile, string dstFile)
