@@ -177,6 +177,7 @@ public sealed class GamePatcherTests
             File.WriteAllText(Path.Combine(donorsDir, "VintagestoryAPI.Contracts.dll"), "donor-api");
             File.WriteAllText(Path.Combine(donorsDir, "VSEssentials.Donor.dll"), "donor-essentials");
             File.WriteAllText(Path.Combine(overlayDir, "Optimum.Api.Contracts.dll"), "contracts-dll");
+            File.WriteAllText(Path.Combine(overlayDir, "Optimum.GameContent.dll"), "game-content-dll");
             File.WriteAllText(Path.Combine(overlayDir, "Optimum"), "#!/bin/sh\necho optimum\n");
             File.WriteAllText(Path.Combine(overlayDir, "assets", "game", "shaders", "optimum.vsh"), "void main() {}");
             File.WriteAllText(Path.Combine(overlayDir, "assets", "game", "lang", "en.json"), "{\"optimum-key\": \"Optimum Value\"}");
@@ -223,6 +224,7 @@ public sealed class GamePatcherTests
 
             // Verify overlay assets deployed
             Assert.True(File.Exists(Path.Combine(gameDir, "Optimum.Api.Contracts.dll")));
+            Assert.Equal("game-content-dll", File.ReadAllText(Path.Combine(gameDir, "Optimum.GameContent.dll")));
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "shaders", "optimum.vsh")));
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
             Assert.Contains("Optimum Value", File.ReadAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
@@ -239,6 +241,16 @@ public sealed class GamePatcherTests
             Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
             Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
             Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.GameContent.dll")));
+
+            // An existing assembly is restored instead of being removed on rollback.
+            File.WriteAllText(Path.Combine(gameDir, "Optimum.GameContent.dll"), "existing-game-content");
+            var existingAssetPatch = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.True(existingAssetPatch.Ok, existingAssetPatch.Message);
+            Assert.Equal("game-content-dll", File.ReadAllText(Path.Combine(gameDir, "Optimum.GameContent.dll")));
+            var existingAssetRollback = await patcher.PatchAsync(new PatchRequest(gameDir, Rollback: true));
+            Assert.True(existingAssetRollback.Ok, existingAssetRollback.Message);
+            Assert.Equal("existing-game-content", File.ReadAllText(Path.Combine(gameDir, "Optimum.GameContent.dll")));
         }
         finally
         {

@@ -75,7 +75,7 @@ fi
 
 OPTIMUM_FILES=(
     Optimum Optimum.dll Optimum.deps.json Optimum.runtimeconfig.json
-    Optimum.Patcher.dll VintagestoryLib.Donor.dll
+    Optimum.Patcher.dll Optimum.Api.Contracts.dll Optimum.GameContent.dll VintagestoryLib.Donor.dll
     Mono.Cecil.dll Mono.Cecil.Mdb.dll Mono.Cecil.Pdb.dll Mono.Cecil.Rocks.dll
     run-optimum.sh datapath.cfg
 )

@@ -6,6 +6,7 @@
 #   - Optimum.Patcher + Mono.Cecil
 #   - Optimum.Cli (optimum binary)
 #   - Optimum.Api.Contracts.dll
+#   - Optimum.GameContent.dll
 #   - .optimum/donors/ (VintagestoryLib.Donor.dll, VintagestoryAPI.Contracts.dll, etc.)
 #   - Shaders and language strings
 #   - optimum-manifest-<rid>.json sidecar (hashes, supported game versions, targets)
@@ -51,10 +52,11 @@ echo "  Output dir:      $OUTPUT_DIR"
 # Ensure build outputs exist
 DONOR_LIB="$REPO_ROOT/build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll"
 CONTRACTS_LIB="$REPO_ROOT/bin/Release/net10.0/Optimum.Api.Contracts.dll"
+GAME_CONTENT_LIB="$REPO_ROOT/bin/Release/net10.0/Optimum.GameContent.dll"
 ESSENTIALS_LIB="$REPO_ROOT/.build/runtime-donors/VSEssentials/bin/Release/net10.0/VSEssentials.dll"
 SURVIVAL_LIB="$REPO_ROOT/.build/runtime-donors/VSSurvivalMod/bin/Release/net10.0/VSSurvivalMod.dll"
 
-if [[ ! -f "$DONOR_LIB" || ! -f "$CONTRACTS_LIB" ]]; then
+if [[ ! -f "$DONOR_LIB" || ! -f "$CONTRACTS_LIB" || ! -f "$GAME_CONTENT_LIB" ]]; then
     echo "Building VintageStory.slnx (Release)..."
     dotnet build "$REPO_ROOT/VintageStory.slnx" -c Release --nologo
 fi
@@ -98,10 +100,14 @@ if [[ -f "$SURVIVAL_LIB" ]]; then
     cp -f "$SURVIVAL_LIB" "$STAGE_DIR/.optimum/donors/VSSurvivalMod.Donor.dll"
 fi
 
-# 2. Contracts at root
+# 2. Runtime assemblies at root
 cp -f "$CONTRACTS_LIB" "$STAGE_DIR/Optimum.Api.Contracts.dll"
 if [[ -f "$REPO_ROOT/bin/Release/net10.0/Optimum.Api.Contracts.pdb" ]]; then
     cp -f "$REPO_ROOT/bin/Release/net10.0/Optimum.Api.Contracts.pdb" "$STAGE_DIR/"
+fi
+cp -f "$GAME_CONTENT_LIB" "$STAGE_DIR/Optimum.GameContent.dll"
+if [[ -f "$REPO_ROOT/bin/Release/net10.0/Optimum.GameContent.pdb" ]]; then
+    cp -f "$REPO_ROOT/bin/Release/net10.0/Optimum.GameContent.pdb" "$STAGE_DIR/"
 fi
 
 # 3. Patcher tool

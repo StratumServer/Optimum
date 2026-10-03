@@ -158,6 +158,7 @@ cp -f "$BUILD_OUT/Vintagestory.runtimeconfig.json" "$APP_DIR/Vintagestory.runtim
 cp -f "$PATCHED_LIB" "$APP_DIR/VintagestoryLib.dll"
 cp -f "$PATCHED_API" "$APP_DIR/VintagestoryAPI.dll"
 cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$APP_DIR/"
+cp -f "$MOD_OUT/Optimum.GameContent.dll" "$APP_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$APP_DIR/Mods/"

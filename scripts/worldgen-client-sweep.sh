@@ -50,6 +50,7 @@ cp build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll "$VANIL
 cp build/Vintagestory/bin/Release/net10.0/Vintagestory.dll "$VANILLA_DIR/"
 cp bin/Release/net10.0/VintagestoryAPI.dll "$VANILLA_DIR/"
 cp bin/Release/net10.0/Optimum.Api.Contracts.dll "$VANILLA_DIR/"
+cp bin/Release/net10.0/Optimum.GameContent.dll "$VANILLA_DIR/"
 cp bin/Release/net10.0/VSEssentials.dll "$VANILLA_DIR/Mods/"
 cp bin/Release/net10.0/VSSurvivalMod.dll "$VANILLA_DIR/Mods/"
 cp bin/Release/net10.0/VSCreativeMod.dll "$VANILLA_DIR/Mods/"
