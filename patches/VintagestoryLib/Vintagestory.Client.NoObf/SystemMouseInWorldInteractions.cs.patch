@@ -1,0 +1,67 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions.cs
+index cda3b27..d68df87 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions.cs
+@@ -20,10 +20,16 @@ public class SystemMouseInWorldInteractions : ClientSystem
+ 
+ 	private int survivalBreakingCounter;
+ 
+ 	private BlockDamage curBlockDmg;
+ 
++	private BlockFilter optimumSelectionBlockFilter;
++
++	private EntityFilter optimumSelectionEntityFilter;
++
++	private bool optimumRenderMetaBlocks;
++
+ 	public bool prevMouseLeft;
+ 
+ 	public bool prevMouseRight;
+ 
+ 	private float accum;
+@@ -268,13 +274,21 @@ public class SystemMouseInWorldInteractions : ClientSystem
+ 	{
+ 		if (game.EntityPlayer == null)
+ 		{
+ 			return;
+ 		}
+-		bool renderMeta = ClientSettings.RenderMetaBlocks;
+-		BlockFilter bfilter = (BlockPos pos, Block block) => ((block == null) | renderMeta) || block.RenderPass != EnumChunkRenderPass.Meta || (block.GetInterface<IMetaBlock>(game.api.World, pos)?.IsSelectable(pos) ?? false);
+-		EntityFilter efilter = (Entity e) => e.IsInteractable && e.EntityId != game.EntityPlayer.EntityId;
++		optimumRenderMetaBlocks = ClientSettings.RenderMetaBlocks;
++		if (optimumSelectionBlockFilter == null)
++		{
++			optimumSelectionBlockFilter = IsOptimumSelectionBlockSelectable;
++		}
++		if (optimumSelectionEntityFilter == null)
++		{
++			optimumSelectionEntityFilter = IsOptimumSelectionEntitySelectable;
++		}
++		BlockFilter bfilter = optimumSelectionBlockFilter;
++		EntityFilter efilter = optimumSelectionEntityFilter;
+ 		bool liquidSelectable = game.LiquidSelectable;
+ 		if (!game.InWorldMouseState.Left && game.InWorldMouseState.Right && game.player?.inventoryMgr?.ActiveHotbarSlot?.Itemstack?.Collectible != null && game.player.inventoryMgr.ActiveHotbarSlot.Itemstack.Collectible.LiquidSelectable)
+ 		{
+ 			game.forceLiquidSelectable = true;
+ 		}
+@@ -299,10 +313,20 @@ public class SystemMouseInWorldInteractions : ClientSystem
+ 			bool firstTick = game.EntityPlayer.PreviousBlockSelection == null || game.EntityPlayer.BlockSelection.Position != game.EntityPlayer.PreviousBlockSelection;
+ 			game.EntityPlayer.BlockSelection.Block.OnBeingLookedAt(game.player, game.EntityPlayer.BlockSelection, firstTick);
+ 		}
+ 	}
+ 
++	private bool IsOptimumSelectionBlockSelectable(BlockPos pos, Block block)
++	{
++		return block == null || optimumRenderMetaBlocks || block.RenderPass != EnumChunkRenderPass.Meta || (block.GetInterface<IMetaBlock>(game.api.World, pos)?.IsSelectable(pos) ?? false);
++	}
++
++	private bool IsOptimumSelectionEntitySelectable(Entity entity)
++	{
++		return entity.IsInteractable && entity.EntityId != game.EntityPlayer.EntityId;
++	}
++
+ 	private void ResetMouseInteractions()
+ 	{
+ 		isSurvivalBreaking = false;
+ 		survivalBreakingCounter = 0;
+ 	}

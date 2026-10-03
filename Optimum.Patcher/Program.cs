@@ -367,6 +367,23 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "optimumLightingDirtyChunks",
     },
+    // Issue #132: client ray selection reuses its predicates and walks entity
+    // chunks directly instead of building a candidate List<Entity>/Entity[].
+    ["Vintagestory.Common.GameMain"] = new()
+    {
+        "optimumRayTraceEntityFilter",
+        "optimumRayTraceEntityMatcher",
+        "MatchesOptimumRayTraceEntity",
+        "FindNearestRayIntersectingEntity",
+    },
+    ["Vintagestory.Client.NoObf.SystemMouseInWorldInteractions"] = new()
+    {
+        "optimumSelectionBlockFilter",
+        "optimumSelectionEntityFilter",
+        "optimumRenderMetaBlocks",
+        "IsOptimumSelectionBlockSelectable",
+        "IsOptimumSelectionEntitySelectable",
+    },
     ["Vintagestory.Common.GameDatabase"] = new()
     {
         "GetChunk",
@@ -447,6 +464,19 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RuntimeAddBlockTextureAtlas", 1),
     // ClientMain: mouse wheel fix (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),
+    // Issue #132: cache selection filters and avoid per-frame closure allocations.
+    new("Vintagestory.Client.NoObf.SystemMouseInWorldInteractions", "UpdateCurrentSelection", 0),
+    // Issue #132: direct entity chunk traversal avoids candidate List/Entity[] allocations.
+    new("Vintagestory.Common.GameMain", "RayTraceForSelection", 6,
+        new[]
+        {
+            "Vintagestory.API.MathTools.IWorldIntersectionSupplier",
+            "Vintagestory.API.MathTools.Ray",
+            "Vintagestory.API.Common.BlockSelection&",
+            "Vintagestory.API.Common.EntitySelection&",
+            "Vintagestory.API.MathTools.BlockFilter",
+            "Vintagestory.API.MathTools.EntityFilter",
+        }),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "UpdateFreeMouse", 0),
     // ClientSystemStartup: atlas pipeline per-stage timing instrumentation.
