@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Common/Registry/RegistryObject.cs b/VintagestoryApi/Common/Registry/RegistryObject.cs
-index f095fbc..ac57834 100644
+index f095fbc..cfcc08b 100644
 --- a/VintagestoryApi/Common/Registry/RegistryObject.cs
 +++ b/VintagestoryApi/Common/Registry/RegistryObject.cs
-@@ -211,14 +211,23 @@ namespace Vintagestory.API.Common
+@@ -211,28 +211,55 @@ namespace Vintagestory.API.Common
          /// <param name="posFromRight"></param>
          /// <returns></returns>
          public string LastCodePart(int posFromRight = 0)
@@ -28,4 +28,39 @@ index f095fbc..ac57834 100644
  
          /// <summary>
          /// Returns the n-th code part. If the code contains no dash ('-') the whole code is returned. Returns null if posFromLeft is too high.
+         /// </summary>
+         /// <param name="posFromLeft"></param>
+         /// <returns></returns>
+         public string FirstCodePart(int posFromLeft = 0)
+         {
+             if (Code == null) return null;
+-            if (posFromLeft == 0 && !Code.Path.Contains('-')) return Code.Path;
++            string path = Code.Path;
++            if (posFromLeft == 0 && !path.Contains('-')) return path;
++            if (posFromLeft < 0)
++            {
++                // Split dereferences Path before the vanilla array access throws.
++                _ = path.Length;
++                throw new IndexOutOfRangeException();
++            }
+ 
+-            string[] parts = Code.Path.Split('-');
+-            return posFromLeft <= parts.Length - 1 ? parts[posFromLeft] : null;
++            // Optimum: scan only as far as the requested part instead of allocating Split's array.
++            int start = 0;
++            int part = 0;
++            int pathLength = path.Length;
++            for (int i = 0; i < pathLength; i++)
++            {
++                if (path[i] != '-') continue;
++                if (part == posFromLeft) return path.Substring(start, i - start);
++                part++;
++                start = i + 1;
++            }
++
++            return part == posFromLeft ? path.Substring(start) : null;
+         }
+ 
+         /// <summary>
+         /// Returns true if any given wildcard matches the blocks/items code. E.g. water-* will match all water blocks
          /// </summary>
