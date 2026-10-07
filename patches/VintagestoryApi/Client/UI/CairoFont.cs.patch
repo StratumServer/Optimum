@@ -1,0 +1,30 @@
+--- a/VintagestoryApi/Client/UI/CairoFont.cs
++++ b/VintagestoryApi/Client/UI/CairoFont.cs
+@@ -242,8 +242,12 @@
+         /// <returns>The FontExtents for this particular font.</returns>
+         public FontExtents GetFontExtents()
+         {
++            bool measure = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
++            long start = measure ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
+             SetupContext(FontMeasuringContext);
+-            return FontMeasuringContext.FontExtents;
++            FontExtents extents = FontMeasuringContext.FontExtents;
++            if (measure) Vintagestory.API.Config.OptimumGuiMetrics.RecordFontExtentMeasurement(start);
++            return extents;
+         }
+ 
+         /// <summary>
+@@ -253,8 +257,12 @@
+         /// <returns>The Text extends for this font with this text.</returns>
+         public TextExtents GetTextExtents(string text)
+         {
++            bool measure = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
++            long start = measure ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
+             SetupContext(FontMeasuringContext);
+-            return FontMeasuringContext.TextExtents(text);
++            TextExtents extents = FontMeasuringContext.TextExtents(text);
++            if (measure) Vintagestory.API.Config.OptimumGuiMetrics.RecordTextExtentMeasurement(start);
++            return extents;
+         }
+ 
+         /// <summary>

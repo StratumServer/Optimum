@@ -15,6 +15,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAdaptiveRadiusController.cs" Link="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAnimLod.cs" Link="Config\OptimumAnimLod.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumConfig.cs" Link="Config\OptimumConfig.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumGuiMetrics.cs" Link="Config\OptimumGuiMetrics.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Model\Mesh\OptimumMeshPartPool.cs" Link="Client\Model\Mesh\OptimumMeshPartPool.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumGreedyMesher.cs" Link="Config\OptimumGreedyMesher.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumThreadGuard.cs" Link="Config\OptimumThreadGuard.cs" />
@@ -35,6 +36,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Optimum.Tests" />
+    <InternalsVisibleTo Include="VintagestoryAPI" />
     <InternalsVisibleTo Include="VintagestoryLib" />
   </ItemGroup>
   <ItemGroup>

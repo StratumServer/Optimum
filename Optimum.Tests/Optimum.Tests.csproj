@@ -11,6 +11,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Optimum.Patcher\Optimum.Patcher.csproj" />
+    <ProjectReference Include="..\tools\Cairo.ParityHarness\Cairo.ParityHarness.csproj" />
     <ProjectReference Include="..\Optimum.Launcher\Optimum.Launcher.csproj" />
     <ProjectReference Include="..\VintagestoryApi\VintagestoryAPI.csproj" />
     <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
