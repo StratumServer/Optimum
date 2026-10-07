@@ -31,6 +31,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch
@@ -44,6 +45,7 @@ patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/GameDatabase.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/GameMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
