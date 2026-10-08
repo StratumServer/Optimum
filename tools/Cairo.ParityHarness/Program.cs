@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Cairo;
 using SkiaSharp;
@@ -16,6 +17,8 @@ internal static class Program
     private static readonly double[] Scales = [1.0, 1.5, 2.0];
     private const string TextSample = "Café Ångström";
     private static string? selectedFontFile;
+    private static string? temporaryFontConfig;
+    private static string? originalFontConfig;
 
     private sealed record RenderResult(PixelImage Image, object? Metrics);
 
@@ -26,17 +29,28 @@ internal static class Program
             WriteApiManifest(System.IO.Path.GetFullPath(args[1]));
             return 0;
         }
+        string? bundledFontDirectory = null;
+        string output;
+        if (args.Length == 3 && args[0] == "--font-matrix")
+        {
+            bundledFontDirectory = System.IO.Path.GetFullPath(args[1]);
+            output = System.IO.Path.GetFullPath(args[2]);
+        }
+        else
+        {
+            output = args.Length > 0 ? System.IO.Path.GetFullPath(args[0]) : System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-issue-130-parity");
+        }
         if (!OperatingSystem.IsLinux())
         {
             Console.Error.WriteLine("This first-slice harness currently supports Linux only; native library names must be verified before adding other platforms.");
             return 1;
         }
         NativeLibrary.SetDllImportResolver(typeof(Context).Assembly, ResolveCairo);
-        var output = args.Length > 0 ? System.IO.Path.GetFullPath(args[0]) : System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-issue-130-parity");
         Directory.CreateDirectory(output);
 
         try
         {
+            if (bundledFontDirectory is not null) ConfigureFontConfig(bundledFontDirectory);
             var results = new List<object>();
             var cairoReferenceDeterministic = true;
             var fontInfo = ResolveFontInfo();
@@ -96,6 +110,9 @@ internal static class Program
                         Console.WriteLine($"  {item.operation}: max {item.comparison.MaxChannelDelta}, {item.comparison.PixelsOverThreshold}/{item.comparison.PixelsCompared} pixels >1, RMS {item.comparison.RmsChannelError:F4}, alpha RMS {item.comparison.RmsAlphaError:F4}; exact mismatches {item.pixelExactComparison.PixelsOverThreshold}/{item.pixelExactComparison.PixelsCompared}.");
             }
 
+            var bundledFontMatrix = bundledFontDirectory is null
+                ? null
+                : RenderBundledFontMatrix(bundledFontDirectory, output);
             var report = new
             {
                 schemaVersion = 2,
@@ -113,18 +130,162 @@ internal static class Program
                 comparisonPolicy = "Cairo repeat-render equality is required; Cairo/Skia pixel deltas are diagnostic and do not fail the run. Functional behavior requires separate layout and live-GUI validation.",
                 cairoReferenceDeterministic,
                 selectedFont = fontInfo,
+                bundledFontMatrix,
                 results,
                 exitMeaning = "2 = Cairo reference renders differ; 1 = setup/render failure; 0 = artifacts generated and Cairo reference is deterministic (cross-backend deltas are informational)"
             };
             File.WriteAllText(System.IO.Path.Combine(output, "metrics.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
             Console.WriteLine($"Artifacts and metrics: {output}");
+            DeleteTemporaryFontConfig();
             return cairoReferenceDeterministic ? 0 : 2;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Parity harness failed: {ex}");
+            DeleteTemporaryFontConfig();
             return 1;
         }
+    }
+
+    private static void ConfigureFontConfig(string fontDirectory)
+    {
+        if (!Directory.Exists(fontDirectory)) throw new DirectoryNotFoundException($"Bundled font directory does not exist: {fontDirectory}");
+        string escaped = System.Security.SecurityElement.Escape(fontDirectory) ?? throw new InvalidOperationException("Could not encode the font directory for Fontconfig.");
+        temporaryFontConfig = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"optimum-fontconfig-{Guid.NewGuid():N}.conf");
+        File.WriteAllText(temporaryFontConfig, $"<?xml version=\"1.0\"?><fontconfig><include>/etc/fonts/fonts.conf</include><dir>{escaped}</dir></fontconfig>");
+        originalFontConfig = Environment.GetEnvironmentVariable("FONTCONFIG_FILE");
+        Environment.SetEnvironmentVariable("FONTCONFIG_FILE", temporaryFontConfig);
+    }
+
+    private static void DeleteTemporaryFontConfig()
+    {
+        if (temporaryFontConfig is null) return;
+        Environment.SetEnvironmentVariable("FONTCONFIG_FILE", originalFontConfig);
+        try { File.Delete(temporaryFontConfig); } catch { }
+        temporaryFontConfig = null;
+        originalFontConfig = null;
+    }
+
+    private static object RenderBundledFontMatrix(string fontDirectory, string outputDirectory)
+    {
+        string[] files = Directory.GetFiles(fontDirectory, "*.ttf", SearchOption.TopDirectoryOnly)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (files.Length == 0) throw new InvalidOperationException($"No TTF fonts were found in '{fontDirectory}'.");
+        var entries = new List<object>();
+        foreach (string file in files)
+        {
+            string stem = System.IO.Path.GetFileNameWithoutExtension(file);
+            int separator = stem.LastIndexOf('-');
+            if (separator <= 0 || separator == stem.Length - 1) throw new InvalidOperationException($"Expected bundled font filename Family-Style.ttf, got '{stem}'.");
+            string family = stem[..separator];
+            string style = stem[(separator + 1)..];
+            FontSlant slant = style.Contains("Italic", StringComparison.OrdinalIgnoreCase) ? FontSlant.Italic : FontSlant.Normal;
+            FontWeight weight = style.Contains("Bold", StringComparison.OrdinalIgnoreCase) ? FontWeight.Bold : FontWeight.Normal;
+            string requestedStyle = weight == FontWeight.Bold
+                ? (slant == FontSlant.Italic ? "Bold Italic" : "Bold")
+                : (slant == FontSlant.Italic ? "Italic" : "Regular");
+            string matchedFile = RunTool("fc-match", "-f", "%{file}", $"{family}:style={requestedStyle}");
+            if (!string.Equals(System.IO.Path.GetFullPath(matchedFile), System.IO.Path.GetFullPath(file), StringComparison.Ordinal))
+                throw new InvalidOperationException($"Fontconfig resolved {family} {requestedStyle} to '{matchedFile}', expected '{file}'.");
+
+            foreach (double scale in Scales)
+            {
+                int width = (int)Math.Ceiling(TextLogicalWidth * scale);
+                int height = (int)Math.Ceiling(LogicalHeight * scale);
+                string safeName = $"font-{family}-{style}-scale-{scale:0.0}".Replace('.', '_');
+                string cairoPath = System.IO.Path.Combine(outputDirectory, $"{safeName}-cairo.png");
+                string skiaPath = System.IO.Path.Combine(outputDirectory, $"{safeName}-skia.png");
+                var cairo = RenderBundledCairoText(file, family, slant, weight, scale, width, height, cairoPath);
+                var skia = RenderBundledSkiaText(file, scale, width, height, skiaPath);
+                var comparison = PixelComparator.Compare(cairo.Image, skia.Image, threshold: 1);
+                entries.Add(new
+                {
+                    file = System.IO.Path.GetFileName(file), family, style, scale,
+                    cairoMetrics = cairo.Metrics,
+                    skiaMetrics = skia.Metrics,
+                    cairoVsSkia = comparison
+                });
+                Console.WriteLine($"font {family} {style} @ {scale:0.0}: Cairo/Skia max {comparison.MaxChannelDelta}, {comparison.PixelsOverThreshold}/{comparison.PixelsCompared} pixels >1, RMS {comparison.RmsChannelError:F4}.");
+            }
+        }
+        return new { fontCount = files.Length, fontScaleCases = entries.Count, entries };
+    }
+
+    private static (PixelImage Image, object Metrics) RenderBundledCairoText(string fontFile, string family, FontSlant slant, FontWeight weight, double scale, int width, int height, string path)
+    {
+        using var surface = new ImageSurface(Cairo.Format.Argb32, width, height);
+        var rows = new List<object>();
+        using (var context = new Context(surface))
+        {
+            context.Scale(scale, scale);
+            context.SelectFontFace(family, slant, weight);
+            context.SetFontSize(17);
+            context.SetSourceRGBA(.12, .18, .24, 1);
+            context.Rectangle(0, 0, TextLogicalWidth, LogicalHeight);
+            context.Fill();
+            context.SetSourceRGBA(.08, .16, .36, 1);
+            string[] samples = [TextSample, "e\u0301", "fallback 漢字"];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                TextExtents extents = context.TextExtents(samples[i]);
+                FontExtents fontExtents = context.FontExtents;
+                context.MoveTo(7, 24 + i * 20);
+                context.ShowText(samples[i]);
+                rows.Add(new
+                {
+                    text = samples[i], extents.XBearing, extents.YBearing, extents.Width, extents.Height,
+                    extents.XAdvance, extents.YAdvance, fontAscent = fontExtents.Ascent,
+                    fontDescent = fontExtents.Descent, fontHeight = fontExtents.Height,
+                    codepointAdvances = samples[i].EnumerateRunes().Select(rune => new
+                    {
+                        codepoint = rune.Value,
+                        advance = context.TextExtents(rune.ToString()).XAdvance
+                    }).ToArray()
+                });
+            }
+        }
+        surface.Flush();
+        surface.WriteToPng(path);
+        return (PixelComparator.FromCairoArgb32(width, height, surface.Stride, surface.Data), new { requestedFontFile = fontFile, rows });
+    }
+
+    private static (PixelImage Image, object Metrics) RenderBundledSkiaText(string fontFile, double scale, int width, int height, string path)
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var rows = new List<object>();
+        using (var canvas = new SKCanvas(bitmap))
+        using (var paint = new SKPaint { IsAntialias = true })
+        using (var typeface = SKTypeface.FromFile(fontFile) ?? throw new InvalidOperationException($"Skia could not load '{fontFile}'."))
+        using (var font = new SKFont(typeface, 17))
+        {
+            canvas.Clear(SKColors.Transparent);
+            canvas.Scale((float)scale);
+            paint.Color = ToColor((.12, .18, .24, 1));
+            canvas.DrawRect(0, 0, TextLogicalWidth, LogicalHeight, paint);
+            paint.Color = ToColor((.08, .16, .36, 1));
+            string[] samples = [TextSample, "e\u0301", "fallback 漢字"];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                rows.Add(new
+                {
+                    text = samples[i], advance = font.MeasureText(samples[i], paint),
+                    metrics = new { font.Metrics.Ascent, font.Metrics.Descent, font.Metrics.Leading },
+                    codepointAdvances = samples[i].EnumerateRunes().Select(rune => new
+                    {
+                        codepoint = rune.Value,
+                        advance = font.MeasureText(rune.ToString(), paint)
+                    }).ToArray()
+                });
+                canvas.DrawText(samples[i], 7, 24 + i * 20, font, paint);
+            }
+            canvas.Flush();
+        }
+        using (var image = SKImage.FromBitmap(bitmap))
+        using (var data = image.Encode(SKEncodedImageFormat.Png, 100)) File.WriteAllBytes(path, data.ToArray());
+        var bytes = new byte[bitmap.RowBytes * bitmap.Height];
+        Marshal.Copy(bitmap.GetPixels(), bytes, 0, bytes.Length);
+        return (PixelComparator.FromSkiaBgraPremultiplied(width, height, bitmap.RowBytes, bytes), new { fontFile, rows });
     }
 
     private static RenderResult RenderCairo(string scene, double scale, string path)

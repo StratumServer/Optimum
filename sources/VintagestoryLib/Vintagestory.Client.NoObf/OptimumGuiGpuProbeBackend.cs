@@ -72,20 +72,25 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "missing-surface";
 						return false;
 					}
-					if (Environment.CurrentManagedThreadId != expectedContextThreadId || !HasCurrentContext())
+					if (Environment.CurrentManagedThreadId != expectedContextThreadId)
 					{
-						failureReason = "missing-context-thread-or-current-context";
+						failureReason = "missing-context-thread";
+						return false;
+					}
+					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
+					{
+						failureReason = "surface-not-recording:" + surface.RecordingState;
+						return false;
+					}
+					if (!HasCurrentContext())
+					{
+						failureReason = "missing-current-context";
 						return false;
 					}
 					TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
 						failureReason = "gpu-probe-not-passed";
-						return false;
-					}
-					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
-					{
-						failureReason = "surface-not-recording:" + surface.RecordingState;
 						return false;
 					}
 					// Keep pre-existing engine errors out of the candidate operation. The probe's caller

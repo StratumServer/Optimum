@@ -118,6 +118,51 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
+	public void RemainingPartialPrimitiveFallbackCasesMatchNativeOutput()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 112, 88);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) DrawAdditionalFallbackOperations (context);
+
+		using var expected = new ImageSurface (Format.Argb32, 112, 88);
+		using (var context = new Context (expected)) DrawAdditionalFallbackOperations (context);
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (expected.Data, actual.Data);
+		Assert.Equal (0, actual.Data[43 * actual.Stride + 67 * 4 + 3]);
+	}
+
+	[Fact]
+	public void StrokeCapsJoinsAndDashPhasesSurviveNativeMaterialization()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 112, 72);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) DrawStrokeStyleMatrix (context);
+
+		using var expected = new ImageSurface (Format.Argb32, 112, 72);
+		using (var context = new Context (expected)) DrawStrokeStyleMatrix (context);
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (expected.Data, actual.Data);
+	}
+
+	[Fact]
+	public void SelfIntersectingPathsKeepCairoFillRuleSemanticsAfterMaterialization()
+	{
+		foreach (FillRule fillRule in new[] { FillRule.Winding, FillRule.EvenOdd }) {
+			using var actual = new ImageSurface (Format.Argb32, 32, 32);
+			var recorder = actual.BeginRecording ();
+			using (var context = new Context (actual)) DrawSelfIntersectingPath (context, fillRule);
+
+			using var expected = new ImageSurface (Format.Argb32, 32, 32);
+			using (var context = new Context (expected)) DrawSelfIntersectingPath (context, fillRule);
+
+			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			Assert.Equal (expected.Data, actual.Data);
+		}
+	}
+
+	[Fact]
 	public void NonZeroAndEvenOddFillRulesKeepCairoPathSemantics()
 	{
 		foreach (FillRule fillRule in new[] { FillRule.Winding, FillRule.EvenOdd }) {
@@ -341,6 +386,123 @@ public sealed class CairoContextRecorderTests
 		context.FillRule = fillRule;
 		context.Rectangle (2, 2, 16, 16);
 		context.Rectangle (6, 6, 8, 8);
+		context.Fill ();
+	}
+
+	static void DrawAdditionalFallbackOperations (Context context)
+	{
+		context.SetSourceRGBA (.1, .2, .3, .7);
+		context.Rectangle (1, 1, 5, 5);
+		context.Fill ();
+
+		context.Save ();
+		context.Translate (7.5, 4.25);
+		context.Rotate (.12);
+		context.Scale (1.1, .9);
+		context.SetSourceRGBA (.8, .15, .25, .85);
+		context.LineWidth = 3.25;
+		context.LineCap = LineCap.Round;
+		context.LineJoin = LineJoin.Bevel;
+		context.SetDash (new[] { 3.0, 1.5, .75, 1.0 }, .625);
+		context.MoveTo (4, 14);
+		context.CurveTo (13, 2, 24, 25, 34, 10);
+		context.LineTo (40, 17);
+		context.Stroke ();
+		context.Restore ();
+
+		context.NewPath ();
+		context.MoveTo (48, 18);
+		context.Arc (57, 18, 9, 0, Math.PI * 1.5);
+		context.LineTo (57, 18);
+		context.ClosePath ();
+		context.SetSourceRGBA (.2, .75, .35, .8);
+		context.Fill ();
+
+		context.Save ();
+		context.Rectangle (4.25, 32.5, 44.5, 28.25);
+		context.Clip ();
+		context.NewPath ();
+		context.Arc (26, 47, 13, 0, Math.PI * 2);
+		context.Clip ();
+		context.SetSourceRGBA (.9, .6, .08, .75);
+		context.Paint ();
+		context.Restore ();
+
+		context.FillRule = FillRule.Winding;
+		context.NewPath ();
+		context.MoveTo (57, 32);
+		context.LineTo (78, 32);
+		context.LineTo (78, 54);
+		context.LineTo (57, 54);
+		context.ClosePath ();
+		context.MoveTo (62, 37);
+		context.LineTo (62, 49);
+		context.LineTo (73, 49);
+		context.LineTo (73, 37);
+		context.ClosePath ();
+		context.SetSourceRGBA (.2, .35, .9, .8);
+		context.Fill ();
+
+		using (var radial = new RadialGradient (91, 40, 1, 91, 40, 14)) {
+			radial.AddColorStop (0, new Color (.95, .2, .15, .95));
+			radial.AddColorStop (1, new Color (.1, .25, .8, .35));
+			radial.Extend = Extend.Pad;
+			radial.Matrix = new Matrix (1.2, .25, -.15, .85, -2, 1);
+			context.SetSource (radial);
+			context.Rectangle (77, 26, 31, 29);
+			context.Fill ();
+		}
+
+		using var tile = new ImageSurface (Format.Argb32, 4, 4);
+		using (var tileContext = new Context (tile)) {
+			tileContext.SetSourceRGBA (.15, .7, .4, 1);
+			tileContext.Rectangle (0, 0, 2, 4);
+			tileContext.Fill ();
+			tileContext.SetSourceRGBA (.9, .3, .1, 1);
+			tileContext.Rectangle (2, 0, 2, 4);
+			tileContext.Fill ();
+		}
+		using (var pattern = new SurfacePattern (tile)) {
+			pattern.Extend = Extend.Repeat;
+			pattern.Filter = Filter.Nearest;
+			pattern.Matrix = new Matrix (.75, .15, -.1, .8, -3, 2);
+			context.SetSource (pattern);
+			context.Rectangle (5, 66, 102, 18);
+			context.Fill ();
+		}
+	}
+
+	static void DrawStrokeStyleMatrix (Context context)
+	{
+		context.SetSourceRGBA (.15, .42, .82, .9);
+		context.SetDash (new[] { 4.0, 1.5, 1.0, 2.0 }, .75);
+		foreach (LineCap cap in new[] { LineCap.Butt, LineCap.Round, LineCap.Square }) {
+			foreach (LineJoin join in new[] { LineJoin.Miter, LineJoin.Round, LineJoin.Bevel }) {
+				int row = (int)cap * 3 + (int)join;
+				context.Save ();
+				context.LineWidth = 2.5 + row * .15;
+				context.LineCap = cap;
+				context.LineJoin = join;
+				context.SetDash (new[] { 3.0 + row * .1, 1.25, .75 }, .25 * row);
+				context.MoveTo (4, 6 + row * 7);
+				context.LineTo (25, 6 + row * 7);
+				context.LineTo (34, 10 + row * 7);
+				context.CurveTo (39, 3 + row * 7, 44, 15 + row * 7, 50, 7 + row * 7);
+				context.Stroke ();
+				context.Restore ();
+			}
+		}
+	}
+
+	static void DrawSelfIntersectingPath (Context context, FillRule fillRule)
+	{
+		context.SetSourceRGBA (.32, .68, .91, .85);
+		context.FillRule = fillRule;
+		context.MoveTo (4, 4);
+		context.LineTo (28, 28);
+		context.LineTo (4, 28);
+		context.LineTo (28, 4);
+		context.ClosePath ();
 		context.Fill ();
 	}
 

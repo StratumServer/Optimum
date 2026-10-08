@@ -12,6 +12,14 @@ Generate the Cairo assembly's exported type and public/protected member inventor
 dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --api-manifest tools/Cairo.ParityHarness/cairo-api-manifest.json
 ```
 
+When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
+
+```bash
+dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --font-matrix /path/to/assets/game/fonts "$TMPDIR/optimum-issue-130-font-matrix"
+```
+
+This mode builds a temporary Fontconfig file for the supplied font directory, verifies that Cairo resolves each requested family/style to the matching TTF, and records Cairo and Skia text metrics, codepoint advances, PNGs, and pixel deltas for every face at scales 1.0, 1.5, and 2.0. The mode is Linux-only and keeps Cairo authoritative for layout. Text deltas are diagnostic; this harness does not test `TextDrawUtil` wrapping or GUI hitboxes.
+
 The inventory includes assembly identity, enum values, signatures, and an initial member classification. Every classification is marked for human review; this inventory alone does not establish old-binary compatibility.
 
 Prerequisites: .NET 10 and the same native `libcairo.so.2` dependency used by the Linux game installation. A missing library or failed Cairo render is a failed run.
