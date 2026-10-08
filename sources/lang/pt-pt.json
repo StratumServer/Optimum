@@ -1,5 +1,7 @@
 {
 	"optimum-tab-header": "Extra",
+	"optimum-guigpu": "Experimental GPU GUI rendering",
+	"optimum-guigpu-tooltip": "Records static dialog drawing and renders supported operations through Skia on the current OpenGL context. The runtime probe must pass; unsupported or failed recordings fall back to Cairo. Requires restart. Experimental; disabled by default.",
 	"optimum-bgfps": "Limitar FPS em segundo plano",
 	"optimum-bgfps-tooltip": "Limita a 30 FPS quando a janela do jogo perde o foco.",
 	"optimum-framepacing": "Cadência de fotogramas suave",

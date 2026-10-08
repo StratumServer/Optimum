@@ -27,6 +27,11 @@ namespace Vintagestory.API.Config
         private static long uploadBytes;
         private static long textureAllocationCount;
         private static long textureUpdateCount;
+        private static long gpuCandidateAttemptCount;
+        private static long gpuCandidateSuccessCount;
+        private static long gpuCandidateFallbackCount;
+        private static long gpuRecordingSurfaceStartCount;
+        private static string lastGpuCandidateFallbackReason;
         private static long lastCompositionThreadId;
         private static long textExtentMeasurementCount;
         private static long textExtentMeasurementTicks;
@@ -58,6 +63,11 @@ namespace Vintagestory.API.Config
                 Interlocked.Read(ref uploadBytes),
                 Interlocked.Read(ref textureAllocationCount),
                 Interlocked.Read(ref textureUpdateCount),
+                Interlocked.Read(ref gpuCandidateAttemptCount),
+                Interlocked.Read(ref gpuCandidateSuccessCount),
+                Interlocked.Read(ref gpuCandidateFallbackCount),
+                Interlocked.Read(ref gpuRecordingSurfaceStartCount),
+                Volatile.Read(ref lastGpuCandidateFallbackReason),
                 Interlocked.Read(ref lastCompositionThreadId),
                 Interlocked.Read(ref textExtentMeasurementCount),
                 Interlocked.Read(ref textExtentMeasurementTicks),
@@ -82,6 +92,11 @@ namespace Vintagestory.API.Config
             Interlocked.Exchange(ref uploadBytes, 0);
             Interlocked.Exchange(ref textureAllocationCount, 0);
             Interlocked.Exchange(ref textureUpdateCount, 0);
+            Interlocked.Exchange(ref gpuCandidateAttemptCount, 0);
+            Interlocked.Exchange(ref gpuCandidateSuccessCount, 0);
+            Interlocked.Exchange(ref gpuCandidateFallbackCount, 0);
+            Interlocked.Exchange(ref gpuRecordingSurfaceStartCount, 0);
+            Volatile.Write(ref lastGpuCandidateFallbackReason, null);
             Interlocked.Exchange(ref lastCompositionThreadId, 0);
             Interlocked.Exchange(ref textExtentMeasurementCount, 0);
             Interlocked.Exchange(ref textExtentMeasurementTicks, 0);
@@ -122,6 +137,19 @@ namespace Vintagestory.API.Config
             else Interlocked.Increment(ref textureUpdateCount);
         }
 
+        internal static void RecordGpuCandidateTexture(bool succeeded, string fallbackReason)
+        {
+            Interlocked.Increment(ref gpuCandidateAttemptCount);
+            if (succeeded) Interlocked.Increment(ref gpuCandidateSuccessCount);
+            else
+            {
+                Interlocked.Increment(ref gpuCandidateFallbackCount);
+                Volatile.Write(ref lastGpuCandidateFallbackReason, fallbackReason ?? "unspecified");
+            }
+        }
+
+        internal static void RecordGpuRecordingSurfaceStart() => Interlocked.Increment(ref gpuRecordingSurfaceStartCount);
+
         internal static void RecordTextExtentMeasurement(long startTimestamp)
         {
             long elapsedTicks = Stopwatch.GetTimestamp() - startTimestamp;
@@ -154,6 +182,11 @@ namespace Vintagestory.API.Config
         public long UploadBytes { get; }
         public long TextureAllocationCount { get; }
         public long TextureUpdateCount { get; }
+        public long GpuCandidateAttemptCount { get; }
+        public long GpuCandidateSuccessCount { get; }
+        public long GpuCandidateFallbackCount { get; }
+        public long GpuRecordingSurfaceStartCount { get; }
+        public string LastGpuCandidateFallbackReason { get; }
         public long LastCompositionThreadId { get; }
         public long TextExtentMeasurementCount { get; }
         public long TextExtentMeasurementTicks { get; }
@@ -163,7 +196,7 @@ namespace Vintagestory.API.Config
 
         internal OptimumGuiMetricsSnapshot(long compositionCount, long compositionTicks, long maxCompositionTicks,
             long composedSurfaceBytes, long lastSurfaceWidth, long lastSurfaceHeight, long initialCompositionCount, long recompositionCount, long uploadCount,
-            long uploadTicks, long uploadBytes, long textureAllocationCount, long textureUpdateCount, long lastCompositionThreadId,
+            long uploadTicks, long uploadBytes, long textureAllocationCount, long textureUpdateCount, long gpuCandidateAttemptCount, long gpuCandidateSuccessCount, long gpuCandidateFallbackCount, long gpuRecordingSurfaceStartCount, string lastGpuCandidateFallbackReason, long lastCompositionThreadId,
             long textExtentMeasurementCount, long textExtentMeasurementTicks, long fontExtentMeasurementCount, long fontExtentMeasurementTicks, long lastTextMeasurementThreadId)
         {
             CompositionCount = compositionCount;
@@ -179,6 +212,11 @@ namespace Vintagestory.API.Config
             UploadBytes = uploadBytes;
             TextureAllocationCount = textureAllocationCount;
             TextureUpdateCount = textureUpdateCount;
+            GpuCandidateAttemptCount = gpuCandidateAttemptCount;
+            GpuCandidateSuccessCount = gpuCandidateSuccessCount;
+            GpuCandidateFallbackCount = gpuCandidateFallbackCount;
+            GpuRecordingSurfaceStartCount = gpuRecordingSurfaceStartCount;
+            LastGpuCandidateFallbackReason = lastGpuCandidateFallbackReason;
             LastCompositionThreadId = lastCompositionThreadId;
             TextExtentMeasurementCount = textExtentMeasurementCount;
             TextExtentMeasurementTicks = textExtentMeasurementTicks;

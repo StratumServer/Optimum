@@ -55,6 +55,7 @@ var typesToInject = new List<string>
     "Optimum.OptimumOptiTimeGuard",
     "Optimum.PhysicsListReuseGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
+    "Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.

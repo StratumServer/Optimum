@@ -43,9 +43,7 @@ index f095fbc..cfcc08b 100644
 +                _ = path.Length;
 +                throw new IndexOutOfRangeException();
 +            }
- 
--            string[] parts = Code.Path.Split('-');
--            return posFromLeft <= parts.Length - 1 ? parts[posFromLeft] : null;
++
 +            // Optimum: scan only as far as the requested part instead of allocating Split's array.
 +            int start = 0;
 +            int part = 0;
@@ -57,7 +55,9 @@ index f095fbc..cfcc08b 100644
 +                part++;
 +                start = i + 1;
 +            }
-+
+ 
+-            string[] parts = Code.Path.Split('-');
+-            return posFromLeft <= parts.Length - 1 ? parts[posFromLeft] : null;
 +            return part == posFromLeft ? path.Substring(start) : null;
          }
  

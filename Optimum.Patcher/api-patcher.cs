@@ -224,9 +224,13 @@ public static class ApiPatcher
 
         var metrics = contracts.GetType("Vintagestory.API.Config.OptimumGuiMetrics")
             ?? throw new InvalidOperationException("OptimumGuiMetrics is missing from the contracts assembly.");
+        var guiGpuProbe = contracts.GetType("Vintagestory.API.Client.OptimumGuiGpuProbe")
+            ?? throw new InvalidOperationException("OptimumGuiGpuProbe is missing from the contracts assembly.");
         var enabledGetter = metrics.Methods.Single(method => method.Name == "get_Enabled" && method.Parameters.Count == 0);
         var startTimestamp = metrics.Methods.Single(method => method.Name == "StartTimestamp" && method.Parameters.Count == 0);
         var recordComposition = metrics.Methods.Single(method => method.Name == "RecordComposition" && method.Parameters.Count == 5);
+        var recordGpuRecordingStart = metrics.Methods.Single(method => method.Name == "RecordGpuRecordingSurfaceStart" && method.Parameters.Count == 0);
+        var renderingRequestedGetter = guiGpuProbe.Methods.Single(method => method.Name == "get_RenderingRequested" && method.Parameters.Count == 0);
 
         var pendingField = new FieldDefinition(pendingFieldName, FieldAttributes.Private, module.TypeSystem.Boolean);
         composer.Fields.Add(pendingField);
@@ -246,11 +250,47 @@ public static class ApiPatcher
         var surfaceLocal = compose.Body.Variables.SingleOrDefault(variable =>
             variable.VariableType.FullName == "Cairo.ImageSurface")
             ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface local.");
+        if (compose.Body.Instructions.Any(instruction => instruction.Operand is MethodReference called && called.Name == "BeginRecording"))
+            throw new InvalidOperationException($"{compose.FullName} already has a GPU recording hook.");
         compose.Body.Variables.Add(enabledLocal);
         compose.Body.Variables.Add(timestampLocal);
         compose.Body.Variables.Add(recomposeLocal);
 
         var composeProcessor = compose.Body.GetILProcessor();
+
+        var imageSurfaceConstructor = compose.Body.Instructions.SingleOrDefault(instruction =>
+            (instruction.OpCode == OpCodes.Newobj || instruction.OpCode == OpCodes.Call) &&
+            instruction.Operand is MethodReference called &&
+            called.Name == ".ctor" && called.DeclaringType.FullName == "Cairo.ImageSurface" &&
+            instruction.Next != null && StoresVariable(instruction.Next, surfaceLocal))
+            ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface construction stored in its surface local.");
+        var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
+        var cairoSurfaceType = new TypeReference("Cairo", "Surface", module, cairoReference);
+        var cairoRecorderType = new TypeReference("Cairo", "SurfaceRecorder", module, cairoReference);
+        var beginRecording = new MethodReference("BeginRecording", cairoRecorderType, cairoSurfaceType)
+        {
+            HasThis = true,
+            CallingConvention = MethodCallingConvention.Default,
+        };
+        Instruction afterRecordingHook = Instruction.Create(OpCodes.Nop);
+        Instruction anchor = imageSurfaceConstructor.Next!;
+        foreach (Instruction hookInstruction in new[]
+        {
+            Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)),
+            Instruction.Create(OpCodes.Brfalse, afterRecordingHook),
+            Instruction.Create(OpCodes.Ldloc, surfaceLocal),
+            Instruction.Create(OpCodes.Callvirt, module.ImportReference(beginRecording)),
+            Instruction.Create(OpCodes.Pop),
+            Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)),
+            Instruction.Create(OpCodes.Brfalse, afterRecordingHook),
+            Instruction.Create(OpCodes.Call, module.ImportReference(recordGpuRecordingStart)),
+            afterRecordingHook
+        })
+        {
+            composeProcessor.InsertAfter(anchor, hookInstruction);
+            anchor = hookInstruction;
+        }
+
         Instruction firstComposeInstruction = compose.Body.Instructions[0];
         Instruction skipTimestamp = Instruction.Create(OpCodes.Nop);
         composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)));
@@ -288,7 +328,7 @@ public static class ApiPatcher
         composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Call, module.ImportReference(recordComposition)));
         composeProcessor.InsertBefore(textureUpload, skipRecord);
 
-        Console.WriteLine($"  API PATCHED: {composerTypeName}.Compose GUI composition metrics");
+        Console.WriteLine($"  API PATCHED: {composerTypeName}.Compose GUI metrics and opt-in GPU recording");
         return 1;
     }
 
@@ -922,6 +962,14 @@ public static class ApiPatcher
         method.DebugInformation.SequencePoints.Clear();
         method.DebugInformation.Scope = null;
     }
+
+    private static bool StoresVariable(Instruction instruction, VariableDefinition variable) =>
+        instruction.OpCode == OpCodes.Stloc_0 && variable.Index == 0 ||
+        instruction.OpCode == OpCodes.Stloc_1 && variable.Index == 1 ||
+        instruction.OpCode == OpCodes.Stloc_2 && variable.Index == 2 ||
+        instruction.OpCode == OpCodes.Stloc_3 && variable.Index == 3 ||
+        (instruction.OpCode == OpCodes.Stloc || instruction.OpCode == OpCodes.Stloc_S) &&
+        instruction.Operand is VariableDefinition storedVariable && storedVariable == variable;
 
     /// <summary>
     /// Injects type-forwarding entries (ExportedType rows) into the vanilla API assembly

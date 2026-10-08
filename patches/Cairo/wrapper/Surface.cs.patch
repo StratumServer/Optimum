@@ -1,0 +1,332 @@
+diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
+index 6f7730e..471b31e 100644
+--- a/Cairo/wrapper/Surface.cs
++++ b/Cairo/wrapper/Surface.cs
+@@ -32,10 +32,12 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Threading;
++using SkiaSharp;
+ 
+ #nullable disable
+ 
+ namespace Cairo
+ {
+@@ -43,10 +45,17 @@ namespace Cairo
+     public class Surface : IDisposable
+ 	{
+ 
+ 		IntPtr handle = IntPtr.Zero;
+ 		bool owner;
++		bool handleExposed;
++		bool recordingCandidate;
++		SurfaceRecorder recorder;
++		readonly object recordingSync = new object ();
++		Thread recordingOwnerThread;
++		Context recordingContext;
++		bool finished;
+ 
+ 		protected Surface (IntPtr handle, bool owner)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+@@ -57,10 +66,137 @@ namespace Cairo
+ 				NativeMethods.cairo_surface_reference (handle);
+ 			if (CairoDebug.Enabled)
+ 				CairoDebug.OnAllocated (handle);
+ 		}
+ 
++		internal Surface (IntPtr handle, bool owner, bool recordingCandidate) : this (handle, owner)
++		{
++			this.recordingCandidate = recordingCandidate;
++		}
++
++		internal SurfaceRecordingState RecordingState {
++			get {
++				lock (recordingSync) {
++					if (handle == IntPtr.Zero) return SurfaceRecordingState.Disposed;
++					return recorder == null ? SurfaceRecordingState.Native : recorder.State;
++				}
++			}
++		}
++
++		internal SurfaceRecorder BeginRecording ()
++		{
++			lock (recordingSync) {
++				CheckDisposed ();
++				if (!recordingCandidate || handleExposed || recorder != null || finished ||
++				    !(this is ImageSurface) || NativeMethods.cairo_image_surface_get_format (handle) != Format.Argb32 ||
++				    NativeMethods.cairo_surface_status (handle) != Status.Success ||
++				    NativeMethods.cairo_surface_get_reference_count (handle) != 1)
++					throw new InvalidOperationException ("Surface is not eligible for geometry recording.");
++				recordingOwnerThread = Thread.CurrentThread;
++				recorder = new SurfaceRecorder (this);
++				return recorder;
++			}
++		}
++
++		internal IntPtr NativeHandleForRecorder {
++			get { CheckDisposed (); EnsureRecordingOwnerThread (); return handle; }
++		}
++		internal IntPtr NativeHandleForMetadata { get { CheckDisposed (); return handle; } }
++
++		internal IntPtr PrepareContextForCreation ()
++		{
++			lock (recordingSync) {
++				CheckDisposed ();
++				EnsureRecordingOwnerThread ();
++				if (recorder != null && recorder.State == SurfaceRecordingState.Recording && recordingContext != null)
++					MaterializeRecorder (recordingContext.NativeHandleForRecorder);
++				return handle;
++			}
++		}
++
++		internal bool AttachRecordingContext (Context context)
++		{
++			lock (recordingSync) {
++				if (recorder == null || recorder.State != SurfaceRecordingState.Recording || recordingContext != null) return false;
++				recordingContext = context;
++				return true;
++			}
++		}
++
++		internal void DetachRecordingContext (Context context)
++		{
++			lock (recordingSync) { if (ReferenceEquals (recordingContext, context)) recordingContext = null; }
++		}
++
++		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) { return TryRecord (rec => rec.RecordSetSourceRGBA (r, g, b, a)); }
++		internal bool RecordPaint () { return TryRecord (rec => rec.RecordPaint ()); }
++		internal bool RecordRectangle (double x, double y, double width, double height) { return TryRecord (rec => rec.RecordRectangle (x, y, width, height)); }
++		internal bool RecordFill () { return TryRecord (rec => rec.RecordFill ()); }
++		internal bool RecordSave () { return TryRecord (rec => rec.RecordSave ()); }
++		internal bool RecordRestore () { return TryRecord (rec => rec.RecordRestore ()); }
++		internal bool RecordAntialias (Antialias value) { return TryRecord (rec => rec.RecordAntialias (value)); }
++		internal bool RecordOperator (Operator value) { return TryRecord (rec => rec.RecordOperator (value)); }
++
++		bool TryRecord (Func<SurfaceRecorder, bool> record)
++		{
++			lock (recordingSync) {
++				if (recorder == null) return false;
++				EnsureRecordingOwnerThread ();
++				if (recorder.State != SurfaceRecordingState.Recording)
++					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++				if (recorder.State != SurfaceRecordingState.Recording) return false;
++				bool recorded = record (recorder);
++				if (!recorded && recorder.State == SurfaceRecordingState.Recording)
++					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++				return recorded;
++			}
++		}
++
++		internal bool TryDrawRecordedCommands (SKCanvas canvas)
++		{
++			SurfaceRecorderSnapshot snapshot;
++			lock (recordingSync) {
++				if (recorder == null || !recorder.TrySeal (out snapshot)) return false;
++			}
++			snapshot.DrawTo (canvas);
++			return true;
++		}
++
++		internal bool CommitGpuRenderedCommands ()
++		{
++			lock (recordingSync) {
++				if (recorder == null || !recorder.CommitGpuRender ()) return false;
++				return true;
++			}
++		}
++
++		internal void MaterializeRecorder () { MaterializeRecorder (IntPtr.Zero); }
++
++		internal void MaterializeRecorder (IntPtr contextHandle)
++		{
++			lock (recordingSync) {
++				if (handle == IntPtr.Zero) return;
++				EnsureRecordingOwnerThread ();
++				if (recorder == null || recorder.State == SurfaceRecordingState.NativeMaterialized || recorder.State == SurfaceRecordingState.Disposed) return;
++				IntPtr replayHandle = contextHandle != IntPtr.Zero ? contextHandle :
++					(recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++				recorder.Materialize (replayHandle);
++				Context oldContext = recordingContext;
++				recordingContext = null;
++				oldContext?.DetachRecordingSurface (this);
++			}
++		}
++
++		internal void EnsureRecordingOwnerThread ()
++		{
++			lock (recordingSync) {
++				if (recorder != null && recorder.State == SurfaceRecordingState.Recording &&
++				    !ReferenceEquals (recordingOwnerThread, Thread.CurrentThread))
++					throw new InvalidOperationException ("A recording surface may only be used from its recording thread.");
++			}
++		}
++
+ 		public static Surface Lookup (IntPtr surface, bool owned)
+ 		{
+ 			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
+ 			switch (st) {
+ 			case SurfaceType.Image:
+@@ -94,10 +230,11 @@ namespace Cairo
+ 
+ 
+ 		public Cairo.Surface CreateSimilar (
+ 			Cairo.Content content, int width, int height)
+ 		{
++			MaterializeRecorder ();
+ 			IntPtr p = NativeMethods.cairo_surface_create_similar (
+ 				this.Handle, content, width, height);
+ 
+ 			return new Cairo.Surface (p, true);
+ 		}
+@@ -108,10 +245,11 @@ namespace Cairo
+ 		}
+ 
+ 		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
+ 		public void Show (Context gr, double x, double y)
+ 		{
++			MaterializeRecorder ();
+ 			NativeMethods.cairo_set_source_surface (gr.Handle, handle, x, y);
+ 			NativeMethods.cairo_paint (gr.Handle);
+ 		}
+ 
+ 		public void Dispose ()
+@@ -123,36 +261,54 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		protected virtual void Dispose (bool disposing)
+ 		{
++			lock (recordingSync) {
++				if (disposing) {
++					EnsureRecordingOwnerThread ();
++					if (recorder != null && (recorder.State == SurfaceRecordingState.Recording ||
++						(recorder.State == SurfaceRecordingState.GpuRendered && recordingContext != null)))
++						MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++				}
++				Context oldContext = recordingContext;
++				recordingContext = null;
++				oldContext?.DetachRecordingSurface (this);
+ 			if (!disposing || CairoDebug.Enabled)
+ 				CairoDebug.OnDisposed<Surface> (handle, disposing);
+ 
+ 			if (handle == IntPtr.Zero)
+ 				return;
+ 
++			if (recorder != null) recorder.DisposeFromSurface ();
++
+ 			NativeMethods.cairo_surface_destroy (handle);
+ 			handle = IntPtr.Zero;
++			}
+ 		}
+ 
+ 		protected void CheckDisposed ()
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
+ 		public Status Finish ()
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_surface_finish (handle);
+-			return Status;
++			lock (recordingSync) {
++				CheckDisposed ();
++				MaterializeRecorder ();
++				NativeMethods.cairo_surface_finish (handle);
++				finished = true;
++				return NativeMethods.cairo_surface_status (handle);
++			}
+ 		}
+ 
+ 		public void Flush ()
+ 		{
+ 			CheckDisposed ();
++			MaterializeRecorder ();
+ 			NativeMethods.cairo_surface_flush (handle);
+ 		}
+ 
+ 		public void MarkDirty ()
+ 		{
+@@ -166,62 +322,75 @@ namespace Cairo
+ 			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
+ 		}
+ 
+ 		public IntPtr Handle {
+ 			get {
+-				return handle;
++				lock (recordingSync) {
++					if (handle == IntPtr.Zero) return IntPtr.Zero;
++					MaterializeRecorder ();
++					handleExposed = true;
++					return handle;
++				}
+ 			}
+ 		}
+ 
+ 		public PointD DeviceOffset {
+ 			get {
+ 				CheckDisposed ();
++				MaterializeRecorder ();
+ 				double x, y;
+ 				NativeMethods.cairo_surface_get_device_offset (handle, out x, out y);
+ 				return new PointD (x, y);
+ 			}
+ 
+ 			set {
+ 				CheckDisposed ();
++				MaterializeRecorder ();
+ 				NativeMethods.cairo_surface_set_device_offset (handle, value.X, value.Y);
+ 			}
+ 		}
+ 
+ 		public void SetFallbackResolution (double x, double y)
+ 		{
+ 			CheckDisposed ();
++			MaterializeRecorder ();
+ 			NativeMethods.cairo_surface_set_fallback_resolution (handle, x, y);
+ 		}
+ 
+ 		public void WriteToPng (string filename)
+ 		{
+ 			CheckDisposed ();
++			MaterializeRecorder ();
+ 			NativeMethods.cairo_surface_write_to_png (handle, filename);
+ 		}
+ 
+ 		public Status Status {
+ 			get {
+ 				CheckDisposed ();
++				MaterializeRecorder ();
+ 				return NativeMethods.cairo_surface_status (handle);
+ 			}
+ 		}
+ 
+ 		public Content Content {
+ 			get {
+ 				CheckDisposed ();
++				MaterializeRecorder ();
+ 				return NativeMethods.cairo_surface_get_content (handle);
+ 			}
+ 		}
+ 
+ 		public SurfaceType SurfaceType {
+ 			get {
+ 				CheckDisposed ();
++				MaterializeRecorder ();
+ 				return NativeMethods.cairo_surface_get_type (handle);
+ 			}
+ 		}
+ 
+ 		public uint ReferenceCount {
+ 			get {
++				MaterializeRecorder ();
+ 				return NativeMethods.cairo_surface_get_reference_count (handle); }
+ 		}
+ 	}
+ }
