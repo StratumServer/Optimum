@@ -76,6 +76,8 @@ public static class ApiPatcher
         int headControllerFallback = PatchHeadControllerPoseFallback(vanilla.MainModule);
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
+        int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
+        int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule);
 
         if (inventoryHooks != 2)
         {
@@ -122,6 +124,16 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 1 ICoreClientAPI.IsTesselationThread contract patch, applied {clientApiThreadContract}.");
         }
+        if (guiCompositionMetrics != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 GuiComposer composition metrics patch, applied {guiCompositionMetrics}.");
+        }
+        if (fontMeasurementMetrics != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 CairoFont measurement metrics patches, applied {fontMeasurementMetrics}.");
+        }
 
         int typeForwards = InjectTypeForwards(vanilla, contracts);
 
@@ -155,6 +167,7 @@ public static class ApiPatcher
                 $"{headControllerFallback} head controller pose fallback, " +
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
+                $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{typeForwards} type forwards.");
         return true;
     }
@@ -187,6 +200,167 @@ public static class ApiPatcher
         clientApi.Methods.Add(method);
         Console.WriteLine($"  API PATCHED: {typeName}.{methodName}(int)");
         return 1;
+    }
+
+    internal static int PatchGuiCompositionMetrics(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string composerTypeName = "Vintagestory.API.Client.GuiComposer";
+        const string pendingFieldName = "optimumGuiMetricsRecomposePending";
+        var composer = module.GetType(composerTypeName)
+            ?? throw new InvalidOperationException($"{composerTypeName} is missing from the vanilla API.");
+        var compose = composer.Methods.Single(method =>
+            method.Name == "Compose" && method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.Boolean);
+        var recompose = composer.Methods.Single(method => method.Name == "ReCompose" && method.Parameters.Count == 0);
+        if (!compose.HasBody || !recompose.HasBody)
+        {
+            throw new InvalidOperationException("GuiComposer.Compose or ReCompose has no method body.");
+        }
+
+        if (composer.Fields.Any(field => field.Name == pendingFieldName))
+        {
+            throw new InvalidOperationException($"{composerTypeName}.{pendingFieldName} already exists.");
+        }
+
+        var metrics = contracts.GetType("Vintagestory.API.Config.OptimumGuiMetrics")
+            ?? throw new InvalidOperationException("OptimumGuiMetrics is missing from the contracts assembly.");
+        var enabledGetter = metrics.Methods.Single(method => method.Name == "get_Enabled" && method.Parameters.Count == 0);
+        var startTimestamp = metrics.Methods.Single(method => method.Name == "StartTimestamp" && method.Parameters.Count == 0);
+        var recordComposition = metrics.Methods.Single(method => method.Name == "RecordComposition" && method.Parameters.Count == 5);
+
+        var pendingField = new FieldDefinition(pendingFieldName, FieldAttributes.Private, module.TypeSystem.Boolean);
+        composer.Fields.Add(pendingField);
+
+        ClearDebugInformation(recompose);
+        var recomposeProcessor = recompose.Body.GetILProcessor();
+        Instruction firstRecomposeInstruction = recompose.Body.Instructions[0];
+        recomposeProcessor.InsertBefore(firstRecomposeInstruction, Instruction.Create(OpCodes.Ldarg_0));
+        recomposeProcessor.InsertBefore(firstRecomposeInstruction, Instruction.Create(OpCodes.Ldc_I4_1));
+        recomposeProcessor.InsertBefore(firstRecomposeInstruction, Instruction.Create(OpCodes.Stfld, pendingField));
+
+        ClearDebugInformation(compose);
+        compose.Body.InitLocals = true;
+        var enabledLocal = new VariableDefinition(module.TypeSystem.Boolean);
+        var timestampLocal = new VariableDefinition(module.TypeSystem.Int64);
+        var recomposeLocal = new VariableDefinition(module.TypeSystem.Boolean);
+        var surfaceLocal = compose.Body.Variables.SingleOrDefault(variable =>
+            variable.VariableType.FullName == "Cairo.ImageSurface")
+            ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface local.");
+        compose.Body.Variables.Add(enabledLocal);
+        compose.Body.Variables.Add(timestampLocal);
+        compose.Body.Variables.Add(recomposeLocal);
+
+        var composeProcessor = compose.Body.GetILProcessor();
+        Instruction firstComposeInstruction = compose.Body.Instructions[0];
+        Instruction skipTimestamp = Instruction.Create(OpCodes.Nop);
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Stloc, enabledLocal));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Ldloc, enabledLocal));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Brfalse, skipTimestamp));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(startTimestamp)));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Stloc, timestampLocal));
+        composeProcessor.InsertBefore(firstComposeInstruction, skipTimestamp);
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Ldarg_0));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Ldfld, pendingField));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Stloc, recomposeLocal));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Ldarg_0));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Ldc_I4_0));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Stfld, pendingField));
+
+        var textureUpload = compose.Body.Instructions.SingleOrDefault(instruction =>
+            (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
+            instruction.Operand is MethodReference called && called.Name == "LoadOrUpdateCairoTexture")
+            ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo texture upload call.");
+        Instruction skipRecord = Instruction.Create(OpCodes.Nop);
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Ldloc, enabledLocal));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Brfalse, skipRecord));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Ldloc, timestampLocal));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Ldloc, surfaceLocal));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Callvirt,
+            module.ImportReference(surfaceLocal.VariableType.Resolve()!.Properties.Single(property => property.Name == "Width").GetMethod!)));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Ldloc, surfaceLocal));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Callvirt,
+            module.ImportReference(surfaceLocal.VariableType.Resolve()!.Properties.Single(property => property.Name == "Height").GetMethod!)));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Ldloc, surfaceLocal));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Callvirt,
+            module.ImportReference(surfaceLocal.VariableType.Resolve()!.Properties.Single(property => property.Name == "Stride").GetMethod!)));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Ldloc, recomposeLocal));
+        composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Call, module.ImportReference(recordComposition)));
+        composeProcessor.InsertBefore(textureUpload, skipRecord);
+
+        Console.WriteLine($"  API PATCHED: {composerTypeName}.Compose GUI composition metrics");
+        return 1;
+    }
+
+    internal static int PatchFontMeasurementMetrics(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string fontTypeName = "Vintagestory.API.Client.CairoFont";
+        var font = module.GetType(fontTypeName)
+            ?? throw new InvalidOperationException($"{fontTypeName} is missing from the vanilla API.");
+        var metrics = contracts.GetType("Vintagestory.API.Config.OptimumGuiMetrics")
+            ?? throw new InvalidOperationException("OptimumGuiMetrics is missing from the contracts assembly.");
+        var enabledGetter = metrics.Methods.Single(method => method.Name == "get_Enabled" && method.Parameters.Count == 0);
+        var startTimestamp = metrics.Methods.Single(method => method.Name == "StartTimestamp" && method.Parameters.Count == 0);
+        var recordTextExtents = metrics.Methods.Single(method => method.Name == "RecordTextExtentMeasurement" && method.Parameters.Count == 1);
+        var recordFontExtents = metrics.Methods.Single(method => method.Name == "RecordFontExtentMeasurement" && method.Parameters.Count == 1);
+
+        var textExtents = font.Methods.Single(method => method.Name == "GetTextExtents" && method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String);
+        var fontExtents = font.Methods.Single(method => method.Name == "GetFontExtents" && method.Parameters.Count == 0);
+        PatchFontMeasurementMethod(module, textExtents, enabledGetter, startTimestamp, recordTextExtents);
+        PatchFontMeasurementMethod(module, fontExtents, enabledGetter, startTimestamp, recordFontExtents);
+        Console.WriteLine($"  API PATCHED: {fontTypeName}.GetTextExtents/GetFontExtents metrics");
+        return 2;
+    }
+
+    private static void PatchFontMeasurementMethod(ModuleDefinition module, MethodDefinition method,
+        MethodDefinition enabledGetter, MethodDefinition startTimestamp, MethodDefinition recordMeasurement)
+    {
+        if (!method.HasBody) throw new InvalidOperationException($"{method.FullName} has no method body.");
+        if (method.Body.Instructions.Any(instruction => instruction.Operand is MethodReference called &&
+            called.Name == recordMeasurement.Name && called.DeclaringType.FullName == recordMeasurement.DeclaringType.FullName))
+            throw new InvalidOperationException($"{method.FullName} already has a GUI text measurement hook.");
+
+        var returns = method.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ret).ToArray();
+        if (returns.Length != 1)
+            throw new InvalidOperationException($"Expected one return in {method.FullName}, found {returns.Length}.");
+
+        method.Body.InitLocals = true;
+        var enabledLocal = new VariableDefinition(module.TypeSystem.Boolean);
+        var timestampLocal = new VariableDefinition(module.TypeSystem.Int64);
+        method.Body.Variables.Add(enabledLocal);
+        method.Body.Variables.Add(timestampLocal);
+        var processor = method.Body.GetILProcessor();
+
+        Instruction originalFirst = method.Body.Instructions[0];
+        Instruction skipStart = Instruction.Create(OpCodes.Nop);
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Stloc, enabledLocal));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Ldloc, enabledLocal));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Brfalse, skipStart));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Call, module.ImportReference(startTimestamp)));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Stloc, timestampLocal));
+        processor.InsertBefore(originalFirst, skipStart);
+
+        Instruction returnInstruction = returns[0];
+        Instruction recordStart = Instruction.Create(OpCodes.Ldloc, enabledLocal);
+        Instruction skipRecord = Instruction.Create(OpCodes.Nop);
+        processor.InsertBefore(returnInstruction, recordStart);
+        processor.InsertBefore(returnInstruction, Instruction.Create(OpCodes.Brfalse, skipRecord));
+        processor.InsertBefore(returnInstruction, Instruction.Create(OpCodes.Ldloc, timestampLocal));
+        processor.InsertBefore(returnInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(recordMeasurement)));
+        processor.InsertBefore(returnInstruction, skipRecord);
+
+        // Retarget existing branches so every successful return passes through the metric hook.
+        foreach (Instruction instruction in method.Body.Instructions)
+        {
+            if (instruction == recordStart) break;
+            if (instruction.Operand is Instruction target && target == returnInstruction)
+                instruction.Operand = recordStart;
+            else if (instruction.Operand is Instruction[] targets)
+                for (int i = 0; i < targets.Length; i++)
+                    if (targets[i] == returnInstruction) targets[i] = recordStart;
+        }
     }
 
     internal static int PatchGameVersionLabel(ModuleDefinition module, string optimumVersion)

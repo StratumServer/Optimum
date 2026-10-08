@@ -1,0 +1,60 @@
+diff --git a/VintagestoryApi/Client/UI/GuiComposer.cs b/VintagestoryApi/Client/UI/GuiComposer.cs
+index fde54a1..2e71bb1 100644
+--- a/VintagestoryApi/Client/UI/GuiComposer.cs
++++ b/VintagestoryApi/Client/UI/GuiComposer.cs
+@@ -59,10 +59,11 @@ namespace Vintagestory.API.Client
+         public ElementBounds CurParentBounds => parentBoundsForNextElement.Peek();
+ 
+         public bool Composed = false;
+         internal bool recomposeOnRender = false;
+         internal bool onlyDynamicRender = false;
++        internal bool optimumGuiMetricsRecomposePending = false;
+         internal ElementBounds InsideClipBounds;
+ 
+         public ICoreClientAPI Api;
+         public float zDepth=50;
+ 
+@@ -233,10 +234,11 @@ namespace Vintagestory.API.Client
+         /// <summary>
+         /// Rebuilds the Composed GUI.  
+         /// </summary>
+         public void ReCompose()
+         {
++            optimumGuiMetricsRecomposePending = true;
+             Composed = false;
+             Compose(false);
+         }
+ 
+         internal void UnFocusElements()
+@@ -363,10 +365,15 @@ namespace Vintagestory.API.Client
+             {
+                 if (focusFirstElement && MaxTabIndex >= 0) FocusElement(0);
+                 return this;
+             }
+ 
++            bool optimumGuiMetricsEnabled = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
++            long optimumGuiCompositionStart = optimumGuiMetricsEnabled ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
++            bool optimumGuiMetricsWasRecomposition = optimumGuiMetricsRecomposePending;
++            optimumGuiMetricsRecomposePending = false;
++
+             foreach (GuiElement element in staticElements.Values)
+             {
+                 element.BeforeCalcBounds();
+             }
+ 
+@@ -421,10 +428,15 @@ namespace Vintagestory.API.Client
+             if (!premultipliedAlpha)
+             {
+                 surface.DemulAlpha();
+             }
+ 
++            if (optimumGuiMetricsEnabled)
++            {
++                Vintagestory.API.Config.OptimumGuiMetrics.RecordComposition(optimumGuiCompositionStart, surface.Width, surface.Height, surface.Stride, optimumGuiMetricsWasRecomposition);
++            }
++
+             Api.Gui.LoadOrUpdateCairoTexture(surface, true, ref staticElementsTexture);            
+ 
+             ctx.Dispose();
+             surface.Dispose();
+ 

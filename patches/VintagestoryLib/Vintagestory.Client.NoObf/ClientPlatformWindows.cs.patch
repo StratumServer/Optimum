@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index 6edf0c9..d2cbd31 100644
+index b1b2eea..c060d0e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,124 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -486,7 +486,54 @@ index 6edf0c9..d2cbd31 100644
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
  			blit.Use();
  			blit.Scene2D = scene2D;
-@@ -2665,15 +2999,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2337,15 +2671,18 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	{
+ 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
+ 		{
+ 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
+ 		}
++		bool optimumGuiMetricsEnabled = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
++		long optimumGuiUploadStart = optimumGuiMetricsEnabled ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
+ 		int num = GL.GenTexture();
+ 		GL.BindTexture((TextureTarget)3553, num);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, linearMag ? 9729 : 9728);
+ 		GL.TexImage2D((TextureTarget)3553, 0, (PixelInternalFormat)32856, surface.Width, surface.Height, 0, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
++		if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, true);
+ 		return num;
+ 	}
+ 
+ 	public override void GenTexture(RawTexture tex)
+ 	{
+@@ -2367,11 +2704,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 	{
+ 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
+ 		{
+ 			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
+ 		}
+-		if (intoTexture.TextureId == 0 || intoTexture.Width != surface.Width || intoTexture.Height != surface.Height)
++		bool optimumGuiMetricsEnabled = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
++		long optimumGuiUploadStart = optimumGuiMetricsEnabled ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
++		bool optimumGuiMetricsAllocatesTexture = intoTexture.TextureId == 0 || intoTexture.Width != surface.Width || intoTexture.Height != surface.Height;
++		if (optimumGuiMetricsAllocatesTexture)
+ 		{
+ 			if (intoTexture.TextureId != 0)
+ 			{
+ 				GL.DeleteTexture(intoTexture.TextureId);
+ 			}
+@@ -2387,10 +2727,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 		{
+ 			GL.BindTexture((TextureTarget)3553, intoTexture.TextureId);
+ 			GL.TexSubImage2D((TextureTarget)3553, 0, 0, 0, surface.Width, surface.Height, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
+ 		}
+ 		CheckGlError("LoadOrUpdateCairoTexture");
++		if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, optimumGuiMetricsAllocatesTexture);
+ 	}
+ 
+ 	public override int LoadTexture(SKBitmap bmp, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
+ 	{
+ 		if (bmp == null)
+@@ -2665,15 +3006,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(float[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -507,7 +554,7 @@ index 6edf0c9..d2cbd31 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +3018,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +3025,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -528,7 +575,7 @@ index 6edf0c9..d2cbd31 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +3037,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +3044,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -549,7 +596,7 @@ index 6edf0c9..d2cbd31 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +3056,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +3063,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -570,7 +617,7 @@ index 6edf0c9..d2cbd31 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +3075,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +3082,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -591,7 +638,7 @@ index 6edf0c9..d2cbd31 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +3098,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +3105,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
