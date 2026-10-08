@@ -1,5 +1,7 @@
 {
 	"optimum-tab-header": "Lisä",
+	"optimum-guigpu": "Experimental GPU GUI rendering",
+	"optimum-guigpu-tooltip": "Records static dialog drawing and renders supported operations through Skia on the current OpenGL context. The runtime probe must pass; unsupported or failed recordings fall back to Cairo. Requires restart. Experimental; disabled by default.",
 	"optimum-bgfps": "Rajoita taustan FPS",
 	"optimum-bgfps-tooltip": "Rajoittaa 30 FPS:ään kun peli-ikkuna menettää kohdistuksen.",
 	"optimum-framepacing": "Tasainen kuvatahti",

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/GuiComposer.cs b/VintagestoryApi/Client/UI/GuiComposer.cs
-index fde54a1..2e71bb1 100644
+index fde54a1..56c4f04 100644
 --- a/VintagestoryApi/Client/UI/GuiComposer.cs
 +++ b/VintagestoryApi/Client/UI/GuiComposer.cs
 @@ -59,10 +59,11 @@ namespace Vintagestory.API.Client
@@ -42,7 +42,24 @@ index fde54a1..2e71bb1 100644
                  element.BeforeCalcBounds();
              }
  
-@@ -421,10 +428,15 @@ namespace Vintagestory.API.Client
+@@ -392,10 +399,16 @@ namespace Vintagestory.API.Client
+                 wdt = Math.Max(wdt, staticElementsTexture.Width);
+                 hgt = Math.Max(hgt, staticElementsTexture.Height);
+             }
+ 
+             ImageSurface surface = new ImageSurface(Format.Argb32, wdt, hgt);
++            if (premultipliedAlpha && Vintagestory.API.Client.OptimumGuiGpuProbe.RenderingRequested)
++            {
++                surface.BeginRecording();
++                if (Vintagestory.API.Config.OptimumGuiMetrics.Enabled)
++                    Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuRecordingSurfaceStart();
++            }
+             Context ctx = new Context(surface);
+             ctx.SetSourceRGBA(0, 0, 0, 0);
+             ctx.Paint();
+             ctx.Antialias = Antialias.Best;
+ 
+@@ -421,10 +434,15 @@ namespace Vintagestory.API.Client
              if (!premultipliedAlpha)
              {
                  surface.DemulAlpha();

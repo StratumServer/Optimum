@@ -1,0 +1,235 @@
+diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
+index 03f9c76..59ed907 100644
+--- a/Cairo/wrapper/Context.cs
++++ b/Cairo/wrapper/Context.cs
+@@ -33,10 +33,11 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Runtime.ExceptionServices;
+ using System.Runtime.InteropServices;
+ using System.Text;
+ 
+ #nullable disable
+ 
+@@ -50,10 +51,11 @@ namespace Cairo
+ 	}
+ 
+ 	public class Context : IDisposable
+ 	{
+ 		IntPtr handle = IntPtr.Zero;
++		Surface recordingSurface;
+ 
+ 		static int native_glyph_size, c_compiler_long_size;
+ 
+ 		static Context ()
+ 		{
+@@ -81,12 +83,13 @@ namespace Cairo
+ 				c_compiler_long_size = 8;
+ 				native_glyph_size = Marshal.SizeOf (typeof (Glyph));
+ 			}
+ 		}
+ 
+-		public Context (Surface surface) : this (NativeMethods.cairo_create (surface.Handle), true)
++		public Context (Surface surface) : this (NativeMethods.cairo_create (surface.PrepareContextForCreation ()), true)
+ 		{
++			if (surface.AttachRecordingContext (this)) recordingSurface = surface;
+ 		}
+ 
+ 		public Context (IntPtr handle, bool owner)
+ 		{
+ 			if (handle == IntPtr.Zero)
+@@ -115,45 +118,80 @@ namespace Cairo
+ 			GC.SuppressFinalize (this);
+ 		}
+ 
+ 		protected virtual void Dispose (bool disposing)
+ 		{
+-			if (!disposing || CairoDebug.Enabled)
+-				CairoDebug.OnDisposed<Context> (handle, disposing);
+-
+-			if (handle == IntPtr.Zero)
+-				return;
+-
+-			NativeMethods.cairo_destroy (handle);
+-			handle = IntPtr.Zero;
++			if (handle == IntPtr.Zero) return;
++			IntPtr disposedHandle = handle;
++			Surface oldSurface = recordingSurface;
++			ExceptionDispatchInfo cleanupFailure = null;
++			// A recorded context can be disposed before its display list is consumed by
++			// the GPU upload path. Replay remains available through Surface's native
++			// materialization boundaries, which can create a fresh Cairo context.
++			try {
++				if (!disposing || CairoDebug.Enabled) CairoDebug.OnDisposed<Context> (disposedHandle, disposing);
++			} catch (Exception exception) {
++				cleanupFailure = ExceptionDispatchInfo.Capture (exception);
++			}
++			try {
++				NativeMethods.cairo_destroy (disposedHandle);
++			} catch (Exception exception) {
++				if (cleanupFailure == null) cleanupFailure = ExceptionDispatchInfo.Capture (exception);
++			} finally {
++				try {
++					if (oldSurface != null) oldSurface.DetachRecordingContext (this);
++				} catch (Exception exception) {
++					if (cleanupFailure == null) cleanupFailure = ExceptionDispatchInfo.Capture (exception);
++				} finally {
++					recordingSurface = null;
++					handle = IntPtr.Zero;
++				}
++			}
++			if (cleanupFailure != null) cleanupFailure.Throw ();
+ 		}
+ 
+ 		void CheckDisposed ()
++		{
++			CheckDisposedOnly ();
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle);
++		}
++
++		void CheckDisposedOnly ()
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
++		internal IntPtr NativeHandleForRecorder { get { return handle; } }
++
++		internal void DetachRecordingSurface (Surface surface)
++		{
++			if (ReferenceEquals (recordingSurface, surface)) recordingSurface = null;
++		}
++
+ 		public void Save ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null && recordingSurface.RecordSave ()) return;
+ 			NativeMethods.cairo_save (handle);
+ 		}
+ 
+ 		public void Restore ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null && recordingSurface.RecordRestore ()) return;
+ 			NativeMethods.cairo_restore (handle);
+ 		}
+ 
+ 		public Antialias Antialias {
+ 			get {
+ 				CheckDisposed ();
+ 				return NativeMethods.cairo_get_antialias (handle);
+ 			}
+ 			set {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
++				if (recordingSurface != null && recordingSurface.RecordAntialias (value)) return;
+ 				NativeMethods.cairo_set_antialias (handle, value);
+ 			}
+ 		}
+ 
+ 		public Cairo.Status Status {
+@@ -163,17 +201,20 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public IntPtr Handle {
+ 			get {
++				if (handle == IntPtr.Zero) return IntPtr.Zero;
++				if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle);
+ 				return handle;
+ 			}
+ 		}
+ 
+ 		public Operator Operator {
+ 			set {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
++				if (recordingSurface != null && recordingSurface.RecordOperator (value)) return;
+ 				NativeMethods.cairo_set_operator (handle, value);
+ 			}
+ 
+ 			get {
+ 				CheckDisposed ();
+@@ -338,13 +379,18 @@ namespace Cairo
+ 		}
+ 
+ 		public void SetTarget (Surface target)
+ 		{
+ 			CheckDisposed ();
+-			if (handle != IntPtr.Zero)
+-				NativeMethods.cairo_destroy (handle);
+-			handle = NativeMethods.cairo_create (target.Handle);
++			if (recordingSurface != null) {
++				recordingSurface.DetachRecordingContext (this);
++				recordingSurface = null;
++			}
++			IntPtr targetHandle = target.PrepareContextForCreation ();
++			if (handle != IntPtr.Zero) NativeMethods.cairo_destroy (handle);
++			handle = NativeMethods.cairo_create (targetHandle);
++			if (target.AttachRecordingContext (this)) recordingSurface = target;
+ 		}
+ 
+ 		[Obsolete("Use GetScaledFont/SetScaledFont")]
+ 		public ScaledFont ScaledFont {
+ 			set {
+@@ -389,11 +435,12 @@ namespace Cairo
+ 			NativeMethods.cairo_set_source_rgb (handle, r, g, b);
+ 		}
+ 
+ 		public void SetSourceRGBA (double r, double g, double b, double a)
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null && recordingSurface.RecordSetSourceRGBA (r, g, b, a)) return;
+ 			NativeMethods.cairo_set_source_rgba (handle, r, g, b, a);
+ 		}
+ 
+         public void SetSourceRGBA(double[] rgba)
+         {
+@@ -528,11 +575,12 @@ namespace Cairo
+ 			Rectangle (p.X, p.Y, width, height);
+ 		}
+ 
+ 		public void Rectangle (double x, double y, double width, double height)
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null && recordingSurface.RecordRectangle (x, y, width, height)) return;
+ 			NativeMethods.cairo_rectangle (handle, x, y, width, height);
+ 		}
+ 
+ 		public void ClosePath ()
+ 		{
+@@ -565,11 +613,12 @@ namespace Cairo
+         /// <summary>
+         /// Paint the whole surface ignoring any paths
+         /// </summary>
+         public void Paint ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null && recordingSurface.RecordPaint ()) return;
+ 			NativeMethods.cairo_paint (handle);
+ 		}
+ 
+ 		public void PaintWithAlpha (double alpha)
+ 		{
+@@ -612,11 +661,12 @@ namespace Cairo
+         /// <summary>
+         /// Paint everything in the current region
+         /// </summary>
+ 		public void Fill ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null && recordingSurface.RecordFill ()) return;
+ 			NativeMethods.cairo_fill (handle);
+ 		}
+ 
+ 		public Rectangle FillExtents ()
+ 		{

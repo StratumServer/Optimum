@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..8414cd7 100644
+index bba43f6..6fb26c1 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 @@ -18,45 +18,95 @@ public class SystemRenderOITLayers : ClientSystem
@@ -126,7 +126,7 @@ index bba43f6..8414cd7 100644
  		private void freeResources()
  		{
  			GL.DeleteTexture(accumTextureId);
-@@ -65,11 +114,11 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -65,11 +115,11 @@ public class SystemRenderOITLayers : ClientSystem
  			revealTextureId = 0;
  		}
  
@@ -139,7 +139,7 @@ index bba43f6..8414cd7 100644
  		private void rebuild()
  		{
  			freeResources();
-@@ -104,15 +153,24 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -104,15 +154,24 @@ public class SystemRenderOITLayers : ClientSystem
  
  		public int RenderRange => 1;
  
@@ -169,7 +169,7 @@ index bba43f6..8414cd7 100644
  		public void Dispose()
  		{
  		}
-@@ -122,19 +180,50 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -122,19 +181,50 @@ public class SystemRenderOITLayers : ClientSystem
  
  	private static int accumTextureId;
  

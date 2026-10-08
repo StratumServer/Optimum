@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..c060d0e 100644
+index b1b2eea..531901e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,124 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -505,7 +505,7 @@ index b1b2eea..c060d0e 100644
  
  	public override void GenTexture(RawTexture tex)
  	{
-@@ -2367,11 +2704,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2367,11 +2704,36 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -515,25 +515,61 @@ index b1b2eea..c060d0e 100644
 +		bool optimumGuiMetricsEnabled = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
 +		long optimumGuiUploadStart = optimumGuiMetricsEnabled ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
 +		bool optimumGuiMetricsAllocatesTexture = intoTexture.TextureId == 0 || intoTexture.Width != surface.Width || intoTexture.Height != surface.Height;
++		if (Vintagestory.API.Client.OptimumGuiGpuProbe.RenderingRequested)
++		{
++			string probeResult = OptimumGuiGpuProbeBackend.TryRunOnce(RuntimeEnv.MainThreadId);
++			if (probeResult != null) logger.Notification("{0}", probeResult);
++		}
++		int candidateTexture = 0;
++		bool guiGpuCandidate = false;
++		if (Vintagestory.API.Client.OptimumGuiGpuProbe.GuiRenderingEnabled)
++		{
++			guiGpuCandidate = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out candidateTexture, out string candidateFailureReason);
++			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuCandidateTexture(guiGpuCandidate, candidateFailureReason);
++		}
++		if (guiGpuCandidate)
++		{
++			int oldTexture = intoTexture.TextureId;
++			intoTexture.TextureId = candidateTexture;
++			intoTexture.Width = surface.Width;
++			intoTexture.Height = surface.Height;
++			if (oldTexture != 0) GL.DeleteTexture(oldTexture);
++			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, true);
++			return;
++		}
 +		if (optimumGuiMetricsAllocatesTexture)
  		{
  			if (intoTexture.TextureId != 0)
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
  			}
-@@ -2387,10 +2727,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2387,10 +2749,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			GL.BindTexture((TextureTarget)3553, intoTexture.TextureId);
  			GL.TexSubImage2D((TextureTarget)3553, 0, 0, 0, surface.Width, surface.Height, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
  		}
  		CheckGlError("LoadOrUpdateCairoTexture");
++		if (Vintagestory.API.Client.OptimumGuiGpuProbe.Enabled)
++		{
++			ShaderProgramBase savedCurrentShaderProgram = ShaderProgramBase.CurrentShaderProgram;
++			try
++			{
++				string probeResult = OptimumGuiGpuProbeBackend.TryRunOnce(RuntimeEnv.MainThreadId);
++				if (probeResult != null) logger.Notification("{0}", probeResult);
++			}
++			finally
++			{
++				// Restore bookkeeping directly; the probe has already restored GL_CURRENT_PROGRAM.
++				ShaderProgramBase.CurrentShaderProgram = savedCurrentShaderProgram;
++			}
++		}
 +		if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, optimumGuiMetricsAllocatesTexture);
  	}
  
  	public override int LoadTexture(SKBitmap bmp, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
  	{
  		if (bmp == null)
-@@ -2665,15 +3006,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2665,15 +3042,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(float[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -554,7 +590,7 @@ index b1b2eea..c060d0e 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +3025,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +3061,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -575,7 +611,7 @@ index b1b2eea..c060d0e 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +3044,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +3080,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -596,7 +632,7 @@ index b1b2eea..c060d0e 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +3063,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +3099,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -617,7 +653,7 @@ index b1b2eea..c060d0e 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +3082,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +3118,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -638,7 +674,7 @@ index b1b2eea..c060d0e 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +3105,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +3141,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);

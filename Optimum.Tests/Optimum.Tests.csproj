@@ -10,6 +10,7 @@
     <PackageReference Include="coverlet.collector" Version="6.*" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Cairo\Cairo.csproj" />
     <ProjectReference Include="..\Optimum.Patcher\Optimum.Patcher.csproj" />
     <ProjectReference Include="..\tools\Cairo.ParityHarness\Cairo.ParityHarness.csproj" />
     <ProjectReference Include="..\Optimum.Launcher\Optimum.Launcher.csproj" />

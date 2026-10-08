@@ -516,6 +516,7 @@ try {
     # _hostcaps.ps1.
     $vanillaDir = Join-Path $repoRoot '.vanilla/win-x64'
     $winVanillaDir = Join-Path $vanillaDir 'vintagestory'
+    $pristineLibPath = Join-Path $winVanillaDir 'VintagestoryLib.vanilla.dll'
     $snapshotDir = Join-Path $repoRoot 'build/snapshot'
     $zipCacheDir = Join-Path $vanillaDir '../archives'
     $sourcesDir = Join-Path $repoRoot 'sources'
@@ -720,7 +721,14 @@ try {
         }
 
         $freshExtract = $true
+        Copy-Item -LiteralPath (Join-Path $winVanillaDir 'VintagestoryLib.dll') -Destination $pristineLibPath -Force
         Write-Host "Extraction complete."
+    }
+
+    # Deploy replaces VintagestoryLib.dll in the cached client directory. Always
+    # decompile the protected copy so repeat patch runs never use their own output.
+    if (-not (Test-Path -LiteralPath $pristineLibPath -PathType Leaf)) {
+        throw "Pristine VintagestoryLib donor is missing: $pristineLibPath. Re-run bootstrap with -Refresh to extract a clean client before deploying."
     }
 
     # Validate the vanilla tree before building against it. A tolerated
@@ -765,7 +773,11 @@ try {
 
     foreach ($dllBase in $decompileTargets.Keys) {
         $workDir = $decompileTargets[$dllBase]
-        $dllPath = Get-ChildItem -Path $winVanillaDir -Recurse -Filter "$dllBase.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($dllBase -eq 'VintagestoryLib') {
+            $dllPath = Get-Item -LiteralPath $pristineLibPath
+        } else {
+            $dllPath = Get-ChildItem -Path $winVanillaDir -Recurse -Filter "$dllBase.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
         if (-not $dllPath) { Write-Warning "Skipping $dllBase.dll (not found)"; continue }
 
         $out = Join-Path $snapshotDir $dllBase
@@ -793,12 +805,28 @@ try {
             if ($producedProjects.Count -eq 0 -or $producedSource.Count -eq 0) {
                 throw "ilspycmd produced an incomplete source tree for $dllBase.dll (exit code $LASTEXITCODE). Delete $out and retry, or reinstall ilspycmd."
             }
-            $producedProjects | ForEach-Object {
+            $normalizedProject = Join-Path $out "$dllBase.csproj"
+            $decompiledProject = Join-Path $out "$($dllBase).vanilla.csproj"
+            if (-not (Test-Path -LiteralPath $normalizedProject) -and (Test-Path -LiteralPath $decompiledProject)) {
+                Move-Item -LiteralPath $decompiledProject -Destination $normalizedProject
+            }
+            if (-not (Test-Path -LiteralPath $normalizedProject -PathType Leaf)) {
+                throw "ilspycmd produced no $dllBase.csproj for $dllBase.dll; the decompile cache will not be reused."
+            }
+            Get-ChildItem -Path $out -Filter '*.csproj' -File | ForEach-Object {
                 Update-FileInPlace $_.FullName { param($t) $t -creplace '<LangVersion>15\.0</LangVersion>', '<LangVersion>latest</LangVersion>' }
             }
             $manifestDirectory = Split-Path -Parent $manifest
             New-Item -ItemType Directory -Force -Path $manifestDirectory | Out-Null
             [System.IO.File]::WriteAllText($manifest, $expectedManifest, [System.Text.Encoding]::UTF8)
+        }
+        $normalizedProject = Join-Path $out "$dllBase.csproj"
+        $decompiledProject = Join-Path $out "$($dllBase).vanilla.csproj"
+        if (-not (Test-Path -LiteralPath $normalizedProject) -and (Test-Path -LiteralPath $decompiledProject)) {
+            Move-Item -LiteralPath $decompiledProject -Destination $normalizedProject
+        }
+        if (-not (Test-Path -LiteralPath $normalizedProject -PathType Leaf)) {
+            throw "ILSpy produced no $dllBase.csproj for $dllBase.dll; the decompile cache will not be reused."
         }
         Convert-ToLf $out
         Copy-TreeFresh $out (Join-Path $repoRoot $workDir)
@@ -880,9 +908,9 @@ try {
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\VintagestoryApi\VintagestoryAPI.csproj" />
+    <ProjectReference Include="..\..\Cairo\Cairo.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="cairo-sharp"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath></Reference>
     <Reference Include="protobuf-net"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\protobuf-net.dll</HintPath></Reference>
     <Reference Include="Newtonsoft.Json"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\Newtonsoft.Json.dll</HintPath></Reference>
     <Reference Include="CommandLine"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\CommandLine.dll</HintPath></Reference>

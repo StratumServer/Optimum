@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\sources\VintagestoryApi\Client\optimum-entity-render-batch.cs" Link="Client\optimum-entity-render-batch.cs" />
+    <Compile Include="OptimumGuiGpuProbe.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveWorkerController.cs" Link="Config\AdaptiveWorkerController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveTessWorkerController.cs" Link="Config\AdaptiveTessWorkerController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAdaptiveRadiusController.cs" Link="Config\OptimumAdaptiveRadiusController.cs" />

@@ -1,6 +1,10 @@
+diff --git a/VintagestoryApi/Client/UI/CairoFont.cs b/VintagestoryApi/Client/UI/CairoFont.cs
+index 03bfd4f..2515e82 100644
 --- a/VintagestoryApi/Client/UI/CairoFont.cs
 +++ b/VintagestoryApi/Client/UI/CairoFont.cs
-@@ -242,8 +242,12 @@
+@@ -240,23 +240,31 @@ namespace Vintagestory.API.Client
+         /// Gets the font's extents.
+         /// </summary>
          /// <returns>The FontExtents for this particular font.</returns>
          public FontExtents GetFontExtents()
          {
@@ -14,7 +18,9 @@
          }
  
          /// <summary>
-@@ -253,8 +257,12 @@
+         /// Gets the extents of the text.
+         /// </summary>
+         /// <param name="text">The text to extend.</param>
          /// <returns>The Text extends for this font with this text.</returns>
          public TextExtents GetTextExtents(string text)
          {
@@ -28,3 +34,5 @@
          }
  
          /// <summary>
+         /// Clone function.  Creates a duplicate of this Cairofont.
+         /// </summary>
