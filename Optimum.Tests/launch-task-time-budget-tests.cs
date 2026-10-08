@@ -6,6 +6,7 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[Collection("GameLaunchTaskDiagnostics")]
 public class LaunchTaskTimeBudgetTests
 {
     [Fact]
