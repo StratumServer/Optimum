@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs
-index 82aaf34..1d251cb 100644
+index d9c078b..283051f 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs
 @@ -8,10 +8,14 @@ namespace Vintagestory.Server;

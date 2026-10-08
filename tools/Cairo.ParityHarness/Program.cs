@@ -11,6 +11,7 @@ internal static class Program
 {
     private const int LogicalWidth = 96;
     private const int TextLogicalWidth = 160;
+    private const int OperatorLogicalWidth = 120;
     private const int LogicalHeight = 72;
     private static readonly double[] Scales = [1.0, 1.5, 2.0];
     private const string TextSample = "Café Ångström";
@@ -51,18 +52,22 @@ internal static class Program
                 var crossPixelExact = PixelComparator.Compare(cairo.Image, skia.Image, threshold: 0);
                 WriteDifference(System.IO.Path.Combine(output, $"{name}-difference.png"), cairo.Image, skia.Image);
                 var operatorResults = scene == "porter-duff"
-                    ? Enumerable.Range(0, 6).Select(i =>
+                    ? Enumerable.Range(0, OperatorFixtures.Length).Select(i =>
                     {
-                        var logicalX = 4 + i * 15;
-                        var cairoCell = CropLogical(cairo.Image, logicalX, 8, 14, 56, scale);
-                        var skiaCell = CropLogical(skia.Image, logicalX, 8, 14, 56, scale);
+                        var fixture = OperatorFixtures[i];
+                        var logicalX = OperatorX(i);
+                        var cairoCell = CropLogical(cairo.Image, logicalX, 8, 12, 56, scale);
+                        var cairoRepeatCell = CropLogical(cairoRepeat.Image, logicalX, 8, 12, 56, scale);
+                        var skiaCell = CropLogical(skia.Image, logicalX, 8, 12, 56, scale);
                         return new
                         {
-                            operation = new[] { "Over", "Source", "In", "Out", "Atop", "Xor" }[i],
+                            operation = fixture.CairoOperator,
+                            skiaBlendMode = fixture.SkiaBlendMode.ToString(),
                             cairoSample = SampleRgba(cairo.Image, (int)((logicalX + 7) * scale), (int)((8 + 30) * scale)),
                             skiaSample = SampleRgba(skia.Image, (int)((logicalX + 7) * scale), (int)((8 + 30) * scale)),
                             cairoBackgroundSample = SampleRgba(cairo.Image, (int)((logicalX + 1) * scale), (int)((8 + 2) * scale)),
                             skiaBackgroundSample = SampleRgba(skia.Image, (int)((logicalX + 1) * scale), (int)((8 + 2) * scale)),
+                            cairoSelfComparison = PixelComparator.Compare(cairoCell, cairoRepeatCell),
                             comparison = PixelComparator.Compare(cairoCell, skiaCell, threshold: 1),
                             pixelExactComparison = PixelComparator.Compare(cairoCell, skiaCell, threshold: 0)
                         };
@@ -187,7 +192,7 @@ internal static class Program
                 return null;
             case "porter-duff":
                 DrawCairoOperators(context);
-                return new { operators = new[] { "Over", "Source", "In", "Out", "Atop", "Xor" } };
+                return new { operators = OperatorFixtures.Select(fixture => new { cairo = fixture.CairoOperator, skia = fixture.SkiaBlendMode.ToString() }) };
             case "text":
                 context.SetSourceRGBA(0.12, 0.18, 0.24, 1);
                 context.Rectangle(0, 0, TextLogicalWidth, LogicalHeight);
@@ -242,7 +247,7 @@ internal static class Program
                 return null;
             case "porter-duff":
                 DrawSkiaOperators(canvas, paint, scale, width, height);
-                return new { operators = new[] { "Over", "Source", "In", "Out", "Atop", "Xor" } };
+                return new { operators = OperatorFixtures.Select(fixture => new { cairo = fixture.CairoOperator, skia = fixture.SkiaBlendMode.ToString() }) };
             case "text":
                 paint.Color = ToColor((0.12, 0.18, 0.24, 1));
                 canvas.DrawRect(0, 0, TextLogicalWidth, LogicalHeight, paint);
@@ -270,19 +275,36 @@ internal static class Program
         rect(52, 10, 12, 46, (0.25, 0.4, 0.95, 0.35));
     }
 
+    private sealed record OperatorFixture(string CairoOperator, Operator Operator, SKBlendMode SkiaBlendMode);
+
+    private static readonly OperatorFixture[] OperatorFixtures =
+    [
+        new("Over", Operator.Over, SKBlendMode.SrcOver),
+        new("Source", Operator.Source, SKBlendMode.Src),
+        new("In", Operator.In, SKBlendMode.SrcIn),
+        new("Out", Operator.Out, SKBlendMode.SrcOut),
+        new("Atop", Operator.Atop, SKBlendMode.SrcATop),
+        new("Xor", Operator.Xor, SKBlendMode.Xor),
+        new("Clear", Operator.Clear, SKBlendMode.Clear),
+        new("DestOver", Operator.DestOver, SKBlendMode.DstOver),
+        new("HardLight", Operator.HardLight, SKBlendMode.HardLight)
+    ];
+
+    private static int OperatorX(int index) => 4 + index * 13;
+
     private static void DrawCairoOperators(Context context)
     {
-        var operators = new[] { Operator.Over, Operator.Source, Operator.In, Operator.Out, Operator.Atop, Operator.Xor };
-        for (var i = 0; i < operators.Length; i++)
+        for (var i = 0; i < OperatorFixtures.Length; i++)
         {
-            var x = 4 + i * 15;
+            var fixture = OperatorFixtures[i];
+            var x = OperatorX(i);
             context.Save();
-            context.Rectangle(x, 8, 14, 56);
+            context.Rectangle(x, 8, 12, 56);
             context.Clip();
             context.Operator = Operator.Over;
             context.SetSourceRGBA(0.12, 0.18, 0.24, 1);
             context.Paint();
-            context.Operator = operators[i];
+            context.Operator = fixture.Operator;
             context.SetSourceRGBA(0.9, 0.2, 0.12, 0.65);
             context.Rectangle(x + 2.25, 18, 9.5, 26);
             context.Fill();
@@ -292,11 +314,12 @@ internal static class Program
 
     private static void DrawSkiaOperators(SKCanvas canvas, SKPaint paint, double scale, int width, int height)
     {
-        var blends = new[] { SKBlendMode.SrcOver, SKBlendMode.Src, SKBlendMode.SrcIn, SKBlendMode.SrcOut, SKBlendMode.SrcATop, SKBlendMode.Xor };
-        for (var i = 0; i < blends.Length; i++)
+        for (var i = 0; i < OperatorFixtures.Length; i++)
         {
-            var x = 4 + i * 15;
-            if (blends[i] is SKBlendMode.SrcIn or SKBlendMode.SrcOut)
+            var fixture = OperatorFixtures[i];
+            var blend = fixture.SkiaBlendMode;
+            var x = OperatorX(i);
+            if (blend is SKBlendMode.SrcIn or SKBlendMode.SrcOut)
             {
                 // Cairo's IN and OUT are unbounded by the source mask. Build the transparent
                 // source independently, then apply the clip exactly once during composition.
@@ -311,22 +334,22 @@ internal static class Program
 
                 canvas.Save();
                 canvas.ResetMatrix();
-                canvas.ClipRect(new SKRect((float)(x * scale), (float)(8 * scale), (float)((x + 14) * scale), (float)(64 * scale)), SKClipOperation.Intersect, antialias: true);
+                canvas.ClipRect(new SKRect((float)(x * scale), (float)(8 * scale), (float)((x + 12) * scale), (float)(64 * scale)), SKClipOperation.Intersect, antialias: true);
                 using (var backgroundPaint = new SKPaint { BlendMode = SKBlendMode.SrcOver, Color = ToColor((0.12, 0.18, 0.24, 1)) })
                     canvas.DrawPaint(backgroundPaint);
-                using (var compositePaint = new SKPaint { BlendMode = blends[i] })
+                using (var compositePaint = new SKPaint { BlendMode = blend })
                     canvas.DrawBitmap(sourceBitmap, 0, 0, compositePaint);
                 canvas.Restore();
                 continue;
             }
 
             canvas.Save();
-            canvas.ClipRect(new SKRect(x, 8, x + 14, 64), SKClipOperation.Intersect, antialias: true);
+            canvas.ClipRect(new SKRect(x, 8, x + 12, 64), SKClipOperation.Intersect, antialias: true);
             paint.BlendMode = SKBlendMode.SrcOver;
             paint.Color = ToColor((0.12, 0.18, 0.24, 1));
             canvas.DrawPaint(paint);
             paint.Color = ToColor((0.9, 0.2, 0.12, 0.65));
-            paint.BlendMode = blends[i];
+            paint.BlendMode = blend;
             canvas.DrawRect(x + 2.25f, 18, 9.5f, 26, paint);
             canvas.Restore();
         }
@@ -343,7 +366,12 @@ internal static class Program
             alpha);
     }
 
-    private static int LogicalWidthFor(string scene) => scene == "text" ? TextLogicalWidth : LogicalWidth;
+    private static int LogicalWidthFor(string scene) => scene switch
+    {
+        "text" => TextLogicalWidth,
+        "porter-duff" => OperatorLogicalWidth,
+        _ => LogicalWidth
+    };
 
     private static byte CairoByte(double value) => (byte)(Math.Clamp((int)Math.Floor(Math.Clamp(value, 0, 1) * 65535 + 0.5), 0, 65535) >> 8);
 

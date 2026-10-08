@@ -20,6 +20,9 @@ public class OptimumGuiMetricsTests
             OptimumGuiMetrics.RecordComposition(OptimumGuiMetrics.StartTimestamp(), surfaceWidth: 30, surfaceHeight: 12, stride: 120, wasRecomposition: true);
             OptimumGuiMetrics.RecordUpload(OptimumGuiMetrics.StartTimestamp(), width: 20, height: 10, allocatesTexture: true);
             OptimumGuiMetrics.RecordUpload(OptimumGuiMetrics.StartTimestamp(), width: 20, height: 10, allocatesTexture: false);
+            OptimumGuiMetrics.RecordGpuCandidateTexture(succeeded: true, fallbackReason: null);
+            OptimumGuiMetrics.RecordGpuCandidateTexture(succeeded: false, fallbackReason: "test-fallback");
+            OptimumGuiMetrics.RecordGpuRecordingSurfaceStart();
             OptimumGuiMetrics.RecordTextExtentMeasurement(OptimumGuiMetrics.StartTimestamp());
             OptimumGuiMetrics.RecordFontExtentMeasurement(OptimumGuiMetrics.StartTimestamp());
 
@@ -38,6 +41,11 @@ public class OptimumGuiMetricsTests
             Assert.Equal(20 * 10 * 4 * 2, snapshot.UploadBytes);
             Assert.Equal(1, snapshot.TextureAllocationCount);
             Assert.Equal(1, snapshot.TextureUpdateCount);
+            Assert.Equal(2, snapshot.GpuCandidateAttemptCount);
+            Assert.Equal(1, snapshot.GpuCandidateSuccessCount);
+            Assert.Equal(1, snapshot.GpuCandidateFallbackCount);
+            Assert.Equal(1, snapshot.GpuRecordingSurfaceStartCount);
+            Assert.Equal("test-fallback", snapshot.LastGpuCandidateFallbackReason);
             Assert.Equal(Environment.CurrentManagedThreadId, snapshot.LastCompositionThreadId);
             Assert.Equal(1, snapshot.TextExtentMeasurementCount);
             Assert.True(snapshot.TextExtentMeasurementTicks > 0);
@@ -48,6 +56,8 @@ public class OptimumGuiMetricsTests
             OptimumGuiMetrics.Reset();
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().CompositionCount);
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().UploadCount);
+            Assert.Equal(0, OptimumGuiMetrics.Snapshot().GpuCandidateAttemptCount);
+            Assert.Equal(0, OptimumGuiMetrics.Snapshot().GpuRecordingSurfaceStartCount);
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().TextExtentMeasurementCount);
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().FontExtentMeasurementCount);
         }

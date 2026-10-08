@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..f46ccc4 100644
+index 4d08f84..c749673 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,14 @@ public class GuiCompositeSettings : GuiComposite
@@ -17,7 +17,7 @@ index 4d08f84..f46ccc4 100644
  	private List<ConfigItem> mousecontrolItems = new List<ConfigItem>();
  
  	private bool mousecontrolsTabActive;
-@@ -142,19 +144,21 @@ public class GuiCompositeSettings : GuiComposite
+@@ -142,19 +146,21 @@ public class GuiCompositeSettings : GuiComposite
  			mButtonBounds.ParentBounds = elementBounds;
  			cButtonBounds.ParentBounds = elementBounds;
  			sButtonBounds.ParentBounds = elementBounds;
@@ -40,7 +40,7 @@ index 4d08f84..f46ccc4 100644
  		{
  			ElementBounds elementBounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed).WithFixedPosition(0.0, 75.0);
  			double num = backButtonBounds.fixedX + backButtonBounds.fixedWidth + 35.0;
-@@ -168,10 +172,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -168,10 +174,11 @@ public class GuiCompositeSettings : GuiComposite
  			mButtonBounds.ParentBounds = elementBounds3;
  			cButtonBounds.ParentBounds = elementBounds3;
  			sButtonBounds.ParentBounds = elementBounds3;
@@ -52,7 +52,7 @@ index 4d08f84..f46ccc4 100644
  			{
  				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
  				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
-@@ -185,10 +190,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -185,10 +192,11 @@ public class GuiCompositeSettings : GuiComposite
  				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
  				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
@@ -64,7 +64,7 @@ index 4d08f84..f46ccc4 100644
  					clickedItemIndex = null;
  					hotkeyCapturer?.EndCapture(wasCancelled: true);
  					return handler.OnBackPressed();
-@@ -199,10 +205,11 @@ public class GuiCompositeSettings : GuiComposite
+@@ -199,10 +207,11 @@ public class GuiCompositeSettings : GuiComposite
  		result.GetToggleButton("controls").SetValue(currentTab == "controls");
  		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
@@ -76,7 +76,7 @@ index 4d08f84..f46ccc4 100644
  
  	private void updateButtonBounds()
  	{
-@@ -235,20 +242,23 @@ public class GuiCompositeSettings : GuiComposite
+@@ -235,20 +244,23 @@ public class GuiCompositeSettings : GuiComposite
  		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -101,7 +101,7 @@ index 4d08f84..f46ccc4 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1750,193 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1752,196 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -136,6 +136,7 @@ index 4d08f84..f46ccc4 100644
 +		AddOptimumSwitchRow("optimum-entityshadercache", "optimum-entityshadercache-tooltip", onOptimumEntityShaderCacheChanged, "optEntityShaderCache");
 +		AddOptimumDropdownRow("optimum-renderscale", "optimum-renderscale-tooltip", new string[] { "1.0", "0.85", "0.77", "0.67" }, new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, 0, onOptimumRenderScaleChanged, "optRenderScale");
 +		AddOptimumSwitchRow("optimum-godrayscap", "optimum-godrayscap-tooltip", onOptimumGodRaysCapChanged, "optGodRaysCap");
++		AddOptimumSwitchRow("optimum-guigpu", "optimum-guigpu-tooltip", onOptimumGuiGpuChanged, "optGuiGpu");
 +#if OPTIMUM_GREEDY_MESH
 +		AddOptimumSwitchRow("optimum-greedymesh", "optimum-greedymesh-tooltip", onOptimumGreedyMeshChanged, "optGreedyMesh");
 +		AddOptimumSliderRow("optimum-greedyspan", onOptimumGreedySpanChanged, "optGreedySpan");
@@ -182,6 +183,7 @@ index 4d08f84..f46ccc4 100644
 +		int renderScaleIdx = ClientSettings.OptimumRenderScale >= 1.0f ? 0 : ClientSettings.OptimumRenderScale >= 0.85f ? 1 : ClientSettings.OptimumRenderScale >= 0.77f ? 2 : 3;
 +		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
 +		composer.GetSwitch("optGodRaysCap").SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
++		composer.GetSwitch("optGuiGpu").SetValue(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
 +#if OPTIMUM_GREEDY_MESH
 +		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.EffectiveGreedyMesh);
 +		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
@@ -277,6 +279,7 @@ index 4d08f84..f46ccc4 100644
 +		handler.ReloadShaders();
 +	}
 +	private void onOptimumGodRaysCapChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private void onOptimumGuiGpuChanged(bool on) { Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityLightBatchChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
@@ -295,7 +298,7 @@ index 4d08f84..f46ccc4 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2003,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2016,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

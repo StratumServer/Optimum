@@ -1,5 +1,7 @@
 {
 	"optimum-tab-header": "Thêm",
+	"optimum-guigpu": "Experimental GPU GUI rendering",
+	"optimum-guigpu-tooltip": "Records static dialog drawing and renders supported operations through Skia on the current OpenGL context. The runtime probe must pass; unsupported or failed recordings fall back to Cairo. Requires restart. Experimental; disabled by default.",
 	"optimum-bgfps": "Giới hạn FPS nền",
 	"optimum-bgfps-tooltip": "Giới hạn 30 FPS khi cửa sổ game mất tiêu điểm.",
 	"optimum-framepacing": "Nhịp khung hình mượt",

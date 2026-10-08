@@ -28,24 +28,17 @@ index 48c8694..3cafe9d 100644
  		double num2 = double.MaxValue;
 -		foreach (Entity entity2 in entitiesAround)
 +		if (ReferenceEquals(supplier, this))
- 		{
--			int selectionBoxIndex = 0;
--			if (entity2.IntersectsRay(ray, interesectionTester, out var intersectionDistance, ref selectionBoxIndex) && intersectionDistance < num2)
++		{
 +			FindNearestRayIntersectingEntity(ray, num, efilter, ref entity, ref num2);
 +		}
 +		else
-+		{
+ 		{
+-			int selectionBoxIndex = 0;
+-			if (entity2.IntersectsRay(ray, interesectionTester, out var intersectionDistance, ref selectionBoxIndex) && intersectionDistance < num2)
 +			EntityFilter previousFilter = optimumRayTraceEntityFilter;
 +			optimumRayTraceEntityFilter = efilter;
 +			try
- 			{
--				entity = entity2;
--				num2 = intersectionDistance;
--				entitySelTmp.SelectionBoxIndex = selectionBoxIndex;
--				entitySelTmp.Entity = entity2;
--				entitySelTmp.Face = interesectionTester.hitOnBlockFace;
--				entitySelTmp.HitPosition = interesectionTester.hitPosition.SubCopy(entity2.Pos.X, entity2.Pos.Y, entity2.Pos.Z);
--				entitySelTmp.Position = entity2.Pos.XYZ;
++			{
 +				ActionConsumable<Entity> matcher = optimumRayTraceEntityMatcher;
 +				if (matcher == null)
 +				{
@@ -69,7 +62,14 @@ index 48c8694..3cafe9d 100644
 +				}
 +			}
 +			finally
-+			{
+ 			{
+-				entity = entity2;
+-				num2 = intersectionDistance;
+-				entitySelTmp.SelectionBoxIndex = selectionBoxIndex;
+-				entitySelTmp.Entity = entity2;
+-				entitySelTmp.Face = interesectionTester.hitOnBlockFace;
+-				entitySelTmp.HitPosition = interesectionTester.hitPosition.SubCopy(entity2.Pos.X, entity2.Pos.Y, entity2.Pos.Z);
+-				entitySelTmp.Position = entity2.Pos.XYZ;
 +				optimumRayTraceEntityFilter = previousFilter;
  			}
  		}

@@ -1,0 +1,57 @@
+diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
+index 8014c9e..e80322b 100644
+--- a/Cairo/wrapper/ImageSurface.cs
++++ b/Cairo/wrapper/ImageSurface.cs
+@@ -44,11 +44,11 @@ namespace Cairo {
+ 		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+         
+ 		public ImageSurface (Format format, int width, int height)
+-			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
++			: base (NativeMethods.cairo_image_surface_create (format, width, height), true, true)
+ 		{
+ 		}
+ 
+         public ImageSurface (byte[] data, Format format, int width, int height, int stride)
+ 			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
+@@ -75,17 +75,17 @@ namespace Cairo {
+ 
+ 
+         public int Width {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_image_surface_get_width (Handle); }
++				return NativeMethods.cairo_image_surface_get_width (NativeHandleForMetadata); }
+ 		}
+ 
+ 		public int Height {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_image_surface_get_height (Handle);
++				return NativeMethods.cairo_image_surface_get_height (NativeHandleForMetadata);
+ 			}
+ 		}
+ 
+ 		public byte[] Data {
+ 			get {
+@@ -106,17 +106,17 @@ namespace Cairo {
+ 		}
+ 
+ 		public Format Format {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_image_surface_get_format (Handle);
++				return NativeMethods.cairo_image_surface_get_format (NativeHandleForMetadata);
+ 			}
+ 		}
+ 
+ 		public int Stride {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_image_surface_get_stride (Handle);
++				return NativeMethods.cairo_image_surface_get_stride (NativeHandleForMetadata);
+ 			}
+ 		}
+ 	}
+ }

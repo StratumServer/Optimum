@@ -502,7 +502,16 @@ decompile_targets=("VintagestoryLib:build/VintagestoryLib" "Vintagestory:build/V
 
 for entry in "${decompile_targets[@]}"; do
   IFS=':' read -r dll_base work_dir <<< "$entry"
-  dll_path="$(find "$vanilla_dir" -type f -name "${dll_base}.dll" -print 2>/dev/null | head -n 1)"
+  if [[ "$dll_base" == "VintagestoryLib" ]]; then
+    if [[ ! -f "$vanilla_lib_pristine" ]]; then
+      echo "ERROR: pristine VintagestoryLib donor is missing: $vanilla_lib_pristine" >&2
+      echo "Restore it from the cached vanilla client archive before bootstrapping." >&2
+      exit 1
+    fi
+    dll_path="$vanilla_lib_pristine"
+  else
+    dll_path="$(find "$vanilla_dir" -type f -name "${dll_base}.dll" -print 2>/dev/null | head -n 1)"
+  fi
   if [[ -z "$dll_path" ]]; then
     echo "Skipping $dll_base.dll (not found)" >&2
     continue
@@ -518,6 +527,10 @@ for entry in "${decompile_targets[@]}"; do
     rm -rf "$out"
     mkdir -p "$out"
     ilspycmd "$dll_path" --project -o "$out" >/dev/null 2>&1
+    decompiled_project="$out/$(basename "$dll_path" .dll).csproj"
+    if [[ ! -f "$out/$dll_base.csproj" && -f "$decompiled_project" ]]; then
+      mv "$decompiled_project" "$out/$dll_base.csproj"
+    fi
     if [[ ! -f "$out/$dll_base.csproj" ]]; then
       echo "ILSpy produced no project for $dll_base.dll; the decompile cache will not be reused." >&2
       exit 1
@@ -528,6 +541,15 @@ for entry in "${decompile_targets[@]}"; do
     fi
     mkdir -p "$(dirname "$manifest")"
     printf '%s\n' "$dll_hash" "$ilspy_version" > "$manifest"
+  fi
+
+  decompiled_project="$out/$(basename "$dll_path" .dll).csproj"
+  if [[ ! -f "$out/$dll_base.csproj" && -f "$decompiled_project" ]]; then
+    mv "$decompiled_project" "$out/$dll_base.csproj"
+  fi
+  if [[ ! -f "$out/$dll_base.csproj" ]]; then
+    echo "ILSpy produced no project for $dll_base.dll; the decompile cache will not be reused." >&2
+    exit 1
   fi
 
   normalize_lf "$out"
@@ -622,9 +644,9 @@ cat > "$repo_root/build/VintagestoryLib/VintagestoryLib.csproj" <<'CSPROJ'
   <ItemGroup>
     <ProjectReference Include="..\..\VintagestoryApi\VintagestoryAPI.csproj" />
     <ProjectReference Include="..\..\optimum-api-contracts\optimum-api-contracts.csproj" />
+    <ProjectReference Include="..\..\Cairo\Cairo.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Reference Include="cairo-sharp"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath></Reference>
     <Reference Include="protobuf-net"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\protobuf-net.dll</HintPath></Reference>
     <Reference Include="Newtonsoft.Json"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\Newtonsoft.Json.dll</HintPath></Reference>
     <Reference Include="CommandLine"><HintPath>..\..\.vanilla\win-x64\vintagestory\Lib\CommandLine.dll</HintPath></Reference>
