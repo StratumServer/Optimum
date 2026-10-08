@@ -1,5 +1,7 @@
 using System;
 using Cairo;
+using Vintagestory.API.Client;
+using Vintagestory.API.Config;
 using Xunit;
 
 public sealed class CairoContextRecorderTests
@@ -194,6 +196,79 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
+
+	[Theory]
+	[InlineData(1f, EnumLinebreakBehavior.AfterWord)]
+	[InlineData(1.5f, EnumLinebreakBehavior.AfterWord)]
+	[InlineData(2f, EnumLinebreakBehavior.AfterWord)]
+	[InlineData(1f, EnumLinebreakBehavior.AfterCharacter)]
+	[InlineData(1.5f, EnumLinebreakBehavior.AfterCharacter)]
+	[InlineData(2f, EnumLinebreakBehavior.AfterCharacter)]
+	[InlineData(1f, EnumLinebreakBehavior.None)]
+	[InlineData(1.5f, EnumLinebreakBehavior.None)]
+	[InlineData(2f, EnumLinebreakBehavior.None)]
+	public void TextLayoutAndSizingStayCairoEquivalentAcrossScales(float guiScale, EnumLinebreakBehavior linebreak)
+	{
+		float previousScale = RuntimeEnv.GUIScale;
+		RuntimeEnv.GUIScale = guiScale;
+		try {
+			const string text = "A wrapped phrase with café and e\u0301\nsecond line";
+			TextFlowPath[] flowPath = { new TextFlowPath (0, 0, 78, 65), new TextFlowPath (17, 65, 137, 180) };
+			TextDrawUtil textUtil = new TextDrawUtil ();
+			CairoFont font = new CairoFont (16, "DejaVu Sans").WithLineHeightMultiplier (1.2);
+			var expectedBounds = ElementBounds.Fixed (0, 0, 1, 1);
+			font.AutoBoxSize (text, expectedBounds);
+			CairoFont expectedAutoFont = new CairoFont (18, "DejaVu Sans");
+			expectedAutoFont.AutoFontSize (text, expectedBounds);
+			TextLine[] actualLines;
+			using (var actual = new ImageSurface (Format.Argb32, 240, 180)) {
+				var recorder = actual.BeginRecording ();
+				using (var context = new Context (actual)) {
+					font.SetupContext (context);
+					actualLines = textUtil.Lineize (context, text, linebreak, flowPath, 0, 0, font.LineHeightMultiplier);
+					textUtil.DrawMultilineText (context, font, actualLines, EnumTextOrientation.Left);
+				}
+
+				Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+				Assert.NotEmpty (actualLines);
+				Assert.Equal (actualLines.Length, textUtil.GetQuantityTextLines (font, text, linebreak, flowPath));
+				Assert.Equal (actualLines.Length * textUtil.GetLineHeight (font),
+					textUtil.GetMultilineTextHeight (font, text, linebreak, flowPath), 6);
+
+				using var expected = new ImageSurface (Format.Argb32, 240, 180);
+				TextLine[] expectedLines;
+				using (var context = new Context (expected)) {
+					font.SetupContext (context);
+					expectedLines = textUtil.Lineize (context, text, linebreak, flowPath, 0, 0, font.LineHeightMultiplier);
+					textUtil.DrawMultilineText (context, font, expectedLines, EnumTextOrientation.Left);
+				}
+
+				Assert.Equal (expectedLines.Length, actualLines.Length);
+				for (int i = 0; i < expectedLines.Length; i++) {
+					Assert.Equal (expectedLines[i].Text, actualLines[i].Text);
+					Assert.Equal (expectedLines[i].Bounds.X, actualLines[i].Bounds.X, 6);
+					Assert.Equal (expectedLines[i].Bounds.Y, actualLines[i].Bounds.Y, 6);
+					Assert.Equal (expectedLines[i].Bounds.Width, actualLines[i].Bounds.Width, 6);
+					Assert.Equal (expectedLines[i].Bounds.Height, actualLines[i].Bounds.Height, 6);
+					Assert.Equal (expectedLines[i].NextOffsetX, actualLines[i].NextOffsetX, 6);
+				}
+				Assert.Equal (expected.Data, actual.Data);
+			}
+
+			var actualBounds = ElementBounds.Fixed (0, 0, 1, 1);
+			font.AutoBoxSize (text, actualBounds);
+			Assert.Equal (expectedBounds.fixedWidth, actualBounds.fixedWidth, 6);
+			Assert.Equal (expectedBounds.fixedHeight, actualBounds.fixedHeight, 6);
+
+			CairoFont actualAutoFont = new CairoFont (18, "DejaVu Sans");
+			actualAutoFont.AutoFontSize (text, actualBounds);
+			Assert.Equal (expectedAutoFont.UnscaledFontsize, actualAutoFont.UnscaledFontsize, 6);
+		}
+		finally {
+			RuntimeEnv.GUIScale = previousScale;
+		}
+	}
+
 	[Fact]
 	public void CpuEscapeBetweenSourceAndPathPreservesLiveContextState()
 	{
