@@ -24,6 +24,89 @@ namespace Cairo
 		readonly object sync = new object ();
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
+		Context shadow;
+		int shadowIndex;
+		Matrix sourceMatrix = new Matrix();
+		readonly Stack<Matrix> savedSources = new Stack<Matrix>();
+		readonly List<IDisposable> resources = new List<IDisposable>();
+		readonly List<RecordedGuiClip> clips = new List<RecordedGuiClip>();
+		readonly Stack<RecordedGuiClip[]> savedClips = new Stack<RecordedGuiClip[]>();
+
+		internal Context Shadow {
+			get {
+				surface.EnsureRecordingOwnerThread();
+				if (shadow == null) shadow = new Context(NativeMethods.cairo_create(surface.NativeHandleForRecorder), true);
+				while (shadowIndex < commands.Count) commands[shadowIndex++].Replay(shadow, false);
+				return shadow;
+			}
+		}
+
+		internal bool RecordNative(Action<Context> replay, IDisposable resource = null, Action<Context> shadowReplay = null, bool bindsSource = false)
+		{
+			Action<Context> update = shadowReplay ?? replay;
+			if (bindsSource) { var operation = update; update = c => { operation(c); sourceMatrix = c.Matrix; }; }
+			bool added = Add(new Command(replay, update));
+			if (added && resource != null) resources.Add(resource);
+			return added;
+		}
+
+		internal bool RecordDrawing(Action<Context> replay, Action<Context> shadowReplay, bool stroke = false, bool paintAll = false, double alpha = 1)
+		{
+			if (State != SurfaceRecordingState.Recording) return false;
+			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(Shadow, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix);
+			if (!Add(new Command(c => drawing.Replay(c, replay), shadowReplay, drawing))) { drawing.Dispose(); return false; }
+			resources.Add(drawing);
+			return true;
+		}
+
+		internal bool RecordClip(bool preserve)
+		{
+			if (State != SurfaceRecordingState.Recording) return false;
+			var clip = new RecordedGuiClip(Shadow);
+			clips.Add(clip); resources.Add(clip);
+			return RecordNative(preserve ? c => c.ClipPreserve() : c => c.Clip());
+		}
+		internal bool RecordResetClip() { clips.Clear(); return RecordNative(c => c.ResetClip()); }
+
+		internal bool RecordText(byte[] text, bool pathOnly)
+		{
+			byte[] copy = (byte[])text.Clone();
+			if (pathOnly) return RecordNative(c => c.TextPath(copy));
+			Context context = Shadow;
+			using (Path oldPath = context.CopyPath()) {
+				PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
+				TextExtents extents = context.TextExtents(copy);
+				context.NewPath(); context.MoveTo(point); context.TextPath(copy);
+				RecordedGuiDrawing drawing;
+				try { drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray()); }
+				finally { context.NewPath(); context.AppendPath(oldPath); }
+				if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), c => c.MoveTo(point.X + extents.XAdvance, point.Y + extents.YAdvance), drawing))) { drawing.Dispose(); return false; }
+				resources.Add(drawing);
+				return true;
+			}
+		}
+
+		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly)
+		{
+			Glyph[] copy = (Glyph[])glyphs.Clone();
+			if (pathOnly) return RecordNative(c => c.GlyphPath(copy));
+			Context context = Shadow;
+			using (Path oldPath = context.CopyPath()) {
+				context.NewPath(); context.GlyphPath(copy);
+				RecordedGuiDrawing drawing;
+				try { drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix); }
+				finally { context.NewPath(); context.AppendPath(oldPath); }
+				if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), c => { }, drawing))) { drawing.Dispose(); return false; }
+				resources.Add(drawing); return true;
+			}
+		}
+
+		void ClearCommands()
+		{
+			commands.Clear(); shadow?.Dispose(); shadow = null; shadowIndex = 0;
+			foreach (IDisposable resource in resources) resource.Dispose();
+			resources.Clear(); clips.Clear(); savedClips.Clear(); savedSources.Clear();
+		}
 
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
@@ -34,7 +117,7 @@ namespace Cairo
 			lock (sync) {
 				if (state != SurfaceRecordingState.Recording) { snapshot = null; return false; }
 				state = SurfaceRecordingState.Sealed;
-				snapshot = new SurfaceRecorderSnapshot (commands.ToArray ());
+				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), NativeMethods.cairo_image_surface_get_width (surface.NativeHandleForMetadata), NativeMethods.cairo_image_surface_get_height (surface.NativeHandleForMetadata));
 				return true;
 			}
 		}
@@ -48,20 +131,26 @@ namespace Cairo
 			}
 		}
 
-		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => Add (new Command (CommandKind.SetSourceRGBA, r, g, b, a));
-		internal bool RecordPaint () => Add (new Command (CommandKind.Paint));
+		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => RecordNative(c => c.SetSourceRGBA(r, g, b, a), bindsSource: true);
+		internal bool RecordPaint () => RecordDrawing(c => c.Paint(), c => { }, paintAll: true);
+		internal bool RecordBlur (double range, int edge, int x1, int y1, int x2, int y2, bool full)
+		{
+			if (State != SurfaceRecordingState.Recording) return false;
+			var blur = new RecordedBlur (range, edge, x1, y1, x2, y2, full);
+			IntPtr native = surface.NativeHandleForRecorder;
+			return Add (new Command (c => blur.ApplyToSurface (native), c => { }, null, blur));
+		}
 		internal bool RecordRectangle (double x, double y, double width, double height) => Add (new Command (CommandKind.Rectangle, x, y, width, height));
-		internal bool RecordFill () => Add (new Command (CommandKind.Fill));
-		internal bool RecordSave () => Add (new Command (CommandKind.Save));
-		internal bool RecordRestore () => Add (new Command (CommandKind.Restore));
+		internal bool RecordFill () => RecordDrawing(c => c.Fill(), c => c.NewPath());
+		internal bool RecordSave () { savedClips.Push(clips.ToArray()); return RecordNative(c => c.Save(), shadowReplay: c => { c.Save(); savedSources.Push((Matrix)sourceMatrix.Clone()); }); }
+		internal bool RecordRestore () { if (savedClips.Count > 0) { clips.Clear(); clips.AddRange(savedClips.Pop()); } return RecordNative(c => c.Restore(), shadowReplay: c => { c.Restore(); if (savedSources.Count > 0) sourceMatrix = savedSources.Pop(); }); }
 		internal bool RecordAntialias (Antialias value)
 		{
-			if (value == Antialias.Subpixel) return false;
 			return Add (new Command (CommandKind.SetAntialias, (double)value));
 		}
 		internal bool RecordOperator (Operator value)
 		{
-			if (value != Operator.Over && value != Operator.Source) return false;
+			if (value == Operator.Saturate) return false;
 			return Add (new Command (CommandKind.SetOperator, (double)value));
 		}
 
@@ -100,10 +189,10 @@ namespace Cairo
 							ThrowIfError (NativeMethods.cairo_surface_status (native), "surface replay");
 						}
 					}
-					commands.Clear ();
+					ClearCommands ();
 					state = SurfaceRecordingState.NativeMaterialized;
 				} catch (Exception exception) {
-					commands.Clear ();
+					ClearCommands ();
 					failure = ExceptionDispatchInfo.Capture (exception);
 					state = SurfaceRecordingState.Failed;
 					throw;
@@ -113,7 +202,7 @@ namespace Cairo
 
 		internal void DisposeFromSurface ()
 		{
-			lock (sync) { commands.Clear (); state = SurfaceRecordingState.Disposed; }
+			lock (sync) { ClearCommands (); state = SurfaceRecordingState.Disposed; }
 		}
 
 		static void ThrowIfError (Status status, string phase)
@@ -123,16 +212,21 @@ namespace Cairo
 
 		internal readonly struct Command
 		{
+			internal readonly Action<Context> NativeReplay, ShadowReplay;
+			internal readonly RecordedGuiDrawing Drawing;
+			internal readonly RecordedBlur Blur;
+			internal Command(Action<Context> replay, Action<Context> shadowReplay, RecordedGuiDrawing drawing = null, RecordedBlur blur = null) { Kind = CommandKind.Native; A = B = C = D = 0; NativeReplay = replay; ShadowReplay = shadowReplay; Drawing = drawing; Blur = blur; }
 			internal readonly CommandKind Kind;
 			internal readonly double A, B, C, D;
-			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { Kind = kind; A = a; B = b; C = c; D = d; }
-			internal void Replay (Context context)
+			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { Kind = kind; A = a; B = b; C = c; D = d; NativeReplay = ShadowReplay = null; Drawing = null; Blur = null; }
+			internal void Replay (Context context, bool draw = true)
 			{
 				switch (Kind) {
+				case CommandKind.Native: if (draw) NativeReplay(context); else ShadowReplay(context); break;
 				case CommandKind.SetSourceRGBA: context.SetSourceRGBA (A, B, C, D); break;
-				case CommandKind.Paint: context.Paint (); break;
+				case CommandKind.Paint: if (draw) context.Paint (); break;
 				case CommandKind.Rectangle: context.Rectangle (A, B, C, D); break;
-				case CommandKind.Fill: context.Fill (); break;
+				case CommandKind.Fill: if (draw) context.Fill (); else context.NewPath(); break;
 				case CommandKind.Save: context.Save (); break;
 				case CommandKind.Restore: context.Restore (); break;
 				case CommandKind.SetAntialias: context.Antialias = (Antialias)A; break;
@@ -141,71 +235,52 @@ namespace Cairo
 			}
 		}
 
-		internal enum CommandKind { SetSourceRGBA, Paint, Rectangle, Fill, Save, Restore, SetAntialias, SetOperator }
+		internal enum CommandKind { Native, SetSourceRGBA, Paint, Rectangle, Fill, Save, Restore, SetAntialias, SetOperator }
 	}
 
 	internal sealed class SurfaceRecorderSnapshot
 	{
 		readonly SurfaceRecorder.Command[] commands;
-		internal SurfaceRecorderSnapshot (SurfaceRecorder.Command[] commands) { this.commands = commands; }
+		readonly int width, height;
+		internal SurfaceRecorderSnapshot (SurfaceRecorder.Command[] commands, int width, int height) { this.commands = commands; this.width = width; this.height = height; }
+
+		internal void DrawTo (SKSurface target, RecordedGpuBlur blur)
+		{
+			if (target == null) throw new ArgumentNullException (nameof (target));
+			SKCanvas canvas = target.Canvas;
+			int save = canvas.Save ();
+			try {
+				canvas.Clear (SKColors.Transparent);
+				foreach (SurfaceRecorder.Command command in commands) {
+					command.Drawing?.Draw (canvas);
+					if (command.Blur != null) blur.Apply (command.Blur, target, width, height);
+				}
+			} finally { canvas.RestoreToCount (save); }
+		}
 
 		internal void DrawTo (SKCanvas canvas)
 		{
-			if (canvas == null) throw new ArgumentNullException (nameof (canvas));
-			canvas.Clear (SKColors.Transparent);
-			var path = new SKPath { FillType = SKPathFillType.Winding };
-			var states = new Stack<DrawState> ();
-			SKColor color = new SKColor (0, 0, 0, 255);
-			SKBlendMode blend = SKBlendMode.SrcOver;
-			bool antialias = true;
+			if (canvas == null) throw new ArgumentNullException(nameof(canvas));
+			int save = canvas.Save();
 			try {
-				for (int i = 0; i < commands.Length; i++) {
-					var command = commands[i];
-					switch (command.Kind) {
-					case SurfaceRecorder.CommandKind.SetSourceRGBA:
-						color = ToColor (command.A, command.B, command.C, command.D);
-						break;
-					case SurfaceRecorder.CommandKind.Paint:
-						using (var paint = new SKPaint { Color = color, BlendMode = blend, IsAntialias = antialias }) canvas.DrawPaint (paint);
-						break;
-					case SurfaceRecorder.CommandKind.Rectangle:
-						float x = (float)command.A, y = (float)command.B, right = (float)(command.A + command.C), bottom = (float)(command.B + command.D);
-						var rect = new SKRect (Math.Min (x, right), Math.Min (y, bottom), Math.Max (x, right), Math.Max (y, bottom));
-						if (rect.Width > 0 && rect.Height > 0) path.AddRect (rect);
-						break;
-					case SurfaceRecorder.CommandKind.Fill:
-						using (var paint = new SKPaint { Color = color, BlendMode = blend, IsAntialias = antialias }) canvas.DrawPath (path, paint);
-						path.Rewind ();
-						break;
-					case SurfaceRecorder.CommandKind.Save:
-						canvas.Save (); states.Push (new DrawState (color, blend, antialias));
-						break;
-					case SurfaceRecorder.CommandKind.Restore:
-						if (states.Count == 0) throw new InvalidOperationException ("Unbalanced Cairo restore in recorded display list.");
-						canvas.Restore (); var saved = states.Pop (); color = saved.Color; blend = saved.Blend; antialias = saved.Antialias;
-						break;
-					case SurfaceRecorder.CommandKind.SetAntialias:
-						antialias = (Antialias)command.A != Antialias.None;
-						break;
-					case SurfaceRecorder.CommandKind.SetOperator:
-						blend = (Operator)command.A == Operator.Source ? SKBlendMode.Src : SKBlendMode.SrcOver;
-						break;
+				canvas.Clear(SKColors.Transparent);
+				bool hasBlur = false;
+				foreach (SurfaceRecorder.Command command in commands) hasBlur |= command.Blur != null;
+				if (!hasBlur) { foreach (SurfaceRecorder.Command command in commands) command.Drawing?.Draw(canvas); return; }
+				// The game's blur reads and rewrites pixels, so those segments run on a raster layer
+				// (still Skia) and the result is composited back onto the target canvas.
+				using (var bitmap = new SKBitmap (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul))) {
+					using (var raster = new SKCanvas (bitmap)) {
+						raster.Clear (SKColors.Transparent);
+						foreach (SurfaceRecorder.Command command in commands) {
+							command.Drawing?.Draw (raster);
+							if (command.Blur != null) { raster.Flush (); command.Blur.ApplyToPixels (bitmap.GetPixels (), width, height); bitmap.NotifyPixelsChanged (); }
+						}
 					}
+					using (var paint = new SKPaint { BlendMode = SKBlendMode.Src })
+						canvas.DrawBitmap (bitmap, 0, 0, paint);
 				}
-				if (states.Count != 0) throw new InvalidOperationException ("Unbalanced Cairo save in recorded display list.");
-			} finally { path.Dispose (); }
-		}
-
-		static SKColor ToColor (double r, double g, double b, double a)
-		{
-			return new SKColor (ToByte (r), ToByte (g), ToByte (b), ToByte (a));
-		}
-		static byte ToByte (double value) => (byte)Math.Round (Math.Max (0, Math.Min (1, value)) * 255.0, MidpointRounding.AwayFromZero);
-
-		readonly struct DrawState
-		{
-			internal readonly SKColor Color; internal readonly SKBlendMode Blend; internal readonly bool Antialias;
-			internal DrawState (SKColor color, SKBlendMode blend, bool antialias) { Color = color; Blend = blend; Antialias = antialias; }
+			} finally { canvas.RestoreToCount(save); }
 		}
 	}
 }

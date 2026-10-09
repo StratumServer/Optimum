@@ -4,6 +4,10 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[CollectionDefinition("GUI metrics", DisableParallelization = true)]
+public sealed class GuiMetricsCollection { }
+
+[Collection("GUI metrics")]
 public class OptimumGuiMetricsTests
 {
     [Fact]

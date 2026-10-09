@@ -9,6 +9,90 @@ public sealed class CairoContextRecorderTests
 	static CairoContextRecorderTests () { _ = CairoAPI.Version; }
 
 	[Fact]
+	public void MutatingGradientAfterDrawCannotChangeEarlierRecordedPixels()
+	{
+		using var actual = new ImageSurface(Format.Argb32, 40, 24);
+		using var expected = new ImageSurface(Format.Argb32, 40, 24);
+		actual.BeginRecording();
+		static void Draw(Context context) {
+			using var gradient = new LinearGradient(0, 0, 40, 0);
+			gradient.AddColorStop(0, new Color(1, 0, 0));
+			gradient.AddColorStop(1, new Color(0, 0, 1));
+			context.SetSource(gradient); context.Rectangle(0, 0, 40, 12); context.Fill();
+			gradient.Matrix = new Matrix(1, 0, 0, 1, 17, 0);
+			gradient.AddColorStop(.5, new Color(0, 1, 0));
+			context.Rectangle(0, 12, 40, 12); context.Fill();
+		}
+		using (var context = new Context(actual)) Draw(context);
+		using (var context = new Context(expected)) Draw(context);
+		Assert.Equal(SurfaceRecordingState.Recording, actual.RecordingState);
+		Assert.Equal(expected.Data, actual.Data);
+	}
+
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void RecordedBlurMatchesNativeBlurWhenMaterializedAndWhenDrawnWithSkia(bool full)
+	{
+		using var actual = new ImageSurface(Format.Argb32, 48, 32);
+		using var expected = new ImageSurface(Format.Argb32, 48, 32);
+		actual.BeginRecording();
+		void Draw(ImageSurface surface) {
+			using (var context = new Context(surface)) {
+				context.Antialias = Antialias.None;
+				context.SetSourceRGBA(1, 0.2, 0.4, 1); context.Rectangle(4, 4, 24, 16); context.Fill();
+				context.SetSourceRGBA(0.2, 0.6, 0.8, 1); context.Rectangle(16, 10, 28, 18); context.Fill();
+			}
+			if (full) surface.BlurFull(3); else surface.BlurPartial(3, 7, 2, 2, 44, 30);
+			using (var context = new Context(surface)) {
+				context.Antialias = Antialias.None;
+				context.SetSourceRGBA(0, 0, 0, 1); context.Rectangle(0, 0, 6, 6); context.Fill();
+			}
+		}
+		Draw(expected);
+		using var bitmap = new SkiaSharp.SKBitmap(48, 32, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+		using (var recorded = new ImageSurface(Format.Argb32, 48, 32)) {
+			recorded.BeginRecording();
+			Draw(recorded);
+			Assert.Equal(SurfaceRecordingState.Recording, recorded.RecordingState);
+			using (var canvas = new SkiaSharp.SKCanvas(bitmap)) Assert.True(recorded.TryDrawRecordedCommands(canvas));
+		}
+		Draw(actual);
+		Assert.Equal(expected.Data, actual.Data);
+		var pixels = new byte[48 * 32 * 4];
+		System.Runtime.InteropServices.Marshal.Copy(bitmap.GetPixels(), pixels, 0, pixels.Length);
+		byte[] native = expected.Data;
+		var bad = new System.Text.StringBuilder(); for (int i = 0; i < pixels.Length; i++) if (Math.Abs(pixels[i] - native[i]) > 3) bad.Append($"({i / 4 % 48},{i / 4 / 48})c{i % 4}:{pixels[i]}/{native[i]} ");
+		Assert.True(bad.Length == 0, bad.ToString());
+	}
+
+	[Fact]
+	public void SkiaGradientPreservesSourceBindingAcrossTransformsAndRestore()
+	{
+		using var actual = new ImageSurface(Format.Argb32, 48, 24);
+		using var expected = new ImageSurface(Format.Argb32, 48, 24);
+		actual.BeginRecording();
+		static void Draw(Context context) {
+			context.Antialias = Antialias.None;
+			context.Translate(4, 0);
+			using var gradient = new LinearGradient(0, 0, 32, 0);
+			gradient.AddColorStop(0, new Color(1, 0, 0)); gradient.AddColorStop(1, new Color(0, 0, 1));
+			context.SetSource(gradient);
+			context.Save(); context.Translate(8, 0); context.Rectangle(0, 0, 24, 12); context.Fill(); context.Restore();
+			context.Rectangle(0, 12, 32, 12); context.Fill();
+		}
+		using (var context = new Context(actual)) Draw(context);
+		using (var context = new Context(expected)) Draw(context);
+		using var bitmap = new SkiaSharp.SKBitmap(48, 24, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+		using (var canvas = new SkiaSharp.SKCanvas(bitmap)) Assert.True(actual.TryDrawRecordedCommands(canvas));
+		var pixels = new byte[48 * 24 * 4];
+		System.Runtime.InteropServices.Marshal.Copy(bitmap.GetPixels(), pixels, 0, pixels.Length);
+		byte[] native = expected.Data;
+		for (int i = 0; i < pixels.Length; i++) Assert.True(Math.Abs(pixels[i] - native[i]) <= 2, $"Pixel {i / 4 % 48},{i / 4 / 48} channel {i % 4}: Skia={pixels[i]} Cairo={native[i]}");
+		Assert.Equal(expected.Data, actual.Data);
+	}
+
+	[Fact]
 	public void SupportedContextOperationsStayRecordedAndMetadataDoesNotMaterialize()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
@@ -80,7 +164,7 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void UnsupportedContextCallMaterializesPrefixBeforeNativeDrawing()
+	public void ArcsStayRecordedAndCpuEscapeMatchesNativeDrawing()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 20, 20);
 		var recorder = actual.BeginRecording ();
@@ -101,7 +185,7 @@ public sealed class CairoContextRecorderTests
 			context.Fill ();
 		}
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -120,7 +204,7 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void RemainingPartialPrimitiveFallbackCasesMatchNativeOutput()
+	public void ExtendedPrimitivesStayRecordedAndCpuEscapeMatchesNativeOutput()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 112, 88);
 		var recorder = actual.BeginRecording ();
@@ -129,7 +213,7 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface (Format.Argb32, 112, 88);
 		using (var context = new Context (expected)) DrawAdditionalFallbackOperations (context);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 		Assert.Equal (0, actual.Data[43 * actual.Stride + 67 * 4 + 3]);
 	}
@@ -144,7 +228,7 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface (Format.Argb32, 112, 72);
 		using (var context = new Context (expected)) DrawStrokeStyleMatrix (context);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -159,7 +243,7 @@ public sealed class CairoContextRecorderTests
 			using var expected = new ImageSurface (Format.Argb32, 32, 32);
 			using (var context = new Context (expected)) DrawSelfIntersectingPath (context, fillRule);
 
-			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 			Assert.Equal (expected.Data, actual.Data);
 		}
 	}
@@ -175,7 +259,7 @@ public sealed class CairoContextRecorderTests
 			using var expected = new ImageSurface (Format.Argb32, 20, 20);
 			using (var context = new Context (expected)) DrawNestedFillRulePaths (context, fillRule);
 
-			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 			Assert.Equal (expected.Data, actual.Data);
 			int centerAlphaIndex = 10 * actual.Stride + 10 * 4 + 3;
 			if (fillRule == FillRule.EvenOdd) Assert.Equal (0, actual.Data[centerAlphaIndex]);
@@ -184,7 +268,7 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void EmptyCombiningAndFallbackTextMaterializeAndMatchNativeCairo()
+	public void EmptyCombiningAndFallbackTextStayRecordedAndCpuEscapeMatchesNativeCairo()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 160, 56);
 		var recorder = actual.BeginRecording ();
@@ -193,7 +277,7 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface (Format.Argb32, 160, 56);
 		using (var context = new Context (expected)) DrawTextFallbackCases (context);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -229,7 +313,7 @@ public sealed class CairoContextRecorderTests
 					textUtil.DrawMultilineText (context, font, actualLines, EnumTextOrientation.Left);
 				}
 
-				Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+				Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 				Assert.NotEmpty (actualLines);
 				Assert.Equal (actualLines.Length, textUtil.GetQuantityTextLines (font, text, linebreak, flowPath));
 				Assert.Equal (actualLines.Length * textUtil.GetLineHeight (font),

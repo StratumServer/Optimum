@@ -139,6 +139,8 @@ namespace Vintagestory.API.Config
 
         internal static void RecordGpuCandidateTexture(bool succeeded, string fallbackReason)
         {
+            // Surfaces that never started recording are not GPU candidates; counting them hid the real outcomes.
+            if (!succeeded && fallbackReason != null && fallbackReason.StartsWith("surface-not-recording:Native:", StringComparison.Ordinal)) return;
             Interlocked.Increment(ref gpuCandidateAttemptCount);
             if (succeeded) Interlocked.Increment(ref gpuCandidateSuccessCount);
             else

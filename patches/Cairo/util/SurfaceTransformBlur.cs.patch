@@ -1,5 +1,5 @@
 diff --git a/Cairo/util/SurfaceTransformBlur.cs b/Cairo/util/SurfaceTransformBlur.cs
-index 075e62d..747929f 100644
+index 075e62d..a30f42f 100644
 --- a/Cairo/util/SurfaceTransformBlur.cs
 +++ b/Cairo/util/SurfaceTransformBlur.cs
 @@ -5,10 +5,28 @@ using System.Collections.Generic;
@@ -31,3 +31,29 @@ index 075e62d..747929f 100644
              BlurPartial(surface, range, blurOnlyEdgeWidth, 0, 0, surface.Width, surface.Height);
          }
          public unsafe static void BlurPartial(this ImageSurface surface, double range, int blurOnlyEdgeWidth, int x1, int y1, int x2, int y2)
+@@ -29,10 +47,12 @@ namespace Cairo
+             if (surface.Width <= 0 || surface.Height <= 0)
+             {
+                 throw new ArgumentException("Image surface width and hight must be above 0");
+             }
+ 
++            if (surface.RecordBlur(range, blurOnlyEdgeWidth, x1, y1, x2, y2, false)) return;
++
+             GaussianBlur blur = new GaussianBlur((int*)surface.DataPtr.ToPointer(), surface.Width, surface.Height);
+             blur.ProcessPartial(range, blurOnlyEdgeWidth, x1, y1, x2, y2);
+ 
+             surface.MarkDirty();
+         }
+@@ -45,10 +65,12 @@ namespace Cairo
+             if (surface.Width <= 0 || surface.Height <= 0)
+             {
+                 throw new ArgumentException("Image surface width and hight must be above 0");
+             }
+ 
++            if (surface.RecordBlur(range, 0, 0, 0, surface.Width, surface.Height, true)) return;
++
+             GaussianBlur blur = new GaussianBlur((int*)surface.DataPtr.ToPointer(), surface.Width, surface.Height);
+             blur.ProcessFull(range);
+ 
+             surface.MarkDirty();
+         }

@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..59ed907 100644
+index 03f9c76..928ca21 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -41,7 +41,7 @@ index 03f9c76..59ed907 100644
  		public Context (IntPtr handle, bool owner)
  		{
  			if (handle == IntPtr.Zero)
-@@ -115,45 +118,80 @@ namespace Cairo
+@@ -115,71 +118,119 @@ namespace Cairo
  			GC.SuppressFinalize (this);
  		}
  
@@ -97,6 +97,16 @@ index 03f9c76..59ed907 100644
  		}
  
 +		internal IntPtr NativeHandleForRecorder { get { return handle; } }
++		static Path CopyRetainedPath(Path path) {
++			using (var image = new ImageSurface(Format.Argb32, 1, 1))
++			using (var context = new Context(image)) { context.AppendPath(path); return context.CopyPath(); }
++		}
++		IntPtr StateHandle { get { CheckDisposedOnly(); return recordingSurface == null ? handle : recordingSurface.RecordingStateHandle; } }
++		bool RecordState(Action<Context> operation, IDisposable resource = null, bool bindsSource = false) {
++			CheckDisposedOnly();
++			return recordingSurface != null && recordingSurface.RecordNative(operation, resource, bindsSource: bindsSource);
++		}
++
 +
 +		internal void DetachRecordingSurface (Surface surface)
 +		{
@@ -121,8 +131,10 @@ index 03f9c76..59ed907 100644
  
  		public Antialias Antialias {
  			get {
- 				CheckDisposed ();
- 				return NativeMethods.cairo_get_antialias (handle);
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_antialias (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_antialias (StateHandle);
  			}
  			set {
 -				CheckDisposed ();
@@ -133,7 +145,11 @@ index 03f9c76..59ed907 100644
  		}
  
  		public Cairo.Status Status {
-@@ -163,17 +201,20 @@ namespace Cairo
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_status (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_status (StateHandle);
  			}
  		}
  
@@ -154,8 +170,164 @@ index 03f9c76..59ed907 100644
  			}
  
  			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_operator (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_operator (StateHandle);
+ 			}
+ 		}
+ 
+ 		[Obsolete ("Use SetSourceColor method")]
+ 		public Color Color {
+@@ -195,70 +246,76 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public double Tolerance {
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_tolerance (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_tolerance (StateHandle);
+ 			}
+ 
+ 			set {
++				if (recordingSurface != null && RecordState(c => c.Tolerance = value)) return;
  				CheckDisposed ();
-@@ -338,13 +379,18 @@ namespace Cairo
+ 				NativeMethods.cairo_set_tolerance (handle, value);
+ 			}
+ 		}
+ 
+ 		public Cairo.FillRule FillRule {
+ 			set {
++				if (recordingSurface != null && RecordState(c => c.FillRule = value)) return;
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_fill_rule (handle, value);
+ 			}
+ 
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_fill_rule (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_fill_rule (StateHandle);
+ 			}
+ 		}
+ 
+ 		public double LineWidth {
+ 			set {
++				if (recordingSurface != null && RecordState(c => c.LineWidth = value)) return;
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_line_width (handle, value);
+ 			}
+ 
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_line_width (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_line_width (StateHandle);
+ 			}
+ 		}
+ 
+ 		public Cairo.LineCap LineCap {
+ 			set {
++				if (recordingSurface != null && RecordState(c => c.LineCap = value)) return;
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_line_cap (handle, value);
+ 			}
+ 
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_line_cap (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_line_cap (StateHandle);
+ 			}
+ 		}
+ 
+ 		public Cairo.LineJoin LineJoin {
+ 			set {
++				if (recordingSurface != null && RecordState(c => c.LineJoin = value)) return;
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_line_join (handle, value);
+ 			}
+ 
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_line_join (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_line_join (StateHandle);
+ 			}
+ 		}
+ 
+ 		public void SetDash (double [] dashes, double offset)
+ 		{
++			if (recordingSurface != null) { var copy = (double[])dashes.Clone(); if (recordingSurface != null && RecordState(c => c.SetDash(copy, offset))) return; }
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_dash (handle, dashes, dashes.Length, offset);
+ 		}
+ 
+ 		private Pattern Pattern {
+@@ -279,46 +336,52 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public void SetSource (Pattern source)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = Pattern.Lookup(source.Handle, false);
++				if (recordingSurface != null && RecordState(c => c.SetSource(snapshot), snapshot, bindsSource: true)) return;
++				snapshot?.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_source (handle, source.Handle);
+ 		}
+ 
+ 		public Pattern GetSource ()
+ 		{
+-			CheckDisposed ();
+-			var ptr = NativeMethods.cairo_get_source (handle);
++			CheckDisposedOnly ();
++			var ptr = NativeMethods.cairo_get_source (StateHandle);
+ 			return Cairo.Pattern.Lookup (ptr, false);
+ 		}
+ 
+ 		public double MiterLimit {
+ 			set {
++				if (recordingSurface != null && RecordState(c => c.MiterLimit = value)) return;
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_miter_limit (handle, value);
+ 			}
+ 
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_get_miter_limit (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_get_miter_limit (StateHandle);
+ 			}
+ 		}
+ 
+ 		public PointD CurrentPoint {
+ 			get {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
+ 				double x, y;
+-				NativeMethods.cairo_get_current_point (handle, out x, out y);
++				NativeMethods.cairo_get_current_point (StateHandle, out x, out y);
+ 				return new PointD (x, y);
+ 			}
+ 		}
+ 
+ 		public bool HasCurrentPoint {
+ 			get {
+-				CheckDisposed ();
+-				return NativeMethods.cairo_has_current_point (handle);
++				CheckDisposedOnly ();
++				return NativeMethods.cairo_has_current_point (StateHandle);
+ 			}
+ 		}
+ 
+ 		[Obsolete ("Use GetTarget/SetTarget")]
+ 		public Cairo.Surface Target {
+@@ -338,13 +401,18 @@ namespace Cairo
  		}
  
  		public void SetTarget (Surface target)
@@ -177,7 +349,45 @@ index 03f9c76..59ed907 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -389,11 +435,12 @@ namespace Cairo
+@@ -356,16 +424,21 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public ScaledFont GetScaledFont ()
+ 		{
+-			CheckDisposed ();
+-			return new ScaledFont (NativeMethods.cairo_get_scaled_font (handle), false);
++			CheckDisposedOnly ();
++			return new ScaledFont (NativeMethods.cairo_get_scaled_font (StateHandle), false);
+ 		}
+ 
+ 		public void SetScaledFont (ScaledFont font)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = new ScaledFont(font.Handle, false);
++				if (recordingSurface != null && RecordState(c => c.SetScaledFont(snapshot), snapshot)) return;
++				snapshot?.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_scaled_font (handle, font.Handle);
+ 		}
+ 
+        
+@@ -377,67 +450,85 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public void SetSourceColor (Color color)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.SetSourceRGBA(color.R, color.G, color.B, color.A), bindsSource: true)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_source_rgba (handle, color.R, color.G, color.B, color.A);
+ 		}
+ 
+ 		public void SetSourceRGB (double r, double g, double b)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.SetSourceRGBA(r, g, b, 1), bindsSource: true)) return;
+ 			CheckDisposed ();
  			NativeMethods.cairo_set_source_rgb (handle, r, g, b);
  		}
  
@@ -191,7 +401,156 @@ index 03f9c76..59ed907 100644
  
          public void SetSourceRGBA(double[] rgba)
          {
-@@ -528,11 +575,12 @@ namespace Cairo
+-            CheckDisposed();
+-            NativeMethods.cairo_set_source_rgba(handle, rgba[0], rgba[1], rgba[2], rgba[3]);
++            SetSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+         }
+ 
+         public void SetSourceRGBA(float[] rgba)
+         {
+-            CheckDisposed();
+-            NativeMethods.cairo_set_source_rgba(handle, rgba[0], rgba[1], rgba[2], rgba[3]);
++            SetSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+         }
+ 
+         //[Obsolete ("Use SetSource method (with double parameters)")]
+         public void SetSourceSurface (Surface source, int x, int y)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = Surface.Lookup(source.Handle, false);
++				if (recordingSurface != null && RecordState(c => c.SetSource(snapshot, x, y), snapshot, bindsSource: true)) return;
++				snapshot.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_source_surface (handle, source.Handle, x, y);
+ 		}
+ 
+ 		public void SetSource (Surface source, double x, double y)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = Surface.Lookup(source.Handle, false);
++				if (recordingSurface != null && RecordState(c => c.SetSource(snapshot, x, y), snapshot, bindsSource: true)) return;
++				snapshot.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_source_surface (handle, source.Handle, x, y);
+ 		}
+ 
+ 		public void SetSource (Surface source)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = Surface.Lookup(source.Handle, false);
++				if (recordingSurface != null && RecordState(c => c.SetSource(snapshot, 0, 0), snapshot, bindsSource: true)) return;
++				snapshot.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_source_surface (handle, source.Handle, 0, 0);
+ 		}
+ 
+ #region Path methods
+ 
+ 		public void NewPath ()
+ 		{
++			if (recordingSurface != null && RecordState(c => c.NewPath())) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_new_path (handle);
+ 		}
+ 
+ 		public void NewSubPath ()
+ 		{
++			if (recordingSurface != null && RecordState(c => c.NewSubPath())) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_new_sub_path (handle);
+ 		}
+ 
+ 		public void MoveTo (PointD p)
+@@ -445,10 +536,11 @@ namespace Cairo
+ 			MoveTo (p.X, p.Y);
+ 		}
+ 
+ 		public void MoveTo (double x, double y)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.MoveTo(x, y))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_move_to (handle, x, y);
+ 		}
+ 
+ 		public void LineTo (PointD p)
+@@ -456,10 +548,11 @@ namespace Cairo
+ 			LineTo (p.X, p.Y);
+ 		}
+ 
+ 		public void LineTo (double x, double y)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.LineTo(x, y))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_line_to (handle, x, y);
+ 		}
+ 
+ 		public void CurveTo (PointD p1, PointD p2, PointD p3)
+@@ -467,10 +560,11 @@ namespace Cairo
+ 			CurveTo (p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y);
+ 		}
+ 
+ 		public void CurveTo (double x1, double y1, double x2, double y2, double x3, double y3)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.CurveTo(x1, y1, x2, y2, x3, y3))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_curve_to (handle, x1, y1, x2, y2, x3, y3);
+ 		}
+ 
+ 		public void RelMoveTo (Distance d)
+@@ -478,10 +572,11 @@ namespace Cairo
+ 			RelMoveTo (d.Dx, d.Dy);
+ 		}
+ 
+ 		public void RelMoveTo (double dx, double dy)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.RelMoveTo(dx, dy))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_rel_move_to (handle, dx, dy);
+ 		}
+ 
+ 		public void RelLineTo (Distance d)
+@@ -489,10 +584,11 @@ namespace Cairo
+ 			RelLineTo (d.Dx, d.Dy);
+ 		}
+ 
+ 		public void RelLineTo (double dx, double dy)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.RelLineTo(dx, dy))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_rel_line_to (handle, dx, dy);
+ 		}
+ 
+ 		public void RelCurveTo (Distance d1, Distance d2, Distance d3)
+@@ -500,22 +596,25 @@ namespace Cairo
+ 			RelCurveTo (d1.Dx, d1.Dy, d2.Dx, d2.Dy, d3.Dx, d3.Dy);
+ 		}
+ 
+ 		public void RelCurveTo (double dx1, double dy1, double dx2, double dy2, double dx3, double dy3)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.RelCurveTo(dx1, dy1, dx2, dy2, dx3, dy3))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_rel_curve_to (handle, dx1, dy1, dx2, dy2, dx3, dy3);
+ 		}
+ 
+ 		public void Arc (double xc, double yc, double radius, double angle1, double angle2)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.Arc(xc, yc, radius, angle1, angle2))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_arc (handle, xc, yc, radius, angle1, angle2);
+ 		}
+ 
+ 		public void ArcNegative (double xc, double yc, double radius, double angle1, double angle2)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.ArcNegative(xc, yc, radius, angle1, angle2))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_arc_negative (handle, xc, yc, radius, angle1, angle2);
+ 		}
+ 
+ 		public void Rectangle (Rectangle rectangle)
+@@ -528,34 +627,41 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -205,7 +564,40 @@ index 03f9c76..59ed907 100644
  
  		public void ClosePath ()
  		{
-@@ -565,11 +613,12 @@ namespace Cairo
++			if (recordingSurface != null && RecordState(c => c.ClosePath())) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_close_path (handle);
+ 		}
+ 
+ 		public Path CopyPath ()
+ 		{
+-			CheckDisposed ();
+-			return new Path (NativeMethods.cairo_copy_path (handle));
++			CheckDisposedOnly ();
++			return new Path (NativeMethods.cairo_copy_path (StateHandle));
+ 		}
+ 
+ 		public Path CopyPathFlat ()
+ 		{
+-			CheckDisposed ();
+-			return new Path (NativeMethods.cairo_copy_path_flat (handle));
++			CheckDisposedOnly ();
++			return new Path (NativeMethods.cairo_copy_path_flat (StateHandle));
+ 		}
+ 
+ 		public void AppendPath (Path path)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = CopyRetainedPath(path);
++				if (recordingSurface != null && RecordState(c => c.AppendPath(snapshot), snapshot)) return;
++				snapshot?.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_append_path (handle, path.Handle);
+ 		}
+ 
+         #endregion
+@@ -565,16 +671,18 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -219,7 +611,40 @@ index 03f9c76..59ed907 100644
  
  		public void PaintWithAlpha (double alpha)
  		{
-@@ -612,11 +661,12 @@ namespace Cairo
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordDrawing(c => c.PaintWithAlpha(alpha), c => { }, paintAll: true, alpha: alpha)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_paint_with_alpha (handle, alpha);
+ 		}
+ 
+ 		public void Mask (Pattern pattern)
+@@ -589,87 +697,94 @@ namespace Cairo
+ 			NativeMethods.cairo_mask_surface (handle, surface.Handle, surface_x, surface_y);
+ 		}
+ 
+ 		public void Stroke ()
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordDrawing(c => c.Stroke(), c => c.NewPath(), stroke: true)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_stroke (handle);
+ 		}
+ 
+ 		public void StrokePreserve ()
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordDrawing(c => c.StrokePreserve(), c => { }, stroke: true)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_stroke_preserve (handle);
+ 		}
+ 
+ 		public Rectangle StrokeExtents ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
+ 			double x1, y1, x2, y2;
+-			NativeMethods.cairo_stroke_extents (handle, out x1, out y1, out x2, out y2);
++			NativeMethods.cairo_stroke_extents (StateHandle, out x1, out y1, out x2, out y2);
+ 			return new Rectangle (x1, y1, x2 - x1, y2 - y1);
+ 		}
+ 
          /// <summary>
          /// Paint everything in the current region
          /// </summary>
@@ -233,3 +658,346 @@ index 03f9c76..59ed907 100644
  
  		public Rectangle FillExtents ()
  		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
+ 			double x1, y1, x2, y2;
+-			NativeMethods.cairo_fill_extents (handle, out x1, out y1, out x2, out y2);
++			NativeMethods.cairo_fill_extents (StateHandle, out x1, out y1, out x2, out y2);
+ 			return new Rectangle (x1, y1, x2 - x1, y2 - y1);
+ 		}
+ 
+ 		public void FillPreserve ()
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordDrawing(c => c.FillPreserve(), c => { })) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_fill_preserve (handle);
+ 		}
+ 
+ #endregion
+ 
+ 		public void Clip ()
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordClip(false)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_clip (handle);
+ 		}
+ 
+ 		public void ClipPreserve ()
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordClip(true)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_clip_preserve (handle);
+ 		}
+ 
+ 		public void ResetClip ()
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordResetClip()) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_reset_clip (handle);
+ 		}
+ 
+ 		public bool InStroke (double x, double y)
+ 		{
+-			CheckDisposed ();
+-			return NativeMethods.cairo_in_stroke (handle, x, y);
++			CheckDisposedOnly ();
++			return NativeMethods.cairo_in_stroke (StateHandle, x, y);
+ 		}
+ 
+ 		public bool InClip (double x, double y)
+ 		{
+-			CheckDisposed ();
+-			return NativeMethods.cairo_in_clip (handle, x, y);
++			CheckDisposedOnly ();
++			return NativeMethods.cairo_in_clip (StateHandle, x, y);
+ 		}
+ 
+ 		public bool InFill (double x, double y)
+ 		{
+-			CheckDisposed ();
+-			return NativeMethods.cairo_in_fill (handle, x, y);
++			CheckDisposedOnly ();
++			return NativeMethods.cairo_in_fill (StateHandle, x, y);
+ 		}
+ 
+ 		public Pattern PopGroup ()
+ 		{
+ 			CheckDisposed ();
+@@ -708,28 +823,32 @@ namespace Cairo
+ 			return Surface.Lookup (surface, false);
+ 		}
+ 
+ 		public void Rotate (double angle)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.Rotate(angle))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_rotate (handle, angle);
+ 		}
+ 
+ 		public void Scale (double sx, double sy)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.Scale(sx, sy))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_scale (handle, sx, sy);
+ 		}
+ 
+ 		public void Translate (double tx, double ty)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.Translate(tx, ty))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_translate (handle, tx, ty);
+ 		}
+ 
+ 		public void Transform (Matrix m)
+ 		{
++			if (recordingSurface != null) { var copy = (Matrix)m.Clone(); if (recordingSurface != null && RecordState(c => c.Transform(copy))) return; }
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_transform (handle, m);
+ 		}
+ 
+ 		[Obsolete("Use UserToDevice instead")]
+@@ -756,54 +875,57 @@ namespace Cairo
+ 			DeviceToUserDistance (ref dx, ref dy);
+ 		}
+ 
+ 		public void UserToDevice (ref double x, ref double y)
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_user_to_device (handle, ref x, ref y);
++			CheckDisposedOnly ();
++			NativeMethods.cairo_user_to_device (StateHandle, ref x, ref y);
+ 		}
+ 
+ 		public void UserToDeviceDistance (ref double dx, ref double dy)
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_user_to_device_distance (handle, ref dx, ref dy);
++			CheckDisposedOnly ();
++			NativeMethods.cairo_user_to_device_distance (StateHandle, ref dx, ref dy);
+ 		}
+ 
+ 		public void DeviceToUser (ref double x, ref double y)
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_device_to_user (handle, ref x, ref y);
++			CheckDisposedOnly ();
++			NativeMethods.cairo_device_to_user (StateHandle, ref x, ref y);
+ 		}
+ 
+ 		public void DeviceToUserDistance (ref double dx, ref double dy)
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_device_to_user_distance (handle, ref dx, ref dy);
++			CheckDisposedOnly ();
++			NativeMethods.cairo_device_to_user_distance (StateHandle, ref dx, ref dy);
+ 		}
+ 
+ 		public Matrix Matrix {
+ 			set {
++				if (recordingSurface != null) { var copy = (Matrix)value.Clone(); if (recordingSurface != null && RecordState(c => c.Matrix = copy)) return;  }
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_matrix (handle, value);
+ 			}
+ 
+ 			get {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
+ 				Matrix m = new Matrix ();
+-				NativeMethods.cairo_get_matrix (handle, m);
++				NativeMethods.cairo_get_matrix (StateHandle, m);
+ 				return m;
+ 			}
+ 		}
+ 
+ 		public void SetFontSize (double scale)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.SetFontSize(scale))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_font_size (handle, scale);
+ 		}
+ 
+ 		public void IdentityMatrix ()
+ 		{
++			if (recordingSurface != null && RecordState(c => c.IdentityMatrix())) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_identity_matrix (handle);
+ 		}
+ 
+ 		[Obsolete ("Use SetFontSize() instead.")]
+@@ -817,29 +939,31 @@ namespace Cairo
+ 			set { SetFontSize (value); }
+ 		}
+ 
+ 		public Matrix FontMatrix {
+ 			get {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
+ 				Matrix m;
+-				NativeMethods.cairo_get_font_matrix (handle, out m);
++				NativeMethods.cairo_get_font_matrix (StateHandle, out m);
+ 				return m;
+ 			}
+ 			set {
++				if (recordingSurface != null) { var copy = (Matrix)value.Clone(); if (recordingSurface != null && RecordState(c => c.FontMatrix = copy)) return;  }
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_font_matrix (handle, value);
+ 			}
+ 		}
+ 
+ 		public FontOptions FontOptions {
+ 			get {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
+ 				FontOptions options = new FontOptions ();
+-				NativeMethods.cairo_get_font_options (handle, options.Handle);
++				NativeMethods.cairo_get_font_options (StateHandle, options.Handle);
+ 				return options;
+ 			}
+ 			set {
++				if (recordingSurface != null) { var copy = value.Copy(); if (recordingSurface != null && RecordState(c => c.FontOptions = copy, copy)) return; copy.Dispose(); }
+ 				CheckDisposed ();
+ 				NativeMethods.cairo_set_font_options (handle, value.Handle);
+ 			}
+ 		}
+ 
+@@ -879,10 +1003,12 @@ namespace Cairo
+ 			return dest;
+ 		}
+ 
+ 		public void ShowGlyphs (Glyph[] glyphs)
+ 		{
++			CheckDisposedOnly();
++			if (recordingSurface != null && recordingSurface.RecordGlyphs(glyphs, false)) return;
+ 			CheckDisposed ();
+ 
+ 			IntPtr ptr;
+ 
+ 			ptr = FromGlyphToUnManagedMemory (glyphs);
+@@ -904,10 +1030,12 @@ namespace Cairo
+ 			GlyphPath (glyphs);
+ 		}
+ 
+ 		public void GlyphPath (Glyph[] glyphs)
+ 		{
++			CheckDisposedOnly();
++			if (recordingSurface != null && recordingSurface.RecordGlyphs(glyphs, true)) return;
+ 			CheckDisposed ();
+ 
+ 			IntPtr ptr;
+ 
+ 			ptr = FromGlyphToUnManagedMemory (glyphs);
+@@ -917,13 +1045,13 @@ namespace Cairo
+ 			Marshal.FreeHGlobal (ptr);
+ 		}
+ 
+ 		public FontExtents FontExtents {
+ 			get {
+-				CheckDisposed ();
++				CheckDisposedOnly ();
+ 				FontExtents f_extents;
+-				NativeMethods.cairo_font_extents (handle, out f_extents);
++				NativeMethods.cairo_font_extents (StateHandle, out f_extents);
+ 				return f_extents;
+ 			}
+ 		}
+ 
+ 		public void CopyPage ()
+@@ -934,22 +1062,28 @@ namespace Cairo
+ 
+         
+ 
+ 		public FontFace GetContextFontFace ()
+ 		{
+-			CheckDisposed ();
+-			return Cairo.FontFace.Lookup (NativeMethods.cairo_get_font_face (handle), false);
++			CheckDisposedOnly ();
++			return Cairo.FontFace.Lookup (NativeMethods.cairo_get_font_face (StateHandle), false);
+ 		}
+ 
+ 		public void SetContextFontFace (FontFace value)
+ 		{
++			if (recordingSurface != null) {
++				var snapshot = value == null ? null : FontFace.Lookup(value.Handle, false);
++				if (recordingSurface != null && RecordState(c => c.SetContextFontFace(snapshot), snapshot)) return;
++				snapshot?.Dispose();
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_set_font_face (handle, value == null ? IntPtr.Zero : value.Handle);
+ 		}
+ 
+ 		public void SelectFontFace (string family, FontSlant slant, FontWeight weight)
+ 		{
++			if (recordingSurface != null && RecordState(c => c.SelectFontFace(family, slant, weight))) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_select_font_face (handle, family, slant, weight);
+ 		}
+ 
+ 		public void ShowPage ()
+@@ -977,57 +1111,61 @@ namespace Cairo
+ 			return bytes;
+ 		}
+ 
+ 		public void ShowText (string str)
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordText(TerminateUtf8(str), false)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_show_text (handle, TerminateUtf8 (str));
+ 		}
+ 
+ 		public void ShowText (byte[] utf8)
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordText(TerminateUtf8(utf8), false)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_show_text (handle, TerminateUtf8 (utf8));
+ 		}
+ 
+ 		public void TextPath (string str)
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordText(TerminateUtf8(str), true)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_text_path (handle, TerminateUtf8 (str));
+ 		}
+ 
+ 		public void TextPath (byte[] utf8)
+ 		{
++			CheckDisposedOnly(); if (recordingSurface != null && recordingSurface.RecordText(TerminateUtf8(utf8), true)) return;
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_text_path (handle, TerminateUtf8 (utf8));
+ 		}
+ 
+ 		public TextExtents TextExtents (string s)
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
+ 			TextExtents extents;
+-			NativeMethods.cairo_text_extents (handle, TerminateUtf8 (s), out extents);
++			NativeMethods.cairo_text_extents (StateHandle, TerminateUtf8 (s), out extents);
+ 			return extents;
+ 		}
+ 
+ 		public TextExtents TextExtents(byte[] utf8)
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
+ 			TextExtents extents;
+-			NativeMethods.cairo_text_extents (handle, TerminateUtf8 (utf8), out extents);
++			NativeMethods.cairo_text_extents (StateHandle, TerminateUtf8 (utf8), out extents);
+ 			return extents;
+ 		}
+ 
+ 		public TextExtents GlyphExtents (Glyph[] glyphs)
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
+ 
+ 			IntPtr ptr = FromGlyphToUnManagedMemory (glyphs);
+ 
+ 			TextExtents extents;
+ 
+-			NativeMethods.cairo_glyph_extents (handle, ptr, glyphs.Length, out extents);
++			NativeMethods.cairo_glyph_extents (StateHandle, ptr, glyphs.Length, out extents);
+ 
+ 			Marshal.FreeHGlobal (ptr);
+ 
+ 			return extents;
+ 		}

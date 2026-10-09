@@ -514,6 +514,8 @@ var targets = new List<MethodTarget>
         new[] { "System.Int32[]", "System.Int32", "System.Int32", "Vintagestory.Client.NoObf.VAO", "System.Boolean" }),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
+    // Release the shared Skia context before GLFW destroys the window.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_Closing", 1),
     // GUI composition profiling: upload paths must ship in the patched game assembly.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadCairoTexture", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateCairoTexture", 3),

@@ -14,7 +14,67 @@ namespace Vintagestory.Client.NoObf
 	{
 		private const int Width = OptimumGuiGpuProbe.ReadbackWidth;
 		private const int Height = OptimumGuiGpuProbe.ReadbackHeight;
-		private static int attempted;
+		[ThreadStatic] private static int attempted;
+		[ThreadStatic] private static IntPtr contextHandle;
+		[ThreadStatic] private static GRGlInterface candidateInterface;
+		[ThreadStatic] private static GRContext candidateContext;
+		[ThreadStatic] private static RecordedGpuBlur candidateBlur;
+
+		/// <summary>Shader passes submitted by this thread's current GUI GPU context.</summary>
+		public static long GpuBlurPassCount => candidateBlur?.PassCount ?? 0;
+
+		// Call while the owning GLFW context is still current. On context replacement,
+		// abandon the old resources without issuing GL calls into the new context.
+		public static void ReleaseCurrentContext()
+		{
+			GRContext context = candidateContext;
+			GRGlInterface glInterface = candidateInterface;
+			RecordedGpuBlur blur = candidateBlur;
+			IntPtr owner = contextHandle;
+			candidateContext = null;
+			candidateInterface = null;
+			candidateBlur = null;
+			contextHandle = IntPtr.Zero;
+			attempted = 0;
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+			try
+			{
+				// Abandon first if a different context is current; disposal must not touch its GL state.
+				if (context != null && owner != GetCurrentContextHandle()) context.AbandonContext(false);
+				blur?.Dispose();
+				if (context != null && owner == GetCurrentContextHandle()) context.AbandonContext(true);
+			}
+			finally
+			{
+				try { context?.Dispose(); }
+				finally { glInterface?.Dispose(); }
+			}
+		}
+
+		private static unsafe IntPtr GetCurrentContextHandle() => (IntPtr)GLFW.GetCurrentContext();
+
+		private static GRContext GetCandidateContext()
+		{
+			if (candidateContext != null) return candidateContext;
+			GRGlInterface glInterface = GRGlInterface.Create(new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress));
+			if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
+			GRContext context = null;
+			try
+			{
+				context = GRContext.CreateGl(glInterface);
+				if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
+				context.SetResourceCacheLimit(16 * 1024 * 1024);
+				candidateInterface = glInterface;
+				candidateContext = context;
+				return context;
+			}
+			catch
+			{
+				try { context?.Dispose(); }
+				finally { glInterface.Dispose(); }
+				throw;
+			}
+		}
 
 		public static string TryRunOnce(int expectedContextThreadId)
 				{
@@ -24,6 +84,12 @@ namespace Vintagestory.Client.NoObf
 						return "Optimum Skia GL probe skipped: caller is not on the context-owning thread.";
 					if (!HasCurrentContext())
 						return "Optimum Skia GL probe skipped: no current GLFW OpenGL context.";
+					IntPtr currentHandle = GetCurrentContextHandle();
+					if (contextHandle != currentHandle)
+					{
+						ReleaseCurrentContext();
+						contextHandle = currentHandle;
+					}
 					if (Interlocked.CompareExchange(ref attempted, 1, 0) != 0)
 						return null;
 					string preexistingErrors = DrainPreexistingGlErrors();
@@ -79,7 +145,7 @@ namespace Vintagestory.Client.NoObf
 					}
 					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
 					{
-						failureReason = "surface-not-recording:" + surface.RecordingState;
+						failureReason = "surface-not-recording:" + surface.RecordingState + ":" + surface.MaterializeCause;
 						return false;
 					}
 					if (!HasCurrentContext())
@@ -137,29 +203,24 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
 						GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
 
-						var getProc = new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress);
-						using (GRGlInterface glInterface = GRGlInterface.Create(getProc))
+						// TopLeft keeps Cairo's row order: canvas row 0 is the first row uploaded to GL.
+						GRContext context = GetCandidateContext();
+						// The engine and Skia share GL; invalidate Skia's cached bindings each time.
+						context.ResetContext(GRGlBackendState.All);
+						var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
+						using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
+						using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888))
 						{
-							if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
-							using (GRContext context = GRContext.CreateGl(glInterface))
-							{
-								if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
-								context.ResetContext(GRGlBackendState.All);
-								var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-							using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
-								{
-									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								if (!surface.TryDrawRecordedCommands(skSurface.Canvas)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-								skSurface.Flush();
-								context.Flush();
-								context.Submit(true);
-								GL.Finish();
-								OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-								if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
-								rendered = true;
-							}
-							}
+							if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
+							candidateBlur ??= new RecordedGpuBlur(context);
+							if (!surface.TryDrawRecordedCommands(skSurface, candidateBlur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+							skSurface.Flush();
+							context.Flush();
+							context.Submit(true);
+							GL.Finish();
+							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+							rendered = true;
 						}
 					}
 					catch (Exception exception)
