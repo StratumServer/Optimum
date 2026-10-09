@@ -20,15 +20,15 @@ public static class OptimumGuiSvgRecorder
 	{
 		if (!OptimumGuiGpuProbe.RenderingRequested || target == null || width <= 0 || height <= 0 || x < 0 || y < 0 ||
 			(long)x + width > target.Width || (long)y + height > target.Height) return false;
-		SkiaSharp.SKPicture picture;
-		try { picture = RecordedSvgGeometry.Parse(ReadAsset(asset), width, height, width, height); }
+		RecordedPreparationCache.Picture prepared;
+		try { prepared = RecordedSvgGeometry.Acquire(ReadAsset(asset), width, height, width, height); }
 		catch (NotSupportedException) { return false; }
 		try {
-			if (target.RecordPicture(picture, x, y, width, height, color, context => {
+			if (target.RecordPicture(prepared.Value, x, y, width, height, color, context => {
 				using (var surface = (ImageSurface)context.GetTarget()) loader.DrawSvg(asset, surface, x, y, width, height, color);
-			})) return true;
-		} catch { picture.Dispose(); throw; }
-		picture.Dispose(); return false;
+			}, pictureOwner: prepared)) return true;
+			return false;
+		} finally { prepared.Dispose(); }
 	}
 
 	public static bool TryLoad(SvgLoader loader, ICoreClientAPI api, IAsset asset, int textureWidth, int textureHeight,
@@ -39,23 +39,23 @@ public static class OptimumGuiSvgRecorder
 		OptimumGuiGpuProbeBackend.TryRunOnce(RuntimeEnv.MainThreadId);
 		if (!OptimumGuiGpuProbe.GuiRenderingEnabled) return false;
 		using (var surface = new ImageSurface(Format.Argb32, textureWidth, textureHeight)) {
-			SkiaSharp.SKPicture picture;
-			try { picture = RecordedSvgGeometry.Parse(ReadAsset(asset), textureWidth, textureHeight, width, height); }
+			RecordedPreparationCache.Picture prepared;
+			try { prepared = RecordedSvgGeometry.Acquire(ReadAsset(asset), textureWidth, textureHeight, width, height); }
 			catch (NotSupportedException) { return false; }
-			bool recorded;
 			try {
-				recorded = surface.RecordPicture(picture, 0, 0, textureWidth, textureHeight, color, context => {
+				bool recorded;
+				recorded = surface.RecordPicture(prepared.Value, 0, 0, textureWidth, textureHeight, color, context => {
 					byte[] rgba = loader.rasterizeSvg(asset, textureWidth, textureHeight, width, height, color);
 					for (int i = 0; i < rgba.Length; i += 4) { byte red = rgba[i]; rgba[i] = rgba[i + 2]; rgba[i + 2] = red; }
 					using (var target = (ImageSurface)context.GetTarget()) { Marshal.Copy(rgba, 0, target.DataPtr, rgba.Length); target.MarkDirty(); }
-				}, textureColorOrder: true);
-			} catch { picture.Dispose(); throw; }
-			if (!recorded) { picture.Dispose(); return false; }
-			bool rendered = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, true, RuntimeEnv.MainThreadId, out int candidate, out string reason);
-			if (OptimumGuiMetrics.Enabled) OptimumGuiMetrics.RecordGpuCandidateTexture(rendered, reason);
-			if (!rendered) return false;
-			texture = new LoadedTexture(api, candidate, width, height);
-			return true;
+				}, textureColorOrder: true, pictureOwner: prepared);
+				if (!recorded) return false;
+				bool rendered = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, true, RuntimeEnv.MainThreadId, out int candidate, out string reason);
+				if (OptimumGuiMetrics.Enabled) OptimumGuiMetrics.RecordGpuCandidateTexture(rendered, reason);
+				if (!rendered) return false;
+				texture = new LoadedTexture(api, candidate, width, height);
+				return true;
+			} finally { prepared.Dispose(); }
 		}
 	}
 }

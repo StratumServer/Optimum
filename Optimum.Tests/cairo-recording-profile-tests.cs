@@ -13,6 +13,8 @@ public sealed class CairoRecordingProfileTests
     public void ProfilingPreservesRecordedPixelsAndStateAndIsIndependentlyDisabled()
     {
         bool original = SurfaceRecordingDiagnostics.ProfilingEnabled;
+        bool originalReuse = RecordedPreparationCache.Enabled;
+        RecordedPreparationCache.Enabled = false;
         try
         {
             SurfaceRecordingDiagnostics.ProfilingEnabled = false;
@@ -47,6 +49,7 @@ public sealed class CairoRecordingProfileTests
         }
         finally
         {
+            RecordedPreparationCache.Enabled = originalReuse;
             SurfaceRecordingDiagnostics.ProfilingEnabled = original;
             SurfaceRecordingDiagnostics.ResetProfiling();
         }
@@ -56,6 +59,8 @@ public sealed class CairoRecordingProfileTests
     public void PaintWithoutGeometryDoesNotReportAPathCopy()
     {
         bool original = SurfaceRecordingDiagnostics.ProfilingEnabled;
+        bool originalReuse = RecordedPreparationCache.Enabled;
+        RecordedPreparationCache.Enabled = false;
         try
         {
             SurfaceRecordingDiagnostics.ProfilingEnabled = true;
@@ -72,6 +77,7 @@ public sealed class CairoRecordingProfileTests
         }
         finally
         {
+            RecordedPreparationCache.Enabled = originalReuse;
             SurfaceRecordingDiagnostics.ProfilingEnabled = original;
             SurfaceRecordingDiagnostics.ResetProfiling();
         }

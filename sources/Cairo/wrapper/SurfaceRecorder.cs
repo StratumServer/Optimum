@@ -81,8 +81,17 @@ namespace Cairo
 		internal bool RecordText(byte[] text, bool pathOnly)
 		{
 			byte[] copy = (byte[])text.Clone();
-			if (pathOnly) return RecordNative(c => c.TextPath(copy));
+			if (pathOnly) return RecordNative(c => c.TextPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, copy));
 			Context context = Shadow;
+			using (var prepared = RecordedPreparationCache.PrepareText(context, copy)) {
+				if (prepared != null) {
+					PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
+					var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), textPath: new SKPath(prepared.Outline), sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
+					double advanceX = prepared.Extents.XAdvance, advanceY = prepared.Extents.YAdvance;
+					if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), c => c.MoveTo(point.X + advanceX, point.Y + advanceY), drawing))) { drawing.Dispose(); return false; }
+					resources.Add(new RecordedResource(drawing)); return true;
+				}
+			}
 			using (Path oldPath = context.CopyPath()) {
 				PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
 				TextExtents extents = context.TextExtents(copy);
@@ -99,8 +108,15 @@ namespace Cairo
 		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly)
 		{
 			Glyph[] copy = (Glyph[])glyphs.Clone();
-			if (pathOnly) return RecordNative(c => c.GlyphPath(copy));
+			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, null, copy));
 			Context context = Shadow;
+			using (var prepared = RecordedPreparationCache.PrepareText(context, null, copy)) {
+				if (prepared != null) {
+					var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), textPath: new SKPath(prepared.Outline), sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
+					if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), c => { }, drawing))) { drawing.Dispose(); return false; }
+					resources.Add(new RecordedResource(drawing)); return true;
+				}
+			}
 			using (Path oldPath = context.CopyPath()) {
 				context.NewPath(); context.GlyphPath(copy);
 				RecordedGuiDrawing drawing;
@@ -167,10 +183,10 @@ namespace Cairo
 			if (!Add(new Command(c => image.Replay(NativeMethods.cairo_get_target(c.NativeHandleForRecorder)), c => { }, image: image))) { image.Dispose(); return false; }
 			resources.Add(new RecordedResource(image)); return true;
 		}
-		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder)
+		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder, RecordedPreparationCache.Picture pictureOwner = null)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
-			var drawing = new RecordedGuiPicture(picture, x, y, width, height, tint, replay, textureColorOrder);
+			var drawing = new RecordedGuiPicture(picture, x, y, width, height, tint, replay, textureColorOrder, pictureOwner?.Retain());
 			if (!Add(new Command(replay, c => { }, picture: drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing)); return true;
 		}

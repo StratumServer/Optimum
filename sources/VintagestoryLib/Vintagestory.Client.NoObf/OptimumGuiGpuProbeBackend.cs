@@ -48,6 +48,21 @@ namespace Vintagestory.Client.NoObf
 		/// <summary>Reset between measurements, with no operation in flight. Does not change enabled state.</summary>
 		public static void ResetRecordingProfiling() => SurfaceRecordingDiagnostics.ResetProfiling();
 
+		/// <summary>Reuse immutable CPU preparation; disabling keeps all legacy commands on the uncached route.</summary>
+		public static bool RecordingPreparationReuseEnabled { get => RecordedPreparationCache.Enabled; set => RecordedPreparationCache.Enabled = value; }
+		public static long RecordingPreparationCacheHits => RecordedPreparationCache.Hits;
+		public static long RecordingPreparationCacheMisses => RecordedPreparationCache.Misses;
+		public static long RecordingPreparationCacheEvictions => RecordedPreparationCache.Evictions;
+		public static long RecordingPreparationTextHits => RecordedPreparationCache.TextHits;
+		public static long RecordingPreparationPathHits => RecordedPreparationCache.PathHits;
+		public static long RecordingPreparationStrokeHits => RecordedPreparationCache.StrokeHits;
+		public static long RecordingPreparationSvgHits => RecordedPreparationCache.PictureHits;
+		public static long RecordingPreparationCacheEntries => RecordedPreparationCache.Count;
+		public static long RecordingPreparationCacheEstimatedBytes => RecordedPreparationCache.Bytes;
+		public static void ResetRecordingPreparationCounters() => RecordedPreparationCache.ResetCounters();
+		public static void ClearRecordingPreparationCache() => RecordedPreparationCache.Clear();
+
+
 
 		// Call while the owning GLFW context is still current. On context replacement,
 		// abandon the old resources without issuing GL calls into the new context.

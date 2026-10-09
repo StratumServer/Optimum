@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..4073eef 100644
+index 6f7730e..efd5266 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,10 +32,12 @@
@@ -131,7 +131,7 @@ index 6f7730e..4073eef 100644
 +		internal bool RecordBlur(double range, int edge, int x1, int y1, int x2, int y2, bool full) => TryRecord(rec => rec.RecordBlur(range, edge, x1, y1, x2, y2, full));
 +		internal bool RecordDemultiplyAlpha() => TryRecord(rec => rec.RecordDemultiplyAlpha());
 +		internal bool RecordImage(SKBitmap bitmap, int x, int y, int width, int height) => TryRecord(rec => rec.RecordImage(bitmap, x, y, width, height));
-+		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false) => TryRecord(rec => rec.RecordPicture(picture, x, y, width, height, tint, replay, textureColorOrder));
++		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false, RecordedPreparationCache.Picture pictureOwner = null) => TryRecord(rec => rec.RecordPicture(picture, x, y, width, height, tint, replay, textureColorOrder, pictureOwner));
 +		internal bool RecordText(byte[] text, bool pathOnly) => TryRecord(rec => rec.RecordText(text, pathOnly));
 +
 +		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly) => TryRecord(rec => rec.RecordGlyphs(glyphs, pathOnly));

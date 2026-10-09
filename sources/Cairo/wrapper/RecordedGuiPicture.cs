@@ -12,9 +12,10 @@ namespace Cairo
 		internal readonly int? Tint;
 		internal readonly bool TextureColorOrder;
 		internal readonly Action<Context> NativeReplay;
-		internal RecordedGuiPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false)
-		{ Picture = picture; X = x; Y = y; Width = width; Height = height; Tint = tint; TextureColorOrder = textureColorOrder; NativeReplay = replay; }
-		public void Dispose() => Picture.Dispose();
+		readonly IDisposable owner;
+		internal RecordedGuiPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false, IDisposable owner = null)
+		{ this.owner = owner; Picture = picture; X = x; Y = y; Width = width; Height = height; Tint = tint; TextureColorOrder = textureColorOrder; NativeReplay = replay; }
+		public void Dispose() { if (owner != null) owner.Dispose(); else Picture.Dispose(); }
 	}
 
 	// The game's NanoSVG parser remains the geometry authority. Its public ABI is
@@ -38,6 +39,15 @@ namespace Cairo
 			internal float FocusX, FocusY; internal int Count;
 		}
 		[StructLayout(LayoutKind.Sequential)] struct Stop { internal uint Color; internal float Offset; }
+
+		internal static RecordedPreparationCache.Picture Acquire(string text, int textureWidth, int textureHeight, int width, int height)
+		{
+			RecordedPreparationCache.Key key = RecordedPreparationCache.Enabled && (text?.Length ?? 0) <= RecordedPreparationCache.MaxKeyBytes / 4
+				? new RecordedPreparationCache.Key(5, new long[] { textureWidth, textureHeight, width, height }, text: text) : null;
+			var cached = RecordedPreparationCache.Acquire<RecordedPreparationCache.Picture>(key); if (cached != null) return cached;
+			var result = new RecordedPreparationCache.Picture(Parse(text, textureWidth, textureHeight, width, height));
+			try { RecordedPreparationCache.Store(key, result); return result; } catch { result.Dispose(); throw; }
+		}
 
 		internal static SKPicture Parse(string text, int textureWidth, int textureHeight, int width, int height)
 		{

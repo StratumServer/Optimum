@@ -21,6 +21,8 @@ namespace Cairo
 		SKMatrix sourceTransform;
 		SKShader shader;
 		SKPathEffect dash;
+		float[] dashIntervals;
+		float dashOffset;
 		Pattern nativeSource;
 		ImageSurface nativeImage;
 		Matrix nativeSourceMatrix;
@@ -47,13 +49,12 @@ namespace Cairo
 					// Rasterize a stroke's union once. Ganesh's analytic stroke path can
 					// blend retraced segments twice (a closed two-point caret becomes
 					// alpha 191 instead of Cairo's 128 at a half-covered pixel).
-					using var strokeProfile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.StrokeOutline);
-					var outline = new SKPath();
-					if (result.Paint.GetFillPath(result.Path, outline)) {
+					var outline = RecordedPreparationCache.StrokeOutline(result.Path, result.Paint, result.dashIntervals, result.dashOffset);
+					if (outline != null) {
 						result.Path.Dispose(); result.Path = outline;
 						result.Paint.Style = SKPaintStyle.Fill;
 						result.Paint.PathEffect = null;
-					} else outline.Dispose();
+					}
 				}
 				using (Pattern source = context.GetSource()) { result.SetSource(source, alpha, sourceMatrix); if (sourceSnapshot == null) result.FreezeSource(source); else { result.nativeSource = new SolidPattern(0, 0, 0, 0); result.nativeSource.Matrix = source.Matrix; result.nativeSource.Extend = source.Extend; } }
 				result.nativeSourceMatrix = sourceMatrix is null ? context.Matrix : (Matrix)sourceMatrix.Clone();
@@ -126,7 +127,8 @@ namespace Cairo
 				var values = new double[count]; Marshal.Copy(buffer, values, 0, count);
 				var intervals = new float[count % 2 == 0 ? count : count * 2];
 				for (int i = 0; i < intervals.Length; i++) intervals[i] = (float)values[i % count];
-				dash = SKPathEffect.CreateDash(intervals, (float)offset); Paint.PathEffect = dash;
+				dashIntervals = intervals; dashOffset = (float)offset;
+				dash = SKPathEffect.CreateDash(intervals, dashOffset); Paint.PathEffect = dash;
 			} finally { Marshal.FreeHGlobal(buffer); }
 		}
 
@@ -232,9 +234,24 @@ namespace Cairo
 		}
 		internal static SKPath CopyPath(IntPtr handle)
 		{
-			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.PathConversion);
 			NativePath data = Marshal.PtrToStructure<NativePath>(handle);
 			if (data.Status != Status.Success) throw new InvalidOperationException("Cairo path capture: " + data.Status);
+			RecordedPreparationCache.Key key = null;
+			if (RecordedPreparationCache.Enabled && data.Count >= 0 && data.Count <= 4096) {
+				// Normalize only initialized union fields. Native header padding is not a key.
+				var words = new long[data.Count * 2];
+				for (int index = 0; index < data.Count;) {
+					IntPtr p = IntPtr.Add(data.Data, index * 16); int kind = Marshal.ReadInt32(p), length = Marshal.ReadInt32(p, 4);
+					int expected = kind == 0 || kind == 1 ? 2 : kind == 2 ? 4 : kind == 3 ? 1 : 0;
+					if (expected == 0 || length != expected || index + length > data.Count) throw new InvalidOperationException("Malformed Cairo path.");
+					words[index * 2] = kind; words[index * 2 + 1] = length;
+					for (int i = 1; i < length; i++) { words[(index+i)*2] = Marshal.ReadInt64(p, i*16); words[(index+i)*2+1] = Marshal.ReadInt64(p, i*16+8); }
+					index += length;
+				}
+				key = new RecordedPreparationCache.Key(3, words);
+				using (var cached = RecordedPreparationCache.Acquire<RecordedPreparationCache.Geometry>(key)) if (cached != null) return new SKPath(cached.Path);
+			}
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.PathConversion);
 			var result = new SKPath();
 			try {
 				for (int index = 0; index < data.Count;) {
@@ -247,6 +264,7 @@ namespace Cairo
 					else throw new InvalidOperationException("Unknown Cairo path command.");
 					index += length;
 				}
+				if (key != null) using (var prepared = new RecordedPreparationCache.Geometry(new SKPath(result))) RecordedPreparationCache.Store(key, prepared);
 				return result;
 			} catch { result.Dispose(); throw; }
 		}
