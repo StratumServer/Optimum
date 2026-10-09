@@ -1,0 +1,127 @@
+diff --git a/Cairo/wrapper/Pattern.cs b/Cairo/wrapper/Pattern.cs
+index fc26cf1..76d0855 100644
+--- a/Cairo/wrapper/Pattern.cs
++++ b/Cairo/wrapper/Pattern.cs
+@@ -34,11 +34,11 @@ using System;
+ namespace Cairo
+ {
+ 
+     public class Pattern : IDisposable
+ 	{
+-        public bool HandleValid { get { return Handle != IntPtr.Zero; } }
++        public bool HandleValid { get { return NativeHandleForRecorder != IntPtr.Zero; } }
+ 
+         [Obsolete]
+ 		protected IntPtr pattern = IntPtr.Zero;
+ 
+ 		public static Pattern Lookup (IntPtr pattern, bool owner)
+@@ -69,11 +69,11 @@ namespace Cairo
+ 		internal Pattern (IntPtr handle, bool owned)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+ 
+-			Handle = handle;
++			NativeHandleForRecorder = handle;
+ 			if (!owned)
+ 				NativeMethods.cairo_pattern_reference (handle);
+ 			if (CairoDebug.Enabled)
+ 				CairoDebug.OnAllocated (handle);
+ 		}
+@@ -91,22 +91,23 @@ namespace Cairo
+ 		}
+ 
+ 		protected virtual void Dispose (bool disposing)
+ 		{
+ 			if (!disposing || CairoDebug.Enabled)
+-				CairoDebug.OnDisposed<Pattern> (Handle, disposing);
++				CairoDebug.OnDisposed<Pattern> (NativeHandleForRecorder, disposing);
+ 
+-			if (Handle == IntPtr.Zero)
++			if (NativeHandleForRecorder == IntPtr.Zero)
+ 				return;
+ 
+-			NativeMethods.cairo_pattern_destroy (Handle);
+-			Handle = IntPtr.Zero;
++			RecordedSource?.Dispose(); RecordedSource = null;
++			NativeMethods.cairo_pattern_destroy (NativeHandleForRecorder);
++			NativeHandleForRecorder = IntPtr.Zero;
+ 		}
+ 
+ 		protected void CheckDisposed ()
+ 		{
+-			if (Handle == IntPtr.Zero)
++			if (NativeHandleForRecorder == IntPtr.Zero)
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
+ 		[Obsolete ("Use Dispose()")]
+ 		public void Destroy ()
+@@ -116,56 +117,59 @@ namespace Cairo
+ 
+ 		public Status Status
+ 		{
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_pattern_status (Handle);
++				return NativeMethods.cairo_pattern_status (NativeHandleForRecorder);
+ 			}
+ 		}
+ 
+ 		public Extend Extend
+ 		{
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_pattern_get_extend (Handle);
++				return NativeMethods.cairo_pattern_get_extend (NativeHandleForRecorder);
+ 			}
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_pattern_set_extend (Handle, value);
++				NativeMethods.cairo_pattern_set_extend (NativeHandleForRecorder, value);
+ 			}
+ 		}
+ 
+ 		public Matrix Matrix {
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_pattern_set_matrix (Handle, value);
++				NativeMethods.cairo_pattern_set_matrix (NativeHandleForRecorder, value);
+ 			}
+ 
+ 			get {
+ 				CheckDisposed ();
+ 				Matrix m = new Matrix ();
+-				NativeMethods.cairo_pattern_get_matrix (Handle, m);
++				NativeMethods.cairo_pattern_get_matrix (NativeHandleForRecorder, m);
+ 				return m;
+ 			}
+ 		}
+ 
+ #pragma warning disable 612
+-		public IntPtr Handle {
++		internal IntPtr NativeHandleForRecorder {
+ 			get { return pattern; }
+ 			private set { pattern = value; }
+ 		}
+ #pragma warning restore 612
++		internal RecordedSurfaceSource RecordedSource;
++		public IntPtr Handle { get { EnsureNativeSource(); return NativeHandleForRecorder; } }
++		void EnsureNativeSource() { if (RecordedSource != null && NativeHandleForRecorder != IntPtr.Zero) { NativeMethods.cairo_pattern_get_surface(NativeHandleForRecorder, out IntPtr target); RecordedSource.Materialize(target); } }
+ 
+ 		[Obsolete]
+ 		public IntPtr Pointer {
+-			get { return pattern; }
++			get { return Handle; }
+ 		}
+ 
+ 		public PatternType PatternType {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_pattern_get_type (Handle);
++				return NativeMethods.cairo_pattern_get_type (NativeHandleForRecorder);
+ 			}
+ 		}
+ 	}
+ }
+ 

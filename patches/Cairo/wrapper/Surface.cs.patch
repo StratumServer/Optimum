@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..1b90ecb 100644
+index 6f7730e..4073eef 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,10 +32,12 @@
@@ -33,7 +33,7 @@ index 6f7730e..1b90ecb 100644
  		{
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
-@@ -57,10 +66,163 @@ namespace Cairo
+@@ -57,10 +66,200 @@ namespace Cairo
  				NativeMethods.cairo_surface_reference (handle);
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
@@ -73,11 +73,18 @@ index 6f7730e..1b90ecb 100644
 +		}
 +		internal IntPtr NativeHandleForMetadata { get { CheckDisposed (); return handle; } }
 +
++		internal static bool AutomaticRecordingEnabled;
++		internal static void ConfigureAutomaticRecording(bool enabled)
++		{
++			AutomaticRecordingEnabled = enabled;
++			SurfaceRecordingDiagnostics.Enabled = enabled;
++		}
 +		internal IntPtr PrepareContextForCreation ()
 +		{
 +			lock (recordingSync) {
 +				CheckDisposed ();
 +				EnsureRecordingOwnerThread ();
++				if (AutomaticRecordingEnabled && recorder == null && recordingCandidate && !handleExposed && !finished && NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
 +				if (recorder != null && recorder.State == SurfaceRecordingState.Recording && recordingContext != null)
 +					MaterializeRecorder (recordingContext.NativeHandleForRecorder);
 +				return handle;
@@ -107,12 +114,24 @@ index 6f7730e..1b90ecb 100644
 +		internal bool RecordAntialias (Antialias value) { return TryRecord (rec => rec.RecordAntialias (value)); }
 +		internal bool RecordOperator (Operator value) { return TryRecord (rec => rec.RecordOperator (value)); }
 +
++		int recordedSourceReferences;
++		SurfaceRecorderSnapshot disposedSourceSnapshot;
++		internal RecordedSurfaceSource AcquireRecordedSource() { lock (recordingSync) { return recorder?.CaptureSnapshot() is SurfaceRecorderSnapshot probe ? AcquireSource(probe) : null; } }
++		RecordedSurfaceSource AcquireSource(SurfaceRecorderSnapshot probe) { probe.Dispose(); return new RecordedSurfaceSource(this); }
++		internal void RetainRecordedSource() { lock (recordingSync) recordedSourceReferences++; }
++		internal void ReleaseRecordedSource() { lock (recordingSync) { if (--recordedSourceReferences == 0) { disposedSourceSnapshot?.Dispose(); disposedSourceSnapshot = null; } } }
++		internal SurfaceRecorderSnapshot CaptureRecordedSource() { lock (recordingSync) { if (recordingContext != null) EnsureRecordingOwnerThread(); return disposedSourceSnapshot?.Retain() ?? recorder?.CaptureSnapshot(); } }
++		internal void InvalidateDisposedSourceRecording() { lock (recordingSync) { disposedSourceSnapshot?.Dispose(); disposedSourceSnapshot = null; } }
++
 +		internal IntPtr RecordingStateHandle => recorder.Shadow.NativeHandleForRecorder;
-+		internal bool RecordNative(Action<Context> replay, IDisposable resource = null, Action<Context> shadowReplay = null, bool bindsSource = false) => TryRecord(rec => rec.RecordNative(replay, resource, shadowReplay, bindsSource));
++		internal bool RecordNative(Action<Context> replay, IDisposable resource = null, Action<Context> shadowReplay = null, bool bindsSource = false, RecordedSurfaceSource sourceBinding = null) => TryRecord(rec => rec.RecordNative(replay, resource, shadowReplay, bindsSource, sourceBinding));
 +		internal bool RecordDrawing(Action<Context> replay, Action<Context> shadowReplay, bool stroke = false, bool paintAll = false, double alpha = 1) => TryRecord(rec => rec.RecordDrawing(replay, shadowReplay, stroke, paintAll, alpha));
 +		internal bool RecordClip(bool preserve) => TryRecord(rec => rec.RecordClip(preserve));
 +		internal bool RecordResetClip() => TryRecord(rec => rec.RecordResetClip());
 +		internal bool RecordBlur(double range, int edge, int x1, int y1, int x2, int y2, bool full) => TryRecord(rec => rec.RecordBlur(range, edge, x1, y1, x2, y2, full));
++		internal bool RecordDemultiplyAlpha() => TryRecord(rec => rec.RecordDemultiplyAlpha());
++		internal bool RecordImage(SKBitmap bitmap, int x, int y, int width, int height) => TryRecord(rec => rec.RecordImage(bitmap, x, y, width, height));
++		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false) => TryRecord(rec => rec.RecordPicture(picture, x, y, width, height, tint, replay, textureColorOrder));
 +		internal bool RecordText(byte[] text, bool pathOnly) => TryRecord(rec => rec.RecordText(text, pathOnly));
 +
 +		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly) => TryRecord(rec => rec.RecordGlyphs(glyphs, pathOnly));
@@ -120,7 +139,13 @@ index 6f7730e..1b90ecb 100644
 +		bool TryRecord (Func<SurfaceRecorder, bool> record)
 +		{
 +			lock (recordingSync) {
++				if (recorder == null && AutomaticRecordingEnabled && recordingCandidate && !handleExposed && !finished &&
++					NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
 +				if (recorder == null) return false;
++				if (recorder.State == SurfaceRecordingState.GpuRendered) {
++					if (!ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) throw new InvalidOperationException("A recording surface may only be modified from its recording thread.");
++					recorder.ResumeRecording();
++				}
 +				EnsureRecordingOwnerThread ();
 +				if (recorder.State != SurfaceRecordingState.Recording)
 +					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
@@ -140,9 +165,10 @@ index 6f7730e..1b90ecb 100644
 +		{
 +			SurfaceRecorderSnapshot snapshot;
 +			lock (recordingSync) {
++				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
 +				if (recorder == null || !recorder.TrySeal (out snapshot)) return false;
 +			}
-+			snapshot.DrawTo (canvas);
++			using (snapshot) snapshot.DrawTo (canvas);
 +			return true;
 +		}
 +
@@ -150,9 +176,10 @@ index 6f7730e..1b90ecb 100644
 +		{
 +			SurfaceRecorderSnapshot snapshot;
 +			lock (recordingSync) {
++				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
 +				if (recorder == null || !recorder.TrySeal (out snapshot)) return false;
 +			}
-+			snapshot.DrawTo (target, blur);
++			using (snapshot) snapshot.DrawTo (target, blur);
 +			return true;
 +		}
 +
@@ -164,6 +191,16 @@ index 6f7730e..1b90ecb 100644
 +			}
 +		}
 +
++		internal bool TrySealEmptyRecordedCommands()
++		{
++			lock (recordingSync) {
++				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
++				if (NativeMethods.cairo_image_surface_get_width(handle) != 0 && NativeMethods.cairo_image_surface_get_height(handle) != 0) return false;
++				if (recorder == null || !recorder.TrySeal(out SurfaceRecorderSnapshot snapshot)) return false;
++				snapshot.Dispose(); return true;
++			}
++		}
++
 +		internal string MaterializeCause { get; private set; }
 +		internal void MaterializeRecorder () { MaterializeRecorder (IntPtr.Zero); }
 +
@@ -171,7 +208,7 @@ index 6f7730e..1b90ecb 100644
 +		{
 +			lock (recordingSync) {
 +				if (handle == IntPtr.Zero) return;
-+				EnsureRecordingOwnerThread ();
++				if (recordingContext != null) EnsureRecordingOwnerThread ();
 +				if (recorder == null || recorder.State == SurfaceRecordingState.NativeMaterialized || recorder.State == SurfaceRecordingState.Disposed) return;
 +				IntPtr replayHandle = contextHandle != IntPtr.Zero ? contextHandle :
 +					(recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
@@ -197,7 +234,7 @@ index 6f7730e..1b90ecb 100644
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
  			switch (st) {
  			case SurfaceType.Image:
-@@ -94,10 +256,11 @@ namespace Cairo
+@@ -94,10 +293,11 @@ namespace Cairo
  
  
  		public Cairo.Surface CreateSimilar (
@@ -209,7 +246,7 @@ index 6f7730e..1b90ecb 100644
  
  			return new Cairo.Surface (p, true);
  		}
-@@ -108,10 +271,11 @@ namespace Cairo
+@@ -108,10 +308,11 @@ namespace Cairo
  		}
  
  		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
@@ -221,7 +258,7 @@ index 6f7730e..1b90ecb 100644
  		}
  
  		public void Dispose ()
-@@ -123,36 +287,54 @@ namespace Cairo
+@@ -123,36 +324,56 @@ namespace Cairo
  			}
  		}
  
@@ -230,9 +267,8 @@ index 6f7730e..1b90ecb 100644
 +			lock (recordingSync) {
 +				if (disposing) {
 +					EnsureRecordingOwnerThread ();
-+					if (recorder != null && (recorder.State == SurfaceRecordingState.Recording ||
-+						(recorder.State == SurfaceRecordingState.GpuRendered && recordingContext != null)))
-+						MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++					if (recorder != null && recordingContext != null)
++						recordingContext.RetainDisposedSurfaceRecording(recorder.CaptureSnapshot(), this);
 +				}
 +				Context oldContext = recordingContext;
 +				recordingContext = null;
@@ -243,7 +279,10 @@ index 6f7730e..1b90ecb 100644
  			if (handle == IntPtr.Zero)
  				return;
  
-+			if (recorder != null) recorder.DisposeFromSurface ();
++			if (recorder != null) {
++				if (recordedSourceReferences > 0) disposedSourceSnapshot = recorder.CaptureSnapshot();
++				recorder.DisposeFromSurface ();
++			}
 +
  			NativeMethods.cairo_surface_destroy (handle);
  			handle = IntPtr.Zero;
@@ -279,7 +318,7 @@ index 6f7730e..1b90ecb 100644
  
  		public void MarkDirty ()
  		{
-@@ -166,62 +348,75 @@ namespace Cairo
+@@ -166,62 +387,76 @@ namespace Cairo
  			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
  		}
  
@@ -288,6 +327,7 @@ index 6f7730e..1b90ecb 100644
 -				return handle;
 +				lock (recordingSync) {
 +					if (handle == IntPtr.Zero) return IntPtr.Zero;
++					EnsureRecordingOwnerThread ();
 +					MaterializeRecorder ();
 +					handleExposed = true;
 +					return handle;

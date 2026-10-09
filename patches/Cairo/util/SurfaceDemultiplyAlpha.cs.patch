@@ -1,0 +1,36 @@
+diff --git a/Cairo/util/SurfaceDemultiplyAlpha.cs b/Cairo/util/SurfaceDemultiplyAlpha.cs
+index e36436f..eab23e0 100644
+--- a/Cairo/util/SurfaceDemultiplyAlpha.cs
++++ b/Cairo/util/SurfaceDemultiplyAlpha.cs
+@@ -7,12 +7,16 @@ namespace Cairo
+     public static class SurfaceTransformDemulAlpha
+     {
+ 
+         public unsafe static void DemulAlpha(this ImageSurface surface)
+         {
+-            int width = surface.Width;
+-            int height = surface.Height;
++            if (surface.RecordDemultiplyAlpha()) return;
++            ApplyToPixels(surface.DataPtr, surface.Width, surface.Height);
++        }
++
++        internal unsafe static void ApplyToPixels(IntPtr data, int width, int height)
++        {
+ 
+ 
+             // https://www.cairographics.org/manual-1.2.0/cairo-Image-Surfaces.html#cairo-format-t
+             // "The 32-bit quantities are stored native-endian."
+             int rShift = 0;
+@@ -28,11 +32,11 @@ namespace Cairo
+                 aShift = 0;
+             }
+ 
+             unsafe
+             {
+-                uint* pixels = (uint*)surface.DataPtr.ToPointer();
++                uint* pixels = (uint*)data.ToPointer();
+ 
+                 for (int x = 0; x < width; x++)
+                 {
+                     for (int y = 0; y < height; y++)
+                     {

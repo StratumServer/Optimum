@@ -56,6 +56,7 @@ var typesToInject = new List<string>
     "Optimum.PhysicsListReuseGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
     "Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend",
+    "Vintagestory.Client.NoObf.OptimumGuiSvgRecorder",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
@@ -649,6 +650,9 @@ var targets = new List<MethodTarget>
     // after the textures category is unloaded (waypoint icon packs, etc.).
     // Vanilla throws; this reloads from Origin, keeping icons drawing.
     new("Vintagestory.Client.NoObf.SvgLoader", "rasterizeSvg", 6),
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 8),
+    new("Vintagestory.Client.NoObf.SvgLoader", "LoadSvg", 6),
 
     // --- Server-side worldgen scheduler + chunk read pool ---
     // See docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md

@@ -12,11 +12,41 @@ namespace Cairo
 		readonly GRContext context;
 		readonly Dictionary<int, SKRuntimeEffect> effects = new Dictionary<int, SKRuntimeEffect> ();
 		readonly Queue<int> effectOrder = new Queue<int> ();
+		readonly Dictionary<(long, int), SKImage> sourceImages = new Dictionary<(long, int), SKImage>();
+		readonly Queue<(long, int)> sourceOrder = new Queue<(long, int)>();
+		long sourceBytes;
+		int dependencyDepth;
 		SKSurface horizontal, vertical;
+		SKRuntimeEffect demultiplyEffect;
+		SKImage demultiplyTable;
+		SKRuntimeEffect imageOverlayEffect;
 		int width, height;
 		internal long PassCount { get; private set; }
 
 		internal RecordedGpuBlur (GRContext context) { this.context = context ?? throw new ArgumentNullException (nameof (context)); }
+
+		internal SKImage RenderSource(SurfaceRecorderSnapshot recording, out bool callerOwnsImage)
+		{
+			callerOwnsImage = false;
+			var key = (recording.Identity, recording.Generation);
+			if (sourceImages.TryGetValue(key, out SKImage cached)) { SurfaceRecordingDiagnostics.ReuseDependency(); return cached; }
+			if (dependencyDepth >= 64) throw new NotSupportedException("Surface dependency depth exceeds 64.");
+			dependencyDepth++;
+			try {
+				using (var target = SKSurface.Create(context, true, new SKImageInfo(recording.Width, recording.Height, SKColorType.Rgba8888, SKAlphaType.Premul))) {
+					if (target == null) throw new InvalidOperationException("Could not create a GPU surface dependency.");
+					recording.DrawTo(target, this); SurfaceRecordingDiagnostics.RenderDependency();
+					SKImage image = target.Snapshot();
+					long bytes = checked((long)recording.Width * recording.Height * 4);
+					if (bytes > 8 * 1024 * 1024) { callerOwnsImage = true; return image; }
+					while (sourceOrder.Count > 0 && (sourceImages.Count >= 32 || sourceBytes + bytes > 8 * 1024 * 1024)) {
+						var oldest = sourceOrder.Dequeue(); SKImage old = sourceImages[oldest]; sourceBytes -= (long)old.Width * old.Height * 4; sourceImages.Remove(oldest); old.Dispose();
+					}
+					sourceImages.Add(key, image); sourceOrder.Enqueue(key); sourceBytes += bytes;
+					return image;
+				}
+			} finally { dependencyDepth--; }
+		}
 
 		internal void Apply (RecordedBlur blur, SKSurface target, int width, int height)
 		{
@@ -42,6 +72,162 @@ namespace Cairo
 					using (SKImage result = vertical.Snapshot ()) target.Canvas.DrawImage (result, 0, 0, paint);
 				}
 			}
+		}
+
+		// Preserve the game's existing native-endian byte operation, including its
+		// little-endian channel order and unchecked overlapping shifted values.
+		internal static string DemultiplyShaderSource => @"
+uniform shader sourceImage;
+uniform shader divisionTable;
+uniform int littleEndian;
+int divideByte(int value, int alpha) {
+    int2 divided = int2(floor(float2(divisionTable.eval(float2(value, alpha) + float2(0.5)).rg) * 255 + 0.5));
+    return divided.x + divided.y * 256;
+}
+int byteOr(int x, int y) {
+    int result = 0;
+    int place = 1;
+    for (int bit = 0; bit < 8; bit++) {
+        if (x - (x / 2) * 2 != 0 || y - (y / 2) * 2 != 0) result += place;
+        x /= 2; y /= 2; place *= 2;
+    }
+    return result;
+}
+float4 main(float2 p) {
+    int4 c = int4(floor(float4(sourceImage.eval(p)) * 255 + 0.5));
+    int alpha = littleEndian != 0 ? c.b : c.a;
+    if (alpha == 0) return littleEndian != 0
+        ? float4(c.r > 0 || c.g > 0 ? 1 : 0, c.g > 0 ? 1 : 0, 0, c.a > 0 || c.r > 0 || c.g > 0 ? 1 : 0)
+        : float4(c.r > 0 || c.g > 0 || c.b > 0 ? 1 : 0, c.g > 0 || c.b > 0 ? 1 : 0, c.b > 0 ? 1 : 0, c.r > 0 || c.g > 0 || c.b > 0 ? 1 : 0);
+    int r = divideByte(littleEndian != 0 ? c.a : c.b, alpha);
+    int g = divideByte(littleEndian != 0 ? c.r : c.g, alpha);
+    int b = divideByte(littleEndian != 0 ? c.g : c.r, alpha);
+    int rLow = r - (r / 256) * 256;
+    int gLow = g - (g / 256) * 256;
+    int bLow = b - (b / 256) * 256;
+    return littleEndian != 0
+        ? float4(byteOr(gLow, b / 256), bLow, alpha, byteOr(rLow, g / 256)) / 255.0
+        : float4(byteOr(bLow, g / 256), byteOr(gLow, r / 256), rLow, byteOr(alpha, b / 256)) / 255.0;
+}";
+
+		internal static SKImage CreateDemultiplyTable()
+		{
+			// A fixed numerical lookup, independent of UI pixels, reproduces the CLR's
+			// float division and truncation without driver-specific reciprocal rounding.
+			using (var bitmap = new SKBitmap(256, 256, SKColorType.Rgba8888, SKAlphaType.Opaque)) {
+				for (int alpha = 0; alpha < 256; alpha++)
+				for (int value = 0; value < 256; value++) {
+					uint divided = alpha == 0 ? 0 : (uint)(value / (alpha / 255f));
+					bitmap.SetPixel(value, alpha, new SKColor((byte)divided, (byte)(divided >> 8), 0, 255));
+				}
+				return SKImage.FromBitmap(bitmap);
+			}
+		}
+
+		internal static void DrawDemultiply(SKRuntimeEffect effect, SKImage input, SKImage table, SKSurface destination, int width, int height)
+		{
+			var uniforms = new SKRuntimeEffectUniforms(effect) { ["littleEndian"] = BitConverter.IsLittleEndian ? 1 : 0 };
+			using (var source = input.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest)))
+			using (var division = table.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest))) {
+				var children = new SKRuntimeEffectChildren(effect) { ["sourceImage"] = source, ["divisionTable"] = division };
+				using (var shader = effect.ToShader(uniforms, children))
+				using (var paint = new SKPaint { Shader = shader, BlendMode = SKBlendMode.Src, IsAntialias = false }) {
+					if (shader == null) throw new InvalidOperationException("Skia rejected the recorded demultiply shader.");
+					destination.Canvas.DrawRect(0, 0, width, height, paint);
+				}
+			}
+		}
+
+		internal void Demultiply(SKSurface target, int width, int height)
+		{
+			if (demultiplyEffect == null) {
+				demultiplyEffect = SKRuntimeEffect.CreateShader(DemultiplyShaderSource, out string errors);
+				if (demultiplyEffect == null) throw new NotSupportedException("Recorded demultiply shader compilation failed: " + errors);
+			}
+			EnsureSurfaces(width, height);
+			demultiplyTable ??= CreateDemultiplyTable();
+			using (var original = target.Snapshot()) DrawDemultiply(demultiplyEffect, original, demultiplyTable, horizontal, width, height);
+			using (var result = horizontal.Snapshot())
+			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
+		}
+
+		internal static string ImageOverlayShaderSource => @"
+uniform shader sourceImage;
+uniform shader original;
+uniform float4 rectangle;
+uniform float2 scale;
+uniform int hasTint;
+uniform int swapSource;
+uniform float4 tint;
+float4 main(float2 p) {
+    float4 base = float4(original.eval(p));
+    if (p.x < rectangle.x || p.y < rectangle.y || p.x >= rectangle.z || p.y >= rectangle.w) return base;
+    float4 sampled = float4(sourceImage.eval((p - rectangle.xy) * scale));
+    float aOver = floor(sampled.a * 255 + 0.5) / 255.0;
+    float3 rgbOver = sampled.a > 0 ? floor(clamp(sampled.rgb / sampled.a, 0.0, 1.0) * 255 + 0.5) : float3(0);
+    if (swapSource != 0) rgbOver = rgbOver.bgr;
+    if (hasTint != 0) { rgbOver = floor(aOver * tint.rgb); aOver = floor(aOver * tint.a) / 255.0; }
+    float aBase = floor(base.a * 255 + 0.5) / 255.0;
+    float3 rgbBase = floor(base.rgb * 255 + 0.5);
+    float total = aOver + aBase * (1.0 - aOver);
+    if (total == 0) return float4(0);
+    float3 rgb = floor((rgbOver * aOver + rgbBase * aBase * (1.0 - aOver)) / total);
+    return float4(rgb, floor(255.0 * total)) / 255.0;
+}";
+
+		internal static void DrawImageOverlay(SKRuntimeEffect effect, RecordedGuiImage image, SKImage original, SKSurface destination, int width, int height)
+			=> DrawOverlay(effect, image.Image, original, destination, image.X, image.Y, image.Width, image.Height, width, height,
+				new SKSamplingOptions(SKCubicResampler.Mitchell), null, false, false);
+
+		internal static void DrawOverlay(SKRuntimeEffect effect, SKImage image, SKImage original, SKSurface destination,
+			int x, int y, int imageWidth, int imageHeight, int width, int height, SKSamplingOptions sampling, int? tint, bool textureColorOrder, bool svg)
+		{
+			var uniforms = new SKRuntimeEffectUniforms(effect) {
+				["rectangle"] = new float[] { x, y, x + imageWidth, y + imageHeight },
+				["scale"] = new float[] { (float)image.Width / imageWidth, (float)image.Height / imageHeight },
+				["hasTint"] = tint.HasValue ? 1 : 0,
+				["swapSource"] = svg && textureColorOrder && !tint.HasValue ? 1 : 0,
+				["tint"] = tint.HasValue ? new float[] { (tint.Value >> (textureColorOrder ? 16 : 0)) & 255, (tint.Value >> 8) & 255, (tint.Value >> (textureColorOrder ? 0 : 16)) & 255, (tint.Value >> 24) & 255 } : new float[4]
+			};
+			using (var source = image.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, sampling))
+			using (var backdrop = original.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest))) {
+				var children = new SKRuntimeEffectChildren(effect) { ["sourceImage"] = source, ["original"] = backdrop };
+				using (var shader = effect.ToShader(uniforms, children))
+				using (var paint = new SKPaint { Shader = shader, BlendMode = SKBlendMode.Src, IsAntialias = false }) {
+					if (shader == null) throw new InvalidOperationException("Skia rejected the recorded GUI image shader.");
+					destination.Canvas.DrawRect(0, 0, width, height, paint);
+				}
+			}
+		}
+
+		internal void DrawImage(RecordedGuiImage image, SKSurface target, int width, int height)
+		{
+			if (imageOverlayEffect == null) {
+				imageOverlayEffect = SKRuntimeEffect.CreateShader(ImageOverlayShaderSource, out string errors);
+				if (imageOverlayEffect == null) throw new NotSupportedException("Recorded GUI image shader compilation failed: " + errors);
+			}
+			EnsureSurfaces(width, height);
+			using (var original = target.Snapshot()) DrawImageOverlay(imageOverlayEffect, image, original, horizontal, width, height);
+			using (var result = horizontal.Snapshot())
+			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
+		}
+
+		internal void DrawPicture(RecordedGuiPicture picture, SKSurface target, int width, int height)
+		{
+			if (imageOverlayEffect == null) {
+				imageOverlayEffect = SKRuntimeEffect.CreateShader(ImageOverlayShaderSource, out string errors);
+				if (imageOverlayEffect == null) throw new NotSupportedException("Recorded SVG shader compilation failed: " + errors);
+			}
+			EnsureSurfaces(width, height);
+			using (var source = SKSurface.Create(context, true, new SKImageInfo(picture.Width, picture.Height, SKColorType.Rgba8888, SKAlphaType.Premul))) {
+				if (source == null) throw new InvalidOperationException("Skia could not allocate a GPU SVG surface.");
+				source.Canvas.Clear(SKColors.Transparent); source.Canvas.DrawPicture(picture.Picture);
+				using (var pixels = source.Snapshot())
+				using (var original = target.Snapshot()) DrawOverlay(imageOverlayEffect, pixels, original, horizontal,
+					picture.X, picture.Y, picture.Width, picture.Height, width, height, new SKSamplingOptions(SKFilterMode.Nearest), picture.Tint, picture.TextureColorOrder, true);
+			}
+			using (var result = horizontal.Snapshot())
+			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
 		}
 
 		internal static void DrawPass (SKRuntimeEffect effect, SKImage input, SKImage original, SKSurface destination,
@@ -150,10 +336,14 @@ half4 main(float2 p) {
 
 		public void Dispose ()
 		{
+			demultiplyEffect?.Dispose(); demultiplyEffect = null;
+			demultiplyTable?.Dispose(); demultiplyTable = null;
+			imageOverlayEffect?.Dispose(); imageOverlayEffect = null;
 			horizontal?.Dispose (); horizontal = null;
 			vertical?.Dispose (); vertical = null;
 			foreach (SKRuntimeEffect effect in effects.Values) effect.Dispose ();
 			effects.Clear (); effectOrder.Clear ();
+			foreach (var image in sourceImages.Values) image.Dispose(); sourceImages.Clear(); sourceOrder.Clear(); sourceBytes = 0;
 		}
 	}
 }

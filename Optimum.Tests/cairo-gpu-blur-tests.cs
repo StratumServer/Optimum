@@ -6,6 +6,7 @@ using Xunit;
 
 public sealed class CairoGpuBlurTests
 {
+	static CairoGpuBlurTests() { _ = CairoAPI.Version; }
 	// Run the same shaders in Skia raster for deterministic CI coverage. The GL harness
 	// separately verifies GPU execution, GL state, context lifetime, and command ordering.
 	[Theory]

@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..e80322b 100644
+index 8014c9e..849e4fe 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -44,11 +44,11 @@ namespace Cairo {
+@@ -44,14 +44,24 @@ namespace Cairo {
  		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
  		{
  		}
@@ -13,9 +13,22 @@ index 8014c9e..e80322b 100644
  		{
  		}
  
++		// The list-menu's offscreen scrollbar may receive a negative height when
++		// its menu is above the viewport. Cairo's error surface has no pixels and
++		// reports zero dimensions; retain those dimensions with a recordable empty
++		// surface rather than running drawing commands against an error context.
++		internal static ImageSurface CreateForRecordedGui(Format format, int width, int height)
++		{
++			if (AutomaticRecordingEnabled && (width < 0 || height < 0)) return new ImageSurface(format, 0, 0);
++			return new ImageSurface(format, width, height);
++		}
++
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
  			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
-@@ -75,17 +75,17 @@ namespace Cairo {
+ 		{
+ 		}
+ 
+@@ -75,17 +85,17 @@ namespace Cairo {
  
  
          public int Width {
@@ -35,7 +48,7 @@ index 8014c9e..e80322b 100644
  
  		public byte[] Data {
  			get {
-@@ -106,17 +106,17 @@ namespace Cairo {
+@@ -106,17 +116,17 @@ namespace Cairo {
  		}
  
  		public Format Format {

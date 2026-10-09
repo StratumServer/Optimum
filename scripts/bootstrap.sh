@@ -1510,7 +1510,7 @@ if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.pat
   if [[ -f "$repo_root/.git/optimum-bootstrap-tmp" ]]; then
     rm -rf "$repo_root/.git"
   fi
-  if [[ ! -d "$repo_root/.git" ]]; then
+  if [[ ! -e "$repo_root/.git" ]]; then
     git init -q "$repo_root"
     touch "$repo_root/.git/optimum-bootstrap-tmp"
     _optimum_tmp_git=true

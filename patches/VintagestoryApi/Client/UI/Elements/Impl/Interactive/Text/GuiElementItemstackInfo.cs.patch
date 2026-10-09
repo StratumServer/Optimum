@@ -1,0 +1,16 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementItemstackInfo.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementItemstackInfo.cs
+index b7bdf5c..038a60d 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementItemstackInfo.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementItemstackInfo.cs
+@@ -186,10 +186,11 @@ namespace Vintagestory.API.Client
+                 ctx.Fill();
+ 
+                 shCtx.Dispose();
+                 shSurface.Dispose();
+ 
++                if (Vintagestory.API.Client.OptimumGuiGpuProbe.RenderingRequested) ctx.Dispose();
+                 api.Event.EnqueueMainThreadTask(() =>
+                 {
+                     titleElement.Compose(false);
+                     descriptionElement.Compose(false);
+ 

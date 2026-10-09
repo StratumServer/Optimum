@@ -15,6 +15,10 @@ namespace Cairo
 		internal RecordedGuiClip[] Clips;
 		internal bool PaintAll;
 		SKImage image;
+		SurfaceRecorderSnapshot sourceSnapshot;
+		SKShaderTileMode sourceTile;
+		SKFilterMode sourceFilter;
+		SKMatrix sourceTransform;
 		SKShader shader;
 		SKPathEffect dash;
 		Pattern nativeSource;
@@ -22,9 +26,9 @@ namespace Cairo
 		Matrix nativeSourceMatrix;
 
 		internal static RecordedGuiDrawing Capture(Context context, bool stroke, bool paintAll,
-			RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null)
+			RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null, SurfaceRecorderSnapshot sourceSnapshot = null)
 		{
-			var result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll };
+			var result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot };
 			try {
 				result.Path = textPath ?? (paintAll ? null : CopyPath(context));
 				if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
@@ -38,7 +42,18 @@ namespace Cairo
 					BlendMode = Blend(context.Operator)
 				};
 				if (stroke) result.SetDash(context);
-				using (Pattern source = context.GetSource()) { result.SetSource(source, alpha, sourceMatrix); result.FreezeSource(source); }
+				if (stroke && result.Paint.StrokeWidth > 0) {
+					// Rasterize a stroke's union once. Ganesh's analytic stroke path can
+					// blend retraced segments twice (a closed two-point caret becomes
+					// alpha 191 instead of Cairo's 128 at a half-covered pixel).
+					var outline = new SKPath();
+					if (result.Paint.GetFillPath(result.Path, outline)) {
+						result.Path.Dispose(); result.Path = outline;
+						result.Paint.Style = SKPaintStyle.Fill;
+						result.Paint.PathEffect = null;
+					} else outline.Dispose();
+				}
+				using (Pattern source = context.GetSource()) { result.SetSource(source, alpha, sourceMatrix); if (sourceSnapshot == null) result.FreezeSource(source); else { result.nativeSource = new SolidPattern(0, 0, 0, 0); result.nativeSource.Matrix = source.Matrix; result.nativeSource.Extend = source.Extend; } }
 				result.nativeSourceMatrix = sourceMatrix is null ? context.Matrix : (Matrix)sourceMatrix.Clone();
 				return result;
 			} catch { result.Dispose(); throw; }
@@ -50,6 +65,12 @@ namespace Cairo
 			try {
 				Matrix drawMatrix = context.Matrix;
 				context.Matrix = nativeSourceMatrix;
+				if (sourceSnapshot != null && nativeImage == null) {
+					nativeImage = new ImageSurface(Format.Argb32, sourceSnapshot.Width, sourceSnapshot.Height);
+					sourceSnapshot.ReplayNative(nativeImage.NativeHandleForMetadata);
+					var pattern = new SurfacePattern(nativeImage) { Matrix = nativeSource.Matrix, Extend = nativeSource.Extend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
+					nativeSource.Dispose(); nativeSource = pattern;
+				}
 				context.SetSource(nativeSource);
 				context.Matrix = drawMatrix;
 				operation(context);
@@ -58,7 +79,7 @@ namespace Cairo
 
 		void FreezeSource(Pattern source)
 		{
-			IntPtr h = source.Handle;
+			IntPtr h = source.NativeHandleForRecorder;
 			switch (NativeMethods.cairo_pattern_get_type(h)) {
 			case PatternType.Solid:
 				NativeMethods.cairo_pattern_get_rgba(h, out double r, out double g, out double b, out double a);
@@ -109,7 +130,7 @@ namespace Cairo
 
 		void SetSource(Pattern pattern, double alpha, Matrix sourceMatrix)
 		{
-			IntPtr handle = pattern.Handle;
+			IntPtr handle = pattern.NativeHandleForRecorder;
 			PatternType type = NativeMethods.cairo_pattern_get_type(handle);
 			if (type == PatternType.Solid) {
 				NativeMethods.cairo_pattern_get_rgba(handle, out double r, out double g, out double b, out double a);
@@ -133,6 +154,8 @@ namespace Cairo
 					NativeMethods.cairo_pattern_get_radial_circles(handle, out double x0, out double y0, out double r0, out double x1, out double y1, out double r1);
 					shader = SKShader.CreateTwoPointConicalGradient(new SKPoint((float)x0, (float)y0), (float)r0, new SKPoint((float)x1, (float)y1), (float)r1, colors, positions, tile);
 				}
+			} else if (type == PatternType.Surface && sourceSnapshot != null) {
+				sourceTile = tile; sourceFilter = pattern is SurfacePattern recorded && recorded.Filter == Filter.Nearest ? SKFilterMode.Nearest : SKFilterMode.Linear;
 			} else if (type == PatternType.Surface) {
 				NativeMethods.cairo_pattern_get_surface(handle, out IntPtr surface);
 				Format format = NativeMethods.cairo_image_surface_get_format(surface);
@@ -154,21 +177,30 @@ namespace Cairo
 				if (!Matrix.TryInvert(out SKMatrix drawInverse)) throw new NotSupportedException("Singular drawing transform.");
 				inverse = SKMatrix.Concat(SKMatrix.Concat(drawInverse, ToSkia(sourceMatrix)), inverse);
 			}
+			if (sourceSnapshot != null) { sourceTransform = inverse; Paint.Color = Color(1, 1, 1, alpha); return; }
 			SKShader transformed = shader.WithLocalMatrix(inverse);
 			if (!ReferenceEquals(shader, transformed)) shader.Dispose();
 			shader = transformed;
 			Paint.Shader = shader; Paint.Color = Color(1, 1, 1, alpha);
 		}
 
-		internal void Draw(SKCanvas canvas)
+		internal void Draw(SKCanvas canvas, RecordedGpuBlur gpu = null)
 		{
+			SKShader dependencyShader = null;
+			SKImage dependencyImage = null;
+			bool ownsDependencyImage = gpu == null;
+			if (sourceSnapshot != null) {
+				if (gpu != null) dependencyImage = gpu.RenderSource(sourceSnapshot, out ownsDependencyImage);
+				else { using (var surface = SKSurface.Create(new SKImageInfo(sourceSnapshot.Width, sourceSnapshot.Height, SKColorType.Bgra8888, SKAlphaType.Premul))) { sourceSnapshot.DrawTo(surface.Canvas); dependencyImage = surface.Snapshot(); } }
+				dependencyShader = dependencyImage.ToShader(sourceTile, sourceTile, new SKSamplingOptions(sourceFilter), sourceTransform); Paint.Shader = dependencyShader;
+			}
 			int save = canvas.Save();
 			try {
 				canvas.ResetMatrix();
 				foreach (RecordedGuiClip clip in Clips) canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
 				canvas.SetMatrix(Matrix);
 				if (PaintAll) canvas.DrawPaint(Paint); else canvas.DrawPath(Path, Paint);
-			} finally { canvas.RestoreToCount(save); }
+			} finally { canvas.RestoreToCount(save); if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); } if (ownsDependencyImage) dependencyImage?.Dispose(); }
 		}
 
 		internal static SKMatrix ToSkia(Matrix matrix) => new SKMatrix((float)matrix.Xx, (float)matrix.Xy, (float)matrix.X0, (float)matrix.Yx, (float)matrix.Yy, (float)matrix.Y0, 0, 0, 1);
@@ -215,7 +247,7 @@ namespace Cairo
 			} catch { result.Dispose(); throw; }
 		}
 		static SKPoint Point(IntPtr data, int index) => new SKPoint((float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16)), (float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16 + 8)));
-		public void Dispose() { Path?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); }
+		public void Dispose() { Path?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
 	}
 
 	internal sealed class RecordedGuiClip : IDisposable

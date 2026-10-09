@@ -1,0 +1,53 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
+index 4548001..d28451c 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
+@@ -26,10 +26,11 @@ public class SvgLoader
+ 		}
+ 	}
+ 
+ 	public unsafe void DrawSvg(IAsset svgAsset, ImageSurface intoSurface, int posx, int posy, int width = 0, int height = 0, int? color = null)
+ 	{
++		if (OptimumGuiSvgRecorder.TryRecord(this, svgAsset, intoSurface, posx, posy, width, height, color)) return;
+ 		byte[] array = rasterizeSvg(svgAsset, width, height, width, height, color);
+ 		int num = intoSurface.Width * intoSurface.Height;
+ 		nint dataPtr = intoSurface.DataPtr;
+ 		fixed (byte* ptr = array)
+ 		{
+@@ -52,10 +53,12 @@ public class SvgLoader
+ 		((Surface)intoSurface).MarkDirty();
+ 	}
+ 
+ 	public unsafe void DrawSvg(IAsset svgAsset, ImageSurface intoSurface, Matrix matrix, int posx, int posy, int width = 0, int height = 0, int? color = null)
+ 	{
++		if (matrix.Xx == 1 && matrix.Yy == 1 && matrix.Xy == 0 && matrix.Yx == 0 && matrix.X0 == (int)matrix.X0 && matrix.Y0 == (int)matrix.Y0 &&
++			OptimumGuiSvgRecorder.TryRecord(this, svgAsset, intoSurface, posx + (int)matrix.X0, posy + (int)matrix.Y0, width, height, color)) return;
+ 		byte[] array = rasterizeSvg(svgAsset, width, height, width, height, color);
+ 		int num = intoSurface.Width * intoSurface.Height;
+ 		nint dataPtr = intoSurface.DataPtr;
+ 		fixed (byte* ptr = array)
+ 		{
+@@ -82,10 +85,11 @@ public class SvgLoader
+ 		((Surface)intoSurface).MarkDirty();
+ 	}
+ 
+ 	public unsafe LoadedTexture LoadSvg(IAsset svgAsset, int textureWidth, int textureHeight, int width = 0, int height = 0, int? color = null)
+ 	{
++		if (OptimumGuiSvgRecorder.TryLoad(this, capi, svgAsset, textureWidth, textureHeight, width, height, color, out LoadedTexture gpuTexture)) return gpuTexture;
+ 		int num = GL.GenTexture();
+ 		GL.BindTexture((TextureTarget)3553, num);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, 9729);
+ 		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9729);
+ 		fixed (byte* ptr = rasterizeSvg(svgAsset, textureWidth, textureHeight, width, height, color))
+@@ -149,10 +153,11 @@ public class SvgLoader
+ 			num3 = (int)((float)textureHeight - val.height * num5) / 2;
+ 		}
+ 		byte[] array2 = new byte[textureWidth * textureHeight * 4];
+ 		fixed (byte* ptr = array2)
+ 		{
++			SurfaceRecordingDiagnostics.Rasterize();
+ 			SvgNativeMethods.nsvgRasterize((IntPtr)rasterizer, (IntPtr)num4, (float)num2, (float)num3, num5, (IntPtr)(nint)ptr, textureWidth, textureHeight, textureWidth * 4);
+ 			if (array != null)
+ 			{
+ 				for (int i = 0; i < array2.Length - 1; i += 4)
+ 				{

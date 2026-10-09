@@ -78,6 +78,9 @@ public static class ApiPatcher
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule);
+        int queuedGuiContexts = PatchQueuedGuiContexts(vanilla.MainModule, contracts.MainModule);
+        if (queuedGuiContexts != 4) throw new InvalidOperationException($"Expected 4 queued GUI context handoffs, applied {queuedGuiContexts}.");
+        if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
         if (inventoryHooks != 2)
         {
@@ -170,6 +173,77 @@ public static class ApiPatcher
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{typeForwards} type forwards.");
         return true;
+    }
+
+    internal static int PatchSvgIconTarget(ModuleDefinition module)
+    {
+        var icon = module.GetType("Vintagestory.API.Client.IconUtil") ?? throw new InvalidOperationException("IconUtil is missing from the vanilla API.");
+        IEnumerable<TypeDefinition> Descendants(TypeDefinition type) => new[] { type }.Concat(type.NestedTypes.SelectMany(Descendants));
+        int count = 0;
+        foreach (var method in Descendants(icon).SelectMany(type => type.Methods).Where(method => method.HasBody))
+        foreach (var instruction in method.Body.Instructions)
+        {
+            if (instruction.Operand is not MethodReference called || called.Name != "GetTarget" || called.DeclaringType.FullName != "Cairo.Context") continue;
+            instruction.Operand = new MethodReference("GetTargetForRecordedDrawing", called.ReturnType, called.DeclaringType) { HasThis = true };
+            ClearDebugInformation(method);
+            count++;
+        }
+        Console.WriteLine($"  API PATCHED: IconUtil recorded SVG target ({count} call site)");
+        return count;
+    }
+
+    internal static int PatchQueuedGuiContexts(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        var requested = contracts.GetType("Vintagestory.API.Client.OptimumGuiGpuProbe").Methods
+            .Single(method => method.Name == "get_RenderingRequested");
+        int patched = 0;
+        IEnumerable<TypeDefinition> Descendants(TypeDefinition type) => new[] { type }.Concat(type.NestedTypes.SelectMany(Descendants));
+        var types = new[] { "GuiElementStatbar", "GuiElementDynamicText", "GuiElementItemstackInfo" }
+            .SelectMany(name => Descendants(module.GetType("Vintagestory.API.Client." + name)
+                ?? throw new InvalidOperationException(name + " is missing from the vanilla API.")));
+        foreach (var method in types.SelectMany(type => type.Methods).Where(method => method.HasBody))
+        {
+            var enqueue = method.Body.Instructions.SingleOrDefault(instruction => instruction.Operand is MethodReference called && called.Name == "EnqueueMainThreadTask");
+            if (enqueue == null) continue;
+            var delegateTarget = enqueue.Previous;
+            while (delegateTarget != null && delegateTarget.OpCode != OpCodes.Ldftn) delegateTarget = delegateTarget.Previous;
+            if (delegateTarget == null) throw new InvalidOperationException($"Missing queued callback in {method.FullName}.");
+            var callback = ((MethodReference)delegateTarget.Operand).Resolve();
+            var fields = callback.DeclaringType.Fields.Where(field => field.FieldType.FullName == "Cairo.Context").ToArray();
+            if (fields.Length is < 1 or > 2)
+                throw new InvalidOperationException($"Unexpected Cairo context captures in {method.FullName}.");
+            ClearDebugInformation(method);
+            foreach (var instruction in method.Body.Instructions)
+                instruction.OpCode = instruction.OpCode.Code switch {
+                    Code.Br_S => OpCodes.Br, Code.Brfalse_S => OpCodes.Brfalse, Code.Brtrue_S => OpCodes.Brtrue,
+                    Code.Beq_S => OpCodes.Beq, Code.Bne_Un_S => OpCodes.Bne_Un,
+                    Code.Bge_S => OpCodes.Bge, Code.Bge_Un_S => OpCodes.Bge_Un,
+                    Code.Bgt_S => OpCodes.Bgt, Code.Bgt_Un_S => OpCodes.Bgt_Un,
+                    Code.Ble_S => OpCodes.Ble, Code.Ble_Un_S => OpCodes.Ble_Un,
+                    Code.Blt_S => OpCodes.Blt, Code.Blt_Un_S => OpCodes.Blt_Un,
+                    Code.Leave_S => OpCodes.Leave, _ => instruction.OpCode
+                };
+            var processor = method.Body.GetILProcessor();
+            processor.InsertBefore(delegateTarget, Instruction.Create(OpCodes.Call, module.ImportReference(requested)));
+            processor.InsertBefore(delegateTarget, Instruction.Create(OpCodes.Brfalse, delegateTarget));
+            // The delegate target object is already on the stack. Release its completed
+            // writer contexts before enqueueing; the retained surfaces cross threads.
+            foreach (var field in fields)
+            {
+                var dispose = new MethodReference("Dispose", module.TypeSystem.Void, module.ImportReference(field.FieldType)) { HasThis = true };
+                var nullContext = Instruction.Create(OpCodes.Pop);
+                var done = Instruction.Create(OpCodes.Nop);
+                foreach (var instruction in new[] {
+                    Instruction.Create(OpCodes.Dup), Instruction.Create(OpCodes.Ldfld, module.ImportReference(field)),
+                    Instruction.Create(OpCodes.Dup), Instruction.Create(OpCodes.Brfalse, nullContext),
+                    Instruction.Create(OpCodes.Callvirt, dispose), Instruction.Create(OpCodes.Br, done), nullContext, done
+                }) processor.InsertBefore(delegateTarget, instruction);
+            }
+            method.Body.MaxStackSize += 2;
+            patched++;
+            Console.WriteLine($"  API PATCHED: {method.FullName} queued GPU context handoff");
+        }
+        return patched;
     }
 
     internal static int PatchClientApiThreadContract(ModuleDefinition module)
@@ -266,6 +340,8 @@ public static class ApiPatcher
             ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface construction stored in its surface local.");
         var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
         var cairoSurfaceType = new TypeReference("Cairo", "Surface", module, cairoReference);
+        var configureRecording = new MethodReference("ConfigureAutomaticRecording", module.TypeSystem.Void, cairoSurfaceType);
+        configureRecording.Parameters.Add(new ParameterDefinition(module.TypeSystem.Boolean));
         var cairoRecorderType = new TypeReference("Cairo", "SurfaceRecorder", module, cairoReference);
         var beginRecording = new MethodReference("BeginRecording", cairoRecorderType, cairoSurfaceType)
         {
@@ -292,6 +368,8 @@ public static class ApiPatcher
         }
 
         Instruction firstComposeInstruction = compose.Body.Instructions[0];
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)));
+        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(configureRecording)));
         Instruction skipTimestamp = Instruction.Create(OpCodes.Nop);
         composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)));
         composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Stloc, enabledLocal));
@@ -329,6 +407,22 @@ public static class ApiPatcher
         composeProcessor.InsertBefore(textureUpload, skipRecord);
 
         Console.WriteLine($"  API PATCHED: {composerTypeName}.Compose GUI metrics and opt-in GPU recording");
+        var listMenu = module.GetType("Vintagestory.API.Client.GuiElementListMenu")
+            ?? throw new InvalidOperationException("GuiElementListMenu is missing.");
+        var composeMenu = listMenu.Methods.Single(method => method.Name == "ComposeDynamicElements" && method.Parameters.Count == 0);
+        var menuSurfaces = composeMenu.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Newobj &&
+            instruction.Operand is MethodReference called && called.DeclaringType.FullName == "Cairo.ImageSurface" && called.Parameters.Count == 3).ToArray();
+        if (menuSurfaces.Length != 3) throw new InvalidOperationException($"Expected three list-menu surfaces, found {menuSurfaces.Length}.");
+        foreach (var instruction in menuSurfaces)
+        {
+            var constructor = (MethodReference)instruction.Operand;
+            var factory = new MethodReference("CreateForRecordedGui", constructor.DeclaringType, constructor.DeclaringType);
+            foreach (var parameter in constructor.Parameters) factory.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+            instruction.OpCode = OpCodes.Call;
+            instruction.Operand = module.ImportReference(factory);
+        }
+        ClearDebugInformation(composeMenu);
+        Console.WriteLine("  API PATCHED: list-menu empty GPU surface normalization (3 call sites)");
         return 1;
     }
 

@@ -21,6 +21,13 @@ namespace Vintagestory.Client.NoObf
 		[ThreadStatic] private static RecordedGpuBlur candidateBlur;
 
 		/// <summary>Shader passes submitted by this thread's current GUI GPU context.</summary>
+		public static long CpuRasterizationCount => SurfaceRecordingDiagnostics.CpuRasterizations;
+		public static long NativeMaterializationCount => SurfaceRecordingDiagnostics.Materializations;
+		public static long GpuDependencyRenderCount => SurfaceRecordingDiagnostics.DependencyRenders;
+		public static long GpuDependencyCacheHitCount => SurfaceRecordingDiagnostics.DependencyCacheHits;
+		private static long diagnosticReadbackCount;
+		public static long DiagnosticReadbackCount => Interlocked.Read(ref diagnosticReadbackCount);
+		public static void ResetRenderingDiagnostics() { SurfaceRecordingDiagnostics.Reset(); Interlocked.Exchange(ref diagnosticReadbackCount, 0); }
 		public static long GpuBlurPassCount => candidateBlur?.PassCount ?? 0;
 
 		// Call while the owning GLFW context is still current. On context replacement,
@@ -78,6 +85,8 @@ namespace Vintagestory.Client.NoObf
 
 		public static string TryRunOnce(int expectedContextThreadId)
 				{
+					Surface.AutomaticRecordingEnabled = OptimumGuiGpuProbe.RenderingRequested;
+					SurfaceRecordingDiagnostics.Enabled = OptimumGuiGpuProbe.RenderingRequested;
 					if (!OptimumGuiGpuProbe.Enabled && !OptimumGuiGpuProbe.RenderingRequested)
 						return null;
 					if (Environment.CurrentManagedThreadId != expectedContextThreadId)
@@ -124,10 +133,21 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
+		public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetMaterializationDiagnostics() => SurfaceRecordingDiagnostics.MaterializationCauses;
+		public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetRasterizationDiagnostics() => SurfaceRecordingDiagnostics.RasterizationCauses;
+		public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetGpuFallbackDiagnostics() => SurfaceRecordingDiagnostics.FallbackReasons;
 		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason)
+		{
+			bool result = TryCreateCandidateTextureCore(surface, linearMag, expectedContextThreadId, out candidateTexture, out failureReason);
+			if (!result) SurfaceRecordingDiagnostics.Fallback(failureReason);
+			return result;
+		}
+		private static bool TryCreateCandidateTextureCore(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason)
 				{
 					candidateTexture = 0;
 					failureReason = null;
+					Surface.AutomaticRecordingEnabled = OptimumGuiGpuProbe.RenderingRequested;
+					SurfaceRecordingDiagnostics.Enabled = OptimumGuiGpuProbe.RenderingRequested;
 					if (!OptimumGuiGpuProbe.RenderingRequested)
 					{
 						failureReason = "rendering-not-requested";
@@ -143,7 +163,7 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "missing-context-thread";
 						return false;
 					}
-					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
+					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording && surface.RecordingState != Cairo.SurfaceRecordingState.GpuRendered)
 					{
 						failureReason = "surface-not-recording:" + surface.RecordingState + ":" + surface.MaterializeCause;
 						return false;
@@ -182,6 +202,16 @@ namespace Vintagestory.Client.NoObf
 						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
 						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
 						GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+						if (surface.Width == 0 || surface.Height == 0)
+						{
+							// Vanilla creates zero-sized textures while a scrollbar is not yet
+							// sized. Preserve that storage and seal the empty recording without
+							// constructing an incomplete framebuffer or rasterizing on the CPU.
+							if (!surface.TrySealEmptyRecordedCommands()) throw new InvalidOperationException("The empty GUI command list could not be sealed.");
+							rendered = true;
+						}
+						else
+						{
 						GL.GenFramebuffers(1, out framebuffer);
 						GL.BindFramebuffer(FramebufferTarget.Framebuffer, framebuffer);
 						GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, texture, 0);
@@ -216,11 +246,11 @@ namespace Vintagestory.Client.NoObf
 							if (!surface.TryDrawRecordedCommands(skSurface, candidateBlur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
 							skSurface.Flush();
 							context.Flush();
-							context.Submit(true);
-							GL.Finish();
+							context.Submit(false);
 							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
 							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
 							rendered = true;
+						}
 						}
 					}
 					catch (Exception exception)
@@ -360,7 +390,8 @@ namespace Vintagestory.Client.NoObf
 									GL.PixelStore((PixelStoreParameter)0x0D02, 0); // PACK_ROW_LENGTH
 									GL.PixelStore((PixelStoreParameter)0x0D03, 0); // PACK_SKIP_ROWS
 									GL.PixelStore((PixelStoreParameter)0x0D04, 0); // PACK_SKIP_PIXELS
-									GL.ReadPixels(0, 0, Width, Height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+									Interlocked.Increment(ref diagnosticReadbackCount);
+						GL.ReadPixels(0, 0, Width, Height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
 								}
 							}
 						}

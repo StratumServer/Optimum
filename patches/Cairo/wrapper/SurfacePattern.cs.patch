@@ -1,0 +1,39 @@
+diff --git a/Cairo/wrapper/SurfacePattern.cs b/Cairo/wrapper/SurfacePattern.cs
+index 0c6dcd5..7524abe 100644
+--- a/Cairo/wrapper/SurfacePattern.cs
++++ b/Cairo/wrapper/SurfacePattern.cs
+@@ -42,28 +42,30 @@ namespace Cairo {
+ 
+         internal SurfacePattern (IntPtr handle, bool owned) : base (handle, owned)
+ 		{
+ 		}
+ 
+-		public SurfacePattern (ImageSurface surface) : base (NativeMethods.cairo_pattern_create_for_surface (surface.Handle), true)
++		public SurfacePattern (ImageSurface surface) : base (NativeMethods.cairo_pattern_create_for_surface (surface.NativeHandleForMetadata), true)
+ 		{
++            RecordedSource = surface.AcquireRecordedSource();
+             this.width = surface.Width;
+             this.height = surface.Height;
+ 		}
+ 
+-        public SurfacePattern(Surface surface) : base(NativeMethods.cairo_pattern_create_for_surface(surface.Handle), true)
++        public SurfacePattern(Surface surface) : base(NativeMethods.cairo_pattern_create_for_surface(surface.NativeHandleForMetadata), true)
+         {
++            RecordedSource = surface.AcquireRecordedSource();
+         }
+ 
+         public Filter Filter {
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_pattern_set_filter (Handle, value);
++				NativeMethods.cairo_pattern_set_filter (NativeHandleForRecorder, value);
+ 			}
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_pattern_get_filter (Handle);
++				return NativeMethods.cairo_pattern_get_filter (NativeHandleForRecorder);
+ 			}
+ 		}
+ 	}
+ }
+ 
