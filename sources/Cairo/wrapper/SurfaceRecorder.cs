@@ -41,9 +41,12 @@ namespace Cairo
 		internal Context Shadow {
 			get {
 				surface.EnsureRecordingOwnerThread();
-				if (shadow == null) shadow = new Context(NativeMethods.cairo_create(surface.NativeHandleForRecorder), true);
-				while (shadowIndex < commands.Count) commands[shadowIndex++].Replay(shadow, false);
-				return shadow;
+				var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.Shadow);
+				try {
+					if (shadow == null) { shadow = new Context(NativeMethods.cairo_create(surface.NativeHandleForRecorder), true); profile.CreatedShadow = true; }
+					while (shadowIndex < commands.Count) { commands[shadowIndex++].Replay(shadow, false); profile.ReplayedCommands++; }
+					return shadow;
+				} finally { profile.Dispose(); }
 			}
 		}
 

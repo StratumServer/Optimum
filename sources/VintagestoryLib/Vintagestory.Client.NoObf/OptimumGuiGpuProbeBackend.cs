@@ -30,6 +30,25 @@ namespace Vintagestory.Client.NoObf
 		public static void ResetRenderingDiagnostics() { SurfaceRecordingDiagnostics.Reset(); Interlocked.Exchange(ref diagnosticReadbackCount, 0); }
 		public static long GpuBlurPassCount => candidateBlur?.PassCount ?? 0;
 
+		/// <summary>Opt-in elapsed timings for CPU preparation. Disabled by default; not thread CPU or GPU time.</summary>
+		public static bool RecordingProfilingEnabled { get => SurfaceRecordingDiagnostics.ProfilingEnabled; set => SurfaceRecordingDiagnostics.ProfilingEnabled = value; }
+		public static long RecordingProfileTimestampFrequency => System.Diagnostics.Stopwatch.Frequency;
+		public static long RecordingShadowAccessCount => SurfaceRecordingDiagnostics.ShadowAccesses;
+		public static long RecordingShadowTicks => SurfaceRecordingDiagnostics.ShadowTicks;
+		public static long RecordingShadowCreationCount => SurfaceRecordingDiagnostics.ShadowCreations;
+		public static long RecordingShadowCommandCount => SurfaceRecordingDiagnostics.ShadowCommands;
+		public static long RecordingDrawingCaptureCount => SurfaceRecordingDiagnostics.DrawingCaptures;
+		public static long RecordingDrawingCaptureTicks => SurfaceRecordingDiagnostics.DrawingCaptureTicks;
+		public static long RecordingPathCopyCount => SurfaceRecordingDiagnostics.PathCopies;
+		public static long RecordingPathCopyTicks => SurfaceRecordingDiagnostics.PathCopyTicks;
+		public static long RecordingPathConversionCount => SurfaceRecordingDiagnostics.PathConversions;
+		public static long RecordingPathConversionTicks => SurfaceRecordingDiagnostics.PathConversionTicks;
+		public static long RecordingStrokeOutlineCount => SurfaceRecordingDiagnostics.StrokeOutlines;
+		public static long RecordingStrokeOutlineTicks => SurfaceRecordingDiagnostics.StrokeOutlineTicks;
+		/// <summary>Reset between measurements, with no operation in flight. Does not change enabled state.</summary>
+		public static void ResetRecordingProfiling() => SurfaceRecordingDiagnostics.ResetProfiling();
+
+
 		// Call while the owning GLFW context is still current. On context replacement,
 		// abandon the old resources without issuing GL calls into the new context.
 		public static void ReleaseCurrentContext()

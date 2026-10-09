@@ -28,6 +28,7 @@ namespace Cairo
 		internal static RecordedGuiDrawing Capture(Context context, bool stroke, bool paintAll,
 			RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null, SurfaceRecorderSnapshot sourceSnapshot = null)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.DrawingCapture);
 			var result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot };
 			try {
 				result.Path = textPath ?? (paintAll ? null : CopyPath(context));
@@ -46,6 +47,7 @@ namespace Cairo
 					// Rasterize a stroke's union once. Ganesh's analytic stroke path can
 					// blend retraced segments twice (a closed two-point caret becomes
 					// alpha 191 instead of Cairo's 128 at a half-covered pixel).
+					using var strokeProfile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.StrokeOutline);
 					var outline = new SKPath();
 					if (result.Paint.GetFillPath(result.Path, outline)) {
 						result.Path.Dispose(); result.Path = outline;
@@ -225,10 +227,12 @@ namespace Cairo
 		[StructLayout(LayoutKind.Sequential)] struct NativePath { internal Status Status; internal IntPtr Data; internal int Count; }
 		internal static SKPath CopyPath(Context context)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.PathCopy);
 			using (Path native = context.CopyPath()) return CopyPath(native.Handle);
 		}
 		internal static SKPath CopyPath(IntPtr handle)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.PathConversion);
 			NativePath data = Marshal.PtrToStructure<NativePath>(handle);
 			if (data.Status != Status.Success) throw new InvalidOperationException("Cairo path capture: " + data.Status);
 			var result = new SKPath();
