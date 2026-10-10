@@ -156,12 +156,16 @@ namespace Cairo
 				// Cairo quantizes premultiplied solid channels to 16 bits, then
 				// Pixman takes the high byte. Quantizing straight RGBA first
 				// changes low-alpha inputs that partial blur can amplify.
-				if (alpha == 1) Paint.ColorF = SolidColor(r, g, b, a);
-				else Paint.Color = Color(r, g, b, a * alpha);
+				Paint.ColorF = SolidColor(r, g, b, a * Math.Max(0, Math.Min(1, alpha)));
 				return;
 			}
 			SKShaderTileMode tile = Tile(pattern.Extend);
 			if (type == PatternType.Linear || type == PatternType.Radial) {
+				// Cairo/Pixman and Skia classify discontinuous extension boundaries
+				// differently; radial Decal also changes native coverage.
+				// Preserve native coverage until those cases have an equivalent shader.
+				if (pattern.Extend is Extend.None or Extend.Repeat)
+					throw new NotSupportedException("Gradient extension: " + pattern.Extend);
 				NativeMethods.cairo_pattern_get_color_stop_count(handle, out int count);
 				if (count == 0) { Paint.Color = SKColors.Transparent; return; }
 				var colors = new SKColor[Math.Max(2, count)]; var positions = new float[colors.Length];

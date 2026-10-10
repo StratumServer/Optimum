@@ -15,7 +15,7 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface(Format.Argb32, 40, 24);
 		actual.BeginRecording();
 		static void Draw(Context context) {
-			using var gradient = new LinearGradient(0, 0, 40, 0);
+			using var gradient = new LinearGradient(0, 0, 40, 0) { Extend = Extend.Pad };
 			gradient.AddColorStop(0, new Color(1, 0, 0));
 			gradient.AddColorStop(1, new Color(0, 0, 1));
 			context.SetSource(gradient); context.Rectangle(0, 0, 40, 12); context.Fill();
@@ -75,7 +75,7 @@ public sealed class CairoContextRecorderTests
 		static void Draw(Context context) {
 			context.Antialias = Antialias.None;
 			context.Translate(4, 0);
-			using var gradient = new LinearGradient(0, 0, 32, 0);
+			using var gradient = new LinearGradient(0, 0, 32, 0) { Extend = Extend.Pad };
 			gradient.AddColorStop(0, new Color(1, 0, 0)); gradient.AddColorStop(1, new Color(0, 0, 1));
 			context.SetSource(gradient);
 			context.Save(); context.Translate(8, 0); context.Rectangle(0, 0, 24, 12); context.Fill(); context.Restore();
