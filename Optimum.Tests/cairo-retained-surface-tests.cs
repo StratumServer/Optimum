@@ -131,13 +131,13 @@ public sealed class CairoRetainedSurfaceTests
 	}
 
 	[Fact]
-	public void SvgGeometryRecordsNativeViewportPathsColorsAndGradients()
+	public void SvgGeometryRecordsNativeViewportPathsAndSolidColors()
 	{
-		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='12'><defs><linearGradient id='g'><stop offset='0' stop-color='#ff0000'/><stop offset='1' stop-color='#0000ff'/></linearGradient></defs><rect x='2' y='2' width='12' height='8' fill='url(#g)'/></svg>";
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='12'><rect width='8' height='12' fill='#ff0000'/><rect x='8' width='8' height='12' fill='#0000ff'/></svg>";
 		using var picture = RecordedSvgGeometry.Parse(svg, 32, 24, 32, 24);
 		using var surface = SKSurface.Create(new SKImageInfo(32, 24)); surface.Canvas.Clear(SKColors.Transparent); surface.Canvas.DrawPicture(picture);
 		using var pixels = new SKBitmap(32, 24); Assert.True(surface.ReadPixels(pixels.Info, pixels.GetPixels(), pixels.RowBytes, 0, 0));
-		Assert.Equal(0, pixels.GetPixel(1, 1).Alpha);
+		Assert.Equal(255, pixels.GetPixel(1, 1).Alpha);
 		Assert.Equal(255, pixels.GetPixel(8, 12).Alpha); Assert.True(pixels.GetPixel(8, 12).Red > pixels.GetPixel(8, 12).Blue);
 		Assert.True(pixels.GetPixel(24, 12).Blue > pixels.GetPixel(24, 12).Red);
 	}

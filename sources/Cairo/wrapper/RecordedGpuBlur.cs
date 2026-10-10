@@ -159,13 +159,19 @@ uniform float4 rectangle;
 uniform float2 scale;
 uniform int hasTint;
 uniform int swapSource;
+uniform int svgSource;
 uniform float4 tint;
 float4 main(float2 p) {
     float4 base = float4(original.eval(p));
     if (p.x < rectangle.x || p.y < rectangle.y || p.x >= rectangle.z || p.y >= rectangle.w) return base;
     float4 sampled = float4(sourceImage.eval((p - rectangle.xy) * scale));
     float aOver = floor(sampled.a * 255 + 0.5) / 255.0;
-    float3 rgbOver = sampled.a > 0 ? floor(clamp(sampled.rgb / sampled.a, 0.0, 1.0) * 255 + 0.5) : float3(0);
+    float3 rgbOver = sampled.a > 0 ? floor(clamp(sampled.rgb / sampled.a, 0.0, 1.0) * 255 + (svgSource != 0 ? 0.0 : 0.5)) : float3(0);
+    if (svgSource != 0) {
+        int alpha = int(floor(sampled.a * 255 + 0.5));
+        int3 premultiplied = int3(floor(sampled.rgb * 255 + 0.5));
+        rgbOver = alpha > 0 ? float3(premultiplied * 255 / alpha) : float3(0);
+    }
     if (swapSource != 0) rgbOver = rgbOver.bgr;
     if (hasTint != 0) { rgbOver = floor(aOver * tint.rgb); aOver = floor(aOver * tint.a) / 255.0; }
     float aBase = floor(base.a * 255 + 0.5) / 255.0;
@@ -187,6 +193,7 @@ float4 main(float2 p) {
 				["rectangle"] = new float[] { x, y, x + imageWidth, y + imageHeight },
 				["scale"] = new float[] { (float)image.Width / imageWidth, (float)image.Height / imageHeight },
 				["hasTint"] = tint.HasValue ? 1 : 0,
+				["svgSource"] = svg ? 1 : 0,
 				["swapSource"] = svg && textureColorOrder && !tint.HasValue ? 1 : 0,
 				["tint"] = tint.HasValue ? new float[] { (tint.Value >> (textureColorOrder ? 16 : 0)) & 255, (tint.Value >> 8) & 255, (tint.Value >> (textureColorOrder ? 0 : 16)) & 255, (tint.Value >> 24) & 255 } : new float[4]
 			};

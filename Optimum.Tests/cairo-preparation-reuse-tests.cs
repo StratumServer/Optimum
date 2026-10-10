@@ -205,7 +205,7 @@ public sealed class CairoPreparationReuseTests : IDisposable
         using var same = RecordedSvgGeometry.Acquire(Svg("red"), 32, 32, 32, 32);
         Assert.Same(first.Value, same.Value);
         using var changed = RecordedSvgGeometry.Acquire(Svg("blue"), 32, 32, 32, 32);
-        using var resized = RecordedSvgGeometry.Acquire(Svg("red"), 64, 32, 64, 32);
+        using var resized = RecordedSvgGeometry.Acquire(Svg("red"), 64, 64, 64, 64);
         Assert.NotSame(first.Value, changed.Value); Assert.NotSame(first.Value, resized.Value);
         Assert.Equal(1, RecordedPreparationCache.PictureHits);
     }
@@ -280,7 +280,7 @@ public sealed class CairoPreparationReuseTests : IDisposable
         Assert.InRange(RecordedPreparationCache.Count, 0, RecordedPreparationCache.MaxEntries);
     }
 
-    static string Svg(string color) => $"<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect x='2' y='2' width='20' height='20' fill='{color}'/></svg>";
+    static string Svg(string color) => $"<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><rect width='32' height='32' fill='{color}'/></svg>";
     static byte[] Draw(double scale, int variant, out PointD point)
     {
         using var surface = new ImageSurface(Format.Argb32, 144, 96);
