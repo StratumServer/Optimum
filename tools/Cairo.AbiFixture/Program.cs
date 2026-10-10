@@ -1,6 +1,24 @@
 using Cairo;
 using System.Runtime.InteropServices;
 
+if (args.Length == 1 && args[0] == "--debug-state")
+{
+    string? before = Environment.GetEnvironmentVariable("CAIRO_DEBUG_DISPOSE");
+    bool initial = CairoDebug.Enabled;
+    string? after = Environment.GetEnvironmentVariable("CAIRO_DEBUG_DISPOSE");
+    // Old compiled consumers can still enable tracing after initialization.
+    CairoDebug.Enabled = true;
+    CairoDebug.OnAllocated(new IntPtr(1));
+    CairoDebug.OnDisposed<object>(new IntPtr(1), true);
+    CairoDebug.Enabled = false;
+    CairoDebug.Enabled = true;
+    CairoDebug.OnAllocated(new IntPtr(2));
+    CairoDebug.OnDisposed<object>(new IntPtr(2), true);
+    CairoDebug.Enabled = initial;
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { initial, before, after }));
+    return 0;
+}
+
 if (args.Length != 1)
 {
     Console.Error.WriteLine("Usage: Cairo.AbiFixture <output.png>");

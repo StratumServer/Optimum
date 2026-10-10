@@ -309,6 +309,7 @@ namespace Cairo
 
 		internal void DrawTo (SKSurface target, RecordedGpuBlur blur)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.GpuReplay);
 			if (target == null) throw new ArgumentNullException (nameof (target));
 			SKCanvas canvas = target.Canvas;
 			int save = canvas.Save ();

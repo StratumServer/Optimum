@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cairo\Cairo.csproj" />
+    <ProjectReference Include="..\tools\Cairo.AbiFixture\Cairo.AbiFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\Optimum.Patcher\Optimum.Patcher.csproj" />
     <ProjectReference Include="..\tools\Cairo.ParityHarness\Cairo.ParityHarness.csproj" />
     <ProjectReference Include="..\Optimum.Launcher\Optimum.Launcher.csproj" />

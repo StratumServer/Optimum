@@ -47,6 +47,7 @@ namespace Vintagestory.Client.NoObf
 		public static long RecordingStrokeOutlineTicks => SurfaceRecordingDiagnostics.StrokeOutlineTicks;
 		/// <summary>Reset between measurements, with no operation in flight. Does not change enabled state.</summary>
 		public static void ResetRecordingProfiling() => SurfaceRecordingDiagnostics.ResetProfiling();
+        public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetRecordingStageDiagnostics() => SurfaceRecordingDiagnostics.StageDiagnostics;
 
 		/// <summary>Reuse immutable CPU preparation; disabling keeps all legacy commands on the uncached route.</summary>
 		public static bool RecordingPreparationReuseEnabled { get => RecordedPreparationCache.Enabled; set => RecordedPreparationCache.Enabled = value; }
@@ -278,9 +279,9 @@ namespace Vintagestory.Client.NoObf
 							if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
 							candidateBlur ??= new RecordedGpuBlur(context);
 							if (!surface.TryDrawRecordedCommands(skSurface, candidateBlur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-							skSurface.Flush();
-							context.Flush();
-							context.Submit(false);
+							using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.GpuSubmission)) {
+                                skSurface.Flush(); context.Flush(); context.Submit(false);
+                            }
 							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
 							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
 							rendered = true;

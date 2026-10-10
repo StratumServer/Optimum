@@ -31,19 +31,23 @@ namespace Cairo
 			RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null, SurfaceRecorderSnapshot sourceSnapshot = null)
 		{
 			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.DrawingCapture);
-			var result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot };
+			RecordedGuiDrawing result;
+			using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState))
+				result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot };
 			try {
 				result.Path = textPath ?? (paintAll ? null : CopyPath(context));
-				if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
-				result.Paint = new SKPaint {
-					IsAntialias = context.Antialias != Cairo.Antialias.None,
-					Style = stroke ? SKPaintStyle.Stroke : SKPaintStyle.Fill,
-					StrokeWidth = (float)context.LineWidth,
-					StrokeMiter = (float)context.MiterLimit,
-					StrokeCap = (SKStrokeCap)(int)context.LineCap,
-					StrokeJoin = (SKStrokeJoin)(int)context.LineJoin,
-					BlendMode = Blend(context.Operator)
-				};
+				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState)) {
+					if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
+					result.Paint = new SKPaint {
+						IsAntialias = context.Antialias != Cairo.Antialias.None,
+						Style = stroke ? SKPaintStyle.Stroke : SKPaintStyle.Fill,
+						StrokeWidth = (float)context.LineWidth,
+						StrokeMiter = (float)context.MiterLimit,
+						StrokeCap = (SKStrokeCap)(int)context.LineCap,
+						StrokeJoin = (SKStrokeJoin)(int)context.LineJoin,
+						BlendMode = Blend(context.Operator)
+					};
+				}
 				if (stroke) result.SetDash(context);
 				if (stroke && result.Paint.StrokeWidth > 0) {
 					// Rasterize a stroke's union once. Ganesh's analytic stroke path can
@@ -56,7 +60,16 @@ namespace Cairo
 						result.Paint.PathEffect = null;
 					}
 				}
-				using (Pattern source = context.GetSource()) { result.SetSource(source, alpha, sourceMatrix); if (sourceSnapshot == null) result.FreezeSource(source); else { result.nativeSource = new SolidPattern(0, 0, 0, 0); result.nativeSource.Matrix = source.Matrix; result.nativeSource.Extend = source.Extend; } }
+				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceCapture))
+				using (Pattern source = context.GetSource()) {
+					result.SetSource(source, alpha, sourceMatrix);
+					if (sourceSnapshot == null) result.FreezeSource(source);
+					else {
+						result.nativeSource = new SolidPattern(0, 0, 0, 0);
+						result.nativeSource.Matrix = source.Matrix;
+						result.nativeSource.Extend = source.Extend;
+					}
+				}
 				result.nativeSourceMatrix = sourceMatrix is null ? context.Matrix : (Matrix)sourceMatrix.Clone();
 				return result;
 			} catch { result.Dispose(); throw; }
@@ -82,6 +95,7 @@ namespace Cairo
 
 		void FreezeSource(Pattern source)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceFreeze);
 			IntPtr h = source.NativeHandleForRecorder;
 			switch (NativeMethods.cairo_pattern_get_type(h)) {
 			case PatternType.Solid:
@@ -134,6 +148,7 @@ namespace Cairo
 
 		void SetSource(Pattern pattern, double alpha, Matrix sourceMatrix)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceShader);
 			IntPtr handle = pattern.NativeHandleForRecorder;
 			PatternType type = NativeMethods.cairo_pattern_get_type(handle);
 			if (type == PatternType.Solid) {

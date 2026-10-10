@@ -107,6 +107,8 @@ public sealed class CairoRecordingProfileTests
 
     static void AssertZero()
     {
+        foreach (long value in SurfaceRecordingDiagnostics.StageDiagnostics.Values)
+            Assert.Equal(0, value);
         foreach (long value in new[] {
             SurfaceRecordingDiagnostics.ShadowAccesses, SurfaceRecordingDiagnostics.ShadowTicks,
             SurfaceRecordingDiagnostics.ShadowCreations, SurfaceRecordingDiagnostics.ShadowCommands,
@@ -115,5 +117,64 @@ public sealed class CairoRecordingProfileTests
             SurfaceRecordingDiagnostics.PathConversions, SurfaceRecordingDiagnostics.PathConversionTicks,
             SurfaceRecordingDiagnostics.StrokeOutlines, SurfaceRecordingDiagnostics.StrokeOutlineTicks })
             Assert.Equal(0, value);
+    }
+
+    [Fact]
+    public void DetailedTimingsPreserveNativeTextMetricsCurrentPointAndReplayPixels()
+    {
+        bool original = SurfaceRecordingDiagnostics.ProfilingEnabled;
+        bool originalReuse = RecordedPreparationCache.Enabled;
+        try
+        {
+            RecordedPreparationCache.Enabled = true;
+            RecordedPreparationCache.Clear();
+            SurfaceRecordingDiagnostics.ProfilingEnabled = false;
+            SurfaceRecordingDiagnostics.ResetProfiling();
+            var expected = DrawText();
+            AssertZero();
+            RecordedPreparationCache.Clear();
+            SurfaceRecordingDiagnostics.ProfilingEnabled = true;
+            SurfaceRecordingDiagnostics.ResetProfiling();
+            var actual = DrawText();
+            Assert.Equal(expected.Pixels, actual.Pixels);
+            Assert.Equal(expected.Text, actual.Text);
+            Assert.Equal(expected.Font, actual.Font);
+            Assert.Equal(expected.Point.X, actual.Point.X);
+            Assert.Equal(expected.Point.Y, actual.Point.Y);
+            var stages = SurfaceRecordingDiagnostics.StageDiagnostics;
+            foreach (string stage in new[] { "CaptureState", "SourceCapture", "TextPreparation", "TextMeasurement", "FontSelection" })
+            {
+                Assert.True(stages[stage + "Count"] > 0, stage);
+                Assert.True(stages[stage + "Ticks"] > 0, stage);
+            }
+            Assert.Equal(0, stages["GpuBlurCount"]);
+            Assert.Equal(0, stages["GpuSubmissionCount"]);
+            SurfaceRecordingDiagnostics.ResetProfiling();
+            Assert.True(SurfaceRecordingDiagnostics.ProfilingEnabled);
+            AssertZero();
+        }
+        finally
+        {
+            RecordedPreparationCache.Clear();
+            RecordedPreparationCache.Enabled = originalReuse;
+            SurfaceRecordingDiagnostics.ProfilingEnabled = original;
+            SurfaceRecordingDiagnostics.ResetProfiling();
+        }
+    }
+
+    static (byte[] Pixels, TextExtents Text, FontExtents Font, PointD Point) DrawText()
+    {
+        using var surface = new ImageSurface(Format.Argb32, 96, 48);
+        surface.BeginRecording();
+        using var context = new Context(surface);
+        context.SelectFontFace("Arial", FontSlant.Normal, FontWeight.Normal);
+        context.SetFontSize(13);
+        context.MoveTo(4, 22);
+        var text = context.TextExtents("profile Ág");
+        var font = context.FontExtents;
+        context.SetSourceRGBA(.2, .5, .7, .8);
+        context.ShowText("profile Ág");
+        var point = context.CurrentPoint;
+        return (surface.Data, text, font, point);
     }
 }

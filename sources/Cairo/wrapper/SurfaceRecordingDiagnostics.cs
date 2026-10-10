@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -27,7 +28,20 @@ namespace Cairo
 		internal static long PathConversionTicks => Interlocked.Read(ref pathConversionTicks);
 		internal static long StrokeOutlines => Interlocked.Read(ref strokeOutlines);
 		internal static long StrokeOutlineTicks => Interlocked.Read(ref strokeOutlineTicks);
-		internal enum ProfileStage { Shadow, DrawingCapture, PathCopy, PathConversion, StrokeOutline }
+		internal enum ProfileStage { Shadow, DrawingCapture, PathCopy, PathConversion, StrokeOutline, CaptureState, SourceCapture, TextPreparation, TextMeasurement, FontSelection, GpuBlur, GpuReplay, GpuSubmission, SourceShader, SourceFreeze }
+		const int StageCount = (int)ProfileStage.SourceFreeze + 1;
+		static readonly long[] stageCounts = new long[StageCount], stageTicks = new long[StageCount];
+		internal static IReadOnlyDictionary<string, long> StageDiagnostics {
+			get {
+				var result = new Dictionary<string, long>();
+				foreach (ProfileStage stage in Enum.GetValues(typeof(ProfileStage))) {
+					int index = (int)stage;
+					result[stage + "Count"] = Interlocked.Read(ref stageCounts[index]);
+					result[stage + "Ticks"] = Interlocked.Read(ref stageTicks[index]);
+				}
+				return result;
+			}
+		}
 		internal static ProfileScope Profile(ProfileStage stage) => new ProfileScope(stage, ProfilingEnabled);
 		// Value-type scope: disabled calls do not read the clock or update counters.
 		internal struct ProfileScope : System.IDisposable
@@ -41,6 +55,7 @@ namespace Cairo
 			{
 				if (start < 0) return;
 				long ticks = System.Math.Max(0, Stopwatch.GetTimestamp() - start);
+				Interlocked.Increment(ref stageCounts[(int)stage]); Interlocked.Add(ref stageTicks[(int)stage], ticks);
 				switch (stage) {
 				case ProfileStage.Shadow:
 					Interlocked.Increment(ref shadowAccesses); Interlocked.Add(ref shadowTicks, ticks);
@@ -55,6 +70,7 @@ namespace Cairo
 		// Reset only between measurements, while no profiled operation is in flight.
 		internal static void ResetProfiling()
 		{
+			for (int i = 0; i < stageCounts.Length; i++) { Interlocked.Exchange(ref stageCounts[i], 0); Interlocked.Exchange(ref stageTicks[i], 0); }
 			Interlocked.Exchange(ref shadowAccesses, 0); Interlocked.Exchange(ref shadowTicks, 0);
 			Interlocked.Exchange(ref shadowCreations, 0); Interlocked.Exchange(ref shadowCommands, 0);
 			Interlocked.Exchange(ref drawingCaptures, 0); Interlocked.Exchange(ref drawingCaptureTicks, 0);

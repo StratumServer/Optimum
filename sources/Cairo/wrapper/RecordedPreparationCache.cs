@@ -160,6 +160,7 @@ namespace Cairo
         static long Bits(double value) => BitConverter.DoubleToInt64Bits(value);
         internal static Text PrepareText(Context context, byte[] text, Glyph[] glyphs = null)
         {
+            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
             if (!Enabled || (text?.Length ?? 0) > MaxKeyBytes / 2 || (glyphs?.Length ?? 0) > MaxKeyBytes / 32) return null;
             if (glyphs == null) {
                 if (text == null || text.Length == 0 || text[0] == 0) return null;

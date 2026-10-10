@@ -50,6 +50,7 @@ namespace Cairo
 
 		internal void Apply (RecordedBlur blur, SKSurface target, int width, int height)
 		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.GpuBlur);
 			int left = blur.Full ? 0 : blur.X1, top = blur.Full ? 0 : blur.Y1;
 			int right = blur.Full ? width : blur.X2, bottom = blur.Full ? height : blur.Y2;
 			if (left < 0 || top < 0 || right > width || bottom > height || left >= right || top >= bottom)

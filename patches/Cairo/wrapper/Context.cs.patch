@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..785bc2a 100644
+index 03f9c76..136da47 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -798,7 +798,7 @@ index 03f9c76..785bc2a 100644
  		}
  
  		[Obsolete("Use UserToDevice instead")]
-@@ -756,54 +900,57 @@ namespace Cairo
+@@ -756,54 +900,58 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -853,6 +853,7 @@ index 03f9c76..785bc2a 100644
  
  		public void SetFontSize (double scale)
  		{
++            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
 +			if (recordingSurface != null && RecordState(c => c.SetFontSize(scale))) return;
  			CheckDisposed ();
  			NativeMethods.cairo_set_font_size (handle, scale);
@@ -866,7 +867,7 @@ index 03f9c76..785bc2a 100644
  		}
  
  		[Obsolete ("Use SetFontSize() instead.")]
-@@ -817,29 +964,31 @@ namespace Cairo
+@@ -817,29 +965,31 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -902,7 +903,7 @@ index 03f9c76..785bc2a 100644
  			}
  		}
  
-@@ -879,16 +1028,20 @@ namespace Cairo
+@@ -879,16 +1029,20 @@ namespace Cairo
  			return dest;
  		}
  
@@ -923,7 +924,7 @@ index 03f9c76..785bc2a 100644
  			Marshal.FreeHGlobal (ptr);
  		}
  
-@@ -904,10 +1057,12 @@ namespace Cairo
+@@ -904,10 +1058,12 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -936,13 +937,14 @@ index 03f9c76..785bc2a 100644
  			IntPtr ptr;
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
-@@ -917,13 +1072,13 @@ namespace Cairo
+@@ -917,13 +1073,14 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
  		public FontExtents FontExtents {
  			get {
 -				CheckDisposed ();
++            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement);
 +				CheckDisposedOnly ();
  				FontExtents f_extents;
 -				NativeMethods.cairo_font_extents (handle, out f_extents);
@@ -952,7 +954,7 @@ index 03f9c76..785bc2a 100644
  		}
  
  		public void CopyPage ()
-@@ -934,22 +1089,28 @@ namespace Cairo
+@@ -934,22 +1091,29 @@ namespace Cairo
  
          
  
@@ -977,13 +979,14 @@ index 03f9c76..785bc2a 100644
  
  		public void SelectFontFace (string family, FontSlant slant, FontWeight weight)
  		{
++            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
 +			if (recordingSurface != null && RecordState(c => c.SelectFontFace(family, slant, weight))) return;
  			CheckDisposed ();
  			NativeMethods.cairo_select_font_face (handle, family, slant, weight);
  		}
  
  		public void ShowPage ()
-@@ -977,57 +1138,63 @@ namespace Cairo
+@@ -977,57 +1141,66 @@ namespace Cairo
  			return bytes;
  		}
  
@@ -1020,6 +1023,7 @@ index 03f9c76..785bc2a 100644
  		public TextExtents TextExtents (string s)
  		{
 -			CheckDisposed ();
++            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement);
 +			CheckDisposedOnly ();
  			TextExtents extents;
 -			NativeMethods.cairo_text_extents (handle, TerminateUtf8 (s), out extents);
@@ -1030,6 +1034,7 @@ index 03f9c76..785bc2a 100644
  		public TextExtents TextExtents(byte[] utf8)
  		{
 -			CheckDisposed ();
++            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement);
 +			CheckDisposedOnly ();
  			TextExtents extents;
 -			NativeMethods.cairo_text_extents (handle, TerminateUtf8 (utf8), out extents);
@@ -1040,6 +1045,7 @@ index 03f9c76..785bc2a 100644
  		public TextExtents GlyphExtents (Glyph[] glyphs)
  		{
 -			CheckDisposed ();
++            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement);
 +			CheckDisposedOnly ();
  
  			IntPtr ptr = FromGlyphToUnManagedMemory (glyphs);
