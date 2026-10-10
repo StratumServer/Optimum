@@ -6,6 +6,8 @@ This is a Linux-only evidence tool for Optimum issue #130. It renders geometry/a
 
 `primitive-coverage-manifest.csv` records the operations exercised by the CPU harness and the fixtures still needed before considering those operations for a non-Cairo backend. `not-run` rows stay on the native Cairo path.
 
+Recorded solid colors without an additional opacity mask use Cairo's premultiplied 16-bit-to-8-bit quantization before Skia rendering. This preserves the source bytes consumed by blur; a one-level source difference can become much larger under native partial-blur byte wrapping. `PaintWithAlpha` with opacity other than one materializes and replays through native Cairo for `Clear`, `Source`, `In`, `Out`, `DestIn` and `DestAtop`. These operators are not bounded by source, so scaling source alpha cannot replace their coverage mask. Gradient and other masked-operator comparisons remain separate compatibility diagnostics.
+
 Generate the Cairo assembly's exported type and public/protected member inventory with:
 
 ```bash

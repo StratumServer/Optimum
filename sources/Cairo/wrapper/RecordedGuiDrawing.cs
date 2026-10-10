@@ -153,7 +153,11 @@ namespace Cairo
 			PatternType type = NativeMethods.cairo_pattern_get_type(handle);
 			if (type == PatternType.Solid) {
 				NativeMethods.cairo_pattern_get_rgba(handle, out double r, out double g, out double b, out double a);
-				Paint.Color = Color(r, g, b, a * alpha);
+				// Cairo quantizes premultiplied solid channels to 16 bits, then
+				// Pixman takes the high byte. Quantizing straight RGBA first
+				// changes low-alpha inputs that partial blur can amplify.
+				if (alpha == 1) Paint.ColorF = SolidColor(r, g, b, a);
+				else Paint.Color = Color(r, g, b, a * alpha);
 				return;
 			}
 			SKShaderTileMode tile = Tile(pattern.Extend);
@@ -223,6 +227,16 @@ namespace Cairo
 		}
 
 		internal static SKMatrix ToSkia(Matrix matrix) => new SKMatrix((float)matrix.Xx, (float)matrix.Xy, (float)matrix.X0, (float)matrix.Yx, (float)matrix.Yy, (float)matrix.Y0, 0, 0, 1);
+		static SKColorF SolidColor(double r, double g, double b, double a)
+		{
+			byte alpha = PremultipliedByte(a);
+			if (alpha == 0) return new SKColorF(0, 0, 0, 0);
+			return new SKColorF(PremultipliedByte(r * a) / (float)alpha,
+				PremultipliedByte(g * a) / (float)alpha,
+				PremultipliedByte(b * a) / (float)alpha, alpha / 255f);
+		}
+		static byte PremultipliedByte(double value) => (byte)((int)(Math.Max(0, Math.Min(1, value)) * 65535 + .5) >> 8);
+
 		internal static SKColor Color(double r, double g, double b, double a) => new SKColor(Byte(r), Byte(g), Byte(b), Byte(a));
 		static byte Byte(double value) => (byte)Math.Round(Math.Max(0, Math.Min(1, value)) * 255, MidpointRounding.AwayFromZero);
 		static SKShaderTileMode Tile(Extend value) => value == Extend.Repeat ? SKShaderTileMode.Repeat : value == Extend.Reflect ? SKShaderTileMode.Mirror : value == Extend.Pad ? SKShaderTileMode.Clamp : SKShaderTileMode.Decal;

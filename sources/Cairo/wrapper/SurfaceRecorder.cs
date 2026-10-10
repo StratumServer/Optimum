@@ -63,6 +63,11 @@ namespace Cairo
 		internal bool RecordDrawing(Action<Context> replay, Action<Context> shadowReplay, bool stroke = false, bool paintAll = false, double alpha = 1)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
+			// These Cairo operators are not bounded by source: scaling source
+			// alpha cannot replace their coverage mask. Preserve native replay
+			// until the recorder has an equivalent mask compositor.
+			if (alpha != 1 && Shadow.Operator is Operator.Clear or Operator.Source
+				or Operator.In or Operator.Out or Operator.DestIn or Operator.DestAtop) return false;
 			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(Shadow, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
 			if (!Add(new Command(c => drawing.Replay(c, replay), shadowReplay, drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
