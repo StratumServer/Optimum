@@ -1,14 +1,14 @@
 using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using NanoSvg;
 using SkiaSharp;
 
 namespace Cairo
 {
-	// NanoSVG remains the parser and geometry authority. Only fully covered,
-	// disjoint, device-aligned solid rectangles are recorded; every other feature
-	// is replayed by the original native rasterizer.
+	// NanoSVG remains the parser and geometry authority. Skia rasterizes the parsed solid
+	// fills and strokes, and the result is post-processed with NanoSVG's unpremultiply and
+	// defringe steps and SvgLoader.rasterizeSvg's tint/channel conversion, so callers get
+	// the same straight-alpha RGBA bytes. Gradients and dashed strokes stay native.
 	internal static unsafe class RecordedSvgGeometry
 	{
 		[StructLayout (LayoutKind.Sequential)] struct Paint { internal byte Type; internal IntPtr Value; }
@@ -25,129 +25,119 @@ namespace Cairo
 			internal fixed float Bounds[4]; internal IntPtr Next;
 		}
 
-		internal static SKPicture Parse (string text, int textureWidth, int textureHeight, int width, int height, int? tint, bool opaqueOnly = false)
+		const byte PaintNone = 0, PaintColor = 1;
+		const int MaxShapes = 100000, MaxPaths = 100000, MaxPoints = 1000000;
+		const long MaxPixels = 16L * 1024 * 1024;
+
+		/// <summary>
+		/// Equivalent of <c>SvgLoader.rasterizeSvg</c>: straight-alpha RGBA bytes, tinted or
+		/// with red and blue swapped. Throws <see cref="NotSupportedException"/> for content
+		/// that must stay on the native rasterizer.
+		/// </summary>
+		internal static byte[] Rasterize (string text, int textureWidth, int textureHeight, int width, int height, int? tint)
 		{
-			if (textureWidth <= 0 || textureHeight <= 0) throw new NotSupportedException ("Recorded SVG has no positive texture size.");
-			// SvgLoader applies tint after NanoSVG rasterization using straight RGBA
-			// bytes. Skia's recorded paint uses premultiplied alpha, so the same
-			// channel values cannot be represented faithfully for partially covered
-			// pixels. Keep tinted assets on the native path until parity is proven.
-			if (tint.HasValue) throw new NotSupportedException ("Tinted SVG requires native rasterization.");
+			if (text == null) throw new NotSupportedException ("Recorded SVG has no text.");
+			if (textureWidth <= 0 || textureHeight <= 0 || (long)textureWidth * textureHeight > MaxPixels)
+				throw new NotSupportedException ("Recorded SVG has no supported texture size.");
 			IntPtr image = SvgNativeMethods.nsvgParse (text, "px", 96);
 			if (image == IntPtr.Zero) throw new NotSupportedException ("NanoSVG could not parse the recorded SVG.");
 			try {
-				var size = Marshal.PtrToStructure<NsvgSize> (SvgNativeMethods.nsvgImageGetSize (image));
-				if (!float.IsFinite (size.width) || !float.IsFinite (size.height) || size.width <= 0 || size.height <= 0)
-					throw new NotSupportedException ("Recorded SVG has no positive viewport.");
-				float scale = width == 0 && height == 0 ? 1 : width == 0 ? height / size.height : height == 0 ? width / size.width : Math.Min (width / size.width, height / size.height);
-				if (!float.IsFinite (scale) || scale <= 0) throw new NotSupportedException ("Recorded SVG has an invalid scale.");
-				int offsetX = width != 0 && height != 0 ? (int)(textureWidth - size.width * scale) / 2 : 0;
-				int offsetY = width != 0 && height != 0 ? (int)(textureHeight - size.height * scale) / 2 : 0;
-				using (var recorder = new SKPictureRecorder ()) {
-					var canvas = recorder.BeginRecording (SKRect.Create (textureWidth, textureHeight));
-					canvas.Translate (offsetX, offsetY); canvas.Scale (scale);
-					IntPtr pointer = Marshal.ReadIntPtr (image, 24);
-					int shapeCount = 0;
-					var rectangles = new List<SKRect> ();
-					double coveredArea = 0;
-					while (pointer != IntPtr.Zero) {
-						if (++shapeCount > 100000) throw new NotSupportedException ("Recorded SVG has too many shapes.");
-						Shape shape = Marshal.PtrToStructure<Shape> (pointer); pointer = shape.Next;
-						if ((shape.Flags & 1) == 0) continue;
-						if (shape.Fill.Type == 0) {
-							if (shape.Stroke.Type != 0 && shape.StrokeWidth > 0)
-								throw new NotSupportedException ("Recorded SVG stroke requires native rasterization.");
-							continue;
-						}
-						if (rectangles.Count >= 256) throw new NotSupportedException ("Recorded SVG rectangle budget requires native rasterization.");
-						if (shape.Stroke.Type != 0 && shape.StrokeWidth > 0) throw new NotSupportedException ("Recorded SVG stroke requires native rasterization.");
-						if (shape.Fill.Type != 1) throw new NotSupportedException ("Recorded SVG gradient requires native rasterization.");
-						if (opaqueOnly && (((uint)shape.Fill.Value.ToInt64 () >> 24) != 255 || shape.Opacity != 1f))
-							throw new NotSupportedException ("Recorded SVG transparency requires native rasterization for texture upload.");
-						SKRect rectangle = PixelRectangle (shape.Paths, scale, offsetX, offsetY);
-						if (rectangle.Left < 0 || rectangle.Top < 0 || rectangle.Right > textureWidth || rectangle.Bottom > textureHeight)
-							throw new NotSupportedException ("Recorded SVG clipped coverage requires native rasterization.");
-						foreach (var previous in rectangles)
-							if (rectangle.Left < previous.Right && rectangle.Right > previous.Left && rectangle.Top < previous.Bottom && rectangle.Bottom > previous.Top)
-								throw new NotSupportedException ("Recorded SVG overlap requires native rasterization.");
-						rectangles.Add (rectangle);
-						coveredArea += (double)rectangle.Width * rectangle.Height;
-						using (var path = ReadPath (shape.Paths, shape.FillRule))
-						using (var paint = ReadPaint (shape.Fill, shape.Opacity, opaqueOnly)) canvas.DrawPath (path, paint);
-					}
-					// NanoSVG writes defringed RGB into transparent uncovered pixels. Exact
-					// reconstruction is only established when the rectangles tile the image.
-					if (coveredArea != (double)textureWidth * textureHeight)
-						throw new NotSupportedException ("Recorded SVG uncovered pixels require native rasterization.");
-					return recorder.EndRecording ();
+				IntPtr sizePointer = SvgNativeMethods.nsvgImageGetSize (image);
+				if (sizePointer == IntPtr.Zero) throw new NotSupportedException ("NanoSVG reported no SVG size.");
+				var size = Marshal.PtrToStructure<NsvgSize> (sizePointer);
+				// Same float arithmetic as SvgLoader.rasterizeSvg.
+				float scale;
+				int offsetX = 0, offsetY = 0;
+				if (width == 0 && height == 0) scale = 1f;
+				else if (width == 0) scale = (float)height / size.height;
+				else if (height == 0) scale = (float)width / size.width;
+				else {
+					float scaleX = (float)width / size.width;
+					float scaleY = (float)height / size.height;
+					scale = scaleX < scaleY ? scaleX : scaleY;
+					offsetX = (int)((float)textureWidth - size.width * scale) / 2;
+					offsetY = (int)((float)textureHeight - size.height * scale) / 2;
 				}
+				if (!float.IsFinite (scale) || scale <= 0) throw new NotSupportedException ("Recorded SVG has an invalid scale.");
+
+				var info = new SKImageInfo (textureWidth, textureHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
+				byte[] pixels = new byte[textureWidth * textureHeight * 4];
+				using (SKSurface surface = SKSurface.Create (info)) {
+					if (surface == null) throw new NotSupportedException ("Skia could not create the SVG raster.");
+					SKCanvas canvas = surface.Canvas;
+					canvas.Clear (SKColors.Transparent);
+					canvas.Translate (offsetX, offsetY);
+					DrawShapes (canvas, Marshal.ReadIntPtr (image, 24), scale);
+					fixed (byte* data = pixels)
+						if (!surface.ReadPixels (info, (IntPtr)data, textureWidth * 4, 0, 0)) throw new NotSupportedException ("Skia could not read the SVG raster.");
+				}
+				UnpremultiplyAndDefringe (pixels, textureWidth, textureHeight, textureWidth * 4);
+				ApplyLoaderConversion (pixels, tint);
+				return pixels;
 			} finally { SvgNativeMethods.nsvgDelete (image); }
 		}
 
-		static SKPath ReadPath (IntPtr pointer, byte fillRule)
+		static void DrawShapes (SKCanvas canvas, IntPtr pointer, float scale)
 		{
-			var result = new SKPath { FillType = fillRule == 1 ? SKPathFillType.EvenOdd : SKPathFillType.Winding };
+			int shapeCount = 0;
+			while (pointer != IntPtr.Zero) {
+				if (++shapeCount > MaxShapes) throw new NotSupportedException ("Recorded SVG has too many shapes.");
+				Shape shape = Marshal.PtrToStructure<Shape> (pointer); pointer = shape.Next;
+				if ((shape.Flags & 1) == 0) continue;
+				if (shape.Fill.Type != PaintNone) {
+					if (shape.Fill.Type != PaintColor) throw new NotSupportedException ("Recorded SVG gradient requires native rasterization.");
+					using (SKPath path = ReadPath (shape.Paths, scale, shape.FillRule == 1 ? SKPathFillType.EvenOdd : SKPathFillType.Winding))
+					using (SKPaint paint = ReadPaint (shape.Fill, shape.Opacity)) canvas.DrawPath (path, paint);
+				}
+				// NanoSVG skips strokes whose scaled width is not above 0.01.
+				if (shape.Stroke.Type != PaintNone && shape.StrokeWidth * scale > 0.01f) {
+					if (shape.Stroke.Type != PaintColor) throw new NotSupportedException ("Recorded SVG stroke gradient requires native rasterization.");
+					if (shape.DashCount != 0) throw new NotSupportedException ("Recorded SVG dashed stroke requires native rasterization.");
+					using (SKPath path = ReadPath (shape.Paths, scale, SKPathFillType.Winding))
+					using (SKPaint paint = ReadPaint (shape.Stroke, shape.Opacity))
+					using (var stroke = new SKPaint {
+						Style = SKPaintStyle.Stroke, StrokeWidth = shape.StrokeWidth * scale,
+						StrokeCap = (SKStrokeCap)Math.Min ((int)shape.Cap, 2), StrokeJoin = (SKStrokeJoin)Math.Min ((int)shape.Join, 2),
+						StrokeMiter = shape.Miter, IsAntialias = true
+					})
+					using (var outline = new SKPath ()) {
+						// Fill the stroke union once, as NanoSVG rasterizes its stroke polygon.
+						if (!stroke.GetFillPath (path, outline, 16f)) continue;
+						outline.FillType = SKPathFillType.Winding;
+						canvas.DrawPath (outline, paint);
+					}
+				}
+			}
+		}
+
+		static SKPath ReadPath (IntPtr pointer, float scale, SKPathFillType fillType)
+		{
+			var result = new SKPath { FillType = fillType };
 			try {
 				int pathCount = 0;
 				while (pointer != IntPtr.Zero) {
-					if (++pathCount > 100000) throw new NotSupportedException ("Recorded SVG has too many paths.");
+					if (++pathCount > MaxPaths) throw new NotSupportedException ("Recorded SVG has too many paths.");
 					Path path = Marshal.PtrToStructure<Path> (pointer); pointer = path.Next;
-					if (path.Count <= 0 || path.Count > 1000000 || (path.Count - 1) % 3 != 0 || path.Points == IntPtr.Zero)
+					if (path.Count <= 0 || path.Count > MaxPoints || (path.Count - 1) % 3 != 0 || path.Points == IntPtr.Zero)
 						throw new NotSupportedException ("Recorded SVG has an invalid cubic path.");
 					float* points = (float*)path.Points;
-					result.MoveTo (points[0], points[1]);
+					result.MoveTo (points[0] * scale, points[1] * scale);
 					for (int i = 1; i < path.Count; i += 3)
-						result.CubicTo (points[i * 2], points[i * 2 + 1], points[i * 2 + 2], points[i * 2 + 3], points[i * 2 + 4], points[i * 2 + 5]);
+						result.CubicTo (points[i * 2] * scale, points[i * 2 + 1] * scale, points[i * 2 + 2] * scale, points[i * 2 + 3] * scale, points[i * 2 + 4] * scale, points[i * 2 + 5] * scale);
 					if (path.Closed != 0) result.Close ();
 				}
 				return result;
 			} catch { result.Dispose (); throw; }
 		}
 
-		static SKRect PixelRectangle (IntPtr pointer, float scale, int offsetX, int offsetY)
-		{
-			if (pointer == IntPtr.Zero) throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-			Path path = Marshal.PtrToStructure<Path> (pointer);
-			if (path.Count != 13 || path.Closed == 0 || path.Next != IntPtr.Zero || path.Points == IntPtr.Zero)
-				throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-			float* points = (float*)path.Points;
-			float left = float.PositiveInfinity, top = float.PositiveInfinity, right = float.NegativeInfinity, bottom = float.NegativeInfinity;
-			for (int segment = 0; segment < 4; segment++) {
-				int start = segment * 6, end = start + 6;
-				float x = points[start], y = points[start + 1], nextX = points[end], nextY = points[end + 1];
-				bool vertical = x == nextX, horizontal = y == nextY;
-				if (vertical == horizontal) throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-				for (int i = start + 2; i < end; i += 2)
-					if ((vertical && points[i] != x) || (horizontal && points[i + 1] != y) || points[i] < Math.Min (x, nextX) || points[i] > Math.Max (x, nextX) || points[i + 1] < Math.Min (y, nextY) || points[i + 1] > Math.Max (y, nextY))
-						throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-				left = Math.Min (left, x); right = Math.Max (right, x); top = Math.Min (top, y); bottom = Math.Max (bottom, y);
-			}
-			if (points[24] != points[0] || points[25] != points[1] || left >= right || top >= bottom)
-				throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-			for (int corner = 0; corner < 4; corner++) {
-				for (int previous = 0; previous < corner; previous++)
-					if (points[corner * 6] == points[previous * 6] && points[corner * 6 + 1] == points[previous * 6 + 1])
-						throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-				if ((points[corner * 6] != left && points[corner * 6] != right) || (points[corner * 6 + 1] != top && points[corner * 6 + 1] != bottom))
-					throw new NotSupportedException ("Recorded SVG geometry requires native rasterization.");
-			}
-			var result = new SKRect (left * scale + offsetX, top * scale + offsetY, right * scale + offsetX, bottom * scale + offsetY);
-			if (!float.IsFinite (result.Left) || !float.IsFinite (result.Top) || !float.IsFinite (result.Right) || !float.IsFinite (result.Bottom) ||
-				result.Left != MathF.Floor (result.Left) || result.Top != MathF.Floor (result.Top) || result.Right != MathF.Floor (result.Right) || result.Bottom != MathF.Floor (result.Bottom))
-				throw new NotSupportedException ("Recorded SVG fractional coverage requires native rasterization.");
-			return result;
-		}
-
-		static SKPaint ReadPaint (Paint source, float opacity, bool matchNativeTextureUpload)
+		static SKPaint ReadPaint (Paint source, float opacity)
 		{
 			uint packed = (uint)source.Value.ToInt64 ();
 			byte red = (byte)packed, green = (byte)(packed >> 8), blue = (byte)(packed >> 16), alpha = (byte)(packed >> 24);
-			// SvgLoader.rasterizeSvg swaps red and blue before uploading its byte
-			// buffer as GL_RGBA. Preserve that texture output for LoadSvg while
-			// DrawSvg continues to match Cairo's native ARGB32 interpretation.
-			if (matchNativeTextureUpload) (red, blue) = (blue, red);
+			// nsvg__applyOpacity, then NanoSVG's div255 premultiply expressed through Skia's
+			// float colour premultiply.
 			int sourceAlpha = alpha * (int)(Math.Clamp (opacity, 0, 1) * 256) >> 8;
-			var paint = new SKPaint { IsAntialias = false };
+			var paint = new SKPaint { IsAntialias = true };
 			if (sourceAlpha == 0) paint.Color = SKColors.Transparent;
 			else {
 				paint.ColorF = new SKColorF (
@@ -159,5 +149,93 @@ namespace Cairo
 			return paint;
 		}
 		static int Premultiply (int channel, int alpha) => ((channel * alpha + 1) * 257) >> 16;
+
+		/// <summary>nsvg__unpremultiplyAlpha: integer unpremultiply, then fill the colour of fully
+		/// transparent pixels from opaque neighbours.</summary>
+		internal static void UnpremultiplyAndDefringe (byte[] image, int w, int h, int stride)
+		{
+			for (int y = 0; y < h; y++) {
+				int row = y * stride;
+				for (int x = 0; x < w; x++) {
+					int i = row + x * 4;
+					int r = image[i], g = image[i + 1], b = image[i + 2], a = image[i + 3];
+					if (a != 0) {
+						image[i] = (byte)(r * 255 / a);
+						image[i + 1] = (byte)(g * 255 / a);
+						image[i + 2] = (byte)(b * 255 / a);
+					}
+				}
+			}
+			for (int y = 0; y < h; y++) {
+				int row = y * stride;
+				for (int x = 0; x < w; x++) {
+					int i = row + x * 4;
+					int r = 0, g = 0, b = 0, a = image[i + 3], n = 0;
+					if (a != 0) continue;
+					if (x - 1 > 0 && image[i - 1] != 0) { r += image[i - 4]; g += image[i - 3]; b += image[i - 2]; n++; }
+					if (x + 1 < w && image[i + 7] != 0) { r += image[i + 4]; g += image[i + 5]; b += image[i + 6]; n++; }
+					if (y - 1 > 0 && image[i - stride + 3] != 0) { r += image[i - stride]; g += image[i - stride + 1]; b += image[i - stride + 2]; n++; }
+					if (y + 1 < h && image[i + stride + 3] != 0) { r += image[i + stride]; g += image[i + stride + 1]; b += image[i + stride + 2]; n++; }
+					if (n > 0) {
+						image[i] = (byte)(r / n);
+						image[i + 1] = (byte)(g / n);
+						image[i + 2] = (byte)(b / n);
+					}
+				}
+			}
+		}
+
+		/// <summary>The pixel loop of SvgLoader.DrawSvg over a rasterizeSvg buffer, including its
+		/// row-major index arithmetic. <paramref name="colorOver"/> is ColorUtil.ColorOver.</summary>
+		internal static RecordedPixelOperation DrawSvgOperation (byte[] rgba, int posx, int posy, int width, int height, Func<int, int, int> colorOver)
+		{
+			if (rgba == null) throw new ArgumentNullException (nameof (rgba));
+			if (colorOver == null) throw new ArgumentNullException (nameof (colorOver));
+			return (data, surfaceWidth, surfaceHeight, stride) => {
+				int num = surfaceWidth * surfaceHeight;
+				int* destination = (int*)data.ToPointer ();
+				fixed (byte* source = rgba) {
+					int* pixels = (int*)source;
+					for (int i = 0; i < width; i++) {
+						for (int j = 0; j < height; j++) {
+							int rgb = pixels[j * width + i];
+							int index = (posy + j) * surfaceWidth + posx + i;
+							if (index >= 0 && index < num) destination[index] = colorOver (rgb, destination[index]);
+						}
+					}
+				}
+			};
+		}
+
+		/// <summary>Writes a rasterizeSvg buffer (uploaded by vanilla as GL_RGBA) into a surface
+		/// whose logical R, G, B, A channels become the candidate texture's channels.</summary>
+		internal static RecordedPixelOperation TextureOperation (byte[] rgba)
+		{
+			if (rgba == null) throw new ArgumentNullException (nameof (rgba));
+			return (data, width, height, stride) => {
+				uint* destination = (uint*)data.ToPointer ();
+				int count = Math.Min (width * height, rgba.Length / 4);
+				for (int i = 0; i < count; i++)
+					destination[i] = (uint)rgba[i * 4 + 3] << 24 | (uint)rgba[i * 4] << 16 | (uint)rgba[i * 4 + 1] << 8 | rgba[i * 4 + 2];
+			};
+		}
+
+		/// <summary>The tint (or red/blue swap) loop of SvgLoader.rasterizeSvg.</summary>
+		internal static void ApplyLoaderConversion (byte[] pixels, int? tint)
+		{
+			if (tint.HasValue) {
+				int color = tint.Value;
+				byte[] rgba = { (byte)(color >> 16), (byte)(color >> 8), (byte)color, (byte)(color >> 24) };
+				for (int i = 0; i < pixels.Length - 1; i += 4) {
+					float coverage = (float)(int)pixels[i + 3] / 255f;
+					pixels[i] = (byte)(coverage * (float)(int)rgba[0]);
+					pixels[i + 1] = (byte)(coverage * (float)(int)rgba[1]);
+					pixels[i + 2] = (byte)(coverage * (float)(int)rgba[2]);
+					pixels[i + 3] = (byte)(coverage * (float)(int)rgba[3]);
+				}
+			} else {
+				for (int i = 0; i < pixels.Length - 1; i += 4) (pixels[i], pixels[i + 2]) = (pixels[i + 2], pixels[i]);
+			}
+		}
 	}
 }

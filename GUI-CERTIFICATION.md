@@ -75,18 +75,21 @@ written; the report records that result and launcher validation requires it.
 
 ## SVG rasterization coverage
 
-The recorder accepts only integer aligned, disjoint solid rectangles that cover
-the full drawing target. `DrawSvg` can record this subset when it has no tint.
-`LoadSvg` further requires fully opaque fills because its native texture path
-uploads straight RGBA bytes, while Skia renders premultiplied pixels. Tint,
-transparency in `LoadSvg`, strokes, gradients, overlap, clipping, uncovered
-pixels, fractional edges and unsupported shapes continue through NanoSVG. The
-focused test checks pixel parity for accepted drawing cases and checks that the
-other cases remain on the native path.
+NanoSVG still parses each document. Visible solid fills (non-zero and even-odd)
+and solid strokes, including fill and shape opacity, are rasterized by Skia's CPU
+rasterizer. The raster then goes through NanoSVG's integer unpremultiply and
+defringe steps and the tint or red/blue conversion of `SvgLoader.rasterizeSvg`, so
+callers receive the same straight-alpha RGBA bytes. `DrawSvg` into a recording
+surface records the original `ColorOver` loop over these bytes as a pixel step;
+native materialization replays the original NanoSVG route. `LoadSvg` writes the
+bytes into a candidate texture through the certified GPU path. Gradients and
+dashed strokes continue through NanoSVG. The focused tests compare the bytes with
+NanoSVG: flat pixels within one channel value, antialiased edges within the GUI
+edge policy.
 
 Run the CPU parser and parity tests with the platform's Vintage Story native
-library directory available to the loader. This checks the SVG subset only. It
-does not certify GPU output on Intel, AMD or NVIDIA.
+library directory available to the loader. This checks the CPU rasterization
+only. It does not certify GPU output on Intel, AMD or NVIDIA.
 
 ```sh
 export VINTAGE_STORY=/path/to/vintagestory
@@ -128,10 +131,10 @@ in a separate evidence directory for each adapter:
 That private runner writes the test log, TRX results, runtime manifest and
 `svg-parity.json`. Keep those files with the physical adapter's report. Its
 SVG matrix exercises the recorder fixtures directly and supplements the
-standalone public-route diagnostic. For an eligible opaque tiled SVG, require
-one candidate attempt, one success and zero fallbacks. For tint, alpha and
-other unsupported shapes, require zero candidate attempts and exact native
-fallback bytes. A passing CPU parser test or an in-memory identity
+standalone public-route diagnostic. For a supported solid SVG (tiled,
+translucent, tinted or stroked), require one candidate attempt, one success and
+zero fallbacks. For gradients and dashed strokes, require zero candidate
+attempts and exact native fallback bytes. A passing CPU parser test or an in-memory identity
 qualification is diagnostic only; neither produces an approved hardware
 certificate.
 

@@ -106,41 +106,51 @@ public sealed class SvgGpuProbe : ClientScenarioBase
                     Assert.True(RequiredProperty(probe, "GuiRenderingEnabled").GetValue(null) is true,
                         "The exact live GL identity did not enable the in-memory diagnostic path.");
 
-                    IAsset supportedAsset = Asset(
-                        "<rect width='24' height='32' fill='#3585cd'/><rect x='24' width='24' height='32' fill='#d7396b'/>");
-                    foreach ((int textureWidth, int textureHeight) in new[] { (48, 32), (72, 48), (96, 64) })
+                    // Solid fills and strokes rasterize through Skia; gradients and dashed
+                    // strokes stay on NanoSVG. Flat pixels must match within one level; the
+                    // stroke's antialiased edge pixels get the GUI edge allowance of 32.
+                    foreach ((string name, string shape, int? tint, int edgeDelta) in new[]
                     {
-                        gpuEnabled.SetValue(null, false);
-                        using LoadedTexture nativeTexture = loader.LoadSvg(supportedAsset, textureWidth, textureHeight, textureWidth, textureHeight, null);
-                        byte[] expected = ReadTexture(nativeTexture.TextureId, textureWidth, textureHeight);
-
-                        gpuEnabled.SetValue(null, true);
-                        resetMetrics.Invoke(null, null);
-                        using LoadedTexture candidate = loader.LoadSvg(supportedAsset, textureWidth, textureHeight, textureWidth, textureHeight, null);
-                        byte[] actual = ReadTexture(candidate.TextureId, textureWidth, textureHeight);
-                        object snapshot = snapshotMetrics.Invoke(null, null)!;
-                        AssertGpuCounts(snapshot, 1, 1, 0);
-                        int maxDelta = ComparePixels(expected, actual, maximumDelta: 1);
-                        cases.Add(new
+                        ("tiled", "<rect width='24' height='32' fill='#3585cd'/><rect x='24' width='24' height='32' fill='#d7396b'/>", (int?)null, 1),
+                        ("alpha", "<rect width='48' height='32' fill='#3585cd' fill-opacity='.5'/>", (int?)null, 1),
+                        ("tint", "<rect width='48' height='32' fill='#3585cd'/>", (int?)unchecked((int)0xb73585cd), 1),
+                        ("stroke", "<rect width='48' height='32' fill='#3585cd' stroke='#d7396b' stroke-width='2'/>", (int?)null, 32)
+                    })
+                    {
+                        IAsset supportedAsset = Asset(shape);
+                        foreach ((int textureWidth, int textureHeight) in new[] { (48, 32), (72, 48), (96, 64) })
                         {
-                            path = "SvgLoader.LoadSvg",
-                            textureWidth,
-                            textureHeight,
-                            supported = true,
-                            attempts = 1,
-                            successes = 1,
-                            fallbacks = 0,
-                            maxChannelDelta = maxDelta,
-                            passed = true
-                        });
+                            gpuEnabled.SetValue(null, false);
+                            using LoadedTexture nativeTexture = loader.LoadSvg(supportedAsset, textureWidth, textureHeight, textureWidth, textureHeight, tint);
+                            byte[] expected = ReadTexture(nativeTexture.TextureId, textureWidth, textureHeight);
+
+                            gpuEnabled.SetValue(null, true);
+                            resetMetrics.Invoke(null, null);
+                            using LoadedTexture candidate = loader.LoadSvg(supportedAsset, textureWidth, textureHeight, textureWidth, textureHeight, tint);
+                            byte[] actual = ReadTexture(candidate.TextureId, textureWidth, textureHeight);
+                            object snapshot = snapshotMetrics.Invoke(null, null)!;
+                            AssertGpuCounts(snapshot, 1, 1, 0);
+                            int maxDelta = ComparePixels(expected, actual, textureWidth, textureHeight, maximumFlatDelta: 1, maximumEdgeDelta: edgeDelta);
+                            cases.Add(new
+                            {
+                                path = "SvgLoader.LoadSvg",
+                                name,
+                                textureWidth,
+                                textureHeight,
+                                supported = true,
+                                attempts = 1,
+                                successes = 1,
+                                fallbacks = 0,
+                                maxChannelDelta = maxDelta,
+                                passed = true
+                            });
+                        }
                     }
 
                     foreach ((string name, string shape, int? tint) in new[]
                     {
-                    ("alpha", "<rect width='48' height='32' fill='#3585cd' fill-opacity='.5'/>", (int?)null),
-                    ("tint", "<rect width='48' height='32' fill='#3585cd'/>", (int?)unchecked((int)0xb73585cd)),
                     ("gradient", "<defs><linearGradient id='g'><stop offset='0' stop-color='#3585cd'/><stop offset='1' stop-color='#d7396b'/></linearGradient></defs><rect width='48' height='32' fill='url(#g)'/>", (int?)null),
-                    ("stroke", "<rect width='48' height='32' fill='#3585cd' stroke='#d7396b' stroke-width='2'/>", (int?)null)
+                    ("dashed-stroke", "<rect width='48' height='32' fill='#3585cd' stroke='#d7396b' stroke-width='2' stroke-dasharray='3 2'/>", (int?)null)
                 })
                     {
                         IAsset unsupportedAsset = Asset(shape);
@@ -364,15 +374,33 @@ public sealed class SvgGpuProbe : ClientScenarioBase
         return data;
     }
 
-    private static int ComparePixels(byte[] expected, byte[] actual, int maximumDelta)
+    // A pixel is an edge pixel when its 3x3 neighbourhood in the native reference is not
+    // uniform; only those may use the antialiasing allowance.
+    private static int ComparePixels(byte[] expected, byte[] actual, int width, int height, int maximumFlatDelta, int maximumEdgeDelta)
     {
         Assert.Equal(expected.Length, actual.Length);
         int worst = 0;
-        for (int index = 0; index < expected.Length; index++)
+        for (int y = 0; y < height; y++)
         {
-            int delta = Math.Abs(expected[index] - actual[index]);
-            worst = Math.Max(worst, delta);
-            Assert.InRange(delta, 0, maximumDelta);
+            for (int x = 0; x < width; x++)
+            {
+                bool edge = false;
+                for (int dy = -1; dy <= 1 && !edge; dy++)
+                    for (int dx = -1; dx <= 1 && !edge; dx++)
+                    {
+                        int nx = x + dx, ny = y + dy;
+                        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+                        for (int c = 0; c < 4; c++)
+                            if (expected[(ny * width + nx) * 4 + c] != expected[(y * width + x) * 4 + c]) { edge = true; break; }
+                    }
+                for (int c = 0; c < 4; c++)
+                {
+                    int index = (y * width + x) * 4 + c;
+                    int delta = Math.Abs(expected[index] - actual[index]);
+                    worst = Math.Max(worst, delta);
+                    Assert.InRange(delta, 0, edge ? maximumEdgeDelta : maximumFlatDelta);
+                }
+            }
         }
         return worst;
     }

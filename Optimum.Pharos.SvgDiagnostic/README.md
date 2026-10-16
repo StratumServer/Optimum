@@ -3,8 +3,9 @@
 This opt-in test exercises the patched public `SvgLoader.LoadSvg` method on a
 live OpenGL client thread. It compares complete RGBA texture readbacks of the
 same 48×32 SVG at 1x, 1.5x and 2x output sizes with native NanoSVG output.
-Opaque tiled rectangles must take the candidate path with counters `1/1/0`; alpha, tint, gradient and
-stroke cases must use byte-exact native fallback with counters `0/0/0`.
+Tiled, translucent, tinted and stroked solid shapes must take the candidate path with counters
+`1/1/0`, within one channel value on flat pixels (32 on the stroke's antialiased edge pixels).
+Gradient and dashed-stroke cases must use byte-exact native fallback with counters `0/0/0`.
 
 The test grants the live device identity in memory so it can exercise the GPU
 path. It does not write a GUI certificate or certification evidence and cannot
