@@ -1,5 +1,7 @@
 using System;
+using System.Runtime.InteropServices;
 using Cairo;
+using SkiaSharp;
 using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 using Xunit;
@@ -43,6 +45,105 @@ public sealed class CairoContextRecorderTests
 		}
 		Assert.Equal (expected.Data, actual.Data);
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+	}
+
+	[Fact]
+	public void SolidColorSettersStayRecordedAndMatchCairoAndSkia()
+	{
+		Action<Context>[] setColors = {
+			context => context.SetSourceColor (new Color (.23, .61, .87, .72)),
+			context => context.SetSourceRGB (.23, .61, .87),
+			context => context.SetSourceRGBA (.23, .61, .87, .72),
+			context => context.SetSourceRGBA (new[] { .23, .61, .87, .72 }),
+			context => context.SetSourceRGBA (new[] { .23f, .61f, .87f, .72f })
+		};
+
+		foreach (Action<Context> setColor in setColors) {
+			using var actual = new ImageSurface (Format.Argb32, 18, 14);
+			var recorder = actual.BeginRecording ();
+			using (var context = new Context (actual)) {
+				context.Antialias = Antialias.None;
+				context.Operator = Operator.Source;
+				context.SetSourceRGBA (0, 0, 0, 0);
+				context.Paint ();
+				context.Save ();
+				setColor (context);
+				context.Rectangle (2, 2, 12, 9);
+				context.Fill ();
+				context.Restore ();
+			}
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+			using var bitmap = new SKBitmap (new SKImageInfo (18, 14, SKColorType.Bgra8888, SKAlphaType.Premul));
+			using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+			byte[] gpuPixels = new byte[bitmap.ByteCount];
+			Marshal.Copy (bitmap.GetPixels (), gpuPixels, 0, gpuPixels.Length);
+
+			using var expected = new ImageSurface (Format.Argb32, 18, 14);
+			using (var context = new Context (expected)) {
+				context.Antialias = Antialias.None;
+				context.Operator = Operator.Source;
+				context.SetSourceRGBA (0, 0, 0, 0);
+				context.Paint ();
+				context.Save ();
+				context.SetSourceRGBA (.23, .61, .87, setColor == setColors[1] ? 1 : .72);
+				context.Rectangle (2, 2, 12, 9);
+				context.Fill ();
+				context.Restore ();
+			}
+			byte[] expectedPixels = expected.Data;
+			for (int i = 0; i < gpuPixels.Length; i++)
+				Assert.InRange (Math.Abs (gpuPixels[i] - expectedPixels[i]), 0, 1);
+			Assert.Equal (expected.Data, actual.Data);
+			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		}
+	}
+
+	[Fact]
+	public void ArrayColorSettersCaptureValuesAndKeepTheirArgumentExceptions()
+	{
+		foreach (bool useFloat in new[] { false, true }) {
+			using var surface = new ImageSurface (Format.Argb32, 8, 8);
+			var recorder = surface.BeginRecording ();
+			using (var context = new Context (surface)) {
+				if (useFloat) {
+					var color = new[] { .2f, .5f, .8f, .6f };
+					context.SetSourceRGBA (color);
+					Array.Fill (color, 1f);
+				} else {
+					var color = new[] { .2, .5, .8, .6 };
+					context.SetSourceRGBA (color);
+					Array.Fill (color, 1d);
+				}
+				context.Antialias = Antialias.None;
+				context.Rectangle (1, 1, 6, 6);
+				context.Fill ();
+			}
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+			using var expected = new ImageSurface (Format.Argb32, 8, 8);
+			using (var context = new Context (expected)) {
+				context.Antialias = Antialias.None;
+				context.SetSourceRGBA (.2, .5, .8, .6);
+				context.Rectangle (1, 1, 6, 6);
+				context.Fill ();
+			}
+			Assert.Equal (expected.Data, surface.Data);
+		}
+
+		using var invalidSurface = new ImageSurface (Format.Argb32, 4, 4);
+		var invalidRecorder = invalidSurface.BeginRecording ();
+		using (var context = new Context (invalidSurface)) {
+			Assert.Throws<NullReferenceException> (() => context.SetSourceRGBA ((double[])null));
+			Assert.Throws<IndexOutOfRangeException> (() => context.SetSourceRGBA (new[] { 1d, 0d }));
+			Assert.Throws<NullReferenceException> (() => context.SetSourceRGBA ((float[])null));
+			Assert.Throws<IndexOutOfRangeException> (() => context.SetSourceRGBA (new[] { 1f, 0f }));
+		}
+		Assert.Equal (SurfaceRecordingState.Recording, invalidRecorder.State);
+
+		var disposed = new Context (new ImageSurface (Format.Argb32, 2, 2));
+		disposed.Dispose ();
+		Assert.Throws<ObjectDisposedException> (() => disposed.SetSourceRGBA ((double[])null));
+		Assert.Throws<ObjectDisposedException> (() => disposed.SetSourceRGBA ((float[])null));
 	}
 
 	[Fact]
@@ -293,7 +394,7 @@ public sealed class CairoContextRecorderTests
 			context.SetSourceRGBA (.12, .18, .24, 1);
 			context.Rectangle (0, 0, 144, 36);
 			context.Fill ();
-			context.SetSourceRGBA (.94, .93, .89, 1);
+			context.SetSourceColor (new Color (.94, .93, .89, 1));
 			context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
 			context.SetFontSize (15);
 			using var options = new FontOptions { Antialias = Antialias.Subpixel };
@@ -308,7 +409,7 @@ public sealed class CairoContextRecorderTests
 			context.SetSourceRGBA (.12, .18, .24, 1);
 			context.Rectangle (0, 0, 144, 36);
 			context.Fill ();
-			context.SetSourceRGBA (.94, .93, .89, 1);
+			context.SetSourceColor (new Color (.94, .93, .89, 1));
 			context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
 			context.SetFontSize (15);
 			using var options = new FontOptions { Antialias = Antialias.Subpixel };
