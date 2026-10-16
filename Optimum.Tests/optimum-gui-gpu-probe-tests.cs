@@ -83,6 +83,33 @@ namespace Optimum.Tests;
 		}
 	}
 
+	[Fact]
+	public void RequestAndBackendProbeCannotBypassCertification()
+	{
+		var original = Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled;
+		try
+		{
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = true;
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(false);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(true);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+			Assert.False(OptimumGuiGpuProbe.GuiRenderingEnabled);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(true);
+			Assert.True(OptimumGuiGpuProbe.RenderingRequested);
+			Assert.True(OptimumGuiGpuProbe.GuiRenderingEnabled);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+			Assert.False(OptimumGuiGpuProbe.GuiRenderingEnabled);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(false);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+		}
+		finally
+		{
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(false);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = original;
+		}
+	}
+
 	private static byte[] CreateExpectedReadback()
 	{
 		byte[] pixels = new byte[8 * 8 * 4];

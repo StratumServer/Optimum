@@ -181,7 +181,7 @@ public static class Program
         try
         {
             DeployPatchedMods(cacheDir, gameDir);
-            return LaunchGame(args, cacheDir, gameDir, cache);
+            return LaunchGame(args, cacheDir, gameDir, cache, dataPath);
         }
         catch (Exception ex)
         {
@@ -363,7 +363,7 @@ public static class Program
         return null;
     }
 
-    private static int LaunchGame(string[] args, string cacheDir, string gameDir, CacheManager cache)
+    private static int LaunchGame(string[] args, string cacheDir, string gameDir, CacheManager cache, string dataPath)
     {
         // --- Load patched assemblies and launch the game ---
         using var loader = new AssemblyLoader(cacheDir, gameDir);
@@ -373,6 +373,17 @@ public static class Program
         // copy from the normal probing paths.
         var patchedAssemblies = LoadAllPatchedAssemblies(loader);
         var vintagestoryLib = patchedAssemblies[0];
+
+        // Resolve approval after loading the exact patched API and before client entry.
+        // Every launch (including cache hits) revalidates content and the local profile.
+        var apiConfig = patchedAssemblies[1].GetType("Vintagestory.API.Config.OptimumConfig")
+            ?? throw new InvalidDataException("Patched API lacks the GUI certification contract.");
+        var certificationSetter = apiConfig.GetMethod("SetGuiGpuCertificationPassed", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidDataException("Patched API lacks the GUI certification setter.");
+        certificationSetter.Invoke(null, [false]);
+        var certification = GuiCertification.Validate(gameDir, cacheDir, dataPath, args);
+        certificationSetter.Invoke(null, [certification.Passed]);
+        Logger.Log($"[Optimum] GUI certification: {(certification.Passed ? "approved profile" : "vanilla")}; {certification.Reason}");
 
         // Find and invoke ClientProgram.Main
         var clientProgramType = vintagestoryLib.GetType("Vintagestory.Client.ClientProgram");
