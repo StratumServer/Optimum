@@ -73,7 +73,7 @@ namespace Cairo
 						rectangles.Add (rectangle);
 						coveredArea += (double)rectangle.Width * rectangle.Height;
 						using (var path = ReadPath (shape.Paths, shape.FillRule))
-						using (var paint = ReadPaint (shape.Fill, shape.Opacity)) canvas.DrawPath (path, paint);
+						using (var paint = ReadPaint (shape.Fill, shape.Opacity, opaqueOnly)) canvas.DrawPath (path, paint);
 					}
 					// NanoSVG writes defringed RGB into transparent uncovered pixels. Exact
 					// reconstruction is only established when the rectangles tile the image.
@@ -138,10 +138,14 @@ namespace Cairo
 			return result;
 		}
 
-		static SKPaint ReadPaint (Paint source, float opacity)
+		static SKPaint ReadPaint (Paint source, float opacity, bool matchNativeTextureUpload)
 		{
 			uint packed = (uint)source.Value.ToInt64 ();
 			byte red = (byte)packed, green = (byte)(packed >> 8), blue = (byte)(packed >> 16), alpha = (byte)(packed >> 24);
+			// SvgLoader.rasterizeSvg swaps red and blue before uploading its byte
+			// buffer as GL_RGBA. Preserve that texture output for LoadSvg while
+			// DrawSvg continues to match Cairo's native ARGB32 interpretation.
+			if (matchNativeTextureUpload) (red, blue) = (blue, red);
 			int sourceAlpha = alpha * (int)(Math.Clamp (opacity, 0, 1) * 256) >> 8;
 			var paint = new SKPaint { IsAntialias = false };
 			if (sourceAlpha == 0) paint.Color = SKColors.Transparent;
