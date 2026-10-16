@@ -73,12 +73,55 @@ back from the candidate GPU texture and match the native Cairo pixels within one
 channel value. The assertion runs inside the Pharos test before its evidence can be
 written; the report records that result and launcher validation requires it.
 
+## SVG rasterization coverage
+
+The recorder accepts only integer aligned, disjoint solid rectangles that cover
+the full drawing target. `DrawSvg` can record this subset when it has no tint.
+`LoadSvg` further requires fully opaque fills because its native texture path
+uploads straight RGBA bytes, while Skia renders premultiplied pixels. Tint,
+transparency in `LoadSvg`, strokes, gradients, overlap, clipping, uncovered
+pixels, fractional edges and unsupported shapes continue through NanoSVG. The
+focused test checks pixel parity for accepted drawing cases and checks that the
+other cases remain on the native path.
+
+Run the CPU parser and parity tests with the platform's Vintage Story native
+library directory available to the loader. This checks the SVG subset only. It
+does not certify GPU output on Intel, AMD or NVIDIA.
+
+```sh
+export VINTAGE_STORY=/path/to/vintagestory
+LD_LIBRARY_PATH="$VINTAGE_STORY/Lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+  dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release \
+  --filter FullyQualifiedName~CairoSvgRecorderTests
+```
+
+On Windows, add `Vintagestory\Lib` to `PATH` before running the same
+`dotnet test` command. After this test passes, run the private Pharos GPU suite
+on each physical adapter using the Intel and NVIDIA steps below. Keep each
+machine's report separate and let the exact-device certification gate decide
+whether GPU rendering is eligible.
+
 ## Intel and NVIDIA verification
 
 Use the same protocol independently on physical Intel and NVIDIA adapters;
 record actual GL identity and driver, OS, staged runtime hashes, harness commit,
 profile configuration and datapath. Do not report a software renderer or a
 successful run on another adapter as vendor coverage.
+
+On Windows, after staging the candidate with the private Pharos harness, run
+the SVG compatibility scenario in a separate evidence directory for each
+adapter:
+
+```powershell
+.\run-gui.ps1 -OptimumRoot <candidate-checkout> `
+  -OutputRoot <adapter-specific-evidence-directory> `
+  -Filter FullyQualifiedName~NanoSvgNativeCompatibility
+```
+
+The runner writes the test log, TRX results, runtime manifest and
+`svg-parity.json`. Keep those files with the physical adapter's report. The
+scenario checks actual `SvgLoader.LoadSvg` routing and GPU texture readback;
+CPU parser tests alone do not provide this evidence.
 
 1. Build and stage the exact candidate runtime. Use a disposable datapath/world
    and retain its configuration. Keep the authenticated user datapath intact.

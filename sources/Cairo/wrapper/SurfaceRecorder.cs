@@ -9,6 +9,7 @@ namespace Cairo
 	{
 		Native,
 		Recording,
+		Materializing,
 		NativeMaterialized,
 		Failed,
 		Sealed,
@@ -101,6 +102,12 @@ namespace Cairo
 			if (value != Operator.Over && value != Operator.Source) return false;
 			return Add (new Command (CommandKind.SetOperator, (double)value));
 		}
+		internal bool RecordPicture (SKPicture picture, int x, int y, Action<Context> nativeReplay)
+		{
+			if (picture == null) throw new ArgumentNullException (nameof (picture));
+			if (nativeReplay == null) throw new ArgumentNullException (nameof (nativeReplay));
+			return Add (new Command (CommandKind.Picture, x, y, picture: picture, nativeReplay: nativeReplay));
+		}
 
 		internal void FillRectangle (double x, double y, double width, double height, double red, double green, double blue, double alpha)
 		{
@@ -131,6 +138,10 @@ namespace Cairo
 				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return;
 				attempted = true;
 				trigger = firstMaterializationTrigger ?? "Unknown";
+				// Native replay may touch the same surface (for example, an SVG
+				// DrawSvg call obtains DataPtr). Suppress nested materialization until
+				// the command list has replayed once.
+				state = SurfaceRecordingState.Materializing;
 				try {
 					IntPtr native = surface.NativeHandleForRecorder;
 					ThrowIfError (NativeMethods.cairo_surface_status (native), "surface before replay");
@@ -143,9 +154,11 @@ namespace Cairo
 							ThrowIfError (NativeMethods.cairo_surface_status (native), "surface replay");
 						}
 					}
+					DisposePictures (commands);
 					commands.Clear ();
 					state = SurfaceRecordingState.NativeMaterialized;
 				} catch (Exception exception) {
+					DisposePictures (commands);
 					commands.Clear ();
 					failure = ExceptionDispatchInfo.Capture (exception);
 					state = SurfaceRecordingState.Failed;
@@ -164,7 +177,12 @@ namespace Cairo
 
 		internal void DisposeFromSurface ()
 		{
-			lock (sync) { commands.Clear (); state = SurfaceRecordingState.Disposed; }
+			lock (sync) { DisposePictures (commands); commands.Clear (); state = SurfaceRecordingState.Disposed; }
+		}
+
+		static void DisposePictures (List<Command> source)
+		{
+			for (int i = 0; i < source.Count; i++) source[i].Picture?.Dispose ();
 		}
 
 		static void ThrowIfError (Status status, string phase)
@@ -176,7 +194,10 @@ namespace Cairo
 		{
 			internal readonly CommandKind Kind;
 			internal readonly double A, B, C, D;
-			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { Kind = kind; A = a; B = b; C = c; D = d; }
+			internal readonly SKPicture Picture;
+			internal readonly Action<Context> NativeReplay;
+			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0, SKPicture picture = null, Action<Context> nativeReplay = null)
+			{ Kind = kind; A = a; B = b; C = c; D = d; Picture = picture; NativeReplay = nativeReplay; }
 			internal void Replay (Context context)
 			{
 				switch (Kind) {
@@ -188,11 +209,12 @@ namespace Cairo
 				case CommandKind.Restore: context.Restore (); break;
 				case CommandKind.SetAntialias: context.Antialias = (Antialias)A; break;
 				case CommandKind.SetOperator: context.Operator = (Operator)A; break;
+				case CommandKind.Picture: NativeReplay (context); break;
 				}
 			}
 		}
 
-		internal enum CommandKind { SetSourceRGBA, Paint, Rectangle, Fill, Save, Restore, SetAntialias, SetOperator }
+		internal enum CommandKind { SetSourceRGBA, Paint, Rectangle, Fill, Save, Restore, SetAntialias, SetOperator, Picture }
 	}
 
 	internal sealed class SurfaceRecorderSnapshot
@@ -240,6 +262,12 @@ namespace Cairo
 						break;
 					case SurfaceRecorder.CommandKind.SetOperator:
 						blend = (Operator)command.A == Operator.Source ? SKBlendMode.Src : SKBlendMode.SrcOver;
+						break;
+					case SurfaceRecorder.CommandKind.Picture:
+						canvas.Save ();
+						canvas.Translate ((float)command.A, (float)command.B);
+						canvas.DrawPicture (command.Picture);
+						canvas.Restore ();
 						break;
 					}
 				}
