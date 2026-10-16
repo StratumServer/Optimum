@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..6ba1a20 100644
+index 03f9c76..fc6309a 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -178,8 +178,22 @@ index 03f9c76..6ba1a20 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -389,11 +436,12 @@ namespace Cairo
- 			NativeMethods.cairo_set_source_rgb (handle, r, g, b);
+@@ -377,36 +424,35 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public void SetSourceColor (Color color)
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_set_source_rgba (handle, color.R, color.G, color.B, color.A);
++			SetSourceRGBA (color.R, color.G, color.B, color.A);
+ 		}
+ 
+ 		public void SetSourceRGB (double r, double g, double b)
+ 		{
+-			CheckDisposed ();
+-			NativeMethods.cairo_set_source_rgb (handle, r, g, b);
++			SetSourceRGBA (r, g, b, 1);
  		}
  
  		public void SetSourceRGBA (double r, double g, double b, double a)
@@ -192,7 +206,24 @@ index 03f9c76..6ba1a20 100644
  
          public void SetSourceRGBA(double[] rgba)
          {
-@@ -528,11 +576,12 @@ namespace Cairo
+-            CheckDisposed();
+-            NativeMethods.cairo_set_source_rgba(handle, rgba[0], rgba[1], rgba[2], rgba[3]);
++            CheckDisposedOnly();
++            SetSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+         }
+ 
+         public void SetSourceRGBA(float[] rgba)
+         {
+-            CheckDisposed();
+-            NativeMethods.cairo_set_source_rgba(handle, rgba[0], rgba[1], rgba[2], rgba[3]);
++            CheckDisposedOnly();
++            SetSourceRGBA(rgba[0], rgba[1], rgba[2], rgba[3]);
+         }
+ 
+         //[Obsolete ("Use SetSource method (with double parameters)")]
+         public void SetSourceSurface (Surface source, int x, int y)
+ 		{
+@@ -528,11 +574,12 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -206,7 +237,7 @@ index 03f9c76..6ba1a20 100644
  
  		public void ClosePath ()
  		{
-@@ -565,11 +614,12 @@ namespace Cairo
+@@ -565,11 +612,12 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -220,7 +251,7 @@ index 03f9c76..6ba1a20 100644
  
  		public void PaintWithAlpha (double alpha)
  		{
-@@ -612,11 +662,12 @@ namespace Cairo
+@@ -612,11 +660,12 @@ namespace Cairo
          /// <summary>
          /// Paint everything in the current region
          /// </summary>
