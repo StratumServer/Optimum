@@ -107,6 +107,7 @@ public sealed class CairoContextRecorderTests
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal ("Recorder.Fill.Unsupported", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -136,6 +137,7 @@ public sealed class CairoContextRecorderTests
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal ("Recorder.Antialias.Unsupported", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 

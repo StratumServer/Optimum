@@ -77,6 +77,7 @@ public sealed class CairoSurfaceRecorderTests
 		}
 		Assert.Equal (expected.Data, actual.Data); // Data materializes the retained display list after GPU publication.
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal ("SurfaceCpuReadback.Data", recorder.FirstMaterializationTrigger);
 	}
 
 	[Fact]
@@ -187,6 +188,13 @@ public sealed class CairoSurfaceRecorderTests
 				} finally { System.IO.File.Delete (file); }
 			}
 			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			string expectedTrigger = boundary switch {
+				"handle" => "Surface.Handle",
+				"data" => "SurfaceCpuReadback.Data",
+				"pointer" => "SurfaceCpuReadback.DataPtr",
+				_ => "Surface.WriteToPng"
+			};
+			Assert.Equal (expectedTrigger, recorder.FirstMaterializationTrigger);
 			Assert.Equal (expected.Data, surface.Data);
 		}
 	}

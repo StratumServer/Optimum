@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Cairo;
@@ -15,6 +16,30 @@ namespace Vintagestory.Client.NoObf
 		private const int Width = OptimumGuiGpuProbe.ReadbackWidth;
 		private const int Height = OptimumGuiGpuProbe.ReadbackHeight;
 		private static int attempted;
+		private const int MaxMaterializationTriggerKinds = 32;
+		private static readonly object materializationDiagnosticsSync = new object();
+		private static readonly Dictionary<string, long> materializationTriggerCounts = new Dictionary<string, long>();
+		private static long untrackedMaterializationTriggerCount;
+
+		// Counts candidate-upload checks that observe a materialized surface with a captured first trigger.
+		// It does not count every materialization or unique surfaces.
+		public static Dictionary<string, long> GetMaterializationDiagnostics ()
+		{
+			lock (materializationDiagnosticsSync) {
+				var snapshot = new Dictionary<string, long> (materializationTriggerCounts);
+				if (untrackedMaterializationTriggerCount != 0)
+					snapshot["other-trigger-kinds"] = untrackedMaterializationTriggerCount;
+				return snapshot;
+			}
+		}
+
+		public static void ResetRenderingDiagnostics ()
+		{
+			lock (materializationDiagnosticsSync) {
+				materializationTriggerCounts.Clear ();
+				untrackedMaterializationTriggerCount = 0;
+			}
+		}
 
 		public static string TryRunOnce(int expectedContextThreadId)
 				{
@@ -84,7 +109,13 @@ namespace Vintagestory.Client.NoObf
 					}
 					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
 					{
-						failureReason = "surface-not-recording:" + surface.RecordingState;
+						string firstTrigger = surface.FirstMaterializationTrigger;
+						if (surface.RecordingState == Cairo.SurfaceRecordingState.NativeMaterialized && firstTrigger != null)
+						{
+							failureReason = "surface-not-recording:NativeMaterialized:first-trigger=" + firstTrigger;
+							RecordMaterializationTrigger (firstTrigger);
+						}
+						else failureReason = "surface-not-recording:" + surface.RecordingState;
 						return false;
 					}
 					if (!HasCurrentContext())
@@ -205,6 +236,22 @@ namespace Vintagestory.Client.NoObf
 					try { while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { } } catch { }
 					return false;
 				}
+
+		private static void RecordMaterializationTrigger (string trigger)
+		{
+			if (!Vintagestory.API.Config.OptimumGuiMetrics.Enabled || string.IsNullOrEmpty (trigger)) return;
+			lock (materializationDiagnosticsSync) {
+				if (materializationTriggerCounts.TryGetValue (trigger, out long count)) {
+					materializationTriggerCounts[trigger] = count + 1;
+					return;
+				}
+				if (materializationTriggerCounts.Count >= MaxMaterializationTriggerKinds) {
+					untrackedMaterializationTriggerCount++;
+					return;
+				}
+				materializationTriggerCounts.Add (trigger, 1);
+			}
+		}
 
 		private static string DrainPreexistingGlErrors()
 				{

@@ -25,11 +25,22 @@ namespace Cairo
 		readonly object sync = new object ();
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
+		string firstMaterializationTrigger;
 		bool antialiasSkiaCompatible;
 		bool hasUnsafeFilledPath;
 
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
+		internal string FirstMaterializationTrigger { get { lock (sync) return firstMaterializationTrigger; } }
+
+		internal void SetFirstMaterializationTrigger (string trigger)
+		{
+			if (string.IsNullOrEmpty (trigger)) return;
+			lock (sync) {
+				if ((state == SurfaceRecordingState.Recording || state == SurfaceRecordingState.Sealed || state == SurfaceRecordingState.GpuRendered) && firstMaterializationTrigger == null)
+					firstMaterializationTrigger = trigger;
+			}
+		}
 
 		internal bool TrySeal (out SurfaceRecorderSnapshot snapshot)
 		{

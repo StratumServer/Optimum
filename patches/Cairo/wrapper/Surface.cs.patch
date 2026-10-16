@@ -1,13 +1,14 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..471b31e 100644
+index 6f7730e..16773e4 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,10 +32,12 @@
+@@ -32,10 +32,13 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
  
  using System;
++using System.Runtime.CompilerServices;
 +using System.Threading;
 +using SkiaSharp;
  
@@ -15,7 +16,7 @@ index 6f7730e..471b31e 100644
  
  namespace Cairo
  {
-@@ -43,10 +45,17 @@ namespace Cairo
+@@ -43,10 +46,17 @@ namespace Cairo
      public class Surface : IDisposable
  	{
  
@@ -33,7 +34,7 @@ index 6f7730e..471b31e 100644
  		{
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
-@@ -57,10 +66,137 @@ namespace Cairo
+@@ -57,10 +67,151 @@ namespace Cairo
  				NativeMethods.cairo_surface_reference (handle);
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
@@ -51,6 +52,10 @@ index 6f7730e..471b31e 100644
 +					return recorder == null ? SurfaceRecordingState.Native : recorder.State;
 +				}
 +			}
++		}
++
++		internal string FirstMaterializationTrigger {
++			get { lock (recordingSync) return recorder == null ? null : recorder.FirstMaterializationTrigger; }
 +		}
 +
 +		internal SurfaceRecorder BeginRecording ()
@@ -79,7 +84,7 @@ index 6f7730e..471b31e 100644
 +				CheckDisposed ();
 +				EnsureRecordingOwnerThread ();
 +				if (recorder != null && recorder.State == SurfaceRecordingState.Recording && recordingContext != null)
-+					MaterializeRecorder (recordingContext.NativeHandleForRecorder);
++					MaterializeRecorder (recordingContext.NativeHandleForRecorder, "ContextCreation", "Surface");
 +				return handle;
 +			}
 +		}
@@ -98,26 +103,26 @@ index 6f7730e..471b31e 100644
 +			lock (recordingSync) { if (ReferenceEquals (recordingContext, context)) recordingContext = null; }
 +		}
 +
-+		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) { return TryRecord (rec => rec.RecordSetSourceRGBA (r, g, b, a)); }
-+		internal bool RecordPaint () { return TryRecord (rec => rec.RecordPaint ()); }
-+		internal bool RecordRectangle (double x, double y, double width, double height) { return TryRecord (rec => rec.RecordRectangle (x, y, width, height)); }
-+		internal bool RecordFill () { return TryRecord (rec => rec.RecordFill ()); }
-+		internal bool RecordSave () { return TryRecord (rec => rec.RecordSave ()); }
-+		internal bool RecordRestore () { return TryRecord (rec => rec.RecordRestore ()); }
-+		internal bool RecordAntialias (Antialias value) { return TryRecord (rec => rec.RecordAntialias (value)); }
-+		internal bool RecordOperator (Operator value) { return TryRecord (rec => rec.RecordOperator (value)); }
++		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) { return TryRecord ("SetSourceRGBA", rec => rec.RecordSetSourceRGBA (r, g, b, a)); }
++		internal bool RecordPaint () { return TryRecord ("Paint", rec => rec.RecordPaint ()); }
++		internal bool RecordRectangle (double x, double y, double width, double height) { return TryRecord ("Rectangle", rec => rec.RecordRectangle (x, y, width, height)); }
++		internal bool RecordFill () { return TryRecord ("Fill", rec => rec.RecordFill ()); }
++		internal bool RecordSave () { return TryRecord ("Save", rec => rec.RecordSave ()); }
++		internal bool RecordRestore () { return TryRecord ("Restore", rec => rec.RecordRestore ()); }
++		internal bool RecordAntialias (Antialias value) { return TryRecord ("Antialias", rec => rec.RecordAntialias (value)); }
++		internal bool RecordOperator (Operator value) { return TryRecord ("Operator", rec => rec.RecordOperator (value)); }
 +
-+		bool TryRecord (Func<SurfaceRecorder, bool> record)
++		bool TryRecord (string operation, Func<SurfaceRecorder, bool> record)
 +		{
 +			lock (recordingSync) {
 +				if (recorder == null) return false;
 +				EnsureRecordingOwnerThread ();
 +				if (recorder.State != SurfaceRecordingState.Recording)
-+					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder, operation + ".RecordingStopped", "Recorder");
 +				if (recorder.State != SurfaceRecordingState.Recording) return false;
 +				bool recorded = record (recorder);
 +				if (!recorded && recorder.State == SurfaceRecordingState.Recording)
-+					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder, operation + ".Unsupported", "Recorder");
 +				return recorded;
 +			}
 +		}
@@ -140,14 +145,24 @@ index 6f7730e..471b31e 100644
 +			}
 +		}
 +
-+		internal void MaterializeRecorder () { MaterializeRecorder (IntPtr.Zero); }
++		internal void MaterializeRecorder ([CallerMemberName] string caller = null)
++		{
++			MaterializeRecorder (IntPtr.Zero, caller, "Surface");
++		}
 +
-+		internal void MaterializeRecorder (IntPtr contextHandle)
++		internal void MaterializeRecorder (string caller, string category)
++		{
++			MaterializeRecorder (IntPtr.Zero, caller, category);
++		}
++
++		internal void MaterializeRecorder (IntPtr contextHandle, string caller, string category)
 +		{
 +			lock (recordingSync) {
 +				if (handle == IntPtr.Zero) return;
 +				EnsureRecordingOwnerThread ();
 +				if (recorder == null || recorder.State == SurfaceRecordingState.NativeMaterialized || recorder.State == SurfaceRecordingState.Disposed) return;
++				if ((recorder.State == SurfaceRecordingState.Recording || recorder.State == SurfaceRecordingState.Sealed || recorder.State == SurfaceRecordingState.GpuRendered) && recorder.FirstMaterializationTrigger == null)
++					recorder.SetFirstMaterializationTrigger (category + "." + (caller ?? "Unknown"));
 +				IntPtr replayHandle = contextHandle != IntPtr.Zero ? contextHandle :
 +					(recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
 +				recorder.Materialize (replayHandle);
@@ -171,7 +186,7 @@ index 6f7730e..471b31e 100644
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
  			switch (st) {
  			case SurfaceType.Image:
-@@ -94,10 +230,11 @@ namespace Cairo
+@@ -94,10 +245,11 @@ namespace Cairo
  
  
  		public Cairo.Surface CreateSimilar (
@@ -183,7 +198,7 @@ index 6f7730e..471b31e 100644
  
  			return new Cairo.Surface (p, true);
  		}
-@@ -108,10 +245,11 @@ namespace Cairo
+@@ -108,10 +260,11 @@ namespace Cairo
  		}
  
  		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
@@ -195,7 +210,7 @@ index 6f7730e..471b31e 100644
  		}
  
  		public void Dispose ()
-@@ -123,36 +261,54 @@ namespace Cairo
+@@ -123,36 +276,54 @@ namespace Cairo
  			}
  		}
  
@@ -206,7 +221,7 @@ index 6f7730e..471b31e 100644
 +					EnsureRecordingOwnerThread ();
 +					if (recorder != null && (recorder.State == SurfaceRecordingState.Recording ||
 +						(recorder.State == SurfaceRecordingState.GpuRendered && recordingContext != null)))
-+						MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
++						MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder, "Dispose", "Surface");
 +				}
 +				Context oldContext = recordingContext;
 +				recordingContext = null;
@@ -253,7 +268,7 @@ index 6f7730e..471b31e 100644
  
  		public void MarkDirty ()
  		{
-@@ -166,62 +322,75 @@ namespace Cairo
+@@ -166,62 +337,75 @@ namespace Cairo
  			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
  		}
  
