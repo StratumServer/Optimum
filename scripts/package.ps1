@@ -284,6 +284,14 @@ try {
     # Optimum.dll, so a fixed list of the apphost/config files is not enough.
     Get-ChildItem -Path $launcherOut -Filter '*.dll' -File |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
+    # The launcher hosts the game in its own process, and its generated runtimeconfig
+    # names only Microsoft.NETCore.App. Mirror the shared frameworks vanilla's own
+    # runtimeconfig names (Microsoft.WindowsDesktop.App for Eto.Wpf/PresentationFramework),
+    # or ShowMessageBox throws FileNotFoundException and hides the real startup error.
+    & (Join-Path $PSScriptRoot 'sync-runtimeconfig-frameworks.ps1') `
+        -LauncherConfig (Join-Path $stageDir 'Optimum.runtimeconfig.json') `
+        -VanillaConfig (Join-Path $stageDir 'Vintagestory.runtimeconfig.json')
+    if (-not $?) { throw 'Could not sync the launcher runtimeconfig frameworks with vanilla.' }
     # Managers that launch the game executable by its vanilla name
     # (StoryForge launches Vintagestory.exe directly) must get the Optimum
     # launcher, not a vanilla start. The apphost embeds the managed entry
