@@ -116,7 +116,6 @@ public sealed class CairoContextRecorderTests
 	[InlineData (Antialias.Subpixel)]
 	[InlineData (Antialias.Fast)]
 	[InlineData (Antialias.Good)]
-	[InlineData (Antialias.Best)]
 	public void UnsupportedAntialiasModesMaterializeBeforeNativeFill (Antialias antialias)
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);

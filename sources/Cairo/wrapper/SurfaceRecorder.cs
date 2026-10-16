@@ -25,7 +25,7 @@ namespace Cairo
 		readonly object sync = new object ();
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
-		bool antialiasExplicitlyDisabled;
+		bool antialiasSkiaCompatible;
 		bool hasUnsafeFilledPath;
 
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; }
@@ -56,15 +56,15 @@ namespace Cairo
 		internal bool RecordRectangle (double x, double y, double width, double height) => Add (new Command (CommandKind.Rectangle, x, y, width, height));
 		internal bool RecordFill ()
 		{
-			// Skia's boolean antialias switch cannot reproduce Cairo's default/gray/good/best
-			// rasterizers. Only seal filled paths after Cairo antialiasing was explicitly disabled.
-			if (!antialiasExplicitlyDisabled) return false;
+			// Skia's AA path is accepted only for Cairo's binary mode or the validated Best
+			// image-surface mapping. Other Cairo modes still use the native rasterizer.
+			if (!antialiasSkiaCompatible) return false;
 			return Add (new Command (CommandKind.Fill));
 		}
 		internal bool RecordSave ()
 		{
 			if (!Add (new Command (CommandKind.Save))) return false;
-			antialiasSaveStack.Push (antialiasExplicitlyDisabled);
+			antialiasSaveStack.Push (antialiasSkiaCompatible);
 			return true;
 		}
 		internal bool RecordRestore ()
@@ -72,14 +72,14 @@ namespace Cairo
 			// Let Cairo handle an unmatched restore immediately so it can set InvalidRestore.
 			if (antialiasSaveStack.Count == 0) return false;
 			if (!Add (new Command (CommandKind.Restore))) return false;
-			antialiasExplicitlyDisabled = antialiasSaveStack.Pop ();
+			antialiasSkiaCompatible = antialiasSaveStack.Pop ();
 			return true;
 		}
 		internal bool RecordAntialias (Antialias value)
 		{
-			if (value != Antialias.None) return false;
+			if (value != Antialias.None && value != Antialias.Best) return false;
 			if (!Add (new Command (CommandKind.SetAntialias, (double)value))) return false;
-			antialiasExplicitlyDisabled = true;
+			antialiasSkiaCompatible = true;
 			return true;
 		}
 		internal bool RecordOperator (Operator value)
@@ -92,7 +92,7 @@ namespace Cairo
 		{
 			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !Add (new Command (CommandKind.Fill)))
 				throw new InvalidOperationException ("Recorder is no longer recording.");
-			if (!antialiasExplicitlyDisabled) hasUnsafeFilledPath = true;
+			if (!antialiasSkiaCompatible) hasUnsafeFilledPath = true;
 		}
 
 		bool Add (Command command)
