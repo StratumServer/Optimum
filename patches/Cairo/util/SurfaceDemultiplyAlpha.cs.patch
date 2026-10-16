@@ -1,0 +1,69 @@
+diff --git a/Cairo/util/SurfaceDemultiplyAlpha.cs b/Cairo/util/SurfaceDemultiplyAlpha.cs
+index e36436f..16c0bc5 100644
+--- a/Cairo/util/SurfaceDemultiplyAlpha.cs
++++ b/Cairo/util/SurfaceDemultiplyAlpha.cs
+@@ -7,10 +7,13 @@ namespace Cairo
+     public static class SurfaceTransformDemulAlpha
+     {
+ 
+         public unsafe static void DemulAlpha(this ImageSurface surface)
+         {
++            // Optimum: a recording surface keeps this byte transform in its display list;
++            // the GPU path applies the same operation to the Skia result.
++            if (surface.RecordPixelStep("DemulAlpha", ApplyToPixels)) return;
+             int width = surface.Width;
+             int height = surface.Height;
+ 
+ 
+             // https://www.cairographics.org/manual-1.2.0/cairo-Image-Surfaces.html#cairo-format-t
+@@ -56,8 +59,50 @@ namespace Cairo
+ 
+             }
+ 
+             
+         }
++
++        // Optimum: the loop above on an explicit pixel buffer (stride = width * 4, as the
++        // original assumes), including its native-endian channel naming and overflow.
++        internal unsafe static void ApplyToPixels(IntPtr data, int width, int height, int stride)
++        {
++            int rShift = 0;
++            int gShift = 8;
++            int bShift = 16;
++            int aShift = 24;
++
++            if (BitConverter.IsLittleEndian)
++            {
++                rShift = 24;
++                gShift = 16;
++                bShift = 8;
++                aShift = 0;
++            }
++
++            uint* pixels = (uint*)data.ToPointer();
++
++            for (int x = 0; x < width; x++)
++            {
++                for (int y = 0; y < height; y++)
++                {
++                    int index = y * width + x;
++                    uint color = pixels[index];
++
++                    uint r = (color >> rShift) & 0xff;
++                    uint g = (color >> gShift) & 0xff;
++                    uint b = (color >> bShift) & 0xff;
++                    uint a = (color >> aShift) & 0xff;
++
++                    float arel = a / 255f;
++
++                    r = (uint)(r / arel);
++                    g = (uint)(g / arel);
++                    b = (uint)(b / arel);
++
++                    pixels[index] = (r << rShift) | (g << gShift) | (b << bShift) | (a << aShift);
++                }
++            }
++        }
+     }
+ 
+ }

@@ -28,14 +28,18 @@ public sealed class CairoRecorderParityTests
 	/// judged on a Gaussian-filtered (sigma 0.65 px) difference of at most 96 levels.
 	/// Uniform regions keep the one-level limit.
 	/// </summary>
-	internal static void AssertLocalAaParity (int width, int height, Action<Context> draw) => AssertParity (width, height, draw, localAa: true);
+	internal static void AssertLocalAaParity (int width, int height, Action<Context> draw) => AssertParity (width, height, (context, _) => draw (context), localAa: true);
+	internal static void AssertLocalAaParity (int width, int height, Action<Context, ImageSurface> draw) => AssertParity (width, height, draw, localAa: true);
 
 	internal static void AssertParity (int width, int height, Action<Context> draw, bool edgeAllowance = true, int flatTolerance = FlatTolerance, bool localAa = false)
+		=> AssertParity (width, height, (context, _) => draw (context), edgeAllowance, flatTolerance, localAa);
+
+	internal static void AssertParity (int width, int height, Action<Context, ImageSurface> draw, bool edgeAllowance = true, int flatTolerance = FlatTolerance, bool localAa = false)
 	{
 		byte[] expected = RenderNative (width, height, draw);
 		using var actual = new ImageSurface (Format.Argb32, width, height);
 		var recorder = actual.BeginRecording ();
-		using (var context = new Context (actual)) draw (context);
+		using (var context = new Context (actual)) draw (context, actual);
 		Assert.True (recorder.State == SurfaceRecordingState.Recording, "Recording stopped: " + recorder.FirstMaterializationTrigger);
 
 		byte[] skia = RenderSkia (actual, width, height);
@@ -67,10 +71,12 @@ public sealed class CairoRecorderParityTests
 		System.IO.File.WriteAllBytes (System.IO.Path.Combine (dir, name + "-" + width + "x" + height + ".png"), data.ToArray ());
 	}
 
-	internal static byte[] RenderNative (int width, int height, Action<Context> draw)
+	internal static byte[] RenderNative (int width, int height, Action<Context> draw) => RenderNative (width, height, (context, _) => draw (context));
+
+	internal static byte[] RenderNative (int width, int height, Action<Context, ImageSurface> draw)
 	{
 		using var expected = new ImageSurface (Format.Argb32, width, height);
-		using (var context = new Context (expected)) draw (context);
+		using (var context = new Context (expected)) draw (context, expected);
 		return expected.Data;
 	}
 

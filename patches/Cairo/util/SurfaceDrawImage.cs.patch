@@ -1,0 +1,60 @@
+diff --git a/Cairo/util/SurfaceDrawImage.cs b/Cairo/util/SurfaceDrawImage.cs
+index 5bbf9e4..ab59d9a 100644
+--- a/Cairo/util/SurfaceDrawImage.cs
++++ b/Cairo/util/SurfaceDrawImage.cs
+@@ -7,10 +7,27 @@ namespace Cairo;
+ public static class SurfaceDrawImage
+ {
+     public static unsafe void Image(this ImageSurface surface, SKBitmap bmp, int xPos, int yPos, int width, int height)
+     {
+         SKBitmap resized = ResizeImage(bmp, width, height);
++        if (surface.IsRecordingDisplayList)
++        {
++            // Optimum: keep the resized pixels and replay the original overlay loop on
++            // the display list's pixels.
++            int resizedWidth = resized.Width, resizedHeight = resized.Height;
++            var copy = new uint[resizedWidth * resizedHeight];
++            fixed (uint* target = copy)
++                System.Buffer.MemoryCopy(resized.GetPixels().ToPointer(), target, copy.Length * 4L, copy.Length * 4L);
++            if (surface.RecordPixelStep("Image", (data, surfaceWidth, surfaceHeight, stride) =>
++            {
++                fixed (uint* source = copy) Overlay((uint*)data.ToPointer(), surfaceWidth, surfaceHeight, source, resizedWidth, resizedHeight, xPos, yPos);
++            }))
++            {
++                resized.Dispose();
++                return;
++            }
++        }
+         var sourcePixels = (uint*)resized.GetPixels().ToPointer();
+         uint* destPixels = (uint*)surface.DataPtr.ToPointer();
+         int surfaceWidth = surface.Width;
+         int bitmapWidth = resized.Width;
+         int surfaceMaxIndex = surface.Width * surface.Height;
+@@ -28,10 +45,27 @@ public static class SurfaceDrawImage
+ 
+         resized.Dispose();
+         surface.MarkDirty();
+     }
+ 
++    // Optimum: the loop of Image() on explicit buffers.
++    static unsafe void Overlay(uint* destPixels, int surfaceWidth, int surfaceHeight, uint* sourcePixels, int bitmapWidth, int bitmapHeight, int xPos, int yPos)
++    {
++        int surfaceMaxIndex = surfaceWidth * surfaceHeight;
++        int destIndex, sourceIndex;
++        for (int x = 0; x < bitmapWidth; x++)
++        {
++            for (int y = 0; y < bitmapHeight; y++)
++            {
++                sourceIndex = y * bitmapWidth + x;
++                destIndex = (y + yPos) * surfaceWidth + x + xPos;
++                if (destIndex >= surfaceMaxIndex) continue;
++                    destPixels[destIndex] = ColorOverlay(destPixels[destIndex], sourcePixels[sourceIndex]);
++            }
++        }
++    }
++
+     public static uint ColorOverlay(uint rgbaBase, uint rgbaOver)
+     {
+         float aBase = ((rgbaBase >> 24) & 0xff) / 255f;
+         float aOver = ((rgbaOver >> 24) & 0xff) / 255f;
+ 
