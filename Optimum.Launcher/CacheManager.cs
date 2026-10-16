@@ -196,26 +196,66 @@ public sealed class CacheManager
     }
 
     /// <summary>
-    /// Saves the patched assembly bytes + PDB to the cache directory.
+    /// Atomically promotes a fully written patcher output into the cache.
     /// </summary>
-    public void SavePatchedAssembly(string assemblyName, byte[] dllBytes, byte[]? pdbBytes)
+    public void CommitPatchedAssembly(string assemblyName, string stagedDllPath)
     {
-        if (dllBytes is null || dllBytes.Length == 0)
-            throw new ArgumentException("The patched assembly cannot be empty.", nameof(dllBytes));
+        if (!File.Exists(stagedDllPath))
+            throw new FileNotFoundException("The staged patched assembly does not exist.", stagedDllPath);
+        if (new FileInfo(stagedDllPath).Length == 0)
+            throw new InvalidDataException($"The staged patched assembly is empty: {stagedDllPath}");
 
         var outputPath = Path.Combine(_cacheDir, assemblyName);
         Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-        WriteBytesAtomically(outputPath, dllBytes);
-
-        var pdbPath = Path.ChangeExtension(outputPath, ".pdb");
-        if (pdbBytes is not null && pdbBytes.Length > 0)
+        EnsureSameDirectory(stagedDllPath, outputPath);
+        try
         {
-            WriteBytesAtomically(pdbPath, pdbBytes);
+            File.Move(stagedDllPath, outputPath, true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException(
+                $"Could not promote staged assembly '{stagedDllPath}' to cache path '{outputPath}'.", ex);
+        }
+
+        var stagedPdbPath = Path.ChangeExtension(stagedDllPath, ".pdb");
+        var pdbPath = Path.ChangeExtension(outputPath, ".pdb");
+        if (File.Exists(stagedPdbPath))
+        {
+            try
+            {
+                File.Move(stagedPdbPath, pdbPath, true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new IOException(
+                    $"Could not promote staged symbols '{stagedPdbPath}' to cache path '{pdbPath}'.", ex);
+            }
         }
         else if (File.Exists(pdbPath))
         {
-            File.Delete(pdbPath);
+            try
+            {
+                File.Delete(pdbPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new IOException($"Could not remove stale cache symbols '{pdbPath}'.", ex);
+            }
         }
+    }
+
+    private static void EnsureSameDirectory(string stagedPath, string outputPath)
+    {
+        string stagedDirectory = Path.GetFullPath(Path.GetDirectoryName(stagedPath)!);
+        string outputDirectory = Path.GetFullPath(Path.GetDirectoryName(outputPath)!);
+        StringComparison comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!string.Equals(stagedDirectory, outputDirectory, comparison))
+            throw new ArgumentException(
+                $"Staged assembly '{stagedPath}' must be in the cache directory '{outputDirectory}' " +
+                "so it can be promoted atomically.", nameof(stagedPath));
     }
 
     public string GetCachedPath(string assemblyName) =>
@@ -225,21 +265,6 @@ public sealed class CacheManager
     {
         var json = JsonSerializer.Serialize(manifest, JsonOpts);
         WriteTextAtomically(ManifestPath, json);
-    }
-
-    private static void WriteBytesAtomically(string path, byte[] bytes)
-    {
-        var temporaryPath = $"{path}.tmp-{Guid.NewGuid():N}";
-        try
-        {
-            File.WriteAllBytes(temporaryPath, bytes);
-            File.Move(temporaryPath, path, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
     }
 
     private static void WriteTextAtomically(string path, string contents)

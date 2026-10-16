@@ -24,7 +24,8 @@ public static class PatchEngine
 
     /// <summary>
     /// Patches a vanilla assembly using the Optimum.Patcher executable.
-    /// Returns the patched bytes (DLL + PDB) or throws on failure.
+    /// Writes the patched DLL (and optional PDB) to <paramref name="outputDllPath"/>
+    /// or throws on failure.
     ///
     /// In Phase 1 (MVP), this invokes Optimum.Patcher as a subprocess:
     ///   Optimum.Patcher {vanillaPath} {compiledPath} {outputPath}
@@ -134,20 +135,18 @@ public static class PatchEngine
                 $"stdout: {stdout}\nstderr: {stderr}");
         }
 
-        // Read the output DLL + PDB
+        // Ensure the patcher produced a usable output before reporting success.
         if (!File.Exists(outputDllPath))
             throw new PatchFailedException($"Patcher did not produce output: {outputDllPath}");
-
-        var dllBytes = File.ReadAllBytes(outputDllPath);
-        var pdbPath = outputPdbPath;
-        var pdbBytes = File.Exists(pdbPath) ? File.ReadAllBytes(pdbPath) : null;
+        if (new FileInfo(outputDllPath).Length == 0)
+            throw new PatchFailedException($"Patcher produced an empty output: {outputDllPath}");
 
         // Parse stdout for patch count
         int patchCount = ParsePatchCount(stdout);
 
         progress?.Report(new PatchProgress(1, 1, "Done."));
 
-        return new PatchResult(dllBytes, pdbBytes, patchCount);
+        return new PatchResult(patchCount);
     }
 
     /// <summary>
@@ -192,7 +191,7 @@ public static class PatchEngine
 }
 
 /// <summary>Result of a successful patch operation.</summary>
-public record PatchResult(byte[] DllBytes, byte[]? PdbBytes, int PatchCount);
+public record PatchResult(int PatchCount);
 
 /// <summary>Thrown when the Cecil patcher fails.</summary>
 public sealed class PatchFailedException : Exception
