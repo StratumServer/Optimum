@@ -19,6 +19,9 @@ namespace Cairo
 	/// <summary>Immutable command stream for a newly-created ARGB32 image surface.</summary>
 	internal sealed class SurfaceRecorder
 	{
+		// Observers are diagnostic-only and must never run while the recorder lock is held.
+		internal static event Action<string, bool> MaterializationCompleted;
+
 		readonly Surface surface;
 		readonly List<Command> commands = new List<Command> ();
 		readonly Stack<bool> antialiasSaveStack = new Stack<bool> ();
@@ -120,9 +123,14 @@ namespace Cairo
 
 		internal void Materialize (IntPtr contextHandle = default)
 		{
+			string trigger = null;
+			ExceptionDispatchInfo materializationFailure = null;
+			bool attempted = false;
 			lock (sync) {
 				if (state == SurfaceRecordingState.Failed) failure.Throw ();
 				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return;
+				attempted = true;
+				trigger = firstMaterializationTrigger ?? "Unknown";
 				try {
 					IntPtr native = surface.NativeHandleForRecorder;
 					ThrowIfError (NativeMethods.cairo_surface_status (native), "surface before replay");
@@ -141,9 +149,17 @@ namespace Cairo
 					commands.Clear ();
 					failure = ExceptionDispatchInfo.Capture (exception);
 					state = SurfaceRecordingState.Failed;
-					throw;
+					materializationFailure = failure;
 				}
 			}
+
+			// This is one event per first replay attempt, including failed replay. Later
+			// reads see NativeMaterialized or Failed and do not report a second event.
+			if (attempted) {
+				try { MaterializationCompleted?.Invoke (trigger, materializationFailure == null); }
+				catch { /* Diagnostics must not change Cairo behavior. */ }
+			}
+			materializationFailure?.Throw ();
 		}
 
 		internal void DisposeFromSurface ()

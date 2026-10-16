@@ -1,13 +1,19 @@
 using System;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Cairo;
 using SkiaSharp;
+using Vintagestory.API.Config;
 using Xunit;
 
+[CollectionDefinition("Cairo materialization metrics", DisableParallelization = true)]
+public sealed class CairoMaterializationMetricsCollection { }
+
+[Collection("Cairo materialization metrics")]
 public sealed class CairoSurfaceRecorderTests
 {
-	static CairoSurfaceRecorderTests () { _ = CairoAPI.Version; }
+	static CairoSurfaceRecorderTests () { _ = CairoAPI.Version; _ = typeof (Vintagestory.API.Client.ICoreClientAPI).Assembly; }
 
 	[Fact]
 	public void ReplayMaterializesRecordedPrefixAndAllowsNativeDrawing()
@@ -197,6 +203,111 @@ public sealed class CairoSurfaceRecorderTests
 			Assert.Equal (expectedTrigger, recorder.FirstMaterializationTrigger);
 			Assert.Equal (expected.Data, surface.Data);
 		}
+	}
+
+	[Fact]
+	public void MaterializationDiagnosticsCountActualReplayOnceWithoutUpload()
+	{
+		using var observer = SubscribeMaterializationMetricsForTest ();
+		bool wasEnabled = OptimumGuiMetrics.Enabled;
+		try {
+			OptimumGuiMetrics.Enabled = true;
+			OptimumGuiMetrics.Reset ();
+			using var surface = new ImageSurface (Format.Argb32, 8, 8);
+			surface.BeginRecording ().FillRectangle (1, 1, 4, 4, .2, .5, .8, 1);
+			_ = surface.DataPtr;
+			_ = surface.Data;
+
+			var snapshot = OptimumGuiMetrics.Snapshot ();
+			Assert.Equal (1, snapshot.MaterializationAttemptCount);
+			Assert.Equal (1, snapshot.MaterializationSuccessCount);
+			Assert.Equal (0, snapshot.MaterializationFailureCount);
+			Assert.Equal (1, OptimumGuiMetrics.GetMaterializationDiagnostics ()["SurfaceCpuReadback.DataPtr"]);
+		} finally {
+			OptimumGuiMetrics.Reset ();
+			OptimumGuiMetrics.Enabled = wasEnabled;
+		}
+	}
+
+	[Fact]
+	public void MaterializationDiagnosticsCountGpuReadbackAndFailedReplayExactlyOnce()
+	{
+		using var observer = SubscribeMaterializationMetricsForTest ();
+		bool wasEnabled = OptimumGuiMetrics.Enabled;
+		try {
+			OptimumGuiMetrics.Enabled = true;
+			OptimumGuiMetrics.Reset ();
+			using (var surface = new ImageSurface (Format.Argb32, 8, 8)) {
+				var recorder = surface.BeginRecording ();
+				Assert.True (recorder.RecordAntialias (Antialias.None));
+				recorder.FillRectangle (1, 1, 4, 4, .2, .5, .8, 1);
+				using var bitmap = new SKBitmap (8, 8, SKColorType.Rgba8888, SKAlphaType.Premul);
+				using (var canvas = new SKCanvas (bitmap)) Assert.True (surface.TryDrawRecordedCommands (canvas));
+				Assert.True (surface.CommitGpuRenderedCommands ());
+				_ = surface.Data;
+				_ = surface.DataPtr;
+			}
+
+			using (var failed = new ImageSurface (Format.Argb32, 4, 4)) {
+				failed.BeginRecording ().FillRectangle (0, 0, 2, 2, 1, 0, 0, 1);
+				NativeMethods.cairo_surface_finish (failed.NativeHandleForRecorder);
+				Assert.NotNull (Record.Exception (() => _ = failed.Handle));
+				Assert.NotNull (Record.Exception (() => _ = failed.DataPtr));
+			}
+
+			var snapshot = OptimumGuiMetrics.Snapshot ();
+			Assert.Equal (2, snapshot.MaterializationAttemptCount);
+			Assert.Equal (1, snapshot.MaterializationSuccessCount);
+			Assert.Equal (1, snapshot.MaterializationFailureCount);
+			var causes = OptimumGuiMetrics.GetMaterializationDiagnostics ();
+			Assert.Equal (1, causes["SurfaceCpuReadback.Data"]);
+			Assert.Equal (1, causes["Surface.Handle"]);
+		} finally {
+			OptimumGuiMetrics.Reset ();
+			OptimumGuiMetrics.Enabled = wasEnabled;
+		}
+	}
+
+	[Fact]
+	public void MaterializationDiagnosticsBoundTriggerKindsAndReset()
+	{
+		using var observer = SubscribeMaterializationMetricsForTest ();
+		bool wasEnabled = OptimumGuiMetrics.Enabled;
+		try {
+			OptimumGuiMetrics.Enabled = true;
+			OptimumGuiMetrics.Reset ();
+			for (int i = 0; i < 35; i++) {
+				using var surface = new ImageSurface (Format.Argb32, 2, 2);
+				surface.BeginRecording ().FillRectangle (0, 0, 1, 1, 1, 0, 0, 1);
+				surface.MaterializeRecorder (IntPtr.Zero, "cause-" + i, "test");
+			}
+			var causes = OptimumGuiMetrics.GetMaterializationDiagnostics ();
+			Assert.Equal (33, causes.Count); // 32 explicit keys plus the bounded overflow bucket.
+			Assert.Equal (3, causes["other-trigger-kinds"]);
+			Assert.Equal (35, OptimumGuiMetrics.MaterializationAttemptCount);
+			OptimumGuiMetrics.ResetMaterializationDiagnostics ();
+			Assert.Empty (OptimumGuiMetrics.GetMaterializationDiagnostics ());
+			Assert.Equal (0, OptimumGuiMetrics.MaterializationAttemptCount);
+		} finally {
+			OptimumGuiMetrics.Reset ();
+			OptimumGuiMetrics.Enabled = wasEnabled;
+		}
+	}
+
+	private static IDisposable SubscribeMaterializationMetricsForTest ()
+	{
+		Type recorderType = typeof (ImageSurface).Assembly.GetType ("Cairo.SurfaceRecorder", throwOnError: true)!;
+		EventInfo materialized = recorderType.GetEvent ("MaterializationCompleted", BindingFlags.Static | BindingFlags.NonPublic)!;
+		var callback = (Action<string, bool>)typeof (OptimumGuiMetrics)
+			.GetMethod ("RecordMaterialization", BindingFlags.Static | BindingFlags.NonPublic)!
+			.CreateDelegate (typeof (Action<string, bool>));
+		materialized.GetAddMethod (nonPublic: true)!.Invoke (null, [callback]);
+		return new MaterializationMetricsObserver(materialized.GetRemoveMethod (nonPublic: true)!, callback);
+	}
+
+	private sealed class MaterializationMetricsObserver (MethodInfo remove, Action<string, bool> callback) : IDisposable
+	{
+		public void Dispose () => remove.Invoke (null, [callback]);
 	}
 
 	[Fact]
