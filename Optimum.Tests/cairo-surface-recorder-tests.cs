@@ -87,14 +87,14 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
-	public void DefaultAntialiasSurfaceHelperCannotBeSealedForSkia()
+	public void DefaultAntialiasSurfaceHelperRendersWithinEdgeTolerance()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
 		var recorder = actual.BeginRecording ();
 		recorder.FillRectangle (1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
-		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
-		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
-		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		byte[] skia = CairoRecorderParityTests.RenderSkia (actual, 16, 12);
+		Assert.True (actual.CommitGpuRenderedCommands ());
+		CairoRecorderParityTests.AssertWithinTolerance (CairoRecorderParityTests.RenderNative (16, 12, context => DrawNativeRectangle (context, 1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1)), skia, 16, 12, edgeAllowance: true);
 
 		using var expected = new ImageSurface (Format.Argb32, 16, 12);
 		using (var context = new Context (expected)) DrawNativeRectangle (context, 1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
@@ -141,7 +141,7 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
-	public void UnbalancedSaveCannotBeSealedForSkia()
+	public void UnbalancedSaveStillSealsAndMatchesCairo()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
 		var recorder = actual.BeginRecording ();
@@ -153,9 +153,12 @@ public sealed class CairoSurfaceRecorderTests
 			context.Fill ();
 		}
 
+		// The native context owns the save stack; the display list holds self-contained
+		// drawings, so an unmatched Save at the end changes nothing Cairo would draw.
 		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
-		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
-		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.True (actual.CommitGpuRenderedCommands ());
 
 		using var expected = new ImageSurface (Format.Argb32, 16, 12);
 		using (var context = new Context (expected)) {

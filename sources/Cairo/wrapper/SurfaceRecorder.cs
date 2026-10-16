@@ -17,25 +17,185 @@ namespace Cairo
 		Disposed
 	}
 
-	/// <summary>Immutable command stream for a newly-created ARGB32 image surface.</summary>
+	/// <summary>
+	/// One immutable display-list entry. Native replay must reproduce the exact Cairo
+	/// output of the original call; Skia replay must stay within the GUI parity tolerance.
+	/// </summary>
+	internal abstract class RecordedCommand
+	{
+		internal abstract void ReplayNative (RecordedNativeReplay replay);
+		internal abstract void DrawSkia (RecordedSkiaReplay replay);
+	}
+
+	internal sealed class RecordedNativeReplay
+	{
+		internal readonly IntPtr Context;
+		internal readonly IntPtr Surface;
+		internal readonly int Width, Height;
+		readonly Func<Context> wrapper;
+		Context managed;
+		internal RecordedNativeReplay (IntPtr context, IntPtr surface, int width, int height, Func<Context> wrapper)
+		{ Context = context; Surface = surface; Width = width; Height = height; this.wrapper = wrapper; }
+		/// <summary>A non-recording managed wrapper over the replay context, for legacy native callbacks.</summary>
+		internal Context Managed => managed ??= wrapper ();
+	}
+
+	/// <summary>Skia replay target. Pixel steps read back and rewrite the target surface.</summary>
+	internal sealed class RecordedSkiaReplay
+	{
+		internal readonly SKSurface Target;
+		internal readonly int Width, Height;
+		internal readonly int Depth;
+		// Rendered images of nested recording sources, shared by one root replay and
+		// disposed when it ends. GPU images never outlive the candidate's GRContext.
+		internal readonly Dictionary<SurfaceRecorderSnapshot, SKImage> Sources;
+		internal RecordedSkiaReplay (SKSurface target, int width, int height, int depth, Dictionary<SurfaceRecorderSnapshot, SKImage> sources)
+		{ Target = target; Width = width; Height = height; Depth = depth; Sources = sources; }
+		internal SKCanvas Canvas => Target.Canvas;
+
+		internal SKSurface CreateOffscreen (int width, int height)
+		{
+			var info = new SKImageInfo (width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+			GRRecordingContext gpu = Target.Context;
+			SKSurface result = gpu != null ? SKSurface.Create (gpu, false, info) : SKSurface.Create (info);
+			if (result == null) throw new InvalidOperationException ("Skia could not create an offscreen GUI surface.");
+			return result;
+		}
+
+		/// <summary>Reads the target as Cairo-layout premultiplied BGRA (stride = width * 4), runs a
+		/// managed pixel operation and writes the exact bytes back.</summary>
+		internal unsafe void ApplyPixels (RecordedPixelOperation operation, bool readBack = true)
+		{
+			if (Width <= 0 || Height <= 0) return;
+			var info = new SKImageInfo (Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+			byte[] pixels = new byte[checked(Width * Height * 4)];
+			fixed (byte* data = pixels) {
+				if (readBack && !Target.ReadPixels (info, (IntPtr)data, Width * 4, 0, 0))
+					throw new InvalidOperationException ("Skia could not read back the GUI surface for a pixel operation.");
+				operation ((IntPtr)data, Width, Height, Width * 4);
+				using (SKImage image = SKImage.FromPixelCopy (info, (IntPtr)data, Width * 4))
+				using (var paint = new SKPaint { BlendMode = SKBlendMode.Src, IsAntialias = false }) {
+					if (image == null) throw new InvalidOperationException ("Skia could not create the pixel operation image.");
+					SKCanvas canvas = Target.Canvas;
+					int save = canvas.Save ();
+					try {
+						canvas.ResetMatrix ();
+						canvas.DrawImage (image, 0, 0, new SKSamplingOptions (SKFilterMode.Nearest), paint);
+					} finally { canvas.RestoreToCount (save); }
+				}
+			}
+		}
+	}
+
+	/// <summary>A pixel operation over Cairo's native-endian premultiplied ARGB32 layout.</summary>
+	internal delegate void RecordedPixelOperation (IntPtr pixels, int width, int height, int stride);
+
+	/// <summary>Managed CPU pixel transform from the game's Cairo utilities (blur, demultiply,
+	/// image overlay, SVG overlay). It reproduces the original byte operation exactly on both paths.</summary>
+	internal sealed class RecordedPixelStep : RecordedCommand
+	{
+		readonly RecordedPixelOperation operation;
+		readonly bool readBack;
+		internal readonly string Name;
+		internal RecordedPixelStep (string name, RecordedPixelOperation operation, bool readBack = true)
+		{ Name = name; this.operation = operation ?? throw new ArgumentNullException (nameof (operation)); this.readBack = readBack; }
+
+		internal override void ReplayNative (RecordedNativeReplay replay)
+		{
+			NativeMethods.cairo_surface_flush (replay.Surface);
+			IntPtr data = NativeMethods.cairo_image_surface_get_data (replay.Surface);
+			int stride = NativeMethods.cairo_image_surface_get_stride (replay.Surface);
+			if (data == IntPtr.Zero) throw new InvalidOperationException ("Cairo replay surface has no pixel data.");
+			operation (data, replay.Width, replay.Height, stride);
+			NativeMethods.cairo_surface_mark_dirty (replay.Surface);
+		}
+
+		internal override void DrawSkia (RecordedSkiaReplay replay) => replay.ApplyPixels (operation, readBack);
+	}
+
+	/// <summary>An operation whose Skia form differs from its legacy native replay (for example
+	/// SVG drawing, whose native replay is the original NanoSVG route).</summary>
+	internal sealed class RecordedLegacyStep : RecordedCommand
+	{
+		readonly Action<Context> nativeReplay;
+		readonly RecordedPixelOperation skiaOperation;
+		readonly bool readBack;
+		internal RecordedLegacyStep (Action<Context> nativeReplay, RecordedPixelOperation skiaOperation, bool readBack = true)
+		{
+			this.nativeReplay = nativeReplay ?? throw new ArgumentNullException (nameof (nativeReplay));
+			this.skiaOperation = skiaOperation ?? throw new ArgumentNullException (nameof (skiaOperation));
+			this.readBack = readBack;
+		}
+		internal override void ReplayNative (RecordedNativeReplay replay) => nativeReplay (replay.Managed);
+		internal override void DrawSkia (RecordedSkiaReplay replay) => replay.ApplyPixels (skiaOperation, readBack);
+	}
+
+	/// <summary>Display list for a newly-created ARGB32 image surface.</summary>
 	internal sealed class SurfaceRecorder
 	{
 		// Observers are diagnostic-only and must never run while the recorder lock is held.
 		internal static event Action<string, bool> MaterializationCompleted;
 
+		// Recording surfaces keyed by their native handle. Native consumers of a pattern
+		// (and the pattern capture in RecordedDrawing) resolve a native surface back to its
+		// display list through this registry. Orphaned recorders hold their own native
+		// reference so that the key cannot be reused while it is registered.
+		static readonly Dictionary<IntPtr, SurfaceRecorder> registry = new Dictionary<IntPtr, SurfaceRecorder> ();
+
 		readonly Surface surface;
-		readonly List<Command> commands = new List<Command> ();
-		readonly Stack<bool> antialiasSaveStack = new Stack<bool> ();
+		readonly IntPtr native;
+		readonly List<RecordedCommand> commands = new List<RecordedCommand> ();
 		readonly object sync = new object ();
+		internal readonly int Width, Height;
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
 		string firstMaterializationTrigger;
-		bool antialiasSkiaCompatible;
-		bool hasUnsafeFilledPath;
+		bool orphaned;
+		// Antialias for the internal FillRectangle helper (tests and direct helpers).
+		Antialias helperAntialias = Antialias.Default;
 
-		internal SurfaceRecorder (Surface surface) { this.surface = surface; }
+		internal SurfaceRecorder (Surface surface, IntPtr native, int width, int height)
+		{
+			this.surface = surface; this.native = native; Width = width; Height = height;
+			lock (registry) { Prune (); registry[native] = this; }
+		}
+
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
 		internal string FirstMaterializationTrigger { get { lock (sync) return firstMaterializationTrigger; } }
+		internal IntPtr NativeSurface => native;
+		internal bool IsOrphaned { get { lock (sync) return orphaned; } }
+
+		internal static SurfaceRecorder Lookup (IntPtr nativeSurface)
+		{
+			if (nativeSurface == IntPtr.Zero) return null;
+			lock (registry) {
+				Prune ();
+				return registry.TryGetValue (nativeSurface, out SurfaceRecorder recorder) ? recorder : null;
+			}
+		}
+
+		static void Prune ()
+		{
+			List<IntPtr> released = null;
+			foreach (var entry in registry) {
+				SurfaceRecorder recorder = entry.Value;
+				if (recorder.IsOrphaned && NativeMethods.cairo_surface_get_reference_count (entry.Key) <= 1)
+					(released ??= new List<IntPtr> ()).Add (entry.Key);
+			}
+			if (released == null) return;
+			foreach (IntPtr key in released) {
+				SurfaceRecorder recorder = registry[key];
+				registry.Remove (key);
+				recorder.ReleaseOrphan ();
+			}
+		}
+
+		void Unregister ()
+		{
+			lock (registry) {
+				if (registry.TryGetValue (native, out SurfaceRecorder current) && ReferenceEquals (current, this)) registry.Remove (native);
+			}
+		}
 
 		internal void SetFirstMaterializationTrigger (string trigger)
 		{
@@ -50,9 +210,9 @@ namespace Cairo
 		{
 			surface.EnsureRecordingOwnerThread ();
 			lock (sync) {
-				if (state != SurfaceRecordingState.Recording || hasUnsafeFilledPath || antialiasSaveStack.Count != 0) { snapshot = null; return false; }
+				if (state != SurfaceRecordingState.Recording) { snapshot = null; return false; }
 				state = SurfaceRecordingState.Sealed;
-				snapshot = new SurfaceRecorderSnapshot (commands.ToArray ());
+				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), Width, Height);
 				return true;
 			}
 		}
@@ -66,58 +226,24 @@ namespace Cairo
 			}
 		}
 
-		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => Add (new Command (CommandKind.SetSourceRGBA, r, g, b, a));
-		internal bool RecordPaint () => Add (new Command (CommandKind.Paint));
-		internal bool RecordRectangle (double x, double y, double width, double height) => Add (new Command (CommandKind.Rectangle, x, y, width, height));
-		internal bool RecordFill ()
+		/// <summary>Immutable copy of the current display list, used when another recording
+		/// draws this surface as a pattern source.</summary>
+		internal SurfaceRecorderSnapshot CaptureSnapshot ()
 		{
-			// Skia's AA path is accepted only for Cairo's binary mode or the validated Best
-			// image-surface mapping. Other Cairo modes still use the native rasterizer.
-			if (!antialiasSkiaCompatible) return false;
-			return Add (new Command (CommandKind.Fill));
+			lock (sync) {
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null;
+				// The list is append-only, so an unchanged count means an identical snapshot;
+				// sharing it lets one replay render the source once.
+				if (lastSnapshot == null || lastSnapshot.Count != commands.Count)
+					lastSnapshot = new SurfaceRecorderSnapshot (commands.ToArray (), Width, Height);
+				return lastSnapshot;
+			}
 		}
-		internal bool RecordSave ()
-		{
-			if (!Add (new Command (CommandKind.Save))) return false;
-			antialiasSaveStack.Push (antialiasSkiaCompatible);
-			return true;
-		}
-		internal bool RecordRestore ()
-		{
-			// Let Cairo handle an unmatched restore immediately so it can set InvalidRestore.
-			if (antialiasSaveStack.Count == 0) return false;
-			if (!Add (new Command (CommandKind.Restore))) return false;
-			antialiasSkiaCompatible = antialiasSaveStack.Pop ();
-			return true;
-		}
-		internal bool RecordAntialias (Antialias value)
-		{
-			if (value != Antialias.None && value != Antialias.Best) return false;
-			if (!Add (new Command (CommandKind.SetAntialias, (double)value))) return false;
-			antialiasSkiaCompatible = true;
-			return true;
-		}
-		internal bool RecordOperator (Operator value)
-		{
-			if (value != Operator.Over && value != Operator.Source) return false;
-			return Add (new Command (CommandKind.SetOperator, (double)value));
-		}
-		internal bool RecordPicture (SKPicture picture, int x, int y, Action<Context> nativeReplay)
-		{
-			if (picture == null) throw new ArgumentNullException (nameof (picture));
-			if (nativeReplay == null) throw new ArgumentNullException (nameof (nativeReplay));
-			return Add (new Command (CommandKind.Picture, x, y, picture: picture, nativeReplay: nativeReplay));
-		}
+		SurfaceRecorderSnapshot lastSnapshot;
 
-		internal void FillRectangle (double x, double y, double width, double height, double red, double green, double blue, double alpha)
+		internal bool Add (RecordedCommand command)
 		{
-			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !Add (new Command (CommandKind.Fill)))
-				throw new InvalidOperationException ("Recorder is no longer recording.");
-			if (!antialiasSkiaCompatible) hasUnsafeFilledPath = true;
-		}
-
-		bool Add (Command command)
-		{
+			if (command == null) throw new ArgumentNullException (nameof (command));
 			surface.EnsureRecordingOwnerThread ();
 			lock (sync) {
 				if (state == SurfaceRecordingState.Disposed) throw new ObjectDisposedException (nameof (SurfaceRecorder));
@@ -128,7 +254,32 @@ namespace Cairo
 			}
 		}
 
-		internal void Materialize (IntPtr contextHandle = default)
+		internal bool RecordAntialias (Antialias value)
+		{
+			lock (sync) {
+				if (state != SurfaceRecordingState.Recording) return false;
+				helperAntialias = value;
+				return true;
+			}
+		}
+
+		internal bool RecordPicture (SKPicture picture, int x, int y, Action<Context> nativeReplay)
+		{
+			if (picture == null) throw new ArgumentNullException (nameof (picture));
+			if (nativeReplay == null) throw new ArgumentNullException (nameof (nativeReplay));
+			return Add (new RecordedPicture (picture, x, y, nativeReplay));
+		}
+
+		/// <summary>Internal helper: fills an axis-aligned rectangle with a solid colour
+		/// using Over and the helper antialias, exactly like the equivalent Cairo calls.</summary>
+		internal void FillRectangle (double x, double y, double width, double height, double red, double green, double blue, double alpha)
+		{
+			RecordedDrawing drawing = RecordedDrawing.SolidRectangle (x, y, width, height, red, green, blue, alpha, helperAntialias);
+			if (drawing == null || !Add (drawing))
+				throw new InvalidOperationException ("Recorder is no longer recording.");
+		}
+
+		internal void Materialize ()
 		{
 			string trigger = null;
 			ExceptionDispatchInfo materializationFailure = null;
@@ -143,27 +294,20 @@ namespace Cairo
 				// the command list has replayed once.
 				state = SurfaceRecordingState.Materializing;
 				try {
-					IntPtr native = surface.NativeHandleForRecorder;
 					ThrowIfError (NativeMethods.cairo_surface_status (native), "surface before replay");
-					IntPtr replayHandle = contextHandle == IntPtr.Zero ? NativeMethods.cairo_create (native) : contextHandle;
-					using (var context = new Context (replayHandle, contextHandle == IntPtr.Zero)) {
-						ThrowIfError (context.Status, "context creation");
-						for (int i = 0; i < commands.Count; i++) {
-							commands[i].Replay (context);
-							ThrowIfError (context.Status, "command replay");
-							ThrowIfError (NativeMethods.cairo_surface_status (native), "surface replay");
-						}
-					}
-					DisposePictures (commands);
+					ReplayInto (commands, native, Width, Height);
 					commands.Clear ();
 					state = SurfaceRecordingState.NativeMaterialized;
 				} catch (Exception exception) {
-					DisposePictures (commands);
 					commands.Clear ();
 					failure = ExceptionDispatchInfo.Capture (exception);
 					state = SurfaceRecordingState.Failed;
 					materializationFailure = failure;
 				}
+			}
+			if (attempted) {
+				Unregister ();
+				if (orphaned) ReleaseOrphan ();
 			}
 
 			// This is one event per first replay attempt, including failed replay. Later
@@ -175,116 +319,157 @@ namespace Cairo
 			materializationFailure?.Throw ();
 		}
 
-		internal void DisposeFromSurface ()
+		/// <summary>Replays a command list into a native surface with a fresh Cairo context.
+		/// The live recording context keeps its own native state untouched.</summary>
+		internal static void ReplayInto (IList<RecordedCommand> list, IntPtr nativeSurface, int width, int height)
 		{
-			lock (sync) { DisposePictures (commands); commands.Clear (); state = SurfaceRecordingState.Disposed; }
-		}
-
-		static void DisposePictures (List<Command> source)
-		{
-			for (int i = 0; i < source.Count; i++) source[i].Picture?.Dispose ();
-		}
-
-		static void ThrowIfError (Status status, string phase)
-		{
-			if (status != Status.Success) throw new InvalidOperationException ("Cairo " + phase + " failed with status " + status + ".");
-		}
-
-		internal readonly struct Command
-		{
-			internal readonly CommandKind Kind;
-			internal readonly double A, B, C, D;
-			internal readonly SKPicture Picture;
-			internal readonly Action<Context> NativeReplay;
-			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0, SKPicture picture = null, Action<Context> nativeReplay = null)
-			{ Kind = kind; A = a; B = b; C = c; D = d; Picture = picture; NativeReplay = nativeReplay; }
-			internal void Replay (Context context)
-			{
-				switch (Kind) {
-				case CommandKind.SetSourceRGBA: context.SetSourceRGBA (A, B, C, D); break;
-				case CommandKind.Paint: context.Paint (); break;
-				case CommandKind.Rectangle: context.Rectangle (A, B, C, D); break;
-				case CommandKind.Fill: context.Fill (); break;
-				case CommandKind.Save: context.Save (); break;
-				case CommandKind.Restore: context.Restore (); break;
-				case CommandKind.SetAntialias: context.Antialias = (Antialias)A; break;
-				case CommandKind.SetOperator: context.Operator = (Operator)A; break;
-				case CommandKind.Picture: NativeReplay (context); break;
+			IntPtr cr = NativeMethods.cairo_create (nativeSurface);
+			Context wrapper = null;
+			try {
+				ThrowIfError (NativeMethods.cairo_status (cr), "context creation");
+				var replay = new RecordedNativeReplay (cr, nativeSurface, width, height, () => wrapper = new Context (cr, false));
+				for (int i = 0; i < list.Count; i++) {
+					list[i].ReplayNative (replay);
+					ThrowIfError (NativeMethods.cairo_status (cr), "command replay");
+					ThrowIfError (NativeMethods.cairo_surface_status (nativeSurface), "surface replay");
 				}
+			} finally {
+				wrapper?.Dispose ();
+				NativeMethods.cairo_destroy (cr);
 			}
 		}
 
-		internal enum CommandKind { SetSourceRGBA, Paint, Rectangle, Fill, Save, Restore, SetAntialias, SetOperator, Picture }
+		/// <summary>The managed surface wrapper is gone but native references remain. Keep
+		/// the display list (and a native reference) until the last external reference is
+		/// released or a native consumer requires the pixels.</summary>
+		internal void Orphan ()
+		{
+			lock (sync) {
+				if (orphaned || (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered)) return;
+				NativeMethods.cairo_surface_reference (native);
+				orphaned = true;
+			}
+		}
+
+		void ReleaseOrphan ()
+		{
+			lock (sync) {
+				if (!orphaned) return;
+				orphaned = false;
+				if (state == SurfaceRecordingState.Recording || state == SurfaceRecordingState.Sealed || state == SurfaceRecordingState.GpuRendered) {
+					commands.Clear ();
+					state = SurfaceRecordingState.Disposed;
+				}
+			}
+			NativeMethods.cairo_surface_destroy (native);
+		}
+
+		internal void DisposeFromSurface ()
+		{
+			lock (sync) {
+				if (orphaned) return;
+				commands.Clear ();
+				state = SurfaceRecordingState.Disposed;
+			}
+			Unregister ();
+		}
+
+		internal static void ThrowIfError (Status status, string phase)
+		{
+			if (status != Status.Success) throw new InvalidOperationException ("Cairo " + phase + " failed with status " + status + ".");
+		}
+	}
+
+	/// <summary>Legacy SVG picture command; Skia draws the picture, native replay runs NanoSVG.</summary>
+	internal sealed class RecordedPicture : RecordedCommand
+	{
+		readonly SKPicture picture;
+		readonly int x, y;
+		readonly Action<Context> nativeReplay;
+		internal RecordedPicture (SKPicture picture, int x, int y, Action<Context> nativeReplay)
+		{ this.picture = picture; this.x = x; this.y = y; this.nativeReplay = nativeReplay; }
+		internal override void ReplayNative (RecordedNativeReplay replay) => nativeReplay (replay.Managed);
+		internal override void DrawSkia (RecordedSkiaReplay replay)
+		{
+			SKCanvas canvas = replay.Canvas;
+			int save = canvas.Save ();
+			try {
+				canvas.ResetMatrix ();
+				canvas.Translate (x, y);
+				canvas.DrawPicture (picture);
+			} finally { canvas.RestoreToCount (save); }
+		}
 	}
 
 	internal sealed class SurfaceRecorderSnapshot
 	{
-		readonly SurfaceRecorder.Command[] commands;
-		internal SurfaceRecorderSnapshot (SurfaceRecorder.Command[] commands) { this.commands = commands; }
+		readonly RecordedCommand[] commands;
+		internal readonly int Width, Height;
+		/// <summary>Nesting depth of recording surfaces used as sources (0 = none).</summary>
+		internal readonly int Depth;
+		internal SurfaceRecorderSnapshot (RecordedCommand[] commands, int width, int height)
+		{
+			this.commands = commands; Width = width; Height = height;
+			int depth = 0;
+			foreach (RecordedCommand command in commands)
+				if (command is RecordedDrawing drawing && drawing.Source is RecordedSurfaceSource source && source.Recording != null)
+					depth = Math.Max (depth, source.Recording.Depth + 1);
+			Depth = depth;
+		}
+		internal int Count => commands.Length;
 
+		internal void DrawTo (SKSurface target)
+		{
+			var sources = new Dictionary<SurfaceRecorderSnapshot, SKImage> ();
+			try { DrawTo (target, 0, sources); }
+			finally { foreach (SKImage image in sources.Values) image.Dispose (); }
+		}
+
+		void DrawTo (SKSurface target, int depth, Dictionary<SurfaceRecorderSnapshot, SKImage> sources)
+		{
+			if (target == null) throw new ArgumentNullException (nameof (target));
+			if (depth > RecordedDrawing.MaxSourceDepth) throw new NotSupportedException ("Recorded surface sources are nested too deeply.");
+			SKCanvas canvas = target.Canvas;
+			int save = canvas.Save ();
+			try {
+				canvas.ResetMatrix ();
+				canvas.Clear (SKColors.Transparent);
+				var replay = new RecordedSkiaReplay (target, Width, Height, depth, sources);
+				for (int i = 0; i < commands.Length; i++) commands[i].DrawSkia (replay);
+			} finally { canvas.RestoreToCount (save); }
+		}
+
+		/// <summary>Renders this snapshot as an image for use as a pattern source.</summary>
+		internal SKImage Render (RecordedSkiaReplay parent)
+		{
+			if (parent.Sources.TryGetValue (this, out SKImage cached)) return cached;
+			using (SKSurface offscreen = parent.CreateOffscreen (Math.Max (1, Width), Math.Max (1, Height))) {
+				DrawTo (offscreen, parent.Depth + 1, parent.Sources);
+				SKImage image = offscreen.Snapshot ();
+				parent.Sources[this] = image;
+				return image;
+			}
+		}
+
+		/// <summary>Draws onto an arbitrary canvas through a raster intermediate (tests and callers
+		/// that do not own an SKSurface). Pixel operations need a readable surface.</summary>
 		internal void DrawTo (SKCanvas canvas)
 		{
 			if (canvas == null) throw new ArgumentNullException (nameof (canvas));
-			canvas.Clear (SKColors.Transparent);
-			var path = new SKPath { FillType = SKPathFillType.Winding };
-			var states = new Stack<DrawState> ();
-			SKColor color = new SKColor (0, 0, 0, 255);
-			SKBlendMode blend = SKBlendMode.SrcOver;
-			bool antialias = true;
-			try {
-				for (int i = 0; i < commands.Length; i++) {
-					var command = commands[i];
-					switch (command.Kind) {
-					case SurfaceRecorder.CommandKind.SetSourceRGBA:
-						color = ToColor (command.A, command.B, command.C, command.D);
-						break;
-					case SurfaceRecorder.CommandKind.Paint:
-						using (var paint = new SKPaint { Color = color, BlendMode = blend, IsAntialias = antialias }) canvas.DrawPaint (paint);
-						break;
-					case SurfaceRecorder.CommandKind.Rectangle:
-						float x = (float)command.A, y = (float)command.B, right = (float)(command.A + command.C), bottom = (float)(command.B + command.D);
-						var rect = new SKRect (Math.Min (x, right), Math.Min (y, bottom), Math.Max (x, right), Math.Max (y, bottom));
-						if (rect.Width > 0 && rect.Height > 0) path.AddRect (rect);
-						break;
-					case SurfaceRecorder.CommandKind.Fill:
-						using (var paint = new SKPaint { Color = color, BlendMode = blend, IsAntialias = antialias }) canvas.DrawPath (path, paint);
-						path.Rewind ();
-						break;
-					case SurfaceRecorder.CommandKind.Save:
-						canvas.Save (); states.Push (new DrawState (color, blend, antialias));
-						break;
-					case SurfaceRecorder.CommandKind.Restore:
-						if (states.Count == 0) throw new InvalidOperationException ("Unbalanced Cairo restore in recorded display list.");
-						canvas.Restore (); var saved = states.Pop (); color = saved.Color; blend = saved.Blend; antialias = saved.Antialias;
-						break;
-					case SurfaceRecorder.CommandKind.SetAntialias:
-						antialias = (Antialias)command.A != Antialias.None;
-						break;
-					case SurfaceRecorder.CommandKind.SetOperator:
-						blend = (Operator)command.A == Operator.Source ? SKBlendMode.Src : SKBlendMode.SrcOver;
-						break;
-					case SurfaceRecorder.CommandKind.Picture:
-						canvas.Save ();
-						canvas.Translate ((float)command.A, (float)command.B);
-						canvas.DrawPicture (command.Picture);
-						canvas.Restore ();
-						break;
-					}
+			using (SKSurface raster = SKSurface.Create (new SKImageInfo (Math.Max (1, Width), Math.Max (1, Height), SKColorType.Rgba8888, SKAlphaType.Premul))) {
+				if (raster == null) throw new InvalidOperationException ("Skia could not create a raster GUI surface.");
+				DrawTo (raster);
+				using (SKImage image = raster.Snapshot ())
+				using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) {
+					int save = canvas.Save ();
+					try {
+						canvas.ResetMatrix ();
+						canvas.DrawImage (image, 0, 0, new SKSamplingOptions (SKFilterMode.Nearest), paint);
+					} finally { canvas.RestoreToCount (save); }
 				}
-				if (states.Count != 0) throw new InvalidOperationException ("Unbalanced Cairo save in recorded display list.");
-			} finally { path.Dispose (); }
+			}
 		}
 
-		static SKColor ToColor (double r, double g, double b, double a)
-		{
-			return new SKColor (ToByte (r), ToByte (g), ToByte (b), ToByte (a));
-		}
-		static byte ToByte (double value) => (byte)Math.Round (Math.Max (0, Math.Min (1, value)) * 255.0, MidpointRounding.AwayFromZero);
-
-		readonly struct DrawState
-		{
-			internal readonly SKColor Color; internal readonly SKBlendMode Blend; internal readonly bool Antialias;
-			internal DrawState (SKColor color, SKBlendMode blend, bool antialias) { Color = color; Blend = blend; Antialias = antialias; }
-		}
+		internal void ReplayNative (IntPtr nativeSurface) => SurfaceRecorder.ReplayInto (commands, nativeSurface, Width, Height);
 	}
 }

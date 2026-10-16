@@ -1,0 +1,24 @@
+diff --git a/Cairo/wrapper/SurfacePattern.cs b/Cairo/wrapper/SurfacePattern.cs
+index 0c6dcd5..652d062 100644
+--- a/Cairo/wrapper/SurfacePattern.cs
++++ b/Cairo/wrapper/SurfacePattern.cs
+@@ -42,17 +42,17 @@ namespace Cairo {
+ 
+         internal SurfacePattern (IntPtr handle, bool owned) : base (handle, owned)
+ 		{
+ 		}
+ 
+-		public SurfacePattern (ImageSurface surface) : base (NativeMethods.cairo_pattern_create_for_surface (surface.Handle), true)
++		public SurfacePattern (ImageSurface surface) : base (NativeMethods.cairo_pattern_create_for_surface (surface.NativeHandleForPattern), true)
+ 		{
+             this.width = surface.Width;
+             this.height = surface.Height;
+ 		}
+ 
+-        public SurfacePattern(Surface surface) : base(NativeMethods.cairo_pattern_create_for_surface(surface.Handle), true)
++        public SurfacePattern(Surface surface) : base(NativeMethods.cairo_pattern_create_for_surface(surface.NativeHandleForPattern), true)
+         {
+         }
+ 
+         public Filter Filter {
+ 			set {

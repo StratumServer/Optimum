@@ -192,7 +192,7 @@ namespace Vintagestory.Client.NoObf
 							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
 								{
 									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								if (!surface.TryDrawRecordedCommands(skSurface.Canvas)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+								if (!surface.TryDrawRecordedCommands(skSurface)) throw new InvalidOperationException("The GUI command list could not be sealed.");
 								skSurface.Flush();
 								context.Flush();
 								context.Submit(true);

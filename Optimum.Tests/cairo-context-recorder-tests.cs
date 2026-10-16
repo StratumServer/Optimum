@@ -194,8 +194,11 @@ public sealed class CairoContextRecorderTests
 			context.SetSourceRGBA (.8, .1, .2, .55);
 			context.Rectangle (2, 2, 9, 7);
 			context.Fill ();
+			context.PushGroup ();
 			context.Arc (14, 13, 3, 0, 6.283185307179586);
 			context.Fill ();
+			context.PopGroupToSource ();
+			context.Paint ();
 		}
 
 		using var expected = new ImageSurface (Format.Argb32, 20, 20);
@@ -203,12 +206,15 @@ public sealed class CairoContextRecorderTests
 			context.SetSourceRGBA (.8, .1, .2, .55);
 			context.Rectangle (2, 2, 9, 7);
 			context.Fill ();
+			context.PushGroup ();
 			context.Arc (14, 13, 3, 0, 6.283185307179586);
 			context.Fill ();
+			context.PopGroupToSource ();
+			context.Paint ();
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.Fill.Unsupported", actual.FirstMaterializationTrigger);
+		Assert.Equal ("Context.PushGroup", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -216,8 +222,19 @@ public sealed class CairoContextRecorderTests
 	[InlineData (Antialias.Default)]
 	[InlineData (Antialias.Gray)]
 	[InlineData (Antialias.Subpixel)]
-	[InlineData (Antialias.Fast)]
 	[InlineData (Antialias.Good)]
+	public void AnalyticAntialiasModesStayRecordedAndMatchCairo (Antialias antialias)
+	{
+		CairoRecorderParityTests.AssertParity (18, 14, context => {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Antialias = antialias;
+			context.Fill ();
+		});
+	}
+
+	[Theory]
+	[InlineData (Antialias.Fast)]
 	public void UnsupportedAntialiasModesMaterializeBeforeNativeFill (Antialias antialias)
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
@@ -238,12 +255,12 @@ public sealed class CairoContextRecorderTests
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.Antialias.Unsupported", actual.FirstMaterializationTrigger);
+		Assert.Equal ("Recorder.Fill.Unsupported:antialias-Fast", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
 	[Fact]
-	public void DefaultAntialiasFillMaterializesBeforeNativeDrawing ()
+	public void DefaultAntialiasFillStaysRecordedAndReplaysExactly ()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
 		var recorder = actual.BeginRecording ();
@@ -260,12 +277,13 @@ public sealed class CairoContextRecorderTests
 			context.Fill ();
 		}
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
 	[Fact]
-	public void RestoreOfDefaultAntialiasMakesSubsequentFillUseNativeCairo ()
+	public void RestoreOfDefaultAntialiasKeepsRecordingAndReplaysExactly ()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
 		var recorder = actual.BeginRecording ();
@@ -288,7 +306,7 @@ public sealed class CairoContextRecorderTests
 			context.Fill ();
 		}
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -316,7 +334,7 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface (Format.Argb32, 112, 88);
 		using (var context = new Context (expected)) DrawAdditionalFallbackOperations (context);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 		Assert.Equal (0, actual.Data[43 * actual.Stride + 67 * 4 + 3]);
 	}
@@ -331,7 +349,7 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface (Format.Argb32, 112, 72);
 		using (var context = new Context (expected)) DrawStrokeStyleMatrix (context);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -346,7 +364,7 @@ public sealed class CairoContextRecorderTests
 			using var expected = new ImageSurface (Format.Argb32, 32, 32);
 			using (var context = new Context (expected)) DrawSelfIntersectingPath (context, fillRule);
 
-			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 			Assert.Equal (expected.Data, actual.Data);
 		}
 	}
@@ -362,7 +380,7 @@ public sealed class CairoContextRecorderTests
 			using var expected = new ImageSurface (Format.Argb32, 20, 20);
 			using (var context = new Context (expected)) DrawNestedFillRulePaths (context, fillRule);
 
-			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 			Assert.Equal (expected.Data, actual.Data);
 			int centerAlphaIndex = 10 * actual.Stride + 10 * 4 + 3;
 			if (fillRule == FillRule.EvenOdd) Assert.Equal (0, actual.Data[centerAlphaIndex]);
@@ -603,7 +621,7 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void InvalidRestoreFallsBackToCairoAndStillAllowsContextCleanup()
+	public void InvalidRestoreKeepsRecordingAndStillAllowsContextCleanup()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
 		var recorder = surface.BeginRecording ();
@@ -613,7 +631,8 @@ public sealed class CairoContextRecorderTests
 		context.Restore ();
 
 		Assert.Equal (Status.InvalidRestore, context.Status);
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		// The native context reports the error; Cairo and the recorder ignore later drawing.
 		Assert.Null (Record.Exception (() => _ = surface.Data));
 		Assert.Null (Record.Exception (() => context.Dispose ()));
 		Assert.Equal (IntPtr.Zero, context.Handle);
