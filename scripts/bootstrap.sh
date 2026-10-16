@@ -1518,10 +1518,14 @@ if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.pat
   # behind, its stale index and lock files make the next git add die with a
   # silent exit 128 under set -e, so throw it away and start clean.
   _optimum_tmp_git=false
-  if [[ -f "$repo_root/.git/optimum-bootstrap-tmp" ]]; then
+  if [[ -d "$repo_root/.git" && -f "$repo_root/.git/optimum-bootstrap-tmp" ]]; then
     rm -rf "$repo_root/.git"
   fi
-  if [[ ! -d "$repo_root/.git" ]]; then
+  # Linked worktrees store a .git file that points to the shared repository's
+  # per-worktree metadata. Treat them as real repositories; `git init` would
+  # leave that file in place, and writing `.git/optimum-bootstrap-tmp` would
+  # fail because `.git` is a file rather than a directory.
+  if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git init -q "$repo_root"
     touch "$repo_root/.git/optimum-bootstrap-tmp"
     _optimum_tmp_git=true

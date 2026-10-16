@@ -83,7 +83,7 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason)
+		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, bool linearMin = false)
 				{
 					candidateTexture = 0;
 					failureReason = null;
@@ -154,7 +154,7 @@ namespace Vintagestory.Client.NoObf
 						GL.ActiveTexture(TextureUnit.Texture0);
 						GL.GenTextures(1, out texture);
 						GL.BindTexture(TextureTarget.Texture2D, texture);
-						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
 						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
 						GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
 						GL.GenFramebuffers(1, out framebuffer);
