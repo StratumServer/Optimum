@@ -1,4 +1,7 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
@@ -200,16 +203,26 @@ internal sealed class PatchSplashScreen : IDisposable
         using var font = new SKFont(typeface, FontSize);
         using var paint = new SKPaint { Color = SKColor.Parse(TextColorHex), IsAntialias = true };
 
-        float textWidth = font.MeasureText(text, paint);
+        float maximumTextWidth = Math.Max(1, _window.ClientSize.X * 0.84f - 4);
+        string[] lines = WrapText(text, font, paint, maximumTextWidth);
+        float textWidth = 0;
+        foreach (string line in lines) textWidth = Math.Max(textWidth, font.MeasureText(line, paint));
         var metrics = font.Metrics;
         int width = Math.Max(1, (int)Math.Ceiling(textWidth) + 4);
-        int height = Math.Max(1, (int)Math.Ceiling(metrics.Descent - metrics.Ascent) + 4);
+        float lineAdvance = Math.Max(1, metrics.Descent - metrics.Ascent + metrics.Leading);
+        int height = Math.Max(1, (int)Math.Ceiling(lineAdvance * lines.Length) + 4);
 
         using var bitmap = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
         using (var canvas = new SKCanvas(bitmap))
         {
             canvas.Clear(SKColors.Transparent);
-            canvas.DrawText(text, 2, 2 - metrics.Ascent, font, paint);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                float lineWidth = font.MeasureText(lines[i], paint);
+                float x = 2 + (textWidth - lineWidth) / 2;
+                float baseline = 2 - metrics.Ascent + i * lineAdvance;
+                canvas.DrawText(lines[i], x, baseline, font, paint);
+            }
         }
 
         if (_textureId == 0)
@@ -227,6 +240,33 @@ internal sealed class PatchSplashScreen : IDisposable
 
         _textureWidth = width;
         _textureHeight = height;
+    }
+
+    internal static string[] WrapText(string text, SKFont font, SKPaint paint, float maximumWidth)
+    {
+        if (maximumWidth <= 0) throw new ArgumentOutOfRangeException(nameof(maximumWidth));
+        var lines = new List<string>();
+        var line = new StringBuilder();
+        TextElementEnumerator elements = StringInfo.GetTextElementEnumerator(text);
+        while (elements.MoveNext())
+        {
+            string element = (string)elements.Current!;
+            if (element is "\n" or "\r" or "\r\n")
+            {
+                lines.Add(line.ToString());
+                line.Clear();
+                continue;
+            }
+            string candidate = line.ToString() + element;
+            if (line.Length != 0 && font.MeasureText(candidate, paint) > maximumWidth)
+            {
+                lines.Add(line.ToString());
+                line.Clear();
+            }
+            line.Append(element);
+        }
+        if (line.Length != 0 || lines.Count == 0) lines.Add(line.ToString());
+        return lines.ToArray();
     }
 
     private void Render()

@@ -96,10 +96,26 @@ public sealed class GuiCertificationTests : IDisposable
     }
 
     [Fact]
-    public void OtherwiseCompleteCertificateStillRequiresLiveDeviceVerification()
+    public void OtherwiseCompleteCertificateRequiresExactLiveDeviceAndContextMatch()
     {
         WriteCertificate(CompleteSyntheticEvidence());
-        Assert.Equal(new GuiCertificationDecision(false, "local-device-preflight-unavailable"), Validate());
+        var identity = new GuiDeviceIdentity("synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0);
+        Assert.Equal(new GuiCertificationDecision(true, "local-device-preflight-matched", identity), Validate(identity));
+        Assert.Equal("local-device-identity-mismatch", Validate(identity with { Renderer = "other renderer" }).Reason);
+        Assert.Equal("local-device-identity-mismatch", Validate(identity with { Minor = 5 }).Reason);
+        Assert.Equal("local-device-identity-mismatch", Validate(identity with { ProfileMask = 1 }).Reason);
+        Assert.Equal("local-device-identity-mismatch", Validate(identity with { ContextFlags = 1 }).Reason);
+        Assert.Equal(new GuiCertificationDecision(false, "local-device-preflight-unavailable"), Validate(null));
+    }
+
+    [Fact]
+    public void EvidenceMustCarryTheProfileFingerprintFromTheSuccessfulRun()
+    {
+        var evidence = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        evidence["runtimeProfileFingerprint"] = new string('0', 64);
+        WriteCertificate(evidence.ToJsonString());
+        Assert.Equal("evidence-profile-fingerprint-mismatch", Validate(new GuiDeviceIdentity(
+            "synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0)).Reason);
     }
 
     [Fact]
@@ -132,6 +148,7 @@ public sealed class GuiCertificationTests : IDisposable
         {
             Directory.CreateDirectory(Path.GetDirectoryName(runtimePath)!);
             File.WriteAllText(runtimePath, "synthetic fixture");
+            if (name == "SkiaSharp native") return Artifact(name, runtimePath);
             string stagedPath = Path.Combine(Game, "evidence-artifacts", name.Replace(' ', '-') + Path.GetExtension(runtimePath));
             Directory.CreateDirectory(Path.GetDirectoryName(stagedPath)!);
             File.Copy(runtimePath, stagedPath, overwrite: true);
@@ -164,15 +181,18 @@ public sealed class GuiCertificationTests : IDisposable
         return JsonSerializer.Serialize(new
         {
             schemaVersion = 1, scenarioId = "optimum-gui-inventory-capture-v1", gpuDecision = "skia-only",
+            qualificationMode = "pharos-current-context",
+            runtimeProfileFingerprint = Fingerprint(),
             optimumCommit = new string('a', 40), pharosCommit = new string('b', 40),
             gpuDecisionReasons = Array.Empty<string>(),
             materializationObserverStartupSmoke = new { passed = true, attemptCount = 1, successCount = 1, failureCount = 0,
                 causes = new System.Collections.Generic.Dictionary<string, long> { ["Context.MoveTo"] = 1 } },
             glStateSentinel = new { candidateAndProbeRestoredCapturedState = true, samplerBindingsSupported = true },
-            runtimeProvenance = new { StagePath = Game, Complete = true, SamplerBindingsSupported = true, GlVendor = "synthetic", GlRenderer = "synthetic",
-                GlVersion = "synthetic", DriverVersion = "synthetic", Artifacts = artifacts },
+            runtimeProvenance = new { StagePath = Game, Complete = true, SamplerBindingsSupported = true, GlVendor = "synthetic vendor", GlRenderer = "synthetic renderer",
+                GlVersion = "4.6 synthetic", DriverVersion = "diagnostic-only", GlContextProfileMask = 2, GlContextFlags = 0, Artifacts = artifacts },
             initialGuiComposition = window, recompositionBenchmark = window, guiScaleFixtures = scales,
             gpuPrimitiveFixture = "GpuRendered",
+            gpuPrimitiveFixtureParityWithinOneChannelValue = true,
             gpuNonSubsetFixtureDiagnostics = Enumerable.Range(1, 5).ToDictionary(index => "fixture-" + index, _ => "GpuRendered"),
             gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizer = "Skia GPU", parityWithinOneChannelValue = true,
                 materializationAttemptsAfterLoad = 0, materializationAttemptsBefore = 0, gpuCandidateAttemptsDuringLoad = 1 }).ToArray()
@@ -202,7 +222,8 @@ public sealed class GuiCertificationTests : IDisposable
         Assert.False(Validate().Passed);
     }
 
-    private GuiCertificationDecision Validate() => GuiCertification.Validate(Game, Cache, Data, []);
+    private GuiCertificationDecision Validate(GuiDeviceIdentity? identity = null) =>
+        GuiCertification.Validate(Game, Cache, Data, [], (_, _) => identity);
     private string Fingerprint() => GuiCertification.ComputeFingerprint(Game, Cache, Data, []);
     private void WriteCertificate(string evidence)
     {
@@ -210,7 +231,8 @@ public sealed class GuiCertificationTests : IDisposable
         var certificate = new GuiCertificate(1, GuiCertification.Policy, GuiCertification.Policy,
             RuntimeInformation.RuntimeIdentifier, Fingerprint(),
             Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(Metadata, GuiCertification.EvidenceFile)))));
-        File.WriteAllText(Path.Combine(Metadata, GuiCertification.CertificateFile), JsonSerializer.Serialize(certificate));
+        File.WriteAllText(Path.Combine(Metadata, GuiCertification.CertificateFile),
+            JsonSerializer.Serialize(certificate, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
     }
 
     public void Dispose() => Directory.Delete(root, true);

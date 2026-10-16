@@ -152,6 +152,11 @@ namespace Vintagestory.API.Config
 
         internal static void RecordMaterialization(string trigger, bool succeeded)
         {
+            // A native Cairo replay changes the requested Skia-only policy for
+            // this client run. Keep Cairo's text/subpixel rasterization intact,
+            // then deny subsequent GPU composition instead of mixing paths.
+            if (OptimumConfig.GuiGpuCertificationPassed)
+                OptimumConfig.RevokeGuiGpuCertification();
             if (!Enabled) return;
             Interlocked.Increment(ref materializationAttemptCount);
             if (succeeded) Interlocked.Increment(ref materializationSuccessCount);

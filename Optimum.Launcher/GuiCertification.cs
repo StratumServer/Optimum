@@ -15,7 +15,7 @@ internal sealed record GuiCertificate(
     int SchemaVersion, string Policy, string ProfileId, string RuntimeIdentifier,
     string RuntimeFingerprint, string EvidenceSha256);
 
-internal sealed record GuiCertificationDecision(bool Passed, string Reason);
+internal sealed record GuiCertificationDecision(bool Passed, string Reason, GuiDeviceIdentity? DeviceIdentity = null);
 
 internal static class GuiCertification
 {
@@ -25,10 +25,12 @@ internal static class GuiCertification
     private const int MaximumJsonBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
+        PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
     };
 
-    internal static GuiCertificationDecision Validate(string gameDir, string cacheDir, string dataPath, string[] args)
+    internal static GuiCertificationDecision Validate(string gameDir, string cacheDir, string dataPath, string[] args,
+        Func<int, int, GuiDeviceIdentity?>? deviceProbe = null)
     {
         try
         {
@@ -56,6 +58,11 @@ internal static class GuiCertification
                 root.GetProperty("gpuDecisionReasons").GetArrayLength() != 0 ||
                 !root.GetProperty("materializationObserverStartupSmoke").GetProperty("passed").GetBoolean())
                 return new(false, "evidence-not-approved");
+            if (root.GetProperty("qualificationMode").GetString() != "pharos-current-context")
+                return new(false, "evidence-qualification-mode-unsupported");
+            if (!HashEquals(certificate.RuntimeFingerprint,
+                    Convert.FromHexString(root.GetProperty("runtimeProfileFingerprint").GetString() ?? "")))
+                return new(false, "evidence-profile-fingerprint-mismatch");
             var startup = root.GetProperty("materializationObserverStartupSmoke");
             if (startup.GetProperty("attemptCount").GetInt64() != 1 ||
                 startup.GetProperty("successCount").GetInt64() != 1 ||
@@ -71,9 +78,14 @@ internal static class GuiCertification
             var provenance = root.GetProperty("runtimeProvenance");
             if (!provenance.GetProperty("Complete").GetBoolean() ||
                 !provenance.GetProperty("SamplerBindingsSupported").GetBoolean() ||
-                new[] { "GlVendor", "GlRenderer", "GlVersion", "DriverVersion" }.Any(name =>
+                new[] { "GlVendor", "GlRenderer", "GlVersion" }.Any(name =>
                     string.IsNullOrWhiteSpace(provenance.GetProperty(name).GetString())))
                 return new(false, "evidence-provenance-incomplete");
+            if (!provenance.TryGetProperty("GlContextProfileMask", out var profileMaskElement) ||
+                !profileMaskElement.TryGetInt32(out int evidenceProfileMask) ||
+                !provenance.TryGetProperty("GlContextFlags", out var contextFlagsElement) ||
+                !contextFlagsElement.TryGetInt32(out int evidenceContextFlags))
+                return new(false, "evidence-context-profile-incomplete");
             if (!root.GetProperty("initialGuiComposition").GetProperty("evidenceComplete").GetBoolean() ||
                 !root.GetProperty("initialGuiComposition").GetProperty("measuredFromBeforeFirstClientFramesThroughInventoryOpenAndSettle").GetBoolean() ||
                 !CleanWindow(root.GetProperty("initialGuiComposition"), false) ||
@@ -89,6 +101,7 @@ internal static class GuiCertification
             var nonSubset = root.GetProperty("gpuNonSubsetFixtureDiagnostics");
             var svg = root.GetProperty("gpuSvgDiagnostics");
             if (root.GetProperty("gpuPrimitiveFixture").GetString() != "GpuRendered" ||
+                !root.GetProperty("gpuPrimitiveFixtureParityWithinOneChannelValue").GetBoolean() ||
                 Enumerable.Range(1, 5).Any(index => nonSubset.GetProperty("fixture-" + index).GetString() != "GpuRendered") ||
                 svg.GetArrayLength() != 3 || svg.EnumerateArray().Any(row =>
                     row.GetProperty("rasterizer").GetString() != "Skia GPU" ||
@@ -101,15 +114,61 @@ internal static class GuiCertification
             if (!HashEquals(certificate.RuntimeFingerprint,
                     Convert.FromHexString(ComputeFingerprint(gameDir, cacheDir, dataPath, args))))
                 return new(false, "runtime-profile-mismatch");
-            // The current slice has no isolated local GL identity verifier. Never accept
-            // an artifact certificate as proof that this process will use the certified GPU.
-            return new(false, "local-device-preflight-unavailable");
+            if (!TryGetRequestedContext(dataPath, out int requestedMajor, out int requestedMinor))
+                return new(false, "client-gl-context-setting-invalid");
+            GuiDeviceIdentity? identity = (deviceProbe ?? GuiDevicePreflight.Probe)(requestedMajor, requestedMinor);
+            if (identity is null) return new(false, "local-device-preflight-unavailable");
+            string vendor = provenance.GetProperty("GlVendor").GetString() ?? "";
+            string renderer = provenance.GetProperty("GlRenderer").GetString() ?? "";
+            string version = provenance.GetProperty("GlVersion").GetString() ?? "";
+            if (!string.Equals(identity.Vendor, vendor, StringComparison.Ordinal) ||
+                !string.Equals(identity.Renderer, renderer, StringComparison.Ordinal) ||
+                !string.Equals(identity.Version, version, StringComparison.Ordinal) ||
+                identity.ProfileMask != evidenceProfileMask || identity.ContextFlags != evidenceContextFlags ||
+                !TryParseGlContextVersion(version, out int evidenceMajor, out int evidenceMinor) ||
+                identity.Major != evidenceMajor || identity.Minor != evidenceMinor)
+                return new(false, "local-device-identity-mismatch");
+            return new(true, "local-device-preflight-matched", identity);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or
             InvalidOperationException or KeyNotFoundException or FormatException or ArgumentException or NotSupportedException)
         {
             return new(false, "certificate-invalid:" + ex.GetType().Name);
         }
+    }
+
+    private static bool TryGetRequestedContext(string dataPath, out int major, out int minor)
+    {
+        major = 4;
+        minor = 3;
+        string settings = Path.Combine(dataPath, "clientsettings.json");
+        if (!File.Exists(settings)) return true;
+        using var json = JsonDocument.Parse(ReadBounded(settings));
+        if (!json.RootElement.TryGetProperty("stringSettings", out var stringSettings) ||
+            !stringSettings.TryGetProperty("glContextVersion", out var context)) return true;
+        string? value = context.GetString();
+        if (value is null) return false;
+        string[] parts = value.Split('.');
+        return parts.Length == 2 && int.TryParse(parts[0], System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out major) &&
+            int.TryParse(parts[1], System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out minor) && major is >= 3 and <= 9 && minor is >= 0 and <= 9 &&
+            (major > 3 || minor >= 2);
+    }
+
+    private static bool TryParseGlContextVersion(string value, out int major, out int minor)
+    {
+        major = minor = 0;
+        int dot = value.IndexOf('.');
+        if (dot < 1) return false;
+        int start = dot - 1;
+        while (start > 0 && char.IsDigit(value[start - 1])) start--;
+        int end = dot + 1;
+        while (end < value.Length && char.IsDigit(value[end])) end++;
+        return int.TryParse(value.AsSpan(start, dot - start), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out major) &&
+            int.TryParse(value.AsSpan(dot + 1, end - dot - 1), System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out minor);
     }
 
     // Hash inventories as well as bytes so added/removed mods, configs, assets and native libraries invalidate approval.
@@ -133,11 +192,30 @@ internal static class GuiCertification
         }
         Append(Policy);
         Append(RuntimeInformation.RuntimeIdentifier);
-        Append(args.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        foreach (string argument in args) Append(argument);
+        string[] normalizedArgs = NormalizeLaunchArguments(args);
+        Append(normalizedArgs.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        foreach (string argument in normalizedArgs) Append(argument);
         Append("inputs");
         foreach (var entry in entries) { Append(entry.Key); Append(entry.Value); }
         return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
+    private static string[] NormalizeLaunchArguments(string[] args)
+    {
+        var normalized = new List<string>(args.Length);
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (string.Equals(args[i], "--dataPath", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                normalized.Add("--dataPath");
+                normalized.Add("<data-path>");
+                i++;
+            }
+            else if (args[i].StartsWith("--dataPath=", StringComparison.OrdinalIgnoreCase))
+                normalized.Add("--dataPath=<data-path>");
+            else normalized.Add(args[i]);
+        }
+        return normalized.ToArray();
     }
 
     private static bool IsCommit(string? value) => value is { Length: >= 40 and <= 64 } && value.All(Uri.IsHexDigit);
@@ -183,8 +261,10 @@ internal static class GuiCertification
             }
             else if (name == "SkiaSharp native")
             {
-                if (!nativeCandidates.Any(candidate => HashEquals(
-                    artifact.GetProperty("Sha256").GetString(), Convert.FromHexString(HashFile(candidate))))) return false;
+                string loadedPath = Path.GetFullPath(path);
+                StringComparer pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+                if (!nativeCandidates.Any(candidate => pathComparer.Equals(Path.GetFullPath(candidate), loadedPath) &&
+                    HashEquals(artifact.GetProperty("Sha256").GetString(), Convert.FromHexString(HashFile(candidate))))) return false;
                 matchedRuntimeArtifacts.Add(name);
             }
         }
