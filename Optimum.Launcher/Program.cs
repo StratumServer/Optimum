@@ -263,19 +263,37 @@ public static class Program
 
                     splash?.SetStatus($"Applying Optimum patches: {target.VanillaDll}");
                     var progress = new LoggingProgress(target.VanillaDll, splash);
+                    var stagingPath = Path.Combine(
+                        Path.GetDirectoryName(outputPath)!,
+                        $"{Path.GetFileNameWithoutExtension(outputPath)}.stage-{Guid.NewGuid():N}.dll");
                     try
                     {
                         var result = PatchEngine.Patch(
-                            vanillaPath, donorPath, outputPath, target.Mode, target.ModName, progress);
-                        cache.SavePatchedAssembly(target.AssemblyPath, result.DllBytes, result.PdbBytes);
+                            vanillaPath, donorPath, stagingPath, target.Mode, target.ModName, progress);
+                        cache.CommitPatchedAssembly(target.AssemblyPath, stagingPath);
                         patchedTargets.Add(new PatchedTarget(target.AssemblyPath, target.DonorDll, result.PatchCount, target.VanillaDll));
                         Logger.Log($"[Optimum] ✓ {target.AssemblyPath} ({result.PatchCount} patches)");
                     }
                     catch (PatchFailedException ex)
                     {
-                        Logger.LogError($"[Optimum] ✗ Patch failed: {ex.Message}");
+                        Logger.LogError(
+                            $"[Optimum] ✗ Patch failed for '{target.AssemblyPath}' " +
+                            $"(staging '{stagingPath}', cache '{outputPath}'): {ex.Message}");
                         failureReason = ex.Message;
                         return;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(
+                            $"[Optimum] ✗ Failed while patching or saving '{target.AssemblyPath}' " +
+                            $"(staging '{stagingPath}', cache '{outputPath}'): {ex}");
+                        failureReason = ex.Message;
+                        return;
+                    }
+                    finally
+                    {
+                        TryDeletePatchOutput(stagingPath);
+                        TryDeletePatchOutput(Path.ChangeExtension(stagingPath, ".pdb"));
                     }
                 }
             }
@@ -284,8 +302,21 @@ public static class Program
                 // Safety net: this runs on a background thread, so an
                 // exception here would otherwise take down the whole
                 // process via the default unhandled-exception handler.
-                Logger.LogError($"[Optimum] Unexpected error while patching: {ex.Message}");
+                Logger.LogError($"[Optimum] Unexpected error while patching: {ex}");
                 failureReason ??= ex.Message;
+            }
+        }
+
+        static void TryDeletePatchOutput(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.LogError($"[Optimum] Could not remove temporary patch output '{path}': {ex}");
             }
         }
 

@@ -279,6 +279,11 @@ try {
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir
     }
+    # Preserve the managed launcher dependencies (OpenTK, SkiaSharp, Cecil).
+    # The deps file names these assemblies, but .NET does not bundle them into
+    # Optimum.dll, so a fixed list of the apphost/config files is not enough.
+    Get-ChildItem -Path $launcherOut -Filter '*.dll' -File |
+        ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
     # Managers that launch the game executable by its vanilla name
     # (StoryForge launches Vintagestory.exe directly) must get the Optimum
     # launcher, not a vanilla start. The apphost embeds the managed entry
