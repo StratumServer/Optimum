@@ -20,6 +20,7 @@ namespace Vintagestory.API.Config;
 public static class OptimumConfig
 {
     private static int guiGpuBackendProbePassed;
+    private static int guiGpuCertificationPassed;
     private static readonly bool environmentGuiGpuRender = string.Equals(Environment.GetEnvironmentVariable("OPTIMUM_GUI_GPU_RENDERING"), "1", StringComparison.Ordinal);
     /// <summary>
     /// Supplies the version to every managed assembly. Packaging scripts read
@@ -556,7 +557,11 @@ public static class OptimumConfig
 
     public static bool GuiGpuRenderRequested => GuiGpuRenderEnabled || environmentGuiGpuRender;
 
-    public static bool EffectiveGuiGpuRender => GuiGpuRenderRequested && System.Threading.Volatile.Read(ref guiGpuBackendProbePassed) != 0;
+    public static bool GuiGpuRecordingEligible => GuiGpuRenderRequested && System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0;
+
+    internal static void SetGuiGpuCertificationPassed(bool passed) => System.Threading.Volatile.Write(ref guiGpuCertificationPassed, passed ? 1 : 0);
+
+    public static bool EffectiveGuiGpuRender => GuiGpuRecordingEligible && System.Threading.Volatile.Read(ref guiGpuBackendProbePassed) != 0;
 
     internal static void SetGuiGpuBackendProbePassed(bool passed) => System.Threading.Volatile.Write(ref guiGpuBackendProbePassed, passed ? 1 : 0);
 

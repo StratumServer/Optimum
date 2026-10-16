@@ -35,6 +35,33 @@ public static class ApiContractValidator
         }
     }
 
+    public static bool HasGuiCertificationContract(string assemblyPath)
+    {
+        try
+        {
+            using var assembly = AssemblyDefinition.ReadAssembly(assemblyPath);
+            var config = assembly.MainModule.GetType("Vintagestory.API.Config.OptimumConfig");
+            return config?.Methods.Any(method => method.Name == "SetGuiGpuCertificationPassed" &&
+                method.IsStatic && method.IsAssembly && method.ReturnType.FullName == "System.Void" &&
+                method.Parameters.Count == 1 && method.Parameters[0].ParameterType.FullName == "System.Boolean") == true &&
+                config.Methods.Any(method => method.Name == "get_GuiGpuRecordingEligible" &&
+                    method.IsStatic && method.ReturnType.FullName == "System.Boolean" && method.Parameters.Count == 0);
+        }
+        catch (Exception ex) when (ex is IOException or BadImageFormatException or AssemblyResolutionException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    public static void EnsureGuiCertificationContract(string assemblyPath)
+    {
+        if (!HasGuiCertificationContract(assemblyPath))
+        {
+            throw new InvalidDataException(
+                "VintagestoryAPI.dll lacks the Optimum GUI certification gate: " + assemblyPath);
+        }
+    }
+
     public static void EnsureTesselationThreadContract(string assemblyPath)
     {
         if (!HasTesselationThreadContract(assemblyPath))

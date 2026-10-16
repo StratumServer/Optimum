@@ -96,7 +96,8 @@ public sealed class CacheManager
                 return null;
 
             if (string.Equals(target.Assembly, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase) &&
-                !ApiContractValidator.HasTesselationThreadContract(cachedPath))
+                (!ApiContractValidator.HasTesselationThreadContract(cachedPath) ||
+                 !ApiContractValidator.HasGuiCertificationContract(cachedPath)))
             {
                 return null;
             }
@@ -148,7 +149,10 @@ public sealed class CacheManager
                 throw new FileNotFoundException("Patched assembly is missing from the cache.", cachedPath);
 
             if (string.Equals(t.AssemblyName, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase))
+            {
                 ApiContractValidator.EnsureTesselationThreadContract(cachedPath);
+                ApiContractValidator.EnsureGuiCertificationContract(cachedPath);
+            }
 
             manifest.Targets.Add(new CacheTarget
             {
