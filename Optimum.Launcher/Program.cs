@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Threading;
 
 [assembly: InternalsVisibleTo("Optimum.Launcher.Tests")]
@@ -18,6 +20,8 @@ namespace Optimum.Launcher;
 public static class Program
 {
     private const string ValidateOnlyArgument = "--validate-only";
+    private const string ProfileFingerprintArgument = "--optimum-gui-profile-fingerprint";
+    private const string ValidateGuiCertificationArgument = "--optimum-gui-validate-certification";
 
     private static readonly string Version =
         typeof(Program).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
@@ -38,6 +42,8 @@ public static class Program
     {
         try
         {
+            if (args.Length > 0 && args[0] == "--optimum-gui-device-preflight")
+                return GuiDevicePreflight.RunChild(args);
             return Run(args);
         }
         catch (Exception ex)
@@ -180,7 +186,52 @@ public static class Program
 
         try
         {
+            // Deployment mutates the staged mod tree, which is part of the
+            // certified fingerprint. Complete it before any fingerprint or
+            // certificate-validation control mode reports success.
             DeployPatchedMods(cacheDir, gameDir);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Optimum] Patched mod deployment failed: {ex.Message}");
+            return AbortLaunch(gameDir, cache, ex.Message);
+        }
+
+        if (args.Length > 0 && args[0] == ProfileFingerprintArgument)
+        {
+            try
+            {
+                string metadata = Path.Combine(dataPath, CacheDirName);
+                Directory.CreateDirectory(metadata);
+                string fingerprint = GuiCertification.ComputeFingerprint(gameDir, cacheDir, dataPath, args.Skip(1).ToArray());
+                byte[] output = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    runtimeIdentifier = RuntimeInformation.RuntimeIdentifier,
+                    runtimeFingerprint = fingerprint
+                });
+                string path = Path.Combine(metadata, "gui-profile-fingerprint.json");
+                string temporary = path + ".tmp-" + Guid.NewGuid().ToString("N");
+                File.WriteAllBytes(temporary, output);
+                File.Move(temporary, path, overwrite: true);
+                Logger.Log("[Optimum] GUI runtime profile fingerprint captured.");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Optimum] GUI profile fingerprint failed: {ex.Message}");
+                return 1;
+            }
+        }
+
+        if (args.Length > 0 && args[0] == ValidateGuiCertificationArgument)
+        {
+            GuiCertificationDecision decision = GuiCertification.Validate(gameDir, cacheDir, dataPath, args.Skip(1).ToArray());
+            Logger.Log($"[Optimum] GUI certification validation: {(decision.Passed ? "approved profile" : "vanilla")}; {decision.Reason}");
+            return decision.Passed ? 0 : 1;
+        }
+
+        try
+        {
             return LaunchGame(args, cacheDir, gameDir, cache, dataPath);
         }
         catch (Exception ex)
@@ -380,9 +431,12 @@ public static class Program
             ?? throw new InvalidDataException("Patched API lacks the GUI certification contract.");
         var certificationSetter = apiConfig.GetMethod("SetGuiGpuCertificationPassed", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidDataException("Patched API lacks the GUI certification setter.");
-        certificationSetter.Invoke(null, [false]);
+        certificationSetter.Invoke(null, [false, null, null, null, 0, 0, 0, 0]);
         var certification = GuiCertification.Validate(gameDir, cacheDir, dataPath, args);
-        certificationSetter.Invoke(null, [certification.Passed]);
+        var identity = certification.DeviceIdentity;
+        certificationSetter.Invoke(null, [certification.Passed, identity?.Vendor, identity?.Renderer,
+            identity?.Version, identity?.Major ?? 0, identity?.Minor ?? 0,
+            identity?.ProfileMask ?? 0, identity?.ContextFlags ?? 0]);
         Logger.Log($"[Optimum] GUI certification: {(certification.Passed ? "approved profile" : "vanilla")}; {certification.Reason}");
 
         // Find and invoke ClientProgram.Main

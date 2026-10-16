@@ -39,6 +39,11 @@ namespace Vintagestory.Client.NoObf
 						return "Optimum Skia GL probe skipped: caller is not on the context-owning thread.";
 					if (!HasCurrentContext())
 						return "Optimum Skia GL probe skipped: no current GLFW OpenGL context.";
+					if (!MatchesCertifiedDevice())
+					{
+						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
+						return "Optimum Skia GL probe skipped: current OpenGL context does not match the prelaunch-certified device/context; GUI rendering remains vanilla.";
+					}
 					if (Interlocked.CompareExchange(ref attempted, 1, 0) != 0)
 						return null;
 					string preexistingErrors = DrainPreexistingGlErrors();
@@ -110,6 +115,12 @@ namespace Vintagestory.Client.NoObf
 					if (!HasCurrentContext())
 					{
 						failureReason = "missing-current-context";
+						return false;
+					}
+					if (!MatchesCertifiedDevice())
+					{
+						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
+						failureReason = "current-device-or-context-mismatch";
 						return false;
 					}
 					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
@@ -240,6 +251,29 @@ namespace Vintagestory.Client.NoObf
 				}
 
 		private static unsafe bool HasCurrentContext() => GLFW.GetCurrentContext() != null;
+
+		private static bool MatchesCertifiedDevice()
+		{
+			try
+			{
+				string vendor = SafeGetString(StringName.Vendor);
+				string renderer = SafeGetString(StringName.Renderer);
+				string version = SafeGetString(StringName.Version);
+				GL.GetInteger(GetPName.MajorVersion, out int major);
+				GL.GetInteger(GetPName.MinorVersion, out int minor);
+				GL.GetInteger(GetPName.ContextProfileMask, out int profileMask);
+				GL.GetInteger(GetPName.ContextFlags, out int contextFlags);
+				return !string.IsNullOrWhiteSpace(vendor) && vendor != "unknown" &&
+					!string.IsNullOrWhiteSpace(renderer) && renderer != "unknown" &&
+					!string.IsNullOrWhiteSpace(version) && version != "unknown" &&
+					Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches(vendor, renderer, version,
+						major, minor, profileMask, contextFlags);
+			}
+			catch
+			{
+				return false;
+			}
+		}
 
 		private static IntPtr GetGlProcedureAddress(string name)
 		{

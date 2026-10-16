@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using SkiaSharp;
 using Xunit;
 
 namespace Optimum.Launcher.Tests;
@@ -41,6 +42,41 @@ public class SplashScreenPackagingTests
         string script = Read("scripts/package.ps1");
         Assert.Contains("Get-ChildItem -Path $launcherOut -Filter '*.dll' -File", script);
         Assert.Contains("Copy-Item -Force $_.FullName $stageDir", script);
+    }
+
+    [Fact]
+    public void PatchProgressTextWrapsWithinTheSplashWindowWithoutLosingCharacters()
+    {
+        const string text = "Applying Optimum patches: .optimum/vanilla/Mods/VSSurvivalMod.dll";
+        using var typeface = SKTypeface.FromFamilyName("sans-serif");
+        using var font = new SKFont(typeface, 28f);
+        using var paint = new SKPaint { IsAntialias = true };
+
+        string[] lines = PatchSplashScreen.WrapText(text, font, paint, maximumWidth: 420);
+
+        Assert.True(lines.Length > 1);
+        Assert.All(lines, line => Assert.True(font.MeasureText(line, paint) <= 420));
+        Assert.Equal(text, string.Concat(lines));
+    }
+
+    [Fact]
+    public void PatchProgressTextWrapsAtUnicodeTextElementBoundariesAndHandlesCrLf()
+    {
+        const string text = "Stage e\u0301 🧪 ready\r\nApplying patch";
+        using var typeface = SKTypeface.FromFamilyName("sans-serif");
+        using var font = new SKFont(typeface, 28f);
+        using var paint = new SKPaint { IsAntialias = true };
+
+        string[] lines = PatchSplashScreen.WrapText(text, font, paint, maximumWidth: 100);
+
+        Assert.True(lines.Length > 2);
+        Assert.All(lines, line => Assert.True(font.MeasureText(line, paint) <= 100));
+        Assert.Equal(text.Replace("\r\n", "", StringComparison.Ordinal), string.Concat(lines));
+        for (int index = 0; index + 1 < lines.Length; index++)
+        {
+            Assert.False(char.IsHighSurrogate(lines[index][^1]));
+            Assert.False(char.IsLowSurrogate(lines[index + 1][0]));
+        }
     }
 
     private static string Read(string relativePath)

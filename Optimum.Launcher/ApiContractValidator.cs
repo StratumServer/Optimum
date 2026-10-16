@@ -35,17 +35,24 @@ public static class ApiContractValidator
         }
     }
 
-    public static bool HasGuiCertificationContract(string assemblyPath)
+    public static bool HasGuiCertificationContract(string assemblyPath, string? contractsAssemblyPath = null)
     {
         try
         {
             using var assembly = AssemblyDefinition.ReadAssembly(assemblyPath);
             var config = assembly.MainModule.GetType("Vintagestory.API.Config.OptimumConfig");
-            return config?.Methods.Any(method => method.Name == "SetGuiGpuCertificationPassed" &&
-                method.IsStatic && method.IsAssembly && method.ReturnType.FullName == "System.Void" &&
-                method.Parameters.Count == 1 && method.Parameters[0].ParameterType.FullName == "System.Boolean") == true &&
-                config.Methods.Any(method => method.Name == "get_GuiGpuRecordingEligible" &&
-                    method.IsStatic && method.ReturnType.FullName == "System.Boolean" && method.Parameters.Count == 0);
+            if (config == null)
+            {
+                bool forwarded = assembly.MainModule.ExportedTypes.Any(type =>
+                    type.FullName == "Vintagestory.API.Config.OptimumConfig" &&
+                    type.Scope is AssemblyNameReference reference && reference.Name == "Optimum.Api.Contracts");
+                if (!forwarded) return false;
+                contractsAssemblyPath ??= Path.Combine(Path.GetDirectoryName(Path.GetFullPath(assemblyPath))!, "Optimum.Api.Contracts.dll");
+                if (!File.Exists(contractsAssemblyPath)) return false;
+                using var contracts = AssemblyDefinition.ReadAssembly(contractsAssemblyPath);
+                return HasGuiCertificationMethods(contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig"));
+            }
+            return HasGuiCertificationMethods(config);
         }
         catch (Exception ex) when (ex is IOException or BadImageFormatException or AssemblyResolutionException or UnauthorizedAccessException)
         {
@@ -53,9 +60,24 @@ public static class ApiContractValidator
         }
     }
 
-    public static void EnsureGuiCertificationContract(string assemblyPath)
+    private static bool HasGuiCertificationMethods(TypeDefinition? config) =>
+            config?.Methods.Any(method => method.Name == "SetGuiGpuCertificationPassed" &&
+                method.IsStatic && method.IsAssembly && method.ReturnType.FullName == "System.Void" &&
+                method.Parameters.Count == 8 && method.Parameters[0].ParameterType.FullName == "System.Boolean" &&
+                method.Parameters.Skip(1).Take(3).All(parameter => parameter.ParameterType.FullName == "System.String") &&
+                method.Parameters.Skip(4).All(parameter => parameter.ParameterType.FullName == "System.Int32")) == true &&
+                config.Methods.Any(method => method.Name == "GuiGpuDeviceMatches" && method.IsStatic && method.IsAssembly &&
+                    method.ReturnType.FullName == "System.Boolean" && method.Parameters.Count == 7 &&
+                    method.Parameters.Take(3).All(parameter => parameter.ParameterType.FullName == "System.String") &&
+                    method.Parameters.Skip(3).All(parameter => parameter.ParameterType.FullName == "System.Int32")) &&
+                config.Methods.Any(method => method.Name == "RevokeGuiGpuCertification" && method.IsStatic && method.IsAssembly &&
+                    method.ReturnType.FullName == "System.Void" && method.Parameters.Count == 0) &&
+                config.Methods.Any(method => method.Name == "get_GuiGpuRecordingEligible" &&
+                    method.IsStatic && method.ReturnType.FullName == "System.Boolean" && method.Parameters.Count == 0);
+
+    public static void EnsureGuiCertificationContract(string assemblyPath, string? contractsAssemblyPath = null)
     {
-        if (!HasGuiCertificationContract(assemblyPath))
+        if (!HasGuiCertificationContract(assemblyPath, contractsAssemblyPath))
         {
             throw new InvalidDataException(
                 "VintagestoryAPI.dll lacks the Optimum GUI certification gate: " + assemblyPath);

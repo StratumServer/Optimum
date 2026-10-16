@@ -7,14 +7,27 @@ vanilla GUI composition. The game continues launching. The environment/config GP
 request cannot approve a certificate. The launcher clears approval before every
 validation; the runtime gate starts denied, also for direct client launches.
 
-This first slice **does not enable Skia on any real device**. It validates artifact
-and evidence inputs, then denies with `local-device-preflight-unavailable` because
-an isolated pre-client GL device matcher has not been implemented. There is no
-certificate producer or positive hardware approval in this change. Existing AMD
-Pharos evidence is negative and must stay negative. A future device verifier must
-match the actual GL vendor, renderer, version and driver from the approved
-profile, and the actual game context must still pass its independent backend
-probe. Do not replace that missing verification with an environment override.
+The private runner resolves the runtime fingerprint through the patched launcher
+before and after the isolated Pharos test. It issues local evidence only after
+that test exits successfully with exactly one pass and the runtime fingerprint
+stays unchanged. There is no launcher command that accepts a caller-supplied
+success code to issue approval. The launcher validates the certificate before
+`ClientProgram.Main`, runs a hidden OpenGL probe in a child process with an
+eight-second deadline, and requires exact vendor, renderer, GL version, major,
+minor, context profile mask, and context flags. Missing display, native failure,
+timeout, software renderer, incomplete output, or any mismatch selects vanilla.
+The real game context repeats the same comparison before every candidate texture;
+a mismatch revokes approval for that launch. GL context profile identity requires
+OpenGL 3.2 or newer. The existing Skia readback/state probe remains required.
+
+The certificate is a local review artifact, not a cryptographic authorization
+boundary against code running as the user. The private wrapper derives checkout
+HEAD IDs from Git and records loaded artifact hashes; the hashes identify the
+actual staged binaries even when a checkout has local edits. `DriverVersion` is
+optional diagnostic text and is not trusted or compared. The live GL version,
+vendor, renderer and context profile are compared, but these strings do not
+provide physical-device UUID attestation. A certificate applies only to the
+local staged runtime/profile. Do not copy certificates between machines.
 
 The certificate is a local review artifact, not a cryptographic authorization
 boundary against code running as the user. Schema 1 uses these exact property
@@ -32,12 +45,33 @@ Cairo and Skia dependencies and pass initial composition, recomposition, scales
 Counters must show positive successful candidates and zero fallback or native
 materialization. Changing only the decision string cannot approve evidence.
 
+The evidence also carries the runtime/profile fingerprint captured before the
+Pharos process; launcher validation requires it to match the certificate and
+current profile. The wrapper removes old approval first, enforces a 15-minute
+test deadline, and removes a newly written certificate if launcher validation
+fails. This is fail-closed operational binding, not protection against a
+malicious process with the same user's filesystem access.
+
 The current evidence corpus is an inventory/fixture profile, not exhaustive GUI
 coverage. Arbitrary mod callbacks, external paths, future GUI states, native
-escapes, and device/context changes cannot be universally certified. The current
-consumer deliberately cannot turn this bounded evidence into a positive device
-certificate. `--validate-only` continues to validate assemblies without granting
-GUI approval or starting the client.
+escapes, and device/context changes cannot be universally certified.
+`--validate-only` continues to validate assemblies without creating an OpenGL
+context, granting GUI approval or starting the client.
+
+Text keeps Cairo's native rasterization. The recording backend does not translate
+font and glyph operations into Skia; unsupported text operations materialize the
+recorded prefix and execute through Cairo with the requested `FontOptions`, including
+`Antialias.Subpixel`. A native materialization revokes the active GPU approval even
+when the GPU request or metrics collection is temporarily disabled. Subsequent GUI
+composition therefore uses the normal Cairo path. The regression test asserts that
+the Subpixel text path materializes natively and produces the same bytes as direct
+vanilla Cairo. A profile that materializes text during its measured workload cannot
+receive a Skia-only certificate.
+
+Certification also requires the live GL `Antialias.Best` rectangle fixture to read
+back from the candidate GPU texture and match the native Cairo pixels within one
+channel value. The assertion runs inside the Pharos test before its evidence can be
+written; the report records that result and launcher validation requires it.
 
 ## Intel and NVIDIA verification
 
@@ -57,9 +91,10 @@ successful run on another adapter as vendor coverage.
 4. Verify launcher behavior with absent certificate, malformed JSON, AMD-negative
    evidence, changed evidence bytes, changed cached DLL, changed mod/configuration
    and a cache hit. Each must select vanilla while allowing normal client entry.
-5. Until the isolated live-device verifier and complete positive profile exist,
-   require vanilla even for a synthetic otherwise complete certificate. Keep
-   negative reports; do not hand-edit them into positive approvals.
+5. With a complete synthetic report, verify exact live identity match, each
+   vendor/renderer/version mismatch, missing display, software renderer and
+   timeout. Each failure must select vanilla and allow normal client entry.
+   Keep the real AMD report negative; do not hand-edit reports into approvals.
 
 Local regression commands:
 

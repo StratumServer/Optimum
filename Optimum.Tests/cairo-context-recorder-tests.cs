@@ -283,6 +283,45 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
+	[Fact]
+	public void SubpixelTextMaterializesToNativeCairoAndMatchesVanillaOutput()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 144, 36);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.12, .18, .24, 1);
+			context.Rectangle (0, 0, 144, 36);
+			context.Fill ();
+			context.SetSourceRGBA (.94, .93, .89, 1);
+			context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
+			context.SetFontSize (15);
+			using var options = new FontOptions { Antialias = Antialias.Subpixel };
+			context.FontOptions = options;
+			context.MoveTo (3.375, 23.625);
+			context.ShowText ("Subpixel: ffi 0123");
+		}
+
+		using var expected = new ImageSurface (Format.Argb32, 144, 36);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.12, .18, .24, 1);
+			context.Rectangle (0, 0, 144, 36);
+			context.Fill ();
+			context.SetSourceRGBA (.94, .93, .89, 1);
+			context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
+			context.SetFontSize (15);
+			using var options = new FontOptions { Antialias = Antialias.Subpixel };
+			context.FontOptions = options;
+			context.MoveTo (3.375, 23.625);
+			context.ShowText ("Subpixel: ffi 0123");
+		}
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Contains ("SelectFontFace", actual.FirstMaterializationTrigger);
+		Assert.Equal (expected.Data, actual.Data);
+	}
+
 	[Theory]
 	[InlineData(1f, EnumLinebreakBehavior.AfterWord)]
 	[InlineData(1.5f, EnumLinebreakBehavior.AfterWord)]

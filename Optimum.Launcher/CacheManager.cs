@@ -97,7 +97,7 @@ public sealed class CacheManager
 
             if (string.Equals(target.Assembly, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase) &&
                 (!ApiContractValidator.HasTesselationThreadContract(cachedPath) ||
-                 !ApiContractValidator.HasGuiCertificationContract(cachedPath)))
+                 !ApiContractValidator.HasGuiCertificationContract(cachedPath, Path.Combine(_gameDir, "Optimum.Api.Contracts.dll"))))
             {
                 return null;
             }
@@ -151,7 +151,8 @@ public sealed class CacheManager
             if (string.Equals(t.AssemblyName, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase))
             {
                 ApiContractValidator.EnsureTesselationThreadContract(cachedPath);
-                ApiContractValidator.EnsureGuiCertificationContract(cachedPath);
+                ApiContractValidator.EnsureGuiCertificationContract(cachedPath,
+                    Path.Combine(_gameDir, "Optimum.Api.Contracts.dll"));
             }
 
             manifest.Targets.Add(new CacheTarget
