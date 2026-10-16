@@ -108,9 +108,16 @@ record actual GL identity and driver, OS, staged runtime hashes, harness commit,
 profile configuration and datapath. Do not report a software renderer or a
 successful run on another adapter as vendor coverage.
 
-On Windows, after staging the candidate with the private Pharos harness, run
-the SVG compatibility scenario in a separate evidence directory for each
-adapter:
+Run the committed standalone Pharos diagnostic on each physical adapter using
+the commands in `Optimum.Pharos.SvgDiagnostic/README.md`. It calls the patched
+public `SvgLoader.LoadSvg` method and compares complete GPU texture readbacks
+with the native NanoSVG route at 1x, 1.5x and 2x texture sizes. Each run writes
+a separate JSON report with the live GL identity, context and loaded assembly
+hashes. The diagnostic grants the live identity in memory, revokes it at the
+end of the test, and never writes a certificate.
+
+On Windows, also run the private full GUI suite against the staged candidate
+in a separate evidence directory for each adapter:
 
 ```powershell
 .\run-gui.ps1 -OptimumRoot <candidate-checkout> `
@@ -118,14 +125,13 @@ adapter:
   -Filter FullyQualifiedName~NanoSvgNativeCompatibility
 ```
 
-The runner writes the test log, TRX results, runtime manifest and
-`svg-parity.json`. Keep those files with the physical adapter's report. The
-scenario must call the public `SvgLoader.LoadSvg` route, read back the full GPU
-texture, and compare every RGBA byte with the native NanoSVG texture (allow at
-most one channel value for documented rounding). For an eligible opaque tiled
-SVG, require one candidate attempt, one success and zero fallbacks. For tint,
-alpha and other unsupported shapes, require zero candidate attempts and exact
-native fallback bytes. A passing CPU parser test or an in-memory identity
+That private runner writes the test log, TRX results, runtime manifest and
+`svg-parity.json`. Keep those files with the physical adapter's report. Its
+SVG matrix exercises the recorder fixtures directly and supplements the
+standalone public-route diagnostic. For an eligible opaque tiled SVG, require
+one candidate attempt, one success and zero fallbacks. For tint, alpha and
+other unsupported shapes, require zero candidate attempts and exact native
+fallback bytes. A passing CPU parser test or an in-memory identity
 qualification is diagnostic only; neither produces an approved hardware
 certificate.
 
