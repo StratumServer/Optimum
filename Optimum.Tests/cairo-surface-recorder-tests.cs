@@ -96,6 +96,44 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
+	public void BestAntialiasRecordingMatchesCairoWithinEdgeTolerance()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+			context.SetSourceRGBA (.9, .1, .3, .43);
+			context.Rectangle (4.5, 1.75, 10.25, 9.5);
+			context.Fill ();
+		}
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		using var bitmap = new SKBitmap (new SKImageInfo (18, 14, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+			context.SetSourceRGBA (.9, .1, .3, .43);
+			context.Rectangle (4.5, 1.75, 10.25, 9.5);
+			context.Fill ();
+		}
+
+		byte[] actualPixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), actualPixels, 0, actualPixels.Length);
+		byte[] expectedPixels = expected.Data;
+		int maxChannelDelta = 0;
+		for (int i = 0; i < actualPixels.Length; i++) maxChannelDelta = Math.Max (maxChannelDelta, Math.Abs (actualPixels[i] - expectedPixels[i]));
+		Assert.InRange (maxChannelDelta, 0, 3);
+	}
+
+	[Fact]
 	public void UnbalancedSaveCannotBeSealedForSkia()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
