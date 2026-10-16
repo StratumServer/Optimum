@@ -1,20 +1,21 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..59ed907 100644
+index 03f9c76..6ba1a20 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
-@@ -33,10 +33,11 @@
+@@ -33,10 +33,12 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
  
  using System;
++using System.Runtime.CompilerServices;
 +using System.Runtime.ExceptionServices;
  using System.Runtime.InteropServices;
  using System.Text;
  
  #nullable disable
  
-@@ -50,10 +51,11 @@ namespace Cairo
+@@ -50,10 +52,11 @@ namespace Cairo
  	}
  
  	public class Context : IDisposable
@@ -26,7 +27,7 @@ index 03f9c76..59ed907 100644
  
  		static Context ()
  		{
-@@ -81,12 +83,13 @@ namespace Cairo
+@@ -81,12 +84,13 @@ namespace Cairo
  				c_compiler_long_size = 8;
  				native_glyph_size = Marshal.SizeOf (typeof (Glyph));
  			}
@@ -41,7 +42,7 @@ index 03f9c76..59ed907 100644
  		public Context (IntPtr handle, bool owner)
  		{
  			if (handle == IntPtr.Zero)
-@@ -115,45 +118,80 @@ namespace Cairo
+@@ -115,45 +119,80 @@ namespace Cairo
  			GC.SuppressFinalize (this);
  		}
  
@@ -52,9 +53,6 @@ index 03f9c76..59ed907 100644
 -
 -			if (handle == IntPtr.Zero)
 -				return;
--
--			NativeMethods.cairo_destroy (handle);
--			handle = IntPtr.Zero;
 +			if (handle == IntPtr.Zero) return;
 +			IntPtr disposedHandle = handle;
 +			Surface oldSurface = recordingSurface;
@@ -82,14 +80,17 @@ index 03f9c76..59ed907 100644
 +				}
 +			}
 +			if (cleanupFailure != null) cleanupFailure.Throw ();
- 		}
++		}
  
- 		void CheckDisposed ()
+-			NativeMethods.cairo_destroy (handle);
+-			handle = IntPtr.Zero;
++		void CheckDisposed ([CallerMemberName] string caller = null)
 +		{
 +			CheckDisposedOnly ();
-+			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle);
-+		}
-+
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, caller, "Context");
+ 		}
+ 
+-		void CheckDisposed ()
 +		void CheckDisposedOnly ()
  		{
  			if (handle == IntPtr.Zero)
@@ -133,14 +134,14 @@ index 03f9c76..59ed907 100644
  		}
  
  		public Cairo.Status Status {
-@@ -163,17 +201,20 @@ namespace Cairo
+@@ -163,17 +202,20 @@ namespace Cairo
  			}
  		}
  
  		public IntPtr Handle {
  			get {
 +				if (handle == IntPtr.Zero) return IntPtr.Zero;
-+				if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle);
++				if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, "Handle", "Context");
  				return handle;
  			}
  		}
@@ -155,7 +156,7 @@ index 03f9c76..59ed907 100644
  
  			get {
  				CheckDisposed ();
-@@ -338,13 +379,18 @@ namespace Cairo
+@@ -338,13 +380,18 @@ namespace Cairo
  		}
  
  		public void SetTarget (Surface target)
@@ -177,7 +178,7 @@ index 03f9c76..59ed907 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -389,11 +435,12 @@ namespace Cairo
+@@ -389,11 +436,12 @@ namespace Cairo
  			NativeMethods.cairo_set_source_rgb (handle, r, g, b);
  		}
  
@@ -191,7 +192,7 @@ index 03f9c76..59ed907 100644
  
          public void SetSourceRGBA(double[] rgba)
          {
-@@ -528,11 +575,12 @@ namespace Cairo
+@@ -528,11 +576,12 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -205,7 +206,7 @@ index 03f9c76..59ed907 100644
  
  		public void ClosePath ()
  		{
-@@ -565,11 +613,12 @@ namespace Cairo
+@@ -565,11 +614,12 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -219,7 +220,7 @@ index 03f9c76..59ed907 100644
  
  		public void PaintWithAlpha (double alpha)
  		{
-@@ -612,11 +661,12 @@ namespace Cairo
+@@ -612,11 +662,12 @@ namespace Cairo
          /// <summary>
          /// Paint everything in the current region
          /// </summary>
