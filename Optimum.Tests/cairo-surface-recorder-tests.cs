@@ -58,6 +58,7 @@ public sealed class CairoSurfaceRecorderTests
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
 		var recorder = actual.BeginRecording ();
+		Assert.True (recorder.RecordAntialias (Antialias.None));
 		recorder.FillRectangle (1, 1, 14, 10, .12, .48, .82, 1);
 		recorder.FillRectangle (3, 2, 8, 7, .91, .2, .36, .43);
 		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -75,6 +76,51 @@ public sealed class CairoSurfaceRecorderTests
 			DrawNativeRectangle (context, 3, 2, 8, 7, .91, .2, .36, .43);
 		}
 		Assert.Equal (expected.Data, actual.Data); // Data materializes the retained display list after GPU publication.
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+	}
+
+	[Fact]
+	public void DefaultAntialiasSurfaceHelperCannotBeSealedForSkia()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 16, 12);
+		var recorder = actual.BeginRecording ();
+		recorder.FillRectangle (1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
+		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		using var expected = new ImageSurface (Format.Argb32, 16, 12);
+		using (var context = new Context (expected)) DrawNativeRectangle (context, 1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
+		Assert.Equal (expected.Data, actual.Data);
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+	}
+
+	[Fact]
+	public void UnbalancedSaveCannotBeSealedForSkia()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 16, 12);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Save ();
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (.12, .48, .82, 1);
+			context.Rectangle (1, 1, 10, 8);
+			context.Fill ();
+		}
+
+		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		using var expected = new ImageSurface (Format.Argb32, 16, 12);
+		using (var context = new Context (expected)) {
+			context.Save ();
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (.12, .48, .82, 1);
+			context.Rectangle (1, 1, 10, 8);
+			context.Fill ();
+		}
+		Assert.Equal (expected.Data, actual.Data);
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 

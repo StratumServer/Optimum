@@ -17,6 +17,7 @@ public sealed class CairoContextRecorderTests
 		actualContext.SetSourceRGBA (0, 0, 0, 0);
 		actualContext.Paint ();
 		actualContext.Save ();
+		actualContext.Antialias = Antialias.None;
 		actualContext.SetSourceRGBA (.2, .7, .4, .65);
 		actualContext.Rectangle (2.25, 3.5, 11.5, 8.25);
 		actualContext.Fill ();
@@ -34,6 +35,7 @@ public sealed class CairoContextRecorderTests
 			context.SetSourceRGBA (0, 0, 0, 0);
 			context.Paint ();
 			context.Save ();
+			context.Antialias = Antialias.None;
 			context.SetSourceRGBA (.2, .7, .4, .65);
 			context.Rectangle (2.25, 3.5, 11.5, 8.25);
 			context.Fill ();
@@ -51,6 +53,7 @@ public sealed class CairoContextRecorderTests
 		using (var context = new Context (actual)) {
 			context.SetSourceRGBA (.15, .65, .35, .7);
 			context.Rectangle (1.25, 2.5, 8.5, 6);
+			context.Antialias = Antialias.None;
 			context.Fill ();
 		}
 
@@ -59,6 +62,7 @@ public sealed class CairoContextRecorderTests
 		using (var context = new Context (expected)) {
 			context.SetSourceRGBA (.15, .65, .35, .7);
 			context.Rectangle (1.25, 2.5, 8.5, 6);
+			context.Antialias = Antialias.None;
 			context.Fill ();
 		}
 		Assert.Equal (expected.Data, actual.Data);
@@ -73,6 +77,7 @@ public sealed class CairoContextRecorderTests
 		using var context = new Context (surface);
 		context.SetSourceRGBA (1, 0, 0, .5);
 		context.Rectangle (1, 1, 5, 5);
+		context.Antialias = Antialias.None;
 		context.Fill ();
 		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		_ = context.Handle;
@@ -98,6 +103,86 @@ public sealed class CairoContextRecorderTests
 			context.Rectangle (2, 2, 9, 7);
 			context.Fill ();
 			context.Arc (14, 13, 3, 0, 6.283185307179586);
+			context.Fill ();
+		}
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (expected.Data, actual.Data);
+	}
+
+	[Theory]
+	[InlineData (Antialias.Default)]
+	[InlineData (Antialias.Gray)]
+	[InlineData (Antialias.Subpixel)]
+	[InlineData (Antialias.Fast)]
+	[InlineData (Antialias.Good)]
+	[InlineData (Antialias.Best)]
+	public void UnsupportedAntialiasModesMaterializeBeforeNativeFill (Antialias antialias)
+	{
+		using var actual = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Antialias = antialias;
+			context.Fill ();
+		}
+
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Antialias = antialias;
+			context.Fill ();
+		}
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (expected.Data, actual.Data);
+	}
+
+	[Fact]
+	public void DefaultAntialiasFillMaterializesBeforeNativeDrawing ()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+		}
+
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+		}
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (expected.Data, actual.Data);
+	}
+
+	[Fact]
+	public void RestoreOfDefaultAntialiasMakesSubsequentFillUseNativeCairo ()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Save ();
+			context.Antialias = Antialias.None;
+			context.Restore ();
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+		}
+
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		using (var context = new Context (expected)) {
+			context.Save ();
+			context.Antialias = Antialias.None;
+			context.Restore ();
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
 			context.Fill ();
 		}
 
@@ -319,11 +404,13 @@ public sealed class CairoContextRecorderTests
 		using var context = new Context (oldSurface);
 		context.SetSourceRGBA (.9, .2, .1, .8);
 		context.Rectangle (1, 1, 5, 5);
+		context.Antialias = Antialias.None;
 		context.Fill ();
 		context.SetTarget (newSurface);
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, oldRecorder.State);
 		context.SetSourceRGBA (.1, .4, .9, .7);
 		context.Rectangle (4, 3, 6, 7);
+		context.Antialias = Antialias.None;
 		context.Fill ();
 		Assert.Equal (SurfaceRecordingState.Recording, newRecorder.State);
 
@@ -331,6 +418,7 @@ public sealed class CairoContextRecorderTests
 		using (var native = new Context (expected)) {
 			native.SetSourceRGBA (.1, .4, .9, .7);
 			native.Rectangle (4, 3, 6, 7);
+			native.Antialias = Antialias.None;
 			native.Fill ();
 		}
 		Assert.Equal (expected.Data, newSurface.Data);
@@ -374,18 +462,18 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void FailedMaterializationBeforeDisposeStillAllowsContextCleanup()
+	public void InvalidRestoreFallsBackToCairoAndStillAllowsContextCleanup()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
 		var recorder = surface.BeginRecording ();
 		var context = new Context (surface);
 		context.SetSourceRGBA (1, 0, 0, .5);
 		context.Rectangle (1, 1, 4, 4);
-		context.Restore (); // Replay fails with Cairo's InvalidRestore status.
+		context.Restore ();
 
-		Exception materializationFailure = Record.Exception (() => _ = surface.Data);
-		Assert.IsType<InvalidOperationException> (materializationFailure);
-		Assert.Equal (SurfaceRecordingState.Failed, recorder.State);
+		Assert.Equal (Status.InvalidRestore, context.Status);
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Null (Record.Exception (() => _ = surface.Data));
 		Assert.Null (Record.Exception (() => context.Dispose ()));
 		Assert.Equal (IntPtr.Zero, context.Handle);
 	}

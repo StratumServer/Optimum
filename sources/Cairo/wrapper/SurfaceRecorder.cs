@@ -21,9 +21,12 @@ namespace Cairo
 	{
 		readonly Surface surface;
 		readonly List<Command> commands = new List<Command> ();
+		readonly Stack<bool> antialiasSaveStack = new Stack<bool> ();
 		readonly object sync = new object ();
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
+		bool antialiasExplicitlyDisabled;
+		bool hasUnsafeFilledPath;
 
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
@@ -32,7 +35,7 @@ namespace Cairo
 		{
 			surface.EnsureRecordingOwnerThread ();
 			lock (sync) {
-				if (state != SurfaceRecordingState.Recording) { snapshot = null; return false; }
+				if (state != SurfaceRecordingState.Recording || hasUnsafeFilledPath || antialiasSaveStack.Count != 0) { snapshot = null; return false; }
 				state = SurfaceRecordingState.Sealed;
 				snapshot = new SurfaceRecorderSnapshot (commands.ToArray ());
 				return true;
@@ -51,13 +54,33 @@ namespace Cairo
 		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => Add (new Command (CommandKind.SetSourceRGBA, r, g, b, a));
 		internal bool RecordPaint () => Add (new Command (CommandKind.Paint));
 		internal bool RecordRectangle (double x, double y, double width, double height) => Add (new Command (CommandKind.Rectangle, x, y, width, height));
-		internal bool RecordFill () => Add (new Command (CommandKind.Fill));
-		internal bool RecordSave () => Add (new Command (CommandKind.Save));
-		internal bool RecordRestore () => Add (new Command (CommandKind.Restore));
+		internal bool RecordFill ()
+		{
+			// Skia's boolean antialias switch cannot reproduce Cairo's default/gray/good/best
+			// rasterizers. Only seal filled paths after Cairo antialiasing was explicitly disabled.
+			if (!antialiasExplicitlyDisabled) return false;
+			return Add (new Command (CommandKind.Fill));
+		}
+		internal bool RecordSave ()
+		{
+			if (!Add (new Command (CommandKind.Save))) return false;
+			antialiasSaveStack.Push (antialiasExplicitlyDisabled);
+			return true;
+		}
+		internal bool RecordRestore ()
+		{
+			// Let Cairo handle an unmatched restore immediately so it can set InvalidRestore.
+			if (antialiasSaveStack.Count == 0) return false;
+			if (!Add (new Command (CommandKind.Restore))) return false;
+			antialiasExplicitlyDisabled = antialiasSaveStack.Pop ();
+			return true;
+		}
 		internal bool RecordAntialias (Antialias value)
 		{
-			if (value == Antialias.Subpixel) return false;
-			return Add (new Command (CommandKind.SetAntialias, (double)value));
+			if (value != Antialias.None) return false;
+			if (!Add (new Command (CommandKind.SetAntialias, (double)value))) return false;
+			antialiasExplicitlyDisabled = true;
+			return true;
 		}
 		internal bool RecordOperator (Operator value)
 		{
@@ -67,8 +90,9 @@ namespace Cairo
 
 		internal void FillRectangle (double x, double y, double width, double height, double red, double green, double blue, double alpha)
 		{
-			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !RecordFill ())
+			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !Add (new Command (CommandKind.Fill)))
 				throw new InvalidOperationException ("Recorder is no longer recording.");
+			if (!antialiasExplicitlyDisabled) hasUnsafeFilledPath = true;
 		}
 
 		bool Add (Command command)

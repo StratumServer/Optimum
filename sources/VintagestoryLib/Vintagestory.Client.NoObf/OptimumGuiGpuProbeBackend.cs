@@ -35,6 +35,11 @@ namespace Vintagestory.Client.NoObf
 
 					string renderer = SafeGetString(StringName.Renderer);
 					string version = SafeGetString(StringName.Version);
+					if (!IsOpenGl3OrNewer(version))
+					{
+						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+						return "Optimum Skia GL probe skipped; renderer=" + renderer + "; GL=" + version + "; reason=OpenGL 3.0 or newer is required for state capture.";
+					}
 					if (OptimumGuiGpuProbe.IsSoftwareRenderer(renderer))
 					{
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
@@ -87,6 +92,11 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "missing-current-context";
 						return false;
 					}
+					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
+					{
+						failureReason = "OpenGL 3.0 or newer is required for state capture";
+						return false;
+					}
 					TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
@@ -131,6 +141,7 @@ namespace Vintagestory.Client.NoObf
 						GL.Disable(EnableCap.StencilTest);
 						GL.Disable(EnableCap.CullFace);
 						GL.Disable((EnableCap)0x8DB9);
+						if (state.SupportsRasterizerDiscard) GL.Disable((EnableCap)0x8C89); // RASTERIZER_DISCARD
 						GL.ColorMask(true, true, true, true);
 						GL.DepthMask(true);
 						GL.StencilMask(0xFFFFFFFF);
@@ -263,6 +274,7 @@ namespace Vintagestory.Client.NoObf
 						GL.Disable(EnableCap.StencilTest);
 						GL.Disable(EnableCap.CullFace);
 						GL.Disable((EnableCap)0x8DB9); // FRAMEBUFFER_SRGB
+						if (state.SupportsRasterizerDiscard) GL.Disable((EnableCap)0x8C89); // RASTERIZER_DISCARD
 						GL.ColorMask(true, true, true, true);
 						GL.DepthMask(true);
 						GL.StencilMask(0xFFFFFFFF);
@@ -364,6 +376,14 @@ namespace Vintagestory.Client.NoObf
 					catch { return "unavailable"; }
 				}
 
+				private static bool IsOpenGl3OrNewer(string version)
+				{
+					if (string.IsNullOrEmpty(version)) return false;
+					int length = 0;
+					while (length < version.Length && version[length] >= '0' && version[length] <= '9') length++;
+					return length > 0 && int.TryParse(version.Substring(0, length), out int major) && major >= 3;
+				}
+
 		private static string AppendFailure(string existing, string added) => existing == null ? added : existing + "; " + added;
 
 				private sealed class GlStateSnapshot
@@ -398,6 +418,8 @@ namespace Vintagestory.Client.NoObf
 					private readonly bool stencilEnabled;
 					private readonly bool cullEnabled;
 					private readonly bool framebufferSrgbEnabled;
+					private readonly bool rasterizerDiscardEnabled;
+					private readonly bool supportsRasterizerDiscard;
 					private readonly bool depthWriteEnabled;
 					private readonly int depthFunction;
 					private readonly int frontStencilFunction;
@@ -438,6 +460,7 @@ namespace Vintagestory.Client.NoObf
 						textureBindings = new int[textureUnitCount];
 						GL.GetInteger((GetPName)0x821B, out int glMajor);
 						GL.GetInteger((GetPName)0x821C, out int glMinor);
+						supportsRasterizerDiscard = glMajor >= 3;
 						samplerObjectsSupported = glMajor > 3 || (glMajor == 3 && glMinor >= 3);
 						samplerBindings = samplerObjectsSupported ? new int[textureUnitCount] : Array.Empty<int>();
 						try
@@ -475,6 +498,7 @@ namespace Vintagestory.Client.NoObf
 						stencilEnabled = GL.IsEnabled(EnableCap.StencilTest);
 						cullEnabled = GL.IsEnabled(EnableCap.CullFace);
 						framebufferSrgbEnabled = GL.IsEnabled((EnableCap)0x8DB9);
+						rasterizerDiscardEnabled = supportsRasterizerDiscard && GL.IsEnabled((EnableCap)0x8C89);
 						depthWriteEnabled = GL.GetBoolean((GetPName)0x0B72);
 						GL.GetInteger((GetPName)0x0B74, out depthFunction);
 						GL.GetInteger((GetPName)0x0B45, out cullFaceMode);
@@ -502,6 +526,7 @@ namespace Vintagestory.Client.NoObf
 					}
 
 					internal static GlStateSnapshot Capture() => new GlStateSnapshot();
+					internal bool SupportsRasterizerDiscard => supportsRasterizerDiscard;
 
 					internal void Restore()
 					{
@@ -539,6 +564,7 @@ namespace Vintagestory.Client.NoObf
 						SetEnabled(EnableCap.StencilTest, stencilEnabled);
 						SetEnabled(EnableCap.CullFace, cullEnabled);
 						SetEnabled((EnableCap)0x8DB9, framebufferSrgbEnabled);
+						if (supportsRasterizerDiscard) SetEnabled((EnableCap)0x8C89, rasterizerDiscardEnabled);
 						GL.DepthMask(depthWriteEnabled);
 						GL.DepthFunc((DepthFunction)depthFunction);
 						GL.StencilFuncSeparate(StencilFace.Front, (StencilFunction)frontStencilFunction, frontStencilReference, frontStencilValueMask);
