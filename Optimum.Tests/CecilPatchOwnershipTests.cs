@@ -13,7 +13,6 @@ public class CecilPatchOwnershipTests
         "patches/VintagestoryLib/Vintagestory.API.Common/EventHelper.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch",
-        "patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs.patch",
 
         // Triaged 2026-08-11 (see docs/todo.md's "CecilPatchOwnershipTests backlog
@@ -113,6 +112,18 @@ public class CecilPatchOwnershipTests
             Path.Combine(FindRepositoryRoot(), "Optimum.Patcher", "Program.cs"));
 
         Assert.DoesNotContain("\"optimumTickSliceCount\"", source);
+    }
+
+    [Fact]
+    public void SvgLoaderRecorderRoutesAndHelperShipThroughCecil()
+    {
+        string source = File.ReadAllText(
+            Path.Combine(FindRepositoryRoot(), "Optimum.Patcher", "Program.cs"));
+
+        Assert.Contains("\"Vintagestory.Client.NoObf.OptimumGuiSvgRecorder\"", source);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SvgLoader\", \"DrawSvg\", 7)", source);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SvgLoader\", \"DrawSvg\", 8)", source);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SvgLoader\", \"LoadSvg\", 6)", source);
     }
 
     private static string FindRepositoryRoot()

@@ -120,8 +120,14 @@ adapter:
 
 The runner writes the test log, TRX results, runtime manifest and
 `svg-parity.json`. Keep those files with the physical adapter's report. The
-scenario checks actual `SvgLoader.LoadSvg` routing and GPU texture readback;
-CPU parser tests alone do not provide this evidence.
+scenario must call the public `SvgLoader.LoadSvg` route, read back the full GPU
+texture, and compare every RGBA byte with the native NanoSVG texture (allow at
+most one channel value for documented rounding). For an eligible opaque tiled
+SVG, require one candidate attempt, one success and zero fallbacks. For tint,
+alpha and other unsupported shapes, require zero candidate attempts and exact
+native fallback bytes. A passing CPU parser test or an in-memory identity
+qualification is diagnostic only; neither produces an approved hardware
+certificate.
 
 1. Build and stage the exact candidate runtime. Use a disposable datapath/world
    and retain its configuration. Keep the authenticated user datapath intact.
