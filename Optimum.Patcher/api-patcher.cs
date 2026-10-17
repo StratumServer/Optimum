@@ -106,7 +106,7 @@ public static class ApiPatcher
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
-        int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule);
+        int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int materializationObserver = PatchMaterializationObserver(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
 
         if (inventoryHooks != 2)
@@ -455,7 +455,7 @@ public static class ApiPatcher
         return 1;
     }
 
-    internal static int PatchFontMeasurementMetrics(ModuleDefinition module, ModuleDefinition contracts)
+    internal static int PatchFontMeasurementMetrics(ModuleDefinition module, ModuleDefinition contracts, ModuleDefinition cairo)
     {
         const string fontTypeName = "Vintagestory.API.Client.CairoFont";
         var font = module.GetType(fontTypeName)
@@ -470,10 +470,99 @@ public static class ApiPatcher
         var textExtents = font.Methods.Single(method => method.Name == "GetTextExtents" && method.Parameters.Count == 1 &&
             method.Parameters[0].ParameterType.MetadataType == MetadataType.String);
         var fontExtents = font.Methods.Single(method => method.Name == "GetFontExtents" && method.Parameters.Count == 0);
+        RewriteFontMeasurementsWithSkia(module, cairo, font, textExtents, fontExtents);
         PatchFontMeasurementMethod(module, textExtents, enabledGetter, startTimestamp, recordTextExtents);
         PatchFontMeasurementMethod(module, fontExtents, enabledGetter, startTimestamp, recordFontExtents);
-        Console.WriteLine($"  API PATCHED: {fontTypeName}.GetTextExtents/GetFontExtents metrics");
+        Console.WriteLine($"  API PATCHED: {fontTypeName}.GetTextExtents/GetFontExtents Skia metrics and null-safe disposal");
         return 2;
+    }
+
+    private static void RewriteFontMeasurementsWithSkia(ModuleDefinition module, ModuleDefinition cairo,
+        TypeDefinition font, MethodDefinition textExtents, MethodDefinition fontExtents)
+    {
+        var helper = cairo.GetType("Cairo.OptimumSkiaTextMetrics")
+            ?? throw new InvalidOperationException("Cairo.OptimumSkiaTextMetrics is missing from the candidate Cairo assembly.");
+        if (!helper.IsPublic)
+            throw new InvalidOperationException("Cairo.OptimumSkiaTextMetrics must be public for calls from the API assembly.");
+        if (textExtents.IsStatic || fontExtents.IsStatic || textExtents.ReturnType.FullName != "Cairo.TextExtents" ||
+            fontExtents.ReturnType.FullName != "Cairo.FontExtents")
+            throw new InvalidOperationException("CairoFont measurement signatures do not match the supported vanilla API.");
+        var options = font.Fields.SingleOrDefault(field => field.Name == "CairoFontOptions" && !field.IsStatic && field.FieldType.FullName == "Cairo.FontOptions")
+            ?? throw new InvalidOperationException("CairoFont.CairoFontOptions is missing from the vanilla API.");
+        var dispose = font.Methods.SingleOrDefault(method => method.Name == "Dispose" && !method.IsStatic && method.Parameters.Count == 0 && method.ReturnType.FullName == "System.Void")
+            ?? throw new InvalidOperationException("CairoFont.Dispose() is missing from the vanilla API.");
+        var disposeInstructions = dispose.HasBody ? dispose.Body.Instructions.Where(instruction => instruction.OpCode != OpCodes.Nop).ToArray() : Array.Empty<Instruction>();
+        if (disposeInstructions.Length != 4 || disposeInstructions[0].OpCode != OpCodes.Ldarg_0 ||
+            disposeInstructions[1].OpCode != OpCodes.Ldfld || disposeInstructions[1].Operand is not FieldReference disposeField || disposeField.FullName != options.FullName ||
+            disposeInstructions[2].OpCode != OpCodes.Callvirt || disposeInstructions[2].Operand is not MethodReference disposeCall ||
+            disposeCall.Name != "Dispose" || disposeCall.DeclaringType.FullName != "Cairo.FontOptions" || disposeInstructions[3].OpCode != OpCodes.Ret)
+            throw new InvalidOperationException("CairoFont.Dispose() does not match the supported vanilla font-options disposal body.");
+        var measureText = FindHelper("GetTextExtents", "Cairo.TextExtents", true);
+        var measureFont = FindHelper("GetFontExtents", "Cairo.FontExtents", false);
+        var family = FindField("Fontname", "System.String");
+        var weight = FindField("FontWeight", "Cairo.FontWeight");
+        var slant = FindField("Slant", "Cairo.FontSlant");
+        var size = FindField("UnscaledFontsize", "System.Double");
+        var scaled = module.GetType("Vintagestory.API.Client.GuiElement")?.Methods.SingleOrDefault(method =>
+            method.Name == "scaled" && method.IsStatic && method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.FullName == "System.Double" && method.ReturnType.FullName == "System.Double")
+            ?? throw new InvalidOperationException("GuiElement.scaled(double) is missing from the vanilla API.");
+
+        // Validate both methods before changing either body. Do not silently reapply
+        // on top of an API that already carries the GUI measurement hooks.
+        foreach (var method in new[] { textExtents, fontExtents })
+        {
+            if (!method.HasBody || method.Body.Instructions.Any(instruction =>
+                instruction.Operand is MethodReference called && called.DeclaringType.FullName == "Vintagestory.API.Config.OptimumGuiMetrics"))
+                throw new InvalidOperationException($"{method.FullName} is missing its vanilla body or already has GUI measurement hooks.");
+        }
+        Rewrite(textExtents, measureText, true);
+        Rewrite(fontExtents, measureFont, false);
+        // Measuring through Skia no longer calls SetupContext, so font options
+        // can remain null throughout a font's lifetime.
+        var disposeProcessor = dispose.Body.GetILProcessor();
+        Instruction originalDispose = dispose.Body.Instructions[0];
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Ldarg_0));
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Ldfld, module.ImportReference(options)));
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Brtrue, originalDispose));
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Ret));
+
+        MethodDefinition FindHelper(string name, string result, bool hasText)
+        {
+            string[] parameters = hasText
+                ? new[] { "System.String", "Cairo.FontWeight", "Cairo.FontSlant", "System.Double", "System.String" }
+                : new[] { "System.String", "Cairo.FontWeight", "Cairo.FontSlant", "System.Double" };
+            return helper.Methods.SingleOrDefault(method => method.Name == name && method.IsPublic && method.IsStatic &&
+                method.ReturnType.FullName == result && method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters))
+                ?? throw new InvalidOperationException($"The candidate Cairo assembly lacks the expected {name} Skia helper signature.");
+        }
+
+        FieldDefinition FindField(string name, string type)
+        {
+            for (TypeDefinition? current = font; current != null; current = current.BaseType?.Resolve())
+            {
+                var field = current.Fields.SingleOrDefault(candidate => candidate.Name == name && !candidate.IsStatic && candidate.FieldType.FullName == type);
+                if (field != null) return field;
+            }
+            throw new InvalidOperationException($"{font.FullName} is missing its {type} {name} field.");
+        }
+
+        void Rewrite(MethodDefinition method, MethodDefinition helperMethod, bool hasText)
+        {
+            method.Body = new MethodBody(method);
+            method.DebugInformation.SequencePoints.Clear();
+            method.DebugInformation.Scope = null;
+            var processor = method.Body.GetILProcessor();
+            foreach (var field in new[] { family, weight, slant, size })
+            {
+                processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+                processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(field)));
+            }
+            processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(scaled)));
+            if (hasText) processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+            processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(helperMethod)));
+            processor.Append(Instruction.Create(OpCodes.Ret));
+        }
     }
 
     private static void PatchFontMeasurementMethod(ModuleDefinition module, MethodDefinition method,

@@ -282,7 +282,7 @@ namespace Cairo
 			return true;
 		}
 
-		static SKTypeface MatchCairoTypeface (string family, FontSlant slant, FontWeight weight)
+		internal static SKTypeface MatchCairoTypeface (string family, FontSlant slant, FontWeight weight)
 		{
 			// Cairo's toy font backend resolves names through Fontconfig. Ask that same
 			// configuration for the file and face index, then give the exact face to Skia;

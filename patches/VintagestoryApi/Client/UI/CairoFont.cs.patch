@@ -1,18 +1,21 @@
 diff --git a/VintagestoryApi/Client/UI/CairoFont.cs b/VintagestoryApi/Client/UI/CairoFont.cs
-index 03bfd4f..2515e82 100644
 --- a/VintagestoryApi/Client/UI/CairoFont.cs
 +++ b/VintagestoryApi/Client/UI/CairoFont.cs
-@@ -240,23 +240,31 @@ namespace Vintagestory.API.Client
+@@ -240,23 +240,38 @@
          /// Gets the font's extents.
          /// </summary>
          /// <returns>The FontExtents for this particular font.</returns>
          public FontExtents GetFontExtents()
          {
+-            SetupContext(FontMeasuringContext);
+-            return FontMeasuringContext.FontExtents;
 +            bool measure = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
 +            long start = measure ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
-             SetupContext(FontMeasuringContext);
--            return FontMeasuringContext.FontExtents;
-+            FontExtents extents = FontMeasuringContext.FontExtents;
++            FontExtents extents = OptimumSkiaTextMetrics.GetFontExtents(
++                Fontname,
++                FontWeight,
++                Slant,
++                GuiElement.scaled(UnscaledFontsize));
 +            if (measure) Vintagestory.API.Config.OptimumGuiMetrics.RecordFontExtentMeasurement(start);
 +            return extents;
          }
@@ -24,11 +27,16 @@ index 03bfd4f..2515e82 100644
          /// <returns>The Text extends for this font with this text.</returns>
          public TextExtents GetTextExtents(string text)
          {
+-            SetupContext(FontMeasuringContext);
+-            return FontMeasuringContext.TextExtents(text);
 +            bool measure = Vintagestory.API.Config.OptimumGuiMetrics.Enabled;
 +            long start = measure ? Vintagestory.API.Config.OptimumGuiMetrics.StartTimestamp() : 0;
-             SetupContext(FontMeasuringContext);
--            return FontMeasuringContext.TextExtents(text);
-+            TextExtents extents = FontMeasuringContext.TextExtents(text);
++            TextExtents extents = OptimumSkiaTextMetrics.GetTextExtents(
++                Fontname,
++                FontWeight,
++                Slant,
++                GuiElement.scaled(UnscaledFontsize),
++                text);
 +            if (measure) Vintagestory.API.Config.OptimumGuiMetrics.RecordTextExtentMeasurement(start);
 +            return extents;
          }
@@ -36,3 +44,16 @@ index 03bfd4f..2515e82 100644
          /// <summary>
          /// Clone function.  Creates a duplicate of this Cairofont.
          /// </summary>
+@@ -435,11 +450,11 @@
+ 
+         }
+ 
+         public void Dispose()
+         {
+-            CairoFontOptions.Dispose();
++            CairoFontOptions?.Dispose();
+         }
+         
+         #endregion
+ 
+     }

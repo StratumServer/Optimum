@@ -273,7 +273,8 @@ namespace Cairo
 				Alpha = alpha
 			};
 			NativeMethods.cairo_get_matrix (cr, drawing.Ctm);
-			if (!IsSupportedOperator (drawing.Operator)) { failure = "operator-" + drawing.Operator; return null; }
+			// Screen parity is verified for geometry and paint; keep text on its existing fallback.
+			if (!IsSupportedOperator (drawing.Operator) || (text && drawing.Operator == Operator.Screen)) { failure = "operator-" + drawing.Operator; return null; }
 			if (!text && !IsSupportedAntialias (drawing.Antialias)) { failure = "antialias-" + drawing.Antialias; return null; }
 			foreach (RecordedClip clip in drawing.Clips) {
 				if (!IsSupportedAntialias (clip.Antialias)) { failure = "clip-antialias-" + clip.Antialias; return null; }
@@ -348,6 +349,7 @@ namespace Cairo
 			case Operator.Clear: case Operator.Source: case Operator.Over: case Operator.Atop:
 			case Operator.Dest: case Operator.DestOver: case Operator.DestOut: case Operator.Xor:
 			case Operator.Add: case Operator.HardLight:
+			case Operator.Screen:
 				return true;
 			default:
 				// In/Out/DestIn/DestAtop are unbounded in Cairo (they clear outside the mask
@@ -366,6 +368,7 @@ namespace Cairo
 			Operator.Atop => SKBlendMode.SrcATop, Operator.Dest => SKBlendMode.Dst, Operator.DestOver => SKBlendMode.DstOver,
 			Operator.DestOut => SKBlendMode.DstOut, Operator.Xor => SKBlendMode.Xor, Operator.Add => SKBlendMode.Plus,
 			Operator.HardLight => SKBlendMode.HardLight,
+			Operator.Screen => SKBlendMode.Screen,
 			_ => throw new NotSupportedException ("Cairo operator has no recorded Skia equivalent: " + value)
 		};
 

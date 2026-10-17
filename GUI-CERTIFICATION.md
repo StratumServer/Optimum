@@ -61,17 +61,15 @@ escapes, and device/context changes cannot be universally certified.
 `--validate-only` continues to validate assemblies without creating an OpenGL
 context, granting GUI approval or starting the client.
 
-Cairo remains the text layout authority: font selection, `SetFontSize`, font
-options, `TextExtents`, `FontExtents`, `TextPath`, glyph IDs and glyph positions
-still come from Cairo. Gray `ShowText` and `ShowGlyphs` remain fills of Cairo's
-hinted outlines at Cairo's quantized glyph origins. For Subpixel text, the recorder
-uses a Skia LCD text blob only for regular `sans-serif` and `Montserrat` faces when
-the matrix and font size are supported. It resolves the face through Fontconfig,
-then loads the exact file and face index into Skia. That route no longer calls
-`cairo_glyph_path`. Bold faces, Lora, Almendra, other families, transforms,
-unsupported Cairo versions, and more than 4096 glyphs materialize and replay the
-original call through Cairo. The current local fixture covers 14 px regular text;
-it does not certify other sizes or scripts.
+Cairo still owns the public GUI drawing API, context state, glyph IDs and glyph
+positions. The runtime API patcher now routes `CairoFont.GetTextExtents` and
+`GetFontExtents` through Skia metrics, using the same Fontconfig face match as the
+text recorder. `CairoFont.FontMeasuringContext`, `SetupContext`, and the context-
+based `TextDrawUtil` overloads remain Cairo-backed. Compatible Gray text and the
+tested Subpixel matrix rasterize as Skia text blobs. Unsupported Gray faces keep
+Cairo outlines; unsupported Subpixel faces materialize the original call through
+Cairo. The tested matrix and remaining limits are recorded in Stage B3 and Stage C
+below.
 
 Policy: preserve the requested antialias mode. `CairoFont.SetupContext` requests
 `Antialias.Subpixel` for GUI text. Skia LCD rendering passes the local visual policy
@@ -236,3 +234,28 @@ Compatible Gray text cases now rasterize as Skia antialiased text blobs. Cairo c
 The focused `CairoRecorderTextTests` passed 24/24. The full `Optimum.Tests` suite passed 991 with 34 existing skips after the Gray raster change; the final added fallback assertion also passed in the focused suite. Build completed with zero warnings and errors, patch validation reported 81 source patches, 53 Cecil patches and 22 runtime donors, shader validation passed, and IL patching reported 146/146 required methods.
 
 The full staged Pharos inventory scenario passed 1/1 on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core, against Optimum commit `e425e3d9b3fd2668a4772542e80dfeb3c57dee34`. It selected `skia-with-subpixel-cairo-fallback` with no decision reasons, and the launcher validated the local profile certificate. Initial composition recorded 38/38 candidates, ten recompositions recorded 360/360, and GUI scales 1, 1.5 and 2 recorded 30/30, 159/171 and 161/173 successes/attempts. All eight materializations succeeded with zero failures and the exact Subpixel fallback cause; there were no Gray fallback materializations. The primitive fixture, five non-subset fixtures and three SVG comparisons passed. The report uses Pharos checkout `4966732269f02408df314ae155bb7e6f3817f9d9`, which has uncommitted harness changes and limits commit-level reproducibility. Intel and NVIDIA still need physical runs against this behavior. No performance gain is claimed.
+
+
+### Stage C: Skia font metrics and Screen composition (2026-10-17)
+
+The runtime API patcher now rewrites `CairoFont.GetTextExtents` and
+`GetFontExtents` to call a Skia helper in the candidate `cairo-sharp.dll`. The
+helper resolves the same Fontconfig face as the recorder, does not cache faces
+before bundled fonts register, and retains the existing Cairo return types. The
+patcher also makes `CairoFont.Dispose` safe when measurement left its Cairo font
+options unset. `CairoFont.FontMeasuringContext`, `SetupContext`, Cairo context
+layout, glyph generation, and unsupported text fallbacks still use Cairo.
+
+The recorder now keeps the `Screen` operator on the Skia path for supported
+fills, strokes and paint operations. Text and `PaintWithAlpha` retain their prior
+fallback. `Multiply`, `Darken`, `Lighten`, `Difference` and `Exclusion` exceeded
+the existing one-channel parity limit and remain on Cairo. Linux and macOS shell
+packages now ship the candidate Cairo wrapper, matching PowerShell packaging.
+
+Validation passed on this machine: 1,020 `Optimum.Tests` passed and 34 skipped
+with `LD_LIBRARY_PATH` including the installed game `Lib`; Launcher passed 69,
+CLI 24, Bootstrap.Core 156 and Installer 78. Build reported zero warnings and
+errors. Patch validation reported 82 applied patches, 53 Cecil patches and 22
+runtime donor patches; shader validation and `make check` passed. These are CPU
+and integration tests. They do not certify the updated runtime on a physical GPU.
+No performance gain is claimed.
