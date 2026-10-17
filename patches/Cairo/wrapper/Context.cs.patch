@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..4acf3de 100644
+index 03f9c76..9228179 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -15,16 +15,15 @@ index 03f9c76..4acf3de 100644
  
  #nullable disable
  
-@@ -50,10 +52,16 @@ namespace Cairo
+@@ -50,10 +52,15 @@ namespace Cairo
  	}
  
  	public class Context : IDisposable
  	{
  		IntPtr handle = IntPtr.Zero;
 +		Surface recordingSurface;
-+		// Managed mirror of the Cairo graphics state that the public API cannot query:
-+		// the user space of the current source and the clip stack. The native context
-+		// stays authoritative for everything else (path, matrix, styles, source).
++		// Managed mirror of the state used to capture commands. Cairo remains the
++		// native rendering and public ABI authority outside supported recording.
 +		RecordingGraphicsState recordingState;
 +		System.Collections.Generic.Stack<RecordingGraphicsState> recordingSaved;
  
@@ -32,7 +31,7 @@ index 03f9c76..4acf3de 100644
  
  		static Context ()
  		{
-@@ -81,12 +89,20 @@ namespace Cairo
+@@ -81,12 +88,20 @@ namespace Cairo
  				c_compiler_long_size = 8;
  				native_glyph_size = Marshal.SizeOf (typeof (Glyph));
  			}
@@ -54,7 +53,7 @@ index 03f9c76..4acf3de 100644
  		public Context (IntPtr handle, bool owner)
  		{
  			if (handle == IntPtr.Zero)
-@@ -115,70 +131,182 @@ namespace Cairo
+@@ -115,70 +130,183 @@ namespace Cairo
  			GC.SuppressFinalize (this);
  		}
  
@@ -131,6 +130,7 @@ index 03f9c76..4acf3de 100644
 +
 +		Matrix CurrentMatrix ()
 +		{
++			if (recordingSurface != null) return (Matrix)recordingState.Ctm.Clone ();
 +			var m = new Matrix ();
 +			NativeMethods.cairo_get_matrix (handle, m);
 +			return m;
@@ -839,7 +839,7 @@ index 03f9c76..4acf3de 100644
  
  		public Pattern PopGroup ()
  		{
-@@ -708,29 +906,29 @@ namespace Cairo
+@@ -708,30 +906,54 @@ namespace Cairo
  			return Surface.Lookup (surface, false);
  		}
  
@@ -847,33 +847,58 @@ index 03f9c76..4acf3de 100644
  		{
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
++			Matrix next = null;
++			if (recordingSurface != null) {
++				next = (Matrix)recordingState.Ctm.Clone ();
++				next.Rotate (angle);
++			}
  			NativeMethods.cairo_rotate (handle, angle);
++			if (next is not null && NativeMethods.cairo_status (handle) == Status.Success) recordingState.Ctm = next;
  		}
  
  		public void Scale (double sx, double sy)
  		{
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
++			Matrix next = null;
++			if (recordingSurface != null) {
++				next = (Matrix)recordingState.Ctm.Clone ();
++				next.Scale (sx, sy);
++			}
  			NativeMethods.cairo_scale (handle, sx, sy);
++			if (next is not null && NativeMethods.cairo_status (handle) == Status.Success) recordingState.Ctm = next;
  		}
  
  		public void Translate (double tx, double ty)
  		{
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
++			Matrix next = null;
++			if (recordingSurface != null) {
++				next = (Matrix)recordingState.Ctm.Clone ();
++				next.Translate (tx, ty);
++			}
  			NativeMethods.cairo_translate (handle, tx, ty);
++			if (next is not null && NativeMethods.cairo_status (handle) == Status.Success) recordingState.Ctm = next;
  		}
  
  		public void Transform (Matrix m)
  		{
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
++			Matrix next = null;
++			if (recordingSurface != null && m is not null) {
++				next = (Matrix)recordingState.Ctm.Clone ();
++				Matrix.Multiply (next, m, next);
++			}
  			NativeMethods.cairo_transform (handle, m);
++			if (next is not null && NativeMethods.cairo_status (handle) == Status.Success) recordingState.Ctm = next;
  		}
  
  		[Obsolete("Use UserToDevice instead")]
  		public void TransformPoint (ref double x, ref double y)
-@@ -756,55 +954,55 @@ namespace Cairo
+ 		{
+@@ -756,56 +978,61 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -909,12 +934,15 @@ index 03f9c76..4acf3de 100644
  			set {
 -				CheckDisposed ();
 +				CheckDisposedOnly ();
++				Matrix next = recordingSurface == null || value is null ? null : (Matrix)value.Clone ();
  				NativeMethods.cairo_set_matrix (handle, value);
++				if (next is not null && NativeMethods.cairo_status (handle) == Status.Success) recordingState.Ctm = next;
  			}
  
  			get {
 -				CheckDisposed ();
 +				CheckDisposedOnly ();
++				if (recordingSurface != null) return (Matrix)recordingState.Ctm.Clone ();
  				Matrix m = new Matrix ();
  				NativeMethods.cairo_get_matrix (handle, m);
  				return m;
@@ -933,11 +961,14 @@ index 03f9c76..4acf3de 100644
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
  			NativeMethods.cairo_identity_matrix (handle);
++			if (recordingSurface != null && NativeMethods.cairo_status (handle) == Status.Success)
++				recordingState.Ctm = new Matrix ();
  		}
  
  		[Obsolete ("Use SetFontSize() instead.")]
  		public void FontSetSize (double scale)
-@@ -817,30 +1015,31 @@ namespace Cairo
+ 		{
+@@ -817,30 +1044,31 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -973,7 +1004,7 @@ index 03f9c76..4acf3de 100644
  		}
  
  		[StructLayout(LayoutKind.Sequential)]
-@@ -879,19 +1078,24 @@ namespace Cairo
+@@ -879,19 +1107,24 @@ namespace Cairo
  			return dest;
  		}
  
@@ -1003,7 +1034,7 @@ index 03f9c76..4acf3de 100644
  		[Obsolete("The matrix argument was never used, use ShowGlyphs(Glyphs []) instead")]
  		public void ShowGlyphs (Matrix matrix, Glyph[] glyphs)
  		{
-@@ -904,11 +1108,11 @@ namespace Cairo
+@@ -904,11 +1137,11 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -1016,7 +1047,7 @@ index 03f9c76..4acf3de 100644
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
  
-@@ -917,11 +1121,11 @@ namespace Cairo
+@@ -917,11 +1150,11 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -1029,7 +1060,7 @@ index 03f9c76..4acf3de 100644
  				return f_extents;
  			}
  		}
-@@ -934,23 +1138,23 @@ namespace Cairo
+@@ -934,23 +1167,23 @@ namespace Cairo
  
          
  
@@ -1056,7 +1087,7 @@ index 03f9c76..4acf3de 100644
  
  		public void ShowPage ()
  		{
-@@ -977,51 +1181,66 @@ namespace Cairo
+@@ -977,51 +1210,66 @@ namespace Cairo
  			return bytes;
  		}
  

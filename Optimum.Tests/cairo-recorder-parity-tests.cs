@@ -437,6 +437,36 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void RecorderMatrixMirrorTracksSettersAndSaveRestore ()
+	{
+		using var nativeSurface = new ImageSurface (Format.Argb32, 8, 8);
+		using var native = new Context (nativeSurface);
+		using var actual = new ImageSurface (Format.Argb32, 8, 8);
+		actual.BeginRecording ();
+		using var recorded = new Context (actual);
+
+		void AssertMatrixMatches () => Assert.True (native.Matrix == recorded.Matrix, $"native={native.Matrix}; recorded={recorded.Matrix}");
+		void TransformBoth (Action<Context> transform)
+		{
+			transform (native);
+			transform (recorded);
+			AssertMatrixMatches ();
+		}
+
+		TransformBoth (context => context.Translate (3.25, -1.5));
+		TransformBoth (context => context.Rotate (.37));
+		TransformBoth (context => context.Scale (1.25, .75));
+		TransformBoth (context => context.Transform (new Matrix (1, .1, -.2, 1, 2, -3)));
+		TransformBoth (context => context.Save ());
+		TransformBoth (context => context.IdentityMatrix ());
+		var replacement = new Matrix (1.1, .2, -.15, .9, 4.5, 6.25);
+		TransformBoth (context => context.Matrix = replacement);
+		replacement.X0 = 100;
+		AssertMatrixMatches (); // The setter snapshot is independent of its input object.
+		TransformBoth (context => context.Restore ());
+	}
+
+	[Fact]
 	public void RecordedClipCapturesMirroredFillRuleAntialiasAndTolerance ()
 	{
 		AssertParity (36, 30, context => {

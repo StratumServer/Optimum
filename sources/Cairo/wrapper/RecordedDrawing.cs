@@ -196,6 +196,7 @@ namespace Cairo
 	internal sealed class RecordingGraphicsState
 	{
 		internal static readonly RecordedClip[] NoClips = new RecordedClip[0];
+		internal Matrix Ctm = new Matrix ();
 		internal Matrix SourceCtm = new Matrix ();
 		internal IntPtr SourceSurface;
 		internal RecordedSource SourceHint = new RecordedSolidSource (0, 0, 0, 1);
@@ -254,7 +255,7 @@ namespace Cairo
 			DashOffset = offset;
 		}
 
-		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { SourceCtm = SourceCtm, SourceSurface = SourceSurface,
+		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { Ctm = (Matrix)Ctm.Clone (), SourceCtm = SourceCtm, SourceSurface = SourceSurface,
 			SourceHint = SourceHint, Operator = Operator, Antialias = Antialias, FillRule = FillRule, Tolerance = Tolerance,
 			LineWidth = LineWidth, LineCap = LineCap, LineJoin = LineJoin, MiterLimit = MiterLimit,
 			Dash = Dash, DashOffset = DashOffset, Clips = Clips };
@@ -328,10 +329,10 @@ namespace Cairo
 				Antialias = state == null ? NativeMethods.cairo_get_antialias (cr) : state.Antialias,
 				FillRule = state == null ? NativeMethods.cairo_get_fill_rule (cr) : state.FillRule,
 				Tolerance = state == null ? NativeMethods.cairo_get_tolerance (cr) : state.Tolerance,
-				Ctm = new Matrix (),
+				Ctm = state == null ? new Matrix () : (Matrix)state.Ctm.Clone (),
 				Alpha = alpha
 			};
-			NativeMethods.cairo_get_matrix (cr, drawing.Ctm);
+			if (state == null) NativeMethods.cairo_get_matrix (cr, drawing.Ctm);
 			// Screen parity is verified for geometry and paint; keep text on its existing fallback.
 			if (!IsSupportedOperator (drawing.Operator) || (text && drawing.Operator == Operator.Screen)) { failure = "operator-" + drawing.Operator; return null; }
 			if (!text && !IsSupportedAntialias (drawing.Antialias)) { failure = "antialias-" + drawing.Antialias; return null; }

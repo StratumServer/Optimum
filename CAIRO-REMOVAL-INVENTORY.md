@@ -201,9 +201,22 @@ cross-platform run is available.
 tolerance instead of querying those three values from Cairo when recording a
 clip. Public context getters still use Cairo. `RecordedClipCapturesMirroredFillRuleAntialiasAndTolerance`
 checks a curved even-odd clip against native Cairo output. The recorder parity,
-surface-recorder, and recorder-text suites now pass 149/149. This saves three
+surface-recorder, and recorder-text suites now pass 150/150. This saves three
 native getter calls per captured clip by static inspection; no call counter or
 timing measurement was run.
+
+`RecordingGraphicsState` now mirrors the current transformation matrix. The
+wrapper tracks `Translate`, `Rotate`, `Scale`, `Transform`, the `Matrix` setter,
+and `IdentityMatrix`, and copies the matrix during Save/Restore. Recorded draw
+capture, clip capture, and source-surface assignment use that snapshot;
+`Context.Matrix` returns a copy of it while recording. The native matrix getter
+remains for non-recorded contexts. `RecorderMatrixMirrorTracksSettersAndSaveRestore`
+compares the managed snapshot field-for-field with a separate native Cairo
+context after every operation, including mutation of the input matrix. The
+transformed clip and recorder parity suites pass. Static inspection shows one
+fewer `cairo_get_matrix` call per recorded draw, clip, or source-surface
+assignment. No call counter, timing result, or cross-platform test is
+available.
 
 ## Native import inventory
 
