@@ -52,9 +52,8 @@ namespace Cairo
 		{
 			result = null;
 			var inverse = (Matrix)sourceCtm.Clone ();
-			if (NativeMethods.cairo_matrix_invert (inverse) != Status.Success) return false;
-			result = new Matrix ();
-			NativeMethods.cairo_matrix_multiply (result, inverse, patternMatrix);
+			if (inverse.Invert () != Status.Success) return false;
+			result = Matrix.Multiply (inverse, patternMatrix);
 			return true;
 		}
 

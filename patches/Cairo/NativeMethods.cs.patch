@@ -1,0 +1,51 @@
+diff --git a/Cairo/NativeMethods.cs b/Cairo/NativeMethods.cs
+index 7d2fc60..d15beec 100644
+--- a/Cairo/NativeMethods.cs
++++ b/Cairo/NativeMethods.cs
+@@ -371,46 +371,10 @@ namespace Cairo
+         internal static extern void cairo_mask(IntPtr cr, IntPtr pattern);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_mask_surface(IntPtr cr, IntPtr surface, double x, double y);
+ 
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_init(Matrix matrix, double xx, double yx, double xy, double yy, double x0, double y0);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_init_identity(Matrix matrix);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_init_rotate(Matrix matrix, double radians);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_init_scale(Matrix matrix, double sx, double sy);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_init_translate(Matrix matrix, double tx, double ty);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern Status cairo_matrix_invert(Matrix matrix);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_multiply(Matrix result, Matrix a, Matrix b);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_rotate(Matrix matrix, double radians);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_scale(Matrix matrix, double sx, double sy);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_transform_distance(Matrix matrix, ref double dx, ref double dy);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_transform_point(Matrix matrix, ref double x, ref double y);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_matrix_translate(Matrix matrix, double tx, double ty);
+-
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_move_to(IntPtr cr, double x, double y);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_new_path(IntPtr cr);

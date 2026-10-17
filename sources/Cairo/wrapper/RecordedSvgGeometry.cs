@@ -208,7 +208,7 @@ namespace Cairo
 		}
 
 		/// <summary>The pixel loop of SvgLoader.DrawSvg(…, Matrix, …): each source pixel position
-		/// goes through cairo_matrix_transform_point (distance, then translation) and is
+		/// uses an affine point transform (distance, then translation) and is
 		/// truncated to an index, exactly as the original.</summary>
 		internal static RecordedPixelOperation DrawSvgMatrixOperation (byte[] rgba, Matrix matrix, int posx, int posy, int width, int height, Func<int, int, int> colorOver)
 		{

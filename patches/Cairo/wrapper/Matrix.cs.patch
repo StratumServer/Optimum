@@ -1,0 +1,148 @@
+diff --git a/Cairo/wrapper/Matrix.cs b/Cairo/wrapper/Matrix.cs
+index cb6590c..46aec6d 100644
+--- a/Cairo/wrapper/Matrix.cs
++++ b/Cairo/wrapper/Matrix.cs
+@@ -65,12 +65,11 @@ namespace Cairo {
+ 			return (this == new Matrix ());
+ 		}
+ 
+ 		public void InitIdentity ()
+ 		{
+-			// this.Init(1,0,0,1,0,0);
+-			NativeMethods.cairo_matrix_init_identity (this);
++			this.Init (1, 0, 0, 1, 0, 0);
+ 		}
+ 
+ 		public void Init (double xx, double yx, double xy, double yy,
+ 				  double x0, double y0)
+ 		{
+@@ -78,71 +77,110 @@ namespace Cairo {
+ 			this.Yy = yy; this.X0 = x0; this.Y0 = y0;
+ 		}
+ 
+ 		public void InitTranslate (double tx, double ty)
+ 		{
+-			NativeMethods.cairo_matrix_init_translate (this, tx, ty);
++			this.Init (1, 0, 0, 1, tx, ty);
+ 		}
+ 
+ 		public void Translate (double tx, double ty)
+ 		{
+-			NativeMethods.cairo_matrix_translate (this, tx, ty);
++			Matrix.Multiply (this, new Matrix (1, 0, 0, 1, tx, ty), this);
+ 		}
+ 
+ 		public void InitScale (double sx, double sy)
+ 		{
+-			//this.Init (sx, 0, 0, sy, 0, 0);
+-			NativeMethods.cairo_matrix_init_scale (this, sx, sy);
++			this.Init (sx, 0, 0, sy, 0, 0);
+ 		}
+ 
+ 		public void Scale (double sx, double sy)
+ 		{
+-			NativeMethods.cairo_matrix_scale (this, sx, sy);
++			Matrix.Multiply (this, new Matrix (sx, 0, 0, sy, 0, 0), this);
+ 		}
+ 
+ 		public void InitRotate (double radians)
+ 		{
+-			/*
+-			double s, c;
+-			s = Math.Sin (radians);
+-			c = Math.Cos (radians);
++			double s = Math.Sin (radians);
++			double c = Math.Cos (radians);
+ 			this.Init (c, s, -s, c, 0, 0);
+-			*/
+-			NativeMethods.cairo_matrix_init_rotate (this, radians);
+ 		}
+ 
+ 		public void Rotate (double radians)
+ 		{
+-			NativeMethods.cairo_matrix_rotate (this, radians);
++			var rotation = new Matrix ();
++			rotation.InitRotate (radians);
++			Matrix.Multiply (this, rotation, this);
+ 		}
+ 
+ 		public Cairo.Status Invert ()
+ 		{
+-			return NativeMethods.cairo_matrix_invert (this);
++			if (this.Xy == 0 && this.Yx == 0) {
++				this.X0 = -this.X0;
++				this.Y0 = -this.Y0;
++				if (this.Xx != 1) {
++					if (this.Xx == 0) return Status.InvalidMatrix;
++					this.Xx = 1 / this.Xx;
++					this.X0 *= this.Xx;
++				}
++				if (this.Yy != 1) {
++					if (this.Yy == 0) return Status.InvalidMatrix;
++					this.Yy = 1 / this.Yy;
++					this.Y0 *= this.Yy;
++				}
++				return Status.Success;
++			}
++
++			double determinant = this.Xx * this.Yy - this.Yx * this.Xy;
++			if (double.IsNaN (determinant) || double.IsInfinity (determinant) || determinant == 0)
++				return Status.InvalidMatrix;
++
++			double scale = 1 / determinant;
++			double xx = this.Yy * scale;
++			double yx = -this.Yx * scale;
++			double xy = -this.Xy * scale;
++			double yy = this.Xx * scale;
++			double x0 = (this.Xy * this.Y0 - this.Yy * this.X0) * scale;
++			double y0 = (this.Yx * this.X0 - this.Xx * this.Y0) * scale;
++			this.Init (xx, yx, xy, yy, x0, y0);
++			return Status.Success;
+ 		}
+ 
+ 		public void Multiply (Matrix b)
+ 		{
+-			Matrix a = (Matrix) this.Clone ();
+-			NativeMethods.cairo_matrix_multiply (this, a, b);
++			Matrix.Multiply (this, this, b);
+ 		}
+ 
+ 		public static Matrix Multiply (Matrix a, Matrix b) {
+-			Matrix result = new Matrix ();
+-			NativeMethods.cairo_matrix_multiply (result, a, b);
++			return Matrix.Multiply (new Matrix (), a, b);
++		}
++
++		internal static Matrix Multiply (Matrix result, Matrix a, Matrix b)
++		{
++			double xx = a.Xx * b.Xx + a.Yx * b.Xy;
++			double yx = a.Xx * b.Yx + a.Yx * b.Yy;
++			double xy = a.Xy * b.Xx + a.Yy * b.Xy;
++			double yy = a.Xy * b.Yx + a.Yy * b.Yy;
++			double x0 = a.X0 * b.Xx + a.Y0 * b.Xy + b.X0;
++			double y0 = a.X0 * b.Yx + a.Y0 * b.Yy + b.Y0;
++			result.Init (xx, yx, xy, yy, x0, y0);
+ 			return result;
+ 		}
+ 
+ 
+ 		public void TransformDistance (ref double dx, ref double dy)
+ 		{
+-			NativeMethods.cairo_matrix_transform_distance (this, ref dx, ref dy);
++			double x = this.Xx * dx + this.Xy * dy;
++			double y = this.Yx * dx + this.Yy * dy;
++			dx = x;
++			dy = y;
+ 		}
+ 
+ 		public void TransformPoint (ref double x, ref double y)
+ 		{
+-			NativeMethods.cairo_matrix_transform_point (this, ref x, ref y);
++			this.TransformDistance (ref x, ref y);
++			x += this.X0;
++			y += this.Y0;
+ 		}
+ 
+ 		public override String ToString ()
+ 		{
+ 			String s = String.Format ("xx:{0:##0.0#} yx:{1:##0.0#} xy:{2:##0.0#} yy:{3:##0.0#} x0:{4:##0.0#} y0:{5:##0.0#}",

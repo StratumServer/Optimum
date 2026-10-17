@@ -64,7 +64,7 @@ namespace Cairo
 			} finally { NativeMethods.cairo_path_destroy (handle); }
 		}
 
-		static double SnapFixed (double value)
+		internal static double SnapFixed (double value)
 		{
 			if (!double.IsFinite (value)) return value;
 			return Math.Round (value * 256.0, MidpointRounding.ToEven) / 256.0;
@@ -328,19 +328,27 @@ namespace Cairo
 
 		internal static RecordedDrawing SolidRectangle (double x, double y, double width, double height, double r, double g, double b, double a, Antialias antialias)
 		{
-			IntPtr surface = NativeMethods.cairo_image_surface_create (Format.Argb32, 1, 1);
-			IntPtr cr = NativeMethods.cairo_create (surface);
-			try {
-				NativeMethods.cairo_set_antialias (cr, antialias);
-				NativeMethods.cairo_set_source_rgba (cr, r, g, b, a);
-				NativeMethods.cairo_rectangle (cr, x, y, width, height);
-				RecordedDrawing drawing = Capture (cr, RecordedDrawKind.Fill, 1, null, new Matrix (), null, out string failure);
-				if (drawing == null && failure != null) throw new NotSupportedException ("Recorder helper cannot capture rectangle: " + failure);
-				return drawing;
-			} finally {
-				NativeMethods.cairo_destroy (cr);
-				NativeMethods.cairo_surface_destroy (surface);
-			}
+			double x2 = x + width, y2 = y + height;
+			if (!double.IsFinite (x) || !double.IsFinite (y) || !double.IsFinite (x2) || !double.IsFinite (y2)) return null;
+			if (!IsSupportedAntialias (antialias)) throw new NotSupportedException ("Recorder helper cannot capture rectangle: antialias-" + antialias);
+			var path = new RecordedPath (
+				new byte[] { RecordedPath.Move, RecordedPath.Line, RecordedPath.Line, RecordedPath.Line, RecordedPath.Close },
+				new double[] { RecordedPath.SnapFixed (x), RecordedPath.SnapFixed (y),
+					RecordedPath.SnapFixed (x2), RecordedPath.SnapFixed (y),
+					RecordedPath.SnapFixed (x2), RecordedPath.SnapFixed (y2),
+					RecordedPath.SnapFixed (x), RecordedPath.SnapFixed (y2) });
+			if (!path.AllFinite ()) throw new NotSupportedException ("Recorder helper cannot capture rectangle: path-out-of-range");
+			return new RecordedDrawing {
+				Kind = RecordedDrawKind.Fill,
+				Path = path,
+				Clips = NoClips,
+				Source = new RecordedSolidSource (r, g, b, a),
+				Operator = Operator.Over,
+				Antialias = antialias,
+				FillRule = FillRule.Winding,
+				Tolerance = .1,
+				Ctm = new Matrix ()
+			};
 		}
 
 		internal static bool IsSupportedOperator (Operator value)
