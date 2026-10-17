@@ -443,9 +443,31 @@ namespace Vintagestory.Client.NoObf
 
 		private static string AppendFailure(string existing, string added) => existing == null ? added : existing + "; " + added;
 
-				// Pack/unpack parameters beyond alignment, row length and skips: swap bytes,
-				// LSB first, image height and skip images.
-				private static readonly int[] ExtraPixelStoreNames = { 0x0D00, 0x0D01, 0x806C, 0x806B, 0x0CF0, 0x0CF1, 0x806E, 0x806D };
+				// Pack/unpack parameters whose default is zero: row length, skips, swap bytes,
+				// LSB first, image height and skip images. A switch instead of an array
+				// initializer: the IL injector does not carry <PrivateImplementationDetails>.
+				private const int ZeroPixelStoreCount = 14;
+				private static int ZeroPixelStoreName(int index)
+				{
+					switch (index)
+					{
+						case 0: return 0x0D02; // PACK_ROW_LENGTH
+						case 1: return 0x0D03; // PACK_SKIP_ROWS
+						case 2: return 0x0D04; // PACK_SKIP_PIXELS
+						case 3: return 0x0CF2; // UNPACK_ROW_LENGTH
+						case 4: return 0x0CF3; // UNPACK_SKIP_ROWS
+						case 5: return 0x0CF4; // UNPACK_SKIP_PIXELS
+						case 6: return 0x0D00; // PACK_SWAP_BYTES
+						case 7: return 0x0D01; // PACK_LSB_FIRST
+						case 8: return 0x806C; // PACK_IMAGE_HEIGHT
+						case 9: return 0x806B; // PACK_SKIP_IMAGES
+						case 10: return 0x0CF0; // UNPACK_SWAP_BYTES
+						case 11: return 0x0CF1; // UNPACK_LSB_FIRST
+						case 12: return 0x806E; // UNPACK_IMAGE_HEIGHT
+						case 13: return 0x806D; // UNPACK_SKIP_IMAGES
+						default: throw new ArgumentOutOfRangeException(nameof(index));
+					}
+				}
 
 				internal static void NormalizePixelStore()
 				{
@@ -453,10 +475,8 @@ namespace Vintagestory.Client.NoObf
 					GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
 					GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
 					GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-					foreach (int name in new[] { 0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x0CF3, 0x0CF4 })
-						GL.PixelStore((PixelStoreParameter)name, 0);
-					foreach (int name in ExtraPixelStoreNames)
-						GL.PixelStore((PixelStoreParameter)name, 0);
+					for (int i = 0; i < ZeroPixelStoreCount; i++)
+						GL.PixelStore((PixelStoreParameter)ZeroPixelStoreName(i), 0);
 				}
 
 				internal static bool PixelStoreIsTight()
@@ -466,14 +486,9 @@ namespace Vintagestory.Client.NoObf
 					GL.GetInteger((GetPName)0x0D05, out int packAlignment);
 					GL.GetInteger((GetPName)0x0CF5, out int unpackAlignment);
 					if (packBuffer != 0 || unpackBuffer != 0 || packAlignment != 1 || unpackAlignment != 1) return false;
-					foreach (int name in new[] { 0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x0CF3, 0x0CF4 })
+					for (int i = 0; i < ZeroPixelStoreCount; i++)
 					{
-						GL.GetInteger((GetPName)name, out int value);
-						if (value != 0) return false;
-					}
-					foreach (int name in ExtraPixelStoreNames)
-					{
-						GL.GetInteger((GetPName)name, out int value);
+						GL.GetInteger((GetPName)ZeroPixelStoreName(i), out int value);
 						if (value != 0) return false;
 					}
 					return true;
@@ -502,7 +517,7 @@ namespace Vintagestory.Client.NoObf
 					private readonly int unpackRowLength;
 					private readonly int unpackSkipRows;
 					private readonly int unpackSkipPixels;
-					private readonly int[] extraPixelStore = new int[ExtraPixelStoreNames.Length];
+					private readonly int[] extraPixelStore = new int[8];
 					private readonly int[] viewport = new int[4];
 					private readonly int[] scissorBox = new int[4];
 					private readonly bool[] colorMask = new bool[4];
@@ -582,7 +597,7 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x0CF2, out unpackRowLength);
 						GL.GetInteger((GetPName)0x0CF3, out unpackSkipRows);
 						GL.GetInteger((GetPName)0x0CF4, out unpackSkipPixels);
-						for (int i = 0; i < ExtraPixelStoreNames.Length; i++) GL.GetInteger((GetPName)ExtraPixelStoreNames[i], out extraPixelStore[i]);
+						for (int i = 0; i < extraPixelStore.Length; i++) GL.GetInteger((GetPName)ZeroPixelStoreName(6 + i), out extraPixelStore[i]);
 						GL.GetInteger(GetPName.Viewport, viewport);
 						GL.GetInteger(GetPName.ScissorBox, scissorBox);
 						GL.GetBoolean((GetPName)0x0C23, colorMask);
@@ -646,7 +661,7 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF2, unpackRowLength);
 						GL.PixelStore((PixelStoreParameter)0x0CF3, unpackSkipRows);
 						GL.PixelStore((PixelStoreParameter)0x0CF4, unpackSkipPixels);
-						for (int i = 0; i < ExtraPixelStoreNames.Length; i++) GL.PixelStore((PixelStoreParameter)ExtraPixelStoreNames[i], extraPixelStore[i]);
+						for (int i = 0; i < extraPixelStore.Length; i++) GL.PixelStore((PixelStoreParameter)ZeroPixelStoreName(6 + i), extraPixelStore[i]);
 						for (int unit = 0; unit < textureBindings.Length; unit++)
 						{
 							GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
