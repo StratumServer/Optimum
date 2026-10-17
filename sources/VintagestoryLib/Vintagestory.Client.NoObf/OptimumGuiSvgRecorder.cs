@@ -24,7 +24,7 @@ namespace Vintagestory.Client.NoObf
 		/// <summary>DrawSvg with a matrix (map layers), recorded with the original transformed loop.</summary>
 		public static bool TryRecordWithMatrix (SvgLoader loader, IAsset asset, ImageSurface target, Matrix matrix, int x, int y, int width, int height, int? color)
 		{
-			if (matrix == null) return false;
+			if (matrix is null) return false;
 			return TryRecordCore (loader, asset, target, (Matrix)matrix.Clone (), x, y, width, height, color);
 		}
 
@@ -45,7 +45,7 @@ namespace Vintagestory.Client.NoObf
 				try { rgba = loader.rasterizeSvg (asset, width, height, width, height, color); }
 				finally { replayingNativeSvg = wasReplaying; }
 			}
-			RecordedPixelOperation operation = matrix == null
+			RecordedPixelOperation operation = matrix is null
 				? RecordedSvgGeometry.DrawSvgOperation (rgba, x, y, width, height, ColorUtil.ColorOver)
 				: RecordedSvgGeometry.DrawSvgMatrixOperation (rgba, matrix, x, y, width, height, ColorUtil.ColorOver);
 			return target.RecordCommand ("DrawSvg", () => new RecordedLegacyStep (context => {
@@ -53,7 +53,7 @@ namespace Vintagestory.Client.NoObf
 				replayingNativeSvg = true;
 				try {
 					using (var surface = (ImageSurface)context.GetTarget ()) {
-						if (matrix == null) loader.DrawSvg (asset, surface, x, y, width, height, color);
+						if (matrix is null) loader.DrawSvg (asset, surface, x, y, width, height, color);
 						else loader.DrawSvg (asset, surface, matrix, x, y, width, height, color);
 					}
 				} finally { replayingNativeSvg = wasReplaying; }
