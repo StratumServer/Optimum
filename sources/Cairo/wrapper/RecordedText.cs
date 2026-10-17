@@ -68,8 +68,6 @@ namespace Cairo
 		[DllImport (cairo, CallingConvention = CallingConvention.Cdecl)]
 		static extern void cairo_glyph_free (IntPtr glyphs);
 		[DllImport (cairo, CallingConvention = CallingConvention.Cdecl)]
-		static extern Status cairo_scaled_font_status (IntPtr scaledFont);
-		[DllImport (cairo, CallingConvention = CallingConvention.Cdecl)]
 		static extern void cairo_get_font_matrix (IntPtr cr, [Out] Matrix matrix);
 		[DllImport (cairo, CallingConvention = CallingConvention.Cdecl)]
 		static extern IntPtr cairo_scaled_font_get_font_face (IntPtr scaledFont);
@@ -149,7 +147,7 @@ namespace Cairo
 		{
 			failure = null; subpixel = false;
 			scaledFont = NativeMethods.cairo_get_scaled_font (cr);
-			if (scaledFont == IntPtr.Zero || cairo_scaled_font_status (scaledFont) != Status.Success) { failure = "text-scaled-font"; return false; }
+			if (scaledFont == IntPtr.Zero || NativeMethods.cairo_scaled_font_status (scaledFont) != Status.Success) { failure = "text-scaled-font"; return false; }
 			IntPtr options = NativeMethods.cairo_font_options_create ();
 			Antialias antialias;
 			try {

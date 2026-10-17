@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedUtc": "2026-10-17T23:18:05.6813677+00:00",
+  "generatedUtc": "2026-10-17T23:24:45.9465665+00:00",
   "generatorRuntime": ".NET 10.0.12",
   "generatorOs": "Ubuntu 26.04.1 LTS",
   "generatorArchitecture": "X64",
@@ -9,7 +9,7 @@
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 82,
   "publicAndProtectedMemberCount": 871,
-  "nativeImportCount": 271,
+  "nativeImportCount": 270,
   "classificationNote": "Automated initial classification and reflection ABI metadata; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -29854,37 +29854,6 @@
         "import": {
           "library": "libcairo-2",
           "entryPoint": "cairo_toy_font_face_get_weight",
-          "callingConvention": "Cdecl",
-          "charSet": "None",
-          "exactSpelling": false,
-          "setLastError": false,
-          "preserveSig": true
-        }
-      }
-    },
-    {
-      "declaringType": "Cairo.RecordedText",
-      "signature": "Cairo.Status cairo_scaled_font_status(System.IntPtr)",
-      "importReview": "required",
-      "abi": {
-        "accessibility": "private",
-        "isStatic": true,
-        "isVirtual": false,
-        "isAbstract": false,
-        "isFinal": false,
-        "implementationFlags": "PreserveSig",
-        "parameters": [
-          {
-            "signature": "System.IntPtr",
-            "isIn": false,
-            "isOut": false,
-            "marshalAs": null
-          }
-        ],
-        "returnMarshalAs": null,
-        "import": {
-          "library": "libcairo-2",
-          "entryPoint": "cairo_scaled_font_status",
           "callingConvention": "Cdecl",
           "charSet": "None",
           "exactSpelling": false,

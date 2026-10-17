@@ -1,7 +1,7 @@
 # Cairo removal inventory
 
 Baseline for this pass: branch `feat/issue-130-recorder-stage-a`, parent commit
-`7e523e8` (2026-10-17).
+`f02d4eb` (2026-10-17).
 This inventories repository responsibilities and removal gates. It is not a
 claim that native Cairo has been removed or that third-party binaries are
 compatible.
@@ -225,14 +225,14 @@ or cross-platform test is available.
 
 ## Native import inventory
 
-The schema-2 manifest includes **271 active `DllImport` methods** reflected from
-the current assembly: 241 for `libcairo-2`, 13 for `freetype6`, 9 for
+The schema-2 manifest includes **270 active `DllImport` methods** reflected from
+the current assembly: 240 for `libcairo-2`, 13 for `freetype6`, 9 for
 `libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 233
-methods in `Cairo.NativeMethods` and 8 separate declarations in `RecordedText`.
+methods in `Cairo.NativeMethods` and 7 separate declarations in `RecordedText`.
 Every `nativeImports` row is marked for manual native-header review; reflection
 records declarations but does not verify that their native signatures are
-correct. The manifest records 575 parameters, 53 `IsOut` and 0 `IsIn` flags,
-258 `Cdecl` and 13 `Winapi` imports. A source-to-manifest correspondence check
+correct. The manifest records 574 parameters, 53 `IsOut` and 0 `IsIn` flags,
+257 `Cdecl` and 13 `Winapi` imports. A source-to-manifest correspondence check
 must still be paired with native-header review; it does not establish ABI
 correctness.
 
@@ -240,15 +240,18 @@ correctness.
 comments. After stripping comments there are **233 active declarations**, with
 232 unique names because `cairo_image_surface_create_for_data` has two
 overloads. Reflection reports the same 233 active `NativeMethods` imports. The
-25 declarations removed in this pass had no `NativeMethods.<name>` call in the
-C# wrapper/consumer tree or the generated source tree used by the build.
+previous pass removed 25 declarations without a `NativeMethods.<name>` call in
+the C# wrapper/consumer tree or the generated source tree used by the build.
 Twenty-four removed entrypoints have no C# reference in that tree. The
 remaining one, `cairo_scaled_font_get_font_face`, is still declared and called
 through a separate import in `RecordedText`. All 232 remaining unique
 `NativeMethods` names have a source caller. Six additional names have direct
-imports in `RecordedText` beyond the two active `NativeMethods` duplicates (8
-declarations total). This is a source call-site audit, not proof against every
-possible runtime reflection or string-based invocation. All reachable imports
+imports in `RecordedText` beyond the one active `NativeMethods` duplicate (7
+Cairo declarations total). This pass removed the duplicate
+`cairo_scaled_font_status` import and reuses `NativeMethods.cairo_scaled_font_status`;
+both declarations had the same Cdecl ABI signature. This is a source call-site
+audit, not proof against every possible runtime reflection or string-based
+invocation. All reachable imports
 and runtime-created calls still need a managed replacement or an explicit
 limitation before native Cairo can be removed. Header/platform review still
 needs to resolve, among other items, Cairo boolean and `unsigned long` widths,
