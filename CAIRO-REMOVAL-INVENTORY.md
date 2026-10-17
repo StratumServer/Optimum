@@ -1,6 +1,7 @@
 # Cairo removal inventory
 
-Baseline: branch `feat/issue-130-recorder-stage-a`, commit `fb4f526` (2026-10-17).
+Baseline for this pass: branch `feat/issue-130-recorder-stage-a`, parent commit
+`7e523e8` (2026-10-17).
 This inventories repository responsibilities and removal gates. It is not a
 claim that native Cairo has been removed or that third-party binaries are
 compatible.
@@ -224,35 +225,37 @@ or cross-platform test is available.
 
 ## Native import inventory
 
-The schema-2 manifest includes **296 active `DllImport` methods** reflected from
-the current assembly: 266 for `libcairo-2`, 13 for `freetype6`, 9 for
-`libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 258
+The schema-2 manifest includes **271 active `DllImport` methods** reflected from
+the current assembly: 241 for `libcairo-2`, 13 for `freetype6`, 9 for
+`libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 233
 methods in `Cairo.NativeMethods` and 8 separate declarations in `RecordedText`.
 Every `nativeImports` row is marked for manual native-header review; reflection
 records declarations but does not verify that their native signatures are
-correct. A separate source-to-manifest pass matched all **296/296 active
-declarations** by declaring type, return/parameter types, library, entrypoint,
-calling convention, direction and marshal attributes. The 623 parameters
-contain 63 `IsOut` and 0 `IsIn` flags; the reflection metadata preserves these
-separately from by-reference type syntax. The manifest contains 283 `Cdecl`
-and 13 `Winapi` imports. This proves inventory correspondence, not native ABI
+correct. The manifest records 575 parameters, 53 `IsOut` and 0 `IsIn` flags,
+258 `Cdecl` and 13 `Winapi` imports. A source-to-manifest correspondence check
+must still be paired with native-header review; it does not establish ABI
 correctness.
 
-`Cairo/NativeMethods.cs` has 328 raw `extern`/`DllImport` matches, but 69 are in
-comments. After stripping comments there are **258 active declarations**, with
-257 unique names because `cairo_image_surface_create_for_data` has two
-overloads. Reflection reports the same 258 active `NativeMethods` imports.
-Source search finds 232 unique names called as `NativeMethods.cairo_*`; six
-additional names have equivalent direct imports in `RecordedText`. The other
-19 unique active Cairo entrypoints have no caller found in the available
-wrapper/consumer source. Those 19 may be removable internal declarations, but
-removing them is cleanup only. All reachable imports and runtime-created calls
-still need a managed replacement or an explicit limitation before native Cairo
-can be removed. Header/platform review still needs to resolve, among other
-items, Cairo boolean and `unsigned long` widths, status values discarded by
-wrappers, FreeType parameter widths and calling convention, string encodings,
-NanoSVG variant exports, and the fixed 24-byte glyph stride. The import table
-does not include runtime dynamic loading or transitive native dependencies.
+`Cairo/NativeMethods.cs` has 302 raw `extern`/`DllImport` matches, 69 in
+comments. After stripping comments there are **233 active declarations**, with
+232 unique names because `cairo_image_surface_create_for_data` has two
+overloads. Reflection reports the same 233 active `NativeMethods` imports. The
+25 declarations removed in this pass had no `NativeMethods.<name>` call in the
+C# wrapper/consumer tree or the generated source tree used by the build.
+Twenty-four removed entrypoints have no C# reference in that tree. The
+remaining one, `cairo_scaled_font_get_font_face`, is still declared and called
+through a separate import in `RecordedText`. All 232 remaining unique
+`NativeMethods` names have a source caller. Six additional names have direct
+imports in `RecordedText` beyond the two active `NativeMethods` duplicates (8
+declarations total). This is a source call-site audit, not proof against every
+possible runtime reflection or string-based invocation. All reachable imports
+and runtime-created calls still need a managed replacement or an explicit
+limitation before native Cairo can be removed. Header/platform review still
+needs to resolve, among other items, Cairo boolean and `unsigned long` widths,
+status values discarded by wrappers, FreeType parameter widths and calling
+convention, string encodings, NanoSVG variant exports, and the fixed 24-byte
+glyph stride. The import table does not include runtime dynamic loading or
+transitive native dependencies.
 
 ### Managed image stride calculation
 
