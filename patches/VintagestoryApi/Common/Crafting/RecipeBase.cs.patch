@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Common/Crafting/RecipeBase.cs b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-index 21b4330..5f40f3d 100644
+index 21b4330..a0d3a1f 100644
 --- a/VintagestoryApi/Common/Crafting/RecipeBase.cs
 +++ b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-@@ -774,27 +774,55 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+@@ -774,34 +774,76 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
          }
  
          return true;
@@ -59,4 +59,27 @@ index 21b4330..5f40f3d 100644
  
      protected virtual void MergeStacks(ItemSlot[] slots, List<ItemStack> stacks)
      {
-         foreach (ItemStack suppliedStack in slots.Select(slot => slot.Itemstack).OfType<ItemStack>())
+-        foreach (ItemStack suppliedStack in slots.Select(slot => slot.Itemstack).OfType<ItemStack>())
++        // Optimum: Avoid LINQ iterator and lambda allocations during repeated shapeless recipe checks.
++        for (int index = 0; index < slots.Length; index++)
+         {
+-            ItemStack? similarStack = stacks.Find(stack => stack.Satisfies(suppliedStack));
++            ItemStack? suppliedStack = slots[index]?.Itemstack;
++            if (suppliedStack == null) continue;
++
++            ItemStack? similarStack = null;
++            for (int stackIndex = 0; stackIndex < stacks.Count; stackIndex++)
++            {
++                ItemStack stack = stacks[stackIndex];
++                if (stack.Satisfies(suppliedStack))
++                {
++                    similarStack = stack;
++                    break;
++                }
++            }
++
+             if (similarStack != null)
+             {
+                 similarStack.StackSize += suppliedStack.StackSize;
+             }
+             else
