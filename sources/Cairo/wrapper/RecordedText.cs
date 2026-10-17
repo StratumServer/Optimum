@@ -5,6 +5,51 @@ using System.Runtime.InteropServices;
 namespace Cairo
 {
 	/// <summary>
+	/// GUI GPU recording eligibility as seen from cairo-sharp, late-bound to
+	/// OptimumConfig.GuiGpuRecordingEligible (cairo-sharp cannot reference the API
+	/// contracts assembly). A missing type keeps vanilla behaviour.
+	/// </summary>
+	internal static class CairoGpuPolicy
+	{
+		static Func<bool> eligible;
+		static volatile bool resolved;
+		/// <summary>Per-thread test hook for surface auto-recording; null uses the process value.</summary>
+		[ThreadStatic] internal static bool? AutoRecordOverride;
+		/// <summary>Process-wide test hook for surface auto-recording; null uses eligibility.</summary>
+		internal static volatile object AutoRecordProcessOverride;
+
+		internal static bool RecordingEligible {
+			get {
+				if (!resolved) Resolve ();
+				try { return eligible != null && eligible (); }
+				catch { return false; }
+			}
+		}
+
+		/// <summary>True when new ARGB32 image surfaces start as display lists.</summary>
+		internal static bool AutoRecording {
+			get {
+				bool? value = AutoRecordOverride;
+				if (value.HasValue) return value.Value;
+				if (AutoRecordProcessOverride is bool process) return process;
+				return RecordingEligible;
+			}
+		}
+
+		static void Resolve ()
+		{
+			try {
+				Type config = Type.GetType ("Vintagestory.API.Config.OptimumConfig, Optimum.Api.Contracts", false);
+				PropertyInfo property = config?.GetProperty ("GuiGpuRecordingEligible", BindingFlags.Public | BindingFlags.Static);
+				MethodInfo getter = property?.GetGetMethod ();
+				if (getter != null && getter.ReturnType == typeof (bool))
+					eligible = (Func<bool>)Delegate.CreateDelegate (typeof (Func<bool>), getter);
+			} catch { eligible = null; }
+			resolved = true;
+		}
+	}
+
+	/// <summary>
 	/// Text policy for the GPU GUI path. While GUI GPU recording is eligible, a Subpixel
 	/// font-options request is applied as Gray, for measurement and drawing alike, because
 	/// LCD (component-alpha) glyphs cannot be reproduced on the Skia path. When GPU
@@ -12,33 +57,14 @@ namespace Cairo
 	/// </summary>
 	internal static class CairoTextPolicy
 	{
-		static Func<bool> eligible;
-		static bool resolved;
 		/// <summary>Per-thread test hook; null uses OptimumConfig.GuiGpuRecordingEligible.</summary>
 		[ThreadStatic] internal static bool? Override;
 
 		internal static bool SubpixelAsGray {
 			get {
 				bool? value = Override;
-				if (value.HasValue) return value.Value;
-				if (!resolved) Resolve ();
-				try { return eligible != null && eligible (); }
-				catch { return false; }
+				return value ?? CairoGpuPolicy.RecordingEligible;
 			}
-		}
-
-		static void Resolve ()
-		{
-			resolved = true;
-			try {
-				// Late-bound: cairo-sharp cannot reference the API contracts assembly. A missing
-				// type keeps vanilla behaviour.
-				Type config = Type.GetType ("Vintagestory.API.Config.OptimumConfig, Optimum.Api.Contracts", false);
-				PropertyInfo property = config?.GetProperty ("GuiGpuRecordingEligible", BindingFlags.Public | BindingFlags.Static);
-				MethodInfo getter = property?.GetGetMethod ();
-				if (getter != null && getter.ReturnType == typeof (bool))
-					eligible = (Func<bool>)Delegate.CreateDelegate (typeof (Func<bool>), getter);
-			} catch { eligible = null; }
 		}
 
 		/// <summary>Returns a Gray copy of <paramref name="options"/> to apply instead, or

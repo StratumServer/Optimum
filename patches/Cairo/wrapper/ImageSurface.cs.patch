@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..5c6ea71 100644
+index 8014c9e..c600090 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -44,11 +44,11 @@ namespace Cairo {
+@@ -44,12 +44,13 @@ namespace Cairo {
  		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
  		{
  		}
@@ -11,11 +11,13 @@ index 8014c9e..5c6ea71 100644
 -			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
 +			: base (NativeMethods.cairo_image_surface_create (format, width, height), true, true)
  		{
++			TryBeginAutoRecording ();
  		}
  
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
  			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
-@@ -75,23 +75,24 @@ namespace Cairo {
+ 		{
+@@ -75,23 +76,24 @@ namespace Cairo {
  
  
          public int Width {
@@ -43,7 +45,7 @@ index 8014c9e..5c6ea71 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +100,25 @@ namespace Cairo {
+@@ -99,24 +101,25 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {

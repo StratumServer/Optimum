@@ -315,11 +315,32 @@ namespace Cairo
 				throw new InvalidOperationException ("Recorder is no longer recording.");
 		}
 
+		/// <summary>Auto-recorded surfaces: an empty list has nothing to replay, so switching it
+		/// to native pixels is not a Cairo rasterization and is not reported.</summary>
+		internal bool SilentWhenEmpty;
+		/// <summary>The list was empty when native pixels were first requested.</summary>
+		internal volatile bool ReleasedEmpty;
+
 		internal void Materialize ()
 		{
 			string trigger = null;
 			ExceptionDispatchInfo materializationFailure = null;
 			bool attempted = false;
+			bool silentRelease = false;
+			lock (sync) {
+				if (state == SurfaceRecordingState.Failed) failure.Throw ();
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return;
+				if (SilentWhenEmpty && commands.Count == 0) {
+					state = SurfaceRecordingState.NativeMaterialized;
+					ReleasedEmpty = true;
+					silentRelease = true;
+				}
+			}
+			if (silentRelease) {
+				Unregister ();
+				if (orphaned) ReleaseOrphan ();
+				return;
+			}
 			lock (sync) {
 				if (state == SurfaceRecordingState.Failed) failure.Throw ();
 				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return;
