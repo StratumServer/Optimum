@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..4aef900 100644
+index 03f9c76..3a63947 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -406,7 +406,7 @@ index 03f9c76..4aef900 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -370,153 +493,170 @@ namespace Cairo
+@@ -370,153 +493,171 @@ namespace Cairo
  
         
  
@@ -437,7 +437,8 @@ index 03f9c76..4aef900 100644
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
  			NativeMethods.cairo_set_source_rgba (handle, r, g, b, a);
-+			if (recordingSurface != null) RecordSourceState (IntPtr.Zero);
++			// A solid source does not depend on the user space it was set in.
++			if (recordingSurface != null) recordingState.SourceSurface = IntPtr.Zero;
  		}
  
          public void SetSourceRGBA(double[] rgba)
@@ -597,7 +598,7 @@ index 03f9c76..4aef900 100644
  
  		public void Rectangle (Rectangle rectangle)
  		{
-@@ -528,35 +668,35 @@ namespace Cairo
+@@ -528,35 +669,35 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -638,7 +639,7 @@ index 03f9c76..4aef900 100644
  
          #endregion
  
-@@ -565,23 +705,26 @@ namespace Cairo
+@@ -565,23 +706,26 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -667,7 +668,7 @@ index 03f9c76..4aef900 100644
  
  		public void MaskSurface (Surface surface, double surface_x, double surface_y)
  		{
-@@ -589,86 +732,93 @@ namespace Cairo
+@@ -589,86 +733,93 @@ namespace Cairo
  			NativeMethods.cairo_mask_surface (handle, surface.Handle, surface_x, surface_y);
  		}
  
@@ -773,7 +774,7 @@ index 03f9c76..4aef900 100644
  
  		public Pattern PopGroup ()
  		{
-@@ -708,29 +858,29 @@ namespace Cairo
+@@ -708,29 +859,29 @@ namespace Cairo
  			return Surface.Lookup (surface, false);
  		}
  
@@ -807,7 +808,7 @@ index 03f9c76..4aef900 100644
  
  		[Obsolete("Use UserToDevice instead")]
  		public void TransformPoint (ref double x, ref double y)
-@@ -756,40 +906,40 @@ namespace Cairo
+@@ -756,40 +907,40 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -854,7 +855,7 @@ index 03f9c76..4aef900 100644
  				return m;
  			}
  		}
-@@ -800,11 +950,11 @@ namespace Cairo
+@@ -800,11 +951,11 @@ namespace Cairo
  			NativeMethods.cairo_set_font_size (handle, scale);
  		}
  
