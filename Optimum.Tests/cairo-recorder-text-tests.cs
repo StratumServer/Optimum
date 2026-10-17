@@ -1,18 +1,18 @@
 using System;
 using Path = System.IO.Path;
 using Directory = System.IO.Directory;
+using System.Collections;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Cairo;
 using Vintagestory.API.Config;
 using Xunit;
 
 /// <summary>
-/// Text capture keeps Cairo font selection, measurement and glyph layout. Gray text remains
-/// a fill of Cairo's hinted glyph outlines. Subpixel font and weight cases that pass the
-/// local fixture matrix use Skia LCD glyph runs; unsupported faces materialize to Cairo
-/// exactly. The local-AA visual-parity policy applies to Skia output (flat pixels within
-/// one level, filtered edge
-/// difference at most 96). Native materialization must reproduce Cairo's bytes exactly.
+/// Text capture keeps Cairo font selection, measurement and glyph layout. Approved Gray and
+/// Subpixel faces use Skia glyph runs; unsupported Gray faces keep Cairo outlines and
+/// unsupported Subpixel faces materialize exactly. Local-AA policy allows flat pixels within
+/// one level and filtered edge difference at most 96.
 /// </summary>
 [Collection ("Cairo materialization metrics")]
 public sealed class CairoRecorderTextTests
@@ -54,6 +54,60 @@ public sealed class CairoRecorderTextTests
 		};
 	}
 
+	static void AssertSkiaTextBlobs (SurfaceRecorder recorder, int expectedTextRuns)
+	{
+		FieldInfo field = typeof (SurfaceRecorder).GetField ("commands", BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull (field);
+		var commands = Assert.IsAssignableFrom<IList> (field.GetValue (recorder));
+		int count = 0;
+		foreach (object command in commands) {
+			if (!(command is RecordedDrawing drawing) || !drawing.IsText) continue;
+			Assert.NotNull (drawing.TextBlob);
+			Assert.Null (drawing.Path);
+			count++;
+		}
+		Assert.Equal (expectedTextRuns, count);
+	}
+
+	static void AssertCairoTextOutlines (SurfaceRecorder recorder, int expectedTextRuns)
+	{
+		FieldInfo field = typeof (SurfaceRecorder).GetField ("commands", BindingFlags.Instance | BindingFlags.NonPublic);
+		Assert.NotNull (field);
+		var commands = Assert.IsAssignableFrom<IList> (field.GetValue (recorder));
+		int count = 0;
+		foreach (object command in commands) {
+			if (!(command is RecordedDrawing drawing) || !drawing.IsText) continue;
+			Assert.Null (drawing.TextBlob);
+			Assert.NotNull (drawing.Path);
+			count++;
+		}
+		Assert.Equal (expectedTextRuns, count);
+	}
+
+	static void AssertSkiaTextBlobParity (int width, int height, Action<Context> draw)
+	{
+		byte[] expected = CairoRecorderParityTests.RenderNative (width, height, draw);
+		using var surface = new ImageSurface (Format.Argb32, width, height);
+		var recorder = surface.BeginRecording ();
+		using (var context = new Context (surface)) draw (context);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		AssertSkiaTextBlobs (recorder, 2);
+		byte[] actual = CairoRecorderParityTests.RenderSkia (surface, width, height);
+		CairoRecorderParityTests.AssertLocalAa (expected, actual, width, height);
+	}
+
+	static void AssertCairoTextOutlineParity (int width, int height, Action<Context> draw)
+	{
+		byte[] expected = CairoRecorderParityTests.RenderNative (width, height, draw);
+		using var surface = new ImageSurface (Format.Argb32, width, height);
+		var recorder = surface.BeginRecording ();
+		using (var context = new Context (surface)) draw (context);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		AssertCairoTextOutlines (recorder, 2);
+		byte[] actual = CairoRecorderParityTests.RenderSkia (surface, width, height);
+		CairoRecorderParityTests.AssertLocalAa (expected, actual, width, height);
+	}
+
 	[Theory]
 	[InlineData ("sans-serif", FontWeight.Normal, 14.0, 3.0, 20.0)]
 	[InlineData ("sans-serif", FontWeight.Bold, 14.0, 3.3, 20.6)]
@@ -67,7 +121,7 @@ public sealed class CairoRecorderTextTests
 	public void GrayTextRecordsAndMatchesCairoWithinLocalAntialiasPolicy (string family, FontWeight weight, double size, double x, double y)
 	{
 		if (family != "sans-serif" && !BundledFonts.Available) return; // bundled fonts not installed on this host
-		CairoRecorderParityTests.AssertLocalAaParity (240, 40, Text (family, weight, size, x, y, "Inventory 0123 Wg"));
+		AssertSkiaTextBlobParity (240, 40, Text (family, weight, size, x, y, "Inventory 0123 Wg"));
 	}
 
 	[Fact]
@@ -140,6 +194,12 @@ public sealed class CairoRecorderTextTests
 	{
 		if (family != "sans-serif" && !BundledFonts.Available) return;
 		CairoRecorderParityTests.AssertLocalAaParity (240, 40, Text (family, weight, size, x, y, "LCD Fringes 0123 Wg", Antialias.Subpixel));
+	}
+
+	[Fact]
+	public void UnsupportedGrayFontKeepsCairoOutlinePath ( )
+	{
+		AssertCairoTextOutlineParity (240, 40, Text ("serif", FontWeight.Normal, 14, 3.3, 20, "Legacy Gray", Antialias.Gray));
 	}
 
 	[Theory]

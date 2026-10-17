@@ -51,9 +51,9 @@ namespace Cairo
 	}
 
 	/// <summary>
-	/// ShowText / ShowGlyphs with Cairo layout captured for Skia. Gray text uses Cairo's hinted
-	/// outlines; certified Subpixel font cases use Skia LCD glyph runs. Native materialization
-	/// replays the original call for transforms, unsupported fonts and other unsupported cases.
+	/// ShowText / ShowGlyphs with Cairo layout captured for Skia. Compatible Gray and Subpixel
+	/// faces use Skia text blobs; unsupported Gray faces retain Cairo outlines. Native
+	/// materialization replays transforms and unsupported Subpixel cases through Cairo.
 	/// </summary>
 	internal static class RecordedText
 	{
@@ -174,38 +174,43 @@ namespace Cairo
 			var ctm = new Matrix ();
 			NativeMethods.cairo_get_matrix (cr, ctm);
 			// Cairo's image compositor draws each glyph mask at a quantized device origin:
-			// whole pixels before 1.17, quarter-pixel phases from 1.18. Place the outlines at
-			// the same origins. Development versions in between are not reproduced.
+			// whole pixels before 1.17, quarter-pixel phases from 1.18. Place outlines and
+			// Skia glyph runs at the same origins. Development versions in between are unsupported.
 			int version = NativeMethods.cairo_version ();
 			double steps;
 			if (version >= 11800) steps = 4;
 			else if (version < 11700) steps = 1;
 			else { failure = "text-cairo-version-" + version; return null; }
-			IntPtr rounded = subpixel ? IntPtr.Zero : Marshal.AllocHGlobal (count * GlyphSize);
-			IntPtr scratchSurface = subpixel ? IntPtr.Zero : NativeMethods.cairo_image_surface_create (Format.Argb32, 1, 1);
-			IntPtr scratch = subpixel ? IntPtr.Zero : NativeMethods.cairo_create (scratchSurface);
+			IntPtr rounded = Marshal.AllocHGlobal (count * GlyphSize);
+			IntPtr scratchSurface = NativeMethods.cairo_image_surface_create (Format.Argb32, 1, 1);
+			IntPtr scratch = NativeMethods.cairo_create (scratchSurface);
 			try {
 				var buffer = new byte[count * GlyphSize];
 				Marshal.Copy (glyphs, buffer, 0, buffer.Length);
-				if (!subpixel) Marshal.Copy (buffer, 0, rounded, buffer.Length);
-				var skiaGlyphs = subpixel ? new ushort[count] : null;
-				var skiaPositions = subpixel ? new SKPoint[count] : null;
+				Marshal.Copy (buffer, 0, rounded, buffer.Length);
+				var skiaGlyphs = new ushort[count];
+				var skiaPositions = new SKPoint[count];
+				bool validSkiaGlyphs = true;
 				for (int i = 0; i < count; i++) {
 					ulong glyphIndex = unchecked ((ulong)Marshal.ReadInt64 (IntPtr.Add (glyphs, i * GlyphSize)));
-					if (subpixel && glyphIndex > ushort.MaxValue) { failure = "text-glyph-index"; return null; }
+					if (glyphIndex > ushort.MaxValue) {
+						validSkiaGlyphs = false;
+						if (subpixel) { failure = "text-glyph-index"; return null; }
+					}
 					double gx = Marshal.PtrToStructure<double> (IntPtr.Add (glyphs, i * GlyphSize + 8));
 					double gy = Marshal.PtrToStructure<double> (IntPtr.Add (glyphs, i * GlyphSize + 16));
 					double dx = QuantizeOrigin (ctm.Xx * gx + ctm.X0, steps);
 					double dy = QuantizeOrigin (ctm.Yy * gy + ctm.Y0, steps);
-					if (!subpixel) {
-						Marshal.StructureToPtr ((dx - ctm.X0) / ctm.Xx, IntPtr.Add (rounded, i * GlyphSize + 8), false);
-						Marshal.StructureToPtr ((dy - ctm.Y0) / ctm.Yy, IntPtr.Add (rounded, i * GlyphSize + 16), false);
-					}
-					if (subpixel) { skiaGlyphs[i] = (ushort)glyphIndex; skiaPositions[i] = new SKPoint ((float)dx, (float)dy); }
+					Marshal.StructureToPtr ((dx - ctm.X0) / ctm.Xx, IntPtr.Add (rounded, i * GlyphSize + 8), false);
+					Marshal.StructureToPtr ((dy - ctm.Y0) / ctm.Yy, IntPtr.Add (rounded, i * GlyphSize + 16), false);
+					skiaGlyphs[i] = glyphIndex <= ushort.MaxValue ? (ushort)glyphIndex : (ushort)0;
+					skiaPositions[i] = new SKPoint ((float)dx, (float)dy);
 				}
+				SKTextBlob textBlob = null;
+				if (validSkiaGlyphs) TryCreateSkiaTextBlob (cr, scaledFont, skiaGlyphs, skiaPositions, subpixel, out textBlob, out _);
+				if (subpixel && textBlob == null) { failure = "text-antialias-Subpixel"; return null; }
 				IntPtr pathContext = IntPtr.Zero;
-				if (!subpixel) {
-					// Gray mode still uses Cairo's hinted outline until Skia passes visual parity.
+				if (textBlob == null) {
 					NativeMethods.cairo_set_matrix (scratch, ctm);
 					NativeMethods.cairo_set_scaled_font (scratch, scaledFont);
 					NativeMethods.cairo_glyph_path (scratch, rounded, count);
@@ -213,17 +218,11 @@ namespace Cairo
 					pathContext = scratch;
 				}
 				RecordedDrawing drawing = RecordedDrawing.Capture (cr, RecordedDrawKind.Fill, 1, clips, sourceCtm, target, out failure,
-					pathContext: pathContext, textDrawing: subpixel, capturePath: !subpixel);
-				if (drawing == null) return null;
+					pathContext: pathContext, textDrawing: true, capturePath: textBlob == null);
+				if (drawing == null) { textBlob?.Dispose (); return null; }
 				drawing.FillRule = FillRule.Winding;
 				drawing.ScaledFont = new ScaledFont (scaledFont, false);
-				if (subpixel && !TryCreateSubpixelTextBlob (cr, scaledFont, skiaGlyphs, skiaPositions, drawing, out _)) {
-					// Keep the established per-surface Subpixel fallback category accepted by
-					// the hardware certification gate.
-					failure = "text-antialias-Subpixel";
-					drawing.Dispose ();
-					return null;
-				}
+				drawing.TextBlob = textBlob;
 				return drawing;
 			} finally {
 				if (rounded != IntPtr.Zero) Marshal.FreeHGlobal (rounded);
@@ -232,9 +231,10 @@ namespace Cairo
 			}
 		}
 
-		static bool TryCreateSubpixelTextBlob (IntPtr cr, IntPtr scaledFont, ushort[] glyphs, SKPoint[] positions, RecordedDrawing drawing, out string failure)
+		static bool TryCreateSkiaTextBlob (IntPtr cr, IntPtr scaledFont, ushort[] glyphs, SKPoint[] positions, bool subpixel,
+			out SKTextBlob textBlob, out string failure)
 		{
-			failure = null;
+			failure = null; textBlob = null;
 			IntPtr face = cairo_scaled_font_get_font_face (scaledFont);
 			if (face == IntPtr.Zero || NativeMethods.cairo_font_face_get_type (face) != FontType.Toy) { failure = "text-font-face"; return false; }
 			IntPtr familyPointer = cairo_toy_font_face_get_family (face);
@@ -254,26 +254,31 @@ namespace Cairo
 
 			FontSlant slant = cairo_toy_font_face_get_slant (face);
 			FontWeight weight = cairo_toy_font_face_get_weight (face);
-			bool supportedFace =
+			bool supportedSubpixelFace =
 				(string.Equals (family, "sans-serif", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal) ||
 				(string.Equals (family, "Montserrat", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal) ||
 				(string.Equals (family, "Lora", StringComparison.OrdinalIgnoreCase) && (weight == FontWeight.Normal || weight == FontWeight.Bold)) ||
 				(string.Equals (family, "Almendra", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal);
-			if (!supportedFace) { failure = "text-subpixel-font-parity"; return false; }
+			bool supportedGrayFace =
+				(string.Equals (family, "sans-serif", StringComparison.OrdinalIgnoreCase) && (weight == FontWeight.Normal || weight == FontWeight.Bold)) ||
+				(string.Equals (family, "Montserrat", StringComparison.OrdinalIgnoreCase) && (weight == FontWeight.Normal || weight == FontWeight.Bold)) ||
+				(string.Equals (family, "Lora", StringComparison.OrdinalIgnoreCase) && (weight == FontWeight.Normal || weight == FontWeight.Bold)) ||
+				(string.Equals (family, "Almendra", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal);
+			if (subpixel ? !supportedSubpixelFace : !supportedGrayFace) { failure = "text-font-parity"; return false; }
 			using (SKTypeface typeface = MatchCairoTypeface (family, slant, weight)) {
 				if (typeface == null) { failure = "text-font-unavailable"; return false; }
 				using (var font = new SKFont (typeface, (float)deviceSize)) {
-					font.Edging = SKFontEdging.SubpixelAntialias;
+					font.Edging = subpixel ? SKFontEdging.SubpixelAntialias : SKFontEdging.Antialias;
 					font.Subpixel = true;
-					// Slight hinting passes the local LCD policy for these faces; Full did not.
+					// Slight hinting is closer to Cairo's raster for the currently measured faces.
 					font.Hinting = SKFontHinting.Slight;
 					using (var builder = new SKTextBlobBuilder ()) {
 						builder.AddPositionedRun (glyphs, font, positions);
-						drawing.SubpixelTextBlob = builder.Build ();
+						textBlob = builder.Build ();
 					}
 				}
 			}
-			if (drawing.SubpixelTextBlob == null) { failure = "text-skia-blob"; return false; }
+			if (textBlob == null) { failure = "text-skia-blob"; return false; }
 			return true;
 		}
 

@@ -223,21 +223,21 @@ namespace Cairo
 		internal LineJoin LineJoin;
 		internal double[] Dash;
 		internal double Alpha = 1;
-		// Gray text uses Cairo's glyph outline as its Skia path. Native replay keeps the original
-		// text and captured scaled font; Subpixel can instead use a Skia text blob.
+		// Cairo text layout is retained for native replay. Compatible Gray and Subpixel glyph
+		// runs can use a Skia text blob; other Gray text uses Cairo's hinted outline as a path.
 		internal byte[] TextUtf8;
 		internal byte[] TextGlyphs;
 		internal PointD TextOrigin;
 		internal ScaledFont ScaledFont;
-		internal SKTextBlob SubpixelTextBlob;
+		internal SKTextBlob TextBlob;
 		internal bool IsText => ScaledFont != null;
 
 		internal override void Dispose ()
 		{
 			ScaledFont?.Dispose ();
 			ScaledFont = null;
-			SubpixelTextBlob?.Dispose ();
-			SubpixelTextBlob = null;
+			TextBlob?.Dispose ();
+			TextBlob = null;
 			skiaPath?.Dispose ();
 			skiaPath = null;
 		}
@@ -419,8 +419,8 @@ namespace Cairo
 				foreach (RecordedClip clip in Clips) clip.ApplySkia (canvas);
 				using (var paint = new SKPaint { IsAntialias = IsText || Antialias != Antialias.None, BlendMode = ToSkia (Operator), Style = SKPaintStyle.Fill }) {
 					using (RecordedSourcePaint source = Source.ConfigurePaint (paint, Alpha, replay)) {
-					if (SubpixelTextBlob != null) {
-						canvas.DrawText (SubpixelTextBlob, 0, 0, paint);
+					if (TextBlob != null) {
+						canvas.DrawText (TextBlob, 0, 0, paint);
 						return;
 					}
 						switch (Kind) {
