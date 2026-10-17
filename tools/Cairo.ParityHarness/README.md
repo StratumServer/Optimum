@@ -18,7 +18,11 @@ type's layout and instance-field offsets where the runtime can report them. The
 manifest records the generator OS, runtime, process architecture, and pointer
 size because reflected layouts can be architecture-specific. Automatically
 collected ABI data still needs manual review and does not prove compatibility
-with native pointer consumers.
+with native pointer consumers. Its `nativeImports` table enumerates every
+active `DllImport` in the assembly, including private Cairo entrypoints and
+separate Fontconfig, FreeType, and NanoSVG imports. Each import is marked for
+manual review; reflection does not establish that native signatures match the
+platform headers.
 
 When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
 

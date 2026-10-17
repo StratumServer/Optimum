@@ -594,6 +594,13 @@ internal static class Program
             }
         }
 
+        var nativeImportMethods = assembly.GetTypes()
+            .SelectMany(type => type.GetMethods(flags))
+            .Where(method => method.GetCustomAttribute<DllImportAttribute>() is not null)
+            .OrderBy(method => method.DeclaringType?.FullName, StringComparer.Ordinal)
+            .ThenBy(MemberSignature, StringComparer.Ordinal)
+            .ToArray();
+
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(new
         {
@@ -607,6 +614,7 @@ internal static class Program
             targetFramework = assembly.GetCustomAttribute<System.Runtime.Versioning.TargetFrameworkAttribute>()?.FrameworkName,
             exportedTypeCount = exportedTypes.Length,
             publicAndProtectedMemberCount = members.Count,
+            nativeImportCount = nativeImportMethods.Length,
             classificationNote = "Automated initial classification and reflection ABI metadata; every row requires human review before ABI compatibility is claimed.",
             types = exportedTypes.Select(type => new
             {
@@ -616,9 +624,16 @@ internal static class Program
                 enumValues = type.IsEnum ? Enum.GetNames(type).Select(name => new { name, value = Convert.ToInt64(Enum.Parse(type, name)) }) : null,
                 layout = DescribeTypeLayout(type)
             }),
-            members
+            members,
+            nativeImports = nativeImportMethods.Select(method => new
+            {
+                declaringType = method.DeclaringType?.FullName,
+                signature = MemberSignature(method),
+                importReview = "required",
+                abi = DescribeMemberAbi(method)
+            })
         }, new JsonSerializerOptions { WriteIndented = true }));
-        Console.WriteLine($"Wrote public/protected ABI inventory: {exportedTypes.Length} types, {members.Count} members, assembly {assembly.GetName().FullName}.");
+        Console.WriteLine($"Wrote ABI inventory: {exportedTypes.Length} types, {members.Count} public/protected members, {nativeImportMethods.Length} native imports, assembly {assembly.GetName().FullName}.");
     }
 
     private static object DescribeTypeLayout(Type type)
@@ -725,8 +740,18 @@ internal static class Program
         _ => null
     };
 
-    private static string Accessibility(MethodBase method) => method.IsPublic ? "public" : method.IsFamily ? "family" : "family-or-assembly";
-    private static string Accessibility(FieldInfo field) => field.IsPublic ? "public" : field.IsFamily ? "family" : "family-or-assembly";
+    private static string Accessibility(MethodBase method) => method.IsPublic ? "public"
+        : method.IsPrivate ? "private"
+        : method.IsFamily ? "family"
+        : method.IsFamilyOrAssembly ? "family-or-assembly"
+        : method.IsFamilyAndAssembly ? "family-and-assembly"
+        : "assembly";
+    private static string Accessibility(FieldInfo field) => field.IsPublic ? "public"
+        : field.IsPrivate ? "private"
+        : field.IsFamily ? "family"
+        : field.IsFamilyOrAssembly ? "family-or-assembly"
+        : field.IsFamilyAndAssembly ? "family-and-assembly"
+        : "assembly";
 
     private static object? DescribeMarshalAs(MarshalAsAttribute? attribute) => attribute is null ? null : new
     {
@@ -760,8 +785,17 @@ internal static class Program
         _ => $"{member.MemberType} {member.Name}"
     };
 
-    private static string ParameterSignature(ParameterInfo parameter) =>
-        $"{(parameter.IsOut ? "out " : parameter.ParameterType.IsByRef ? "ref " : "")}{(parameter.ParameterType.IsByRef ? parameter.ParameterType.GetElementType() : parameter.ParameterType)?.FullName}{(parameter.IsOptional ? " = optional" : "")}";
+    private static string ParameterSignature(ParameterInfo parameter)
+    {
+        string direction = !parameter.ParameterType.IsByRef ? ""
+            : parameter.IsOut && !parameter.IsIn ? "out "
+            : parameter.IsIn && !parameter.IsOut ? "in "
+            : "ref ";
+        Type parameterType = parameter.ParameterType.IsByRef
+            ? parameter.ParameterType.GetElementType()!
+            : parameter.ParameterType;
+        return $"{direction}{parameterType.FullName}{(parameter.IsOptional ? " = optional" : "")}";
+    }
 
     private static string IndexParameters(PropertyInfo property) => property.GetIndexParameters().Length == 0
         ? ""
