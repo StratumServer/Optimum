@@ -127,6 +127,56 @@ public sealed class CairoRecorderPixelStepTests
 		Assert.Equal (reference.Data, surface.Data);
 	}
 
+	[Fact]
+	public void PharosFixture2AliasedRectangleThenDemulAlphaIsExact ()
+	{
+		CairoRecorderParityTests.AssertParity (16, 12, (context, surface) => {
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (.16, .58, .92, .75);
+			context.Rectangle (2.25, 1.5, 11, 9);
+			context.Fill ();
+			context.Dispose ();
+			SurfaceTransformDemulAlpha.DemulAlpha (surface);
+		}, edgeAllowance: false, flatTolerance: 0);
+	}
+
+	[Fact]
+	public void PharosFixture4ScaledImageOnEmptySurfaceIsExact ()
+	{
+		using var bitmap = new SKBitmap (8, 6, SKColorType.Bgra8888, SKAlphaType.Unpremul);
+		bitmap.Erase (new SKColor (66, 117, 213, 255));
+		CairoRecorderParityTests.AssertParity (16, 12, (context, surface) => {
+			context.Dispose ();
+			SurfaceDrawImage.Image (surface, bitmap, 0, 0, 16, 12);
+		}, edgeAllowance: false, flatTolerance: 0);
+		byte[] native = CairoRecorderParityTests.RenderNative (16, 12, (context, surface) => SurfaceDrawImage.Image (surface, bitmap, 0, 0, 16, 12));
+		Assert.Equal (new byte[] { 213, 117, 66, 255 }, native[0..4]);
+	}
+
+	[Theory]
+	[InlineData (1, 1)]
+	[InlineData (7, 5)]
+	[InlineData (13, 3)]
+	[InlineData (16, 12)]
+	public void ReadbackGuardDetectsHostilePixelStoreState (int width, int height)
+	{
+		// Models glReadPixels under PACK_ROW_LENGTH=37, SKIP_ROWS=2, SKIP_PIXELS=3 (the
+		// Pharos state sentinel): rows land past a tightly sized destination.
+		Assert.Throws<InvalidOperationException> (() => RecordedSkiaReplay.ReadBackGuarded (width, height, (data, rowBytes) => {
+			int rowLength = 37, skipRows = 2, skipPixels = 3;
+			for (int y = 0; y < height; y++)
+				for (int x = 0; x < width * 4; x++)
+					System.Runtime.InteropServices.Marshal.WriteByte (data, ((y + skipRows) * rowLength + skipPixels) * 4 + x, 0x72);
+			return true;
+		}));
+		byte[] tight = RecordedSkiaReplay.ReadBackGuarded (width, height, (data, rowBytes) => {
+			Assert.Equal (width * 4, rowBytes);
+			for (int i = 0; i < rowBytes * height; i++) System.Runtime.InteropServices.Marshal.WriteByte (data, i, 7);
+			return true;
+		});
+		Assert.True (tight.Length >= width * height * 4);
+	}
+
 	static void RoundRectangle (Context context, double x, double y, double width, double height, double radius)
 	{
 		double degrees = Math.PI / 180.0;

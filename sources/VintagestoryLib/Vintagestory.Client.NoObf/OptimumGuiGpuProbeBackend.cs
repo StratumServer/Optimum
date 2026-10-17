@@ -176,8 +176,11 @@ namespace Vintagestory.Client.NoObf
 						GL.ColorMask(true, true, true, true);
 						GL.DepthMask(true);
 						GL.StencilMask(0xFFFFFFFF);
-						GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
-						GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+						// Skia's readback (pixel steps) and image uploads assume default pixel-store
+						// state; a leftover row length or skip would make glReadPixels write past
+						// the destination buffer and uploads read past their source.
+						NormalizePixelStore();
+						if (!PixelStoreIsTight()) throw new InvalidOperationException("GL pixel-store state could not be normalized.");
 
 						var getProc = new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress);
 						using (GRGlInterface glInterface = GRGlInterface.Create(getProc))
@@ -440,6 +443,42 @@ namespace Vintagestory.Client.NoObf
 
 		private static string AppendFailure(string existing, string added) => existing == null ? added : existing + "; " + added;
 
+				// Pack/unpack parameters beyond alignment, row length and skips: swap bytes,
+				// LSB first, image height and skip images.
+				private static readonly int[] ExtraPixelStoreNames = { 0x0D00, 0x0D01, 0x806C, 0x806B, 0x0CF0, 0x0CF1, 0x806E, 0x806D };
+
+				internal static void NormalizePixelStore()
+				{
+					GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
+					GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
+					GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+					GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+					foreach (int name in new[] { 0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x0CF3, 0x0CF4 })
+						GL.PixelStore((PixelStoreParameter)name, 0);
+					foreach (int name in ExtraPixelStoreNames)
+						GL.PixelStore((PixelStoreParameter)name, 0);
+				}
+
+				internal static bool PixelStoreIsTight()
+				{
+					GL.GetInteger((GetPName)0x88ED, out int packBuffer);
+					GL.GetInteger((GetPName)0x88EF, out int unpackBuffer);
+					GL.GetInteger((GetPName)0x0D05, out int packAlignment);
+					GL.GetInteger((GetPName)0x0CF5, out int unpackAlignment);
+					if (packBuffer != 0 || unpackBuffer != 0 || packAlignment != 1 || unpackAlignment != 1) return false;
+					foreach (int name in new[] { 0x0D02, 0x0D03, 0x0D04, 0x0CF2, 0x0CF3, 0x0CF4 })
+					{
+						GL.GetInteger((GetPName)name, out int value);
+						if (value != 0) return false;
+					}
+					foreach (int name in ExtraPixelStoreNames)
+					{
+						GL.GetInteger((GetPName)name, out int value);
+						if (value != 0) return false;
+					}
+					return true;
+				}
+
 				private sealed class GlStateSnapshot
 				{
 					private readonly int readFramebuffer;
@@ -463,6 +502,7 @@ namespace Vintagestory.Client.NoObf
 					private readonly int unpackRowLength;
 					private readonly int unpackSkipRows;
 					private readonly int unpackSkipPixels;
+					private readonly int[] extraPixelStore = new int[ExtraPixelStoreNames.Length];
 					private readonly int[] viewport = new int[4];
 					private readonly int[] scissorBox = new int[4];
 					private readonly bool[] colorMask = new bool[4];
@@ -542,6 +582,7 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x0CF2, out unpackRowLength);
 						GL.GetInteger((GetPName)0x0CF3, out unpackSkipRows);
 						GL.GetInteger((GetPName)0x0CF4, out unpackSkipPixels);
+						for (int i = 0; i < ExtraPixelStoreNames.Length; i++) GL.GetInteger((GetPName)ExtraPixelStoreNames[i], out extraPixelStore[i]);
 						GL.GetInteger(GetPName.Viewport, viewport);
 						GL.GetInteger(GetPName.ScissorBox, scissorBox);
 						GL.GetBoolean((GetPName)0x0C23, colorMask);
@@ -605,6 +646,7 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF2, unpackRowLength);
 						GL.PixelStore((PixelStoreParameter)0x0CF3, unpackSkipRows);
 						GL.PixelStore((PixelStoreParameter)0x0CF4, unpackSkipPixels);
+						for (int i = 0; i < ExtraPixelStoreNames.Length; i++) GL.PixelStore((PixelStoreParameter)ExtraPixelStoreNames[i], extraPixelStore[i]);
 						for (int unit = 0; unit < textureBindings.Length; unit++)
 						{
 							GL.ActiveTexture((TextureUnit)(0x84C0 + unit));

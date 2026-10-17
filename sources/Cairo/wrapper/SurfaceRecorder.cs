@@ -68,10 +68,10 @@ namespace Cairo
 		{
 			if (Width <= 0 || Height <= 0) return;
 			var info = new SKImageInfo (Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul);
-			byte[] pixels = new byte[checked(Width * Height * 4)];
+			byte[] pixels = readBack
+				? ReadBackGuarded (Width, Height, (data, rowBytes) => Target.ReadPixels (info, data, rowBytes, 0, 0))
+				: new byte[checked(Width * Height * 4)];
 			fixed (byte* data = pixels) {
-				if (readBack && !Target.ReadPixels (info, (IntPtr)data, Width * 4, 0, 0))
-					throw new InvalidOperationException ("Skia could not read back the GUI surface for a pixel operation.");
 				operation ((IntPtr)data, Width, Height, Width * 4);
 				using (SKImage image = SKImage.FromPixelCopy (info, (IntPtr)data, Width * 4))
 				using (var paint = new SKPaint { BlendMode = SKBlendMode.Src, IsAntialias = false }) {
@@ -85,6 +85,29 @@ namespace Cairo
 				}
 			}
 		}
+
+		/// <summary>
+		/// Reads a tightly packed Width x Height BGRA image into a buffer followed by a canary
+		/// region. A readback that writes past width * 4 * height (for example under a stale
+		/// GL pack row length or skip) is detected and fails the replay instead of silently
+		/// producing shifted pixels. The returned array is at least width * height * 4 bytes.
+		/// </summary>
+		internal static unsafe byte[] ReadBackGuarded (int width, int height, Func<IntPtr, int, bool> read)
+		{
+			int rowBytes = checked(width * 4);
+			int size = checked(rowBytes * height);
+			int guard = Math.Min (checked(rowBytes * 8 + 4096), 1 << 20);
+			var buffer = new byte[checked(size + guard)];
+			for (int i = size; i < buffer.Length; i++) buffer[i] = Canary (i);
+			fixed (byte* data = buffer)
+				if (!read ((IntPtr)data, rowBytes)) throw new InvalidOperationException ("Skia could not read back the GUI surface for a pixel operation.");
+			for (int i = size; i < buffer.Length; i++)
+				if (buffer[i] != Canary (i))
+					throw new InvalidOperationException ("GUI surface readback wrote past its " + width + "x" + height + " destination; the GL pixel-store state is not tightly packed.");
+			return buffer;
+		}
+
+		static byte Canary (int index) => (byte)(index * 31 + 0x5A);
 	}
 
 	/// <summary>A pixel operation over Cairo's native-endian premultiplied ARGB32 layout.</summary>
