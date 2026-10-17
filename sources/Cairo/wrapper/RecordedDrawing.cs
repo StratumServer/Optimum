@@ -230,6 +230,12 @@ namespace Cairo
 		internal PointD TextOrigin;
 		internal ScaledFont ScaledFont;
 		internal bool IsText => ScaledFont != null;
+
+		/// <summary>Paint with Clear, or Source with a transparent solid colour, and no clip:
+		/// every pixel becomes transparent (ctx.Clear in the GUI code).</summary>
+		internal bool IsFullClear =>
+			Kind == RecordedDrawKind.Paint && Clips.Length == 0 && Alpha >= 1 &&
+			(Operator == Operator.Clear || (Operator == Operator.Source && Source is RecordedSolidSource solid && solid.IsTransparent));
 		SKPath skiaPath;
 
 		static readonly RecordedClip[] NoClips = new RecordedClip[0];

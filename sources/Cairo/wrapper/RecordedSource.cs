@@ -77,6 +77,7 @@ namespace Cairo
 	{
 		readonly double r, g, b, a;
 		internal RecordedSolidSource (double r, double g, double b, double a) { this.r = r; this.g = g; this.b = b; this.a = a; }
+		internal bool IsTransparent => PremultipliedByte (a) == 0;
 		internal override void ApplyNative (IntPtr cr) => NativeMethods.cairo_set_source_rgba (cr, r, g, b, a);
 		internal override RecordedSourcePaint ConfigurePaint (SKPaint paint, double alpha, RecordedSkiaReplay replay)
 		{

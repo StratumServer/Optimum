@@ -39,10 +39,59 @@ namespace Vintagestory.Client.NoObf
 			return Cairo.SurfaceRecorder.GetMaterializationCallers ();
 		}
 
+		// "Reason@Caller<Caller<Caller" for uploads of surfaces that never recorded: the first
+		// three frames outside Cairo, the upload plumbing and this backend. 16 keys plus
+		// "other-uploaders"; only computed on that fallback.
+		private static readonly object nativeUploadSync = new object();
+		private static readonly Dictionary<string, long> nativeUploadCallers = new Dictionary<string, long>();
+
+		public static Dictionary<string, long> GetNativeUploadCallerDiagnostics ()
+		{
+			lock (nativeUploadSync) return new Dictionary<string, long>(nativeUploadCallers);
+		}
+
+		private static void RecordNativeUploadCaller(string reason)
+		{
+			string key;
+			try { key = reason + "@" + FindUploadCallers(); }
+			catch { key = reason + "@unknown"; }
+			lock (nativeUploadSync)
+			{
+				if (nativeUploadCallers.TryGetValue(key, out long count)) nativeUploadCallers[key] = count + 1;
+				else if (nativeUploadCallers.Count < 16) nativeUploadCallers.Add(key, 1);
+				else nativeUploadCallers["other-uploaders"] = nativeUploadCallers.TryGetValue("other-uploaders", out long other) ? other + 1 : 1;
+			}
+		}
+
+		private static string FindUploadCallers()
+		{
+			var trace = new System.Diagnostics.StackTrace(1, false);
+			var builder = new System.Text.StringBuilder();
+			int found = 0;
+			for (int i = 0; i < trace.FrameCount && found < 3; i++)
+			{
+				System.Reflection.MethodBase method = trace.GetFrame(i)?.GetMethod();
+				Type type = method?.DeclaringType;
+				if (type == null) continue;
+				string name = type.FullName ?? type.Name;
+				if (name.StartsWith("System", StringComparison.Ordinal) || name.StartsWith("Cairo", StringComparison.Ordinal) ||
+				    name.StartsWith("Vintagestory.Client.NoObf.ClientPlatform", StringComparison.Ordinal) ||
+				    name.StartsWith("Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend", StringComparison.Ordinal) ||
+				    name == "Vintagestory.Client.NoObf.GuiAPI" || name == "Vintagestory.Client.Gui.MainMenuGuiAPI" ||
+				    name == "Vintagestory.Client.RenderAPIBase") continue;
+				if (found > 0) builder.Append('<');
+				if (name.Length > 80) name = name.Substring(0, 80);
+				builder.Append(name).Append('.').Append(method.Name);
+				found++;
+			}
+			return found == 0 ? "unknown" : builder.ToString();
+		}
+
 		public static void ResetRenderingDiagnostics ()
 		{
 			Vintagestory.API.Config.OptimumGuiMetrics.ResetMaterializationDiagnostics ();
 			Cairo.SurfaceRecorder.ResetMaterializationCallers ();
+			lock (nativeUploadSync) nativeUploadCallers.Clear();
 		}
 
 		public static string TryRunOnce(int expectedContextThreadId)
@@ -116,12 +165,18 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "missing-context-thread";
 						return false;
 					}
-					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
+					// GpuRendered: the same list is uploaded again (for example after a texture update).
+					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording && surface.RecordingState != Cairo.SurfaceRecordingState.GpuRendered)
 					{
 						string firstTrigger = surface.FirstMaterializationTrigger;
 						if (surface.RecordingState == Cairo.SurfaceRecordingState.NativeMaterialized && firstTrigger != null)
 						{
 							failureReason = "surface-not-recording:NativeMaterialized:first-trigger=" + firstTrigger;
+						}
+						else if (surface.RecordingState == Cairo.SurfaceRecordingState.Native)
+						{
+							failureReason = "surface-not-recording:Native:" + surface.RecordingOrigin;
+							RecordNativeUploadCaller(failureReason);
 						}
 						else failureReason = "surface-not-recording:" + surface.RecordingState;
 						return false;

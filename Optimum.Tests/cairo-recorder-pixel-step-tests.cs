@@ -111,7 +111,7 @@ public sealed class CairoRecorderPixelStepTests
 	}
 
 	[Fact]
-	public void PixelStepAfterGpuCommitMaterializesBeforeRunningNatively ()
+	public void PixelStepAfterGpuCommitAppendsToThePublishedList ()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 28, 16);
 		var recorder = surface.BeginRecording ();
@@ -119,13 +119,13 @@ public sealed class CairoRecorderPixelStepTests
 		CairoRecorderParityTests.RenderSkia (surface, 28, 16);
 		Assert.True (surface.CommitGpuRenderedCommands ());
 		surface.DemulAlpha ();
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.DemulAlpha.RecordingStopped", recorder.FirstMaterializationTrigger);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		using var reference = new ImageSurface (Format.Argb32, 28, 16);
 		using (var context = new Context (reference)) Shapes (context);
 		reference.DemulAlpha ();
 		Assert.Equal (reference.Data, surface.Data);
 	}
+
 
 	[Fact]
 	public void PharosFixture2AliasedRectangleThenDemulAlphaIsExact ()

@@ -246,10 +246,30 @@ namespace Cairo
 		{
 			surface.EnsureRecordingOwnerThread ();
 			lock (sync) {
-				if (state != SurfaceRecordingState.Recording) { snapshot = null; return false; }
+				// A list already published to the GPU can be rendered again unchanged.
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.GpuRendered) { snapshot = null; return false; }
 				state = SurfaceRecordingState.Sealed;
 				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), Width, Height);
 				return true;
+			}
+		}
+
+		/// <summary>Vanilla code often uploads a surface, keeps drawing (ctx.Clear, hover
+		/// states) and uploads again. The published list stays valid, so drawing after a GPU
+		/// commit appends to it instead of replaying it natively.</summary>
+		internal void ResumeIfGpuRendered ()
+		{
+			lock (sync) { if (state == SurfaceRecordingState.GpuRendered) state = SurfaceRecordingState.Recording; }
+		}
+
+		/// <summary>A fully opaque clear (Source/Clear paint of a transparent colour without
+		/// clip) makes every earlier command invisible; drop them to keep the list short.</summary>
+		internal void DiscardForFullClear ()
+		{
+			lock (sync) {
+				if (state != SurfaceRecordingState.Recording) return;
+				commands.Clear ();
+				lastSnapshot = null; // the count-based snapshot cache must not match a new list
 			}
 		}
 

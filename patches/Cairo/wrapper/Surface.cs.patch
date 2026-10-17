@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..34ad9ac 100644
+index 6f7730e..afaa848 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,10 +32,13 @@
@@ -39,7 +39,7 @@ index 6f7730e..34ad9ac 100644
  		{
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
-@@ -57,10 +72,326 @@ namespace Cairo
+@@ -57,10 +72,358 @@ namespace Cairo
  				NativeMethods.cairo_surface_reference (handle);
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
@@ -92,8 +92,28 @@ index 6f7730e..34ad9ac 100644
 +		/// </summary>
 +		internal bool IsCpuPixelBuffer {
 +			get {
-+				lock (recordingSync)
-+					return autoRecorded && recorder != null && recorder.ReleasedEmpty && !nativeContextAfterRelease;
++				lock (recordingSync) {
++					if (autoRecorded && recorder != null) return recorder.ReleasedEmpty && !nativeContextAfterRelease;
++					// A surface that never recorded is bitmap-only while no Cairo context was
++					// ever created on it and its raw handle never escaped (file, byte[] and
++					// DataPtr-filled surfaces).
++					return recorder == null && !contextEverCreated && !handleExposed;
++				}
++			}
++		}
++		bool contextEverCreated;
++
++		/// <summary>Why a surface is not a display list, for fallback diagnostics.</summary>
++		internal string RecordingOrigin {
++			get {
++				lock (recordingSync) {
++					if (recorder != null) return autoRecorded ? "auto" : "explicit";
++					if (!recordingCandidate) return "native-constructor";
++					if (handle == IntPtr.Zero) return "disposed";
++					Format format = NativeMethods.cairo_image_surface_get_format (handle);
++					if (format != Format.Argb32) return "format-" + format;
++					return "not-eligible-at-creation";
++				}
 +			}
 +		}
 +
@@ -127,10 +147,12 @@ index 6f7730e..34ad9ac 100644
 +		{
 +			lock (recordingSync) {
 +				CheckDisposed ();
++				contextEverCreated = true;
 +				if (recorder != null && recorder.ReleasedEmpty) nativeContextAfterRelease = true;
 +				EnsureRecordingOwnerThread ();
 +				// A context created on an alias would draw natively past the display list.
-+				if (recorder != null && recorder.State == SurfaceRecordingState.Recording && (recordingContext != null || aliasOf != null))
++				if (recorder != null && (recorder.State == SurfaceRecordingState.Recording || recorder.State == SurfaceRecordingState.GpuRendered) &&
++				    (recordingContext != null || aliasOf != null))
 +					MaterializeRecorder (aliasOf != null ? "AliasContextCreation" : "ContextCreation", "Surface");
 +				return handle;
 +			}
@@ -141,6 +163,7 @@ index 6f7730e..34ad9ac 100644
 +		internal Surface CreateRecordingAlias ()
 +		{
 +			lock (recordingSync) {
++				recorder?.ResumeIfGpuRendered ();
 +				if (handle == IntPtr.Zero || recorder == null || recorder.State != SurfaceRecordingState.Recording || !(this is ImageSurface)) return null;
 +				var alias = new ImageSurface (handle, false);
 +				alias.recorder = recorder;
@@ -155,6 +178,7 @@ index 6f7730e..34ad9ac 100644
 +		{
 +			lock (recordingSync) {
 +				if (aliasOf != null) return false;
++				recorder?.ResumeIfGpuRendered ();
 +				if (recorder == null || recorder.State != SurfaceRecordingState.Recording || recordingContext != null) return false;
 +				recordingContext = context;
 +				return true;
@@ -188,6 +212,7 @@ index 6f7730e..34ad9ac 100644
 +			lock (recordingSync) {
 +				if (recorder == null) return false;
 +				EnsureRecordingOwnerThread ();
++				recorder.ResumeIfGpuRendered ();
 +				if (recorder.State != SurfaceRecordingState.Recording)
 +					MaterializeRecorder (operation + ".RecordingStopped", "Recorder");
 +				if (recorder.State != SurfaceRecordingState.Recording) return false;
@@ -196,6 +221,7 @@ index 6f7730e..34ad9ac 100644
 +					MaterializeRecorder (operation + ".Unsupported:" + failure, "Recorder");
 +					return false;
 +				}
++				if (drawing != null && drawing.IsFullClear) recorder.DiscardForFullClear ();
 +				if (drawing != null && !recorder.Add (drawing)) return false;
 +				return true;
 +			}
@@ -210,6 +236,7 @@ index 6f7730e..34ad9ac 100644
 +			lock (recordingSync) {
 +				if (recorder == null) return false;
 +				EnsureRecordingOwnerThread ();
++				recorder.ResumeIfGpuRendered ();
 +				if (recorder.State != SurfaceRecordingState.Recording)
 +					MaterializeRecorder (operation + ".RecordingStopped", "Recorder");
 +				if (recorder.State != SurfaceRecordingState.Recording) return false;
@@ -230,6 +257,7 @@ index 6f7730e..34ad9ac 100644
 +			lock (recordingSync) {
 +				if (recorder == null) return false;
 +				EnsureRecordingOwnerThread ();
++				recorder.ResumeIfGpuRendered ();
 +				if (recorder.State != SurfaceRecordingState.Recording)
 +					MaterializeRecorder (operation + ".RecordingStopped", "Recorder");
 +				if (recorder.State != SurfaceRecordingState.Recording) return false;
@@ -245,7 +273,11 @@ index 6f7730e..34ad9ac 100644
 +
 +		/// <summary>True while drawing into this surface appends to a display list.</summary>
 +		internal bool IsRecordingDisplayList {
-+			get { lock (recordingSync) return recorder != null && handle != IntPtr.Zero && recorder.State == SurfaceRecordingState.Recording; }
++			get {
++				lock (recordingSync)
++					return recorder != null && handle != IntPtr.Zero &&
++						(recorder.State == SurfaceRecordingState.Recording || recorder.State == SurfaceRecordingState.GpuRendered);
++			}
 +		}
 +
 +		/// <summary>Records a managed pixel transform instead of running it on Cairo's
@@ -366,7 +398,7 @@ index 6f7730e..34ad9ac 100644
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
  			switch (st) {
  			case SurfaceType.Image:
-@@ -94,10 +425,11 @@ namespace Cairo
+@@ -94,10 +457,11 @@ namespace Cairo
  
  
  		public Cairo.Surface CreateSimilar (
@@ -378,7 +410,7 @@ index 6f7730e..34ad9ac 100644
  
  			return new Cairo.Surface (p, true);
  		}
-@@ -108,10 +440,11 @@ namespace Cairo
+@@ -108,10 +472,11 @@ namespace Cairo
  		}
  
  		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
@@ -390,7 +422,7 @@ index 6f7730e..34ad9ac 100644
  		}
  
  		public void Dispose ()
-@@ -123,41 +456,79 @@ namespace Cairo
+@@ -123,41 +488,79 @@ namespace Cairo
  			}
  		}
  
@@ -473,7 +505,7 @@ index 6f7730e..34ad9ac 100644
  		}
  
  		public void MarkDirty (Rectangle rectangle)
-@@ -166,62 +537,75 @@ namespace Cairo
+@@ -166,62 +569,75 @@ namespace Cairo
  			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
  		}
  
