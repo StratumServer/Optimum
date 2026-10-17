@@ -853,6 +853,32 @@ public sealed class CairoRecorderParityTests
 		});
 	}
 
+	[Theory]
+	[InlineData (Operator.Over, 0)]
+	[InlineData (Operator.Over, .5)]
+	[InlineData (Operator.Over, 1)]
+	[InlineData (Operator.Atop, 0)]
+	[InlineData (Operator.Atop, .5)]
+	[InlineData (Operator.Atop, 1)]
+	[InlineData (Operator.DestOver, 0)]
+	[InlineData (Operator.DestOver, .5)]
+	[InlineData (Operator.DestOver, 1)]
+	public void SolidMaskUsesRecordedAlphaWithSupportedOperators (Operator op, double alpha)
+	{
+		AssertParity (24, 24, context => {
+			context.SetSourceRGBA (.25, .5, .75, .6);
+			context.Paint ();
+			context.SetSourceRGBA (.85, .35, .15, .7);
+			context.Operator = op;
+			context.Rectangle (3, 4, 12, 9);
+			using var mask = new SolidPattern (0, 0, 0, alpha);
+			context.Mask (mask);
+			context.Operator = Operator.Over;
+			context.SetSourceRGBA (.1, .8, .3, .5);
+			context.Fill ();
+		});
+	}
+
 	[Fact]
 	public void GroupsMaskAndTextStillMaterialize ()
 	{
@@ -867,6 +893,15 @@ public sealed class CairoRecorderParityTests
 		AssertMaterializesWith (24, 24, context => {
 			context.SetSourceRGBA (.25, .5, .75, .6);
 			context.Paint ();
+			using var mask = new LinearGradient (0, 0, 24, 24);
+			mask.AddColorStop (0, new Color (0, 0, 0, 0));
+			mask.AddColorStop (1, new Color (0, 0, 0, .5));
+			context.Mask (mask);
+		}, "Context.Mask");
+		AssertMaterializesWith (24, 24, context => {
+			context.SetSourceRGBA (.25, .5, .75, .6);
+			context.Paint ();
+			context.Operator = Operator.Screen;
 			using var mask = new SolidPattern (0, 0, 0, .5);
 			context.Mask (mask);
 		}, "Context.Mask");

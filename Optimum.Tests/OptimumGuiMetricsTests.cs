@@ -4,6 +4,9 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[CollectionDefinition("OptimumConfig", DisableParallelization = true)]
+public sealed class OptimumConfigCollectionDefinition { }
+
 [Collection("OptimumConfig")]
 public class OptimumGuiMetricsTests
 {

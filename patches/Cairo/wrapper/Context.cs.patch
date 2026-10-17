@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..0cf1326 100644
+index 03f9c76..8967bab 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -655,7 +655,7 @@ index 03f9c76..0cf1326 100644
  
          #endregion
  
-@@ -565,23 +706,26 @@ namespace Cairo
+@@ -565,110 +706,131 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -677,14 +677,26 @@ index 03f9c76..0cf1326 100644
  
  		public void Mask (Pattern pattern)
  		{
++			CheckDisposedOnly ();
++			if (pattern == null) CheckDisposed ();
++			IntPtr mask = pattern.Handle;
++			if (mask != IntPtr.Zero && NativeMethods.cairo_status (handle) == Status.Success && NativeMethods.cairo_pattern_status (mask) == Status.Success &&
++				NativeMethods.cairo_pattern_get_type (mask) == PatternType.Solid) {
++				Operator op = NativeMethods.cairo_get_operator (handle);
++				if (op == Operator.Over || op == Operator.Atop || op == Operator.DestOver) {
++					if (NativeMethods.cairo_pattern_get_rgba (mask, out _, out _, out _, out double alpha) == Status.Success &&
++						RecordDrawing ("Mask", RecordedDrawKind.Paint, alpha)) return;
++				}
++			}
  			CheckDisposed ();
+-			NativeMethods.cairo_mask (handle, pattern.Handle);
 +			Surface.MaterializeRecordingPatternSource (pattern.Handle, "Mask");
- 			NativeMethods.cairo_mask (handle, pattern.Handle);
++			NativeMethods.cairo_mask (handle, mask);
  		}
  
  		public void MaskSurface (Surface surface, double surface_x, double surface_y)
  		{
-@@ -589,86 +733,93 @@ namespace Cairo
+ 			CheckDisposed ();
  			NativeMethods.cairo_mask_surface (handle, surface.Handle, surface_x, surface_y);
  		}
  
@@ -790,7 +802,7 @@ index 03f9c76..0cf1326 100644
  
  		public Pattern PopGroup ()
  		{
-@@ -708,29 +859,29 @@ namespace Cairo
+@@ -708,29 +870,29 @@ namespace Cairo
  			return Surface.Lookup (surface, false);
  		}
  
@@ -824,7 +836,7 @@ index 03f9c76..0cf1326 100644
  
  		[Obsolete("Use UserToDevice instead")]
  		public void TransformPoint (ref double x, ref double y)
-@@ -756,55 +907,55 @@ namespace Cairo
+@@ -756,55 +918,55 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -888,7 +900,7 @@ index 03f9c76..0cf1326 100644
  
  		[Obsolete ("Use SetFontSize() instead.")]
  		public void FontSetSize (double scale)
-@@ -817,31 +968,32 @@ namespace Cairo
+@@ -817,30 +979,31 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -917,16 +929,14 @@ index 03f9c76..0cf1326 100644
  			}
  			set {
 -				CheckDisposed ();
--				NativeMethods.cairo_set_font_options (handle, value.Handle);
 +				CheckDisposedOnly ();
 +				// Preserve the requested antialias mode. Unsupported text modes materialize to Cairo.
-+				NativeMethods.cairo_set_font_options (handle, value.Handle);
+ 				NativeMethods.cairo_set_font_options (handle, value.Handle);
  			}
  		}
  
  		[StructLayout(LayoutKind.Sequential)]
- 		internal struct NativeGlyph_4byte_longs {
-@@ -879,19 +1031,24 @@ namespace Cairo
+@@ -879,19 +1042,24 @@ namespace Cairo
  			return dest;
  		}
  
@@ -956,7 +966,7 @@ index 03f9c76..0cf1326 100644
  		[Obsolete("The matrix argument was never used, use ShowGlyphs(Glyphs []) instead")]
  		public void ShowGlyphs (Matrix matrix, Glyph[] glyphs)
  		{
-@@ -904,11 +1061,11 @@ namespace Cairo
+@@ -904,11 +1072,11 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -969,7 +979,7 @@ index 03f9c76..0cf1326 100644
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
  
-@@ -917,11 +1074,11 @@ namespace Cairo
+@@ -917,11 +1085,11 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -982,7 +992,7 @@ index 03f9c76..0cf1326 100644
  				return f_extents;
  			}
  		}
-@@ -934,23 +1091,23 @@ namespace Cairo
+@@ -934,23 +1102,23 @@ namespace Cairo
  
          
  
@@ -1009,7 +1019,7 @@ index 03f9c76..0cf1326 100644
  
  		public void ShowPage ()
  		{
-@@ -977,51 +1134,66 @@ namespace Cairo
+@@ -977,51 +1145,66 @@ namespace Cairo
  			return bytes;
  		}
  
