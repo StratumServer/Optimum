@@ -557,7 +557,8 @@ public sealed class CairoRecorderParityTests
 			context.Fill ();
 			context.Save ();
 			context.IdentityMatrix ();
-			context.SetSourceRGBA (.2, .4, .6, .5);
+			using var solid = new SolidPattern (.2, .4, .6, .5);
+			context.SetSource (solid);
 			context.Restore ();
 			context.Rectangle (0, 15, 8, 3);
 			context.Fill ();

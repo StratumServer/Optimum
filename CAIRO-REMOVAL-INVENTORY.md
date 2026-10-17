@@ -115,6 +115,20 @@ Skia measurements. The patch applies and compiles with the current source set;
 the related font/API/text tests pass 41/41. There is not yet a direct editable
 text click/drag fixture, so caret hitbox parity remains unverified.
 
+### Solid-pattern source capture
+
+`Context.RecordSourceState` now skips `CurrentMatrix()` when the native pattern
+type is solid, clears the tracked source surface, and leaves the mirrored CTM
+unchanged. `RecordedSource.Capture` returns a solid source before reading that
+CTM; subsequent gradient/surface sources replace it, and Save/Restore restores
+the corresponding snapshot. The existing source-space parity test now uses a
+`SolidPattern` inside the saved surface-source sequence. This avoids one
+`cairo_get_matrix` call and one managed `Matrix` allocation per recorded
+`SetSource(SolidPattern)` by static inspection. No timing counter measured the
+reduction. The focused Cairo recorder parity/text suites passed 91/91; patch
+validation passed with 85 source patches, 53 Cecil patches, 22 runtime donors
+and zero conflicts.
+
 ## Native import inventory
 
 The schema-2 manifest includes **299 active `DllImport` methods** reflected from
