@@ -64,12 +64,14 @@ context, granting GUI approval or starting the client.
 Cairo still owns the public GUI drawing API, context state, glyph IDs and glyph
 positions. The runtime API patcher now routes `CairoFont.GetTextExtents` and
 `GetFontExtents` through Skia metrics, using the same Fontconfig face match as the
-text recorder. `CairoFont.FontMeasuringContext`, `SetupContext`, and the context-
-based `TextDrawUtil` overloads remain Cairo-backed. Compatible Gray text and the
-tested Subpixel matrix rasterize as Skia text blobs. Unsupported Gray faces keep
-Cairo outlines; unsupported Subpixel faces materialize the original call through
-Cairo. The tested matrix and remaining limits are recorded in Stage B3 and Stage C
-below.
+text recorder. The runtime patcher also routes `TextDrawUtil` font-based
+`Lineize` and `GetQuantityTextLines` through those Skia metrics, without creating
+temporary Cairo contexts. `CairoFont.FontMeasuringContext`, `SetupContext`, and
+the context-based `TextDrawUtil` overloads remain Cairo-backed. Compatible Gray
+text and the tested Subpixel matrix rasterize as Skia text blobs. Unsupported Gray
+faces keep Cairo outlines; unsupported Subpixel faces materialize the original
+call through Cairo. The tested matrix and remaining limits are recorded in Stage
+B3 through Stage D below.
 
 Policy: preserve the requested antialias mode. `CairoFont.SetupContext` requests
 `Antialias.Subpixel` for GUI text. Skia LCD rendering passes the local visual policy
@@ -259,3 +261,35 @@ errors. Patch validation reported 82 applied patches, 53 Cecil patches and 22
 runtime donor patches; shader validation and `make check` passed. These are CPU
 and integration tests. They do not certify the updated runtime on a physical GPU.
 No performance gain is claimed.
+
+### Stage D: runtime font-based text layout and overlay dependency (2026-10-17)
+
+The runtime API patcher now clones the vanilla `TextDrawUtil.Lineize(Context, ... )`
+algorithm into a private helper that receives `CairoFont`. It replaces only the
+`Context.TextExtents` and `Context.FontExtents` calls with `CairoFont` metric calls.
+The `CairoFont` overloads of `Lineize` and `GetQuantityTextLines` call this helper,
+so they no longer create temporary `ImageSurface` or `Context` instances. The
+public `Context` overload is unchanged. Cairo's `CairoFont` static measuring
+context, `SetupContext`, shaping/layout outside these two overloads, glyph
+generation, drawing, and unsupported-operation fallbacks remain dependencies.
+
+The overlay package now includes the candidate `cairo-sharp.dll` beside its API
+contract donor, where `ApiPatcher` resolves the helper assembly. Overlay
+installation copies that wrapper into `game/Lib` and backs up the prior wrapper;
+rollback restores it, or removes the candidate if the game originally had none.
+
+The serialized API patcher test passed and executed font-based layout across
+multiple line-break modes, explicit CRLF/tab text, empty/null input and offsets.
+It compares line text, bounds, ascent and spacing with the source implementation,
+checks that the `Context` overload IL is unchanged, and verifies the rewritten
+methods have no `Context` or `ImageSurface` construction. The installer
+patch/rollback tests passed 10/10. Full suites passed: Optimum 1,021 with 34
+skipped, Launcher 69, CLI 24, Bootstrap.Core 156 and Installer 78. `make check`,
+`make build` (zero warnings/errors), patch validation (82 source, 53 Cecil, 22
+runtime donors), shader validation, and `make patch-il` (146/146 required methods)
+passed. The Linux overlay was packaged in a disposable directory and confirmed to
+place the wrapper beside the API donor.
+
+No physical GPU certification was run for this head. Prior AMD, Intel and NVIDIA
+reports predate it. The CPU and IL gates do not qualify GPU parity or Cairo
+removal. No performance gain is claimed.

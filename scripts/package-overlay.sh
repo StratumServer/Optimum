@@ -53,10 +53,11 @@ echo "  Output dir:      $OUTPUT_DIR"
 DONOR_LIB="$REPO_ROOT/build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll"
 CONTRACTS_LIB="$REPO_ROOT/bin/Release/net10.0/Optimum.Api.Contracts.dll"
 GAME_CONTENT_LIB="$REPO_ROOT/bin/Release/net10.0/Optimum.GameContent.dll"
+CAIRO_LIB="$REPO_ROOT/bin/Release/net10.0/cairo-sharp.dll"
 ESSENTIALS_LIB="$REPO_ROOT/.build/runtime-donors/VSEssentials/bin/Release/net10.0/VSEssentials.dll"
 SURVIVAL_LIB="$REPO_ROOT/.build/runtime-donors/VSSurvivalMod/bin/Release/net10.0/VSSurvivalMod.dll"
 
-if [[ ! -f "$DONOR_LIB" || ! -f "$CONTRACTS_LIB" || ! -f "$GAME_CONTENT_LIB" ]]; then
+if [[ ! -f "$DONOR_LIB" || ! -f "$CONTRACTS_LIB" || ! -f "$GAME_CONTENT_LIB" || ! -f "$CAIRO_LIB" ]]; then
     echo "Building VintageStory.slnx (Release)..."
     dotnet build "$REPO_ROOT/VintageStory.slnx" -c Release --nologo
 fi
@@ -93,6 +94,7 @@ echo "Staging overlay contents into $STAGE_DIR..."
 # 1. Donors
 cp -f "$DONOR_LIB" "$STAGE_DIR/.optimum/donors/VintagestoryLib.Donor.dll"
 cp -f "$CONTRACTS_LIB" "$STAGE_DIR/.optimum/donors/VintagestoryAPI.Contracts.dll"
+cp -f "$CAIRO_LIB" "$STAGE_DIR/.optimum/donors/cairo-sharp.dll"
 if [[ -f "$ESSENTIALS_LIB" ]]; then
     cp -f "$ESSENTIALS_LIB" "$STAGE_DIR/.optimum/donors/VSEssentials.Donor.dll"
 fi

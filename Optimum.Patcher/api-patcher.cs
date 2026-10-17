@@ -107,6 +107,7 @@ public static class ApiPatcher
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
+        int textLayoutMetrics = PatchTextDrawUtilFontOverloads(vanilla.MainModule);
         int materializationObserver = PatchMaterializationObserver(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
 
         if (inventoryHooks != 2)
@@ -163,6 +164,11 @@ public static class ApiPatcher
         {
             throw new InvalidOperationException(
                 $"Expected 2 CairoFont measurement metrics patches, applied {fontMeasurementMetrics}.");
+        }
+        if (textLayoutMetrics != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         }
         if (CountMaterializationObserverHooks(vanilla.MainModule) != 1 || CountMaterializationObserverCallbacks(vanilla.MainModule) != 1)
         {
@@ -613,6 +619,225 @@ public static class ApiPatcher
                 for (int i = 0; i < targets.Length; i++)
                     if (targets[i] == returnInstruction) targets[i] = recordStart;
         }
+    }
+
+    internal static int PatchTextDrawUtilFontOverloads(ModuleDefinition module)
+    {
+        const string utilTypeName = "Vintagestory.API.Client.TextDrawUtil";
+        const string fontTypeName = "Vintagestory.API.Client.CairoFont";
+        var util = module.GetType(utilTypeName)
+            ?? throw new InvalidOperationException($"{utilTypeName} is missing from the vanilla API.");
+        var font = module.GetType(fontTypeName)
+            ?? throw new InvalidOperationException($"{fontTypeName} is missing from the vanilla API.");
+        var flowPath = module.GetType("Vintagestory.API.Client.TextFlowPath")
+            ?? throw new InvalidOperationException("TextFlowPath is missing from the vanilla API.");
+        var lineType = module.GetType("Vintagestory.API.Client.TextLine")
+            ?? throw new InvalidOperationException("TextLine is missing from the vanilla API.");
+        var behavior = module.GetType("Vintagestory.API.Client.EnumLinebreakBehavior")
+            ?? throw new InvalidOperationException("EnumLinebreakBehavior is missing from the vanilla API.");
+
+        MethodDefinition Find(string name, string result, params string[] parameters) =>
+            util.Methods.SingleOrDefault(method => method.Name == name && method.ReturnType.FullName == result &&
+                method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters))
+            ?? throw new InvalidOperationException($"{utilTypeName}.{name}({string.Join(", ", parameters)}) is missing from the vanilla API.");
+
+        var contextLineize = Find("Lineize", $"{lineType.FullName}[]", "Cairo.Context", "System.String", behavior.FullName,
+            $"{flowPath.FullName}[]", "System.Double", "System.Double", "System.Double", "System.Boolean");
+        var context = contextLineize.Parameters[0].ParameterType.Resolve()
+            ?? throw new InvalidOperationException("Cairo.Context is missing from the vanilla API references.");
+        var fontLineize = Find("Lineize", $"{lineType.FullName}[]", font.FullName, "System.String", behavior.FullName,
+            $"{flowPath.FullName}[]", "System.Double", "System.Double", "System.Boolean");
+        var fontQuantity = Find("GetQuantityTextLines", "System.Int32", font.FullName, "System.String", behavior.FullName,
+            $"{flowPath.FullName}[]", "System.Double");
+
+        if (!contextLineize.HasBody || !fontLineize.HasBody || !fontQuantity.HasBody)
+            throw new InvalidOperationException("TextDrawUtil font-layout entrypoints must have managed method bodies.");
+        if (util.Methods.Any(method => method.Name == "LineizeWithSkiaMetrics"))
+            throw new InvalidOperationException("TextDrawUtil already contains the Skia metrics layout helper.");
+
+        var fontTextExtents = font.Methods.SingleOrDefault(method => method.Name == "GetTextExtents" &&
+            method.Parameters.Count == 1 && method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType.FullName == "Cairo.TextExtents")
+            ?? throw new InvalidOperationException("CairoFont.GetTextExtents(string) is missing from the vanilla API.");
+        var fontExtents = font.Methods.SingleOrDefault(method => method.Name == "GetFontExtents" &&
+            method.Parameters.Count == 0 && method.ReturnType.FullName == "Cairo.FontExtents")
+            ?? throw new InvalidOperationException("CairoFont.GetFontExtents() is missing from the vanilla API.");
+        var lineHeight = FindField(font, "LineHeightMultiplier", "System.Double");
+        var textExtents = context.Methods.SingleOrDefault(method => method.Name == "TextExtents" &&
+            method.Parameters.Count == 1 && method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType.FullName == "Cairo.TextExtents")
+            ?? throw new InvalidOperationException("Cairo.Context.TextExtents(string) is missing from the vanilla API.");
+        var contextFontExtents = context.Methods.SingleOrDefault(method => method.Name == "get_FontExtents" &&
+            method.Parameters.Count == 0 && method.ReturnType.FullName == "Cairo.FontExtents")
+            ?? throw new InvalidOperationException("Cairo.Context.FontExtents is missing from the vanilla API.");
+
+        MethodDefinition helper = CloneLineizeWithSkiaMetrics(module, util, contextLineize, font, textExtents,
+            contextFontExtents, fontTextExtents, fontExtents);
+        RewriteFontLineize(module, fontLineize, helper, lineHeight);
+        RewriteFontQuantity(module, fontQuantity, helper, lineHeight);
+
+        Console.WriteLine($"  API PATCHED: {utilTypeName}.Lineize/GetQuantityTextLines(CairoFont) Skia metrics, no temporary Cairo context");
+        return 2;
+
+        static FieldDefinition FindField(TypeDefinition type, string name, string fieldType)
+        {
+            for (TypeDefinition? current = type; current != null; current = current.BaseType?.Resolve())
+            {
+                var field = current.Fields.SingleOrDefault(candidate => candidate.Name == name && !candidate.IsStatic &&
+                    candidate.FieldType.FullName == fieldType);
+                if (field != null) return field;
+            }
+            throw new InvalidOperationException($"{type.FullName} is missing its {fieldType} {name} field.");
+        }
+    }
+
+    private static MethodDefinition CloneLineizeWithSkiaMetrics(ModuleDefinition module, TypeDefinition util,
+        MethodDefinition source, TypeDefinition font, MethodDefinition contextTextExtents,
+        MethodDefinition contextFontExtents, MethodDefinition fontTextExtents, MethodDefinition fontExtents)
+    {
+        var helper = new MethodDefinition("LineizeWithSkiaMetrics",
+            MethodAttributes.Private | MethodAttributes.HideBySig, module.ImportReference(source.ReturnType));
+        foreach (var parameter in source.Parameters)
+        {
+            TypeReference parameterType = parameter.Index == 0
+                ? module.ImportReference(font)
+                : module.ImportReference(parameter.ParameterType);
+            helper.Parameters.Add(new ParameterDefinition(parameter.Name, parameter.Attributes, parameterType));
+        }
+
+        helper.Body.InitLocals = source.Body.InitLocals;
+        helper.Body.MaxStackSize = source.Body.MaxStackSize;
+        var variables = new Dictionary<VariableDefinition, VariableDefinition>();
+        foreach (var variable in source.Body.Variables)
+        {
+            var cloned = new VariableDefinition(module.ImportReference(variable.VariableType));
+            helper.Body.Variables.Add(cloned);
+            variables.Add(variable, cloned);
+        }
+
+        var instructions = new Dictionary<Instruction, Instruction>();
+        ILProcessor processor = helper.Body.GetILProcessor();
+        int replacedTextMetrics = 0;
+        int replacedFontMetrics = 0;
+        foreach (Instruction original in source.Body.Instructions)
+        {
+            Instruction instruction;
+            if (original.Operand is MethodReference method && method.DeclaringType.FullName == "Cairo.Context")
+            {
+                if (method.Name == contextTextExtents.Name && method.Parameters.Count == 1 &&
+                    method.Parameters[0].ParameterType.MetadataType == MetadataType.String && method.ReturnType.FullName == contextTextExtents.ReturnType.FullName)
+                {
+                    instruction = CloneCall(original, fontTextExtents);
+                    replacedTextMetrics++;
+                }
+                else if (method.Name == contextFontExtents.Name && method.Parameters.Count == 0 &&
+                    method.ReturnType.FullName == contextFontExtents.ReturnType.FullName)
+                {
+                    instruction = CloneCall(original, fontExtents);
+                    replacedFontMetrics++;
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unexpected Cairo.Context call in {source.FullName}: {method.FullName}.");
+                }
+            }
+            else
+            {
+                instruction = CloneInstruction(original);
+            }
+            instructions.Add(original, instruction);
+            processor.Append(instruction);
+        }
+
+        foreach (Instruction instruction in helper.Body.Instructions)
+        {
+            if (instruction.Operand is Instruction branch && instructions.TryGetValue(branch, out Instruction? mapped))
+                instruction.Operand = mapped;
+            else if (instruction.Operand is Instruction[] branches)
+                instruction.Operand = branches.Select(branch => instructions.TryGetValue(branch, out Instruction? mappedBranch) ? mappedBranch : branch).ToArray();
+            else if (instruction.Operand is VariableDefinition variable && variables.TryGetValue(variable, out VariableDefinition? mappedVariable))
+                instruction.Operand = mappedVariable;
+            else if (instruction.Operand is ParameterDefinition parameter && parameter.Index >= 0 && parameter.Index < helper.Parameters.Count)
+                instruction.Operand = helper.Parameters[parameter.Index];
+        }
+
+        foreach (ExceptionHandler handler in source.Body.ExceptionHandlers)
+        {
+            helper.Body.ExceptionHandlers.Add(new ExceptionHandler(handler.HandlerType)
+            {
+                TryStart = handler.TryStart != null ? instructions.GetValueOrDefault(handler.TryStart) : null,
+                TryEnd = handler.TryEnd != null ? instructions.GetValueOrDefault(handler.TryEnd) : null,
+                HandlerStart = handler.HandlerStart != null ? instructions.GetValueOrDefault(handler.HandlerStart) : null,
+                HandlerEnd = handler.HandlerEnd != null ? instructions.GetValueOrDefault(handler.HandlerEnd) : null,
+                CatchType = handler.CatchType != null ? module.ImportReference(handler.CatchType) : null,
+            });
+        }
+
+        if (replacedTextMetrics == 0 || replacedFontMetrics == 0)
+            throw new InvalidOperationException($"{source.FullName} did not contain both expected Cairo text measurement calls.");
+        util.Methods.Add(helper);
+        return helper;
+
+        static Instruction CloneCall(Instruction sourceInstruction, MethodDefinition target)
+        {
+            OpCode opcode = sourceInstruction.OpCode == OpCodes.Ldvirtftn ? OpCodes.Ldftn : sourceInstruction.OpCode;
+            return Instruction.Create(opcode, target);
+        }
+
+        Instruction CloneInstruction(Instruction instruction)
+        {
+            object? operand = instruction.Operand;
+            if (operand == null) return Instruction.Create(instruction.OpCode);
+            if (operand is MethodReference method) return Instruction.Create(instruction.OpCode, module.ImportReference(method));
+            if (operand is TypeReference type) return Instruction.Create(instruction.OpCode, module.ImportReference(type));
+            if (operand is FieldReference field) return Instruction.Create(instruction.OpCode, module.ImportReference(field));
+            if (operand is string text) return Instruction.Create(instruction.OpCode, text);
+            if (operand is int i) return Instruction.Create(instruction.OpCode, i);
+            if (operand is long l) return Instruction.Create(instruction.OpCode, l);
+            if (operand is float f) return Instruction.Create(instruction.OpCode, f);
+            if (operand is double d) return Instruction.Create(instruction.OpCode, d);
+            if (operand is byte b) return Instruction.Create(instruction.OpCode, b);
+            if (operand is sbyte sb) return Instruction.Create(instruction.OpCode, sb);
+            if (operand is Instruction targetInstruction) return Instruction.Create(instruction.OpCode, targetInstruction);
+            if (operand is Instruction[] targets) return Instruction.Create(instruction.OpCode, targets);
+            if (operand is VariableDefinition variable) return Instruction.Create(instruction.OpCode, variables[variable]);
+            if (operand is ParameterDefinition parameter) return Instruction.Create(instruction.OpCode, helper.Parameters[parameter.Index]);
+            throw new InvalidOperationException($"Unsupported IL operand {operand.GetType().FullName} in {source.FullName}.");
+        }
+    }
+
+    private static void RewriteFontLineize(ModuleDefinition module, MethodDefinition method, MethodDefinition helper, FieldDefinition lineHeight)
+    {
+        ClearDebugInformation(method);
+        method.Body = new MethodBody(method);
+        ILProcessor processor = method.Body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        foreach (int argument in new[] { 0, 1, 2, 3, 4, 5 })
+            processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[argument]));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(lineHeight)));
+        processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[6]));
+        processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(helper)));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+    }
+
+    private static void RewriteFontQuantity(ModuleDefinition module, MethodDefinition method, MethodDefinition helper, FieldDefinition lineHeight)
+    {
+        ClearDebugInformation(method);
+        method.Body = new MethodBody(method);
+        ILProcessor processor = method.Body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        foreach (int argument in new[] { 0, 1, 2, 3 })
+            processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[argument]));
+        processor.Append(Instruction.Create(OpCodes.Ldc_R8, 0d));
+        processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[4]));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(lineHeight)));
+        processor.Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(helper)));
+        processor.Append(Instruction.Create(OpCodes.Ldlen));
+        processor.Append(Instruction.Create(OpCodes.Conv_I4));
+        processor.Append(Instruction.Create(OpCodes.Ret));
     }
 
     internal static int PatchGameVersionLabel(ModuleDefinition module, string optimumVersion)

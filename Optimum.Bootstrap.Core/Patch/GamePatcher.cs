@@ -395,6 +395,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         }
 
         RestoreGameContentAsset(gameDir);
+        RestoreCairoWrapperAsset(gameDir);
 
         observer?.Log(LogLevel.Info, $"rollback complete: restored {restored.Count} vanilla assemblies");
         return PatchResult.Success(gameDir, restored);
@@ -407,6 +408,17 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         if (contractsSrc is not null && probe.FileExists(contractsSrc))
         {
             CopyFile(contractsSrc, Path.Combine(gameDir, "Optimum.Api.Contracts.dll"));
+        }
+
+        // 1b. The patched API calls Skia helpers in the candidate Cairo wrapper.
+        // The overlay carries the same wrapper beside its API donor for Cecil
+        // patching and in game/Lib for runtime assembly resolution.
+        string? cairoSrc = FindFile(overlayDir, ".optimum/donors/cairo-sharp.dll", "cairo-sharp.dll");
+        if (cairoSrc is not null && probe.FileExists(cairoSrc))
+        {
+            string cairoDst = Path.Combine(gameDir, "Lib", "cairo-sharp.dll");
+            BackupCairoWrapperAsset(gameDir, cairoDst);
+            CopyFile(cairoSrc, cairoDst);
         }
 
         // 2. Copy the assembly referenced by the patched VSEssentials.dll.
@@ -491,6 +503,41 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         else if (probe.FileExists(absentMarker))
         {
             TryDeleteFile(gameContentPath);
+        }
+
+        TryDeleteFile(absentMarker);
+    }
+
+    private void BackupCairoWrapperAsset(string gameDir, string cairoPath)
+    {
+        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla", "Lib");
+        string backupPath = Path.Combine(vanillaDir, "cairo-sharp.dll");
+        string absentMarker = Path.Combine(vanillaDir, "cairo-sharp.dll.absent");
+        if (probe.FileExists(backupPath) || probe.FileExists(absentMarker))
+            return;
+
+        EnsureDirectory(vanillaDir);
+        if (probe.FileExists(cairoPath))
+            CopyFile(cairoPath, backupPath);
+        else
+            WriteText(absentMarker, string.Empty);
+    }
+
+    private void RestoreCairoWrapperAsset(string gameDir)
+    {
+        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla", "Lib");
+        string cairoPath = Path.Combine(gameDir, "Lib", "cairo-sharp.dll");
+        string backupPath = Path.Combine(vanillaDir, "cairo-sharp.dll");
+        string absentMarker = Path.Combine(vanillaDir, "cairo-sharp.dll.absent");
+
+        if (probe.FileExists(backupPath))
+        {
+            CopyFile(backupPath, cairoPath);
+            TryDeleteFile(backupPath);
+        }
+        else if (probe.FileExists(absentMarker))
+        {
+            TryDeleteFile(cairoPath);
         }
 
         TryDeleteFile(absentMarker);
