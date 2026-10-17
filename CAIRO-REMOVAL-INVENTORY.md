@@ -84,6 +84,24 @@ test.
 | Build, patch, install and rollback | Patcher rewrites APIs and hooks recorder metrics; launcher certification fingerprints `cairo-sharp`; overlay/package scripts stage it; installer backs up/restores the wrapper. Linux/macOS packages copy broad vanilla trees/bundles. | Update donors, IL contracts, artifact fingerprints, package manifests and rollback together. Audit packaged native binaries and dependency chains, not just source references. |
 | Tests and certification | ABI fixture intentionally loads native Cairo; parity harness and GPU certificate test current mixed Skia/Cairo behavior. Stage F/G have CPU tests but no GPU retest for their exact head. | Keep native oracle tests separate from runtime proof. Test hardware parity for the exact published head and separately test a packaged client with Cairo loading blocked. |
 
+### Text scratch-surface reduction
+
+`RecordedText.CaptureGlyphs` now creates its 1x1 Cairo surface and context only
+when it needs Cairo outlines for a Gray text run. A run accepted as an Skia
+`SKTextBlob`, including Subpixel, skips the scratch objects. By static call-path
+count this avoids `cairo_image_surface_create`, `cairo_create`,
+`cairo_destroy`, and `cairo_surface_destroy` per accepted text run; the count
+has not been measured with native-call instrumentation. Unsupported Gray text
+still uses Cairo outlines, and unsupported Subpixel text still fails closed to
+the existing Cairo materialization path. This does not remove Cairo glyph
+selection, metrics, font matching, or replay.
+
+The `CairoRecorderTextTests` suite passes 24/24 on this host, including parity
+fixtures and an assertion that the eligible Subpixel case records two Skia text
+blobs without captured Cairo paths. No physical GPU test was run because this
+change skips unused scratch allocations and leaves the rendered commands
+unchanged.
+
 ## Native import inventory
 
 The schema-2 manifest includes **299 active `DllImport` methods** reflected from

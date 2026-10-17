@@ -236,6 +236,7 @@ public sealed class CairoRecorderTextTests
 			Action<Context> draw = Text ("sans-serif", FontWeight.Normal, 14, 3.3, 20, "LCD bytes", Antialias.Subpixel);
 			draw (context);
 			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+			AssertSkiaTextBlobs (recorder, 2);
 			Assert.Null (surface.FirstMaterializationTrigger);
 			byte[] reference = CairoRecorderParityTests.RenderNative (240, 40, draw);
 			byte[] actual = CairoRecorderParityTests.RenderSkia (surface, 240, 40);

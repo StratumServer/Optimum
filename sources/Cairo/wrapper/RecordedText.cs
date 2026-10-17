@@ -182,8 +182,8 @@ namespace Cairo
 			else if (version < 11700) steps = 1;
 			else { failure = "text-cairo-version-" + version; return null; }
 			IntPtr rounded = Marshal.AllocHGlobal (count * GlyphSize);
-			IntPtr scratchSurface = NativeMethods.cairo_image_surface_create (Format.Argb32, 1, 1);
-			IntPtr scratch = NativeMethods.cairo_create (scratchSurface);
+			IntPtr scratchSurface = IntPtr.Zero;
+			IntPtr scratch = IntPtr.Zero;
 			try {
 				var buffer = new byte[count * GlyphSize];
 				Marshal.Copy (glyphs, buffer, 0, buffer.Length);
@@ -211,6 +211,8 @@ namespace Cairo
 				if (subpixel && textBlob == null) { failure = "text-antialias-Subpixel"; return null; }
 				IntPtr pathContext = IntPtr.Zero;
 				if (textBlob == null) {
+					scratchSurface = NativeMethods.cairo_image_surface_create (Format.Argb32, 1, 1);
+					scratch = NativeMethods.cairo_create (scratchSurface);
 					NativeMethods.cairo_set_matrix (scratch, ctm);
 					NativeMethods.cairo_set_scaled_font (scratch, scaledFont);
 					NativeMethods.cairo_glyph_path (scratch, rounded, count);
