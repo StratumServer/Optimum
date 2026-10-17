@@ -1,0 +1,162 @@
+diff --git a/Optimum.Pharos.Gui.Tests/OptimumGuiCaptureScenarioTests.cs b/Optimum.Pharos.Gui.Tests/OptimumGuiCaptureScenarioTests.cs
+index 2df5448a..366b1484 100644
+--- a/Optimum.Pharos.Gui.Tests/OptimumGuiCaptureScenarioTests.cs
++++ b/Optimum.Pharos.Gui.Tests/OptimumGuiCaptureScenarioTests.cs
+@@ -25,6 +25,10 @@ namespace Optimum.Pharos.Tests;
+ [Trait(PharosTraits.Category, PharosTraits.Live)]
+ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenarioBase
+ {
++    private const string SupportedSubpixelMaterialization = "Recorder.ShowText.Unsupported:text-antialias-Subpixel";
++    private const string SupportedSubpixelUploadFallback = "surface-not-recording:NativeMaterialized:first-trigger=" + SupportedSubpixelMaterialization;
++    private const string ApprovedGpuDecision = "skia-with-subpixel-cairo-fallback";
++
+     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+     private struct CpuTimespec { public long Seconds; public long Nanoseconds; }
+     [System.Runtime.InteropServices.DllImport("libc", EntryPoint = "clock_gettime")]
+@@ -332,10 +336,11 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+                 gpuDecisionReasons.Add("initial-gui-composition-diagnostics-incomplete-or-mismatched");
+             if (gpuRequested && initialCandidateAttempts.GetValueOrDefault() == 0)
+                 gpuDecisionReasons.Add("initial-gui-composition-no-candidate-attempts");
+-            if (gpuRequested && initialCandidateFallbacks.GetValueOrDefault() != 0)
++            if (gpuRequested && !OnlySupportedSubpixelUploadFallbacks(initialFallbackReasons, initialCandidateFallbacks))
+                 gpuDecisionReasons.Add("initial-gui-composition-candidate-fallbacks");
+-            if (gpuRequested && initialMaterializationAttempts.GetValueOrDefault() != 0)
+-                gpuDecisionReasons.Add("initial-gui-composition-native-materialization-observed");
++            if (gpuRequested && !OnlySupportedSubpixelMaterializations(initialMaterializationAttempts, initialMaterializationSuccesses,
++                initialMaterializationFailures, initialGuiCauses))
++                gpuDecisionReasons.Add("initial-gui-composition-native-materialization-unsupported-or-incomplete");
+             try
+             {
+                 var previousScaleFallbacks = FallbackHistogram();
+@@ -388,9 +393,11 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+                         scaleDecisionReasons.Add("materialization-counter-mismatch");
+                     }
+                     if (gpuRequested && candidateAttemptDelta == 0) scaleDecisionReasons.Add("no-gpu-candidate-attempts");
+-                    if (candidateFallbackDelta != 0) scaleDecisionReasons.Add("gpu-candidate-fallbacks");
+-                    if (materializationAttempts.GetValueOrDefault() > 0) scaleDecisionReasons.Add("native-materialization-attempted");
+-                    if (materializationFailures.GetValueOrDefault() > 0) scaleDecisionReasons.Add("native-materialization-failed");
++                    if (!OnlySupportedSubpixelUploadFallbacks(scaleFallbackReasons, candidateFallbackDelta))
++                        scaleDecisionReasons.Add("gpu-candidate-fallbacks");
++                    if (!OnlySupportedSubpixelMaterializations(materializationAttempts, materializationSuccesses,
++                        materializationFailures, materializationCauses))
++                        scaleDecisionReasons.Add("native-materialization-unsupported-or-incomplete");
+                     if (gpuRequested && candidateAttemptDelta != candidateSuccessDelta + candidateFallbackDelta)
+                     {
+                         allScaleEvidenceComplete = false;
+@@ -420,7 +427,7 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+                         candidateFallbackReasons = scaleFallbackReasons,
+                         materializationCallers = scaleCallers,
+                         nativeUploadCallers = scaleUploadCallers,
+-                        gpuDecision = gpuRequested && scaleDecisionReasons.Count == 0 ? "skia-only" : "vanilla",
++                        gpuDecision = gpuRequested && scaleDecisionReasons.Count == 0 ? ApprovedGpuDecision : "vanilla",
+                         gpuDecisionReasons = scaleDecisionReasons,
+                         renderingDiagnostics = typeof(ClientMain).Assembly.GetType("Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend")?
+                             .GetProperties(BindingFlags.Public | BindingFlags.Static).Where(property => property.PropertyType == typeof(long))
+@@ -464,11 +471,13 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+             if (gpuRequested && (recomposeBenchmark.gpuCandidateAttempts == 0 ||
+                 recomposeBenchmark.gpuCandidateAttempts != recomposeBenchmark.gpuCandidateSuccesses + recomposeBenchmark.gpuCandidateFallbacks))
+                 gpuDecisionReasons.Add("recomposition-candidate-diagnostics-incomplete-or-mismatched");
+-            if (gpuRequested && recomposeBenchmark.gpuCandidateFallbacks != 0)
++            if (gpuRequested && !OnlySupportedSubpixelUploadFallbacks(
++                recomposeBenchmark.candidateFallbackReasons as IReadOnlyDictionary<string, long>, recomposeBenchmark.gpuCandidateFallbacks))
+                 gpuDecisionReasons.Add("recomposition-candidate-fallbacks");
+-            if (gpuRequested && (recomposeBenchmark.materializationAttempts != 0 ||
+-                recomposeBenchmark.materializationSuccesses != 0 || recomposeBenchmark.materializationFailures != 0))
+-                gpuDecisionReasons.Add("recomposition-native-materialization-observed");
++            if (gpuRequested && !OnlySupportedSubpixelMaterializations(recomposeBenchmark.materializationAttempts,
++                recomposeBenchmark.materializationSuccesses, recomposeBenchmark.materializationFailures,
++                recomposeBenchmark.materializationCauses as IReadOnlyDictionary<string, long>))
++                gpuDecisionReasons.Add("recomposition-native-materialization-unsupported-or-incomplete");
+             if (gpuRequested && !runtimeProvenance.SamplerBindingsSupported)
+                 gpuDecisionReasons.Add("sampler-binding-state-unsupported");
+             string? optimumCommit = Environment.GetEnvironmentVariable("OPTIMUM_PHAROS_OPTIMUM_COMMIT");
+@@ -490,7 +499,7 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+                 gpuDecisionReasons.Add("gpu-candidate-diagnostics-incomplete");
+ 
+             string gpuDecision = gpuRequested && startupObserverPassed && allScaleEvidenceComplete && gpuDecisionReasons.Count == 0
+-                ? "skia-only"
++                ? ApprovedGpuDecision
+                 : "vanilla";
+ 
+             var evidence = new Dictionary<string, object?>
+@@ -549,7 +558,7 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+             Assert.True(startupObserverPassed,
+                 "The API module-initializer materialization observer did not record a replay before GPU backend access; inspect the saved fail-closed JSON evidence.");
+             if (gpuRequested)
+-                Assert.Equal("skia-only", gpuDecision);
++                Assert.Equal(ApprovedGpuDecision, gpuDecision);
+         }
+         finally
+         {
+@@ -685,6 +694,20 @@ public sealed partial class OptimumGuiCaptureScenarioTests : ClientServerScenari
+         return current == null ? new Dictionary<string, long>() : new Dictionary<string, long>(current);
+     }
+ 
++    private static bool OnlySupportedSubpixelUploadFallbacks(IReadOnlyDictionary<string, long>? reasons, long? expectedFallbacks) =>
++        reasons != null && expectedFallbacks.HasValue && expectedFallbacks.Value >= 0 &&
++        reasons.Values.Sum() == expectedFallbacks.Value &&
++        reasons.All(reason => reason.Key == SupportedSubpixelUploadFallback && reason.Value > 0);
++
++    private static bool OnlySupportedSubpixelMaterializations(long? attempts, long? successes, long? failures,
++        IReadOnlyDictionary<string, long>? causes)
++    {
++        if (attempts == null || successes == null || failures == null || causes == null ||
++            attempts != successes + failures || failures != 0 || causes.Any(cause => cause.Key != SupportedSubpixelMaterialization || cause.Value <= 0))
++            return false;
++        return causes.Values.Sum() == attempts;
++    }
++
+     private static Dictionary<string, long> MaterializationCallers()
+     {
+         Type? backendType = typeof(ClientMain).Assembly.GetType("Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend");
+diff --git a/docs/implementation-plans/optimum-gui-gpu-vendor-prelaunch-runbook-2026-10-16.md b/docs/implementation-plans/optimum-gui-gpu-vendor-prelaunch-runbook-2026-10-16.md
+index 1fe2f012..49120e4a 100644
+--- a/docs/implementation-plans/optimum-gui-gpu-vendor-prelaunch-runbook-2026-10-16.md
++++ b/docs/implementation-plans/optimum-gui-gpu-vendor-prelaunch-runbook-2026-10-16.md
+@@ -2,7 +2,7 @@
+ 
+ This runbook tests the GUI renderer on one physical GPU before opening the normal Vintage Story client. It uses a disposable copy of the game and a private Pharos scenario, which starts an embedded server and an isolated engine client. It does not open the user's installed game, normal user data directory, or world. The data path must be explicitly set to a child directory inside the disposable staging directory; both scenarios reject missing paths, paths outside `VINTAGE_STORY`, and any symlink/junction in existing components of the stage or data path before starting a server or client.
+ 
+-The result is fail-closed. `skia-only` is acceptable only when the exact staged runtime passes every measured phase: client startup and first inventory composition/open, the recomposition benchmark including warmups, GUI captures at scales 1/1.5/2, the Best-antialias primitive fixture, every non-subset fixture (1–5), and the SVG texture-loader check. Each phase must report complete counters, no Cairo materialization, and no GPU candidate fallback. The current `SvgLoader.LoadSvg` path explicitly uses Cairo, so that observation selects `vanilla`; it cannot be cleared by a missing recorder counter. Missing counters/provenance, an unsupported fixture, a timeout, or any test error also means `vanilla`. The runner writes JSON and captures before the certification assertion; a nonzero test exit with `gpuDecision: "vanilla"` is a recorded rejection, never a pass. An 8x8 OpenGL capability probe or one synthetic rectangle is not a full GUI certificate.
++The result is fail-closed. `skia-with-subpixel-cairo-fallback` is acceptable only when the exact staged runtime passes every measured phase: client startup and first inventory composition/open, the recomposition benchmark including warmups, GUI captures at scales 1/1.5/2, the Best-antialias primitive fixture, every non-subset fixture (1–5), and the SVG texture-loader check. Each phase must report complete counters and positive GPU candidate coverage. The only allowed native materialization is a successful `Recorder.ShowText.Unsupported:text-antialias-Subpixel` replay, with matching `surface-not-recording:NativeMaterialized:first-trigger=Recorder.ShowText.Unsupported:text-antialias-Subpixel` candidate fallbacks. Candidate attempts must balance against successes and fallbacks; all materialization attempts must succeed and match the exact allowed cause. Any other fallback, cause, failure, missing counter/provenance, unsupported fixture, timeout, or test error means `vanilla`. The runner writes JSON and captures before the certification assertion; a nonzero test exit with `gpuDecision: "vanilla"` is a recorded rejection, never a pass. An 8x8 OpenGL capability probe or one synthetic rectangle is not a full GUI certificate.
+ 
+ ## Prepare a disposable runtime
+ 
+@@ -65,11 +65,11 @@ bash scripts/run-optimum-gui-gpu-certification.sh \
+   "$STAGE" "$STAGE/data" "$EVIDENCE" "$STAGE/Optimum"
+ ```
+ 
+-Save the reported driver package version separately as diagnostic metadata (for example `glxinfo -B`, and on NVIDIA `nvidia-smi --query-gpu=driver_version --format=csv,noheader`). It is not treated as a trusted identity value: evidence records the live GL vendor, renderer, version, profile mask and context flags, plus hashes/paths of loaded runtime artifacts. The runtime fingerprint covers the staged files, cache, mods, settings and launch arguments. A profile change during the scenario prevents certificate issuance. Unsupported sampler state, fallback, materialization, missing provenance or any nonzero test result means `vanilla`.
++Save the reported driver package version separately as diagnostic metadata (for example `glxinfo -B`, and on NVIDIA `nvidia-smi --query-gpu=driver_version --format=csv,noheader`). It is not treated as a trusted identity value: evidence records the live GL vendor, renderer, version, profile mask and context flags, plus hashes/paths of loaded runtime artifacts. The runtime fingerprint covers the staged files, cache, mods, settings and launch arguments. A profile change during the scenario prevents certificate issuance. Unsupported sampler state, any fallback or materialization outside the exact successful Subpixel allowlist, missing provenance or any nonzero test result means `vanilla`.
+ 
+-The JSON includes candidate and materialization deltas from startup/first inventory open, the full recomposition benchmark including warmups, and each GUI scale; it also includes bounded materialization-cause histograms, every fixture result, SVG rasterizer evidence, provenance, and artifact hashes. The startup-observer smoke deliberately forces one native replay before resetting workload metrics; that smoke proves hook ordering and is reported separately. `set -o pipefail` with `tee` preserves the test process exit status in the saved log. A pass requires exit code zero and `gpuDecision: "skia-only"`. A nonzero exit with `gpuDecision: "vanilla"`, missing provenance/counters, any fallback/materialization, unsupported/native SVG path, or software renderer is a rejection and selects only the normal Cairo renderer. Do not convert an inconclusive run into a pass.
++The JSON includes candidate and materialization deltas from startup/first inventory open, the full recomposition benchmark including warmups, and each GUI scale; it also includes bounded materialization-cause histograms, every fixture result, SVG rasterizer evidence, provenance, and artifact hashes. The startup-observer smoke deliberately forces one native replay before resetting workload metrics; that smoke proves hook ordering and is reported separately. `set -o pipefail` with `tee` preserves the test process exit status in the saved log. A pass requires exit code zero and `gpuDecision: "skia-with-subpixel-cairo-fallback"`. A nonzero exit with `gpuDecision: "vanilla"`, missing provenance/counters, any fallback or materialization outside the exact successful Subpixel allowlist, unsupported/native SVG path, or software renderer is a rejection and selects only the normal Cairo renderer. Do not convert an inconclusive run into a pass.
+ 
+-The wrapper removes prior certificate files before starting. It writes evidence only after the test reports exactly one pass with no skips, the process exits zero, the before/after fingerprints match, and the launcher validates the resulting evidence and live preflight. Any failure deletes or leaves absent the certificate. On a source checkout with local changes, the recorded commit IDs identify the base commits; the test and runtime artifact hashes identify the binaries actually loaded. Do not publish the report as a commit-level result unless those source changes have been committed and the stage rebuilt from those commits. The current AMD scenario was negative at the previous checkpoint and must remain denied unless a new complete run passes.
++The wrapper removes prior certificate files before starting. It writes evidence only after the test reports exactly one pass with no skips, the process exits zero, the before/after fingerprints match, and the launcher validates the resulting evidence and live preflight. Any failure deletes or leaves absent the certificate. On a source checkout with local changes, the recorded commit IDs identify the base commits; the test and runtime artifact hashes identify the binaries actually loaded. Do not publish the report as a commit-level result unless those source changes have been committed and the stage rebuilt from those commits. The AMD Subpixel fallback retest passed on 2026-10-17 with `optimumCommit` matching `5931c3cabe3bd59712986baf9bc02ea5971aa8b8` and the local launcher accepting its profile certificate. The local Pharos source tree had uncommitted harness changes, so treat it as a successful AMD runtime retest with that reproducibility limitation.
+ 
+ The current Pharos harness is Linux-oriented for live OpenGL client scenarios. On Windows, use the supported runtime/client test harness available on that machine; do not infer Windows, Intel, or NVIDIA coverage from a Radeon/Linux result. If the required isolated client scenario cannot run on the target OS, record the result as `not certified`, which selects vanilla.
+ 
+@@ -93,7 +93,7 @@ Run the complete staged procedure separately on the physical Intel and NVIDIA ma
+ | Device | OpenGL renderer/version/vendor, explicit driver version, and sampler-binding support from the live test process |
+ | Workload | Recomposition benchmark, resolution, GUI scales, selected GUI dialog, Best fixture, fixtures 1–5, SVG loader, and profile version |
+ | Evidence | Test log, JSON report, screenshot, process exit code |
+-| Decision | `skia-only` only when every scoped phase has complete zero-materialization and zero-fallback evidence; otherwise `vanilla` |
++| Decision | `skia-with-subpixel-cairo-fallback` only when every scoped phase has complete balanced counters, positive candidate coverage, and successful materializations limited to the exact Subpixel allowlist; otherwise `vanilla` |
+ 
+ Run once from a cold process, then once more from a fresh process to check reproducibility. Repeat with GPU rendering disabled as a control. Test stale/tampered staged assemblies and injected GL failure; both must produce `vanilla`. Keep each machine's report separate and do not merge different GPU results into a single vendor pass.
+ 
+@@ -103,11 +103,11 @@ This is a bounded client scenario, not proof for arbitrary mods, callbacks, refl
+ 
+ The launcher checks a local certificate before calling `ClientProgram.Main`. It fingerprints the exact staged runtime/profile, validates the Pharos report and loaded artifact hashes, and keeps certification denied by default. A hidden OpenGL preflight runs in a child launcher process before the client with an eight-second timeout. Vendor, renderer, GL version, major/minor, context profile mask and flags must match the Pharos evidence. The real game's context repeats the comparison before GPU candidates. GL context profile capture requires OpenGL 3.2 or newer. Missing, malformed, negative, stale, unavailable or mismatched input leaves the client on vanilla Cairo. `OPTIMUM_GUI_GPU_RENDERING=1` and the saved GUI preference only request the renderer; neither grants approval. `--validate-only` never creates a GL context or grants approval.
+ 
+-The private wrapper is the only supported local issuance path. It derives repository HEAD values from Git and ties them to actual loaded artifact hashes; driver package version is a separate diagnostic, not identity proof. The available AMD report from 2026-10-16 was negative (`gpuDecision: "vanilla"`). Each Intel/NVIDIA machine needs its own full run and its own staged certificate; never copy reports or certificates between adapters. GL identity is not physical GPU UUID attestation.
++The private wrapper is the only supported local issuance path. It derives repository HEAD values from Git and ties them to actual loaded artifact hashes; driver package version is a separate diagnostic, not identity proof. The 2026-10-16 AMD report selected `vanilla`; the 2026-10-17 retest passed with the Subpixel fallback allowlist, using a private Pharos working tree with local harness changes. Each Intel/NVIDIA machine needs its own full run and its own staged certificate; never copy reports or certificates between adapters. GL identity is not physical GPU UUID attestation.
+ 
+ ### Check launcher behavior on Intel and NVIDIA
+ 
+-Repeat the full staged Pharos procedure above separately on the physical Intel and NVIDIA machines. Keep each machine's stage and `data` directory separate. Save the exact Optimum/Pharos commit IDs, GPU vendor/renderer/GL version, driver version, `gpuDecision`, reasons, process exit code, JSON, screenshot, and test log. Require exit code 0 and `gpuDecision: "skia-only"` for a clean *scenario result*; otherwise record `vanilla` and retain the report as diagnostic evidence. Do not copy a report or certificate between machines.
++Repeat the full staged Pharos procedure above separately on the physical Intel and NVIDIA machines. Keep each machine's stage and `data` directory separate. Save the exact Optimum/Pharos commit IDs, GPU vendor/renderer/GL version, driver version, `gpuDecision`, reasons, process exit code, JSON, screenshot, and test log. Require exit code 0 and `gpuDecision: "skia-with-subpixel-cairo-fallback"` for a clean *scenario result*; otherwise record `vanilla` and retain the report as diagnostic evidence. The Pharos scenario must use the same exact Subpixel cause and fallback allowlist as the public launcher validator. Do not copy a report or certificate between machines.
+ 
+ Then launch the installed Optimum build with GUI GPU requested (saved setting or `OPTIMUM_GUI_GPU_RENDERING=1`) and inspect its launcher log. It should validate the local certificate and live device before entering the client; missing, stale, mismatched or invalid approval must report vanilla and continue starting the game. Also launch once with the request disabled as a control. Re-run after changing a staged DLL, mod, setting, launch argument, driver, or game install: the exact-input fingerprint must reject stale approval.
+ 

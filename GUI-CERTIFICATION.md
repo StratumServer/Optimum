@@ -124,6 +124,21 @@ record actual GL identity and driver, OS, staged runtime hashes, harness commit,
 profile configuration and datapath. Do not report a software renderer or a
 successful run on another adapter as vendor coverage.
 
+The full inventory scenario lives in the private workspace. Apply the scenario
+gate shipped on this branch from the private workspace root before running it:
+
+```sh
+git apply --check /path/to/optimum/docs/Pharos/issue-130-subpixel-fallback-gate.patch
+git apply /path/to/optimum/docs/Pharos/issue-130-subpixel-fallback-gate.patch
+```
+
+The gate accepts only successful `Recorder.ShowText.Unsupported:text-antialias-Subpixel`
+materializations with the matching `surface-not-recording:NativeMaterialized:first-trigger=Recorder.ShowText.Unsupported:text-antialias-Subpixel`
+fallback. It also requires the fallback histogram sum to equal the fallback
+counter for initial composition, recomposition, and every scale. The branch's
+launcher validator applies the same checks to the report before approving the
+local device profile.
+
 Run the committed standalone Pharos diagnostic on each physical adapter using
 the commands in `Optimum.Pharos.SvgDiagnostic/README.md`. It calls the patched
 public `SvgLoader.LoadSvg` method and compares complete GPU texture readbacks
@@ -159,13 +174,14 @@ certificate.
    diagnostic references/readbacks outside production measurement windows.
 3. Apply a process deadline and bounded repetitions. Run one GPU process at a
    time; stop on context loss, driver reset, hang or unexplained GL errors.
-4. Verify launcher behavior with absent certificate, malformed JSON, AMD-negative
-   evidence, changed evidence bytes, changed cached DLL, changed mod/configuration
-   and a cache hit. Each must select vanilla while allowing normal client entry.
+4. Verify launcher behavior with absent certificate, malformed JSON, synthetic
+   negative AMD evidence, changed evidence bytes, changed cached DLL, changed
+   mod/configuration and a cache hit. Each must select vanilla while allowing
+   normal client entry. Keep measured reports unchanged.
 5. With a complete synthetic report, verify exact live identity match, each
    vendor/renderer/version mismatch, missing display, software renderer and
    timeout. Each failure must select vanilla and allow normal client entry.
-   Keep the real AMD report negative; do not hand-edit reports into approvals.
+   Keep negative cases synthetic; do not hand-edit measured reports into approvals.
 
 Local regression commands:
 
@@ -186,4 +202,4 @@ The earlier run on `70f626a35329d8f3a284569358816e95bfbad680` selected `vanilla`
 
 I rebuilt the staged Vintage Story 1.22.7 runtime from the candidate branch and reran the full inventory scenario on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core. The scenario passed and selected `skia-with-subpixel-cairo-fallback` with no decision reasons. The launcher accepted the local profile certificate. Initial composition recorded 38 candidate attempts, 19 Skia successes, and 19 allowed Subpixel fallbacks. Ten recompositions recorded 360 attempts, 144 successes, and 216 allowed fallbacks. Scales 1, 1.5, and 2 recorded respectively 12/30, 108/171, and 109/173 candidate successes/attempts; all remaining candidates fell back only for successful Subpixel text materialization. There were no materialization failures. The primitive, all five non-subset fixtures, and all three SVG comparisons passed; SVG output remained within one channel value.
 
-The report used the local private Pharos checkout at `4966732269f02408df314ae155bb7e6f3817f9d9`, whose working tree contains local changes including the updated scenario acceptance logic. Treat this as a successful AMD runtime retest, with the harness source state recorded as a reproducibility limitation. Intel and NVIDIA physical runs remain required. Their earlier `7bba055` reports predate the Subpixel policy change and do not validate this behavior. Use the same exact fallback allowlist and launcher certificate validation on each adapter. No GPU performance gain is claimed by this functional scenario.
+The report used the local private Pharos checkout at `4966732269f02408df314ae155bb7e6f3817f9d9`. The harness changes used for this run are included as an applyable patch in this branch. After adding fallback histogram-to-counter equality checks, I reran the scenario against Optimum commit `5931c3cabe3bd59712986baf9bc02ea5971aa8b8`: it passed 1/1 with no decision reasons, balanced counters in every phase, and launcher certificate validation. Intel and NVIDIA physical runs remain required. Their earlier `7bba055` reports predate the Subpixel policy change and do not validate this behavior. Use the same exact fallback allowlist and launcher certificate validation on each adapter. No GPU performance gain is claimed by this functional scenario.
