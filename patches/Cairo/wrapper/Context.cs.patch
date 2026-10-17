@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..0c763d6 100644
+index 03f9c76..4aef900 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -372,7 +372,19 @@ index 03f9c76..0c763d6 100644
  		}
  
  		[Obsolete ("Use GetTarget/SetTarget")]
-@@ -338,13 +451,18 @@ namespace Cairo
+@@ -331,20 +444,30 @@ namespace Cairo
+ 			}
+ 		}
+ 
+ 		public Surface GetTarget ()
+ 		{
++			CheckDisposedOnly ();
++			if (recordingSurface != null) {
++				Surface alias = recordingSurface.CreateRecordingAlias ();
++				if (alias != null) return alias;
++			}
+ 			CheckDisposed ();
+ 			return Surface.Lookup (NativeMethods.cairo_get_target (handle), false);
  		}
  
  		public void SetTarget (Surface target)
@@ -394,7 +406,7 @@ index 03f9c76..0c763d6 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -370,153 +488,170 @@ namespace Cairo
+@@ -370,153 +493,170 @@ namespace Cairo
  
         
  
@@ -585,7 +597,7 @@ index 03f9c76..0c763d6 100644
  
  		public void Rectangle (Rectangle rectangle)
  		{
-@@ -528,35 +663,35 @@ namespace Cairo
+@@ -528,35 +668,35 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -626,7 +638,7 @@ index 03f9c76..0c763d6 100644
  
          #endregion
  
-@@ -565,23 +700,26 @@ namespace Cairo
+@@ -565,23 +705,26 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -655,7 +667,7 @@ index 03f9c76..0c763d6 100644
  
  		public void MaskSurface (Surface surface, double surface_x, double surface_y)
  		{
-@@ -589,86 +727,93 @@ namespace Cairo
+@@ -589,86 +732,93 @@ namespace Cairo
  			NativeMethods.cairo_mask_surface (handle, surface.Handle, surface_x, surface_y);
  		}
  
@@ -761,7 +773,7 @@ index 03f9c76..0c763d6 100644
  
  		public Pattern PopGroup ()
  		{
-@@ -708,29 +853,29 @@ namespace Cairo
+@@ -708,29 +858,29 @@ namespace Cairo
  			return Surface.Lookup (surface, false);
  		}
  
@@ -795,7 +807,7 @@ index 03f9c76..0c763d6 100644
  
  		[Obsolete("Use UserToDevice instead")]
  		public void TransformPoint (ref double x, ref double y)
-@@ -756,40 +901,40 @@ namespace Cairo
+@@ -756,40 +906,40 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -842,7 +854,7 @@ index 03f9c76..0c763d6 100644
  				return m;
  			}
  		}
-@@ -800,11 +945,11 @@ namespace Cairo
+@@ -800,11 +950,11 @@ namespace Cairo
  			NativeMethods.cairo_set_font_size (handle, scale);
  		}
  

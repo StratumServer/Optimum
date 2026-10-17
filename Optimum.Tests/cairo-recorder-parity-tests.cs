@@ -728,6 +728,73 @@ public sealed class CairoRecorderParityTests
 		}, "Recorder.Paint.Unsupported:" + reason);
 	}
 
+	// ---- Context.GetTarget aliases -----------------------------------------------------
+
+	[Fact]
+	public void GetTargetAliasKeepsRecordingForPixelOperations ()
+	{
+		// IconUtil: capi.Gui.DrawSvg (asset, ctx.GetTarget () as ImageSurface, ...).
+		AssertParity (24, 16, (context, surface) => {
+			context.SetSourceRGBA (.3, .6, .9, .8);
+			context.Rectangle (2, 2, 12, 9);
+			context.Fill ();
+			using (var target = (ImageSurface)context.GetTarget ()) {
+				Assert.Equal (24, target.Width);
+				target.BlurFull (1.2);
+			}
+			context.SetSourceRGBA (.9, .2, .1, .5);
+			context.Rectangle (10, 6, 10, 8);
+			context.Fill ();
+		}, edgeAllowance: false);
+	}
+
+	[Fact]
+	public void GetTargetAliasCpuAccessMaterializesAndDetachesTheContext ()
+	{
+		Action<Context, ImageSurface> draw = (context, surface) => {
+			context.SetSourceRGBA (.3, .6, .9, .8);
+			context.Rectangle (2, 2, 12, 9);
+			context.Fill ();
+			var target = (ImageSurface)context.GetTarget ();
+			System.Runtime.InteropServices.Marshal.WriteInt32 (target.DataPtr, 0, unchecked((int)0xff102030));
+			target.MarkDirty ();
+			target.Dispose ();
+			context.Rectangle (10, 6, 10, 8);
+			context.Fill ();
+		};
+		byte[] expected = RenderNative (24, 16, draw);
+		using var actual = new ImageSurface (Format.Argb32, 24, 16);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) draw (context, actual);
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal ("SurfaceCpuReadback.DataPtr", recorder.FirstMaterializationTrigger);
+		Assert.Equal (expected, actual.Data);
+	}
+
+	[Fact]
+	public void ContextOnGetTargetAliasMaterializes ()
+	{
+		Action<Context, ImageSurface> draw = (context, surface) => {
+			context.SetSourceRGBA (.3, .6, .9, .8);
+			context.Rectangle (2, 2, 12, 9);
+			context.Fill ();
+			using var target = (ImageSurface)context.GetTarget ();
+			using (var second = new Context (target)) {
+				second.SetSourceRGBA (.9, .2, .1, .5);
+				second.Rectangle (10, 6, 10, 8);
+				second.Fill ();
+			}
+			context.Rectangle (0, 12, 4, 4);
+			context.Fill ();
+		};
+		byte[] expected = RenderNative (24, 16, draw);
+		using var actual = new ImageSurface (Format.Argb32, 24, 16);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) draw (context, actual);
+		Assert.Equal ("Surface.AliasContextCreation", recorder.FirstMaterializationTrigger);
+		Assert.Equal (expected, actual.Data);
+	}
+
 	// ---- Operators ------------------------------------------------------------------
 
 	[Theory]
