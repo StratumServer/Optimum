@@ -282,7 +282,11 @@ try {
     # Preserve the managed launcher dependencies (OpenTK, SkiaSharp, Cecil).
     # The deps file names these assemblies, but .NET does not bundle them into
     # Optimum.dll, so a fixed list of the apphost/config files is not enough.
+    # Exclude OpenTK.Audio.OpenAL.dll so the game loads it from Lib/ alongside
+    # openal32.dll. Staging it at the root causes OpenTK to probe only the app base
+    # directory and system PATH, failing with DllNotFoundException on Windows.
     Get-ChildItem -Path $launcherOut -Filter '*.dll' -File |
+        Where-Object { $_.Name -ne 'OpenTK.Audio.OpenAL.dll' } |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
     # The launcher hosts the game in its own process, and its generated runtimeconfig
     # names only Microsoft.NETCore.App. Mirror the shared frameworks vanilla's own
