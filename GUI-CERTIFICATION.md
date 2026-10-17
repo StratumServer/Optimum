@@ -309,3 +309,32 @@ sealed and GPU-rendered states, and that later CPU readback still matches Cairo.
 The full `Optimum.Tests` suite passed 1,023 with 34 skipped. Patch validation
 reported 82 source, 53 Cecil and 22 runtime donor patches with no conflicts. No
 GPU behavior changed and no performance claim is made.
+
+### Stage F: managed matrix math and rectangle capture (2026-10-17)
+
+`Cairo.Matrix` operations now use managed double-precision math. Fixed-grid
+rectangle capture no longer creates a temporary Cairo image surface/context.
+Focused matrix and surface-recorder tests passed 22/22. Build, shader, patch and
+IL checks passed; the IL patcher reported 146/146 required methods. The full
+`Optimum.Tests` run was limited by missing `nanosvg.so`; excluding the 17
+NanoSVG cases, 1,010 passed and 34 were skipped. Launcher passed 69, CLI 24,
+Bootstrap.Core 156 and Installer 78. This head was not tested on physical GPU
+hardware.
+
+### Stage G: solid mask recording (2026-10-17)
+
+The recorder now handles valid solid masks for `Over`, `Atop` and `DestOver`.
+The focused mask/parity/fallback tests passed 11/11. Build passed with zero
+warnings/errors, patch validation reported 84 source, 53 Cecil and 22 runtime
+donor patches with no conflicts, and IL patching reported 146/146 required
+methods. `Optimum.Tests` passed 1,019 with 34 skipped when excluding the 17
+NanoSVG cases that cannot load without `nanosvg.so`. The GUI metrics test
+collection is serialized after it exposed a shared-counter race. No physical
+GPU test was run for this head.
+
+Stages F and G do not certify a hardware adapter or remove native Cairo. Context
+and surface construction, general graphics/path state, pattern capture, text
+shaping and unsupported text fallback, CPU pixel access, and public native
+handles remain Cairo dependencies. Third-party native-pointer interoperability
+is not covered by repository tests. Run this exact head on AMD, Intel and NVIDIA
+before extending prior hardware evidence to it.
