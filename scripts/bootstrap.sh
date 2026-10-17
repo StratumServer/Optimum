@@ -843,6 +843,17 @@ if [[ -f "$vs_entry_csproj" ]]; then
   python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$vs_entry_csproj"
 fi
 
+# 6g-extra: AssemblyInfo.cs - ensure Guid/ComVisible attributes resolve without relying on ilspycmd using emission.
+find "$repo_root/build" -type f -name "AssemblyInfo.cs" 2>/dev/null | while read -r ai; do
+  if grep -qE '\[assembly:\s*(System\.Runtime\.InteropServices\.)?(Guid|ComVisible)(Attribute)?\(' "$ai"; then
+    if ! grep -qE '^\s*using\s+System\.Runtime\.InteropServices\s*;' "$ai"; then
+      sed -i '1s/^/using System.Runtime.InteropServices;\n/' "$ai"
+    fi
+    perl -pi -e 's/\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?Guid(?:Attribute)?\(/\[assembly: System.Runtime.InteropServices.Guid\(/g' "$ai"
+    perl -pi -e 's/\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?ComVisible(?:Attribute)?\(/\[assembly: System.Runtime.InteropServices.ComVisible\(/g' "$ai"
+  fi
+done
+
 # 6h: Restore serialization metadata lost by ILSpy.
 # ILSpy fails to decode attribute arguments for JsonObject(MemberSerialization.OptIn) and
 # ProtoContract(ImplicitFields = ImplicitFields.AllFields). Without these, Newtonsoft serializes
