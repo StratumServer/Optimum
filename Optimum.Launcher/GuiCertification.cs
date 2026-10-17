@@ -22,6 +22,9 @@ internal static class GuiCertification
     internal const string Policy = "exact-local-gui-v1";
     internal const string CertificateFile = "gui-certification.json";
     internal const string EvidenceFile = "gui-certification-evidence.json";
+    internal const string ApprovedGpuDecision = "skia-with-subpixel-cairo-fallback";
+    private const string SupportedSubpixelMaterialization = "Recorder.ShowText.Unsupported:text-antialias-Subpixel";
+    private const string SupportedSubpixelUploadFallback = "surface-not-recording:NativeMaterialized:first-trigger=" + SupportedSubpixelMaterialization;
     private const int MaximumJsonBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -54,7 +57,7 @@ internal static class GuiCertification
             RejectDuplicateProperties(root);
             if (root.GetProperty("schemaVersion").GetInt32() != 1 ||
                 root.GetProperty("scenarioId").GetString() != "optimum-gui-inventory-capture-v1" ||
-                root.GetProperty("gpuDecision").GetString() != "skia-only" ||
+                root.GetProperty("gpuDecision").GetString() != ApprovedGpuDecision ||
                 root.GetProperty("gpuDecisionReasons").GetArrayLength() != 0 ||
                 !root.GetProperty("materializationObserverStartupSmoke").GetProperty("passed").GetBoolean())
                 return new(false, "evidence-not-approved");
@@ -95,7 +98,7 @@ internal static class GuiCertification
             var expectedScales = new HashSet<decimal> { 1m, 1.5m, 2m };
             if (scales.GetArrayLength() != 3 || scales.EnumerateArray().Any(scale =>
                     !expectedScales.Remove(scale.GetProperty("scale").GetDecimal()) ||
-                    scale.GetProperty("gpuDecision").GetString() != "skia-only" ||
+                    scale.GetProperty("gpuDecision").GetString() != ApprovedGpuDecision ||
                     scale.GetProperty("gpuDecisionReasons").GetArrayLength() != 0 || !CleanWindow(scale, true)))
                 return new(false, "evidence-scales-incomplete");
             var nonSubset = root.GetProperty("gpuNonSubsetFixtureDiagnostics");
@@ -277,13 +280,21 @@ internal static class GuiCertification
         long successes = window.GetProperty("gpuCandidateSuccesses").GetInt64();
         long fallbacks = window.GetProperty("gpuCandidateFallbacks").GetInt64();
         string suffix = scale ? "Count" : "s";
-        if (window.GetProperty("materializationCauses").EnumerateObject().Any()) return false;
+        var causes = window.GetProperty("materializationCauses");
+        if (causes.EnumerateObject().Any(cause => cause.Name != SupportedSubpixelMaterialization || cause.Value.GetInt64() <= 0))
+            return false;
+        long reportedMaterializations = causes.EnumerateObject().Sum(cause => cause.Value.GetInt64());
+        var fallbackReasons = window.GetProperty("candidateFallbackReasons");
+        if (fallbackReasons.EnumerateObject().Any(reason => reason.Name != SupportedSubpixelUploadFallback || reason.Value.GetInt64() <= 0))
+            return false;
+        long reportedFallbacks = fallbackReasons.EnumerateObject().Sum(reason => reason.Value.GetInt64());
         var rendering = window.GetProperty("renderingDiagnostics");
         long materializationAttempts = window.GetProperty("materializationAttempt" + suffix).GetInt64();
         long materializationSuccesses = window.GetProperty("materializationSuccess" + (scale ? "Count" : "es")).GetInt64();
         long materializationFailures = window.GetProperty("materializationFailure" + suffix).GetInt64();
-        return attempts > 0 && successes == attempts && fallbacks == 0 &&
-            materializationAttempts == 0 && materializationSuccesses == 0 && materializationFailures == 0 &&
+        return attempts > 0 && successes + fallbacks == attempts && fallbacks == reportedFallbacks &&
+            materializationAttempts == materializationSuccesses && materializationFailures == 0 &&
+            materializationAttempts == reportedMaterializations &&
             rendering.GetProperty("MaterializationAttemptCount").GetInt64() == materializationAttempts &&
             rendering.GetProperty("MaterializationSuccessCount").GetInt64() == materializationSuccesses &&
             rendering.GetProperty("MaterializationFailureCount").GetInt64() == materializationFailures;

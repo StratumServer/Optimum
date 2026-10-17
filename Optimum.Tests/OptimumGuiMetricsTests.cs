@@ -32,7 +32,7 @@ public class OptimumGuiMetricsTests
     }
 
     [Fact]
-    public void NativeTextMaterializationRevokesSkiaCertificationEvenWhenMetricsAreDisabled()
+    public void SuccessfulSubpixelFallbackKeepsSkiaCertificationEvenWhenMetricsAreDisabled()
     {
         bool originalRequest = OptimumConfig.GuiGpuRenderEnabled;
         bool originalMetrics = OptimumGuiMetrics.Enabled;
@@ -43,7 +43,33 @@ public class OptimumGuiMetricsTests
             OptimumConfig.SetGuiGpuCertificationPassed(true, "vendor", "renderer", "4.6", 4, 6, 2, 0);
             Assert.True(OptimumConfig.GuiGpuRecordingEligible);
 
-            OptimumGuiMetrics.RecordMaterialization("Context.SelectFontFace", succeeded: true);
+            OptimumGuiMetrics.RecordMaterialization(OptimumGuiMetrics.SupportedGuiNativeFallback, succeeded: true);
+
+            Assert.True(OptimumConfig.GuiGpuRecordingEligible);
+            Assert.True(OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6", 4, 6, 2, 0));
+        }
+        finally
+        {
+            OptimumConfig.RevokeGuiGpuCertification();
+            OptimumGuiMetrics.Enabled = originalMetrics;
+            OptimumConfig.GuiGpuRenderEnabled = originalRequest;
+        }
+    }
+
+    [Theory]
+    [InlineData("Context.SelectFontFace", true)]
+    [InlineData("Recorder.ShowText.Unsupported:text-antialias-Subpixel", false)]
+    public void UnsupportedOrFailedNativeMaterializationRevokesSkiaCertification(string trigger, bool succeeded)
+    {
+        bool originalRequest = OptimumConfig.GuiGpuRenderEnabled;
+        bool originalMetrics = OptimumGuiMetrics.Enabled;
+        try
+        {
+            OptimumConfig.GuiGpuRenderEnabled = true;
+            OptimumGuiMetrics.Enabled = false;
+            OptimumConfig.SetGuiGpuCertificationPassed(true, "vendor", "renderer", "4.6", 4, 6, 2, 0);
+
+            OptimumGuiMetrics.RecordMaterialization(trigger, succeeded);
 
             Assert.False(OptimumConfig.GuiGpuRecordingEligible);
             Assert.False(OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6", 4, 6, 2, 0));

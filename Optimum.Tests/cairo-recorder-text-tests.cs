@@ -156,6 +156,7 @@ public sealed class CairoRecorderTextTests
 			context.ShowText ("LCD text");
 			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 			Assert.Equal ("Recorder.ShowText.Unsupported:text-antialias-Subpixel", surface.FirstMaterializationTrigger);
+			Assert.True (OptimumConfig.GuiGpuRecordingEligible, "A successful Subpixel surface fallback must not disable GPU recording for other surfaces.");
 		} finally {
 			OptimumConfig.RevokeGuiGpuCertification ();
 			OptimumConfig.GuiGpuRenderEnabled = requested;

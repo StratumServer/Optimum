@@ -64,7 +64,7 @@ public sealed class GuiCertificationTests : IDisposable
     {
         WriteCertificate("""
             {"schemaVersion":1,"scenarioId":"optimum-gui-inventory-capture-v1",
-             "gpuDecision":"skia-only","gpuDecisionReasons":[],
+             "gpuDecision":"skia-with-subpixel-cairo-fallback","gpuDecisionReasons":[],
              "materializationObserverStartupSmoke":{"passed":true}}
             """);
         Assert.False(Validate().Passed);
@@ -127,10 +127,52 @@ public sealed class GuiCertificationTests : IDisposable
     }
 
     [Fact]
-    public void PositiveLabelDoesNotOverrideNonzeroMaterializations()
+    public void CompleteEvidenceAllowsTheKnownSuccessfulSubpixelFallback()
     {
         var node = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
-        node["recompositionBenchmark"]!["materializationAttempts"] = 1;
+        var benchmark = node["recompositionBenchmark"]!;
+        benchmark["gpuCandidateAttempts"] = 3;
+        benchmark["gpuCandidateSuccesses"] = 2;
+        benchmark["gpuCandidateFallbacks"] = 1;
+        benchmark["candidateFallbackReasons"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["surface-not-recording:NativeMaterialized:first-trigger=Recorder.ShowText.Unsupported:text-antialias-Subpixel"] = 1
+        };
+        benchmark["materializationAttempts"] = 1;
+        benchmark["materializationSuccesses"] = 1;
+        benchmark["materializationCauses"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["Recorder.ShowText.Unsupported:text-antialias-Subpixel"] = 1
+        };
+        benchmark["renderingDiagnostics"]!["MaterializationAttemptCount"] = 1;
+        benchmark["renderingDiagnostics"]!["MaterializationSuccessCount"] = 1;
+        WriteCertificate(node.ToJsonString());
+        Assert.True(Validate(new GuiDeviceIdentity("synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0)).Passed);
+    }
+
+    [Fact]
+    public void UnsupportedNativeMaterializationStillRejectsPositiveEvidence()
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        var benchmark = node["recompositionBenchmark"]!;
+        benchmark["materializationAttempts"] = 1;
+        benchmark["materializationSuccesses"] = 1;
+        benchmark["materializationCauses"] = new System.Text.Json.Nodes.JsonObject { ["Context.SelectFontFace"] = 1 };
+        benchmark["renderingDiagnostics"]!["MaterializationAttemptCount"] = 1;
+        benchmark["renderingDiagnostics"]!["MaterializationSuccessCount"] = 1;
+        WriteCertificate(node.ToJsonString());
+        Assert.Equal("evidence-window-incomplete", Validate().Reason);
+    }
+
+    [Fact]
+    public void UnsupportedCandidateFallbackStillRejectsPositiveEvidence()
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        var benchmark = node["recompositionBenchmark"]!;
+        benchmark["gpuCandidateAttempts"] = 3;
+        benchmark["gpuCandidateSuccesses"] = 2;
+        benchmark["gpuCandidateFallbacks"] = 1;
+        benchmark["candidateFallbackReasons"] = new System.Text.Json.Nodes.JsonObject { ["candidate-render-exception:InvalidOperationException"] = 1 };
         WriteCertificate(node.ToJsonString());
         Assert.Equal("evidence-window-incomplete", Validate().Reason);
     }
@@ -159,13 +201,15 @@ public sealed class GuiCertificationTests : IDisposable
         {
             evidenceComplete = true, measuredFromBeforeFirstClientFramesThroughInventoryOpenAndSettle = true,
             gpuCandidateAttempts = 2, gpuCandidateSuccesses = 2, gpuCandidateFallbacks = 0,
+            candidateFallbackReasons = new System.Collections.Generic.Dictionary<string, long>(),
             materializationAttempts = 0, materializationSuccesses = 0, materializationFailures = 0,
             materializationCauses = new System.Collections.Generic.Dictionary<string, long>(), renderingDiagnostics = rendering
         };
         var scales = new[] { 1m, 1.5m, 2m }.Select(scale => new
         {
-            scale, gpuDecision = "skia-only", gpuDecisionReasons = Array.Empty<string>(),
+            scale, gpuDecision = GuiCertification.ApprovedGpuDecision, gpuDecisionReasons = Array.Empty<string>(),
             gpuCandidateAttempts = 2, gpuCandidateSuccesses = 2, gpuCandidateFallbacks = 0,
+            candidateFallbackReasons = new System.Collections.Generic.Dictionary<string, long>(),
             materializationAttemptCount = 0, materializationSuccessCount = 0, materializationFailureCount = 0,
             materializationCauses = new System.Collections.Generic.Dictionary<string, long>(), renderingDiagnostics = rendering
         }).ToArray();
@@ -180,7 +224,7 @@ public sealed class GuiCertificationTests : IDisposable
         };
         return JsonSerializer.Serialize(new
         {
-            schemaVersion = 1, scenarioId = "optimum-gui-inventory-capture-v1", gpuDecision = "skia-only",
+            schemaVersion = 1, scenarioId = "optimum-gui-inventory-capture-v1", gpuDecision = GuiCertification.ApprovedGpuDecision,
             qualificationMode = "pharos-current-context",
             runtimeProfileFingerprint = Fingerprint(),
             optimumCommit = new string('a', 40), pharosCommit = new string('b', 40),

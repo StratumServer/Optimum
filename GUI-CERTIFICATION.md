@@ -42,8 +42,11 @@ Mods/ModConfig/assets/clientsettings.json. File additions/removals change it;
 linked inputs are unsupported. Evidence must identify the exact staged Lib/API,
 Cairo and Skia dependencies and pass initial composition, recomposition, scales
 1/1.5/2, primitive and non-subset fixtures, SVG GPU coverage and observer checks.
-Counters must show positive successful candidates and zero fallback or native
-materialization. Changing only the decision string cannot approve evidence.
+Counters must show positive successful candidates and no unrecognized candidate
+fallbacks or native materializations. The only certified native fallback is a
+successful `Recorder.ShowText.Unsupported:text-antialias-Subpixel` replay. It
+keeps that surface on Cairo while other eligible surfaces continue through Skia.
+Changing only the decision string cannot approve evidence.
 
 The evidence also carries the runtime/profile fingerprint captured before the
 Pharos process; launcher validation requires it to match the certificate and
@@ -72,9 +75,11 @@ Policy: preserve the requested antialias mode. `CairoFont.SetupContext` requests
 `Antialias.Subpixel` for GUI text. Skia cannot reproduce Cairo's LCD component
 alpha, so Subpixel `ShowText` and `ShowGlyphs` materialize the affected surface to
 native Cairo. Explicit Gray text can still be recorded. This keeps Cairo's text
-appearance and native output bytes, but text-bearing surfaces may leave the GPU
-path. Regression tests cover Subpixel preservation and native materialization
-while GPU recording is eligible.
+appearance and native output bytes. The Subpixel surface uses Cairo; its
+materialization does not revoke GPU approval for other surfaces. All other native
+materializations, failed Subpixel replays, and unsupported GPU fallbacks still
+revoke approval. Regression tests cover Subpixel preservation, native byte
+parity, and the bounded per-surface fallback.
 
 Certification also requires the live GL `Antialias.Best` rectangle fixture to read
 back from the candidate GPU texture and match the native Cairo pixels within one
@@ -175,12 +180,10 @@ make patch-il
 A passing unit suite proves certificate rejection, input binding and runtime
 eligibility logic. It does not constitute Intel/NVIDIA/AMD hardware evidence.
 
-## Stage A result on Linux AMD (2026-10-17)
+## Stage A Subpixel fallback fix, AMD retest (2026-10-17)
 
-I rebuilt Optimum commit `70f626a35329d8f3a284569358816e95bfbad680` against Vintage Story 1.22.7 and ran the full Pharos inventory scenario twice on an AMD Radeon RX 6650 XT. Mesa reported OpenGL 4.6 Core, Mesa 26.0.8-1ubuntu0.3, with sampler bindings supported. Both GPU-enabled processes selected `vanilla` and failed the certification assertion because the first inventory composition recorded one native Cairo materialization from `TextDrawUtil.DrawTextLine`: `Recorder.ShowText.Unsupported:text-antialias-Subpixel`. The launcher issued no certificate.
+The earlier run on `70f626a35329d8f3a284569358816e95bfbad680` selected `vanilla` after the first successful Subpixel text replay revoked GPU eligibility for every GUI surface. The recorder now keeps Cairo's Subpixel rendering on the surface that needs it while allowing separate surfaces to use Skia. The launcher accepts only successful `Recorder.ShowText.Unsupported:text-antialias-Subpixel` materializations and the matching `surface-not-recording:NativeMaterialized:first-trigger=Recorder.ShowText.Unsupported:text-antialias-Subpixel` candidate fallback. It rejects all other causes, failed materializations, missing counters, or unbalanced candidate totals.
 
-The Best-antialias primitive, fixtures 1 through 5, and all three SVG texture-load comparisons rendered through the GPU candidate. SVG byte comparisons stayed within one channel value. The Subpixel materialization revoked GPU eligibility before the inventory scale captures and recomposition measurement, so those phases recorded no GPU candidates. This is the expected fail-closed result for the current text-preservation policy, not a vendor pass. The Pharos checkout was at base commit `4966732269f02408df314ae155bb7e6f3817f9d9` with local source modifications, so this run is diagnostic; repeat it from a clean harness checkout before treating its report as commit-level evidence.
+I rebuilt the staged Vintage Story 1.22.7 runtime from the candidate branch and reran the full inventory scenario on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core. The scenario passed and selected `skia-with-subpixel-cairo-fallback` with no decision reasons. The launcher accepted the local profile certificate. Initial composition recorded 38 candidate attempts, 19 Skia successes, and 19 allowed Subpixel fallbacks. Ten recompositions recorded 360 attempts, 144 successes, and 216 allowed fallbacks. Scales 1, 1.5, and 2 recorded respectively 12/30, 108/171, and 109/173 candidate successes/attempts; all remaining candidates fell back only for successful Subpixel text materialization. There were no materialization failures. The primitive, all five non-subset fixtures, and all three SVG comparisons passed; SVG output remained within one channel value.
 
-A separate run with GPU rendering disabled passed the same inventory scenario and produced no certificate. The two GPU-enabled runs recorded 10 recomposition iterations at 601.6 ms and 614.1 ms elapsed, allocating about 190.5 MB each. The GPU-off control recorded 540.6 ms and 190.6 MB. These are native-path baselines from one machine; the GPU candidate did not participate in those recomposition measurements, so they do not show a GPU speedup.
-
-The remaining hardware gate is to repeat the complete isolated Pharos procedure on the physical Intel and NVIDIA adapters using this exact commit. Use a fresh stage and evidence directory for each adapter, run a cold process and a second fresh process, and include the GPU-disabled control and launcher rejection checks. Keep the reports separate. The Intel and NVIDIA reports for `7bba055` predate the Subpixel policy change and do not cover this commit. Only report `skia-only` when the complete workload has positive candidate coverage and zero fallback or native materialization, and the launcher accepts the local evidence.
+The report used the local private Pharos checkout at `4966732269f02408df314ae155bb7e6f3817f9d9`, whose working tree contains local changes including the updated scenario acceptance logic. Treat this as a successful AMD runtime retest, with the harness source state recorded as a reproducibility limitation. Intel and NVIDIA physical runs remain required. Their earlier `7bba055` reports predate the Subpixel policy change and do not validate this behavior. Use the same exact fallback allowlist and launcher certificate validation on each adapter. No GPU performance gain is claimed by this functional scenario.

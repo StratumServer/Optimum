@@ -13,6 +13,7 @@ namespace Vintagestory.API.Config
     {
         private const int MaxMaterializationTriggerKinds = 32;
         private const string OtherMaterializationTriggerKinds = "other-trigger-kinds";
+        internal const string SupportedGuiNativeFallback = "Recorder.ShowText.Unsupported:text-antialias-Subpixel";
         private static readonly object materializationDiagnosticsSync = new object();
         private static readonly Dictionary<string, long> materializationTriggerCounts = new Dictionary<string, long>();
         private static long untrackedMaterializationTriggerCount;
@@ -163,10 +164,12 @@ namespace Vintagestory.API.Config
 
         internal static void RecordMaterialization(string trigger, bool succeeded)
         {
-            // A native Cairo replay changes the requested Skia-only policy for
-            // this client run. Keep Cairo's text/subpixel rasterization intact,
-            // then deny subsequent GPU composition instead of mixing paths.
-            if (OptimumConfig.GuiGpuCertificationPassed)
+            // Cairo's LCD Subpixel path is an explicit per-surface fallback. It
+            // preserves native text output while other certified surfaces keep
+            // using Skia. Every other replay, and every failed replay, revokes
+            // the device approval before another GPU candidate can be used.
+            bool supportedFallback = succeeded && string.Equals(trigger, SupportedGuiNativeFallback, StringComparison.Ordinal);
+            if (!supportedFallback && OptimumConfig.GuiGpuCertificationPassed)
                 OptimumConfig.RevokeGuiGpuCertification();
             if (!Enabled) return;
             Interlocked.Increment(ref materializationAttemptCount);
