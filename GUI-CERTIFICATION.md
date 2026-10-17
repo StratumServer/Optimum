@@ -58,15 +58,23 @@ escapes, and device/context changes cannot be universally certified.
 `--validate-only` continues to validate assemblies without creating an OpenGL
 context, granting GUI approval or starting the client.
 
-Text keeps Cairo's native rasterization. The recording backend does not translate
-font and glyph operations into Skia; unsupported text operations materialize the
-recorded prefix and execute through Cairo with the requested `FontOptions`, including
-`Antialias.Subpixel`. A native materialization revokes the active GPU approval even
-when the GPU request or metrics collection is temporarily disabled. Subsequent GUI
-composition therefore uses the normal Cairo path. The regression test asserts that
-the Subpixel text path materializes natively and produces the same bytes as direct
-vanilla Cairo. A profile that materializes text during its measured workload cannot
-receive a Skia-only certificate.
+Cairo stays the text layout authority: font selection, `SetFontSize`, font
+options, `TextExtents`, `FontExtents` and `TextPath` are Cairo state and do not
+materialize. `ShowText` and `ShowGlyphs` with Gray font antialiasing are recorded
+as a fill of Cairo's hinted glyph outlines (`cairo_glyph_path` with the same scaled
+font) at the glyph origins Cairo's image compositor uses: whole pixels before
+Cairo 1.17, quarter pixels from 1.18. Development versions in between, Default,
+Subpixel and None font antialiasing, rotated or skewed text, very large glyphs and
+more than 4096 glyphs per call materialize. Native replay shows the original text
+again with the captured scaled font.
+
+Policy: `CairoFont.SetupContext` requests `Antialias.Subpixel` for all GUI text.
+LCD glyphs cannot be reproduced on the Skia path, so while GUI GPU recording is
+eligible (`OptimumConfig.GuiGpuRecordingEligible`) Cairo receives Gray instead of
+Subpixel, for measurement and drawing alike. This is a visible change from
+vanilla: no LCD colour fringes while the GPU path is active. When GPU recording is
+not eligible, Cairo receives the requested options unchanged and Subpixel text
+materializes to native Cairo with vanilla bytes; regression tests cover both.
 
 Certification also requires the live GL `Antialias.Best` rectangle fixture to read
 back from the candidate GPU texture and match the native Cairo pixels within one

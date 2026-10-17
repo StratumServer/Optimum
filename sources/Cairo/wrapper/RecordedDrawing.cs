@@ -223,6 +223,13 @@ namespace Cairo
 		internal LineJoin LineJoin;
 		internal double[] Dash;
 		internal double Alpha = 1;
+		// Text drawings (ShowText/ShowGlyphs): the glyph outline is the path for Skia; native
+		// replay shows the original text with the captured scaled font.
+		internal byte[] TextUtf8;
+		internal byte[] TextGlyphs;
+		internal PointD TextOrigin;
+		internal ScaledFont ScaledFont;
+		internal bool IsText => ScaledFont != null;
 		SKPath skiaPath;
 
 		static readonly RecordedClip[] NoClips = new RecordedClip[0];
@@ -233,8 +240,9 @@ namespace Cairo
 		/// width stroke); returns null with a reason when the GPU path cannot reproduce it.
 		/// </summary>
 		internal static RecordedDrawing Capture (IntPtr cr, RecordedDrawKind kind, double alpha, RecordedClip[] clips,
-			Matrix sourceCtm, SurfaceRecorder target, out string failure)
+			Matrix sourceCtm, SurfaceRecorder target, out string failure, IntPtr pathContext = default)
 		{
+			bool text = pathContext != IntPtr.Zero;
 			failure = null;
 			if (NativeMethods.cairo_status (cr) != Status.Success) return null; // Cairo ignores drawing in an error state.
 			var drawing = new RecordedDrawing {
@@ -249,7 +257,7 @@ namespace Cairo
 			};
 			NativeMethods.cairo_get_matrix (cr, drawing.Ctm);
 			if (!IsSupportedOperator (drawing.Operator)) { failure = "operator-" + drawing.Operator; return null; }
-			if (!IsSupportedAntialias (drawing.Antialias)) { failure = "antialias-" + drawing.Antialias; return null; }
+			if (!text && !IsSupportedAntialias (drawing.Antialias)) { failure = "antialias-" + drawing.Antialias; return null; }
 			foreach (RecordedClip clip in drawing.Clips) {
 				if (!IsSupportedAntialias (clip.Antialias)) { failure = "clip-antialias-" + clip.Antialias; return null; }
 				if (clip.Antialias == Antialias.None && !clip.Path.IsRectilinear ()) { failure = "aliased-geometry"; return null; }
@@ -284,12 +292,13 @@ namespace Cairo
 				if (Math.Abs (drawing.Ctm.Xx * drawing.Ctm.Yy - drawing.Ctm.Xy * drawing.Ctm.Yx) < 1e-12) { failure = "stroke-singular-matrix"; return null; }
 			}
 			if (kind != RecordedDrawKind.Paint) {
-				drawing.Path = RecordedPath.CaptureDevice (cr, drawing.Ctm, out failure);
+				IntPtr pathSource = text ? pathContext : cr;
+				drawing.Path = RecordedPath.CaptureDevice (pathSource, drawing.Ctm, out failure);
 				if (drawing.Path == null) return null;
 				if (!drawing.Path.AllFinite ()) { failure = "path-out-of-range"; return null; }
-				if (drawing.Antialias == Antialias.None && !drawing.Path.IsRectilinear ()) { failure = "aliased-geometry"; return null; }
+				if (!text && drawing.Antialias == Antialias.None && !drawing.Path.IsRectilinear ()) { failure = "aliased-geometry"; return null; }
 				if (drawing.Path.HasCurves) {
-					drawing.FlatPath = RecordedPath.CaptureDevice (cr, drawing.Ctm, out failure, flat: true);
+					drawing.FlatPath = RecordedPath.CaptureDevice (pathSource, drawing.Ctm, out failure, flat: true);
 					if (drawing.FlatPath == null) return null;
 					if (!drawing.FlatPath.AllFinite ()) { failure = "path-out-of-range"; return null; }
 				}
@@ -353,13 +362,17 @@ namespace Cairo
 				foreach (RecordedClip clip in Clips) clip.ApplyNative (cr);
 				NativeMethods.cairo_identity_matrix (cr);
 				NativeMethods.cairo_new_path (cr);
-				Path?.AppendNative (cr);
+				if (!IsText) Path?.AppendNative (cr);
 				Source.ApplyNative (cr);
 				NativeMethods.cairo_set_matrix (cr, Ctm);
 				NativeMethods.cairo_set_operator (cr, Operator);
 				NativeMethods.cairo_set_antialias (cr, Antialias);
 				NativeMethods.cairo_set_fill_rule (cr, FillRule);
 				NativeMethods.cairo_set_tolerance (cr, Tolerance);
+				if (IsText) {
+					RecordedText.ReplayNative (cr, this);
+					return;
+				}
 				switch (Kind) {
 				case RecordedDrawKind.Fill:
 					NativeMethods.cairo_fill (cr);
@@ -387,7 +400,7 @@ namespace Cairo
 			try {
 				canvas.ResetMatrix ();
 				foreach (RecordedClip clip in Clips) clip.ApplySkia (canvas);
-				using (var paint = new SKPaint { IsAntialias = Antialias != Antialias.None, BlendMode = ToSkia (Operator), Style = SKPaintStyle.Fill }) {
+				using (var paint = new SKPaint { IsAntialias = IsText || Antialias != Antialias.None, BlendMode = ToSkia (Operator), Style = SKPaintStyle.Fill }) {
 					using (RecordedSourcePaint source = Source.ConfigurePaint (paint, Alpha, replay)) {
 						switch (Kind) {
 						case RecordedDrawKind.Fill:

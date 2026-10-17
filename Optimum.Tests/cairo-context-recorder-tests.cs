@@ -405,6 +405,7 @@ public sealed class CairoContextRecorderTests
 	[Fact]
 	public void SubpixelTextMaterializesToNativeCairoAndMatchesVanillaOutput()
 	{
+		CairoTextPolicy.Override = false; // GPU text policy inactive: vanilla Subpixel
 		using var actual = new ImageSurface (Format.Argb32, 144, 36);
 		var recorder = actual.BeginRecording ();
 		using (var context = new Context (actual)) {
@@ -437,7 +438,8 @@ public sealed class CairoContextRecorderTests
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Contains ("SelectFontFace", actual.FirstMaterializationTrigger);
+		// Font selection and measurement are Cairo state; the LCD glyph drawing materializes.
+		Assert.Equal ("Recorder.ShowText.Unsupported:text-antialias-Subpixel", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
@@ -453,6 +455,7 @@ public sealed class CairoContextRecorderTests
 	[InlineData(2f, EnumLinebreakBehavior.None)]
 	public void TextLayoutAndSizingStayCairoEquivalentAcrossScales(float guiScale, EnumLinebreakBehavior linebreak)
 	{
+		CairoTextPolicy.Override = false; // GPU text policy inactive: vanilla Subpixel
 		float previousScale = RuntimeEnv.GUIScale;
 		RuntimeEnv.GUIScale = guiScale;
 		try {
