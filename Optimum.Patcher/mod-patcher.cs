@@ -100,6 +100,13 @@ public static class ModPatcher
                 ["Vintagestory.GameContent.WeatherSystemClient"] =
                 [
                     "optimumWindFrameCounter",
+                    "optimumTargetWindX",
+                    "optimumTargetWindY",
+                    "optimumTargetWindZ",
+                    "optimumTargetSurfaceWindX",
+                    "optimumTargetSurfaceWindY",
+                    "optimumTargetSurfaceWindZ",
+                    "optimumHasWind",
                 ],
                 ["Vintagestory.GameContent.WeatherSimulationSound"] =
                 [

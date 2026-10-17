@@ -91,6 +91,34 @@ public class ThrottleAndCacheBatchCoverageTests
         Assert.Contains("_windFrameCounter % WindUpdateInterval == 0", source);
     }
 
+    [Fact]
+    public void WeatherWindThrottlePreservesPerFrameSmoothing()
+    {
+        string source = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch");
+        Assert.Contains("windSpeedSmoothed.X += (_cachedWindX - windSpeedSmoothed.X) * dt;", source);
+        Assert.Contains("surfaceWindSpeedSmoothed.X += (_cachedSurfaceWindX - surfaceWindSpeedSmoothed.X) * dt;", source);
+
+        string runtimeSource = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSystemClient.cs.patch");
+        Assert.Contains("windSpeedSmoothed.X += (optimumTargetWindX - windSpeedSmoothed.X) * dt;", runtimeSource);
+        Assert.Contains("surfaceWindSpeedSmoothed.X += (optimumTargetSurfaceWindX - surfaceWindSpeedSmoothed.X) * dt;", runtimeSource);
+    }
+
+    [Fact]
+    public void WeatherSimulationSoundResetsDeadzoneOnStopAndSetsVolumeOnStart()
+    {
+        string source = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSimulationSound.cs.patch");
+        Assert.Contains("lastSetWindVolumeLeafy = -99f;", source);
+        Assert.Contains("lastSetWindVolumeLeafless = -99f;", source);
+        Assert.Contains("windSoundLeafy?.SetVolume(initLeafyVol);", source);
+        Assert.Contains("windSoundLeafy?.SetVolume(0f);", source);
+
+        string runtimeSource = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs.patch");
+        Assert.Contains("lastSetWindVolumeLeafy = -99f;", runtimeSource);
+        Assert.Contains("lastSetWindVolumeLeafless = -99f;", runtimeSource);
+        Assert.Contains("windSoundLeafy?.SetVolume(initLeafyVol);", runtimeSource);
+        Assert.Contains("windSoundLeafy?.SetVolume(0f);", runtimeSource);
+    }
+
     private static string FindRepositoryFile(string relativePath)
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
