@@ -207,10 +207,57 @@ namespace Cairo
 		internal LineCap LineCap = LineCap.Butt;
 		internal LineJoin LineJoin = LineJoin.Miter;
 		internal double MiterLimit = 10;
+		internal double[] Dash;
+		internal double DashOffset;
 		internal RecordedClip[] Clips = NoClips;
+
+		internal void SetDash (double[] dashes, double offset)
+		{
+			if (dashes.Length == 0) {
+				Dash = null;
+				DashOffset = 0;
+				return;
+			}
+
+			var normalized = new double[dashes.Length];
+			int count = dashes.Length;
+			double total = 0, on = 0, off = 0;
+			for (int i = 0, j = 0; i < dashes.Length; i++) {
+				if (dashes[i] == 0 && i > 0 && i < dashes.Length - 1) {
+					normalized[j - 1] += dashes[++i];
+					count -= 2;
+				} else {
+					normalized[j++] = dashes[i];
+				}
+				if (dashes[i] != 0) {
+					total += dashes[i];
+					if ((i & 1) == 0) on += dashes[i];
+					else off += dashes[i];
+				}
+			}
+
+			if ((count & 1) != 0) {
+				total *= 2;
+				on += off;
+			}
+			if (total - on < 1.0 / 512.0) {
+				Dash = null;
+				DashOffset = 0;
+				return;
+			}
+
+			if (count != normalized.Length) Array.Resize (ref normalized, count);
+			offset %= total;
+			if (offset < 0) offset += total;
+			if (offset <= 0) offset = 0;
+			Dash = normalized;
+			DashOffset = offset;
+		}
+
 		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { SourceCtm = SourceCtm, SourceSurface = SourceSurface,
 			SourceHint = SourceHint, Operator = Operator, Antialias = Antialias, FillRule = FillRule, Tolerance = Tolerance,
-			LineWidth = LineWidth, LineCap = LineCap, LineJoin = LineJoin, MiterLimit = MiterLimit, Clips = Clips };
+			LineWidth = LineWidth, LineCap = LineCap, LineJoin = LineJoin, MiterLimit = MiterLimit,
+			Dash = Dash, DashOffset = DashOffset, Clips = Clips };
 	}
 
 	/// <summary>One Cairo fill/stroke/paint with all graphics state captured at call time.</summary>
@@ -307,17 +354,16 @@ namespace Cairo
 				drawing.LineCap = state == null ? NativeMethods.cairo_get_line_cap (cr) : state.LineCap;
 				drawing.LineJoin = state == null ? NativeMethods.cairo_get_line_join (cr) : state.LineJoin;
 				drawing.MiterLimit = state == null ? NativeMethods.cairo_get_miter_limit (cr) : state.MiterLimit;
-				int dashCount = NativeMethods.cairo_get_dash_count (cr);
-				if (dashCount > 0) {
-					IntPtr buffer = Marshal.AllocHGlobal (checked(dashCount * sizeof (double)));
-					try {
-						NativeMethods.cairo_get_dash (cr, buffer, out drawing.DashOffset);
-						drawing.Dash = new double[dashCount];
-						Marshal.Copy (buffer, drawing.Dash, 0, dashCount);
-					} finally { Marshal.FreeHGlobal (buffer); }
+				drawing.Dash = state?.Dash;
+				if (state != null) drawing.DashOffset = state.DashOffset;
+				if (drawing.Dash != null) {
+					int dashCount = drawing.Dash.Length;
 					int intervals = dashCount % 2 == 0 ? dashCount : dashCount * 2;
-					for (int i = 0; i < intervals; i += 2)
-						if (drawing.Dash[i % dashCount] == 0 && drawing.LineCap != LineCap.Butt) { failure = "dash-zero-length-cap"; return null; }
+					for (int i = 0; i < intervals; i++) {
+						double interval = drawing.Dash[i % dashCount];
+						if (interval > 0 && interval < 1.0 / 64) { failure = "dash-subpixel-interval"; return null; }
+						if ((i & 1) == 0 && interval == 0 && drawing.LineCap != LineCap.Butt) { failure = "dash-zero-length-cap"; return null; }
+					}
 				}
 				if (Math.Abs (drawing.Ctm.Xx * drawing.Ctm.Yy - drawing.Ctm.Xy * drawing.Ctm.Yx) < 1e-12) { failure = "stroke-singular-matrix"; return null; }
 			}

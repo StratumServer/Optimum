@@ -1,5 +1,5 @@
 diff --git a/Cairo/NativeMethods.cs b/Cairo/NativeMethods.cs
-index 7d2fc60..36a1285 100644
+index 7d2fc60..a1a6272 100644
 --- a/Cairo/NativeMethods.cs
 +++ b/Cairo/NativeMethods.cs
 @@ -214,13 +214,10 @@ namespace Cairo
@@ -16,7 +16,24 @@ index 7d2fc60..36a1285 100644
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
          internal static extern IntPtr cairo_ft_font_face_create_for_pattern(IntPtr fc_pattern);
-@@ -371,46 +368,10 @@ namespace Cairo
+@@ -238,16 +235,10 @@ namespace Cairo
+         internal static extern Antialias cairo_get_antialias(IntPtr cr);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_get_current_point(IntPtr cr, out double x, out double y);
+ 
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_get_dash(IntPtr cr, IntPtr dashes, out double offset);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern int cairo_get_dash_count(IntPtr cr);
+-
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern FillRule cairo_get_fill_rule(IntPtr cr);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern IntPtr cairo_get_font_face(IntPtr cr);
+@@ -371,46 +362,10 @@ namespace Cairo
          internal static extern void cairo_mask(IntPtr cr, IntPtr pattern);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]

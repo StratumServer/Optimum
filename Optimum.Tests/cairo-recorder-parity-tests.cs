@@ -618,6 +618,47 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void RecorderMirroredDashMatchesCairoNormalization ()
+	{
+		double[][] patterns = {
+			Array.Empty<double> (),
+			new[] { 4.0, 2.0, 1.0 },
+			new[] { 0.0, 4.0 },
+			new[] { 4.0, 0.0, 3.0, 2.0 },
+			new[] { 4.0, 0.0, 3.0, 0.0, 2.0 },
+			new[] { 10.0, 0.0 },
+			new[] { 3.0, 1.0, 0.0, 2.0 },
+			new[] { 10.0, .001 }
+		};
+		double[] offsets = { 0, -7.25, 3.5, 9.25, -4.5, 1, 12345.75, 0 };
+		for (int i = 0; i < patterns.Length; i++) {
+			int index = i;
+			AssertParity (48, 20, context => {
+				context.SetSourceRGBA (.18, .48, .82, 1);
+				context.LineWidth = 2.25;
+				context.LineCap = LineCap.Butt;
+				context.SetDash (patterns[index], offsets[index]);
+				context.MoveTo (2, 10);
+				context.LineTo (46, 10);
+				context.Stroke ();
+			});
+		}
+	}
+
+	[Fact]
+	public void RecorderMaterializesForSubpixelDashIntervals ()
+	{
+		AssertMaterializesWith (48, 20, context => {
+			context.SetSourceRGBA (.18, .48, .82, 1);
+			context.LineWidth = 2.25;
+			context.SetDash (new[] { 10.0, .003 }, 0);
+			context.MoveTo (2, 10);
+			context.LineTo (46, 10);
+			context.Stroke ();
+		}, "Recorder.Stroke.Unsupported:dash-subpixel-interval");
+	}
+
+	[Fact]
 	public void RecordingSurfaceSourceIsSnapshottedAtEachDrawWithoutMaterializing ()
 	{
 		// Pharos fixture 1: a recording surface used as a nearest/repeat pattern, redrawn

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedUtc": "2026-10-17T22:37:40.5718076+00:00",
+  "generatedUtc": "2026-10-17T22:57:07.0548135+00:00",
   "generatorRuntime": ".NET 10.0.12",
   "generatorOs": "Ubuntu 26.04.1 LTS",
   "generatorArchitecture": "X64",
@@ -9,7 +9,7 @@
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 82,
   "publicAndProtectedMemberCount": 871,
-  "nativeImportCount": 298,
+  "nativeImportCount": 296,
   "classificationNote": "Automated initial classification and reflection ABI metadata; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -23034,37 +23034,6 @@
     },
     {
       "declaringType": "Cairo.NativeMethods",
-      "signature": "System.Int32 cairo_get_dash_count(System.IntPtr)",
-      "importReview": "required",
-      "abi": {
-        "accessibility": "assembly",
-        "isStatic": true,
-        "isVirtual": false,
-        "isAbstract": false,
-        "isFinal": false,
-        "implementationFlags": "PreserveSig",
-        "parameters": [
-          {
-            "signature": "System.IntPtr",
-            "isIn": false,
-            "isOut": false,
-            "marshalAs": null
-          }
-        ],
-        "returnMarshalAs": null,
-        "import": {
-          "library": "libcairo-2",
-          "entryPoint": "cairo_get_dash_count",
-          "callingConvention": "Cdecl",
-          "charSet": "None",
-          "exactSpelling": false,
-          "setLastError": false,
-          "preserveSig": true
-        }
-      }
-    },
-    {
-      "declaringType": "Cairo.NativeMethods",
       "signature": "System.Int32 cairo_image_surface_get_height(System.IntPtr)",
       "importReview": "required",
       "abi": {
@@ -26937,49 +26906,6 @@
         "import": {
           "library": "libcairo-2",
           "entryPoint": "cairo_get_current_point",
-          "callingConvention": "Cdecl",
-          "charSet": "None",
-          "exactSpelling": false,
-          "setLastError": false,
-          "preserveSig": true
-        }
-      }
-    },
-    {
-      "declaringType": "Cairo.NativeMethods",
-      "signature": "System.Void cairo_get_dash(System.IntPtr, System.IntPtr, out System.Double)",
-      "importReview": "required",
-      "abi": {
-        "accessibility": "assembly",
-        "isStatic": true,
-        "isVirtual": false,
-        "isAbstract": false,
-        "isFinal": false,
-        "implementationFlags": "PreserveSig",
-        "parameters": [
-          {
-            "signature": "System.IntPtr",
-            "isIn": false,
-            "isOut": false,
-            "marshalAs": null
-          },
-          {
-            "signature": "System.IntPtr",
-            "isIn": false,
-            "isOut": false,
-            "marshalAs": null
-          },
-          {
-            "signature": "out System.Double",
-            "isIn": false,
-            "isOut": true,
-            "marshalAs": null
-          }
-        ],
-        "returnMarshalAs": null,
-        "import": {
-          "library": "libcairo-2",
-          "entryPoint": "cairo_get_dash",
           "callingConvention": "Cdecl",
           "charSet": "None",
           "exactSpelling": false,

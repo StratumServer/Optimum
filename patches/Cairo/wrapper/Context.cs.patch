@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..7304934 100644
+index 03f9c76..9987ee8 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -253,7 +253,7 @@ index 03f9c76..7304934 100644
  		}
  
  		[Obsolete ("Use SetSourceColor method")]
-@@ -195,71 +323,76 @@ namespace Cairo
+@@ -195,72 +323,79 @@ namespace Cairo
  			}
  		}
  
@@ -337,11 +337,14 @@ index 03f9c76..7304934 100644
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
  			NativeMethods.cairo_set_dash (handle, dashes, dashes.Length, offset);
++			if (recordingSurface != null && NativeMethods.cairo_status (handle) == Status.Success)
++				recordingState.SetDash (dashes, offset);
  		}
  
  		private Pattern Pattern {
  			set {
-@@ -279,45 +412,53 @@ namespace Cairo
+ 				SetSource (value);
+@@ -279,45 +414,53 @@ namespace Cairo
  			}
  		}
  
@@ -400,7 +403,7 @@ index 03f9c76..7304934 100644
  		}
  
  		[Obsolete ("Use GetTarget/SetTarget")]
-@@ -331,20 +472,30 @@ namespace Cairo
+@@ -331,20 +474,30 @@ namespace Cairo
  			}
  		}
  
@@ -434,7 +437,7 @@ index 03f9c76..7304934 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -356,167 +507,191 @@ namespace Cairo
+@@ -356,167 +509,191 @@ namespace Cairo
  			}
  		}
  
@@ -648,7 +651,7 @@ index 03f9c76..7304934 100644
  
  		public void Rectangle (Rectangle rectangle)
  		{
-@@ -528,35 +703,35 @@ namespace Cairo
+@@ -528,35 +705,35 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -689,7 +692,7 @@ index 03f9c76..7304934 100644
  
          #endregion
  
-@@ -565,110 +740,131 @@ namespace Cairo
+@@ -565,110 +742,131 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -836,7 +839,7 @@ index 03f9c76..7304934 100644
  
  		public Pattern PopGroup ()
  		{
-@@ -708,29 +904,29 @@ namespace Cairo
+@@ -708,29 +906,29 @@ namespace Cairo
  			return Surface.Lookup (surface, false);
  		}
  
@@ -870,7 +873,7 @@ index 03f9c76..7304934 100644
  
  		[Obsolete("Use UserToDevice instead")]
  		public void TransformPoint (ref double x, ref double y)
-@@ -756,55 +952,55 @@ namespace Cairo
+@@ -756,55 +954,55 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -934,7 +937,7 @@ index 03f9c76..7304934 100644
  
  		[Obsolete ("Use SetFontSize() instead.")]
  		public void FontSetSize (double scale)
-@@ -817,30 +1013,31 @@ namespace Cairo
+@@ -817,30 +1015,31 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -970,7 +973,7 @@ index 03f9c76..7304934 100644
  		}
  
  		[StructLayout(LayoutKind.Sequential)]
-@@ -879,19 +1076,24 @@ namespace Cairo
+@@ -879,19 +1078,24 @@ namespace Cairo
  			return dest;
  		}
  
@@ -1000,7 +1003,7 @@ index 03f9c76..7304934 100644
  		[Obsolete("The matrix argument was never used, use ShowGlyphs(Glyphs []) instead")]
  		public void ShowGlyphs (Matrix matrix, Glyph[] glyphs)
  		{
-@@ -904,11 +1106,11 @@ namespace Cairo
+@@ -904,11 +1108,11 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -1013,7 +1016,7 @@ index 03f9c76..7304934 100644
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
  
-@@ -917,11 +1119,11 @@ namespace Cairo
+@@ -917,11 +1121,11 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -1026,7 +1029,7 @@ index 03f9c76..7304934 100644
  				return f_extents;
  			}
  		}
-@@ -934,23 +1136,23 @@ namespace Cairo
+@@ -934,23 +1138,23 @@ namespace Cairo
  
          
  
@@ -1053,7 +1056,7 @@ index 03f9c76..7304934 100644
  
  		public void ShowPage ()
  		{
-@@ -977,51 +1179,66 @@ namespace Cairo
+@@ -977,51 +1181,66 @@ namespace Cairo
  			return bytes;
  		}
  

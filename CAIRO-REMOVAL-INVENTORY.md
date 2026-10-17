@@ -73,7 +73,7 @@ test.
 | Area | Current Cairo dependency and concrete consumers | Removal work / gate |
 |---|---|---|
 | Object creation and native loader | `Context(Surface)` calls `cairo_create`; image surfaces allocate Cairo storage. `CairoAPI` resolves `libcairo` and queries native version. | Replace native factories and prove startup and supported drawing work with native Cairo loading denied. |
-| Drawing state, paths and geometry | `Context` owns path, transforms, clips, groups, operators, dashes, extents and hit-testing. Recorder capture reads the native state/path. Stage F removed managed matrix arithmetic only. | Managed state/path model, differential tests, current-point/save-restore semantics, and no normal shadow-context calls. |
+| Drawing state, paths and geometry | `Context` owns path, transforms, clips, groups, operators, dashes, extents and hit-testing. Recorder mirrors supported draw styles, dash arrays and source hints, while it still reads native context status, CTM, current path and clips. Stage F removed managed matrix arithmetic. | Managed state/path model, differential tests, current-point/save-restore semantics, and no normal shadow-context calls. |
 | Paint, patterns, masks and sources | `RecordedSource` reads native patterns, matrices, stops, surface pixels, extend/filter and source transforms. Stage G records only supported solid masks for three operators. | Managed source snapshots and parity for solid, gradients, surface sources, masks, operators, mutation/disposal and fallback boundaries. |
 | Text and fonts | `CairoFont.SetupContext` and its static measuring context; `TextDrawUtil`, `TextTextureUtil`, editable caret/layout, rich text, engraved/embossed text, tabs, signs, world text; `RecordedText` glyph selection, metrics and fallbacks. | Replace metrics/layout/shaping and glyph construction while preserving widths, advances, face mapping, baselines, wrapping, caret geometry and Subpixel policy. The current Skia font/size matrix is bounded; untested combinations still fall back to Cairo. |
 | Images and CPU pixel bridges | `ImageSurface.Data/DataPtr`, PNG export, flush/finish, external byte buffers, `SurfaceDrawImage.Image` bridges from `SKBitmap`, resize/overlay, blur and alpha demultiplication. Consumers include text textures, icons, dialogs, item slots and status bars. | Managed/Skia surfaces and lazy CPU readback with stride, format, premultiplication, mutation and invalidation compatibility. |
@@ -176,38 +176,48 @@ limit. Its Save/Restore snapshot includes these values. `RecordedDrawing.Capture
 uses that state after the native context status check instead of querying Cairo
 for each draw. Public getters remain native, and raw context-handle access
 materializes recording before callers can make untracked changes. Dash arrays
-and offsets still come from `cairo_get_dash_count` and `cairo_get_dash` on
-strokes.
+and offsets are now normalized into the recording-state mirror when
+`Context.SetDash` succeeds. The mirror preserves Cairo's zero merging for
+interior intervals, odd-length patterns, degenerate all-on patterns, and
+positive modulo normalization of offsets. Save/Restore carries the dash
+snapshot with the other stroke state. Tiny positive dash intervals below
+1/64 user unit fail closed to native Cairo because the Skia path effect differs
+from Cairo there.
 
-The recorder parity, surface-recorder, and recorder-text suites passed 110/110.
+`RecorderMirroredDashMatchesCairoNormalization` compares eight dash cases
+against Cairo's native image output, including empty, odd, leading/interior
+zero, degenerate, near-degenerate, and large/negative offset inputs.
+`RecorderMaterializesForSubpixelDashIntervals` checks the exact native fallback
+for a 0.003-unit interval. The recorder parity, surface-recorder, and
+recorder-text suites passed 148/148.
 The new `RecorderMirroredDrawingStateMatchesCairoAfterSaveRestore` case checks
 operator, fill rule, tolerance, antialias, stroke width/cap/join/miter and
 restoration against Cairo image-surface output. Static inspection shows four
-fewer Cairo state queries per eligible draw and eight for strokes, excluding
-dash queries. No native-call instrumentation, timing result, or cross-platform
-run is available.
+fewer Cairo state queries per eligible draw and ten for strokes, including the
+two removed dash queries. No native-call instrumentation, timing result, or
+cross-platform run is available.
 
 ## Native import inventory
 
-The schema-2 manifest includes **298 active `DllImport` methods** reflected from
-the current assembly: 268 for `libcairo-2`, 13 for `freetype6`, 9 for
-`libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 260
+The schema-2 manifest includes **296 active `DllImport` methods** reflected from
+the current assembly: 266 for `libcairo-2`, 13 for `freetype6`, 9 for
+`libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 258
 methods in `Cairo.NativeMethods` and 8 separate declarations in `RecordedText`.
 Every `nativeImports` row is marked for manual native-header review; reflection
 records declarations but does not verify that their native signatures are
-correct. A separate source-to-manifest pass matched all **298/298 active
+correct. A separate source-to-manifest pass matched all **296/296 active
 declarations** by declaring type, return/parameter types, library, entrypoint,
-calling convention, direction and marshal attributes. The 629 parameters
-contain 64 `IsOut` and 0 `IsIn` flags; the reflection metadata preserves these
-separately from by-reference type syntax. The manifest contains 285 `Cdecl`
+calling convention, direction and marshal attributes. The 623 parameters
+contain 63 `IsOut` and 0 `IsIn` flags; the reflection metadata preserves these
+separately from by-reference type syntax. The manifest contains 283 `Cdecl`
 and 13 `Winapi` imports. This proves inventory correspondence, not native ABI
 correctness.
 
 `Cairo/NativeMethods.cs` has 328 raw `extern`/`DllImport` matches, but 69 are in
-comments. After stripping comments there are **260 active declarations**, with
-259 unique names because `cairo_image_surface_create_for_data` has two
-overloads. Reflection reports the same 260 active `NativeMethods` imports.
-Source search finds 234 unique names called as `NativeMethods.cairo_*`; six
+comments. After stripping comments there are **258 active declarations**, with
+257 unique names because `cairo_image_surface_create_for_data` has two
+overloads. Reflection reports the same 258 active `NativeMethods` imports.
+Source search finds 232 unique names called as `NativeMethods.cairo_*`; six
 additional names have equivalent direct imports in `RecordedText`. The other
 19 unique active Cairo entrypoints have no caller found in the available
 wrapper/consumer source. Those 19 may be removable internal declarations, but
