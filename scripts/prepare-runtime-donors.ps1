@@ -19,37 +19,86 @@ $repoRoot = Split-Path -Parent $scriptDir
 # the profile install, DOTNET_ROOT has to point at it so the host discovers the
 # SDK there, matching what IlspycmdInstaller.cs does for the tool it spawns.
 #
-# Issue #105: a PATH dotnet.exe that exists but has no SDK installed (e.g. a
-# system-wide dotnet stub left by a removed installation) caused the script to
-# accept it immediately without checking whether the required SDK is visible.
-# The user-profile dotnet at %USERPROFILE%\.dotnet, which did have the SDK, was
-# never tried. The fix verifies that the PATH candidate can list at least one
-# SDK before accepting it; if it cannot, the script falls through to the
-# user-profile location.
-function script:Test-DotNetHasSdk([string]$DotnetExe) {
-    $sdks = & $DotnetExe --list-sdks 2>$null
-    return ($sdks -and ($sdks | Where-Object { $_ -match '^\d' }))
+# Issue #105: a PATH dotnet.exe that exists but has no SDK installed caused the
+# script to accept it immediately without checking whether any SDK is visible.
+#
+# Issue #138: a PATH dotnet.exe with SDKs that cannot resolve the repository
+# global.json (for example, only SDK 9 is installed when 10.0.100 is pinned)
+# must not be accepted over a user-profile candidate that has the required SDK.
+function script:Test-DotNetResolvesGlobalJson([string]$DotnetExe, [string]$RepoRoot) {
+    if (-not (Test-Path $DotnetExe)) { return $false }
+    $dotnetDir = Split-Path -Parent $DotnetExe
+    $oldDotnetRoot = $env:DOTNET_ROOT
+    try {
+        $env:DOTNET_ROOT = $dotnetDir
+        # 1. Evaluate global.json directly via dotnet --version inside $RepoRoot.
+        # This honors the exact version and rollForward policy configured in global.json.
+        $prevLocation = Get-Location
+        try {
+            Set-Location $RepoRoot
+            $versionOutput = & $DotnetExe --version 2>$null
+            if ($LASTEXITCODE -eq 0 -and $versionOutput) {
+                return $true
+            }
+        } finally {
+            Set-Location $prevLocation
+        }
+
+        # 2. Fallback for mock environments: inspect --list-sdks for a matching major line.
+        $sdks = & $DotnetExe --list-sdks 2>$null
+        $globalJsonPath = Join-Path $RepoRoot 'global.json'
+        $requiredMajor = '10'
+        if (Test-Path $globalJsonPath) {
+            try {
+                $gj = Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json
+                if ($gj.sdk.version -match '^(\d+)\.') {
+                    $requiredMajor = $Matches[1]
+                }
+            } catch { }
+        }
+        $majorPattern = '^' + [regex]::Escape($requiredMajor) + '\.'
+        return [bool]($sdks -and ($sdks | Where-Object { $_ -match $majorPattern }))
+    } finally {
+        $env:DOTNET_ROOT = $oldDotnetRoot
+    }
+}
+
+function script:Test-DotNetHasSdk([string]$DotnetExe, [string]$Repo = $repoRoot) {
+    return (Test-DotNetResolvesGlobalJson $DotnetExe $Repo)
 }
 
 $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
 $dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
-if ($dotnetCmd -and (Test-DotNetHasSdk $dotnetCmd.Source)) {
+$profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet.exe'
+if (-not (Test-Path $profileDotnetExe)) {
+    $profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet'
+}
+
+if ($dotnetCmd -and (Test-DotNetResolvesGlobalJson $dotnetCmd.Source $repoRoot)) {
     $dotnetPath = $dotnetCmd.Source
+} elseif ((Test-Path $profileDotnetExe) -and (Test-DotNetResolvesGlobalJson $profileDotnetExe $repoRoot)) {
+    $dotnetPath = $profileDotnetExe
 } else {
-    # PATH dotnet either does not exist or has no SDK. Try the user-profile
-    # install, which the installer may have placed there without updating PATH.
-    $profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet.exe'
-    if (-not (Test-Path $profileDotnetExe)) {
-        $profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet'
+    # Neither candidate could resolve the repository's global.json.
+    $requiredSdk = '10.0.100'
+    $globalJsonPath = Join-Path $repoRoot 'global.json'
+    if (Test-Path $globalJsonPath) {
+        try {
+            $gj = Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json
+            if ($gj.sdk.version) { $requiredSdk = $gj.sdk.version }
+        } catch { }
     }
-    if ((Test-Path $profileDotnetExe) -and (Test-DotNetHasSdk $profileDotnetExe)) {
-        $dotnetPath = $profileDotnetExe
-    } elseif ($dotnetCmd) {
-        # PATH dotnet exists but has no SDK - surface the original error from
-        # dotnet itself rather than masking it with a generic message.
-        $dotnetPath = $dotnetCmd.Source
+
+    if ($dotnetCmd) {
+        $sdks = & $dotnetCmd.Source --list-sdks 2>$null
+        $sdkList = if ($sdks) { ($sdks -join '; ') } else { 'none' }
+        throw "Incompatible .NET SDK candidate: $($dotnetCmd.Source) (installed: $sdkList). Required SDK: $requiredSdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.ps1."
+    } elseif (Test-Path $profileDotnetExe) {
+        $sdks = & $profileDotnetExe --list-sdks 2>$null
+        $sdkList = if ($sdks) { ($sdks -join '; ') } else { 'none' }
+        throw "Incompatible .NET SDK candidate: $profileDotnetExe (installed: $sdkList). Required SDK: $requiredSdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.ps1."
     } else {
-        throw 'dotnet is required. Install the .NET SDK or run scripts/bootstrap.ps1 first.'
+        throw "dotnet is required. Install .NET SDK $requiredSdk or run scripts/bootstrap.ps1 first."
     }
 }
 $dotnetDir = Split-Path -Parent $dotnetPath
