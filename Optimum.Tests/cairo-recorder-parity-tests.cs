@@ -566,6 +566,22 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void SolidSourceHintTracksCairoDefaultAndSaveRestore ()
+	{
+		AssertParity (16, 12, context => {
+			context.Rectangle (0, 0, 4, 4);
+			context.Fill (); // Cairo's default source is opaque black.
+			context.Save ();
+			context.SetSourceRGBA (.8, .2, .1, .75);
+			context.Rectangle (4, 0, 4, 4);
+			context.Fill ();
+			context.Restore ();
+			context.Rectangle (8, 0, 4, 4);
+			context.Fill ();
+		});
+	}
+
+	[Fact]
 	public void RecordingSurfaceSourceIsSnapshottedAtEachDrawWithoutMaterializing ()
 	{
 		// Pharos fixture 1: a recording surface used as a nearest/repeat pattern, redrawn

@@ -198,8 +198,9 @@ namespace Cairo
 		internal static readonly RecordedClip[] NoClips = new RecordedClip[0];
 		internal Matrix SourceCtm = new Matrix ();
 		internal IntPtr SourceSurface;
+		internal RecordedSource SourceHint = new RecordedSolidSource (0, 0, 0, 1);
 		internal RecordedClip[] Clips = NoClips;
-		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { SourceCtm = SourceCtm, SourceSurface = SourceSurface, Clips = Clips };
+		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { SourceCtm = SourceCtm, SourceSurface = SourceSurface, SourceHint = SourceHint, Clips = Clips };
 	}
 
 	/// <summary>One Cairo fill/stroke/paint with all graphics state captured at call time.</summary>
@@ -257,7 +258,8 @@ namespace Cairo
 		/// width stroke); returns null with a reason when the GPU path cannot reproduce it.
 		/// </summary>
 		internal static RecordedDrawing Capture (IntPtr cr, RecordedDrawKind kind, double alpha, RecordedClip[] clips,
-			Matrix sourceCtm, SurfaceRecorder target, out string failure, IntPtr pathContext = default, bool textDrawing = false, bool capturePath = true)
+			Matrix sourceCtm, SurfaceRecorder target, out string failure, IntPtr pathContext = default, bool textDrawing = false, bool capturePath = true,
+			RecordedSource sourceHint = null)
 		{
 			bool text = textDrawing || pathContext != IntPtr.Zero;
 			failure = null;
@@ -321,7 +323,7 @@ namespace Cairo
 					if (!drawing.FlatPath.AllFinite ()) { failure = "path-out-of-range"; return null; }
 				}
 			}
-			drawing.Source = RecordedSource.Capture (cr, sourceCtm, target, out failure);
+			drawing.Source = sourceHint ?? RecordedSource.Capture (cr, sourceCtm, target, out failure);
 			if (drawing.Source == null) return null;
 			return drawing;
 		}

@@ -149,6 +149,25 @@ transition from recording to native drawing. Successful assignments replace
 three metadata calls with one status check, one CTM read and the already-known
 surface pointer. No native-call counter or timing measurement is available.
 
+### Solid source hints
+
+The recorder graphics-state mirror now carries an immutable solid-source hint.
+New contexts start with Cairo's default opaque-black source, `SetSourceRGBA`
+stores the exact input channels, and Save/Restore clones the hint with the rest
+of the mirrored state. `RecordedDrawing.Capture` uses the hint for recorded
+draws and skips `cairo_get_source`, `cairo_pattern_status`,
+`cairo_pattern_get_type`, and `cairo_pattern_get_rgba` in that path. Assigning a
+`Pattern` or surface clears the hint, so mutable pattern data continues through
+the native snapshot path. Cairo still receives `SetSourceRGBA`, and its context
+status remains the first capture check.
+
+`SolidSourceHintTracksCairoDefaultAndSaveRestore` passed against Cairo's native
+image-surface output. The recorder parity, surface-recorder, and recorder-text
+suites passed 109/109, including that state test. This removes four
+source-inspection P/Invokes per supported draw by static call-path inspection.
+No native-call counter, cross-platform run, or timing measurement is available.
+Text, including Subpixel, is unchanged.
+
 ## Native import inventory
 
 The schema-2 manifest includes **298 active `DllImport` methods** reflected from
