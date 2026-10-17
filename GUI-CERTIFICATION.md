@@ -293,3 +293,19 @@ place the wrapper beside the API donor.
 No physical GPU certification was run for this head. Prior AMD, Intel and NVIDIA
 reports predate it. The CPU and IL gates do not qualify GPU parity or Cairo
 removal. No performance gain is claimed.
+
+### Stage E: non-pixel surface queries and invalidation (2026-10-17)
+
+`Surface.Content`, `Surface.SurfaceType`, and the `DeviceOffset` getter now query
+their native metadata without materializing a recorded display list. The
+`MarkDirty(Rectangle)` overload now matches `MarkDirty()`: while the recorder is
+`Recording`, `Sealed`, or `GpuRendered`, it skips replay because no native pixels
+were exposed for Cairo to reload. Once materialized, rectangular invalidation
+continues to call Cairo. These metadata calls still use Cairo P/Invoke and this
+stage does not remove the native library dependency.
+
+Regression tests verify metadata and rectangular invalidation preserve recording,
+sealed and GPU-rendered states, and that later CPU readback still matches Cairo.
+The full `Optimum.Tests` suite passed 1,023 with 34 skipped. Patch validation
+reported 82 source, 53 Cecil and 22 runtime donor patches with no conflicts. No
+GPU behavior changed and no performance claim is made.

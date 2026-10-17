@@ -47,6 +47,53 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
+	public void SurfaceMetadataAndRectangleMarkDirtyKeepRecordingActive()
+	{
+		using var recorded = new ImageSurface (Format.Argb32, 18, 14);
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = recorded.BeginRecording ();
+		DrawContextRectangle (recorded, 2.25, 2.5, 8, 6, .2, .7, .4, .65);
+
+		Assert.Equal (expected.Content, recorded.Content);
+		Assert.Equal (SurfaceType.Image, recorded.SurfaceType);
+		PointD offset = recorded.DeviceOffset;
+		Assert.Equal (0, offset.X);
+		Assert.Equal (0, offset.Y);
+		recorded.MarkDirty (new Rectangle (1, 1, 10, 8));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		Assert.Null (recorder.FirstMaterializationTrigger);
+
+		DrawContextRectangle (recorded, 6, 4, 9, 7, .8, .1, .2, .45);
+		DrawContextRectangle (expected, 2.25, 2.5, 8, 6, .2, .7, .4, .65);
+		DrawContextRectangle (expected, 6, 4, 9, 7, .8, .1, .2, .45);
+		Assert.Equal (expected.Data, recorded.Data);
+		Assert.Equal ("SurfaceCpuReadback.Data", recorder.FirstMaterializationTrigger);
+	}
+
+	[Fact]
+	public void RectangleMarkDirtyDoesNotMaterializeSealedOrGpuRenderedRecorder()
+	{
+		using var recorded = new ImageSurface (Format.Argb32, 16, 12);
+		using var expected = new ImageSurface (Format.Argb32, 16, 12);
+		var recorder = recorded.BeginRecording ();
+		recorder.FillRectangle (1, 1, 12, 9, .15, .55, .85, .8);
+		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (recorded.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+
+		recorded.MarkDirty (new Rectangle (0, 0, 16, 12));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (recorder.FirstMaterializationTrigger);
+		Assert.True (recorded.CommitGpuRenderedCommands ());
+		recorded.MarkDirty (new Rectangle (0, 0, 16, 12));
+		Assert.Equal (SurfaceRecordingState.GpuRendered, recorder.State);
+		Assert.Null (recorder.FirstMaterializationTrigger);
+
+		using (var context = new Context (expected)) DrawNativeRectangle (context, 1, 1, 12, 9, .15, .55, .85, .8);
+		Assert.Equal (expected.Data, recorded.Data);
+	}
+
+	[Fact]
 	public void RectangleAndColorValuesPreserveCairoClampingAndNegativeDimensions()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
@@ -409,6 +456,14 @@ public sealed class CairoSurfaceRecorderTests
 		context.SetSourceRGBA (r, g, b, a);
 		context.Rectangle (x, y, width, height);
 		context.Fill ();
+	}
+
+	static void DrawContextRectangle (ImageSurface surface, double x, double y, double width, double height,
+		double r, double g, double b, double a)
+	{
+		using var context = new Context (surface);
+		context.Antialias = Antialias.None;
+		DrawNativeRectangle (context, x, y, width, height, r, g, b, a);
 	}
 
 	static Exception RunOnSeparateThread (Action action)
