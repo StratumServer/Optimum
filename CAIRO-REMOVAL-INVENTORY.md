@@ -134,6 +134,40 @@ wrappers, FreeType parameter widths and calling convention, string encodings,
 NanoSVG variant exports, and the fixed 24-byte glyph stride. The import table
 does not include runtime dynamic loading or transitive native dependencies.
 
+## Runtime loading, package and rollback boundaries
+
+The wrapper registers a native resolver when `CairoAPI` initializes. Linux
+maps `libcairo-2` to `libcairo.so.2`; macOS tries an explicit dylib path and
+then the system loader; Windows falls through to the default resolver. The
+macOS explicit path currently combines `Assembly.Location` as if it were a
+directory, so its candidate includes `cairo-sharp.dll/Lib/...`; only the
+fallback might load the dylib. No macOS runtime run has established which
+library path succeeds.
+
+The launcher assembly resolver can load managed dependencies from its cache,
+the game root, `Mods`, and `Lib` in priority order. It has no Cairo-specific
+selection rule, and the native resolver handles OpenAL only. A stale
+`cairo-sharp.dll` in an earlier location can therefore precede the candidate
+in `Lib`. Runtime validation checks managed references but does not prove the
+selected wrapper version, helper method binding, native library origin, or
+absence of Cairo loads.
+
+The installer backs up and restores `Lib/cairo-sharp.dll`; it does not manage
+other shadow copies or native Cairo files. Standalone Linux and macOS packages
+copy the vanilla installation before overlaying Optimum assemblies, so those
+packages may still carry Cairo and its dependencies. Local inspection of
+`libSkiaSharp.so` and `libnanosvg.so` found no direct Cairo dependency, but the
+final artifacts for each RID and their transitive dependencies remain
+unverified. The ABI fixture and parity harness explicitly load native Cairo,
+so their successful execution cannot serve as a Cairo-denied runtime test.
+
+The release gate still needs final-package file/import inventories per RID,
+managed assembly resolution tests with stale wrapper copies in cache/root/
+Mods, candidate/helper validation, install/upgrade/rollback/uninstall tests,
+and startup plus GUI/map/sign/export/readback execution while every discovered
+Cairo load path is denied. Compiled third-party mods and plugins remain an
+external compatibility boundary.
+
 ## Explicit exclusions and unresolved compatibility
 
 - The tracked source inventory and locally available source trees do not reveal
