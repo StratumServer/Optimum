@@ -437,6 +437,25 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void RecordedClipCapturesMirroredFillRuleAntialiasAndTolerance ()
+	{
+		AssertParity (36, 30, context => {
+			context.Antialias = Antialias.Best;
+			context.FillRule = FillRule.EvenOdd;
+			context.Tolerance = .2;
+			context.MoveTo (3, 3);
+			context.CurveTo (29, 0, 34, 26, 17, 27);
+			context.CurveTo (1, 28, 0, 7, 3, 3);
+			context.ClosePath ();
+			context.NewSubPath ();
+			context.Arc (17, 15, 5, 0, Math.PI * 2);
+			context.Clip ();
+			context.SetSourceRGBA (.2, .6, .9, .85);
+			context.Paint ();
+		});
+	}
+
+	[Fact]
 	public void SaveRestoreKeepsSourceAntialiasAndOperatorLikeCairo ()
 	{
 		AssertParity (32, 24, context => {

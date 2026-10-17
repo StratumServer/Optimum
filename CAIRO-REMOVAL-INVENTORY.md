@@ -197,6 +197,14 @@ fewer Cairo state queries per eligible draw and ten for strokes, including the
 two removed dash queries. No native-call instrumentation, timing result, or
 cross-platform run is available.
 
+`RecordedClip.Capture` now uses the mirrored fill rule, antialias mode, and
+tolerance instead of querying those three values from Cairo when recording a
+clip. Public context getters still use Cairo. `RecordedClipCapturesMirroredFillRuleAntialiasAndTolerance`
+checks a curved even-odd clip against native Cairo output. The recorder parity,
+surface-recorder, and recorder-text suites now pass 149/149. This saves three
+native getter calls per captured clip by static inspection; no call counter or
+timing measurement was run.
+
 ## Native import inventory
 
 The schema-2 manifest includes **296 active `DllImport` methods** reflected from

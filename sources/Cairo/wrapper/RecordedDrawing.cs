@@ -159,7 +159,7 @@ namespace Cairo
 		internal RecordedClip (RecordedPath path, FillRule fillRule, Antialias antialias, double tolerance, RecordedPath flatPath = null)
 		{ Path = path; FillRule = fillRule; Antialias = antialias; Tolerance = tolerance; FlatPath = flatPath; }
 
-		internal static RecordedClip Capture (IntPtr cr, Matrix ctm, out string failure)
+		internal static RecordedClip Capture (IntPtr cr, Matrix ctm, RecordingGraphicsState state, out string failure)
 		{
 			RecordedPath path = RecordedPath.CaptureDevice (cr, ctm, out failure);
 			if (path == null) return null;
@@ -169,7 +169,7 @@ namespace Cairo
 				if (flat == null) return null;
 			}
 			if (!path.AllFinite () || (flat != null && !flat.AllFinite ())) { failure = "path-out-of-range"; return null; }
-			return new RecordedClip (path, NativeMethods.cairo_get_fill_rule (cr), NativeMethods.cairo_get_antialias (cr), NativeMethods.cairo_get_tolerance (cr), flat);
+			return new RecordedClip (path, state.FillRule, state.Antialias, state.Tolerance, flat);
 		}
 
 		internal void ApplyNative (IntPtr cr)

@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..9987ee8 100644
+index 03f9c76..4acf3de 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -175,7 +175,7 @@ index 03f9c76..9987ee8 100644
 +		void RecordClip (bool preserve)
 +		{
 +			if (recordingSurface == null || NativeMethods.cairo_status (handle) != Status.Success) return;
-+			RecordedClip clip = RecordedClip.Capture (handle, CurrentMatrix (), out string failure);
++			RecordedClip clip = RecordedClip.Capture (handle, CurrentMatrix (), recordingState, out string failure);
 +			if (clip == null) {
 +				recordingSurface.MaterializeRecorder ((preserve ? "ClipPreserve" : "Clip") + ".Unsupported:" + failure, "Recorder");
 +				return;
