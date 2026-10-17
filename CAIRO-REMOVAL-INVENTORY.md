@@ -18,7 +18,11 @@ evidence of patch inputs, not proof of runtime execution.
 868 public/protected members. The manifest itself says every row needs human
 review before ABI compatibility can be claimed. It omits some ABI facts such as
 field layout, marshalling, and calling convention, so it is not by itself a
-complete compatibility specification.
+complete compatibility specification. Its current automatic labels cover all
+868 rows: 351 `metadata`, 254 `native-only-pending`, 205
+`recordable-candidate`, 39 `measurement`, and 19 `materialization-boundary`.
+Every row still has `classificationReview: required`; these counts are an
+initial sorting aid, not a completed manual classification.
 
 ## Runtime and API responsibility inventory
 
