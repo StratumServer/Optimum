@@ -26,6 +26,12 @@ namespace Vintagestory.Client.NoObf
 			return Vintagestory.API.Config.OptimumGuiMetrics.GetMaterializationDiagnostics ();
 		}
 
+		// One entry per GPU candidate fallback reason (bounded, normalized).
+		public static Dictionary<string, long> GetCandidateFallbackDiagnostics ()
+		{
+			return Vintagestory.API.Config.OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics ();
+		}
+
 		public static void ResetRenderingDiagnostics ()
 		{
 			Vintagestory.API.Config.OptimumGuiMetrics.ResetMaterializationDiagnostics ();

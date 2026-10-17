@@ -19,6 +19,12 @@ namespace Vintagestory.API.Config
         private static long materializationAttemptCount;
         private static long materializationSuccessCount;
         private static long materializationFailureCount;
+        private const int MaxCandidateFallbackReasonKinds = 32;
+        private const int MaxCandidateFallbackReasonLength = 160;
+        private const string OtherCandidateFallbackReasons = "other-fallback-reasons";
+        private static readonly object candidateFallbackSync = new object();
+        private static readonly Dictionary<string, long> candidateFallbackReasonCounts = new Dictionary<string, long>();
+        private static long untrackedCandidateFallbackReasonCount;
 
         /// <summary>Ticks per second for the duration fields in <see cref="OptimumGuiMetricsSnapshot"/>.</summary>
         public static long TimestampFrequency => Stopwatch.Frequency;
@@ -117,6 +123,11 @@ namespace Vintagestory.API.Config
             Interlocked.Exchange(ref gpuCandidateFallbackCount, 0);
             Interlocked.Exchange(ref gpuRecordingSurfaceStartCount, 0);
             Volatile.Write(ref lastGpuCandidateFallbackReason, null);
+            lock (candidateFallbackSync)
+            {
+                candidateFallbackReasonCounts.Clear();
+                untrackedCandidateFallbackReasonCount = 0;
+            }
             Interlocked.Exchange(ref lastCompositionThreadId, 0);
             Interlocked.Exchange(ref textExtentMeasurementCount, 0);
             Interlocked.Exchange(ref textExtentMeasurementTicks, 0);
@@ -219,6 +230,55 @@ namespace Vintagestory.API.Config
             {
                 Interlocked.Increment(ref gpuCandidateFallbackCount);
                 Volatile.Write(ref lastGpuCandidateFallbackReason, fallbackReason ?? "unspecified");
+                RecordCandidateFallbackReason(fallbackReason);
+            }
+        }
+
+        /// <summary>Bounded reason key: at most 160 characters, digits collapsed so that sizes,
+        /// handles and counts in exception messages do not create new buckets.</summary>
+        internal static string NormalizeFallbackReason(string reason)
+        {
+            if (string.IsNullOrEmpty(reason)) return "unspecified";
+            var builder = new System.Text.StringBuilder(Math.Min(reason.Length, MaxCandidateFallbackReasonLength));
+            bool lastWasDigit = false;
+            foreach (char c in reason)
+            {
+                if (builder.Length >= MaxCandidateFallbackReasonLength) break;
+                bool digit = c >= '0' && c <= '9';
+                if (digit) { if (!lastWasDigit) builder.Append('#'); }
+                else builder.Append(char.IsControl(c) ? ' ' : c);
+                lastWasDigit = digit;
+            }
+            return builder.ToString();
+        }
+
+        private static void RecordCandidateFallbackReason(string reason)
+        {
+            string key = NormalizeFallbackReason(reason);
+            lock (candidateFallbackSync)
+            {
+                if (candidateFallbackReasonCounts.TryGetValue(key, out long count))
+                {
+                    candidateFallbackReasonCounts[key] = count + 1;
+                    return;
+                }
+                if (candidateFallbackReasonCounts.Count >= MaxCandidateFallbackReasonKinds)
+                {
+                    untrackedCandidateFallbackReasonCount++;
+                    return;
+                }
+                candidateFallbackReasonCounts.Add(key, 1);
+            }
+        }
+
+        /// <summary>Returns one bounded bucket per GPU candidate fallback reason since the last reset.</summary>
+        public static Dictionary<string, long> GetGpuCandidateFallbackDiagnostics()
+        {
+            lock (candidateFallbackSync)
+            {
+                var snapshot = new Dictionary<string, long>(candidateFallbackReasonCounts);
+                if (untrackedCandidateFallbackReasonCount != 0) snapshot[OtherCandidateFallbackReasons] = untrackedCandidateFallbackReasonCount;
+                return snapshot;
             }
         }
 

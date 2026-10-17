@@ -8,6 +8,30 @@ namespace Optimum.Tests;
 public class OptimumGuiMetricsTests
 {
     [Fact]
+    public void CandidateFallbackReasonsAreCountedBoundedAndReset()
+    {
+        OptimumGuiMetrics.Reset();
+        try
+        {
+            OptimumGuiMetrics.RecordGpuCandidateTexture(false, "surface-not-recording:Native");
+            OptimumGuiMetrics.RecordGpuCandidateTexture(false, "surface-not-recording:Native");
+            OptimumGuiMetrics.RecordGpuCandidateTexture(true, null);
+            OptimumGuiMetrics.RecordGpuCandidateTexture(false, "candidate-render-exception:InvalidOperationException:size 640x480");
+            OptimumGuiMetrics.RecordGpuCandidateTexture(false, "candidate-render-exception:InvalidOperationException:size 12x9");
+            var reasons = OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics();
+            Assert.Equal(2, reasons["surface-not-recording:Native"]);
+            Assert.Equal(2, reasons["candidate-render-exception:InvalidOperationException:size #x#"]);
+            for (int i = 0; i < 40; i++) OptimumGuiMetrics.RecordGpuCandidateTexture(false, "reason-" + (char)('a' + i % 26) + (char)('a' + i / 26));
+            reasons = OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics();
+            Assert.Equal(33, reasons.Count); // 32 kinds plus the overflow bucket
+            Assert.Equal(10, reasons["other-fallback-reasons"]);
+            Assert.True(OptimumGuiMetrics.NormalizeFallbackReason(new string('x', 500)).Length <= 160);
+        }
+        finally { OptimumGuiMetrics.Reset(); }
+        Assert.Empty(OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics());
+    }
+
+    [Fact]
     public void NativeTextMaterializationRevokesSkiaCertificationEvenWhenMetricsAreDisabled()
     {
         bool originalRequest = OptimumConfig.GuiGpuRenderEnabled;
