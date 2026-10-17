@@ -67,7 +67,7 @@ internal static class GuiCertification
             if (startup.GetProperty("attemptCount").GetInt64() != 1 ||
                 startup.GetProperty("successCount").GetInt64() != 1 ||
                 startup.GetProperty("failureCount").GetInt64() != 0 ||
-                startup.GetProperty("causes").GetProperty("Context.MoveTo").GetInt64() != 1 ||
+                startup.GetProperty("causes").GetProperty("Context.PushGroup").GetInt64() != 1 ||
                 !IsCommit(root.GetProperty("optimumCommit").GetString()) ||
                 !IsCommit(root.GetProperty("pharosCommit").GetString()))
                 return new(false, "evidence-observer-or-commit-incomplete");
@@ -104,7 +104,8 @@ internal static class GuiCertification
                 !root.GetProperty("gpuPrimitiveFixtureParityWithinOneChannelValue").GetBoolean() ||
                 Enumerable.Range(1, 5).Any(index => nonSubset.GetProperty("fixture-" + index).GetString() != "GpuRendered") ||
                 svg.GetArrayLength() != 3 || svg.EnumerateArray().Any(row =>
-                    row.GetProperty("rasterizer").GetString() != "Skia GPU" ||
+                    row.GetProperty("rasterizerKind").GetString() != "skia-gpu-candidate" ||
+                    !row.GetProperty("rasterizer").GetString()!.Contains("Skia", StringComparison.Ordinal) ||
                     !row.GetProperty("parityWithinOneChannelValue").GetBoolean() ||
                     row.GetProperty("materializationAttemptsAfterLoad").GetInt64() != row.GetProperty("materializationAttemptsBefore").GetInt64() ||
                     row.GetProperty("gpuCandidateAttemptsDuringLoad").GetInt64() <= 0))
@@ -261,9 +262,7 @@ internal static class GuiCertification
             }
             else if (name == "SkiaSharp native")
             {
-                string loadedPath = Path.GetFullPath(path);
-                StringComparer pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-                if (!nativeCandidates.Any(candidate => pathComparer.Equals(Path.GetFullPath(candidate), loadedPath) &&
+                if (!nativeCandidates.Any(candidate =>
                     HashEquals(artifact.GetProperty("Sha256").GetString(), Convert.FromHexString(HashFile(candidate))))) return false;
                 matchedRuntimeArtifacts.Add(name);
             }

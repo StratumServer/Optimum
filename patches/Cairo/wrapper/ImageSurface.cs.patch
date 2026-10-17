@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..c600090 100644
+index 8014c9e..4a0094e 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
 @@ -44,12 +44,13 @@ namespace Cairo {
@@ -45,13 +45,14 @@ index 8014c9e..c600090 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +101,25 @@ namespace Cairo {
+@@ -99,24 +101,26 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_data (Handle);
++				nativeDataExposed = true;
 +				MaterializeRecorder ("DataPtr", "SurfaceCpuReadback");
 +				return NativeMethods.cairo_image_surface_get_data (NativeHandleForMetadata);
  			}

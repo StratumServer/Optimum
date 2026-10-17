@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..38ca2f8 100644
+index b1b2eea..23ce9c9 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,124 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -499,7 +499,7 @@ index b1b2eea..38ca2f8 100644
 +			string probeResult = OptimumGuiGpuProbeBackend.TryRunOnce(RuntimeEnv.MainThreadId);
 +			if (probeResult != null) logger.Notification("{0}", probeResult);
 +		}
-+		if (Vintagestory.API.Client.OptimumGuiGpuProbe.GuiRenderingEnabled && !surface.IsCpuPixelBuffer)
++		if (Vintagestory.API.Client.OptimumGuiGpuProbe.GuiRenderingEnabled && !surface.IsCpuPixelBuffer && surface.Width > 0 && surface.Height > 0)
 +		{
 +			// Same min/mag filters as the vanilla upload below.
 +			bool guiGpuCandidate = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out int candidateTexture, out string candidateFailureReason, linearMin: true);
@@ -538,7 +538,7 @@ index b1b2eea..38ca2f8 100644
 +		}
 +		int candidateTexture = 0;
 +		bool guiGpuCandidate = false;
-+		if (Vintagestory.API.Client.OptimumGuiGpuProbe.GuiRenderingEnabled && !surface.IsCpuPixelBuffer)
++		if (Vintagestory.API.Client.OptimumGuiGpuProbe.GuiRenderingEnabled && !surface.IsCpuPixelBuffer && surface.Width > 0 && surface.Height > 0)
 +		{
 +			// Same min/mag filters as the vanilla upload below.
 +			guiGpuCandidate = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out candidateTexture, out string candidateFailureReason, linearMin: true);

@@ -62,6 +62,38 @@ public sealed class CairoRecorderAutoSurfaceTests
 	}
 
 	[Fact]
+	public void FirstContextCanStartRecordingAfterEligibilityChangesButRawDataExposurePreventsIt ()
+	{
+		CairoGpuPolicy.AutoRecordOverride = false;
+		var surface = new ImageSurface (Format.Argb32, 8, 8);
+		Assert.Equal (SurfaceRecordingState.Native, surface.RecordingState);
+		CairoGpuPolicy.AutoRecordOverride = true;
+		try {
+			using (surface) {
+				using (var context = new Context (surface)) {
+					Assert.Equal (SurfaceRecordingState.Recording, surface.RecordingState);
+					context.SetSourceRGBA (1, 0, 0, 1);
+					context.Paint ();
+				}
+				Assert.Equal (SurfaceRecordingState.Recording, surface.RecordingState);
+			}
+		} finally { CairoGpuPolicy.AutoRecordOverride = null; }
+
+		CairoGpuPolicy.AutoRecordOverride = false;
+		var pixelBuffer = new ImageSurface (Format.Argb32, 8, 8);
+		Marshal.WriteInt32 (pixelBuffer.DataPtr, 0, unchecked((int)0xff336699));
+		CairoGpuPolicy.AutoRecordOverride = true;
+		try {
+			using (pixelBuffer) {
+				using var context = new Context (pixelBuffer);
+				Assert.Equal (SurfaceRecordingState.Native, pixelBuffer.RecordingState);
+				context.SetSourceRGBA (1, 0, 0, 1);
+				context.Paint ();
+			}
+		} finally { CairoGpuPolicy.AutoRecordOverride = null; }
+	}
+
+	[Fact]
 	public void CpuPixelBufferUseIsNotAMaterialization ()
 	{
 		// GuiElement.getImageSurfaceFromAsset: new surface, write DataPtr, MarkDirty, upload.

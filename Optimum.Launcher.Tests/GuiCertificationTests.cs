@@ -186,7 +186,7 @@ public sealed class GuiCertificationTests : IDisposable
             optimumCommit = new string('a', 40), pharosCommit = new string('b', 40),
             gpuDecisionReasons = Array.Empty<string>(),
             materializationObserverStartupSmoke = new { passed = true, attemptCount = 1, successCount = 1, failureCount = 0,
-                causes = new System.Collections.Generic.Dictionary<string, long> { ["Context.MoveTo"] = 1 } },
+                causes = new System.Collections.Generic.Dictionary<string, long> { ["Context.PushGroup"] = 1 } },
             glStateSentinel = new { candidateAndProbeRestoredCapturedState = true, samplerBindingsSupported = true },
             runtimeProvenance = new { StagePath = Game, Complete = true, SamplerBindingsSupported = true, GlVendor = "synthetic vendor", GlRenderer = "synthetic renderer",
                 GlVersion = "4.6 synthetic", DriverVersion = "diagnostic-only", GlContextProfileMask = 2, GlContextFlags = 0, Artifacts = artifacts },
@@ -194,7 +194,7 @@ public sealed class GuiCertificationTests : IDisposable
             gpuPrimitiveFixture = "GpuRendered",
             gpuPrimitiveFixtureParityWithinOneChannelValue = true,
             gpuNonSubsetFixtureDiagnostics = Enumerable.Range(1, 5).ToDictionary(index => "fixture-" + index, _ => "GpuRendered"),
-            gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizer = "Skia GPU", parityWithinOneChannelValue = true,
+            gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizerKind = "skia-gpu-candidate", rasterizer = "Skia GPU", parityWithinOneChannelValue = true,
                 materializationAttemptsAfterLoad = 0, materializationAttemptsBefore = 0, gpuCandidateAttemptsDuringLoad = 1 }).ToArray()
         });
     }
