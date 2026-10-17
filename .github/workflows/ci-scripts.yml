@@ -40,3 +40,13 @@ jobs:
 
       - name: install-linux-staging test
         run: bash scripts/tests/install-linux-staging.sh
+
+  assemblyinfo-fixup:
+    name: AssemblyInfo Guid and ComVisible attributes resolve cleanly
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: AssemblyInfo fixup test
+        run: bash scripts/tests/bootstrap-assemblyinfo-fixup.sh
