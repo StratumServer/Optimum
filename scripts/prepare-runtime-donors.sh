@@ -22,27 +22,93 @@ runtime_root="$repo_root/.build/runtime-donors"
 #
 # Issue #105: a PATH dotnet that exists but has no SDK installed causes the
 # script to accept it immediately without checking whether any SDK is visible.
-# The user-profile dotnet at $HOME/.dotnet, which has the SDK, is never tried.
-# The fix verifies that the PATH candidate can list at least one SDK; if it
-# cannot, the script falls through to the user-profile location.
-dotnet_has_sdk() {
+#
+# Issue #138: a PATH dotnet with SDKs that cannot resolve the repository
+# global.json (for example, only SDK 9 is installed when 10.0.100 is pinned)
+# must not be accepted over a user-profile candidate that has the required SDK.
+dotnet_resolves_global_json() {
     local exe="$1"
+    local repo_dir="$2"
+    [[ -x "$exe" ]] || return 1
+
+    local dotnet_dir
+    dotnet_dir="$(cd -- "$(dirname -- "$exe")" && pwd)"
+    local old_dotnet_root="${DOTNET_ROOT:-}"
+    export DOTNET_ROOT="$dotnet_dir"
+
+    # 1. Evaluate global.json directly via dotnet --version inside repo_dir.
+    local version_output
+    if version_output="$(cd "$repo_dir" && "$exe" --version 2>/dev/null)" && [[ -n "$version_output" ]]; then
+        if [[ -n "$old_dotnet_root" ]]; then
+            export DOTNET_ROOT="$old_dotnet_root"
+        else
+            unset DOTNET_ROOT
+        fi
+        return 0
+    fi
+
+    # 2. Fallback for mock environments: inspect --list-sdks for a matching major line.
+    local required_major="10"
+    local global_json="$repo_dir/global.json"
+    if [[ -f "$global_json" ]]; then
+        local parsed_major
+        parsed_major="$(python3 -c "import json; print(json.load(open('$global_json'))['sdk']['version'].split('.')[0])" 2>/dev/null || true)"
+        if [[ -n "$parsed_major" ]]; then
+            required_major="$parsed_major"
+        fi
+    fi
+
     local sdks
-    sdks="$("$exe" --list-sdks 2>/dev/null)" || true
-    [[ -n "$sdks" ]]
+    sdks="$("$exe" --list-sdks 2>/dev/null || true)"
+
+    if [[ -n "$old_dotnet_root" ]]; then
+        export DOTNET_ROOT="$old_dotnet_root"
+    else
+        unset DOTNET_ROOT
+    fi
+
+    if [[ -n "$sdks" ]] && echo "$sdks" | grep -qE "^${required_major}\."; then
+        return 0
+    fi
+
+    return 1
+}
+
+dotnet_has_sdk() {
+    dotnet_resolves_global_json "$1" "$repo_root"
 }
 
 dotnet_cmd=""
-if command -v dotnet >/dev/null 2>&1 && dotnet_has_sdk "$(command -v dotnet)"; then
+profile_dotnet="$HOME/.dotnet/dotnet"
+if command -v dotnet >/dev/null 2>&1 && dotnet_resolves_global_json "$(command -v dotnet)" "$repo_root"; then
     dotnet_cmd="$(command -v dotnet)"
-elif [[ -x "$HOME/.dotnet/dotnet" ]] && dotnet_has_sdk "$HOME/.dotnet/dotnet"; then
-    dotnet_cmd="$HOME/.dotnet/dotnet"
-elif command -v dotnet >/dev/null 2>&1; then
-    # PATH dotnet exists but has no SDK - let it run and surface the dotnet
-    # error directly rather than replacing it with a generic message.
-    dotnet_cmd="$(command -v dotnet)"
+elif [[ -x "$profile_dotnet" ]] && dotnet_resolves_global_json "$profile_dotnet" "$repo_root"; then
+    dotnet_cmd="$profile_dotnet"
 else
-    echo "dotnet is required. Install the .NET SDK or run scripts/bootstrap.sh first." >&2
+    # Neither candidate resolved global.json.
+    required_sdk="10.0.100"
+    global_json="$repo_root/global.json"
+    if [[ -f "$global_json" ]]; then
+        parsed_sdk="$(python3 -c "import json; print(json.load(open('$global_json'))['sdk']['version'])" 2>/dev/null || true)"
+        if [[ -n "$parsed_sdk" ]]; then
+            required_sdk="$parsed_sdk"
+        fi
+    fi
+
+    if command -v dotnet >/dev/null 2>&1; then
+        path_dotnet="$(command -v dotnet)"
+        sdks="$("$path_dotnet" --list-sdks 2>/dev/null || true)"
+        sdk_list="$(echo "$sdks" | tr '\n' '; ' | sed 's/; $//')"
+        [[ -z "$sdk_list" ]] && sdk_list="none"
+        echo "Incompatible .NET SDK candidate: $path_dotnet (installed: $sdk_list). Required SDK: $required_sdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.sh first." >&2
+    elif [[ -x "$profile_dotnet" ]]; then
+        sdks="$("$profile_dotnet" --list-sdks 2>/dev/null || true)"
+        sdk_list="$(echo "$sdks" | tr '\n' '; ' | sed 's/; $//')"
+        [[ -z "$sdk_list" ]] && sdk_list="none"
+        echo "Incompatible .NET SDK candidate: $profile_dotnet (installed: $sdk_list). Required SDK: $required_sdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.sh first." >&2
+    else
+        echo "dotnet is required. Install .NET SDK $required_sdk or run scripts/bootstrap.sh first." >&2
+    fi
     exit 1
 fi
 dotnet_dir="$(cd -- "$(dirname -- "$dotnet_cmd")" && pwd)"

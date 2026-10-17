@@ -11,6 +11,8 @@ on:
       - 'scripts/install-linux-legacy.sh'
       - 'scripts/package-linux.sh'
       - 'scripts/package-linux.ps1'
+      - 'scripts/prepare-runtime-donors.sh'
+      - 'scripts/prepare-runtime-donors.ps1'
       - 'scripts/tests/**'
       - '.github/workflows/ci-scripts.yml'
   pull_request:
@@ -50,3 +52,13 @@ jobs:
 
       - name: AssemblyInfo fixup test
         run: bash scripts/tests/bootstrap-assemblyinfo-fixup.sh
+
+  donor-dotnet-selection:
+    name: Runtime donor dotnet candidate resolution
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Runtime donor candidate resolution test
+        run: bash scripts/tests/runtime-donor-dotnet-selection.sh
