@@ -254,20 +254,19 @@ namespace Cairo
 
 			FontSlant slant = cairo_toy_font_face_get_slant (face);
 			FontWeight weight = cairo_toy_font_face_get_weight (face);
-			// The current Cairo/Skia local-parity fixtures certify these regular faces only.
-			// Other weights/families stay on Cairo until their LCD masks pass the same policy.
-			if (weight != FontWeight.Normal ||
-				(!string.Equals (family, "sans-serif", StringComparison.OrdinalIgnoreCase) &&
-				 !string.Equals (family, "Montserrat", StringComparison.OrdinalIgnoreCase))) {
-				failure = "text-subpixel-font-parity";
-				return false;
-			}
+			bool supportedFace =
+				(string.Equals (family, "sans-serif", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal) ||
+				(string.Equals (family, "Montserrat", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal) ||
+				(string.Equals (family, "Lora", StringComparison.OrdinalIgnoreCase) && (weight == FontWeight.Normal || weight == FontWeight.Bold)) ||
+				(string.Equals (family, "Almendra", StringComparison.OrdinalIgnoreCase) && weight == FontWeight.Normal);
+			if (!supportedFace) { failure = "text-subpixel-font-parity"; return false; }
 			using (SKTypeface typeface = MatchCairoTypeface (family, slant, weight)) {
 				if (typeface == null) { failure = "text-font-unavailable"; return false; }
 				using (var font = new SKFont (typeface, (float)deviceSize)) {
 					font.Edging = SKFontEdging.SubpixelAntialias;
 					font.Subpixel = true;
-					font.Hinting = SKFontHinting.Full;
+					// Slight hinting passes the local LCD policy for these faces; Full did not.
+					font.Hinting = SKFontHinting.Slight;
 					using (var builder = new SKTextBlobBuilder ()) {
 						builder.AddPositionedRun (glyphs, font, positions);
 						drawing.SubpixelTextBlob = builder.Build ();

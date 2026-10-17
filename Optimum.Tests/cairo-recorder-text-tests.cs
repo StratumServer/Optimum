@@ -8,9 +8,10 @@ using Xunit;
 
 /// <summary>
 /// Text capture keeps Cairo font selection, measurement and glyph layout. Gray text remains
-/// a fill of Cairo's hinted glyph outlines. Regular sans-serif and Montserrat Subpixel text
-/// use Skia LCD glyph runs; unsupported faces materialize to Cairo exactly. The local-AA
-/// visual-parity policy applies to Skia output (flat pixels within one level, filtered edge
+/// a fill of Cairo's hinted glyph outlines. Subpixel font and weight cases that pass the
+/// local fixture matrix use Skia LCD glyph runs; unsupported faces materialize to Cairo
+/// exactly. The local-AA visual-parity policy applies to Skia output (flat pixels within
+/// one level, filtered edge
 /// difference at most 96). Native materialization must reproduce Cairo's bytes exactly.
 /// </summary>
 [Collection ("Cairo materialization metrics")]
@@ -132,13 +133,19 @@ public sealed class CairoRecorderTextTests
 	}
 
 	[Theory]
-	[InlineData ("sans-serif", FontWeight.Bold, 18.0, 2.75, 23.5)]
-	[InlineData ("Lora", FontWeight.Bold, 17.0, 4.25, 24.25)]
 	[InlineData ("Lora", FontWeight.Normal, 16.0, 4.4, 22.2)]
+	[InlineData ("Lora", FontWeight.Bold, 17.0, 4.25, 24.25)]
 	[InlineData ("Almendra", FontWeight.Normal, 18.0, 3.6, 24.0)]
-	public void UnsupportedSubpixelTextUsesExactCairoFallbackUntilSkiaParityMatches (string family, FontWeight weight, double size, double x, double y)
+	public void ExpandedSubpixelCandidatesMatchLocalAntialiasPolicy (string family, FontWeight weight, double size, double x, double y)
 	{
 		if (family != "sans-serif" && !BundledFonts.Available) return;
+		CairoRecorderParityTests.AssertLocalAaParity (240, 40, Text (family, weight, size, x, y, "LCD Fringes 0123 Wg", Antialias.Subpixel));
+	}
+
+	[Theory]
+	[InlineData ("sans-serif", FontWeight.Bold, 18.0, 2.75, 23.5)]
+	public void UnsupportedSubpixelFontStylesKeepExactCairoFallback (string family, FontWeight weight, double size, double x, double y)
+	{
 		CairoRecorderParityTests.AssertMaterializesWith (240, 40, Text (family, weight, size, x, y, "LCD Fringes 0123 Wg", Antialias.Subpixel),
 			"Recorder.ShowText.Unsupported:text-antialias-Subpixel");
 	}
