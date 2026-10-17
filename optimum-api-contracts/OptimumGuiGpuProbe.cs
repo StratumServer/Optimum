@@ -52,6 +52,30 @@ namespace Vintagestory.API.Client
 			return true;
 		}
 
+		/// <summary>
+		/// Validates the probe pattern rendered with a top-left origin, as used for GUI
+		/// candidate textures: GL row 0 holds canvas row 0, the same row order as a Cairo
+		/// surface uploaded with TexImage2D.
+		/// </summary>
+		public static bool ValidateTopLeftReadback(byte[] pixels, out string failure)
+		{
+			failure = null;
+			if (pixels == null || pixels.Length != ReadbackWidth * ReadbackHeight * 4)
+			{
+				failure = "Readback size mismatch.";
+				return false;
+			}
+			if (!Matches(pixels, 1, 1, 240, 20, 30, 255) ||
+			    !Matches(pixels, 6, 1, 20, 230, 40, 255) ||
+			    !Matches(pixels, 1, 6, 30, 40, 240, 255) ||
+			    !Matches(pixels, 6, 6, 120, 80, 40, 128))
+			{
+				failure = "Top-left readback did not match the Cairo row order, RGBA channels, or premultiplied alpha.";
+				return false;
+			}
+			return true;
+		}
+
 		private static bool Matches(byte[] pixels, int x, int y, int red, int green, int blue, int alpha)
 		{
 			int index = (y * ReadbackWidth + x) * 4;

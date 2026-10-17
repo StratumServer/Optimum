@@ -192,10 +192,28 @@ namespace Vintagestory.Client.NoObf
 								context.ResetContext(GRGlBackendState.All);
 								var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
 							using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
+							// TopLeft: canvas row 0 is texture row 0, the row order LoadCairoTexture
+							// uploads from Cairo's pixel data.
+							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888))
 								{
 									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								if (!surface.TryDrawRecordedCommands(skSurface)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+								int candidateTextureId = texture;
+								RecordedRawWriter rawWriter = (pixels, width, height) =>
+								{
+									// Store pixel-step bytes exactly (they may hold colour above alpha):
+									// finish Skia's pending work, upload raw rows, then let Skia re-read GL state.
+									skSurface.Flush();
+									context.Flush();
+									context.Submit(true);
+									NormalizePixelStore();
+									GL.ActiveTexture(TextureUnit.Texture0);
+									GL.BindTexture(TextureTarget.Texture2D, candidateTextureId);
+									GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, width, height, PixelFormat.Bgra, PixelType.UnsignedByte, pixels);
+									OpenTK.Graphics.OpenGL.ErrorCode uploadError = GL.GetError();
+									if (uploadError != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL pixel-step upload error: " + uploadError + ".");
+									context.ResetContext(GRGlBackendState.All);
+								};
+								if (!surface.TryDrawRecordedCommands(skSurface, rawWriter)) throw new InvalidOperationException("The GUI command list could not be sealed.");
 								skSurface.Flush();
 								context.Flush();
 								context.Submit(true);
@@ -352,7 +370,7 @@ namespace Vintagestory.Client.NoObf
 								context.ResetContext(GRGlBackendState.All);
 								var framebufferInfo = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
 								using (var target = new GRBackendRenderTarget(Width, Height, 0, 0, framebufferInfo))
-								using (SKSurface surface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
+								using (SKSurface surface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888))
 								{
 									if (surface == null)
 										throw new InvalidOperationException("Skia rejected the 8x8 RGBA8 framebuffer.");
@@ -406,7 +424,9 @@ namespace Vintagestory.Client.NoObf
 						failure = probeFailure;
 						return false;
 					}
-					if (!OptimumGuiGpuProbe.ValidateReadback(pixels, out failure))
+					// The probe renders with the candidate's TopLeft origin; glReadPixels row 0 must
+					// then be canvas row 0 (Cairo upload order).
+					if (!OptimumGuiGpuProbe.ValidateTopLeftReadback(pixels, out failure))
 						return false;
 					return true;
 				}

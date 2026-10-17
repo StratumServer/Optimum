@@ -45,6 +45,18 @@ namespace Optimum.Tests;
 	}
 
 	[Fact]
+	public void TopLeftReadbackRequiresCairoRowOrder()
+	{
+		// GUI candidates render with a top-left origin so that GL row 0 is canvas row 0,
+		// like a Cairo surface uploaded with TexImage2D. A bottom-left render is flipped.
+		byte[] bottomLeft = CreateExpectedReadback();
+		byte[] topLeft = new byte[bottomLeft.Length];
+		for (int y = 0; y < 8; y++) Array.Copy(bottomLeft, (7 - y) * 32, topLeft, y * 32, 32);
+		Assert.True(OptimumGuiGpuProbe.ValidateTopLeftReadback(topLeft, out string failure), failure);
+		Assert.False(OptimumGuiGpuProbe.ValidateTopLeftReadback(bottomLeft, out _));
+	}
+
+	[Fact]
 	public void ProbeCanBeDisabledWithoutAContext()
 	{
 		bool original = OptimumGuiGpuProbe.Enabled;

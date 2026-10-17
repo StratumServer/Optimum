@@ -177,6 +177,41 @@ public sealed class CairoRecorderPixelStepTests
 		Assert.True (tight.Length >= width * height * 4);
 	}
 
+	[Fact]
+	public void RawWriterReceivesDemultipliedBytesUnchangedInCairoRowOrder ()
+	{
+		// Fixture 2 on the GPU: DemulAlpha leaves colour above alpha. A premultiplied image
+		// write-back may clamp or drop such pixels, and a bottom-left target would flip the
+		// rows; the raw writer must receive exactly the native bytes, top row first.
+		Action<Context, ImageSurface> draw = (context, surface) => {
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (.16, .58, .92, .75);
+			context.Rectangle (2.25, 1.5, 11, 9);
+			context.Fill ();
+			context.Dispose ();
+			SurfaceTransformDemulAlpha.DemulAlpha (surface);
+		};
+		byte[] expected = CairoRecorderParityTests.RenderNative (16, 12, draw);
+		const int pixel = (1 * 16 + 2) * 4;
+		Assert.Equal (new byte[] { 176, 160, 43, 20 }, expected[pixel..(pixel + 4)]);
+		using var surface = new ImageSurface (Format.Argb32, 16, 12);
+		surface.BeginRecording ();
+		using (var context = new Context (surface)) draw (context, surface);
+		byte[] written = null;
+		using SKSurface target = SKSurface.Create (new SKImageInfo (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul));
+		Assert.True (surface.TryDrawRecordedCommands (target, (pixels, width, height) => {
+			written = new byte[width * height * 4];
+			System.Runtime.InteropServices.Marshal.Copy (pixels, written, 0, written.Length);
+		}));
+		Assert.Equal (expected, written);
+
+		// Model of the failure: a premultiplied write-back that clamps colour to alpha.
+		byte[] clamped = (byte[])expected.Clone ();
+		for (int i = 0; i < clamped.Length; i += 4)
+			for (int c = 0; c < 3; c++) clamped[i + c] = Math.Min (clamped[i + c], clamped[i + 3]);
+		Assert.NotEqual (expected, clamped);
+	}
+
 	static void RoundRectangle (Context context, double x, double y, double width, double height, double radius)
 	{
 		double degrees = Math.PI / 180.0;

@@ -49,8 +49,12 @@ namespace Cairo
 		// Rendered images of nested recording sources, shared by one root replay and
 		// disposed when it ends. GPU images never outlive the candidate's GRContext.
 		internal readonly Dictionary<SurfaceRecorderSnapshot, SKImage> Sources;
-		internal RecordedSkiaReplay (SKSurface target, int width, int height, int depth, Dictionary<SurfaceRecorderSnapshot, SKImage> sources)
-		{ Target = target; Width = width; Height = height; Depth = depth; Sources = sources; }
+		/// <summary>Optional raw writer for the root target: receives Cairo-layout BGRA rows
+		/// (top row first, stride = width * 4) and stores them unchanged, bypassing Skia's
+		/// premultiplied image path. Null for raster and nested targets.</summary>
+		internal readonly RecordedRawWriter RawWriter;
+		internal RecordedSkiaReplay (SKSurface target, int width, int height, int depth, Dictionary<SurfaceRecorderSnapshot, SKImage> sources, RecordedRawWriter rawWriter = null)
+		{ Target = target; Width = width; Height = height; Depth = depth; Sources = sources; RawWriter = rawWriter; }
 		internal SKCanvas Canvas => Target.Canvas;
 
 		internal SKSurface CreateOffscreen (int width, int height)
@@ -73,6 +77,12 @@ namespace Cairo
 				: new byte[checked(Width * Height * 4)];
 			fixed (byte* data = pixels) {
 				operation ((IntPtr)data, Width, Height, Width * 4);
+				if (RawWriter != null) {
+					// Pixel steps can leave colour above alpha (DemulAlpha). Store the bytes as
+					// they are instead of uploading them as a premultiplied Skia image.
+					RawWriter ((IntPtr)data, Width, Height);
+					return;
+				}
 				using (SKImage image = SKImage.FromPixelCopy (info, (IntPtr)data, Width * 4))
 				using (var paint = new SKPaint { BlendMode = SKBlendMode.Src, IsAntialias = false }) {
 					if (image == null) throw new InvalidOperationException ("Skia could not create the pixel operation image.");
@@ -109,6 +119,9 @@ namespace Cairo
 
 		static byte Canary (int index) => (byte)(index * 31 + 0x5A);
 	}
+
+	/// <summary>Stores tightly packed Cairo-layout BGRA rows into the render target unchanged.</summary>
+	internal delegate void RecordedRawWriter (IntPtr pixels, int width, int height);
 
 	/// <summary>A pixel operation over Cairo's native-endian premultiplied ARGB32 layout.</summary>
 	internal delegate void RecordedPixelOperation (IntPtr pixels, int width, int height, int stride);
@@ -441,14 +454,14 @@ namespace Cairo
 		}
 		internal int Count => commands.Length;
 
-		internal void DrawTo (SKSurface target)
+		internal void DrawTo (SKSurface target, RecordedRawWriter rawWriter = null)
 		{
 			var sources = new Dictionary<SurfaceRecorderSnapshot, SKImage> ();
-			try { DrawTo (target, 0, sources); }
+			try { DrawTo (target, 0, sources, rawWriter); }
 			finally { foreach (SKImage image in sources.Values) image.Dispose (); }
 		}
 
-		void DrawTo (SKSurface target, int depth, Dictionary<SurfaceRecorderSnapshot, SKImage> sources)
+		void DrawTo (SKSurface target, int depth, Dictionary<SurfaceRecorderSnapshot, SKImage> sources, RecordedRawWriter rawWriter = null)
 		{
 			if (target == null) throw new ArgumentNullException (nameof (target));
 			if (depth > RecordedDrawing.MaxSourceDepth) throw new NotSupportedException ("Recorded surface sources are nested too deeply.");
@@ -457,7 +470,7 @@ namespace Cairo
 			try {
 				canvas.ResetMatrix ();
 				canvas.Clear (SKColors.Transparent);
-				var replay = new RecordedSkiaReplay (target, Width, Height, depth, sources);
+				var replay = new RecordedSkiaReplay (target, Width, Height, depth, sources, rawWriter);
 				for (int i = 0; i < commands.Length; i++) commands[i].DrawSkia (replay);
 			} finally { canvas.RestoreToCount (save); }
 		}

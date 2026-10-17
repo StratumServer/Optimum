@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..0cf03e7 100644
+index 6f7730e..72c0640 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,10 +32,13 @@
@@ -196,13 +196,13 @@ index 6f7730e..0cf03e7 100644
 +			return RecordCommand ("SvgPicture", () => new RecordedPicture (picture, x, y, nativeReplay));
 +		}
 +
-+		internal bool TryDrawRecordedCommands (SKSurface target)
++		internal bool TryDrawRecordedCommands (SKSurface target, RecordedRawWriter rawWriter = null)
 +		{
 +			SurfaceRecorderSnapshot snapshot;
 +			lock (recordingSync) {
 +				if (recorder == null || !recorder.TrySeal (out snapshot)) return false;
 +			}
-+			snapshot.DrawTo (target);
++			snapshot.DrawTo (target, rawWriter);
 +			return true;
 +		}
 +
