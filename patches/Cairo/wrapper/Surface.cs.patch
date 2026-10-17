@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..cb3d680 100644
+index 6f7730e..a935fe4 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,10 +32,13 @@
@@ -412,7 +412,48 @@ index 6f7730e..cb3d680 100644
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
  			switch (st) {
  			case SurfaceType.Image:
-@@ -94,10 +471,11 @@ namespace Cairo
+@@ -87,17 +464,51 @@ namespace Cairo
+ 		}
+ 
+ 
+         public static int StrideForWidth(Cairo.Format format, int width)
+         {
+-            return NativeMethods.cairo_format_stride_for_width(format, width);
++            if (width < 0) return -1;
++
++            int bitsPerPixel;
++            switch ((int)format) {
++            case 0: // ARGB32
++            case 1: // RGB24
++            case 5: // RGB30
++                bitsPerPixel = 32;
++                break;
++            case 2: // A8
++                bitsPerPixel = 8;
++                break;
++            case 3: // A1
++                bitsPerPixel = 1;
++                break;
++            case 4: // RGB16_565
++                bitsPerPixel = 16;
++                break;
++            case 6: // RGB96F
++                bitsPerPixel = 96;
++                break;
++            case 7: // RGBA128F
++                bitsPerPixel = 128;
++                break;
++            default:
++                return -1;
++            }
++
++            // Cairo rejects widths whose unaligned bit count could overflow its
++            // signed stride calculation, even when the final aligned value fits.
++            if (width >= (int.MaxValue - 7) / bitsPerPixel) return -1;
++
++            int bytes = (width * bitsPerPixel + 7) / 8;
++            return (bytes + 3) & ~3;
+         }
  
  
  		public Cairo.Surface CreateSimilar (
@@ -424,7 +465,7 @@ index 6f7730e..cb3d680 100644
  
  			return new Cairo.Surface (p, true);
  		}
-@@ -108,10 +486,11 @@ namespace Cairo
+@@ -108,10 +519,11 @@ namespace Cairo
  		}
  
  		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
@@ -436,7 +477,7 @@ index 6f7730e..cb3d680 100644
  		}
  
  		public void Dispose ()
-@@ -123,54 +502,103 @@ namespace Cairo
+@@ -123,54 +535,103 @@ namespace Cairo
  			}
  		}
  
@@ -545,7 +586,7 @@ index 6f7730e..cb3d680 100644
  
  		public PointD DeviceOffset {
  			get {
-@@ -180,29 +608,33 @@ namespace Cairo
+@@ -180,29 +641,33 @@ namespace Cairo
  				return new PointD (x, y);
  			}
  
@@ -579,7 +620,7 @@ index 6f7730e..cb3d680 100644
  		}
  
  		public Content Content {
-@@ -219,9 +651,10 @@ namespace Cairo
+@@ -219,9 +684,10 @@ namespace Cairo
  			}
  		}
  

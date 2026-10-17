@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedUtc": "2026-10-17T22:19:28.7962549+00:00",
+  "generatedUtc": "2026-10-17T22:37:40.5718076+00:00",
   "generatorRuntime": ".NET 10.0.12",
   "generatorOs": "Ubuntu 26.04.1 LTS",
   "generatorArchitecture": "X64",
@@ -9,7 +9,7 @@
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 82,
   "publicAndProtectedMemberCount": 871,
-  "nativeImportCount": 299,
+  "nativeImportCount": 298,
   "classificationNote": "Automated initial classification and reflection ABI metadata; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -23024,43 +23024,6 @@
         "import": {
           "library": "libcairo-2",
           "entryPoint": "cairo_win32_scaled_font_get_metrics_factor",
-          "callingConvention": "Cdecl",
-          "charSet": "None",
-          "exactSpelling": false,
-          "setLastError": false,
-          "preserveSig": true
-        }
-      }
-    },
-    {
-      "declaringType": "Cairo.NativeMethods",
-      "signature": "System.Int32 cairo_format_stride_for_width(Cairo.Format, System.Int32)",
-      "importReview": "required",
-      "abi": {
-        "accessibility": "assembly",
-        "isStatic": true,
-        "isVirtual": false,
-        "isAbstract": false,
-        "isFinal": false,
-        "implementationFlags": "PreserveSig",
-        "parameters": [
-          {
-            "signature": "Cairo.Format",
-            "isIn": false,
-            "isOut": false,
-            "marshalAs": null
-          },
-          {
-            "signature": "System.Int32",
-            "isIn": false,
-            "isOut": false,
-            "marshalAs": null
-          }
-        ],
-        "returnMarshalAs": null,
-        "import": {
-          "library": "libcairo-2",
-          "entryPoint": "cairo_format_stride_for_width",
           "callingConvention": "Cdecl",
           "charSet": "None",
           "exactSpelling": false,

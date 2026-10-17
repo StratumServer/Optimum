@@ -131,25 +131,25 @@ and zero conflicts.
 
 ## Native import inventory
 
-The schema-2 manifest includes **299 active `DllImport` methods** reflected from
-the current assembly: 269 for `libcairo-2`, 13 for `freetype6`, 9 for
-`libfontconfig.so.1`, and 8 for `nanosvg`. The 269 Cairo imports comprise 261
+The schema-2 manifest includes **298 active `DllImport` methods** reflected from
+the current assembly: 268 for `libcairo-2`, 13 for `freetype6`, 9 for
+`libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 260
 methods in `Cairo.NativeMethods` and 8 separate declarations in `RecordedText`.
 Every `nativeImports` row is marked for manual native-header review; reflection
 records declarations but does not verify that their native signatures are
-correct. A separate source-to-manifest pass matched all **299/299 active
+correct. A separate source-to-manifest pass matched all **298/298 active
 declarations** by declaring type, return/parameter types, library, entrypoint,
 calling convention, direction and marshal attributes. The 629 parameters
 contain 64 `IsOut` and 0 `IsIn` flags; the reflection metadata preserves these
-separately from by-reference type syntax. The manifest contains 286 `Cdecl`
+separately from by-reference type syntax. The manifest contains 285 `Cdecl`
 and 13 `Winapi` imports. This proves inventory correspondence, not native ABI
 correctness.
 
-`Cairo/NativeMethods.cs` has 330 raw `extern`/`DllImport` matches, but 69 are in
-comments. After stripping comments there are **261 active declarations**, with
-260 unique names because `cairo_image_surface_create_for_data` has two
-overloads. Reflection reports the same 261 active `NativeMethods` imports.
-Source search finds 235 unique names called as `NativeMethods.cairo_*`; six
+`Cairo/NativeMethods.cs` has 328 raw `extern`/`DllImport` matches, but 69 are in
+comments. After stripping comments there are **260 active declarations**, with
+259 unique names because `cairo_image_surface_create_for_data` has two
+overloads. Reflection reports the same 260 active `NativeMethods` imports.
+Source search finds 234 unique names called as `NativeMethods.cairo_*`; six
 additional names have equivalent direct imports in `RecordedText`. The other
 19 unique active Cairo entrypoints have no caller found in the available
 wrapper/consumer source. Those 19 may be removable internal declarations, but
@@ -160,6 +160,22 @@ items, Cairo boolean and `unsigned long` widths, status values discarded by
 wrappers, FreeType parameter widths and calling convention, string encodings,
 NanoSVG variant exports, and the fixed 24-byte glyph stride. The import table
 does not include runtime dynamic loading or transitive native dependencies.
+
+### Managed image stride calculation
+
+`Surface.StrideForWidth` now calculates the same four-byte-aligned row stride
+without calling `cairo_format_stride_for_width`. It accepts Cairo image formats
+0 through 7, including the floating-point formats present in Cairo 1.18, and
+returns `-1` for negative widths, overflow widths, and invalid formats. The
+unused `NativeMethods` import was removed. This removes one Cairo import while
+preserving the public method signature and `CreateForImage` behavior for the
+formats supported by Cairo 1.18.4.
+
+The 29 focused `CairoSurfaceStrideTests` passed. I compared the managed formula
+against the installed Cairo 1.18.4 native function for 248 format/width pairs,
+including negative values and overflow boundaries, with zero mismatches. The
+native comparison is local Linux evidence; no Windows or macOS execution was
+run for this pure integer calculation.
 
 ## Runtime loading, package and rollback boundaries
 
