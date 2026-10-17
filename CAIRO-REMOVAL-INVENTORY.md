@@ -168,6 +168,25 @@ source-inspection P/Invokes per supported draw by static call-path inspection.
 No native-call counter, cross-platform run, or timing measurement is available.
 Text, including Subpixel, is unchanged.
 
+### Mirrored drawing style
+
+`RecordingGraphicsState` now mirrors the Cairo defaults and wrapper setters for
+operator, antialias, fill rule, tolerance, line width, cap, join, and miter
+limit. Its Save/Restore snapshot includes these values. `RecordedDrawing.Capture`
+uses that state after the native context status check instead of querying Cairo
+for each draw. Public getters remain native, and raw context-handle access
+materializes recording before callers can make untracked changes. Dash arrays
+and offsets still come from `cairo_get_dash_count` and `cairo_get_dash` on
+strokes.
+
+The recorder parity, surface-recorder, and recorder-text suites passed 110/110.
+The new `RecorderMirroredDrawingStateMatchesCairoAfterSaveRestore` case checks
+operator, fill rule, tolerance, antialias, stroke width/cap/join/miter and
+restoration against Cairo image-surface output. Static inspection shows four
+fewer Cairo state queries per eligible draw and eight for strokes, excluding
+dash queries. No native-call instrumentation, timing result, or cross-platform
+run is available.
+
 ## Native import inventory
 
 The schema-2 manifest includes **298 active `DllImport` methods** reflected from

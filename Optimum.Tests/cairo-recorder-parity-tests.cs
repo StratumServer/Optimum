@@ -582,6 +582,42 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void RecorderMirroredDrawingStateMatchesCairoAfterSaveRestore ()
+	{
+		AssertParity (28, 20, context => {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.15, .5, .85, .8);
+			context.Rectangle (1.25, 1.5, 18.5, 14.25);
+			context.Fill (); // Default operator, fill rule, and tolerance.
+			context.MoveTo (2, 18);
+			context.CurveTo (8, 1, 19, 19, 26, 2);
+			context.Stroke (); // Default width, cap, join, and miter limit.
+			context.Operator = Operator.Over;
+			context.FillRule = FillRule.Winding;
+			context.Tolerance = .1;
+			context.LineWidth = 2;
+			context.LineCap = LineCap.Butt;
+			context.LineJoin = LineJoin.Miter;
+			context.MiterLimit = 10;
+			context.Save ();
+			context.Operator = Operator.Source;
+			context.FillRule = FillRule.EvenOdd;
+			context.Tolerance = .25;
+			context.LineWidth = 3.5;
+			context.LineCap = LineCap.Round;
+			context.LineJoin = LineJoin.Bevel;
+			context.MiterLimit = 2;
+			context.Rectangle (1.25, 1.5, 18.5, 14.25);
+			context.Rectangle (5.25, 5.5, 6.5, 5.25);
+			context.Fill ();
+			context.Restore ();
+			context.MoveTo (2, 18);
+			context.CurveTo (8, 1, 19, 19, 26, 2);
+			context.Stroke ();
+		});
+	}
+
+	[Fact]
 	public void RecordingSurfaceSourceIsSnapshottedAtEachDrawWithoutMaterializing ()
 	{
 		// Pharos fixture 1: a recording surface used as a nearest/repeat pattern, redrawn

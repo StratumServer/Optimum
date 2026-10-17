@@ -199,8 +199,18 @@ namespace Cairo
 		internal Matrix SourceCtm = new Matrix ();
 		internal IntPtr SourceSurface;
 		internal RecordedSource SourceHint = new RecordedSolidSource (0, 0, 0, 1);
+		internal Operator Operator = Operator.Over;
+		internal Antialias Antialias = Antialias.Default;
+		internal FillRule FillRule = FillRule.Winding;
+		internal double Tolerance = 0.1;
+		internal double LineWidth = 2;
+		internal LineCap LineCap = LineCap.Butt;
+		internal LineJoin LineJoin = LineJoin.Miter;
+		internal double MiterLimit = 10;
 		internal RecordedClip[] Clips = NoClips;
-		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { SourceCtm = SourceCtm, SourceSurface = SourceSurface, SourceHint = SourceHint, Clips = Clips };
+		internal RecordingGraphicsState Clone () => new RecordingGraphicsState { SourceCtm = SourceCtm, SourceSurface = SourceSurface,
+			SourceHint = SourceHint, Operator = Operator, Antialias = Antialias, FillRule = FillRule, Tolerance = Tolerance,
+			LineWidth = LineWidth, LineCap = LineCap, LineJoin = LineJoin, MiterLimit = MiterLimit, Clips = Clips };
 	}
 
 	/// <summary>One Cairo fill/stroke/paint with all graphics state captured at call time.</summary>
@@ -259,7 +269,7 @@ namespace Cairo
 		/// </summary>
 		internal static RecordedDrawing Capture (IntPtr cr, RecordedDrawKind kind, double alpha, RecordedClip[] clips,
 			Matrix sourceCtm, SurfaceRecorder target, out string failure, IntPtr pathContext = default, bool textDrawing = false, bool capturePath = true,
-			RecordedSource sourceHint = null)
+			RecordingGraphicsState state = null)
 		{
 			bool text = textDrawing || pathContext != IntPtr.Zero;
 			failure = null;
@@ -267,10 +277,10 @@ namespace Cairo
 			var drawing = new RecordedDrawing {
 				Kind = kind,
 				Clips = clips ?? NoClips,
-				Operator = NativeMethods.cairo_get_operator (cr),
-				Antialias = NativeMethods.cairo_get_antialias (cr),
-				FillRule = NativeMethods.cairo_get_fill_rule (cr),
-				Tolerance = NativeMethods.cairo_get_tolerance (cr),
+				Operator = state == null ? NativeMethods.cairo_get_operator (cr) : state.Operator,
+				Antialias = state == null ? NativeMethods.cairo_get_antialias (cr) : state.Antialias,
+				FillRule = state == null ? NativeMethods.cairo_get_fill_rule (cr) : state.FillRule,
+				Tolerance = state == null ? NativeMethods.cairo_get_tolerance (cr) : state.Tolerance,
 				Ctm = new Matrix (),
 				Alpha = alpha
 			};
@@ -289,14 +299,14 @@ namespace Cairo
 				if (alpha <= 0) return null;
 			}
 			if (kind == RecordedDrawKind.Stroke) {
-				drawing.LineWidth = NativeMethods.cairo_get_line_width (cr);
+				drawing.LineWidth = state == null ? NativeMethods.cairo_get_line_width (cr) : state.LineWidth;
 				if (!(drawing.LineWidth > 0)) return null; // Cairo strokes nothing at zero width.
 				// Aliased strokes produce arbitrary outlines whose centre sampling Skia does not
 				// reproduce exactly.
 				if (drawing.Antialias == Antialias.None) { failure = "aliased-geometry"; return null; }
-				drawing.LineCap = NativeMethods.cairo_get_line_cap (cr);
-				drawing.LineJoin = NativeMethods.cairo_get_line_join (cr);
-				drawing.MiterLimit = NativeMethods.cairo_get_miter_limit (cr);
+				drawing.LineCap = state == null ? NativeMethods.cairo_get_line_cap (cr) : state.LineCap;
+				drawing.LineJoin = state == null ? NativeMethods.cairo_get_line_join (cr) : state.LineJoin;
+				drawing.MiterLimit = state == null ? NativeMethods.cairo_get_miter_limit (cr) : state.MiterLimit;
 				int dashCount = NativeMethods.cairo_get_dash_count (cr);
 				if (dashCount > 0) {
 					IntPtr buffer = Marshal.AllocHGlobal (checked(dashCount * sizeof (double)));
@@ -323,7 +333,7 @@ namespace Cairo
 					if (!drawing.FlatPath.AllFinite ()) { failure = "path-out-of-range"; return null; }
 				}
 			}
-			drawing.Source = sourceHint ?? RecordedSource.Capture (cr, sourceCtm, target, out failure);
+			drawing.Source = state?.SourceHint ?? RecordedSource.Capture (cr, sourceCtm, target, out failure);
 			if (drawing.Source == null) return null;
 			return drawing;
 		}
