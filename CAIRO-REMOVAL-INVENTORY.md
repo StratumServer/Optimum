@@ -14,15 +14,23 @@ ignored source trees for `VintagestoryApi`, `VSEssentials`, `VSSurvivalMod`,
 `VSCreativeMod`, and `build/VintagestoryLib`. Donors and generated snapshots are
 evidence of patch inputs, not proof of runtime execution.
 
-`tools/Cairo.ParityHarness/cairo-api-manifest.json` lists 81 exported types and
-868 public/protected members. The manifest itself says every row needs human
-review before ABI compatibility can be claimed. It omits some ABI facts such as
-field layout, marshalling, and calling convention, so it is not by itself a
-complete compatibility specification. Its current automatic labels cover all
-868 rows: 351 `metadata`, 254 `native-only-pending`, 205
-`recordable-candidate`, 39 `measurement`, and 19 `materialization-boundary`.
-Every row still has `classificationReview: required`; these counts are an
-initial sorting aid, not a completed manual classification.
+`tools/Cairo.ParityHarness/cairo-api-manifest.json` schema 2 lists 82 exported
+types and 871 public/protected members from the current branch assembly. The
+previous schema-1 file was stale: it had 81 types/868 members and omitted
+`Cairo.OptimumSkiaTextMetrics` plus two methods on it and the protected
+`Surface.nativeDataExposed` field. The generator now records member accessibility,
+method flags, parameter/return `MarshalAs`, public `DllImport` details, type
+layout and instance field offsets where reflection supports them. This run used
+.NET 10.0.12, Ubuntu 26.04.1 x64, and 8-byte pointers. It records environment
+because layout may differ by architecture.
+
+The 871 automatic labels are 351 `metadata`, 254 `native-only-pending`, 205
+`recordable-candidate`, 41 `measurement`, and 20 `materialization-boundary`.
+Every row still has `classificationReview: required`; the labels and reflected
+facts are an initial sorting aid, not a completed manual classification or a
+cross-platform ABI proof. All 11 exported value structs have a reported
+marshaled size and instance-field offsets on this host. Compiled native layouts
+and pointer behavior still require per-platform evidence.
 
 ## Runtime and API responsibility inventory
 

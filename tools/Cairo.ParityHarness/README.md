@@ -12,6 +12,14 @@ Generate the Cairo assembly's exported type and public/protected member inventor
 dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --api-manifest tools/Cairo.ParityHarness/cairo-api-manifest.json
 ```
 
+Schema 2 records reflected member accessibility, method flags, parameter and
+return marshalling attributes, public native-import metadata, and each exported
+type's layout and instance-field offsets where the runtime can report them. The
+manifest records the generator OS, runtime, process architecture, and pointer
+size because reflected layouts can be architecture-specific. Automatically
+collected ABI data still needs manual review and does not prove compatibility
+with native pointer consumers.
+
 When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
 
 ```bash

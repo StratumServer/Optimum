@@ -588,7 +588,8 @@ internal static class Program
                     declaringType = type.FullName,
                     signature = MemberSignature(member),
                     classification = Classify(member),
-                    classificationReview = "required"
+                    classificationReview = "required",
+                    abi = DescribeMemberAbi(member)
                 });
             }
         }
@@ -596,24 +597,149 @@ internal static class Program
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         File.WriteAllText(path, JsonSerializer.Serialize(new
         {
-            schemaVersion = 1,
+            schemaVersion = 2,
             generatedUtc = DateTimeOffset.UtcNow,
+            generatorRuntime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+            generatorOs = System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+            generatorArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+            pointerSize = IntPtr.Size,
             assemblyIdentity = assembly.GetName().FullName,
             targetFramework = assembly.GetCustomAttribute<System.Runtime.Versioning.TargetFrameworkAttribute>()?.FrameworkName,
             exportedTypeCount = exportedTypes.Length,
             publicAndProtectedMemberCount = members.Count,
-            classificationNote = "Automated initial classification; every row requires human review before ABI compatibility is claimed.",
+            classificationNote = "Automated initial classification and reflection ABI metadata; every row requires human review before ABI compatibility is claimed.",
             types = exportedTypes.Select(type => new
             {
                 name = type.FullName,
                 kind = type.IsEnum ? "enum" : type.IsValueType ? "struct" : type.IsInterface ? "interface" : "class",
                 baseType = type.BaseType?.FullName,
-                enumValues = type.IsEnum ? Enum.GetNames(type).Select(name => new { name, value = Convert.ToInt64(Enum.Parse(type, name)) }) : null
+                enumValues = type.IsEnum ? Enum.GetNames(type).Select(name => new { name, value = Convert.ToInt64(Enum.Parse(type, name)) }) : null,
+                layout = DescribeTypeLayout(type)
             }),
             members
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Wrote public/protected ABI inventory: {exportedTypes.Length} types, {members.Count} members, assembly {assembly.GetName().FullName}.");
     }
+
+    private static object DescribeTypeLayout(Type type)
+    {
+        var layout = type.StructLayoutAttribute;
+        var fields = type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .OrderBy(field => field.MetadataToken)
+            .Select(field => new
+            {
+                name = field.Name,
+                fieldType = field.FieldType.FullName,
+                offset = type.IsValueType && !type.IsEnum && layout?.Value is LayoutKind.Sequential or LayoutKind.Explicit
+                    ? TryGetFieldOffset(type, field.Name)
+                    : null,
+                marshalAs = DescribeMarshalAs(field.GetCustomAttribute<MarshalAsAttribute>())
+            }).ToArray();
+        return new
+        {
+            kind = layout?.Value.ToString(),
+            pack = layout?.Pack,
+            size = layout?.Size,
+            charSet = layout?.CharSet.ToString(),
+            marshaledSize = type.IsValueType && !type.IsEnum ? TryGetMarshaledSize(type) : null,
+            fields
+        };
+    }
+
+    private static int? TryGetFieldOffset(Type type, string fieldName)
+    {
+        try { return checked((int)Marshal.OffsetOf(type, fieldName)); }
+        catch (ArgumentException) { return null; }
+        catch (TypeLoadException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+
+    private static int? TryGetMarshaledSize(Type type)
+    {
+        try { return Marshal.SizeOf(type); }
+        catch (ArgumentException) { return null; }
+        catch (TypeLoadException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
+
+    private static object? DescribeMemberAbi(MemberInfo member) => member switch
+    {
+        MethodBase method => new
+        {
+            accessibility = Accessibility(method),
+            isStatic = method.IsStatic,
+            isVirtual = method.IsVirtual,
+            isAbstract = method.IsAbstract,
+            isFinal = method.IsFinal,
+            implementationFlags = method.GetMethodImplementationFlags().ToString(),
+            parameters = method.GetParameters().Select(parameter => new
+            {
+                signature = ParameterSignature(parameter),
+                isIn = parameter.IsIn,
+                isOut = parameter.IsOut,
+                marshalAs = DescribeMarshalAs(parameter.GetCustomAttribute<MarshalAsAttribute>())
+            }),
+            returnMarshalAs = method is MethodInfo methodInfo
+                ? DescribeMarshalAs(methodInfo.ReturnParameter.GetCustomAttribute<MarshalAsAttribute>())
+                : null,
+            import = method.GetCustomAttribute<DllImportAttribute>() is DllImportAttribute import ? new
+            {
+                library = import.Value,
+                entryPoint = import.EntryPoint,
+                callingConvention = import.CallingConvention.ToString(),
+                charSet = import.CharSet.ToString(),
+                exactSpelling = import.ExactSpelling,
+                setLastError = import.SetLastError,
+                preserveSig = import.PreserveSig
+            } : null
+        },
+        FieldInfo field => new
+        {
+            accessibility = Accessibility(field),
+            isStatic = field.IsStatic,
+            isInitOnly = field.IsInitOnly,
+            isLiteral = field.IsLiteral,
+            marshalAs = DescribeMarshalAs(field.GetCustomAttribute<MarshalAsAttribute>())
+        },
+        PropertyInfo property => new
+        {
+            accessors = property.GetAccessors(nonPublic: true).Where(IsPublicOrProtected).Select(accessor => new
+            {
+                name = accessor.Name,
+                accessibility = Accessibility(accessor),
+                isStatic = accessor.IsStatic,
+                isVirtual = accessor.IsVirtual
+            }),
+            indexParameters = property.GetIndexParameters().Select(parameter => new
+            {
+                signature = ParameterSignature(parameter),
+                marshalAs = DescribeMarshalAs(parameter.GetCustomAttribute<MarshalAsAttribute>())
+            })
+        },
+        EventInfo eventInfo => new
+        {
+            accessors = new[] { eventInfo.AddMethod, eventInfo.RemoveMethod, eventInfo.RaiseMethod }
+                .Where(accessor => accessor is not null && IsPublicOrProtected(accessor))
+                .Select(accessor => new { name = accessor!.Name, accessibility = Accessibility(accessor), isStatic = accessor.IsStatic })
+        },
+        _ => null
+    };
+
+    private static string Accessibility(MethodBase method) => method.IsPublic ? "public" : method.IsFamily ? "family" : "family-or-assembly";
+    private static string Accessibility(FieldInfo field) => field.IsPublic ? "public" : field.IsFamily ? "family" : "family-or-assembly";
+
+    private static object? DescribeMarshalAs(MarshalAsAttribute? attribute) => attribute is null ? null : new
+    {
+        unmanagedType = attribute.Value.ToString(),
+        arraySubType = attribute.ArraySubType.ToString(),
+        sizeParamIndex = attribute.SizeParamIndex,
+        sizeConst = attribute.SizeConst,
+        iidParameterIndex = attribute.IidParameterIndex,
+        safeArraySubType = attribute.SafeArraySubType.ToString(),
+        marshalType = attribute.MarshalType,
+        marshalTypeRef = attribute.MarshalTypeRef?.FullName,
+        marshalCookie = attribute.MarshalCookie
+    };
 
     private static bool IsPublicOrProtected(MemberInfo member) => member switch
     {
