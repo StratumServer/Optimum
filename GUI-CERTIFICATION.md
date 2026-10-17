@@ -68,13 +68,13 @@ Subpixel and None font antialiasing, rotated or skewed text, very large glyphs a
 more than 4096 glyphs per call materialize. Native replay shows the original text
 again with the captured scaled font.
 
-Policy: `CairoFont.SetupContext` requests `Antialias.Subpixel` for all GUI text.
-LCD glyphs cannot be reproduced on the Skia path, so while GUI GPU recording is
-eligible (`OptimumConfig.GuiGpuRecordingEligible`) Cairo receives Gray instead of
-Subpixel, for measurement and drawing alike. This is a visible change from
-vanilla: no LCD colour fringes while the GPU path is active. When GPU recording is
-not eligible, Cairo receives the requested options unchanged and Subpixel text
-materializes to native Cairo with vanilla bytes; regression tests cover both.
+Policy: preserve the requested antialias mode. `CairoFont.SetupContext` requests
+`Antialias.Subpixel` for GUI text. Skia cannot reproduce Cairo's LCD component
+alpha, so Subpixel `ShowText` and `ShowGlyphs` materialize the affected surface to
+native Cairo. Explicit Gray text can still be recorded. This keeps Cairo's text
+appearance and native output bytes, but text-bearing surfaces may leave the GPU
+path. Regression tests cover Subpixel preservation and native materialization
+while GPU recording is eligible.
 
 Certification also requires the live GL `Antialias.Best` rectangle fixture to read
 back from the candidate GPU texture and match the native Cairo pixels within one

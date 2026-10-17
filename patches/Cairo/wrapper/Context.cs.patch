@@ -888,7 +888,7 @@ index 03f9c76..0cf1326 100644
  
  		[Obsolete ("Use SetFontSize() instead.")]
  		public void FontSetSize (double scale)
-@@ -817,31 +968,35 @@ namespace Cairo
+@@ -817,31 +968,32 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -919,17 +919,14 @@ index 03f9c76..0cf1326 100644
 -				CheckDisposed ();
 -				NativeMethods.cairo_set_font_options (handle, value.Handle);
 +				CheckDisposedOnly ();
-+				// While GPU GUI recording is eligible a Subpixel request is applied as Gray
-+				// (CairoTextPolicy); otherwise the options are applied unchanged.
-+				IntPtr mapped = CairoTextPolicy.MapOptions (value.Handle);
-+				try { NativeMethods.cairo_set_font_options (handle, mapped != IntPtr.Zero ? mapped : value.Handle); }
-+				finally { if (mapped != IntPtr.Zero) NativeMethods.cairo_font_options_destroy (mapped); }
++				// Preserve the requested antialias mode. Unsupported text modes materialize to Cairo.
++				NativeMethods.cairo_set_font_options (handle, value.Handle);
  			}
  		}
  
  		[StructLayout(LayoutKind.Sequential)]
  		internal struct NativeGlyph_4byte_longs {
-@@ -879,19 +1034,24 @@ namespace Cairo
+@@ -879,19 +1031,24 @@ namespace Cairo
  			return dest;
  		}
  
@@ -959,7 +956,7 @@ index 03f9c76..0cf1326 100644
  		[Obsolete("The matrix argument was never used, use ShowGlyphs(Glyphs []) instead")]
  		public void ShowGlyphs (Matrix matrix, Glyph[] glyphs)
  		{
-@@ -904,11 +1064,11 @@ namespace Cairo
+@@ -904,11 +1061,11 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -972,7 +969,7 @@ index 03f9c76..0cf1326 100644
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
  
-@@ -917,11 +1077,11 @@ namespace Cairo
+@@ -917,11 +1074,11 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -985,7 +982,7 @@ index 03f9c76..0cf1326 100644
  				return f_extents;
  			}
  		}
-@@ -934,23 +1094,23 @@ namespace Cairo
+@@ -934,23 +1091,23 @@ namespace Cairo
  
          
  
@@ -1012,7 +1009,7 @@ index 03f9c76..0cf1326 100644
  
  		public void ShowPage ()
  		{
-@@ -977,51 +1137,66 @@ namespace Cairo
+@@ -977,51 +1134,66 @@ namespace Cairo
  			return bytes;
  		}
  

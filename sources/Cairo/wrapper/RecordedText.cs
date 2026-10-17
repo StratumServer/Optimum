@@ -50,35 +50,6 @@ namespace Cairo
 	}
 
 	/// <summary>
-	/// Text policy for the GPU GUI path. While GUI GPU recording is eligible, a Subpixel
-	/// font-options request is applied as Gray, for measurement and drawing alike, because
-	/// LCD (component-alpha) glyphs cannot be reproduced on the Skia path. When GPU
-	/// recording is not eligible Cairo receives exactly the requested options.
-	/// </summary>
-	internal static class CairoTextPolicy
-	{
-		/// <summary>Per-thread test hook; null uses OptimumConfig.GuiGpuRecordingEligible.</summary>
-		[ThreadStatic] internal static bool? Override;
-
-		internal static bool SubpixelAsGray {
-			get {
-				bool? value = Override;
-				return value ?? CairoGpuPolicy.RecordingEligible;
-			}
-		}
-
-		/// <summary>Returns a Gray copy of <paramref name="options"/> to apply instead, or
-		/// IntPtr.Zero when the options are applied unchanged.</summary>
-		internal static IntPtr MapOptions (IntPtr options)
-		{
-			if (options == IntPtr.Zero || NativeMethods.cairo_font_options_get_antialias (options) != Antialias.Subpixel || !SubpixelAsGray) return IntPtr.Zero;
-			IntPtr copy = NativeMethods.cairo_font_options_copy (options);
-			NativeMethods.cairo_font_options_set_antialias (copy, Antialias.Gray);
-			return copy;
-		}
-	}
-
-	/// <summary>
 	/// ShowText / ShowGlyphs as a recorded fill of the glyph outlines. Cairo stays the layout
 	/// and glyph authority: glyph indices and positions come from cairo_scaled_font_text_to_glyphs,
 	/// positions are rounded to device pixels like Cairo's image compositor, and the outlines

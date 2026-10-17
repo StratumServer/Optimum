@@ -118,13 +118,10 @@ public sealed class CairoRecorderTextTests
 	[InlineData (Antialias.Subpixel)]
 	[InlineData (Antialias.Default)]
 	[InlineData (Antialias.None)]
-	public void NonGrayTextMaterializesWhenPolicyIsOff (Antialias antialias)
+	public void UnsupportedTextAntialiasMaterializesToCairo (Antialias antialias)
 	{
-		CairoTextPolicy.Override = false;
-		try {
-			CairoRecorderParityTests.AssertMaterializesWith (240, 40, Text ("sans-serif", FontWeight.Normal, 14, 3, 20, "Fringes", antialias),
-				"Recorder.ShowText.Unsupported:text-antialias-" + antialias);
-		} finally { CairoTextPolicy.Override = null; }
+		CairoRecorderParityTests.AssertMaterializesWith (240, 40, Text ("sans-serif", FontWeight.Normal, 14, 3, 20, "Fringes", antialias),
+			"Recorder.ShowText.Unsupported:text-antialias-" + antialias);
 	}
 
 	[Fact]
@@ -140,66 +137,52 @@ public sealed class CairoRecorderTextTests
 	}
 
 	[Fact]
-	public void SubpixelRequestIsGrayOnlyWhilePolicyIsActive ()
-	{
-		using var surface = new ImageSurface (Format.Argb32, 4, 4);
-		using var context = new Context (surface);
-		using var subpixel = new FontOptions { Antialias = Antialias.Subpixel };
-		CairoTextPolicy.Override = true;
-		try {
-			context.FontOptions = subpixel;
-			using (FontOptions applied = context.FontOptions) Assert.Equal (Antialias.Gray, applied.Antialias);
-			Assert.Equal (Antialias.Subpixel, subpixel.Antialias); // the caller's object is not modified
-			CairoRecorderParityTests.AssertLocalAaParity (240, 40, Text ("sans-serif", FontWeight.Normal, 14, 3, 20, "Policy gray", Antialias.Subpixel));
-		} finally { CairoTextPolicy.Override = false; }
-		try {
-			context.FontOptions = subpixel;
-			using (FontOptions applied = context.FontOptions) Assert.Equal (Antialias.Subpixel, applied.Antialias);
-		} finally { CairoTextPolicy.Override = null; }
-	}
-
-	[Fact]
-	public void VanillaSubpixelBytesAreUnchangedWhenPolicyIsOff ()
-	{
-		// The wrapper must hand Cairo exactly the requested options: compare against direct
-		// native calls with LCD options.
-		CairoTextPolicy.Override = false;
-		try {
-			byte[] wrapper = CairoRecorderParityTests.RenderNative (240, 40, Text ("sans-serif", FontWeight.Normal, 14, 3.3, 20, "LCD bytes", Antialias.Subpixel));
-			using var direct = new ImageSurface (Format.Argb32, 240, 40);
-			using (var context = new Context (direct)) {
-				context.SetSourceRGBA (.12, .18, .24, .9);
-				context.Rectangle (0, 0, 400, 400);
-				context.Fill ();
-				context.SetFontSize (14);
-				context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
-				using (var options = new FontOptions { Antialias = Antialias.Subpixel }) NativeMethods.cairo_set_font_options (context.Handle, options.Handle);
-				context.SetSourceRGBA (.94, .93, .89, 1);
-				context.MoveTo (3.3, 20);
-				context.ShowText ("LCD bytes");
-				context.SetSourceRGBA (1, .6, .2, .8);
-				context.ShowText (" +stack 64");
-			}
-			Assert.Equal (direct.Data, wrapper);
-		} finally { CairoTextPolicy.Override = null; }
-	}
-
-	[Fact]
-	public void PolicyFollowsGuiGpuRecordingEligibility ()
+	public void SubpixelRequestIsPreservedAndMaterializesWhileRecordingIsEligible ()
 	{
 		bool requested = OptimumConfig.GuiGpuRenderEnabled;
+		OptimumConfig.GuiGpuRenderEnabled = true;
+		OptimumConfig.SetGuiGpuCertificationPassed (true, "v", "r", "4.6", 4, 6, 1, 0);
 		try {
-			CairoTextPolicy.Override = null;
-			OptimumConfig.GuiGpuRenderEnabled = true;
-			OptimumConfig.SetGuiGpuCertificationPassed (true, "v", "r", "4.6", 4, 6, 1, 0);
 			Assert.True (OptimumConfig.GuiGpuRecordingEligible);
-			Assert.True (CairoTextPolicy.SubpixelAsGray);
-			OptimumConfig.RevokeGuiGpuCertification ();
-			Assert.False (CairoTextPolicy.SubpixelAsGray);
+			using var surface = new ImageSurface (Format.Argb32, 240, 40);
+			var recorder = surface.BeginRecording ();
+			using var context = new Context (surface);
+			using var subpixel = new FontOptions { Antialias = Antialias.Subpixel };
+			context.FontOptions = subpixel;
+			using (FontOptions applied = context.FontOptions) Assert.Equal (Antialias.Subpixel, applied.Antialias);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
+			context.SetFontSize (14);
+			context.MoveTo (3, 20);
+			context.ShowText ("LCD text");
+			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			Assert.Equal ("Recorder.ShowText.Unsupported:text-antialias-Subpixel", surface.FirstMaterializationTrigger);
 		} finally {
 			OptimumConfig.RevokeGuiGpuCertification ();
 			OptimumConfig.GuiGpuRenderEnabled = requested;
 		}
+	}
+
+	[Fact]
+	public void VanillaSubpixelBytesAreUnchanged ()
+	{
+		// The wrapper must hand Cairo exactly the requested options: compare against direct
+		// native calls with LCD options.
+		byte[] wrapper = CairoRecorderParityTests.RenderNative (240, 40, Text ("sans-serif", FontWeight.Normal, 14, 3.3, 20, "LCD bytes", Antialias.Subpixel));
+		using var direct = new ImageSurface (Format.Argb32, 240, 40);
+		using (var context = new Context (direct)) {
+			context.SetSourceRGBA (.12, .18, .24, .9);
+			context.Rectangle (0, 0, 400, 400);
+			context.Fill ();
+			context.SetFontSize (14);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
+			using (var options = new FontOptions { Antialias = Antialias.Subpixel }) NativeMethods.cairo_set_font_options (context.Handle, options.Handle);
+			context.SetSourceRGBA (.94, .93, .89, 1);
+			context.MoveTo (3.3, 20);
+			context.ShowText ("LCD bytes");
+			context.SetSourceRGBA (1, .6, .2, .8);
+			context.ShowText (" +stack 64");
+		}
+		Assert.Equal (direct.Data, wrapper);
 	}
 
 	[Fact]
