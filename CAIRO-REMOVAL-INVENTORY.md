@@ -129,6 +129,26 @@ reduction. The focused Cairo recorder parity/text suites passed 91/91; patch
 validation passed with 85 source patches, 53 Cecil patches, 22 runtime donors
 and zero conflicts.
 
+### Direct surface-source capture
+
+The three `Context.SetSourceSurface`/`SetSource(Surface, ...)` overloads already
+pass the source surface handle to `cairo_set_source_surface`. During recording,
+they now store that same handle and the current CTM directly instead of calling
+`cairo_get_source`, `cairo_pattern_get_type`, and `cairo_pattern_get_surface`
+to recover information already available at the call site. A successful setter
+also checks context status before trusting the supplied handle; if Cairo rejects
+the source, it keeps the prior pattern-derived state as before. The pattern
+matrix and filter are still read from Cairo when each draw is captured,
+preserving Cairo's source offset and mutation behavior. Context detachment still
+checks the stored surface pointer and materializes a source recorder before
+native use.
+
+The recorder parity, surface-recorder, and recorder-text suites passed 108/108,
+including pixel-aligned surface source offsets, source snapshots, and the
+transition from recording to native drawing. Successful assignments replace
+three metadata calls with one status check, one CTM read and the already-known
+surface pointer. No native-call counter or timing measurement is available.
+
 ## Native import inventory
 
 The schema-2 manifest includes **298 active `DllImport` methods** reflected from
