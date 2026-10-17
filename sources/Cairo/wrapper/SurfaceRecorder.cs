@@ -25,6 +25,7 @@ namespace Cairo
 	{
 		internal abstract void ReplayNative (RecordedNativeReplay replay);
 		internal abstract void DrawSkia (RecordedSkiaReplay replay);
+		internal virtual void Dispose () { }
 	}
 
 	internal sealed class RecordedNativeReplay
@@ -268,9 +269,15 @@ namespace Cairo
 		{
 			lock (sync) {
 				if (state != SurfaceRecordingState.Recording) return;
-				commands.Clear ();
+				ClearCommands ();
 				lastSnapshot = null; // the count-based snapshot cache must not match a new list
 			}
+		}
+
+		void ClearCommands ()
+		{
+			foreach (RecordedCommand command in commands) command.Dispose ();
+			commands.Clear ();
 		}
 
 		internal bool CommitGpuRender ()
@@ -373,10 +380,10 @@ namespace Cairo
 				try {
 					ThrowIfError (NativeMethods.cairo_surface_status (native), "surface before replay");
 					ReplayInto (commands, native, Width, Height);
-					commands.Clear ();
+					ClearCommands ();
 					state = SurfaceRecordingState.NativeMaterialized;
 				} catch (Exception exception) {
-					commands.Clear ();
+					ClearCommands ();
 					failure = ExceptionDispatchInfo.Capture (exception);
 					state = SurfaceRecordingState.Failed;
 					materializationFailure = failure;
@@ -482,7 +489,7 @@ namespace Cairo
 				if (!orphaned) return;
 				orphaned = false;
 				if (state == SurfaceRecordingState.Recording || state == SurfaceRecordingState.Sealed || state == SurfaceRecordingState.GpuRendered) {
-					commands.Clear ();
+					ClearCommands ();
 					state = SurfaceRecordingState.Disposed;
 				}
 			}
@@ -493,7 +500,7 @@ namespace Cairo
 		{
 			lock (sync) {
 				if (orphaned) return;
-				commands.Clear ();
+				ClearCommands ();
 				state = SurfaceRecordingState.Disposed;
 			}
 			Unregister ();

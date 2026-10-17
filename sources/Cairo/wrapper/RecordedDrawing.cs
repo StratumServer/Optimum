@@ -231,6 +231,14 @@ namespace Cairo
 		internal ScaledFont ScaledFont;
 		internal bool IsText => ScaledFont != null;
 
+		internal override void Dispose ()
+		{
+			ScaledFont?.Dispose ();
+			ScaledFont = null;
+			skiaPath?.Dispose ();
+			skiaPath = null;
+		}
+
 		/// <summary>Paint with Clear, or Source with a transparent solid colour, and no clip:
 		/// every pixel becomes transparent (ctx.Clear in the GUI code).</summary>
 		internal bool IsFullClear =>
