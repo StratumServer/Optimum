@@ -61,25 +61,27 @@ escapes, and device/context changes cannot be universally certified.
 `--validate-only` continues to validate assemblies without creating an OpenGL
 context, granting GUI approval or starting the client.
 
-Cairo stays the text layout authority: font selection, `SetFontSize`, font
-options, `TextExtents`, `FontExtents` and `TextPath` are Cairo state and do not
-materialize. `ShowText` and `ShowGlyphs` with Gray font antialiasing are recorded
-as a fill of Cairo's hinted glyph outlines (`cairo_glyph_path` with the same scaled
-font) at the glyph origins Cairo's image compositor uses: whole pixels before
-Cairo 1.17, quarter pixels from 1.18. Development versions in between, Default,
-Subpixel and None font antialiasing, rotated or skewed text, very large glyphs and
-more than 4096 glyphs per call materialize. Native replay shows the original text
-again with the captured scaled font.
+Cairo remains the text layout authority: font selection, `SetFontSize`, font
+options, `TextExtents`, `FontExtents`, `TextPath`, glyph IDs and glyph positions
+still come from Cairo. Gray `ShowText` and `ShowGlyphs` remain fills of Cairo's
+hinted outlines at Cairo's quantized glyph origins. For Subpixel text, the recorder
+uses a Skia LCD text blob only for regular `sans-serif` and `Montserrat` faces when
+the matrix and font size are supported. It resolves the face through Fontconfig,
+then loads the exact file and face index into Skia. That route no longer calls
+`cairo_glyph_path`. Bold faces, Lora, Almendra, other families, transforms,
+unsupported Cairo versions, and more than 4096 glyphs materialize and replay the
+original call through Cairo. The current local fixture covers 14 px regular text;
+it does not certify other sizes or scripts.
 
 Policy: preserve the requested antialias mode. `CairoFont.SetupContext` requests
-`Antialias.Subpixel` for GUI text. Skia cannot reproduce Cairo's LCD component
-alpha, so Subpixel `ShowText` and `ShowGlyphs` materialize the affected surface to
-native Cairo. Explicit Gray text can still be recorded. This keeps Cairo's text
-appearance and native output bytes. The Subpixel surface uses Cairo; its
-materialization does not revoke GPU approval for other surfaces. All other native
-materializations, failed Subpixel replays, and unsupported GPU fallbacks still
-revoke approval. Regression tests cover Subpixel preservation, native byte
-parity, and the bounded per-surface fallback.
+`Antialias.Subpixel` for GUI text. Skia LCD rendering passes the local visual policy
+for the tested regular `sans-serif` and `Montserrat` fixtures. Other font cases
+retain Cairo's exact Subpixel output through the already certified per-surface
+fallback, which does not revoke GPU approval for other surfaces. Gray text stays
+on Cairo-derived outlines because direct Skia rasterization exceeded local visual
+parity in five fixtures. All other native materializations, failed Subpixel
+replays, and unsupported GPU fallbacks still revoke approval. Regression tests
+cover the Skia LCD subset, exact Cairo fallbacks, and unchanged Cairo Gray output.
 
 Certification also requires the live GL `Antialias.Best` rectangle fixture to read
 back from the candidate GPU texture and match the native Cairo pixels within one
@@ -211,3 +213,12 @@ On Optimum commit `8b915e5b72071f590f3a4685f4a71dbe8d6d7def`, the full inventory
 The separate public Pharos SVG diagnostic passed all 14 cases on each adapter using Pharos v0.5.0. Its 12 supported solid SVG calls each used one candidate attempt and success with no fallback; maximum observed channel delta was 17, within the diagnostic's edge policy. Gradient and dashed-stroke cases used exact native output. This diagnostic does not issue a hardware certificate.
 
 The resource fix disposes recorded Cairo scaled fonts and Skia paths when recorded drawing commands are cleared or released. After the fix, bootstrap and patch validation passed with 130 applied patches and no failures; shader validation passed; build completed with zero warnings and errors; IL patching reported 146/146 required methods. Test suites passed: Optimum 986 (34 skipped), Launcher 65 (4 skipped), CLI 24, Bootstrap.Core 156 and Installer 78. The Intel GPU-disabled control also passed the inventory scenario and selected `vanilla`. `make check` could not run because PowerShell (`pwsh`), required by packaging checks, is not installed. No GPU performance gain is claimed by these functional results.
+
+
+## Stage B Subpixel raster migration, AMD retest (2026-10-17)
+
+Subpixel glyphs that pass the local font/weight matrix now use Skia LCD text blobs. Cairo still provides glyph IDs, positions, current-point advance, face family and style. The Skia route resolves `sans-serif` and `Montserrat` through the same Fontconfig configuration Cairo uses, loads the matched font file/index, positions those Cairo glyphs in device space, and avoids Cairo outline construction. Bold faces and Lora/Almendra remain exact per-surface Cairo fallbacks because their local LCD comparison exceeded the 96 filtered-difference limit. Gray text remains on Cairo outlines. An attempted direct Skia Gray raster failed five existing local-AA fixtures and was reverted.
+
+The branch regression passed all 110 `CairoRecorder` tests, then all five project suites: Optimum 991 passed/34 skipped, Launcher 69, CLI 24, Bootstrap.Core 156, and Installer 78. Build completed with zero warnings and errors. Patch validation reported 81 applied source patches, 53 Cecil patches, and 22 runtime donors compiled; shader validation and `make check` passed.
+
+The full Pharos inventory scenario passed on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core. The launcher accepted the staged profile certificate and the report selected `skia-with-subpixel-cairo-fallback` with no decision reasons. Initial composition recorded 38/38 GPU candidates and recomposition 360/360. GUI scales 1, 1.5, and 2 recorded 30/30, 159/171, and 162/174 successes. The remaining 24 candidates were successful Subpixel Cairo fallbacks; all eight materializations succeeded, with zero failures. The primitive, five non-subset fixtures, and SVG comparisons passed. This was a local source build before publication; the Pharos checkout was dirty at commit `4966732269f02408df314ae155bb7e6f3817f9d9`, so this run is diagnostic until repeated against the committed source and a clean harness. Intel and NVIDIA must run this exact change before the previous adapter reports can cover it. No performance gain is claimed.

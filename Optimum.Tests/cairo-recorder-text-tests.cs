@@ -7,12 +7,11 @@ using Vintagestory.API.Config;
 using Xunit;
 
 /// <summary>
-/// Stage B text: Cairo keeps font selection, measurement and glyph layout; ShowText and
-/// ShowGlyphs are recorded as fills of Cairo's hinted glyph outlines at Cairo's glyph
-/// positions (rounded to device pixels like Cairo's compositor). Tolerance: Cairo's own
-/// FreeType glyph masks and an outline fill differ only on antialiased edge pixels, so the
-/// local-AA visual-parity policy applies (uniform pixels within one level, Gaussian-filtered
-/// edge difference at most 96). Native materialization must reproduce Cairo's bytes exactly.
+/// Text capture keeps Cairo font selection, measurement and glyph layout. Gray text remains
+/// a fill of Cairo's hinted glyph outlines. Regular sans-serif and Montserrat Subpixel text
+/// use Skia LCD glyph runs; unsupported faces materialize to Cairo exactly. The local-AA
+/// visual-parity policy applies to Skia output (flat pixels within one level, filtered edge
+/// difference at most 96). Native materialization must reproduce Cairo's bytes exactly.
 /// </summary>
 [Collection ("Cairo materialization metrics")]
 public sealed class CairoRecorderTextTests
@@ -115,13 +114,33 @@ public sealed class CairoRecorderTextTests
 	}
 
 	[Theory]
-	[InlineData (Antialias.Subpixel)]
 	[InlineData (Antialias.Default)]
 	[InlineData (Antialias.None)]
 	public void UnsupportedTextAntialiasMaterializesToCairo (Antialias antialias)
 	{
 		CairoRecorderParityTests.AssertMaterializesWith (240, 40, Text ("sans-serif", FontWeight.Normal, 14, 3, 20, "Fringes", antialias),
 			"Recorder.ShowText.Unsupported:text-antialias-" + antialias);
+	}
+
+	[Theory]
+	[InlineData ("sans-serif", FontWeight.Normal, 14.0, 3.3, 20.0)]
+	[InlineData ("Montserrat", FontWeight.Normal, 14.0, 3.0, 20.0)]
+	public void SubpixelTextUsesSkiaAndMatchesCairoWithinLocalAntialiasPolicy (string family, FontWeight weight, double size, double x, double y)
+	{
+		if (family != "sans-serif" && !BundledFonts.Available) return;
+		CairoRecorderParityTests.AssertLocalAaParity (240, 40, Text (family, weight, size, x, y, "LCD Fringes 0123 Wg", Antialias.Subpixel));
+	}
+
+	[Theory]
+	[InlineData ("sans-serif", FontWeight.Bold, 18.0, 2.75, 23.5)]
+	[InlineData ("Lora", FontWeight.Bold, 17.0, 4.25, 24.25)]
+	[InlineData ("Lora", FontWeight.Normal, 16.0, 4.4, 22.2)]
+	[InlineData ("Almendra", FontWeight.Normal, 18.0, 3.6, 24.0)]
+	public void UnsupportedSubpixelTextUsesExactCairoFallbackUntilSkiaParityMatches (string family, FontWeight weight, double size, double x, double y)
+	{
+		if (family != "sans-serif" && !BundledFonts.Available) return;
+		CairoRecorderParityTests.AssertMaterializesWith (240, 40, Text (family, weight, size, x, y, "LCD Fringes 0123 Wg", Antialias.Subpixel),
+			"Recorder.ShowText.Unsupported:text-antialias-Subpixel");
 	}
 
 	[Fact]
@@ -137,7 +156,7 @@ public sealed class CairoRecorderTextTests
 	}
 
 	[Fact]
-	public void SubpixelRequestIsPreservedAndMaterializesWhileRecordingIsEligible ()
+	public void SubpixelRequestIsPreservedAndDrawnBySkiaWhileRecordingIsEligible ()
 	{
 		bool requested = OptimumConfig.GuiGpuRenderEnabled;
 		OptimumConfig.GuiGpuRenderEnabled = true;
@@ -147,15 +166,13 @@ public sealed class CairoRecorderTextTests
 			using var surface = new ImageSurface (Format.Argb32, 240, 40);
 			var recorder = surface.BeginRecording ();
 			using var context = new Context (surface);
-			using var subpixel = new FontOptions { Antialias = Antialias.Subpixel };
-			context.FontOptions = subpixel;
-			using (FontOptions applied = context.FontOptions) Assert.Equal (Antialias.Subpixel, applied.Antialias);
-			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
-			context.SetFontSize (14);
-			context.MoveTo (3, 20);
-			context.ShowText ("LCD text");
-			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-			Assert.Equal ("Recorder.ShowText.Unsupported:text-antialias-Subpixel", surface.FirstMaterializationTrigger);
+			Action<Context> draw = Text ("sans-serif", FontWeight.Normal, 14, 3.3, 20, "LCD bytes", Antialias.Subpixel);
+			draw (context);
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+			Assert.Null (surface.FirstMaterializationTrigger);
+			byte[] reference = CairoRecorderParityTests.RenderNative (240, 40, draw);
+			byte[] actual = CairoRecorderParityTests.RenderSkia (surface, 240, 40);
+			CairoRecorderParityTests.AssertLocalAa (reference, actual, 240, 40);
 			Assert.True (OptimumConfig.GuiGpuRecordingEligible, "A successful Subpixel surface fallback must not disable GPU recording for other surfaces.");
 		} finally {
 			OptimumConfig.RevokeGuiGpuCertification ();

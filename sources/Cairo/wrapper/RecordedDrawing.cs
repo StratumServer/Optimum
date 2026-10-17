@@ -223,18 +223,21 @@ namespace Cairo
 		internal LineJoin LineJoin;
 		internal double[] Dash;
 		internal double Alpha = 1;
-		// Text drawings (ShowText/ShowGlyphs): the glyph outline is the path for Skia; native
-		// replay shows the original text with the captured scaled font.
+		// Gray text uses Cairo's glyph outline as its Skia path. Native replay keeps the original
+		// text and captured scaled font; Subpixel can instead use a Skia text blob.
 		internal byte[] TextUtf8;
 		internal byte[] TextGlyphs;
 		internal PointD TextOrigin;
 		internal ScaledFont ScaledFont;
+		internal SKTextBlob SubpixelTextBlob;
 		internal bool IsText => ScaledFont != null;
 
 		internal override void Dispose ()
 		{
 			ScaledFont?.Dispose ();
 			ScaledFont = null;
+			SubpixelTextBlob?.Dispose ();
+			SubpixelTextBlob = null;
 			skiaPath?.Dispose ();
 			skiaPath = null;
 		}
@@ -254,9 +257,9 @@ namespace Cairo
 		/// width stroke); returns null with a reason when the GPU path cannot reproduce it.
 		/// </summary>
 		internal static RecordedDrawing Capture (IntPtr cr, RecordedDrawKind kind, double alpha, RecordedClip[] clips,
-			Matrix sourceCtm, SurfaceRecorder target, out string failure, IntPtr pathContext = default)
+			Matrix sourceCtm, SurfaceRecorder target, out string failure, IntPtr pathContext = default, bool textDrawing = false, bool capturePath = true)
 		{
-			bool text = pathContext != IntPtr.Zero;
+			bool text = textDrawing || pathContext != IntPtr.Zero;
 			failure = null;
 			if (NativeMethods.cairo_status (cr) != Status.Success) return null; // Cairo ignores drawing in an error state.
 			var drawing = new RecordedDrawing {
@@ -305,8 +308,8 @@ namespace Cairo
 				}
 				if (Math.Abs (drawing.Ctm.Xx * drawing.Ctm.Yy - drawing.Ctm.Xy * drawing.Ctm.Yx) < 1e-12) { failure = "stroke-singular-matrix"; return null; }
 			}
-			if (kind != RecordedDrawKind.Paint) {
-				IntPtr pathSource = text ? pathContext : cr;
+			if (kind != RecordedDrawKind.Paint && capturePath) {
+				IntPtr pathSource = pathContext != IntPtr.Zero ? pathContext : cr;
 				drawing.Path = RecordedPath.CaptureDevice (pathSource, drawing.Ctm, out failure);
 				if (drawing.Path == null) return null;
 				if (!drawing.Path.AllFinite ()) { failure = "path-out-of-range"; return null; }
@@ -416,6 +419,10 @@ namespace Cairo
 				foreach (RecordedClip clip in Clips) clip.ApplySkia (canvas);
 				using (var paint = new SKPaint { IsAntialias = IsText || Antialias != Antialias.None, BlendMode = ToSkia (Operator), Style = SKPaintStyle.Fill }) {
 					using (RecordedSourcePaint source = Source.ConfigurePaint (paint, Alpha, replay)) {
+					if (SubpixelTextBlob != null) {
+						canvas.DrawText (SubpixelTextBlob, 0, 0, paint);
+						return;
+					}
 						switch (Kind) {
 						case RecordedDrawKind.Fill:
 							canvas.DrawPath (GetSkiaPath (), paint);
