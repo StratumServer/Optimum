@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..9228179 100644
+index 03f9c76..c154848 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,12 @@
@@ -1024,7 +1024,7 @@ index 03f9c76..9228179 100644
 +				if (recordingSurface != null && native_glyph_size == 24) {
 +					RecordingGraphicsState state = recordingState;
 +					if (recordingSurface.RecordCapturedDrawing ("ShowGlyphs", (SurfaceRecorder recorder, out string failure) =>
-+						RecordedText.CaptureShowGlyphs (handle, ptr, glyphs.Length, state.Clips, state.SourceCtm, recorder, out failure))) return;
++						RecordedText.CaptureShowGlyphs (handle, state, ptr, glyphs.Length, recorder, out failure))) return;
 +				}
 +				CheckDisposed ();
 +				NativeMethods.cairo_show_glyphs (handle, ptr, glyphs.Length);
@@ -1111,7 +1111,7 @@ index 03f9c76..9228179 100644
 +				PointD? advance = null;
 +				RecordingGraphicsState state = recordingState;
 +				if (recordingSurface.RecordCapturedDrawing ("ShowText", (SurfaceRecorder recorder, out string failure) =>
-+					RecordedText.CaptureText (handle, utf8, state.Clips, state.SourceCtm, recorder, out failure, out advance))) {
++					RecordedText.CaptureText (handle, state, utf8, recorder, out failure, out advance))) {
 +					if (advance.HasValue) NativeMethods.cairo_move_to (handle, advance.Value.X, advance.Value.Y);
 +					return;
 +				}

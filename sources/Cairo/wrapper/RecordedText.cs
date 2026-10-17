@@ -101,12 +101,12 @@ namespace Cairo
 		/// <summary>Records <c>cairo_show_text</c>. Returns null without failure when Cairo draws
 		/// nothing (error state, no glyphs); <paramref name="advance"/> is the current point Cairo
 		/// moves to, if any.</summary>
-		internal static RecordedDrawing CaptureText (IntPtr cr, byte[] utf8, RecordedClip[] clips, Matrix sourceCtm, SurfaceRecorder target,
+		internal static RecordedDrawing CaptureText (IntPtr cr, RecordingGraphicsState state, byte[] utf8, SurfaceRecorder target,
 			out string failure, out PointD? advance)
 		{
 			failure = null; advance = null;
 			if (NativeMethods.cairo_status (cr) != Status.Success) return null;
-			if (!CheckFont (cr, out IntPtr scaledFont, out bool subpixel, out failure)) return null;
+			if (!CheckFont (cr, state.Ctm, out IntPtr scaledFont, out bool subpixel, out failure)) return null;
 			double x = 0, y = 0;
 			if (NativeMethods.cairo_has_current_point (cr)) NativeMethods.cairo_get_current_point (cr, out x, out y);
 			IntPtr glyphs = IntPtr.Zero;
@@ -120,7 +120,7 @@ namespace Cairo
 				double lastX = Marshal.PtrToStructure<double> (IntPtr.Add (glyphs, (count - 1) * GlyphSize + 8));
 				double lastY = Marshal.PtrToStructure<double> (IntPtr.Add (glyphs, (count - 1) * GlyphSize + 16));
 				advance = new PointD (lastX + last.XAdvance, lastY + last.YAdvance);
-				RecordedDrawing drawing = CaptureGlyphs (cr, scaledFont, glyphs, count, clips, sourceCtm, target, subpixel, out failure);
+				RecordedDrawing drawing = CaptureGlyphs (cr, state, scaledFont, glyphs, count, target, subpixel, out failure);
 				if (drawing != null) {
 					drawing.TextUtf8 = (byte[])utf8.Clone ();
 					drawing.TextOrigin = new PointD (x, y);
@@ -132,20 +132,20 @@ namespace Cairo
 		}
 
 		/// <summary>Records <c>cairo_show_glyphs</c> (the current point does not move).</summary>
-		internal static RecordedDrawing CaptureShowGlyphs (IntPtr cr, IntPtr glyphs, int count, RecordedClip[] clips, Matrix sourceCtm, SurfaceRecorder target, out string failure)
+		internal static RecordedDrawing CaptureShowGlyphs (IntPtr cr, RecordingGraphicsState state, IntPtr glyphs, int count, SurfaceRecorder target, out string failure)
 		{
 			failure = null;
 			if (NativeMethods.cairo_status (cr) != Status.Success || count <= 0) return null;
 			if (count > MaxGlyphs) { failure = "text-glyph-count"; return null; }
-			if (!CheckFont (cr, out IntPtr scaledFont, out bool subpixel, out failure)) return null;
+			if (!CheckFont (cr, state.Ctm, out IntPtr scaledFont, out bool subpixel, out failure)) return null;
 			var copy = new byte[count * GlyphSize];
 			Marshal.Copy (glyphs, copy, 0, copy.Length);
-			RecordedDrawing drawing = CaptureGlyphs (cr, scaledFont, glyphs, count, clips, sourceCtm, target, subpixel, out failure);
+			RecordedDrawing drawing = CaptureGlyphs (cr, state, scaledFont, glyphs, count, target, subpixel, out failure);
 			if (drawing != null) drawing.TextGlyphs = copy;
 			return drawing;
 		}
 
-		static bool CheckFont (IntPtr cr, out IntPtr scaledFont, out bool subpixel, out string failure)
+		static bool CheckFont (IntPtr cr, Matrix ctm, out IntPtr scaledFont, out bool subpixel, out string failure)
 		{
 			failure = null; subpixel = false;
 			scaledFont = NativeMethods.cairo_get_scaled_font (cr);
@@ -158,8 +158,6 @@ namespace Cairo
 			} finally { NativeMethods.cairo_font_options_destroy (options); }
 			if (antialias != Antialias.Gray && antialias != Antialias.Subpixel) { failure = "text-antialias-" + antialias; return false; }
 			subpixel = antialias == Antialias.Subpixel;
-			var ctm = new Matrix ();
-			NativeMethods.cairo_get_matrix (cr, ctm);
 			if (ctm.Xy != 0 || ctm.Yx != 0 || ctm.Xx <= 0 || ctm.Yy <= 0) { failure = "text-transform"; return false; }
 			var font = new Matrix ();
 			cairo_get_font_matrix (cr, font);
@@ -168,11 +166,10 @@ namespace Cairo
 			return true;
 		}
 
-		static RecordedDrawing CaptureGlyphs (IntPtr cr, IntPtr scaledFont, IntPtr glyphs, int count, RecordedClip[] clips, Matrix sourceCtm, SurfaceRecorder target, bool subpixel, out string failure)
+		static RecordedDrawing CaptureGlyphs (IntPtr cr, RecordingGraphicsState state, IntPtr scaledFont, IntPtr glyphs, int count, SurfaceRecorder target, bool subpixel, out string failure)
 		{
 			failure = null;
-			var ctm = new Matrix ();
-			NativeMethods.cairo_get_matrix (cr, ctm);
+			Matrix ctm = state.Ctm;
 			// Cairo's image compositor draws each glyph mask at a quantized device origin:
 			// whole pixels before 1.17, quarter-pixel phases from 1.18. Place outlines and
 			// Skia glyph runs at the same origins. Development versions in between are unsupported.
@@ -207,7 +204,7 @@ namespace Cairo
 					skiaPositions[i] = new SKPoint ((float)dx, (float)dy);
 				}
 				SKTextBlob textBlob = null;
-				if (validSkiaGlyphs) TryCreateSkiaTextBlob (cr, scaledFont, skiaGlyphs, skiaPositions, subpixel, out textBlob, out _);
+				if (validSkiaGlyphs) TryCreateSkiaTextBlob (cr, scaledFont, ctm, skiaGlyphs, skiaPositions, subpixel, out textBlob, out _);
 				if (subpixel && textBlob == null) { failure = "text-antialias-Subpixel"; return null; }
 				IntPtr pathContext = IntPtr.Zero;
 				if (textBlob == null) {
@@ -219,8 +216,8 @@ namespace Cairo
 					if (NativeMethods.cairo_status (scratch) != Status.Success) { failure = "text-glyph-path"; return null; }
 					pathContext = scratch;
 				}
-				RecordedDrawing drawing = RecordedDrawing.Capture (cr, RecordedDrawKind.Fill, 1, clips, sourceCtm, target, out failure,
-					pathContext: pathContext, textDrawing: true, capturePath: textBlob == null);
+				RecordedDrawing drawing = RecordedDrawing.Capture (cr, RecordedDrawKind.Fill, 1, state.Clips, state.SourceCtm, target, out failure,
+					pathContext: pathContext, textDrawing: true, capturePath: textBlob == null, state: state);
 				if (drawing == null) { textBlob?.Dispose (); return null; }
 				drawing.FillRule = FillRule.Winding;
 				drawing.ScaledFont = new ScaledFont (scaledFont, false);
@@ -233,7 +230,7 @@ namespace Cairo
 			}
 		}
 
-		static bool TryCreateSkiaTextBlob (IntPtr cr, IntPtr scaledFont, ushort[] glyphs, SKPoint[] positions, bool subpixel,
+		static bool TryCreateSkiaTextBlob (IntPtr cr, IntPtr scaledFont, Matrix ctm, ushort[] glyphs, SKPoint[] positions, bool subpixel,
 			out SKTextBlob textBlob, out string failure)
 		{
 			failure = null; textBlob = null;
@@ -243,9 +240,7 @@ namespace Cairo
 			string family = familyPointer == IntPtr.Zero ? null : Marshal.PtrToStringAnsi (familyPointer);
 			if (string.IsNullOrWhiteSpace (family)) { failure = "text-font-family"; return false; }
 
-			var ctm = new Matrix ();
 			var fontMatrix = new Matrix ();
-			NativeMethods.cairo_get_matrix (cr, ctm);
 			cairo_get_font_matrix (cr, fontMatrix);
 			// Positioned glyphs are sent to Skia in device space. Until nonuniform font/CTM
 			// transforms have dedicated parity fixtures, reject them instead of distorting text.

@@ -210,13 +210,17 @@ wrapper tracks `Translate`, `Rotate`, `Scale`, `Transform`, the `Matrix` setter,
 and `IdentityMatrix`, and copies the matrix during Save/Restore. Recorded draw
 capture, clip capture, and source-surface assignment use that snapshot;
 `Context.Matrix` returns a copy of it while recording. The native matrix getter
-remains for non-recorded contexts. `RecorderMatrixMirrorTracksSettersAndSaveRestore`
-compares the managed snapshot field-for-field with a separate native Cairo
-context after every operation, including mutation of the input matrix. The
-transformed clip and recorder parity suites pass. Static inspection shows one
-fewer `cairo_get_matrix` call per recorded draw, clip, or source-surface
-assignment. No call counter, timing result, or cross-platform test is
-available.
+remains for non-recorded contexts. `RecordedText` now uses the same CTM snapshot
+for text eligibility, glyph capture, Skia text-blob placement, and its retained
+drawing record, so text capture no longer re-reads the matrix from Cairo.
+`RecorderMatrixMirrorTracksSettersAndSaveRestore` compares the managed snapshot
+field-for-field with a separate native Cairo context after every operation,
+including mutation of the input matrix. The transformed clip, Subpixel/Gray
+text, and recorder parity suites pass. Static inspection shows one fewer
+`cairo_get_matrix` call per recorded geometry draw, clip, or source-surface
+assignment, and three or four fewer matrix reads per text capture, depending
+on whether Skia text-blob creation is eligible. No call counter, timing result,
+or cross-platform test is available.
 
 ## Native import inventory
 
