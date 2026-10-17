@@ -609,7 +609,7 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void SurfaceDisposalMaterializesAndDetachesLiveRecordingContext()
+	public void SurfaceDisposalOrphansTheListForALiveRecordingContext()
 	{
 		var surface = new ImageSurface (Format.Argb32, 8, 8);
 		var recorder = surface.BeginRecording ();
@@ -617,9 +617,12 @@ public sealed class CairoContextRecorderTests
 		context.SetSourceRGBA (1, 0, 0, .5);
 		context.Rectangle (1, 1, 4, 4);
 		surface.Dispose ();
-		Assert.Equal (SurfaceRecordingState.Disposed, recorder.State);
+		// The context still references the native surface: the list is kept, not replayed.
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		Assert.True (recorder.IsOrphaned);
 		context.Fill ();
-		Assert.NotEqual (IntPtr.Zero, context.Handle);
+		Assert.NotEqual (IntPtr.Zero, context.Handle); // raw handle exposure materializes the orphan
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 		context.Dispose ();
 	}
 

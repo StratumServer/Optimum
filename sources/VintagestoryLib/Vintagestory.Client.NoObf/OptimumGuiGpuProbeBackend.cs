@@ -32,9 +32,17 @@ namespace Vintagestory.Client.NoObf
 			return Vintagestory.API.Config.OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics ();
 		}
 
+		// "Trigger@Type.Method" of the first non-Cairo, non-BCL frame per materialization
+		// (16 distinct keys plus "other-callers"), kept by cairo-sharp across metric resets.
+		public static Dictionary<string, long> GetMaterializationCallerDiagnostics ()
+		{
+			return Cairo.SurfaceRecorder.GetMaterializationCallers ();
+		}
+
 		public static void ResetRenderingDiagnostics ()
 		{
 			Vintagestory.API.Config.OptimumGuiMetrics.ResetMaterializationDiagnostics ();
+			Cairo.SurfaceRecorder.ResetMaterializationCallers ();
 		}
 
 		public static string TryRunOnce(int expectedContextThreadId)

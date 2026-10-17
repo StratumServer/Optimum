@@ -367,6 +367,8 @@ namespace Cairo
 				if (orphaned) ReleaseOrphan ();
 			}
 
+			if (attempted) RecordCaller (trigger);
+
 			// This is one event per first replay attempt, including failed replay. Later
 			// reads see NativeMaterialized or Failed and do not report a second event.
 			if (attempted) {
@@ -374,6 +376,52 @@ namespace Cairo
 				catch { /* Diagnostics must not change Cairo behavior. */ }
 			}
 			materializationFailure?.Throw ();
+		}
+
+		// Caller attribution for materializations: "Trigger@Namespace.Type.Method" of the first
+		// stack frame outside cairo-sharp and the BCL. Bounded to 16 distinct keys plus an
+		// overflow bucket; only computed on the (rare) materialization path.
+		internal const int MaxMaterializationCallerKinds = 16;
+		internal const string OtherMaterializationCallers = "other-callers";
+		static readonly object callerSync = new object ();
+		static readonly Dictionary<string, long> callerCounts = new Dictionary<string, long> ();
+
+		static void RecordCaller (string trigger)
+		{
+			string key;
+			try { key = (trigger ?? "Unknown") + "@" + FindCaller (); }
+			catch { key = (trigger ?? "Unknown") + "@unknown"; }
+			lock (callerSync) {
+				if (callerCounts.TryGetValue (key, out long count)) callerCounts[key] = count + 1;
+				else if (callerCounts.Count < MaxMaterializationCallerKinds) callerCounts.Add (key, 1);
+				else callerCounts[OtherMaterializationCallers] = callerCounts.TryGetValue (OtherMaterializationCallers, out long other) ? other + 1 : 1;
+			}
+		}
+
+		static string FindCaller ()
+		{
+			var trace = new System.Diagnostics.StackTrace (2, false);
+			for (int i = 0; i < trace.FrameCount; i++) {
+				System.Reflection.MethodBase method = trace.GetFrame (i)?.GetMethod ();
+				Type type = method?.DeclaringType;
+				if (type == null) continue;
+				string ns = type.Namespace ?? "";
+				if (type.Assembly == typeof (SurfaceRecorder).Assembly || ns.StartsWith ("System", StringComparison.Ordinal)) continue;
+				string name = type.FullName ?? type.Name;
+				if (name.Length > 120) name = name.Substring (0, 120);
+				return name + "." + method.Name;
+			}
+			return "unknown";
+		}
+
+		internal static Dictionary<string, long> GetMaterializationCallers ()
+		{
+			lock (callerSync) return new Dictionary<string, long> (callerCounts);
+		}
+
+		internal static void ResetMaterializationCallers ()
+		{
+			lock (callerSync) callerCounts.Clear ();
 		}
 
 		/// <summary>Replays a command list into a native surface with a fresh Cairo context.
