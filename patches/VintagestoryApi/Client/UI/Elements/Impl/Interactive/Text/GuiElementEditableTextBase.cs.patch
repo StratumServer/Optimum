@@ -1,0 +1,56 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementEditableTextBase.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementEditableTextBase.cs
+index ae335e1..69623e6 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementEditableTextBase.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementEditableTextBase.cs
+@@ -169,25 +169,19 @@ namespace Vintagestory.API.Client
+         /// <param name="x">X position of the cursor.</param>
+         /// <param name="y">Y position of the cursor.</param>
+         public void SetCaretPos(double x, double y)
+         {
+             CaretPosLine = 0;
+-
+-            ImageSurface surface = new ImageSurface(Format.Argb32, 1, 1);
+-            Context ctx = genContext(surface);
+-            Font.SetupContext(ctx);
++            double fontHeight = Font.GetFontExtents().Height;
+ 
+             if (multilineMode)
+             {
+-                double lineY = y / ctx.FontExtents.Height;
++                double lineY = y / fontHeight;
+                 if (lineY > lines.Count)
+                 {
+                     CaretPosLine = lines.Count - 1;
+                     CaretPosInLine = lines[CaretPosLine].Length;
+-
+-                    ctx.Dispose();
+-                    surface.Dispose();
+                     return;
+                 }
+ 
+                 CaretPosLine = Math.Max(0, (int)lineY);
+             }
+@@ -196,22 +190,19 @@ namespace Vintagestory.API.Client
+             string line = lines[CaretPosLine].TrimEnd('\r', '\n');
+             CaretPosInLine = line.Length;
+ 
+             for (int i = 0; i < line.Length; i++)
+             {
+-                double posx = ctx.TextExtents(line.Substring(0, i+1)).XAdvance;
++                double posx = Font.GetTextExtents(line.Substring(0, i+1)).XAdvance;
+ 
+                 if (x - posx <= 0)
+                 {
+                     CaretPosInLine = i;
+                     break;
+                 }
+             }
+ 
+-            ctx.Dispose();
+-            surface.Dispose();
+-
+             SetCaretPos(CaretPosInLine, CaretPosLine);
+         }
+ 
+ 
+        

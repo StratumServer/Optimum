@@ -102,6 +102,19 @@ blobs without captured Cairo paths. No physical GPU test was run because this
 change skips unused scratch allocations and leaves the rendered commands
 unchanged.
 
+### Editable-text hit testing
+
+`GuiElementEditableTextBase.SetCaretPos(double,double)` now measures line height
+and text prefixes through `CairoFont.GetFontExtents/GetTextExtents`, which use
+the existing Skia metrics helper. It no longer creates a temporary
+`ImageSurface` and `Context` for each pointer-position update. The character
+index loop, newline trimming, clamps and early return remain in place. This
+aligns pointer hit testing with `SetCaretPos(int,int)`, which already uses the
+same Skia metrics, but changes click positioning from Cairo measurements to
+Skia measurements. The patch applies and compiles with the current source set;
+the related font/API/text tests pass 41/41. There is not yet a direct editable
+text click/drag fixture, so caret hitbox parity remains unverified.
+
 ## Native import inventory
 
 The schema-2 manifest includes **299 active `DllImport` methods** reflected from
