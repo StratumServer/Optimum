@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
-index 4548001..7024a83 100644
+index 4548001..13a59ab 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs
 @@ -26,10 +26,11 @@ public class SvgLoader
@@ -14,20 +14,19 @@ index 4548001..7024a83 100644
  		nint dataPtr = intoSurface.DataPtr;
  		fixed (byte* ptr = array)
  		{
-@@ -52,10 +53,12 @@ public class SvgLoader
+@@ -52,10 +53,11 @@ public class SvgLoader
  		((Surface)intoSurface).MarkDirty();
  	}
  
  	public unsafe void DrawSvg(IAsset svgAsset, ImageSurface intoSurface, Matrix matrix, int posx, int posy, int width = 0, int height = 0, int? color = null)
  	{
-+		if (matrix.Xx == 1 && matrix.Yy == 1 && matrix.Xy == 0 && matrix.Yx == 0 && matrix.X0 == (int)matrix.X0 && matrix.Y0 == (int)matrix.Y0 &&
-+			OptimumGuiSvgRecorder.TryRecord(this, svgAsset, intoSurface, posx + (int)matrix.X0, posy + (int)matrix.Y0, width, height, color)) return;
++		if (OptimumGuiSvgRecorder.TryRecordWithMatrix(this, svgAsset, intoSurface, matrix, posx, posy, width, height, color)) return;
  		byte[] array = rasterizeSvg(svgAsset, width, height, width, height, color);
  		int num = intoSurface.Width * intoSurface.Height;
  		nint dataPtr = intoSurface.DataPtr;
  		fixed (byte* ptr = array)
  		{
-@@ -82,10 +85,11 @@ public class SvgLoader
+@@ -82,10 +84,11 @@ public class SvgLoader
  		((Surface)intoSurface).MarkDirty();
  	}
  

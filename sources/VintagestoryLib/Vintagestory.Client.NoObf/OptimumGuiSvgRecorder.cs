@@ -18,19 +18,46 @@ namespace Vintagestory.Client.NoObf
 		/// </summary>
 		public static bool TryRecord (SvgLoader loader, IAsset asset, ImageSurface target, int x, int y, int width, int height, int? color)
 		{
-			if (replayingNativeSvg || !OptimumGuiGpuProbe.RenderingRequested || asset == null || target == null || width <= 0 || height <= 0 ||
+			return TryRecordCore (loader, asset, target, null, x, y, width, height, color);
+		}
+
+		/// <summary>DrawSvg with a matrix (map layers), recorded with the original transformed loop.</summary>
+		public static bool TryRecordWithMatrix (SvgLoader loader, IAsset asset, ImageSurface target, Matrix matrix, int x, int y, int width, int height, int? color)
+		{
+			if (matrix == null) return false;
+			return TryRecordCore (loader, asset, target, (Matrix)matrix.Clone (), x, y, width, height, color);
+		}
+
+		static bool TryRecordCore (SvgLoader loader, IAsset asset, ImageSurface target, Matrix matrix, int x, int y, int width, int height, int? color)
+		{
+			if (replayingNativeSvg || !OptimumGuiGpuProbe.RenderingRequested || asset == null || target == null ||
 				asset.Data == null || !target.IsRecordingDisplayList) return false;
+			// rasterizeSvg returns no pixels for an empty size, so vanilla draws nothing.
+			if (width <= 0 || height <= 0) return true;
 
 			byte[] rgba;
 			try { rgba = RecordedSvgGeometry.Rasterize (asset.ToText (), width, height, width, height, color); }
-			catch (NotSupportedException) { return false; }
+			catch (NotSupportedException) {
+				// Gradients, dashes or geometry Skia does not cover: the NanoSVG buffer itself is
+				// the vanilla result, and NanoSVG is not Cairo, so the display list stays intact.
+				bool wasReplaying = replayingNativeSvg;
+				replayingNativeSvg = true;
+				try { rgba = loader.rasterizeSvg (asset, width, height, width, height, color); }
+				finally { replayingNativeSvg = wasReplaying; }
+			}
+			RecordedPixelOperation operation = matrix == null
+				? RecordedSvgGeometry.DrawSvgOperation (rgba, x, y, width, height, ColorUtil.ColorOver)
+				: RecordedSvgGeometry.DrawSvgMatrixOperation (rgba, matrix, x, y, width, height, ColorUtil.ColorOver);
 			return target.RecordCommand ("DrawSvg", () => new RecordedLegacyStep (context => {
 				bool wasReplaying = replayingNativeSvg;
 				replayingNativeSvg = true;
 				try {
-					using (var surface = (ImageSurface)context.GetTarget ()) loader.DrawSvg (asset, surface, x, y, width, height, color);
+					using (var surface = (ImageSurface)context.GetTarget ()) {
+						if (matrix == null) loader.DrawSvg (asset, surface, x, y, width, height, color);
+						else loader.DrawSvg (asset, surface, matrix, x, y, width, height, color);
+					}
 				} finally { replayingNativeSvg = wasReplaying; }
-			}, RecordedSvgGeometry.DrawSvgOperation (rgba, x, y, width, height, ColorUtil.ColorOver)));
+			}, operation));
 		}
 
 		/// <summary>

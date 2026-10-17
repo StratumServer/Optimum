@@ -207,6 +207,33 @@ namespace Cairo
 			};
 		}
 
+		/// <summary>The pixel loop of SvgLoader.DrawSvg(…, Matrix, …): each source pixel position
+		/// goes through cairo_matrix_transform_point (distance, then translation) and is
+		/// truncated to an index, exactly as the original.</summary>
+		internal static RecordedPixelOperation DrawSvgMatrixOperation (byte[] rgba, Matrix matrix, int posx, int posy, int width, int height, Func<int, int, int> colorOver)
+		{
+			if (rgba == null) throw new ArgumentNullException (nameof (rgba));
+			if (colorOver == null) throw new ArgumentNullException (nameof (colorOver));
+			double xx = matrix.Xx, yx = matrix.Yx, xy = matrix.Xy, yy = matrix.Yy, x0 = matrix.X0, y0 = matrix.Y0;
+			return (data, surfaceWidth, surfaceHeight, stride) => {
+				int num = surfaceWidth * surfaceHeight;
+				int* destination = (int*)data.ToPointer ();
+				fixed (byte* source = rgba) {
+					int* pixels = (int*)source;
+					for (int i = 0; i < width; i++) {
+						for (int j = 0; j < height; j++) {
+							int rgb = pixels[j * width + i];
+							double x = posx + i, y = posy + j;
+							double tx = xx * x + xy * y, ty = yx * x + yy * y;
+							tx += x0; ty += y0;
+							int index = (int)ty * surfaceWidth + (int)tx;
+							if (index >= 0 && index < num) destination[index] = colorOver (rgb, destination[index]);
+						}
+					}
+				}
+			};
+		}
+
 		/// <summary>Writes a rasterizeSvg buffer (uploaded by vanilla as GL_RGBA) into a surface
 		/// whose logical R, G, B, A channels become the candidate texture's channels.</summary>
 		internal static RecordedPixelOperation TextureOperation (byte[] rgba)
