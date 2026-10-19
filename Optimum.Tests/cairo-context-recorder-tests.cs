@@ -212,6 +212,18 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
+	[Fact]
+	public void PushGroupMaterializesRecordedPrefixBeforeNativeGroupSetup()
+	{
+		using var surface = new ImageSurface (Format.Argb32, 8, 8);
+		var recorder = surface.BeginRecording ();
+		using var context = new Context (surface);
+		context.PushGroup ();
+
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal ("Context.PushGroup", recorder.FirstMaterializationTrigger);
+	}
+
 	[Theory]
 	[InlineData (Antialias.Default)]
 	[InlineData (Antialias.Gray)]

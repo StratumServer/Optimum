@@ -1,10 +1,8 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..136da47 100644
+index 03f9c76..888b9f7 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
-@@ -33,10 +33,11 @@ @@ @@ @@ @@ @@
- // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
- // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+@@ -35,6 +35,7 @@
  //
  
  using System;
@@ -12,11 +10,7 @@ index 03f9c76..136da47 100644
  using System.Runtime.InteropServices;
  using System.Text;
  
- #nullable disable
- 
-@@ -50,10 +51,13 @@ @@ @@ @@ @@ @@ namespace Cairo
- 	}
- 
+@@ -52,6 +53,9 @@ namespace Cairo
  	public class Context : IDisposable
  	{
  		IntPtr handle = IntPtr.Zero;
@@ -26,11 +20,7 @@ index 03f9c76..136da47 100644
  
  		static int native_glyph_size, c_compiler_long_size;
  
- 		static Context ()
- 		{
-@@ -81,12 +85,13 @@ @@ @@ @@ @@ @@ namespace Cairo
- 				c_compiler_long_size = 8;
- 				native_glyph_size = Marshal.SizeOf (typeof (Glyph));
+@@ -83,8 +87,9 @@ namespace Cairo
  			}
  		}
  
@@ -41,11 +31,7 @@ index 03f9c76..136da47 100644
  		}
  
  		public Context (IntPtr handle, bool owner)
- 		{
- 			if (handle == IntPtr.Zero)
-@@ -115,71 +120,132 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			GC.SuppressFinalize (this);
- 		}
+@@ -117,67 +122,128 @@ namespace Cairo
  
  		protected virtual void Dispose (bool disposing)
  		{
@@ -192,11 +178,7 @@ index 03f9c76..136da47 100644
  			}
  		}
  
- 		[Obsolete ("Use SetSourceColor method")]
- 		public Color Color {
-@@ -195,70 +258,76 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			}
- 		}
+@@ -197,11 +263,12 @@ namespace Cairo
  
  		public double Tolerance {
  			get {
@@ -211,7 +193,7 @@ index 03f9c76..136da47 100644
  				CheckDisposed ();
  				NativeMethods.cairo_set_tolerance (handle, value);
  			}
- 		}
+@@ -209,54 +276,59 @@ namespace Cairo
  
  		public Cairo.FillRule FillRule {
  			set {
@@ -279,11 +261,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_set_dash (handle, dashes, dashes.Length, offset);
  		}
- 
- 		private Pattern Pattern {
-@@ -279,46 +348,53 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			}
- 		}
+@@ -281,42 +353,49 @@ namespace Cairo
  
  		public void SetSource (Pattern source)
  		{
@@ -341,11 +319,7 @@ index 03f9c76..136da47 100644
  			}
  		}
  
- 		[Obsolete ("Use GetTarget/SetTarget")]
- 		public Cairo.Surface Target {
-@@ -334,17 +410,23 @@ @@ @@ @@ @@ @@ namespace Cairo
- 		public Surface GetTarget ()
- 		{
+@@ -336,13 +415,19 @@ namespace Cairo
  			CheckDisposed ();
  			return Surface.Lookup (NativeMethods.cairo_get_target (handle), false);
  		}
@@ -368,11 +342,7 @@ index 03f9c76..136da47 100644
  		}
  
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
- 		public ScaledFont ScaledFont {
- 			set {
-@@ -356,16 +438,21 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			}
- 		}
+@@ -358,12 +443,17 @@ namespace Cairo
  
  		public ScaledFont GetScaledFont ()
  		{
@@ -392,11 +362,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_set_scaled_font (handle, font.Handle);
  		}
- 
-        
-@@ -377,67 +464,88 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			}
- 		}
+@@ -379,63 +469,84 @@ namespace Cairo
  
  		public void SetSourceColor (Color color)
  		{
@@ -492,11 +458,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_new_sub_path (handle);
  		}
- 
- 		public void MoveTo (PointD p)
-@@ -445,10 +553,11 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			MoveTo (p.X, p.Y);
- 		}
+@@ -447,6 +558,7 @@ namespace Cairo
  
  		public void MoveTo (double x, double y)
  		{
@@ -504,11 +466,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_move_to (handle, x, y);
  		}
- 
- 		public void LineTo (PointD p)
-@@ -456,10 +565,11 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			LineTo (p.X, p.Y);
- 		}
+@@ -458,6 +570,7 @@ namespace Cairo
  
  		public void LineTo (double x, double y)
  		{
@@ -516,11 +474,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_line_to (handle, x, y);
  		}
- 
- 		public void CurveTo (PointD p1, PointD p2, PointD p3)
-@@ -467,10 +577,11 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			CurveTo (p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y);
- 		}
+@@ -469,6 +582,7 @@ namespace Cairo
  
  		public void CurveTo (double x1, double y1, double x2, double y2, double x3, double y3)
  		{
@@ -528,11 +482,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_curve_to (handle, x1, y1, x2, y2, x3, y3);
  		}
- 
- 		public void RelMoveTo (Distance d)
-@@ -478,10 +589,11 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			RelMoveTo (d.Dx, d.Dy);
- 		}
+@@ -480,6 +594,7 @@ namespace Cairo
  
  		public void RelMoveTo (double dx, double dy)
  		{
@@ -540,11 +490,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_rel_move_to (handle, dx, dy);
  		}
- 
- 		public void RelLineTo (Distance d)
-@@ -489,10 +601,11 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			RelLineTo (d.Dx, d.Dy);
- 		}
+@@ -491,6 +606,7 @@ namespace Cairo
  
  		public void RelLineTo (double dx, double dy)
  		{
@@ -552,11 +498,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_rel_line_to (handle, dx, dy);
  		}
- 
- 		public void RelCurveTo (Distance d1, Distance d2, Distance d3)
-@@ -500,22 +613,25 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			RelCurveTo (d1.Dx, d1.Dy, d2.Dx, d2.Dy, d3.Dx, d3.Dy);
- 		}
+@@ -502,18 +618,21 @@ namespace Cairo
  
  		public void RelCurveTo (double dx1, double dy1, double dx2, double dy2, double dx3, double dy3)
  		{
@@ -578,11 +520,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_arc_negative (handle, xc, yc, radius, angle1, angle2);
  		}
- 
- 		public void Rectangle (Rectangle rectangle)
-@@ -528,34 +644,41 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			Rectangle (p.X, p.Y, width, height);
- 		}
+@@ -530,30 +649,37 @@ namespace Cairo
  
  		public void Rectangle (double x, double y, double width, double height)
  		{
@@ -625,11 +563,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_append_path (handle, path.Handle);
  		}
- 
-         #endregion
-@@ -565,111 +688,128 @@ @@ @@ @@ @@ @@ namespace Cairo
-         /// <summary>
-         /// Paint the whole surface ignoring any paths
+@@ -567,45 +693,55 @@ namespace Cairo
          /// </summary>
          public void Paint ()
  		{
@@ -688,8 +622,7 @@ index 03f9c76..136da47 100644
  			return new Rectangle (x1, y1, x2 - x1, y2 - y1);
  		}
  
-         /// <summary>
-         /// Paint everything in the current region
+@@ -614,21 +750,25 @@ namespace Cairo
          /// </summary>
  		public void Fill ()
  		{
@@ -718,7 +651,7 @@ index 03f9c76..136da47 100644
  			NativeMethods.cairo_fill_preserve (handle);
  		}
  
- #endregion
+@@ -636,61 +776,68 @@ namespace Cairo
  
  		public void Clip ()
  		{
@@ -767,8 +700,44 @@ index 03f9c76..136da47 100644
  
  		public Pattern PopGroup ()
  		{
- 			CheckDisposed ();
-@@ -708,28 +848,32 @@ @@ @@ @@ @@ @@ namespace Cairo
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, "PopGroup", "Context");
+ 			return Pattern.Lookup (NativeMethods.cairo_pop_group (handle), true);
+ 		}
+ 
+ 		public void PopGroupToSource ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, "PopGroupToSource", "Context");
+ 			NativeMethods.cairo_pop_group_to_source (handle);
+ 		}
+ 
+ 		public void PushGroup ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, "PushGroup", "Context");
+ 			NativeMethods.cairo_push_group (handle);
+ 		}
+ 
+ 		public void PushGroup (Content content)
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, "PushGroup", "Context");
+ 			NativeMethods.cairo_push_group_with_content (handle, content);
+ 		}
+ 
+@@ -703,31 +850,36 @@ namespace Cairo
+ 
+ 		public Surface GetGroupTarget ()
+ 		{
+-			CheckDisposed ();
++			CheckDisposedOnly ();
++			if (recordingSurface != null) recordingSurface.MaterializeRecorder (handle, "GetGroupTarget", "Context");
+ 			IntPtr surface = NativeMethods.cairo_get_group_target (handle);
  			return Surface.Lookup (surface, false);
  		}
  
@@ -799,11 +768,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_transform (handle, m);
  		}
- 
- 		[Obsolete("Use UserToDevice instead")]
-@@ -756,54 +900,58 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			DeviceToUserDistance (ref dx, ref dy);
- 		}
+@@ -758,50 +910,54 @@ namespace Cairo
  
  		public void UserToDevice (ref double x, ref double y)
  		{
@@ -868,11 +833,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_identity_matrix (handle);
  		}
- 
- 		[Obsolete ("Use SetFontSize() instead.")]
-@@ -817,29 +965,32 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			set { SetFontSize (value); }
- 		}
+@@ -819,12 +975,13 @@ namespace Cairo
  
  		public Matrix FontMatrix {
  			get {
@@ -888,7 +849,7 @@ index 03f9c76..136da47 100644
  				CheckDisposed ();
  				NativeMethods.cairo_set_font_matrix (handle, value);
  			}
- 		}
+@@ -832,12 +989,14 @@ namespace Cairo
  
  		public FontOptions FontOptions {
  			get {
@@ -905,11 +866,7 @@ index 03f9c76..136da47 100644
  				CheckDisposed ();
  				NativeMethods.cairo_set_font_options (handle, value.Handle);
  			}
- 		}
- 
-@@ -879,16 +1029,20 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			return dest;
- 		}
+@@ -881,12 +1040,16 @@ namespace Cairo
  
  		public void ShowGlyphs (Glyph[] glyphs)
  		{
@@ -926,11 +883,7 @@ index 03f9c76..136da47 100644
  			NativeMethods.cairo_show_glyphs (handle, ptr, glyphs.Length);
  
  			Marshal.FreeHGlobal (ptr);
- 		}
- 
-@@ -904,10 +1058,12 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			GlyphPath (glyphs);
- 		}
+@@ -906,6 +1069,8 @@ namespace Cairo
  
  		public void GlyphPath (Glyph[] glyphs)
  		{
@@ -939,11 +892,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  
  			IntPtr ptr;
- 
- 			ptr = FromGlyphToUnManagedMemory (glyphs);
-@@ -917,13 +1073,14 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			Marshal.FreeHGlobal (ptr);
- 		}
+@@ -919,9 +1084,10 @@ namespace Cairo
  
  		public FontExtents FontExtents {
  			get {
@@ -956,11 +905,7 @@ index 03f9c76..136da47 100644
  				return f_extents;
  			}
  		}
- 
- 		public void CopyPage ()
-@@ -934,22 +1091,29 @@ @@ @@ @@ @@ @@ namespace Cairo
- 
-         
+@@ -936,18 +1102,25 @@ namespace Cairo
  
  		public FontFace GetContextFontFace ()
  		{
@@ -988,11 +933,7 @@ index 03f9c76..136da47 100644
  			CheckDisposed ();
  			NativeMethods.cairo_select_font_face (handle, family, slant, weight);
  		}
- 
- 		public void ShowPage ()
-@@ -977,57 +1141,66 @@ @@ @@ @@ @@ @@ namespace Cairo
- 			return bytes;
- 		}
+@@ -979,53 +1152,62 @@ namespace Cairo
  
  		public void ShowText (string str)
  		{
@@ -1061,5 +1002,3 @@ index 03f9c76..136da47 100644
  
  			Marshal.FreeHGlobal (ptr);
  
- 			return extents;
- 		}
