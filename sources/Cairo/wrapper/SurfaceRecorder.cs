@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
+using System.Text;
+using System.Linq;
 using SkiaSharp;
 
 namespace Cairo
@@ -10,6 +13,7 @@ namespace Cairo
 		Native,
 		Recording,
 		NativeMaterialized,
+		Materializing,
 		Failed,
 		Sealed,
 		GpuRendered,
@@ -19,11 +23,15 @@ namespace Cairo
 	/// <summary>Immutable command stream for a newly-created ARGB32 image surface.</summary>
 	internal sealed class SurfaceRecorder
 	{
+		// Observers are diagnostic-only and never run while the recorder lock is held.
+		internal static event Action<string, bool> MaterializationCompleted;
+
 		readonly Surface surface;
 		readonly List<Command> commands = new List<Command> ();
 		readonly object sync = new object ();
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
+		string firstMaterializationTrigger;
 		Context shadow;
 		int shadowIndex;
 		Matrix sourceMatrix = new Matrix();
@@ -37,6 +45,9 @@ namespace Cairo
 		static long nextIdentity;
 		readonly List<RecordedGuiClip> clips = new List<RecordedGuiClip>();
 		readonly Stack<RecordedGuiClip[]> savedClips = new Stack<RecordedGuiClip[]>();
+		readonly Stack<Antialias> savedAntialias = new Stack<Antialias>();
+		int saveDepth;
+		bool unqualifiedHelperDrawing, antialiasConfigured;
 
 		internal Context Shadow {
 			get {
@@ -86,6 +97,15 @@ namespace Cairo
 		internal bool RecordText(byte[] text, bool pathOnly)
 		{
 			byte[] copy = (byte[])text.Clone();
+			int terminator = Array.IndexOf(copy, (byte)0);
+			int length = terminator < 0 ? copy.Length : terminator;
+			string decoded;
+			try { decoded = new UTF8Encoding(false, true).GetString(copy, 0, length); }
+			catch (DecoderFallbackException) { SetFirstMaterializationTrigger("Recorder.ShowText.Unsupported:text-font-parity"); return false; }
+			if (!pathOnly && (length == 0 || decoded.Any(character => CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark || CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.SpacingCombiningMark))) {
+				SetFirstMaterializationTrigger("Recorder.ShowText.Unsupported:text-font-parity");
+				return false;
+			}
 			if (pathOnly) return RecordNative(c => c.TextPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, copy));
 			Context context = Shadow;
 			using (var prepared = RecordedPreparationCache.PrepareText(context, copy)) {
@@ -136,7 +156,7 @@ namespace Cairo
 		{
 			commands.Clear(); shadow?.Dispose(); shadow = null; shadowIndex = 0;
 			foreach (IDisposable resource in resources) resource.Dispose();
-			resources.Clear(); clips.Clear(); savedClips.Clear(); savedSources.Clear();
+			resources.Clear(); clips.Clear(); savedClips.Clear(); savedAntialias.Clear(); savedSources.Clear();
 			foreach (var binding in sourceBindings) binding.Dispose();
 			sourceBindings.Clear(); currentSource = null; savedSurfaceSources.Clear();
 		}
@@ -144,11 +164,17 @@ namespace Cairo
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; width = NativeMethods.cairo_image_surface_get_width(surface.NativeHandleForMetadata); height = NativeMethods.cairo_image_surface_get_height(surface.NativeHandleForMetadata); }
 		internal SurfaceRecorderSnapshot CaptureSnapshot() { lock (sync) { if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null; return new SurfaceRecorderSnapshot(commands.ToArray(), width, height, resources.ToArray(), Identity); } }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
+		internal string FirstMaterializationTrigger { get { lock (sync) return firstMaterializationTrigger; } }
+		internal void SetFirstMaterializationTrigger(string trigger)
+		{
+			if (string.IsNullOrEmpty(trigger)) return;
+			lock (sync) if ((state == SurfaceRecordingState.Recording || state == SurfaceRecordingState.Sealed || state == SurfaceRecordingState.GpuRendered) && firstMaterializationTrigger == null) firstMaterializationTrigger = trigger;
+		}
 
 		internal bool TrySeal (out SurfaceRecorderSnapshot snapshot)
 		{
 			lock (sync) {
-				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.GpuRendered) { snapshot = null; return false; }
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.GpuRendered || saveDepth != 0 || unqualifiedHelperDrawing) { snapshot = null; return false; }
 				state = SurfaceRecordingState.Sealed;
 				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), width, height, resources.ToArray(), Identity);
 				return true;
@@ -195,12 +221,26 @@ namespace Cairo
 			if (!Add(new Command(replay, c => { }, picture: drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing)); return true;
 		}
-		internal bool RecordFill () => RecordDrawing(c => c.Fill(), c => c.NewPath());
-		internal bool RecordSave () { savedClips.Push(clips.ToArray()); return RecordNative(c => c.Save(), shadowReplay: c => { c.Save(); savedSources.Push((Matrix)sourceMatrix.Clone()); savedSurfaceSources.Push(currentSource); }); }
-		internal bool RecordRestore () { if (savedClips.Count > 0) { clips.Clear(); clips.AddRange(savedClips.Pop()); } return RecordNative(c => c.Restore(), shadowReplay: c => { c.Restore(); if (savedSources.Count > 0) sourceMatrix = savedSources.Pop(); if (savedSurfaceSources.Count > 0) currentSource = savedSurfaceSources.Pop(); }); }
+		internal bool RecordFill ()
+		{
+			Context context = Shadow;
+			if (context.Antialias == Antialias.Default) {
+				Rectangle extents = context.FillExtents();
+				if (Math.Abs(extents.X - Math.Round(extents.X)) > 1e-9 || Math.Abs(extents.Y - Math.Round(extents.Y)) > 1e-9 ||
+					Math.Abs(extents.Width - Math.Round(extents.Width)) > 1e-9 || Math.Abs(extents.Height - Math.Round(extents.Height)) > 1e-9) {
+					SetFirstMaterializationTrigger("Recorder.Antialias.Unsupported");
+					return false;
+				}
+			}
+			return RecordDrawing(c => c.Fill(), c => c.NewPath());
+		}
+		internal bool RecordSave () { Antialias antialias = Shadow.Antialias; bool recorded = RecordNative(c => c.Save(), shadowReplay: c => { c.Save(); savedSources.Push((Matrix)sourceMatrix.Clone()); savedSurfaceSources.Push(currentSource); }); if (recorded) { savedClips.Push(clips.ToArray()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
+		internal bool RecordRestore () { if (saveDepth == 0) return false; savedAntialias.Pop(); clips.Clear(); clips.AddRange(savedClips.Pop()); saveDepth--; return RecordNative(c => c.Restore(), shadowReplay: c => { c.Restore(); if (savedSources.Count > 0) sourceMatrix = savedSources.Pop(); if (savedSurfaceSources.Count > 0) currentSource = savedSurfaceSources.Pop(); }); }
 		internal bool RecordAntialias (Antialias value)
 		{
-			return Add (new Command (CommandKind.SetAntialias, (double)value));
+			bool recorded = Add (new Command (CommandKind.SetAntialias, (double)value));
+			if (recorded && value != Antialias.Default) antialiasConfigured = true;
+			return recorded;
 		}
 		internal bool RecordOperator (Operator value)
 		{
@@ -210,7 +250,8 @@ namespace Cairo
 
 		internal void FillRectangle (double x, double y, double width, double height, double red, double green, double blue, double alpha)
 		{
-			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !RecordFill ())
+			unqualifiedHelperDrawing |= !antialiasConfigured;
+			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !RecordDrawing(c => c.Fill(), c => c.NewPath()))
 				throw new InvalidOperationException ("Recorder is no longer recording.");
 		}
 
@@ -228,9 +269,15 @@ namespace Cairo
 
 		internal void Materialize (IntPtr contextHandle = default)
 		{
+			string trigger = null;
+			ExceptionDispatchInfo materializationFailure = null;
+			bool attempted = false;
 			lock (sync) {
-				if (state == SurfaceRecordingState.Failed) failure.Throw ();
+				if (state == SurfaceRecordingState.Failed) failure.Throw();
 				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return;
+				attempted = true;
+				trigger = firstMaterializationTrigger ?? "Unknown";
+				state = SurfaceRecordingState.Materializing;
 				try {
 					SurfaceRecordingDiagnostics.Materialize();
 					IntPtr native = surface.NativeHandleForMetadata;
@@ -244,15 +291,20 @@ namespace Cairo
 							ThrowIfError (NativeMethods.cairo_surface_status (native), "surface replay");
 						}
 					}
-					ClearCommands ();
+					ClearCommands();
 					state = SurfaceRecordingState.NativeMaterialized;
 				} catch (Exception exception) {
-					ClearCommands ();
+					ClearCommands();
 					failure = ExceptionDispatchInfo.Capture (exception);
 					state = SurfaceRecordingState.Failed;
-					throw;
+					materializationFailure = failure;
 				}
 			}
+			if (attempted) {
+				try { MaterializationCompleted?.Invoke(trigger, materializationFailure == null); }
+				catch { /* Diagnostics must not change Cairo behavior. */ }
+			}
+			materializationFailure?.Throw();
 		}
 
 		internal void DisposeFromSurface ()

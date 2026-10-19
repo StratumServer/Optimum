@@ -68,6 +68,12 @@ public static class ApiPatcher
 
         using var vanilla = AssemblyReader.Read(vanillaPath, vanillaReaderParameters, out preserveSymbols);
         using var contracts = AssemblyDefinition.ReadAssembly(contractsPath, contractsReaderParameters);
+        string cairoPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(contractsPath))!, "cairo-sharp.dll");
+        if (!File.Exists(cairoPath))
+        {
+            throw new FileNotFoundException("The Cairo assembly required for GUI materialization diagnostics was not found.", cairoPath);
+        }
+        using var cairo = AssemblyDefinition.ReadAssembly(cairoPath, contractsReaderParameters);
 
         var bridge = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumApiBridge")
             ?? throw new InvalidOperationException("OptimumApiBridge is missing from the contracts assembly.");
@@ -101,6 +107,7 @@ public static class ApiPatcher
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule);
+        int materializationObserver = PatchMaterializationObserver(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int queuedGuiContexts = PatchQueuedGuiContexts(vanilla.MainModule, contracts.MainModule);
         if (queuedGuiContexts != 4) throw new InvalidOperationException($"Expected 4 queued GUI context handoffs, applied {queuedGuiContexts}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
@@ -160,6 +167,10 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 CairoFont measurement metrics patches, applied {fontMeasurementMetrics}.");
         }
+        if (CountMaterializationObserverHooks(vanilla.MainModule) != 1 || CountMaterializationObserverCallbacks(vanilla.MainModule) != 1)
+        {
+            throw new InvalidOperationException("Expected exactly one module-initializer subscription for Cairo materialization diagnostics.");
+        }
 
         int typeForwards = InjectTypeForwards(vanilla, contracts);
 
@@ -181,6 +192,13 @@ public static class ApiPatcher
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
         AssemblyWriter.Write(vanilla, outputPath, preserveSymbols);
+        using (var written = AssemblyDefinition.ReadAssembly(outputPath, new ReaderParameters { AssemblyResolver = resolver }))
+        {
+            if (CountMaterializationObserverHooks(written.MainModule) != 1 || CountMaterializationObserverCallbacks(written.MainModule) != 1)
+            {
+                throw new InvalidOperationException("The patched API output is missing its unique Cairo materialization observer module-initializer hook.");
+            }
+        }
         if (preserveSymbols)
         {
             Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");
@@ -194,8 +212,90 @@ public static class ApiPatcher
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
+                $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
+    }
+
+    internal static int PatchMaterializationObserver(ModuleDefinition module, ModuleDefinition contracts, ModuleDefinition cairo)
+    {
+        const string metricsTypeName = "Vintagestory.API.Config.OptimumGuiMetrics";
+        const string recorderTypeName = "Cairo.SurfaceRecorder";
+        const string callbackName = "RecordMaterialization";
+        const string eventAdderName = "add_MaterializationCompleted";
+
+        var metrics = contracts.GetType(metricsTypeName)
+            ?? throw new InvalidOperationException($"{metricsTypeName} is missing from the contracts assembly.");
+        var callback = metrics.Methods.SingleOrDefault(method =>
+            method.Name == callbackName && method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.Parameters[1].ParameterType.MetadataType == MetadataType.Boolean)
+            ?? throw new InvalidOperationException("OptimumGuiMetrics.RecordMaterialization(string, bool) is missing from contracts.");
+        var recorder = cairo.GetType(recorderTypeName)
+            ?? throw new InvalidOperationException($"{recorderTypeName} is missing from cairo-sharp.");
+        var eventAdder = recorder.Methods.SingleOrDefault(method =>
+            method.Name == eventAdderName && method.IsStatic && method.Parameters.Count == 1)
+            ?? throw new InvalidOperationException("SurfaceRecorder.MaterializationCompleted event accessor is missing from cairo-sharp.");
+
+        var moduleType = module.Types.SingleOrDefault(type => type.Name == "<Module>")
+            ?? throw new InvalidOperationException("The target API module type is missing.");
+        var initializer = moduleType.Methods.SingleOrDefault(method => method.Name == ".cctor");
+        if (initializer == null)
+        {
+            initializer = new MethodDefinition(".cctor",
+                MethodAttributes.Private | MethodAttributes.Static | MethodAttributes.HideBySig |
+                MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
+                module.TypeSystem.Void);
+            initializer.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+            moduleType.Methods.Add(initializer);
+        }
+
+        int existingHooks = CountMaterializationObserverHooks(module);
+        int existingCallbacks = CountMaterializationObserverCallbacks(module);
+        if (existingHooks == 1 && existingCallbacks == 1) return 0;
+        if (existingHooks != 0)
+            throw new InvalidOperationException($"Expected no or one existing Cairo materialization observer hook, found {existingHooks}.");
+        if (existingCallbacks != 0)
+            throw new InvalidOperationException($"Expected no or one existing materialization observer callback, found {existingCallbacks}.");
+
+        var adderReference = module.ImportReference(eventAdder);
+        var callbackReference = module.ImportReference(callback);
+        var delegateType = module.ImportReference(eventAdder.Parameters[0].ParameterType);
+        var delegateConstructor = new MethodReference(".ctor", module.TypeSystem.Void, delegateType)
+        {
+            HasThis = true,
+            CallingConvention = MethodCallingConvention.Default
+        };
+        delegateConstructor.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+        delegateConstructor.Parameters.Add(new ParameterDefinition(module.TypeSystem.IntPtr));
+
+        var instructions = initializer.Body.Instructions;
+        int insertionIndex = 0;
+        instructions.Insert(insertionIndex++, Instruction.Create(OpCodes.Ldnull));
+        instructions.Insert(insertionIndex++, Instruction.Create(OpCodes.Ldftn, callbackReference));
+        instructions.Insert(insertionIndex++, Instruction.Create(OpCodes.Newobj, delegateConstructor));
+        instructions.Insert(insertionIndex, Instruction.Create(OpCodes.Call, adderReference));
+        return 1;
+    }
+
+    internal static int CountMaterializationObserverHooks(ModuleDefinition module)
+    {
+        var initializer = module.Types.SingleOrDefault(type => type.Name == "<Module>")?.Methods
+            .SingleOrDefault(method => method.Name == ".cctor");
+        if (initializer?.HasBody != true) return 0;
+        return initializer.Body.Instructions.Count(instruction =>
+            instruction.OpCode == OpCodes.Call && instruction.Operand is MethodReference method &&
+            method.Name == "add_MaterializationCompleted" && method.DeclaringType.FullName == "Cairo.SurfaceRecorder");
+    }
+
+    internal static int CountMaterializationObserverCallbacks(ModuleDefinition module)
+    {
+        var initializer = module.Types.SingleOrDefault(type => type.Name == "<Module>")?.Methods
+            .SingleOrDefault(method => method.Name == ".cctor");
+        if (initializer?.HasBody != true) return 0;
+        return initializer.Body.Instructions.Count(instruction =>
+            instruction.OpCode == OpCodes.Ldftn && instruction.Operand is MethodReference method &&
+            method.Name == "RecordMaterialization" && method.DeclaringType.FullName == "Vintagestory.API.Config.OptimumGuiMetrics");
     }
 
     internal static int PatchSvgIconTarget(ModuleDefinition module)
@@ -363,8 +463,6 @@ public static class ApiPatcher
             ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface construction stored in its surface local.");
         var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
         var cairoSurfaceType = new TypeReference("Cairo", "Surface", module, cairoReference);
-        var configureRecording = new MethodReference("ConfigureAutomaticRecording", module.TypeSystem.Void, cairoSurfaceType);
-        configureRecording.Parameters.Add(new ParameterDefinition(module.TypeSystem.Boolean));
         var cairoRecorderType = new TypeReference("Cairo", "SurfaceRecorder", module, cairoReference);
         var beginRecording = new MethodReference("BeginRecording", cairoRecorderType, cairoSurfaceType)
         {
@@ -391,8 +489,6 @@ public static class ApiPatcher
         }
 
         Instruction firstComposeInstruction = compose.Body.Instructions[0];
-        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)));
-        composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(configureRecording)));
         Instruction skipTimestamp = Instruction.Create(OpCodes.Nop);
         composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)));
         composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Stloc, enabledLocal));

@@ -1,13 +1,19 @@
 using System;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Cairo;
 using SkiaSharp;
+using Vintagestory.API.Config;
 using Xunit;
 
+[CollectionDefinition("Cairo materialization metrics", DisableParallelization = true)]
+public sealed class CairoMaterializationMetricsCollection { }
+
+[Collection("Cairo materialization metrics")]
 public sealed class CairoSurfaceRecorderTests
 {
-	static CairoSurfaceRecorderTests () { _ = CairoAPI.Version; }
+	static CairoSurfaceRecorderTests () { _ = CairoAPI.Version; _ = typeof (Vintagestory.API.Client.ICoreClientAPI).Assembly; }
 
 	[Fact]
 	public void ReplayMaterializesRecordedPrefixAndAllowsNativeDrawing()
@@ -58,6 +64,7 @@ public sealed class CairoSurfaceRecorderTests
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
 		var recorder = actual.BeginRecording ();
+		Assert.True (recorder.RecordAntialias (Antialias.None));
 		recorder.FillRectangle (1, 1, 14, 10, .12, .48, .82, 1);
 		recorder.FillRectangle (3, 2, 8, 7, .91, .2, .36, .43);
 		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -75,6 +82,90 @@ public sealed class CairoSurfaceRecorderTests
 			DrawNativeRectangle (context, 3, 2, 8, 7, .91, .2, .36, .43);
 		}
 		Assert.Equal (expected.Data, actual.Data); // Data materializes the retained display list after GPU publication.
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal ("SurfaceCpuReadback.Data", recorder.FirstMaterializationTrigger);
+	}
+
+	[Fact]
+	public void DefaultAntialiasSurfaceHelperCannotBeSealedForSkia()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 16, 12);
+		var recorder = actual.BeginRecording ();
+		recorder.FillRectangle (1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
+		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		using var expected = new ImageSurface (Format.Argb32, 16, 12);
+		using (var context = new Context (expected)) DrawNativeRectangle (context, 1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
+		Assert.Equal (expected.Data, actual.Data);
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+	}
+
+	[Fact]
+	public void BestAntialiasRecordingMatchesCairoWithinEdgeTolerance()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+			context.SetSourceRGBA (.9, .1, .3, .43);
+			context.Rectangle (4.5, 1.75, 10.25, 9.5);
+			context.Fill ();
+		}
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		using var bitmap = new SKBitmap (new SKImageInfo (18, 14, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (2.25, 3.5, 11.5, 8.25);
+			context.Fill ();
+			context.SetSourceRGBA (.9, .1, .3, .43);
+			context.Rectangle (4.5, 1.75, 10.25, 9.5);
+			context.Fill ();
+		}
+
+		byte[] actualPixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), actualPixels, 0, actualPixels.Length);
+		byte[] expectedPixels = expected.Data;
+		int maxChannelDelta = 0;
+		for (int i = 0; i < actualPixels.Length; i++) maxChannelDelta = Math.Max (maxChannelDelta, Math.Abs (actualPixels[i] - expectedPixels[i]));
+		Assert.InRange (maxChannelDelta, 0, 3);
+	}
+
+	[Fact]
+	public void UnbalancedSaveCannotBeSealedForSkia()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 16, 12);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Save ();
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (.12, .48, .82, 1);
+			context.Rectangle (1, 1, 10, 8);
+			context.Fill ();
+		}
+
+		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		using var expected = new ImageSurface (Format.Argb32, 16, 12);
+		using (var context = new Context (expected)) {
+			context.Save ();
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (.12, .48, .82, 1);
+			context.Rectangle (1, 1, 10, 8);
+			context.Fill ();
+		}
+		Assert.Equal (expected.Data, actual.Data);
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
@@ -103,8 +194,120 @@ public sealed class CairoSurfaceRecorderTests
 				} finally { System.IO.File.Delete (file); }
 			}
 			Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+			string expectedTrigger = boundary switch {
+				"handle" => "Surface.Handle",
+				"data" => "SurfaceCpuReadback.Data",
+				"pointer" => "SurfaceCpuReadback.DataPtr",
+				_ => "Surface.WriteToPng"
+			};
+			Assert.Equal (expectedTrigger, recorder.FirstMaterializationTrigger);
 			Assert.Equal (expected.Data, surface.Data);
 		}
+	}
+
+	[Fact]
+	public void MaterializationDiagnosticsCountActualReplayOnceWithoutUpload()
+	{
+		using var observer = SubscribeMaterializationMetricsForTest ();
+		bool wasEnabled = OptimumGuiMetrics.Enabled;
+		try {
+			OptimumGuiMetrics.Enabled = true;
+			OptimumGuiMetrics.Reset ();
+			using var surface = new ImageSurface (Format.Argb32, 8, 8);
+			surface.BeginRecording ().FillRectangle (1, 1, 4, 4, .2, .5, .8, 1);
+			_ = surface.DataPtr;
+			_ = surface.Data;
+
+			var snapshot = OptimumGuiMetrics.Snapshot ();
+			Assert.Equal (1, snapshot.MaterializationAttemptCount);
+			Assert.Equal (1, snapshot.MaterializationSuccessCount);
+			Assert.Equal (0, snapshot.MaterializationFailureCount);
+			Assert.Equal (1, OptimumGuiMetrics.GetMaterializationDiagnostics ()["SurfaceCpuReadback.DataPtr"]);
+		} finally {
+			OptimumGuiMetrics.Reset ();
+			OptimumGuiMetrics.Enabled = wasEnabled;
+		}
+	}
+
+	[Fact]
+	public void MaterializationDiagnosticsCountGpuReadbackAndFailedReplayExactlyOnce()
+	{
+		using var observer = SubscribeMaterializationMetricsForTest ();
+		bool wasEnabled = OptimumGuiMetrics.Enabled;
+		try {
+			OptimumGuiMetrics.Enabled = true;
+			OptimumGuiMetrics.Reset ();
+			using (var surface = new ImageSurface (Format.Argb32, 8, 8)) {
+				var recorder = surface.BeginRecording ();
+				Assert.True (recorder.RecordAntialias (Antialias.None));
+				recorder.FillRectangle (1, 1, 4, 4, .2, .5, .8, 1);
+				using var bitmap = new SKBitmap (8, 8, SKColorType.Rgba8888, SKAlphaType.Premul);
+				using (var canvas = new SKCanvas (bitmap)) Assert.True (surface.TryDrawRecordedCommands (canvas));
+				Assert.True (surface.CommitGpuRenderedCommands ());
+				_ = surface.Data;
+				_ = surface.DataPtr;
+			}
+
+			using (var failed = new ImageSurface (Format.Argb32, 4, 4)) {
+				failed.BeginRecording ().FillRectangle (0, 0, 2, 2, 1, 0, 0, 1);
+				NativeMethods.cairo_surface_finish (failed.NativeHandleForRecorder);
+				Assert.NotNull (Record.Exception (() => _ = failed.Handle));
+				Assert.NotNull (Record.Exception (() => _ = failed.DataPtr));
+			}
+
+			var snapshot = OptimumGuiMetrics.Snapshot ();
+			Assert.Equal (2, snapshot.MaterializationAttemptCount);
+			Assert.Equal (1, snapshot.MaterializationSuccessCount);
+			Assert.Equal (1, snapshot.MaterializationFailureCount);
+			var causes = OptimumGuiMetrics.GetMaterializationDiagnostics ();
+			Assert.Equal (1, causes["SurfaceCpuReadback.Data"]);
+			Assert.Equal (1, causes["Surface.Handle"]);
+		} finally {
+			OptimumGuiMetrics.Reset ();
+			OptimumGuiMetrics.Enabled = wasEnabled;
+		}
+	}
+
+	[Fact]
+	public void MaterializationDiagnosticsBoundTriggerKindsAndReset()
+	{
+		using var observer = SubscribeMaterializationMetricsForTest ();
+		bool wasEnabled = OptimumGuiMetrics.Enabled;
+		try {
+			OptimumGuiMetrics.Enabled = true;
+			OptimumGuiMetrics.Reset ();
+			for (int i = 0; i < 35; i++) {
+				using var surface = new ImageSurface (Format.Argb32, 2, 2);
+				surface.BeginRecording ().FillRectangle (0, 0, 1, 1, 1, 0, 0, 1);
+				surface.MaterializeRecorder (IntPtr.Zero, "cause-" + i, "test");
+			}
+			var causes = OptimumGuiMetrics.GetMaterializationDiagnostics ();
+			Assert.Equal (33, causes.Count); // 32 explicit keys plus the bounded overflow bucket.
+			Assert.Equal (3, causes["other-trigger-kinds"]);
+			Assert.Equal (35, OptimumGuiMetrics.MaterializationAttemptCount);
+			OptimumGuiMetrics.ResetMaterializationDiagnostics ();
+			Assert.Empty (OptimumGuiMetrics.GetMaterializationDiagnostics ());
+			Assert.Equal (0, OptimumGuiMetrics.MaterializationAttemptCount);
+		} finally {
+			OptimumGuiMetrics.Reset ();
+			OptimumGuiMetrics.Enabled = wasEnabled;
+		}
+	}
+
+	private static IDisposable SubscribeMaterializationMetricsForTest ()
+	{
+		Type recorderType = typeof (ImageSurface).Assembly.GetType ("Cairo.SurfaceRecorder", throwOnError: true)!;
+		EventInfo materialized = recorderType.GetEvent ("MaterializationCompleted", BindingFlags.Static | BindingFlags.NonPublic)!;
+		var callback = (Action<string, bool>)typeof (OptimumGuiMetrics)
+			.GetMethod ("RecordMaterialization", BindingFlags.Static | BindingFlags.NonPublic)!
+			.CreateDelegate (typeof (Action<string, bool>));
+		materialized.GetAddMethod (nonPublic: true)!.Invoke (null, [callback]);
+		return new MaterializationMetricsObserver(materialized.GetRemoveMethod (nonPublic: true)!, callback);
+	}
+
+	private sealed class MaterializationMetricsObserver (MethodInfo remove, Action<string, bool> callback) : IDisposable
+	{
+		public void Dispose () => remove.Invoke (null, [callback]);
 	}
 
 	[Fact]

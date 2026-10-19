@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Cairo;
@@ -14,125 +15,34 @@ namespace Vintagestory.Client.NoObf
 	{
 		private const int Width = OptimumGuiGpuProbe.ReadbackWidth;
 		private const int Height = OptimumGuiGpuProbe.ReadbackHeight;
-		[ThreadStatic] private static int attempted;
-		[ThreadStatic] private static IntPtr contextHandle;
-		[ThreadStatic] private static GRGlInterface candidateInterface;
-		[ThreadStatic] private static GRContext candidateContext;
-		[ThreadStatic] private static RecordedGpuBlur candidateBlur;
+		private static int attempted;
+		public static long MaterializationAttemptCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationAttemptCount;
+		public static long MaterializationSuccessCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationSuccessCount;
+		public static long MaterializationFailureCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationFailureCount;
 
-		/// <summary>Shader passes submitted by this thread's current GUI GPU context.</summary>
-		public static long CpuRasterizationCount => SurfaceRecordingDiagnostics.CpuRasterizations;
-		public static long NativeMaterializationCount => SurfaceRecordingDiagnostics.Materializations;
-		public static long GpuDependencyRenderCount => SurfaceRecordingDiagnostics.DependencyRenders;
-		public static long GpuDependencyCacheHitCount => SurfaceRecordingDiagnostics.DependencyCacheHits;
-		private static long diagnosticReadbackCount;
-		public static long DiagnosticReadbackCount => Interlocked.Read(ref diagnosticReadbackCount);
-		public static void ResetRenderingDiagnostics() { SurfaceRecordingDiagnostics.Reset(); Interlocked.Exchange(ref diagnosticReadbackCount, 0); }
-		public static long GpuBlurPassCount => candidateBlur?.PassCount ?? 0;
-
-		/// <summary>Opt-in elapsed timings for CPU preparation. Disabled by default; not thread CPU or GPU time.</summary>
-		public static bool RecordingProfilingEnabled { get => SurfaceRecordingDiagnostics.ProfilingEnabled; set => SurfaceRecordingDiagnostics.ProfilingEnabled = value; }
-		public static long RecordingProfileTimestampFrequency => System.Diagnostics.Stopwatch.Frequency;
-		public static long RecordingShadowAccessCount => SurfaceRecordingDiagnostics.ShadowAccesses;
-		public static long RecordingShadowTicks => SurfaceRecordingDiagnostics.ShadowTicks;
-		public static long RecordingShadowCreationCount => SurfaceRecordingDiagnostics.ShadowCreations;
-		public static long RecordingShadowCommandCount => SurfaceRecordingDiagnostics.ShadowCommands;
-		public static long RecordingDrawingCaptureCount => SurfaceRecordingDiagnostics.DrawingCaptures;
-		public static long RecordingDrawingCaptureTicks => SurfaceRecordingDiagnostics.DrawingCaptureTicks;
-		public static long RecordingPathCopyCount => SurfaceRecordingDiagnostics.PathCopies;
-		public static long RecordingPathCopyTicks => SurfaceRecordingDiagnostics.PathCopyTicks;
-		public static long RecordingPathConversionCount => SurfaceRecordingDiagnostics.PathConversions;
-		public static long RecordingPathConversionTicks => SurfaceRecordingDiagnostics.PathConversionTicks;
-		public static long RecordingStrokeOutlineCount => SurfaceRecordingDiagnostics.StrokeOutlines;
-		public static long RecordingStrokeOutlineTicks => SurfaceRecordingDiagnostics.StrokeOutlineTicks;
-		/// <summary>Reset between measurements, with no operation in flight. Does not change enabled state.</summary>
-		public static void ResetRecordingProfiling() => SurfaceRecordingDiagnostics.ResetProfiling();
-        public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetRecordingStageDiagnostics() => SurfaceRecordingDiagnostics.StageDiagnostics;
-
-		/// <summary>Reuse immutable CPU preparation; disabling keeps all legacy commands on the uncached route.</summary>
-		public static bool RecordingPreparationReuseEnabled { get => RecordedPreparationCache.Enabled; set => RecordedPreparationCache.Enabled = value; }
-		public static long RecordingPreparationCacheHits => RecordedPreparationCache.Hits;
-		public static long RecordingPreparationCacheMisses => RecordedPreparationCache.Misses;
-		public static long RecordingPreparationCacheEvictions => RecordedPreparationCache.Evictions;
-		public static long RecordingPreparationTextHits => RecordedPreparationCache.TextHits;
-		public static long RecordingPreparationPathHits => RecordedPreparationCache.PathHits;
-		public static long RecordingPreparationStrokeHits => RecordedPreparationCache.StrokeHits;
-		public static long RecordingPreparationSvgHits => RecordedPreparationCache.PictureHits;
-		public static long RecordingPreparationCacheEntries => RecordedPreparationCache.Count;
-		public static long RecordingPreparationCacheEstimatedBytes => RecordedPreparationCache.Bytes;
-		public static void ResetRecordingPreparationCounters() => RecordedPreparationCache.ResetCounters();
-		public static void ClearRecordingPreparationCache() => RecordedPreparationCache.Clear();
-
-
-
-		// Call while the owning GLFW context is still current. On context replacement,
-		// abandon the old resources without issuing GL calls into the new context.
-		public static void ReleaseCurrentContext()
+		// One entry per actual first replay attempt, grouped by the trigger captured at the boundary.
+		public static Dictionary<string, long> GetMaterializationDiagnostics ()
 		{
-			GRContext context = candidateContext;
-			GRGlInterface glInterface = candidateInterface;
-			RecordedGpuBlur blur = candidateBlur;
-			IntPtr owner = contextHandle;
-			candidateContext = null;
-			candidateInterface = null;
-			candidateBlur = null;
-			contextHandle = IntPtr.Zero;
-			attempted = 0;
-			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
-			try
-			{
-				// Abandon first if a different context is current; disposal must not touch its GL state.
-				if (context != null && owner != GetCurrentContextHandle()) context.AbandonContext(false);
-				blur?.Dispose();
-				if (context != null && owner == GetCurrentContextHandle()) context.AbandonContext(true);
-			}
-			finally
-			{
-				try { context?.Dispose(); }
-				finally { glInterface?.Dispose(); }
-			}
+			return Vintagestory.API.Config.OptimumGuiMetrics.GetMaterializationDiagnostics ();
 		}
 
-		private static unsafe IntPtr GetCurrentContextHandle() => (IntPtr)GLFW.GetCurrentContext();
-
-		private static GRContext GetCandidateContext()
+		public static void ResetRenderingDiagnostics ()
 		{
-			if (candidateContext != null) return candidateContext;
-			GRGlInterface glInterface = GRGlInterface.Create(new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress));
-			if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
-			GRContext context = null;
-			try
-			{
-				context = GRContext.CreateGl(glInterface);
-				if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
-				context.SetResourceCacheLimit(16 * 1024 * 1024);
-				candidateInterface = glInterface;
-				candidateContext = context;
-				return context;
-			}
-			catch
-			{
-				try { context?.Dispose(); }
-				finally { glInterface.Dispose(); }
-				throw;
-			}
+			Vintagestory.API.Config.OptimumGuiMetrics.ResetMaterializationDiagnostics ();
 		}
 
 		public static string TryRunOnce(int expectedContextThreadId)
 				{
-					Surface.AutomaticRecordingEnabled = OptimumGuiGpuProbe.RenderingRequested;
-					SurfaceRecordingDiagnostics.Enabled = OptimumGuiGpuProbe.RenderingRequested;
 					if (!OptimumGuiGpuProbe.Enabled && !OptimumGuiGpuProbe.RenderingRequested)
 						return null;
 					if (Environment.CurrentManagedThreadId != expectedContextThreadId)
 						return "Optimum Skia GL probe skipped: caller is not on the context-owning thread.";
 					if (!HasCurrentContext())
 						return "Optimum Skia GL probe skipped: no current GLFW OpenGL context.";
-					IntPtr currentHandle = GetCurrentContextHandle();
-					if (contextHandle != currentHandle)
+					if (!MatchesCertifiedDevice())
 					{
-						ReleaseCurrentContext();
-						contextHandle = currentHandle;
+						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
+						return "Optimum Skia GL probe skipped: current OpenGL context does not match the prelaunch-certified device/context; GUI rendering remains vanilla.";
 					}
 					if (Interlocked.CompareExchange(ref attempted, 1, 0) != 0)
 						return null;
@@ -145,6 +55,11 @@ namespace Vintagestory.Client.NoObf
 
 					string renderer = SafeGetString(StringName.Renderer);
 					string version = SafeGetString(StringName.Version);
+					if (!IsOpenGl3OrNewer(version))
+					{
+						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+						return "Optimum Skia GL probe skipped; renderer=" + renderer + "; GL=" + version + "; reason=OpenGL 3.0 or newer is required for state capture.";
+					}
 					if (OptimumGuiGpuProbe.IsSoftwareRenderer(renderer))
 					{
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
@@ -168,21 +83,10 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-		public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetMaterializationDiagnostics() => SurfaceRecordingDiagnostics.MaterializationCauses;
-		public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetRasterizationDiagnostics() => SurfaceRecordingDiagnostics.RasterizationCauses;
-		public static System.Collections.Generic.IReadOnlyDictionary<string, long> GetGpuFallbackDiagnostics() => SurfaceRecordingDiagnostics.FallbackReasons;
-		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason)
-		{
-			bool result = TryCreateCandidateTextureCore(surface, linearMag, expectedContextThreadId, out candidateTexture, out failureReason);
-			if (!result) SurfaceRecordingDiagnostics.Fallback(failureReason);
-			return result;
-		}
-		private static bool TryCreateCandidateTextureCore(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason)
+		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, bool linearMin = false)
 				{
 					candidateTexture = 0;
 					failureReason = null;
-					Surface.AutomaticRecordingEnabled = OptimumGuiGpuProbe.RenderingRequested;
-					SurfaceRecordingDiagnostics.Enabled = OptimumGuiGpuProbe.RenderingRequested;
 					if (!OptimumGuiGpuProbe.RenderingRequested)
 					{
 						failureReason = "rendering-not-requested";
@@ -198,14 +102,30 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "missing-context-thread";
 						return false;
 					}
-					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording && surface.RecordingState != Cairo.SurfaceRecordingState.GpuRendered)
+					if (surface.RecordingState != Cairo.SurfaceRecordingState.Recording)
 					{
-						failureReason = "surface-not-recording:" + surface.RecordingState + ":" + surface.MaterializeCause;
+						string firstTrigger = surface.FirstMaterializationTrigger;
+						if (surface.RecordingState == Cairo.SurfaceRecordingState.NativeMaterialized && firstTrigger != null)
+						{
+							failureReason = "surface-not-recording:NativeMaterialized:first-trigger=" + firstTrigger;
+						}
+						else failureReason = "surface-not-recording:" + surface.RecordingState;
 						return false;
 					}
 					if (!HasCurrentContext())
 					{
 						failureReason = "missing-current-context";
+						return false;
+					}
+					if (!MatchesCertifiedDevice())
+					{
+						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
+						failureReason = "current-device-or-context-mismatch";
+						return false;
+					}
+					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
+					{
+						failureReason = "OpenGL 3.0 or newer is required for state capture";
 						return false;
 					}
 					TryRunOnce(expectedContextThreadId);
@@ -234,19 +154,9 @@ namespace Vintagestory.Client.NoObf
 						GL.ActiveTexture(TextureUnit.Texture0);
 						GL.GenTextures(1, out texture);
 						GL.BindTexture(TextureTarget.Texture2D, texture);
-						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
 						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
 						GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
-						if (surface.Width == 0 || surface.Height == 0)
-						{
-							// Vanilla creates zero-sized textures while a scrollbar is not yet
-							// sized. Preserve that storage and seal the empty recording without
-							// constructing an incomplete framebuffer or rasterizing on the CPU.
-							if (!surface.TrySealEmptyRecordedCommands()) throw new InvalidOperationException("The empty GUI command list could not be sealed.");
-							rendered = true;
-						}
-						else
-						{
 						GL.GenFramebuffers(1, out framebuffer);
 						GL.BindFramebuffer(FramebufferTarget.Framebuffer, framebuffer);
 						GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, texture, 0);
@@ -262,30 +172,36 @@ namespace Vintagestory.Client.NoObf
 						GL.Disable(EnableCap.StencilTest);
 						GL.Disable(EnableCap.CullFace);
 						GL.Disable((EnableCap)0x8DB9);
+						if (state.SupportsRasterizerDiscard) GL.Disable((EnableCap)0x8C89); // RASTERIZER_DISCARD
 						GL.ColorMask(true, true, true, true);
 						GL.DepthMask(true);
 						GL.StencilMask(0xFFFFFFFF);
 						GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
 						GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
 
-						// TopLeft keeps Cairo's row order: canvas row 0 is the first row uploaded to GL.
-						GRContext context = GetCandidateContext();
-						// The engine and Skia share GL; invalidate Skia's cached bindings each time.
-						context.ResetContext(GRGlBackendState.All);
-						var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-						using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-						using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888))
+						var getProc = new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress);
+						using (GRGlInterface glInterface = GRGlInterface.Create(getProc))
 						{
-							if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-							candidateBlur ??= new RecordedGpuBlur(context);
-							if (!surface.TryDrawRecordedCommands(skSurface, candidateBlur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-							using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.GpuSubmission)) {
-                                skSurface.Flush(); context.Flush(); context.Submit(false);
-                            }
-							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
-							rendered = true;
-						}
+							if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
+							using (GRContext context = GRContext.CreateGl(glInterface))
+							{
+								if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
+								context.ResetContext(GRGlBackendState.All);
+								var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
+							using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
+							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
+								{
+									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
+								if (!surface.TryDrawRecordedCommands(skSurface.Canvas)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+								skSurface.Flush();
+								context.Flush();
+								context.Submit(true);
+								GL.Finish();
+								OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+								if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+								rendered = true;
+							}
+							}
 						}
 					}
 					catch (Exception exception)
@@ -335,6 +251,29 @@ namespace Vintagestory.Client.NoObf
 				}
 
 		private static unsafe bool HasCurrentContext() => GLFW.GetCurrentContext() != null;
+
+		private static bool MatchesCertifiedDevice()
+		{
+			try
+			{
+				string vendor = SafeGetString(StringName.Vendor);
+				string renderer = SafeGetString(StringName.Renderer);
+				string version = SafeGetString(StringName.Version);
+				GL.GetInteger(GetPName.MajorVersion, out int major);
+				GL.GetInteger(GetPName.MinorVersion, out int minor);
+				GL.GetInteger(GetPName.ContextProfileMask, out int profileMask);
+				GL.GetInteger(GetPName.ContextFlags, out int contextFlags);
+				return !string.IsNullOrWhiteSpace(vendor) && vendor != "unknown" &&
+					!string.IsNullOrWhiteSpace(renderer) && renderer != "unknown" &&
+					!string.IsNullOrWhiteSpace(version) && version != "unknown" &&
+					Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches(vendor, renderer, version,
+						major, minor, profileMask, contextFlags);
+			}
+			catch
+			{
+				return false;
+			}
+		}
 
 		private static IntPtr GetGlProcedureAddress(string name)
 		{
@@ -389,6 +328,7 @@ namespace Vintagestory.Client.NoObf
 						GL.Disable(EnableCap.StencilTest);
 						GL.Disable(EnableCap.CullFace);
 						GL.Disable((EnableCap)0x8DB9); // FRAMEBUFFER_SRGB
+						if (state.SupportsRasterizerDiscard) GL.Disable((EnableCap)0x8C89); // RASTERIZER_DISCARD
 						GL.ColorMask(true, true, true, true);
 						GL.DepthMask(true);
 						GL.StencilMask(0xFFFFFFFF);
@@ -425,8 +365,7 @@ namespace Vintagestory.Client.NoObf
 									GL.PixelStore((PixelStoreParameter)0x0D02, 0); // PACK_ROW_LENGTH
 									GL.PixelStore((PixelStoreParameter)0x0D03, 0); // PACK_SKIP_ROWS
 									GL.PixelStore((PixelStoreParameter)0x0D04, 0); // PACK_SKIP_PIXELS
-									Interlocked.Increment(ref diagnosticReadbackCount);
-						GL.ReadPixels(0, 0, Width, Height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+									GL.ReadPixels(0, 0, Width, Height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
 								}
 							}
 						}
@@ -491,6 +430,14 @@ namespace Vintagestory.Client.NoObf
 					catch { return "unavailable"; }
 				}
 
+				private static bool IsOpenGl3OrNewer(string version)
+				{
+					if (string.IsNullOrEmpty(version)) return false;
+					int length = 0;
+					while (length < version.Length && version[length] >= '0' && version[length] <= '9') length++;
+					return length > 0 && int.TryParse(version.Substring(0, length), out int major) && major >= 3;
+				}
+
 		private static string AppendFailure(string existing, string added) => existing == null ? added : existing + "; " + added;
 
 				private sealed class GlStateSnapshot
@@ -525,6 +472,8 @@ namespace Vintagestory.Client.NoObf
 					private readonly bool stencilEnabled;
 					private readonly bool cullEnabled;
 					private readonly bool framebufferSrgbEnabled;
+					private readonly bool rasterizerDiscardEnabled;
+					private readonly bool supportsRasterizerDiscard;
 					private readonly bool depthWriteEnabled;
 					private readonly int depthFunction;
 					private readonly int frontStencilFunction;
@@ -565,6 +514,7 @@ namespace Vintagestory.Client.NoObf
 						textureBindings = new int[textureUnitCount];
 						GL.GetInteger((GetPName)0x821B, out int glMajor);
 						GL.GetInteger((GetPName)0x821C, out int glMinor);
+						supportsRasterizerDiscard = glMajor >= 3;
 						samplerObjectsSupported = glMajor > 3 || (glMajor == 3 && glMinor >= 3);
 						samplerBindings = samplerObjectsSupported ? new int[textureUnitCount] : Array.Empty<int>();
 						try
@@ -602,6 +552,7 @@ namespace Vintagestory.Client.NoObf
 						stencilEnabled = GL.IsEnabled(EnableCap.StencilTest);
 						cullEnabled = GL.IsEnabled(EnableCap.CullFace);
 						framebufferSrgbEnabled = GL.IsEnabled((EnableCap)0x8DB9);
+						rasterizerDiscardEnabled = supportsRasterizerDiscard && GL.IsEnabled((EnableCap)0x8C89);
 						depthWriteEnabled = GL.GetBoolean((GetPName)0x0B72);
 						GL.GetInteger((GetPName)0x0B74, out depthFunction);
 						GL.GetInteger((GetPName)0x0B45, out cullFaceMode);
@@ -629,6 +580,7 @@ namespace Vintagestory.Client.NoObf
 					}
 
 					internal static GlStateSnapshot Capture() => new GlStateSnapshot();
+					internal bool SupportsRasterizerDiscard => supportsRasterizerDiscard;
 
 					internal void Restore()
 					{
@@ -638,7 +590,11 @@ namespace Vintagestory.Client.NoObf
 						GL.UseProgram(currentProgram);
 						GL.BindVertexArray(vertexArray);
 						GL.BindBuffer(BufferTarget.ArrayBuffer, arrayBuffer);
-						if (vertexArray != 0) GL.BindBuffer(BufferTarget.ElementArrayBuffer, elementArrayBuffer);
+						// Compatibility contexts can expose an element-array binding on VAO 0.
+						// In core contexts VAO 0 has no element binding and this remains zero, so
+						// skip only that invalid-to-bind case.
+						if (vertexArray != 0 || elementArrayBuffer != 0)
+							GL.BindBuffer(BufferTarget.ElementArrayBuffer, elementArrayBuffer);
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, pixelPackBuffer);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, pixelUnpackBuffer);
 						GL.PixelStore(PixelStoreParameter.PackAlignment, packAlignment);
@@ -666,6 +622,7 @@ namespace Vintagestory.Client.NoObf
 						SetEnabled(EnableCap.StencilTest, stencilEnabled);
 						SetEnabled(EnableCap.CullFace, cullEnabled);
 						SetEnabled((EnableCap)0x8DB9, framebufferSrgbEnabled);
+						if (supportsRasterizerDiscard) SetEnabled((EnableCap)0x8C89, rasterizerDiscardEnabled);
 						GL.DepthMask(depthWriteEnabled);
 						GL.DepthFunc((DepthFunction)depthFunction);
 						GL.StencilFuncSeparate(StencilFace.Front, (StencilFunction)frontStencilFunction, frontStencilReference, frontStencilValueMask);

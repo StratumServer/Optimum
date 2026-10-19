@@ -865,17 +865,6 @@ if [[ -f "$vs_entry_csproj" ]]; then
   python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$vs_entry_csproj"
 fi
 
-# 6g-extra: AssemblyInfo.cs - ensure Guid/ComVisible attributes resolve without relying on ilspycmd using emission.
-find "$repo_root/build" -type f -name "AssemblyInfo.cs" 2>/dev/null | while read -r ai; do
-  if grep -qE '\[assembly:\s*(System\.Runtime\.InteropServices\.)?(Guid|ComVisible)(Attribute)?\(' "$ai"; then
-    if ! grep -qE '^\s*using\s+System\.Runtime\.InteropServices\s*;' "$ai"; then
-      sed -i '1s/^/using System.Runtime.InteropServices;\n/' "$ai"
-    fi
-    perl -pi -e 's/\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?Guid(?:Attribute)?\(/\[assembly: System.Runtime.InteropServices.Guid\(/g' "$ai"
-    perl -pi -e 's/\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?ComVisible(?:Attribute)?\(/\[assembly: System.Runtime.InteropServices.ComVisible\(/g' "$ai"
-  fi
-done
-
 # 6h: Restore serialization metadata lost by ILSpy.
 # ILSpy fails to decode attribute arguments for JsonObject(MemberSerialization.OptIn) and
 # ProtoContract(ImplicitFields = ImplicitFields.AllFields). Without these, Newtonsoft serializes
@@ -1518,10 +1507,14 @@ if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.pat
   # behind, its stale index and lock files make the next git add die with a
   # silent exit 128 under set -e, so throw it away and start clean.
   _optimum_tmp_git=false
-  if [[ -f "$repo_root/.git/optimum-bootstrap-tmp" ]]; then
+  if [[ -d "$repo_root/.git" && -f "$repo_root/.git/optimum-bootstrap-tmp" ]]; then
     rm -rf "$repo_root/.git"
   fi
-  if [[ ! -e "$repo_root/.git" ]]; then
+  # Linked worktrees store a .git file that points to the shared repository's
+  # per-worktree metadata. Treat them as real repositories; `git init` would
+  # leave that file in place, and writing `.git/optimum-bootstrap-tmp` would
+  # fail because `.git` is a file rather than a directory.
+  if ! git -C "$repo_root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git init -q "$repo_root"
     touch "$repo_root/.git/optimum-bootstrap-tmp"
     _optimum_tmp_git=true

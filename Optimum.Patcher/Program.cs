@@ -646,9 +646,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Common.Compression", "CompressAndCombine", 3),
     new("Vintagestory.Common.Compression", "DecompressCombined", 4),
     new("Vintagestory.Common.LoadBalancer", "CreateDedicatedWorkerThread", 3),
-    // SvgLoader: reload SVG asset data when a mod holds a stale IAsset ref
-    // after the textures category is unloaded (waypoint icon packs, etc.).
-    // Vanilla throws; this reloads from Origin, keeping icons drawing.
+    // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset
+    // data when a mod holds a stale IAsset ref after texture unload.
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 8),
+    new("Vintagestory.Client.NoObf.SvgLoader", "LoadSvg", 6),
     new("Vintagestory.Client.NoObf.SvgLoader", "rasterizeSvg", 6),
     new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
     new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 8),

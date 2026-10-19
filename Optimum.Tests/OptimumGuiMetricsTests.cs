@@ -4,12 +4,59 @@ using Xunit;
 
 namespace Optimum.Tests;
 
-[CollectionDefinition("GUI metrics", DisableParallelization = true)]
-public sealed class GuiMetricsCollection { }
-
-[Collection("GUI metrics")]
+[Collection("OptimumConfig")]
 public class OptimumGuiMetricsTests
 {
+    [Fact]
+    public void NativeTextMaterializationRevokesSkiaCertificationEvenWhenMetricsAreDisabled()
+    {
+        bool originalRequest = OptimumConfig.GuiGpuRenderEnabled;
+        bool originalMetrics = OptimumGuiMetrics.Enabled;
+        try
+        {
+            OptimumConfig.GuiGpuRenderEnabled = true;
+            OptimumGuiMetrics.Enabled = false;
+            OptimumConfig.SetGuiGpuCertificationPassed(true, "vendor", "renderer", "4.6", 4, 6, 2, 0);
+            Assert.True(OptimumConfig.GuiGpuRecordingEligible);
+
+            OptimumGuiMetrics.RecordMaterialization("Context.SelectFontFace", succeeded: true);
+
+            Assert.False(OptimumConfig.GuiGpuRecordingEligible);
+            Assert.False(OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6", 4, 6, 2, 0));
+        }
+        finally
+        {
+            OptimumConfig.RevokeGuiGpuCertification();
+            OptimumGuiMetrics.Enabled = originalMetrics;
+            OptimumConfig.GuiGpuRenderEnabled = originalRequest;
+        }
+    }
+
+    [Fact]
+    public void NativeMaterializationRevokesApprovalWhileGpuRequestIsTemporarilyDisabled()
+    {
+        bool originalRequest = OptimumConfig.GuiGpuRenderEnabled;
+        bool originalMetrics = OptimumGuiMetrics.Enabled;
+        try
+        {
+            OptimumConfig.GuiGpuRenderEnabled = false;
+            OptimumGuiMetrics.Enabled = false;
+            OptimumConfig.SetGuiGpuCertificationPassed(true, "vendor", "renderer", "4.6", 4, 6, 2, 0);
+
+            OptimumGuiMetrics.RecordMaterialization("Context.SelectFontFace", succeeded: true);
+
+            OptimumConfig.GuiGpuRenderEnabled = true;
+            Assert.False(OptimumConfig.GuiGpuCertificationPassed);
+            Assert.False(OptimumConfig.GuiGpuRecordingEligible);
+        }
+        finally
+        {
+            OptimumConfig.RevokeGuiGpuCertification();
+            OptimumGuiMetrics.Enabled = originalMetrics;
+            OptimumConfig.GuiGpuRenderEnabled = originalRequest;
+        }
+    }
+
     [Fact]
     public void SnapshotRecordsCompositionsAndAllocationsSeparatelyFromUpdates()
     {

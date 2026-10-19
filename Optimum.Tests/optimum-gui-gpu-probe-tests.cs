@@ -83,6 +83,38 @@ namespace Optimum.Tests;
 		}
 	}
 
+	[Fact]
+	public void RequestAndBackendProbeCannotBypassCertification()
+	{
+		var original = Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled;
+		try
+		{
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = true;
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(false, null, null, null, 0, 0, 0, 0);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(true);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+			Assert.False(OptimumGuiGpuProbe.GuiRenderingEnabled);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(true, "vendor", "renderer", "4.6 driver", 4, 6, 2, 0);
+			Assert.True(Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6 driver", 4, 6, 2, 0));
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches("vendor", "other", "4.6 driver", 4, 6, 2, 0));
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6 driver", 4, 6, 1, 0));
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6 driver", 4, 6, 2, 1));
+			Assert.True(OptimumGuiGpuProbe.RenderingRequested);
+			Assert.True(OptimumGuiGpuProbe.GuiRenderingEnabled);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+			Assert.False(OptimumGuiGpuProbe.GuiRenderingEnabled);
+			Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6 driver", 4, 6, 2, 0));
+		}
+		finally
+		{
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuCertificationPassed(false, null, null, null, 0, 0, 0, 0);
+			Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = original;
+		}
+	}
+
 	private static byte[] CreateExpectedReadback()
 	{
 		byte[] pixels = new byte[8 * 8 * 4];
