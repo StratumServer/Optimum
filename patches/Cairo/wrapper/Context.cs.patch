@@ -509,14 +509,14 @@ index 03f9c76..888b9f7 100644
  
  		public void Arc (double xc, double yc, double radius, double angle1, double angle2)
  		{
-+			if (recordingSurface != null) recordingSurface.MaterializeRecorder(handle, "Fill.Unsupported", "Recorder");
++			if (recordingSurface != null && RecordState(c => c.Arc(xc, yc, radius, angle1, angle2))) return;
  			CheckDisposed ();
  			NativeMethods.cairo_arc (handle, xc, yc, radius, angle1, angle2);
  		}
  
  		public void ArcNegative (double xc, double yc, double radius, double angle1, double angle2)
  		{
-+			if (recordingSurface != null) recordingSurface.MaterializeRecorder(handle, "Fill.Unsupported", "Recorder");
++			if (recordingSurface != null && RecordState(c => c.ArcNegative(xc, yc, radius, angle1, angle2))) return;
  			CheckDisposed ();
  			NativeMethods.cairo_arc_negative (handle, xc, yc, radius, angle1, angle2);
  		}

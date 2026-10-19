@@ -47,6 +47,48 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void ArcPathConstructionStaysRecordedAndMatchesCairo(bool negative)
+	{
+		using var actual = new ImageSurface (Format.Argb32, 24, 20);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .65, .9, .8);
+			if (negative) context.ArcNegative (12, 10, 7, 0, -Math.PI * 1.5);
+			else context.Arc (12, 10, 7, 0, Math.PI * 1.5);
+			context.LineTo (12, 10);
+			context.ClosePath ();
+			context.Fill ();
+		}
+
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		using var bitmap = new SKBitmap (new SKImageInfo (24, 20, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		byte[] gpuPixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), gpuPixels, 0, gpuPixels.Length);
+
+		using var expected = new ImageSurface (Format.Argb32, 24, 20);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .65, .9, .8);
+			if (negative) context.ArcNegative (12, 10, 7, 0, -Math.PI * 1.5);
+			else context.Arc (12, 10, 7, 0, Math.PI * 1.5);
+			context.LineTo (12, 10);
+			context.ClosePath ();
+			context.Fill ();
+		}
+		byte[] expectedPixels = expected.Data;
+		int maxChannelDelta = 0;
+		for (int i = 0; i < gpuPixels.Length; i++)
+			maxChannelDelta = Math.Max (maxChannelDelta, Math.Abs (gpuPixels[i] - expectedPixels[i]));
+		Assert.InRange (maxChannelDelta, 0, 20);
+		Assert.Equal (expectedPixels, actual.Data);
+		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+	}
+
 	[Fact]
 	public void SolidColorSettersStayRecordedAndMatchCairoAndSkia()
 	{
@@ -190,12 +232,12 @@ public sealed class CairoContextRecorderTests
 	{
 		using var actual = new ImageSurface (Format.Argb32, 20, 20);
 		var recorder = actual.BeginRecording ();
+		using var mask = new SolidPattern (.5, .5, .5, .5);
 		using (var context = new Context (actual)) {
 			context.SetSourceRGBA (.8, .1, .2, .55);
 			context.Rectangle (2, 2, 9, 7);
 			context.Fill ();
-			context.Arc (14, 13, 3, 0, 6.283185307179586);
-			context.Fill ();
+			context.Mask (mask);
 		}
 
 		using var expected = new ImageSurface (Format.Argb32, 20, 20);
@@ -203,12 +245,10 @@ public sealed class CairoContextRecorderTests
 			context.SetSourceRGBA (.8, .1, .2, .55);
 			context.Rectangle (2, 2, 9, 7);
 			context.Fill ();
-			context.Arc (14, 13, 3, 0, 6.283185307179586);
-			context.Fill ();
+			context.Mask (mask);
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.Fill.Unsupported", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
