@@ -106,6 +106,7 @@ public static class ApiPatcher
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
+        int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule);
         int materializationObserver = PatchMaterializationObserver(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int queuedGuiContexts = PatchQueuedGuiContexts(vanilla.MainModule, contracts.MainModule);
@@ -464,6 +465,12 @@ public static class ApiPatcher
         var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
         var cairoSurfaceType = new TypeReference("Cairo", "Surface", module, cairoReference);
         var cairoRecorderType = new TypeReference("Cairo", "SurfaceRecorder", module, cairoReference);
+        var automaticRecordingMethod = new MethodReference("ConfigureAutomaticRecording", module.TypeSystem.Void, cairoSurfaceType)
+        {
+            HasThis = false,
+            CallingConvention = MethodCallingConvention.Default
+        };
+        automaticRecordingMethod.Parameters.Add(new ParameterDefinition(module.TypeSystem.Boolean));
         var beginRecording = new MethodReference("BeginRecording", cairoRecorderType, cairoSurfaceType)
         {
             HasThis = true,
@@ -471,6 +478,14 @@ public static class ApiPatcher
         };
         Instruction afterRecordingHook = Instruction.Create(OpCodes.Nop);
         Instruction anchor = imageSurfaceConstructor.Next!;
+        foreach (Instruction recordingConfigurationInstruction in new[]
+        {
+            Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)),
+            Instruction.Create(OpCodes.Call, module.ImportReference(automaticRecordingMethod))
+        })
+        {
+            composeProcessor.InsertBefore(imageSurfaceConstructor, recordingConfigurationInstruction);
+        }
         foreach (Instruction hookInstruction in new[]
         {
             Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)),
@@ -542,6 +557,77 @@ public static class ApiPatcher
         }
         ClearDebugInformation(composeMenu);
         Console.WriteLine("  API PATCHED: list-menu empty GPU surface normalization (3 call sites)");
+        return 1;
+    }
+
+    internal static int PatchLinkTextGpuUploads(ModuleDefinition module)
+    {
+        const string typeName = "Vintagestory.API.Client.LinkTextComponent";
+        var type = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+        var compose = type.Methods.Single(method => method.Name == "ComposeElements" &&
+            method.Parameters.Count == 2 && method.Parameters[0].ParameterType.FullName == "Cairo.Context" &&
+            method.Parameters[1].ParameterType.FullName == "Cairo.ImageSurface");
+        var uploadCalls = compose.Body.Instructions.Where(instruction =>
+            instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt)
+            .Where(instruction => instruction.Operand is MethodReference called && called.Name == "LoadOrUpdateCairoTexture")
+            .ToArray();
+        if (uploadCalls.Length != 2)
+            throw new InvalidOperationException($"Expected two link-text texture uploads, found {uploadCalls.Length}.");
+        var contextLocal = compose.Body.Variables.SingleOrDefault(variable => variable.VariableType.FullName == "Cairo.Context")
+            ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.Context local.");
+        var leftMostX = type.Fields.Single(field => field.Name == "leftMostX");
+        var topMostY = type.Fields.Single(field => field.Name == "topMostY");
+        var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
+        var contextType = new TypeReference("Cairo", "Context", module, cairoReference);
+        var save = new MethodReference("Save", module.TypeSystem.Void, contextType) { HasThis = true };
+        var restore = new MethodReference("Restore", module.TypeSystem.Void, contextType) { HasThis = true };
+        var translate = new MethodReference("Translate", module.TypeSystem.Void, contextType) { HasThis = true };
+        translate.Parameters.Add(new ParameterDefinition(module.TypeSystem.Double));
+        translate.Parameters.Add(new ParameterDefinition(module.TypeSystem.Double));
+
+        var processor = compose.Body.GetILProcessor();
+        var firstUploadSetup = uploadCalls[0];
+        while (firstUploadSetup.Previous != null)
+        {
+            if (firstUploadSetup.Previous.Operand is MethodReference called && called.Name == "get_Gui")
+            {
+                firstUploadSetup = firstUploadSetup.Previous;
+                break;
+            }
+            firstUploadSetup = firstUploadSetup.Previous;
+        }
+        if (!(firstUploadSetup.Operand is MethodReference guiGetter) || guiGetter.Name != "get_Gui")
+            throw new InvalidOperationException("Could not locate the first link-text GUI texture upload setup.");
+
+        processor.InsertBefore(firstUploadSetup, Instruction.Create(OpCodes.Ldloc, contextLocal));
+        processor.InsertBefore(firstUploadSetup, Instruction.Create(OpCodes.Callvirt, module.ImportReference(restore)));
+
+        Instruction anchor = uploadCalls[0];
+        foreach (Instruction instruction in new[]
+        {
+            Instruction.Create(OpCodes.Ldloc, contextLocal),
+            Instruction.Create(OpCodes.Callvirt, module.ImportReference(save)),
+            Instruction.Create(OpCodes.Ldloc, contextLocal),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, leftMostX),
+            Instruction.Create(OpCodes.Conv_I4),
+            Instruction.Create(OpCodes.Neg),
+            Instruction.Create(OpCodes.Conv_R8),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, topMostY),
+            Instruction.Create(OpCodes.Conv_I4),
+            Instruction.Create(OpCodes.Neg),
+            Instruction.Create(OpCodes.Conv_R8),
+            Instruction.Create(OpCodes.Callvirt, module.ImportReference(translate))
+        })
+        {
+            processor.InsertAfter(anchor, instruction);
+            anchor = instruction;
+        }
+
+        ClearDebugInformation(compose);
+        Console.WriteLine($"  API PATCHED: {typeName}.ComposeElements balances the normal-text upload before hover composition");
         return 1;
     }
 

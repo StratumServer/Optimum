@@ -37,7 +37,7 @@ public sealed class CairoSvgRecorderTests
 	public void OpaqueOnlyTextureUploadStillRequiresTiledGeometry ()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='2' width='4' height='4' fill='#3585cd'/></svg>";
-		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, opaqueOnly: true));
+		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, requireOpaque: true));
 	}
 
 	[Theory]
@@ -46,7 +46,7 @@ public sealed class CairoSvgRecorderTests
 	public void PartiallyTransparentSvgStaysOnNativeTextureUploadPath (string content)
 	{
 		string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'>" + content + "</svg>";
-		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, opaqueOnly: true));
+		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, requireOpaque: true));
 	}
 
 	[Fact]
@@ -55,7 +55,7 @@ public sealed class CairoSvgRecorderTests
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4' fill='#3585cd'/><rect x='3' width='5' height='4' fill='#d7396b'/></svg>";
 		byte[] expected = Native (svg);
 		for (int i = 0; i < expected.Length; i += 4) (expected[i], expected[i + 2]) = (expected[i + 2], expected[i]);
-		using var picture = RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, opaqueOnly: true);
+		using var picture = RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, textureColorOrder: true, requireOpaque: true);
 		using var bitmap = new SKBitmap (8, 4, SKColorType.Rgba8888, SKAlphaType.Premul);
 		using (var canvas = new SKCanvas (bitmap)) { canvas.Clear (SKColors.Transparent); canvas.DrawPicture (picture); }
 		var actual = new byte[8 * 4 * 4]; Marshal.Copy (bitmap.GetPixels (), actual, 0, actual.Length);
@@ -68,10 +68,17 @@ public sealed class CairoSvgRecorderTests
 	[InlineData("<rect width='8' height='4' stroke='red' stroke-width='1'/>")]
 	[InlineData("<rect width='8' height='4' fill='none' stroke='red' stroke-width='1'/>")]
 	[InlineData("<rect width='8' height='4'/><rect x='2' width='6' height='4'/>")]
-	[InlineData("<defs><linearGradient id='g'><stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient></defs><rect width='8' height='4' fill='url(#g)'/>")]
-	public void UnsupportedSvgCoverageStaysOnNativeRasterizer (string content)
+	public void SolidSvgPathsAndStrokesAreRecorded (string content)
 	{
 		string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'>" + content + "</svg>";
+		using var picture = RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null);
+		Assert.NotNull (picture);
+	}
+
+	[Fact]
+	public void GradientSvgRemainsExplicitlyUnsupported ()
+	{
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><defs><linearGradient id='g'><stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient></defs><rect width='8' height='4' fill='url(#g)'/></svg>";
 		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null));
 	}
 

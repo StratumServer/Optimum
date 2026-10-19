@@ -45,7 +45,9 @@ namespace Cairo
 		readonly Stack<RecordedGuiClip[]> savedClips = new Stack<RecordedGuiClip[]>();
 		readonly Stack<Antialias> savedAntialias = new Stack<Antialias>();
 		int saveDepth;
-		bool unqualifiedHelperDrawing, antialiasConfigured;
+		bool unqualifiedHelperDrawing;
+		// Cairo's default antialias mode maps to Skia's antialias-on paint, so helper operations using that default are qualified too.
+		bool antialiasConfigured = true;
 
 		internal Context Shadow {
 			get {
@@ -181,7 +183,18 @@ namespace Cairo
 		internal bool TrySeal (out SurfaceRecorderSnapshot snapshot)
 		{
 			lock (sync) {
-				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.GpuRendered || saveDepth != 0 || unqualifiedHelperDrawing) { snapshot = null; return false; }
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.GpuRendered) {
+					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:state-" + state;
+					snapshot = null; return false;
+				}
+				if (saveDepth != 0) {
+					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:unbalanced-save-depth-" + saveDepth;
+					snapshot = null; return false;
+				}
+				if (unqualifiedHelperDrawing) {
+					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:unqualified-helper-drawing";
+					snapshot = null; return false;
+				}
 				state = SurfaceRecordingState.Sealed;
 				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), width, height, resources.ToArray(), Identity);
 				return true;
@@ -267,6 +280,8 @@ namespace Cairo
 
 		internal void Materialize (IntPtr contextHandle = default)
 		{
+			if (Surface.AutomaticRecordingEnabled)
+				throw new InvalidOperationException ("Cairo materialization is forbidden while the Skia GUI renderer is requested.");
 			string trigger = null;
 			ExceptionDispatchInfo materializationFailure = null;
 			bool attempted = false;

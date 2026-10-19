@@ -2,7 +2,7 @@ diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
 index 8014c9e..efbc817 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -46,10 +46,15 @@ namespace Cairo {
+@@ -46,10 +46,18 @@ namespace Cairo {
  		}
          
  		public ImageSurface (Format format, int width, int height)
@@ -13,7 +13,10 @@ index 8014c9e..efbc817 100644
  
 +		public static ImageSurface CreateForRecordedGui (Format format, int width, int height)
 +		{
-+			return new ImageSurface (format, width, height);
++			// Cairo permits zero-sized image surfaces, but OpenGL textures and the
++			// Skia recorder require positive dimensions. Empty dynamic GUI lists are
++			// visually empty, so preserve that result with a transparent 1x1 target.
++			return new ImageSurface (format, Math.Max (1, width), Math.Max (1, height));
 +		}
 +
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)

@@ -17,6 +17,7 @@ namespace Vintagestory.Client.NoObf
 		private const int Height = OptimumGuiGpuProbe.ReadbackHeight;
 		// Isolated Pharos test seam for exercising the real raster-upload recovery.
 		internal static bool ForceSkiaCpuFallbackForTest;
+		internal static bool ForceSkiaCpuPreflightFallbackForTest;
 		private static int attempted;
 		public static long MaterializationAttemptCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationAttemptCount;
 		public static long MaterializationSuccessCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationSuccessCount;
@@ -124,30 +125,33 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "missing-current-context";
 						return false;
 					}
+					if (ForceSkiaCpuPreflightFallbackForTest)
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"test-forced-gpu-preflight-failure", out candidateTexture, out failureReason);
 					if (!MatchesCertifiedDevice())
 					{
 						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
-						failureReason = "current-device-or-context-mismatch";
-						return false;
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"current-device-or-context-mismatch", out candidateTexture, out failureReason);
 					}
 					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
 					{
-						failureReason = "OpenGL 3.0 or newer is required for state capture";
-						return false;
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
 					}
 					TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
-						failureReason = "gpu-probe-not-passed";
-						return false;
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"gpu-probe-not-passed", out candidateTexture, out failureReason);
 					}
 					// Keep pre-existing engine errors out of the candidate operation. The probe's caller
 					// performs the normal upload error check if this returns false.
 					string preexistingErrors = DrainPreexistingGlErrors();
 					if (preexistingErrors != null)
 					{
-						failureReason = "preexisting-gl-errors:" + preexistingErrors;
-						return false;
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"preexisting-gl-errors:" + preexistingErrors, out candidateTexture, out failureReason);
 					}
 
 					GlStateSnapshot state = null;
@@ -276,13 +280,40 @@ namespace Vintagestory.Client.NoObf
 					return false;
 				}
 
+				private static bool TryCreateCpuCandidateTexture(Cairo.ImageSurface surface, int expectedContextThreadId, bool linearMag, bool linearMin,
+					string gpuFailure, out int candidateTexture, out string failureReason)
+				{
+					candidateTexture = 0;
+					failureReason = gpuFailure;
+					if (surface == null || surface.RecordingState != Cairo.SurfaceRecordingState.Recording ||
+						Environment.CurrentManagedThreadId != expectedContextThreadId || !HasCurrentContext()) return false;
+
+					int texture = 0;
+					try
+					{
+						GL.GenTextures(1, out texture);
+						UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+						if (!surface.CommitGpuRenderedCommands())
+							throw new InvalidOperationException("Skia CPU output could not commit the GUI display list.");
+						candidateTexture = texture;
+						failureReason = "skia-cpu-fallback:gpu-preflight=" + gpuFailure;
+						return true;
+					}
+					catch (Exception exception)
+					{
+						if (texture != 0) try { GL.DeleteTextures(1, ref texture); } catch { }
+						failureReason = "skia-cpu-fallback-failed:gpu-preflight=" + gpuFailure + ";" + exception.GetType().Name + ":" + exception.Message;
+						return false;
+					}
+				}
+
 				private static void UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
 				{
 					using (var bitmap = new SKBitmap(new SKImageInfo(surface.Width, surface.Height, SKColorType.Rgba8888, SKAlphaType.Premul)))
 					using (var canvas = new SKCanvas(bitmap))
 					{
 						if (!surface.TryDrawRecordedCommands(canvas))
-							throw new InvalidOperationException("Skia CPU could not seal the GUI display list.");
+							throw new InvalidOperationException("Skia CPU could not seal the GUI display list: " + (surface.FirstMaterializationTrigger ?? "unknown-seal-rejection"));
 						canvas.Flush();
 						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
 						try

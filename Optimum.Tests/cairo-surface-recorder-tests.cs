@@ -96,19 +96,33 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
-	public void DefaultAntialiasSurfaceHelperCannotBeSealedForSkia()
+	public void DefaultAntialiasSurfaceHelperCanBeSealedForSkia()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
 		var recorder = actual.BeginRecording ();
 		recorder.FillRectangle (1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
 		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
-		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
-		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+	}
 
-		using var expected = new ImageSurface (Format.Argb32, 16, 12);
-		using (var context = new Context (expected)) DrawNativeRectangle (context, 1.25, 1.5, 10.5, 8.25, .12, .48, .82, 1);
-		Assert.Equal (expected.Data, actual.Data);
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+	[Fact]
+	public void AutomaticSkiaRenderingRejectsCairoMaterialization()
+	{
+		bool original = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (true);
+			using var surface = new ImageSurface (Format.Argb32, 8, 8);
+			var recorder = surface.BeginRecording ();
+			recorder.FillRectangle (1, 1, 6, 6, 1, 0, 0, 1);
+
+			var exception = Assert.Throws<InvalidOperationException> (() => _ = surface.Data);
+			Assert.Contains ("Cairo materialization is forbidden", exception.Message);
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+			Assert.Equal ("SurfaceCpuReadback.Data", recorder.FirstMaterializationTrigger);
+		} finally {
+			Surface.ConfigureAutomaticRecording (original);
+		}
 	}
 
 	[Fact]

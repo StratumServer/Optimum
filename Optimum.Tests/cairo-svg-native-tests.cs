@@ -10,13 +10,13 @@ using Xunit;
 public sealed class CairoSvgNativeTests
 {
 	[Fact]
-	public void RectangleQualificationHasABoundedOverlapBudget()
+	public void SolidPathsAreNotLimitedByTheOldRectangleQualificationBudget()
 	{
 		var svg = new StringBuilder("<svg xmlns='http://www.w3.org/2000/svg' width='257' height='4'>");
 		for (int x = 0; x < 257; x++) svg.Append($"<rect x='{x}' width='1' height='4'/>");
 		svg.Append("</svg>");
-		var exception = Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg.ToString(), 257, 4, 257, 4));
-		Assert.Contains("rectangle budget", exception.Message);
+		using var picture = RecordedSvgGeometry.Parse(svg.ToString(), 257, 4, 257, 4);
+		Assert.NotNull(picture);
 	}
 
 	[Theory]
@@ -24,10 +24,11 @@ public sealed class CairoSvgNativeTests
 	[InlineData("<rect x='.3' y='.7' width='6' height='2'/>")]
 	[InlineData("<rect width='8' height='4' stroke='red' stroke-width='1'/>")]
 	[InlineData("<rect width='8' height='4' fill-opacity='.35'/><rect x='2' width='6' height='4' fill-opacity='.7'/>")]
-	public void UnqualifiedCoverageAndShapeCompositionUseNativeRasterization(string shapes)
+	public void SolidPathAndStrokeShapesAreRecordedBySkia(string shapes)
 	{
 		string svg = $"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'>{shapes}</svg>";
-		Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4));
+		using var picture = RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4);
+		Assert.NotNull(picture);
 	}
 
 	[Fact]
@@ -35,7 +36,7 @@ public sealed class CairoSvgNativeTests
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4'/><rect x='3' width='5' height='4'/></svg>";
 		AssertRecordedSvgMatchesNative(svg, 16, 8, 16, 8, 2, 0, 0);
-		Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg, 12, 6, 12, 6));
+		AssertRecordedSvgMatchesNative(svg, 12, 6, 12, 6, 1.5f, 0, 0, maxChannelDelta: 3);
 		AssertRecordedSvgMatchesNative(svg, 16, 12, 16, 12, 2, 0, 2);
 	}
 
@@ -57,7 +58,7 @@ public sealed class CairoSvgNativeTests
 	{
 		string svg = $"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><defs><{kind}Gradient id='g' spreadMethod='{spread}'><stop offset='0' stop-color='#3585cd'/><stop offset='1' stop-color='#d7396b'/></{kind}Gradient></defs><rect width='8' height='4' fill='url(#g)'/></svg>";
 		var exception = Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4));
-		Assert.Contains("gradient requires native rasterization", exception.Message);
+		Assert.Contains("does not support SVG gradient fills", exception.Message);
 	}
 
 	[Theory]
@@ -116,7 +117,7 @@ public sealed class CairoSvgNativeTests
 		}
 	}
 
-	static void AssertRecordedSvgMatchesNative(string svg, int textureWidth, int textureHeight, int width, int height, float scale, float offsetX, float offsetY)
+	static void AssertRecordedSvgMatchesNative(string svg, int textureWidth, int textureHeight, int width, int height, float scale, float offsetX, float offsetY, int maxChannelDelta = 1)
 	{
 		using var picture = RecordedSvgGeometry.Parse(svg, textureWidth, textureHeight, width, height);
 		using var bitmap = new SKBitmap(textureWidth, textureHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -124,9 +125,9 @@ public sealed class CairoSvgNativeTests
 		var actual = new byte[checked(textureWidth * textureHeight * 4)]; Marshal.Copy(bitmap.GetPixels(), actual, 0, actual.Length);
 		var expected = Native(svg, textureWidth, textureHeight, scale, offsetX, offsetY);
 		for (int i = 0; i < actual.Length; i += 4) {
-			Assert.InRange(Math.Abs(actual[i + 3] - expected[i + 3]), 0, 1);
+			Assert.InRange(Math.Abs(actual[i + 3] - expected[i + 3]), 0, maxChannelDelta);
 			if (expected[i + 3] == 0) continue; // NanoSVG may retain hidden RGB beneath transparent pixels.
-			for (int channel = 0; channel < 3; channel++) Assert.InRange(Math.Abs(actual[i + channel] - expected[i + channel]), 0, 1);
+			for (int channel = 0; channel < 3; channel++) Assert.InRange(Math.Abs(actual[i + channel] - expected[i + channel]), 0, maxChannelDelta);
 		}
 	}
 
