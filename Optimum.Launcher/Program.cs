@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Loader;
 using System.Threading;
 
 [assembly: InternalsVisibleTo("Optimum.Launcher.Tests")]
@@ -62,6 +64,9 @@ public static class Program
         // launcher report and the runtime configuration use the same root.
         var dataPath = ResolveDataPath(args) ?? ResolveDefaultDataPath(gameDir);
         Logger.Init(dataPath);
+
+        CleanupStrayRootAssemblies(gameDir);
+        RegisterNativeLibraryProbing(gameDir);
 
         ShaderCompatibilityReport shaderCompatibility;
         try
@@ -263,19 +268,37 @@ public static class Program
 
                     splash?.SetStatus($"Applying Optimum patches: {target.VanillaDll}");
                     var progress = new LoggingProgress(target.VanillaDll, splash);
+                    var stagingPath = Path.Combine(
+                        Path.GetDirectoryName(outputPath)!,
+                        $"{Path.GetFileNameWithoutExtension(outputPath)}.stage-{Guid.NewGuid():N}.dll");
                     try
                     {
                         var result = PatchEngine.Patch(
-                            vanillaPath, donorPath, outputPath, target.Mode, target.ModName, progress);
-                        cache.SavePatchedAssembly(target.AssemblyPath, result.DllBytes, result.PdbBytes);
+                            vanillaPath, donorPath, stagingPath, target.Mode, target.ModName, progress);
+                        cache.CommitPatchedAssembly(target.AssemblyPath, stagingPath);
                         patchedTargets.Add(new PatchedTarget(target.AssemblyPath, target.DonorDll, result.PatchCount, target.VanillaDll));
                         Logger.Log($"[Optimum] ✓ {target.AssemblyPath} ({result.PatchCount} patches)");
                     }
                     catch (PatchFailedException ex)
                     {
-                        Logger.LogError($"[Optimum] ✗ Patch failed: {ex.Message}");
+                        Logger.LogError(
+                            $"[Optimum] ✗ Patch failed for '{target.AssemblyPath}' " +
+                            $"(staging '{stagingPath}', cache '{outputPath}'): {ex.Message}");
                         failureReason = ex.Message;
                         return;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(
+                            $"[Optimum] ✗ Failed while patching or saving '{target.AssemblyPath}' " +
+                            $"(staging '{stagingPath}', cache '{outputPath}'): {ex}");
+                        failureReason = ex.Message;
+                        return;
+                    }
+                    finally
+                    {
+                        TryDeletePatchOutput(stagingPath);
+                        TryDeletePatchOutput(Path.ChangeExtension(stagingPath, ".pdb"));
                     }
                 }
             }
@@ -284,8 +307,21 @@ public static class Program
                 // Safety net: this runs on a background thread, so an
                 // exception here would otherwise take down the whole
                 // process via the default unhandled-exception handler.
-                Logger.LogError($"[Optimum] Unexpected error while patching: {ex.Message}");
+                Logger.LogError($"[Optimum] Unexpected error while patching: {ex}");
                 failureReason ??= ex.Message;
+            }
+        }
+
+        static void TryDeletePatchOutput(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Logger.LogError($"[Optimum] Could not remove temporary patch output '{path}': {ex}");
             }
         }
 
@@ -702,6 +738,80 @@ public static class Program
         }
 
         return false;
+    }
+
+    internal static readonly string[] AssembliesShadowingLib =
+    [
+        "OpenTK.Audio.OpenAL.dll",
+    ];
+
+    /// <summary>
+    /// Removes assemblies accidentally staged in the game root directory that
+    /// must be loaded from Lib/. In particular, OpenTK.Audio.OpenAL.dll in the
+    /// root causes .NET to resolve OpenAL from the application base directory,
+    /// which bypasses Lib/openal32.dll and crashes with DllNotFoundException on Windows.
+    /// </summary>
+    internal static void CleanupStrayRootAssemblies(string gameDir)
+    {
+        foreach (var assemblyName in AssembliesShadowingLib)
+        {
+            var rootPath = Path.Combine(gameDir, assemblyName);
+            var libPath = Path.Combine(gameDir, "Lib", assemblyName);
+            if (File.Exists(rootPath) && File.Exists(libPath))
+            {
+                try
+                {
+                    File.SetAttributes(rootPath, FileAttributes.Normal);
+                    File.Delete(rootPath);
+                    Logger.Log($"[Optimum] Removed stray root assembly '{assemblyName}' shadowing Lib/ copy.");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[Optimum] Failed to remove stray root assembly '{assemblyName}': {ex.Message}");
+                }
+            }
+        }
+    }
+
+    private static bool _nativeResolverRegistered;
+
+    /// <summary>
+    /// Fallback native library resolver: resolves unmanaged audio and native dependencies
+    /// from Lib/ if the caller's assembly probe or system path fails to locate them.
+    /// </summary>
+    internal static void RegisterNativeLibraryProbing(string gameDir)
+    {
+        if (_nativeResolverRegistered) return;
+        _nativeResolverRegistered = true;
+        AssemblyLoadContext.Default.ResolvingUnmanagedDll += (_, libraryName) =>
+            ResolveUnmanagedLibrary(gameDir, libraryName);
+    }
+
+    internal static IntPtr ResolveUnmanagedLibrary(string gameDir, string libraryName)
+    {
+        if (string.Equals(libraryName, "openal32", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "openal32.dll", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libopenal.so.1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libopenal.1.dylib", StringComparison.OrdinalIgnoreCase))
+        {
+            var candidatePaths = new[]
+            {
+                Path.Combine(gameDir, "Lib", "OpenAL32.dll"),
+                Path.Combine(gameDir, "Lib", "openal32.dll"),
+                Path.Combine(gameDir, "Lib", "libopenal.so.1"),
+                Path.Combine(gameDir, "Lib", "libopenal.1.dylib"),
+            };
+
+            foreach (var candidate in candidatePaths)
+            {
+                if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
+                {
+                    return handle;
+                }
+            }
+        }
+
+        return IntPtr.Zero;
     }
 
     /// <summary>Progress reporter: forwards to Logger (console + log file) and the splash screen, if any.</summary>

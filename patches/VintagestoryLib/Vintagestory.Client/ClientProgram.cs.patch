@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index 4536b4c..c2a3d41 100644
+index 4536b4c..05a9bba 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -48,3 +48,81 @@ index 4536b4c..c2a3d41 100644
  		new ClientProgram(rawArgs);
  	}
  
+@@ -185,30 +220,73 @@ public class ClientProgram
+ 		screenManager = new ScreenManager(clientPlatformWindows);
+ 		GuiStyle.DecorativeFontName = ClientSettings.DecorativeFontName;
+ 		GuiStyle.StandardFontName = ClientSettings.DefaultFontName;
+ 		if (!Directory.Exists(GamePaths.AssetsPath))
+ 		{
+-			clientPlatformWindows.XPlatInterface.ShowMessageBox("Vintagestory Warning", "Critical files are missing from your game installation. Please try re-installing.");
++			// Optimum: log every startup dialog before showing it, and keep a failing dialog from
++			// replacing the real error. Eto.Wpf throws FileNotFoundException (PresentationFramework)
++			// from ShowMessageBox when the process lacks Microsoft.WindowsDesktop.App. Written inline
++			// (no lambda, no helper) so the body survives the Mono.Cecil transplant (Optimum.Patcher).
++			logger.Error("Startup dialog \"{0}\": {1}", "Vintagestory Warning", "Critical files are missing from your game installation. Please try re-installing.");
++			try
++			{
++				clientPlatformWindows.XPlatInterface.ShowMessageBox("Vintagestory Warning", "Critical files are missing from your game installation. Please try re-installing.");
++			}
++			catch (Exception dialogEx1)
++			{
++				logger.Error("Could not show the startup dialog: {0}", dialogEx1);
++			}
+ 			return;
+ 		}
+ 		Lang.PreLoad(ScreenManager.Platform.Logger, GamePaths.AssetsPath, ClientSettings.Language);
+ 		if (RuntimeEnv.OS == OS.Windows && !ClientSettings.SkipNvidiaProfileCheck && NvidiaGPUFix64.SOP_SetProfile("Vintagestory", GetExecutableName()) == 1)
+ 		{
+-			clientPlatformWindows.XPlatInterface.ShowMessageBox("Vintagestory Nvidia Profile", Lang.Get("Your game is now configured to use your dedicated NVIDIA Graphics card. This requires a restart so please start the game again."));
++			// Optimum: log the dialog first and survive a failing ShowMessageBox (see the first site above).
++			string dialogText2 = Lang.Get("Your game is now configured to use your dedicated NVIDIA Graphics card. This requires a restart so please start the game again.");
++			logger.Error("Startup dialog \"{0}\": {1}", "Vintagestory Nvidia Profile", dialogText2);
++			try
++			{
++				clientPlatformWindows.XPlatInterface.ShowMessageBox("Vintagestory Nvidia Profile", dialogText2);
++			}
++			catch (Exception dialogEx2)
++			{
++				logger.Error("Could not show the startup dialog: {0}", dialogEx2);
++			}
+ 			return;
+ 		}
+ 		if (!CleanInstallCheck.IsCleanInstall())
+ 		{
+-			clientPlatformWindows.XPlatInterface.ShowMessageBox("Vintagestory Warning", Lang.Get("launchfailure-notcleaninstall"));
++			// Optimum: log the dialog first and survive a failing ShowMessageBox (see the first site above).
++			string dialogText3 = Lang.Get("launchfailure-notcleaninstall");
++			logger.Error("Startup dialog \"{0}\": {1}", "Vintagestory Warning", dialogText3);
++			try
++			{
++				clientPlatformWindows.XPlatInterface.ShowMessageBox("Vintagestory Warning", dialogText3);
++			}
++			catch (Exception dialogEx3)
++			{
++				logger.Error("Could not show the startup dialog: {0}", dialogEx3);
++			}
+ 			return;
+ 		}
+ 		if (RuntimeEnv.OS == OS.Windows && !ClientSettings.MultipleInstances)
+ 		{
+ 			new Mutex(initiallyOwned: true, "Vintagestory", out var createdNew);
+ 			if (!createdNew)
+ 			{
+-				clientPlatformWindows.XPlatInterface.ShowMessageBox(Lang.Get("Multiple Instances"), Lang.Get("game-alreadyrunning"));
++				// Optimum: log the dialog first and survive a failing ShowMessageBox (see the first site above).
++				string dialogTitle4 = Lang.Get("Multiple Instances");
++				string dialogText4 = Lang.Get("game-alreadyrunning");
++				logger.Error("Startup dialog \"{0}\": {1}", dialogTitle4, dialogText4);
++				try
++				{
++					clientPlatformWindows.XPlatInterface.ShowMessageBox(dialogTitle4, dialogText4);
++				}
++				catch (Exception dialogEx4)
++				{
++					logger.Error("Could not show the startup dialog: {0}", dialogEx4);
++				}
+ 				return;
+ 			}
+ 		}
+ 		Signals[0] = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnExit);
+ 		Signals[1] = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnExit);

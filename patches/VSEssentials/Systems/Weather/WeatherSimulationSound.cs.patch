@@ -2,27 +2,42 @@ diff --git a/VSEssentials/Systems/Weather/WeatherSimulationSound.cs b/VSEssentia
 index 2fa68b1..5455828 100644
 --- a/VSEssentials/Systems/Weather/WeatherSimulationSound.cs
 +++ b/VSEssentials/Systems/Weather/WeatherSimulationSound.cs
-@@ -32,10 +32,17 @@ namespace Vintagestory.GameContent
-         float curWindVolumeLeafy = 0f;
-         float curWindVolumeLeafless = 0f;
+@@ -34,6 +34,13 @@ namespace Vintagestory.GameContent
          float curRainVolumeLeafy = 0f;
          float curRainVolumeLeafless = 0f;
  
 +        // ponytail: skip SetVolume calls when the change is below 1% (reduces OpenAL driver overhead).
-+        float lastSetWindVolumeLeafy = -1f;
-+        float lastSetWindVolumeLeafless = -1f;
-+        float lastSetRainVolumeLeafy = -1f;
-+        float lastSetRainVolumeLeafless = -1f;
++        float lastSetWindVolumeLeafy = -99f;
++        float lastSetWindVolumeLeafless = -99f;
++        float lastSetRainVolumeLeafy = -99f;
++        float lastSetRainVolumeLeafless = -99f;
 +        const float VolumeDeadzone = 0.01f;
 +
          float curRainPitch = 1f;
          float curHailVolume = 0f;
          float curHailPitch = 1f;
-         float curTrembleVolume = 0f;
-         float curTremblePitch = 0f;
-@@ -278,18 +285,22 @@ namespace Vintagestory.GameContent
-             curRainPitch += (targetRainPitch - curRainPitch) * dt;
-             curTremblePitch += (targetTremblePitch - curTremblePitch) * dt;
+@@ -232,8 +239,18 @@ namespace Vintagestory.GameContent
+ 
+                     if (!rainSoundsOn && (targetRainVolumeLeafy > 0.01 || targetRainVolumeLeafless > 0.01))
+                     {
+-                        for (int i = 0; i < rainSoundsLeafless.Length; i++) { rainSoundsLeafless[i]?.Start(); }
+-                        for (int i = 0; i < rainSoundsLeafy.Length; i++) { rainSoundsLeafy[i]?.Start(); }
++                        for (int i = 0; i < rainSoundsLeafless.Length; i++)
++                        {
++                            rainSoundsLeafless[i]?.SetVolume(curRainVolumeLeafless);
++                            rainSoundsLeafless[i]?.Start();
++                        }
++                        for (int i = 0; i < rainSoundsLeafy.Length; i++)
++                        {
++                            rainSoundsLeafy[i]?.SetVolume(curRainVolumeLeafy);
++                            rainSoundsLeafy[i]?.Start();
++                        }
++                        lastSetRainVolumeLeafy = curRainVolumeLeafy;
++                        lastSetRainVolumeLeafless = curRainVolumeLeafless;
+ 
+                         lowTrembleSound?.Start();
+                         rainSoundsOn = true;
+@@ -280,14 +297,18 @@ namespace Vintagestory.GameContent
  
              if (rainSoundsOn)
              {
@@ -43,11 +58,42 @@ index 2fa68b1..5455828 100644
                      rainSoundsLeafy[i]?.SetPitch(curRainPitch);
                  }
              }
+@@ -305,9 +326,19 @@ namespace Vintagestory.GameContent
  
-             lowTrembleSound?.SetVolume(curTrembleVolume);
-@@ -333,12 +344,22 @@ namespace Vintagestory.GameContent
-                 float targetVolumeLeafless = (1 - nearbyLeaviness) * 1.2f * wstr;
+             if (curRainVolumeLeafless < 0.01 && curRainVolumeLeafy < 0.01)
+             {
+-                for (int i = 0; i < rainSoundsLeafless.Length; i++) rainSoundsLeafless[i]?.Stop();
+-                for (int i = 0; i < rainSoundsLeafy.Length; i++) rainSoundsLeafy[i]?.Stop();
++                for (int i = 0; i < rainSoundsLeafless.Length; i++)
++                {
++                    rainSoundsLeafless[i]?.SetVolume(0f);
++                    rainSoundsLeafless[i]?.Stop();
++                }
++                for (int i = 0; i < rainSoundsLeafy.Length; i++)
++                {
++                    rainSoundsLeafy[i]?.SetVolume(0f);
++                    rainSoundsLeafy[i]?.Stop();
++                }
+                 rainSoundsOn = false;
++                lastSetRainVolumeLeafy = -99f;
++                lastSetRainVolumeLeafless = -99f;
+             }
  
+             if (curHailVolume < 0.01)
+@@ -324,6 +355,12 @@ namespace Vintagestory.GameContent
+             {
+                 if (!windSoundsOn)
+                 {
++                    float initLeafyVol = Math.Max(0, curWindVolumeLeafy);
++                    float initLeaflessVol = Math.Max(0, curWindVolumeLeafless);
++                    windSoundLeafy?.SetVolume(initLeafyVol);
++                    windSoundLeafless?.SetVolume(initLeaflessVol);
++                    lastSetWindVolumeLeafy = initLeafyVol;
++                    lastSetWindVolumeLeafless = initLeaflessVol;
+                     windSoundLeafy?.Start();
+                     windSoundLeafless?.Start();
+                     windSoundsOn = true;
+@@ -335,17 +372,31 @@ namespace Vintagestory.GameContent
                  curWindVolumeLeafy += (targetVolumeLeafy - curWindVolumeLeafy) * dt;
                  curWindVolumeLeafless += (targetVolumeLeafless - curWindVolumeLeafless) * dt;
  
@@ -70,3 +116,14 @@ index 2fa68b1..5455828 100644
              else
              {
                  if (windSoundsOn)
+                 {
++                    windSoundLeafy?.SetVolume(0f);
++                    windSoundLeafless?.SetVolume(0f);
+                     windSoundLeafy?.Stop();
+                     windSoundLeafless?.Stop();
+                     windSoundsOn = false;
++                    lastSetWindVolumeLeafy = -99f;
++                    lastSetWindVolumeLeafless = -99f;
+                 }
+             }
+ 

@@ -15,6 +15,32 @@ namespace Optimum.Patcher;
 /// </summary>
 public static class ApiPatcher
 {
+    internal static DefaultAssemblyResolver CreateResolver(string vanillaPath, string contractsPath)
+    {
+        var resolver = new DefaultAssemblyResolver();
+        resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
+        resolver.AddSearchDirectory(Path.Combine(Path.GetDirectoryName(vanillaPath)!, "Lib"));
+        resolver.AddSearchDirectory(Path.GetDirectoryName(contractsPath)!);
+
+        // The CLI patches from the pristine copy in <game>/.optimum/vanilla, so the
+        // game's own folder and Lib (cairo-sharp.dll) are not beside the input.
+        // Searched last so the backup's VintagestoryAPI.dll still wins over the
+        // game root's already patched copy.
+        for (var dir = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(vanillaPath))!);
+             dir?.Parent != null;
+             dir = dir.Parent)
+        {
+            if (dir.Name != ".optimum")
+                continue;
+
+            resolver.AddSearchDirectory(dir.Parent.FullName);
+            resolver.AddSearchDirectory(Path.Combine(dir.Parent.FullName, "Lib"));
+            break;
+        }
+
+        return resolver;
+    }
+
     public static bool Patch(string vanillaPath, string contractsPath, string outputPath)
     {
         if (!File.Exists(vanillaPath))
@@ -26,10 +52,7 @@ public static class ApiPatcher
             throw new FileNotFoundException("Optimum contracts assembly not found.", contractsPath);
         }
 
-        var resolver = new DefaultAssemblyResolver();
-        resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
-        resolver.AddSearchDirectory(Path.Combine(Path.GetDirectoryName(vanillaPath)!, "Lib"));
-        resolver.AddSearchDirectory(Path.GetDirectoryName(contractsPath)!);
+        var resolver = CreateResolver(vanillaPath, contractsPath);
 
         bool preserveSymbols = File.Exists(Path.ChangeExtension(vanillaPath, ".pdb"));
         var vanillaReaderParameters = new ReaderParameters

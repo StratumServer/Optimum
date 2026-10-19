@@ -119,6 +119,18 @@ public sealed class AssemblyLoader : IDisposable
 
         // Try game dir (vanilla / unpatched assemblies)
         var gamePath = Path.Combine(_gameDir, asmName + ".dll");
+        var libPath = Path.Combine(_gameDir, "Lib", asmName + ".dll");
+
+        // OpenTK.Audio.OpenAL must be loaded from Lib/ so OpenTK's ALLoader resolves
+        // openal32.dll from the same directory on Windows. If both root and Lib/ exist,
+        // prefer Lib/.
+        if (string.Equals(asmName, "OpenTK.Audio.OpenAL", StringComparison.OrdinalIgnoreCase) && File.Exists(libPath))
+        {
+            var asm = Assembly.LoadFrom(libPath);
+            _loaded[asmName] = asm;
+            return asm;
+        }
+
         if (File.Exists(gamePath))
         {
             var asm = Assembly.LoadFrom(gamePath);
@@ -135,7 +147,6 @@ public sealed class AssemblyLoader : IDisposable
         }
 
         // Try Lib/ subfolder (VS puts some deps there)
-        var libPath = Path.Combine(_gameDir, "Lib", asmName + ".dll");
         if (File.Exists(libPath))
         {
             var asm = Assembly.LoadFrom(libPath);

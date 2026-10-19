@@ -1137,6 +1137,21 @@ try {
     }
     $null = [xml](Get-Content -LiteralPath $vsEntryCsproj -Raw)
 
+    # 6g-extra: AssemblyInfo.cs - ensure Guid/ComVisible attributes resolve without relying on ilspycmd using emission.
+    Get-ChildItem -Path (Join-Path $repoRoot 'build') -Recurse -Filter 'AssemblyInfo.cs' -File | ForEach-Object {
+        Update-FileInPlace $_.FullName {
+            param($t)
+            if ($t -match '\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?(?:Guid|ComVisible)(?:Attribute)?\(') {
+                if ($t -notmatch '(?m)^\s*using\s+System\.Runtime\.InteropServices\s*;') {
+                    $t = "using System.Runtime.InteropServices;`n" + $t
+                }
+                $t = [regex]::Replace($t, '\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?Guid(?:Attribute)?\(', '[assembly: System.Runtime.InteropServices.Guid(')
+                $t = [regex]::Replace($t, '\[assembly:\s*(?:System\.Runtime\.InteropServices\.)?ComVisible(?:Attribute)?\(', '[assembly: System.Runtime.InteropServices.ComVisible(')
+            }
+            $t
+        }
+    }
+
     # 6h: Restore serialization metadata lost by ILSpy.
     # ILSpy fails to decode attribute arguments for JsonObject(MemberSerialization.OptIn) and
     # ProtoContract(ImplicitFields = ImplicitFields.AllFields). Without these, Newtonsoft

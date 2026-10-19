@@ -43,7 +43,24 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs b/V
  			{
  				return;
  			}
-@@ -243,14 +269,30 @@ public class WeatherSimulationSound
+@@ -203,12 +229,16 @@ public class WeatherSimulationSound
+ 				{
+ 					for (int num9 = 0; num9 < rainSoundsLeafless.Length; num9++)
+ 					{
++						rainSoundsLeafless[num9]?.SetVolume(curRainVolumeLeafless);
+ 						rainSoundsLeafless[num9]?.Start();
+ 					}
+ 					for (int num10 = 0; num10 < rainSoundsLeafy.Length; num10++)
+ 					{
++						rainSoundsLeafy[num10]?.SetVolume(curRainVolumeLeafy);
+ 						rainSoundsLeafy[num10]?.Start();
+ 					}
++					lastSetRainVolumeLeafy = curRainVolumeLeafy;
++					lastSetRainVolumeLeafless = curRainVolumeLeafless;
+ 					lowTrembleSound?.Start();
+ 					rainSoundsOn = true;
+ 					curRainPitch = num6;
+@@ -243,14 +273,30 @@ public class WeatherSimulationSound
  		curTremblePitch += (num5 - curTremblePitch) * dt;
  		if (rainSoundsOn)
  		{
@@ -76,7 +93,38 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs b/V
  				rainSoundsLeafy[num12]?.SetPitch(curRainPitch);
  			}
  		}
-@@ -291,8 +333,18 @@ public class WeatherSimulationSound
+@@ -265,13 +311,17 @@ public class WeatherSimulationSound
+ 		{
+ 			for (int num13 = 0; num13 < rainSoundsLeafless.Length; num13++)
+ 			{
++				rainSoundsLeafless[num13]?.SetVolume(0f);
+ 				rainSoundsLeafless[num13]?.Stop();
+ 			}
+ 			for (int num14 = 0; num14 < rainSoundsLeafy.Length; num14++)
+ 			{
++				rainSoundsLeafy[num14]?.SetVolume(0f);
+ 				rainSoundsLeafy[num14]?.Stop();
+ 			}
+ 			rainSoundsOn = false;
++			lastSetRainVolumeLeafy = -99f;
++			lastSetRainVolumeLeafless = -99f;
+ 		}
+ 		if ((double)curHailVolume < 0.01)
+ 		{
+@@ -283,6 +333,12 @@ public class WeatherSimulationSound
+ 		{
+ 			if (!windSoundsOn)
+ 			{
++				float initLeafyVol = Math.Max(0f, curWindVolumeLeafy);
++				float initLeaflessVol = Math.Max(0f, curWindVolumeLeafless);
++				windSoundLeafy?.SetVolume(initLeafyVol);
++				windSoundLeafless?.SetVolume(initLeaflessVol);
++				lastSetWindVolumeLeafy = initLeafyVol;
++				lastSetWindVolumeLeafless = initLeaflessVol;
+ 				windSoundLeafy?.Start();
+ 				windSoundLeafless?.Start();
+ 				windSoundsOn = true;
+@@ -291,14 +347,28 @@ public class WeatherSimulationSound
  			float num17 = (1f - num8) * 1.2f * num15;
  			curWindVolumeLeafy += (num16 - curWindVolumeLeafy) * dt;
  			curWindVolumeLeafless += (num17 - curWindVolumeLeafless) * dt;
@@ -97,3 +145,13 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs b/V
  		}
  		else if (windSoundsOn)
  		{
++			windSoundLeafy?.SetVolume(0f);
++			windSoundLeafless?.SetVolume(0f);
+ 			windSoundLeafy?.Stop();
+ 			windSoundLeafless?.Stop();
+ 			windSoundsOn = false;
++			lastSetWindVolumeLeafy = -99f;
++			lastSetWindVolumeLeafless = -99f;
+ 		}
+ 	}
+ 

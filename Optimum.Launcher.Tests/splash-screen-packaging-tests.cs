@@ -35,6 +35,21 @@ public class SplashScreenPackagingTests
         Assert.Contains("Join-Path $launcherOut 'runtimes'", script);
     }
 
+    [Fact]
+    public void WindowsPackagingScriptCopiesManagedLauncherDependencies()
+    {
+        string script = Read("scripts/package.ps1");
+        Assert.Contains("Get-ChildItem -Path $launcherOut -Filter '*.dll' -File", script);
+        Assert.Contains("Copy-Item -Force $_.FullName $stageDir", script);
+    }
+
+    [Fact]
+    public void WindowsPackagingScriptExcludesOpenTKAudioFromRoot()
+    {
+        string script = Read("scripts/package.ps1");
+        Assert.Contains("Where-Object { $_.Name -ne 'OpenTK.Audio.OpenAL.dll' }", script);
+    }
+
     private static string Read(string relativePath)
     {
         var root = FindRepositoryRoot();
