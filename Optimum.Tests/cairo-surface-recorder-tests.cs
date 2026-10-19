@@ -16,6 +16,15 @@ public sealed class CairoSurfaceRecorderTests
 	static CairoSurfaceRecorderTests () { _ = CairoAPI.Version; _ = typeof (Vintagestory.API.Client.ICoreClientAPI).Assembly; }
 
 	[Fact]
+	public void RecordedGuiFactoryCreatesRecordingEligibleSurface()
+	{
+		using var surface = ImageSurface.CreateForRecordedGui (Format.Argb32, 12, 8);
+		Assert.Equal (12, surface.Width);
+		Assert.Equal (8, surface.Height);
+		Assert.Equal (SurfaceRecordingState.Recording, surface.BeginRecording ().State);
+	}
+
+	[Fact]
 	public void ReplayMaterializesRecordedPrefixAndAllowsNativeDrawing()
 	{
 		using var recorded = new ImageSurface (Format.Argb32, 32, 24);

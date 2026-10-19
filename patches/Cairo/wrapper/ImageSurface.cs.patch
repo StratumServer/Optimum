@@ -1,10 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..5c6ea71 100644
+index 8014c9e..efbc817 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -44,11 +44,11 @@ namespace Cairo {
- 		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
- 		{
+@@ -46,10 +46,15 @@ namespace Cairo {
  		}
          
  		public ImageSurface (Format format, int width, int height)
@@ -13,11 +11,15 @@ index 8014c9e..5c6ea71 100644
  		{
  		}
  
++		public static ImageSurface CreateForRecordedGui (Format format, int width, int height)
++		{
++			return new ImageSurface (format, width, height);
++		}
++
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
  			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
-@@ -75,23 +75,24 @@ namespace Cairo {
- 
- 
+ 		{
+@@ -77,19 +82,20 @@ namespace Cairo {
          public int Width {
  			get {
  				CheckDisposed ();
@@ -41,11 +43,7 @@ index 8014c9e..5c6ea71 100644
                  if (ptr == IntPtr.Zero) return null;
  				int length = Height * Stride;
  				byte[] data = new byte[length];
- 				Marshal.Copy (ptr, data, 0, length);
- 				return data;
-@@ -99,24 +100,25 @@ namespace Cairo {
- 		}
- 
+@@ -101,21 +107,22 @@ namespace Cairo {
  		public IntPtr DataPtr {
  			get {
  				CheckDisposed ();
@@ -71,4 +69,3 @@ index 8014c9e..5c6ea71 100644
  			}
  		}
  	}
- }
