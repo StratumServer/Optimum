@@ -192,14 +192,17 @@ namespace Vintagestory.Client.NoObf
 							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
 								{
 									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								if (!surface.TryDrawRecordedCommands(skSurface.Canvas)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-								skSurface.Flush();
-								context.Flush();
-								context.Submit(true);
-								GL.Finish();
-								OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-								if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
-								rendered = true;
+								using (var blur = new RecordedGpuBlur(context))
+								{
+									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+									skSurface.Flush();
+									context.Flush();
+									context.Submit(true);
+									GL.Finish();
+									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+									rendered = true;
+								}
 							}
 							}
 						}
@@ -231,7 +234,9 @@ namespace Vintagestory.Client.NoObf
 						candidateTexture = texture;
 						return true;
 					}
-					if (failureReason == null) failureReason = rendered ? "display-list-commit-failed" : "candidate-render-failed";
+					if (failureReason == null) failureReason = rendered
+						? "display-list-commit-failed:state=" + surface.RecordingState + ";trigger=" + (surface.FirstMaterializationTrigger ?? "none")
+						: "candidate-render-failed";
 					try { if (texture != 0) GL.DeleteTextures(1, ref texture); } catch { }
 					try { while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { } } catch { }
 					return false;

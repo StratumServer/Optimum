@@ -158,7 +158,6 @@ uniform shader original;
 uniform float4 rectangle;
 uniform float2 scale;
 uniform int hasTint;
-uniform int swapSource;
 uniform int svgSource;
 uniform float4 tint;
 float4 main(float2 p) {
@@ -172,7 +171,6 @@ float4 main(float2 p) {
         int3 premultiplied = int3(floor(sampled.rgb * 255 + 0.5));
         rgbOver = alpha > 0 ? float3(premultiplied * 255 / alpha) : float3(0);
     }
-    if (swapSource != 0) rgbOver = rgbOver.bgr;
     if (hasTint != 0) { rgbOver = floor(aOver * tint.rgb); aOver = floor(aOver * tint.a) / 255.0; }
     float aBase = floor(base.a * 255 + 0.5) / 255.0;
     float3 rgbBase = floor(base.rgb * 255 + 0.5);
@@ -194,7 +192,8 @@ float4 main(float2 p) {
 				["scale"] = new float[] { (float)image.Width / imageWidth, (float)image.Height / imageHeight },
 				["hasTint"] = tint.HasValue ? 1 : 0,
 				["svgSource"] = svg ? 1 : 0,
-				["swapSource"] = svg && textureColorOrder && !tint.HasValue ? 1 : 0,
+				// RecordedSvgGeometry already stores SVG RGB in the target path's
+				// expected order. Swapping here reverses the channels a second time.
 				["tint"] = tint.HasValue ? new float[] { (tint.Value >> (textureColorOrder ? 16 : 0)) & 255, (tint.Value >> 8) & 255, (tint.Value >> (textureColorOrder ? 0 : 16)) & 255, (tint.Value >> 24) & 255 } : new float[4]
 			};
 			using (var source = image.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, sampling))

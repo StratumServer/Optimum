@@ -39,11 +39,6 @@ namespace Cairo
 		internal static SKPicture Parse (string text, int textureWidth, int textureHeight, int width, int height, int? tint = null, bool opaqueOnly = false)
 		{
 			if (textureWidth <= 0 || textureHeight <= 0) throw new NotSupportedException ("Recorded SVG has no positive texture size.");
-			// SvgLoader applies tint after NanoSVG rasterization using straight RGBA
-			// bytes. Skia's recorded paint uses premultiplied alpha, so the same
-			// channel values cannot be represented faithfully for partially covered
-			// pixels. Keep tinted assets on the native path until parity is proven.
-			if (tint.HasValue) throw new NotSupportedException ("Tinted SVG requires native rasterization.");
 			IntPtr image = SvgNativeMethods.nsvgParse (text, "px", 96);
 			if (image == IntPtr.Zero) throw new NotSupportedException ("NanoSVG could not parse the recorded SVG.");
 			try {
@@ -86,9 +81,11 @@ namespace Cairo
 						using (var path = ReadPath (shape.Paths, shape.FillRule))
 						using (var paint = ReadPaint (shape.Fill, shape.Opacity, opaqueOnly)) canvas.DrawPath (path, paint);
 					}
-					// NanoSVG writes defringed RGB into transparent uncovered pixels. Exact
-					// reconstruction is only established when the rectangles tile the image.
-					if (coveredArea != (double)textureWidth * textureHeight)
+					// LoadSvg uploads the NanoSVG buffer directly to a filtered texture.
+					// Keep that path restricted to tiled opaque geometry. DrawSvg composes
+					// against the existing target through DrawOverlay, so transparent
+					// uncovered pixels do not need to recreate NanoSVG's hidden defringed RGB.
+					if (opaqueOnly && coveredArea != (double)textureWidth * textureHeight)
 						throw new NotSupportedException ("Recorded SVG uncovered pixels require native rasterization.");
 					return recorder.EndRecording ();
 				}

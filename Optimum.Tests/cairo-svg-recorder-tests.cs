@@ -26,10 +26,18 @@ public sealed class CairoSvgRecorderTests
 	}
 
 	[Fact]
-	public void TintedSvgUsesNativeRasterizerUntilPremultipliedAlphaParityIsEstablished ()
+	public void TintedSvgGeometryCanBeRecordedForOverlayComposition ()
 	{
-		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='8' height='4' fill='#3585cd'/></svg>";
-		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, unchecked((int)0xB3418FD7)));
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='2' width='4' height='4' fill='#3585cd'/></svg>";
+		using var picture = RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, unchecked((int)0xB3418FD7));
+		Assert.NotNull (picture);
+	}
+
+	[Fact]
+	public void OpaqueOnlyTextureUploadStillRequiresTiledGeometry ()
+	{
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='2' width='4' height='4' fill='#3585cd'/></svg>";
+		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, opaqueOnly: true));
 	}
 
 	[Theory]
