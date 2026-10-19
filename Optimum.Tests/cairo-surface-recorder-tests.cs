@@ -7,10 +7,10 @@ using SkiaSharp;
 using Vintagestory.API.Config;
 using Xunit;
 
-[CollectionDefinition("Cairo materialization metrics", DisableParallelization = true)]
+[CollectionDefinition("GUI metrics", DisableParallelization = true)]
 public sealed class CairoMaterializationMetricsCollection { }
 
-[Collection("Cairo materialization metrics")]
+[Collection("GUI metrics")]
 public sealed class CairoSurfaceRecorderTests
 {
 	static CairoSurfaceRecorderTests () { _ = CairoAPI.Version; _ = typeof (Vintagestory.API.Client.ICoreClientAPI).Assembly; }
@@ -212,6 +212,44 @@ public sealed class CairoSurfaceRecorderTests
 			Assert.Equal (expectedTrigger, recorder.FirstMaterializationTrigger);
 			Assert.Equal (expected.Data, surface.Data);
 		}
+	}
+
+	[Fact]
+	public void CpuSkiaReplayCompositesRecordedImageWithoutCairoMaterialization()
+	{
+		using var source = new SKBitmap(4, 4, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+		source.Erase(SKColors.Lime);
+		using var surface = new ImageSurface(Format.Argb32, 8, 8);
+		var recorder = surface.BeginRecording();
+		Assert.True(recorder.RecordImage(source, 2, 2, 4, 4));
+		using var target = new SKBitmap(new SKImageInfo(8, 8, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas(target)) Assert.True(surface.TryDrawRecordedCommands(canvas));
+
+		Assert.Equal(SKColors.Lime, target.GetPixel(3, 3));
+		Assert.Equal((byte)0, target.GetPixel(0, 0).Alpha);
+		Assert.Equal(SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null(recorder.FirstMaterializationTrigger);
+	}
+
+	[Fact]
+	public void CpuSkiaReplayCompositesRecordedPictureWithoutNativeReplay()
+	{
+		using var pictureRecorder = new SKPictureRecorder();
+		SKCanvas pictureCanvas = pictureRecorder.BeginRecording(SKRect.Create(4, 4));
+		pictureCanvas.Clear(SKColors.Transparent);
+		pictureCanvas.DrawColor(SKColors.Magenta);
+		using SKPicture picture = pictureRecorder.EndRecording();
+		using var surface = new ImageSurface(Format.Argb32, 8, 8);
+		var recorder = surface.BeginRecording();
+		Assert.True(surface.RecordPicture(picture, 2, 2, 4, 4, null,
+			_ => throw new Xunit.Sdk.XunitException("CPU Skia replay invoked the native Cairo callback.")));
+		using var target = new SKBitmap(new SKImageInfo(8, 8, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas(target)) Assert.True(surface.TryDrawRecordedCommands(canvas));
+
+		Assert.Equal(SKColors.Magenta, target.GetPixel(3, 3));
+		Assert.Equal((byte)0, target.GetPixel(0, 0).Alpha);
+		Assert.Equal(SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null(recorder.FirstMaterializationTrigger);
 	}
 
 	[Fact]

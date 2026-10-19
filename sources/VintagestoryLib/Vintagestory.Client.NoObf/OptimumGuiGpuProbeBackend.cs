@@ -15,6 +15,8 @@ namespace Vintagestory.Client.NoObf
 	{
 		private const int Width = OptimumGuiGpuProbe.ReadbackWidth;
 		private const int Height = OptimumGuiGpuProbe.ReadbackHeight;
+		// Isolated Pharos test seam for exercising the real raster-upload recovery.
+		internal static bool ForceSkiaCpuFallbackForTest;
 		private static int attempted;
 		public static long MaterializationAttemptCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationAttemptCount;
 		public static long MaterializationSuccessCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationSuccessCount;
@@ -24,6 +26,11 @@ namespace Vintagestory.Client.NoObf
 		public static Dictionary<string, long> GetMaterializationDiagnostics ()
 		{
 			return Vintagestory.API.Config.OptimumGuiMetrics.GetMaterializationDiagnostics ();
+		}
+
+		public static Dictionary<string, long> GetCandidateFallbackDiagnostics ()
+		{
+			return Vintagestory.API.Config.OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics ();
 		}
 
 		public static void ResetRenderingDiagnostics ()
@@ -164,6 +171,8 @@ namespace Vintagestory.Client.NoObf
 						GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
 						if (GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer) != FramebufferErrorCode.FramebufferComplete)
 							throw new InvalidOperationException("Candidate GUI framebuffer is incomplete.");
+						if (ForceSkiaCpuFallbackForTest)
+							throw new InvalidOperationException("Forced Ganesh failure for Skia CPU fallback coverage.");
 
 						GL.Viewport(0, 0, surface.Width, surface.Height);
 						GL.Disable(EnableCap.ScissorTest);
@@ -177,7 +186,13 @@ namespace Vintagestory.Client.NoObf
 						GL.DepthMask(true);
 						GL.StencilMask(0xFFFFFFFF);
 						GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+						GL.PixelStore((PixelStoreParameter)0x0D02, 0); // PACK_ROW_LENGTH
+						GL.PixelStore((PixelStoreParameter)0x0D03, 0); // PACK_SKIP_ROWS
+						GL.PixelStore((PixelStoreParameter)0x0D04, 0); // PACK_SKIP_PIXELS
 						GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+						GL.PixelStore((PixelStoreParameter)0x0CF2, 0); // UNPACK_ROW_LENGTH
+						GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
+						GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
 
 						var getProc = new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress);
 						using (GRGlInterface glInterface = GRGlInterface.Create(getProc))
@@ -229,6 +244,25 @@ namespace Vintagestory.Client.NoObf
 						catch (Exception exception) { rendered = false; failureReason = "gl-error-query-exception:" + exception.GetType().Name + ":" + exception.Message; }
 					}
 
+					// A failed Ganesh render can still publish this display list without
+					// entering the legacy Cairo materialization path. Rasterize with Skia's
+					// CPU backend, then upload those pixels into the candidate GL texture.
+					if (!rendered && failureReason != null && failureReason.StartsWith("candidate-render-exception:", StringComparison.Ordinal))
+					{
+						string gpuFailure = failureReason;
+						try
+						{
+							UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+							rendered = true;
+							failureReason = "skia-cpu-fallback:ganesh=" + gpuFailure;
+						}
+						catch (Exception exception)
+						{
+							rendered = false;
+							failureReason = "gpu-render-and-skia-cpu-upload-failed:" + gpuFailure + ";" + exception.GetType().Name + ":" + exception.Message;
+						}
+					}
+
 					if (rendered && surface.CommitGpuRenderedCommands())
 					{
 						candidateTexture = texture;
@@ -240,6 +274,36 @@ namespace Vintagestory.Client.NoObf
 					try { if (texture != 0) GL.DeleteTextures(1, ref texture); } catch { }
 					try { while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { } } catch { }
 					return false;
+				}
+
+				private static void UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
+				{
+					using (var bitmap = new SKBitmap(new SKImageInfo(surface.Width, surface.Height, SKColorType.Rgba8888, SKAlphaType.Premul)))
+					using (var canvas = new SKCanvas(bitmap))
+					{
+						if (!surface.TryDrawRecordedCommands(canvas))
+							throw new InvalidOperationException("Skia CPU could not seal the GUI display list.");
+						canvas.Flush();
+						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
+						try
+						{
+							GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
+							GL.ActiveTexture(TextureUnit.Texture0);
+							GL.BindTexture(TextureTarget.Texture2D, texture);
+							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
+							GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+							GL.PixelStore((PixelStoreParameter)0x0CF2, 0); // UNPACK_ROW_LENGTH
+							GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
+							GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
+							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0,
+								PixelFormat.Rgba, PixelType.UnsignedByte, bitmap.GetPixels());
+							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+								throw new InvalidOperationException("OpenGL Skia CPU texture upload failed: " + error + ".");
+						}
+						finally { uploadState.Restore(); }
+					}
 				}
 
 		private static string DrainPreexistingGlErrors()

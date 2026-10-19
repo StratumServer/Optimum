@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text;
-using System.Linq;
 using SkiaSharp;
 
 namespace Cairo
@@ -94,62 +92,71 @@ namespace Cairo
 		}
 		internal bool RecordResetClip() { clips.Clear(); return RecordNative(c => c.ResetClip()); }
 
-		internal bool RecordText(byte[] text, bool pathOnly)
+		internal bool RecordText(Context ownerContext, byte[] text, bool pathOnly)
 		{
+			using var textPreparation = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
 			byte[] copy = (byte[])text.Clone();
 			int terminator = Array.IndexOf(copy, (byte)0);
 			int length = terminator < 0 ? copy.Length : terminator;
 			string decoded;
 			try { decoded = new UTF8Encoding(false, true).GetString(copy, 0, length); }
-			catch (DecoderFallbackException) { SetFirstMaterializationTrigger("Recorder.ShowText.Unsupported:text-font-parity"); return false; }
-			if (!pathOnly && (length == 0 || decoded.Any(character => CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark || CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.SpacingCombiningMark))) {
-				SetFirstMaterializationTrigger("Recorder.ShowText.Unsupported:text-font-parity");
-				return false;
-			}
+			catch (DecoderFallbackException exception) { throw new InvalidOperationException("Skia GUI text requires valid UTF-8; refusing Cairo materialization.", exception); }
 			if (pathOnly) return RecordNative(c => c.TextPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, copy));
 			Context context = Shadow;
-			using (var prepared = RecordedPreparationCache.PrepareText(context, copy)) {
-				if (prepared != null) {
-					PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
-					var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), textPath: new SKPath(prepared.Outline), sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
-					double advanceX = prepared.Extents.XAdvance, advanceY = prepared.Extents.YAdvance;
-					if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), c => c.MoveTo(point.X + advanceX, point.Y + advanceY), drawing))) { drawing.Dispose(); return false; }
-					resources.Add(new RecordedResource(drawing)); return true;
-				}
-			}
-			using (Path oldPath = context.CopyPath()) {
-				PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
-				TextExtents extents = context.TextExtents(copy);
-				context.NewPath(); context.MoveTo(point); context.TextPath(copy);
-				RecordedGuiDrawing drawing;
-				try { drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture()); }
-				finally { context.NewPath(); context.AppendPath(oldPath); }
-				if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), c => c.MoveTo(point.X + extents.XAdvance, point.Y + extents.YAdvance), drawing))) { drawing.Dispose(); return false; }
-				resources.Add(new RecordedResource(drawing));
-				return true;
-			}
+			PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
+			using FontOptions options = context.FontOptions;
+			SKFont font = CreateSkiaFont(ownerContext, options.Antialias);
+			float advance;
+			using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
+				advance = font.MeasureText(decoded);
+			var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+				sourceSnapshot: currentSource?.Capture(), text: decoded, textFont: font, textX: (float)point.X, textY: (float)point.Y);
+			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), c => c.MoveTo(point.X + advance, point.Y), drawing))) { drawing.Dispose(); return false; }
+			resources.Add(new RecordedResource(drawing));
+			return true;
 		}
 
-		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly)
+		internal bool RecordGlyphs(Context ownerContext, Glyph[] glyphs, bool pathOnly)
 		{
 			Glyph[] copy = (Glyph[])glyphs.Clone();
 			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, null, copy));
 			Context context = Shadow;
-			using (var prepared = RecordedPreparationCache.PrepareText(context, null, copy)) {
-				if (prepared != null) {
-					var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), textPath: new SKPath(prepared.Outline), sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
-					if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), c => { }, drawing))) { drawing.Dispose(); return false; }
-					resources.Add(new RecordedResource(drawing)); return true;
-				}
+			using FontOptions options = context.FontOptions;
+			using SKFont font = CreateSkiaFont(ownerContext, options.Antialias);
+			var glyphIndices = new ushort[copy.Length];
+			var positions = new SKPoint[copy.Length];
+			for (int i = 0; i < copy.Length; i++) {
+				if (copy[i].Index < 0 || copy[i].Index > ushort.MaxValue)
+					throw new InvalidOperationException("Skia glyph indices are 16-bit; Cairo materialization is disabled for glyph " + copy[i].Index + ".");
+				glyphIndices[i] = (ushort)copy[i].Index;
+				positions[i] = new SKPoint((float)copy[i].X, (float)copy[i].Y);
 			}
-			using (Path oldPath = context.CopyPath()) {
-				context.NewPath(); context.GlyphPath(copy);
-				RecordedGuiDrawing drawing;
-				try { drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture()); }
-				finally { context.NewPath(); context.AppendPath(oldPath); }
-				if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), c => { }, drawing))) { drawing.Dispose(); return false; }
-				resources.Add(new RecordedResource(drawing)); return true;
-			}
+			using var blobBuilder = new SKTextBlobBuilder();
+			blobBuilder.AddPositionedRun(glyphIndices, font, positions);
+			SKTextBlob blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to create a positioned glyph run.");
+			var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+				sourceSnapshot: currentSource?.Capture(), textBlob: blob);
+			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), c => { }, drawing))) { drawing.Dispose(); return false; }
+			resources.Add(new RecordedResource(drawing));
+			return true;
+		}
+
+		static SKFont CreateSkiaFont(Context context, Antialias antialias)
+		{
+			using var fontSelection = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
+			string family = context.RecordingFontFamily;
+			if (string.IsNullOrWhiteSpace(family))
+				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
+			var weight = context.RecordingFontWeight == FontWeight.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal;
+			var slant = context.RecordingFontSlant == FontSlant.Italic ? SKFontStyleSlant.Italic :
+				context.RecordingFontSlant == FontSlant.Oblique ? SKFontStyleSlant.Oblique : SKFontStyleSlant.Upright;
+			using SKTypeface typeface = SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant)
+				?? throw new InvalidOperationException("Skia could not resolve GUI font family '" + family + "'; Cairo materialization is disabled for recorded text.");
+			return new SKFont(typeface, (float)context.RecordingFontSize) {
+				Edging = antialias == Antialias.Subpixel ? SKFontEdging.SubpixelAntialias :
+					antialias == Antialias.None ? SKFontEdging.Alias : SKFontEdging.Antialias,
+				Subpixel = true
+			};
 		}
 
 		void ClearCommands()
@@ -223,15 +230,6 @@ namespace Cairo
 		}
 		internal bool RecordFill ()
 		{
-			Context context = Shadow;
-			if (context.Antialias == Antialias.Default) {
-				Rectangle extents = context.FillExtents();
-				if (Math.Abs(extents.X - Math.Round(extents.X)) > 1e-9 || Math.Abs(extents.Y - Math.Round(extents.Y)) > 1e-9 ||
-					Math.Abs(extents.Width - Math.Round(extents.Width)) > 1e-9 || Math.Abs(extents.Height - Math.Round(extents.Height)) > 1e-9) {
-					SetFirstMaterializationTrigger("Recorder.Antialias.Unsupported");
-					return false;
-				}
-			}
 			return RecordDrawing(c => c.Fill(), c => c.NewPath());
 		}
 		internal bool RecordSave () { Antialias antialias = Shadow.Antialias; bool recorded = RecordNative(c => c.Save(), shadowReplay: c => { c.Save(); savedSources.Push((Matrix)sourceMatrix.Clone()); savedSurfaceSources.Push(currentSource); }); if (recorded) { savedClips.Push(clips.ToArray()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
@@ -393,8 +391,13 @@ namespace Cairo
 				if (!hasBlur) { foreach (SurfaceRecorder.Command command in commands) command.Drawing?.Draw(canvas); return; }
 				// The game's blur reads and rewrites pixels, so those segments run on a raster layer
 				// (still Skia) and the result is composited back onto the target canvas.
+				SKRuntimeEffect overlayEffect = null;
+				try {
 				using (var bitmap = new SKBitmap (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul))) {
-					using (var raster = new SKCanvas (bitmap)) {
+					using (var properties = new SKSurfaceProperties (SKPixelGeometry.RgbHorizontal))
+					using (var rasterSurface = SKSurface.Create(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, properties)) {
+						if (rasterSurface == null) throw new InvalidOperationException("Skia could not create a software GUI surface with pixel geometry.");
+						SKCanvas raster = rasterSurface.Canvas;
 						raster.Clear (SKColors.Transparent);
 						foreach (SurfaceRecorder.Command command in commands) {
 							command.Drawing?.Draw (raster);
@@ -402,14 +405,14 @@ namespace Cairo
 							if (command.Demultiply) { raster.Flush(); SurfaceTransformDemulAlpha.ApplyToPixels(bitmap.GetPixels(), width, height); bitmap.NotifyPixelsChanged(); }
 							if (command.Image != null) {
 								raster.Flush();
-								using (var surface = new ImageSurface(bitmap.GetPixels(), Format.Argb32, width, height, bitmap.RowBytes))
-									surface.Image(command.Image.Bitmap, command.Image.X, command.Image.Y, command.Image.Width, command.Image.Height);
+								overlayEffect ??= RecordedGpuBlur.CreateImageOverlayEffect("CPU image");
+								RecordedGpuBlur.DrawImageCpu(command.Image, rasterSurface, width, height, overlayEffect);
 								bitmap.NotifyPixelsChanged();
-								}
+							}
 							if (command.Picture != null) {
 								raster.Flush();
-								using (var surface = new ImageSurface(bitmap.GetPixels(), Format.Argb32, width, height, bitmap.RowBytes))
-								using (var context = new Context(surface)) command.Picture.NativeReplay(context);
+								overlayEffect ??= RecordedGpuBlur.CreateImageOverlayEffect("CPU picture");
+								RecordedGpuBlur.DrawPictureCpu(command.Picture, rasterSurface, width, height, overlayEffect);
 								bitmap.NotifyPixelsChanged();
 							}
 						}
@@ -417,6 +420,7 @@ namespace Cairo
 					using (var paint = new SKPaint { BlendMode = SKBlendMode.Src })
 						canvas.DrawBitmap (bitmap, 0, 0, paint);
 				}
+				} finally { overlayEffect?.Dispose(); }
 			} finally { canvas.RestoreToCount(save); }
 		}
 	}

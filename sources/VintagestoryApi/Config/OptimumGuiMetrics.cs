@@ -15,6 +15,8 @@ namespace Vintagestory.API.Config
         private const string OtherMaterializationTriggerKinds = "other-trigger-kinds";
         private static readonly object materializationDiagnosticsSync = new object();
         private static readonly Dictionary<string, long> materializationTriggerCounts = new Dictionary<string, long>();
+        private static readonly object gpuCandidateFallbackDiagnosticsSync = new object();
+        private static readonly Dictionary<string, long> gpuCandidateFallbackReasonCounts = new Dictionary<string, long>(StringComparer.Ordinal);
         private static long untrackedMaterializationTriggerCount;
         private static long materializationAttemptCount;
         private static long materializationSuccessCount;
@@ -117,6 +119,7 @@ namespace Vintagestory.API.Config
             Interlocked.Exchange(ref gpuCandidateFallbackCount, 0);
             Interlocked.Exchange(ref gpuRecordingSurfaceStartCount, 0);
             Volatile.Write(ref lastGpuCandidateFallbackReason, null);
+            lock (gpuCandidateFallbackDiagnosticsSync) gpuCandidateFallbackReasonCounts.Clear();
             Interlocked.Exchange(ref lastCompositionThreadId, 0);
             Interlocked.Exchange(ref textExtentMeasurementCount, 0);
             Interlocked.Exchange(ref textExtentMeasurementTicks, 0);
@@ -152,9 +155,8 @@ namespace Vintagestory.API.Config
 
         internal static void RecordMaterialization(string trigger, bool succeeded)
         {
-            // A native Cairo replay changes the requested Skia-only policy for
-            // this client run. Keep Cairo's text/subpixel rasterization intact,
-            // then deny subsequent GPU composition instead of mixing paths.
+            // Any native materialization invalidates zero-Cairo-fallback
+            // certification, including Subpixel and font-parity paths.
             if (OptimumConfig.GuiGpuCertificationPassed)
                 OptimumConfig.RevokeGuiGpuCertification();
             if (!Enabled) return;
@@ -214,14 +216,37 @@ namespace Vintagestory.API.Config
         internal static void RecordGpuCandidateTexture(bool succeeded, string fallbackReason)
         {
             // Surfaces that never started recording are not GPU candidates; counting them hid the real outcomes.
-            if (!succeeded && fallbackReason != null && fallbackReason.StartsWith("surface-not-recording:Native:", StringComparison.Ordinal)) return;
+            if (!succeeded && fallbackReason == "surface-not-recording:Native") return;
             Interlocked.Increment(ref gpuCandidateAttemptCount);
-            if (succeeded) Interlocked.Increment(ref gpuCandidateSuccessCount);
+            if (succeeded)
+            {
+                Interlocked.Increment(ref gpuCandidateSuccessCount);
+                if (fallbackReason != null && fallbackReason.StartsWith("skia-cpu-fallback:", StringComparison.Ordinal))
+                {
+                    lock (gpuCandidateFallbackDiagnosticsSync)
+                    {
+                        gpuCandidateFallbackReasonCounts.TryGetValue("skia-cpu-fallback", out long count);
+                        gpuCandidateFallbackReasonCounts["skia-cpu-fallback"] = count + 1;
+                    }
+                }
+            }
             else
             {
                 Interlocked.Increment(ref gpuCandidateFallbackCount);
-                Volatile.Write(ref lastGpuCandidateFallbackReason, fallbackReason ?? "unspecified");
+                string reason = fallbackReason ?? "unspecified";
+                Volatile.Write(ref lastGpuCandidateFallbackReason, reason);
+                lock (gpuCandidateFallbackDiagnosticsSync)
+                {
+                    gpuCandidateFallbackReasonCounts.TryGetValue(reason, out long count);
+                    gpuCandidateFallbackReasonCounts[reason] = count + 1;
+                }
             }
+        }
+
+        public static Dictionary<string, long> GetGpuCandidateFallbackDiagnostics()
+        {
+            lock (gpuCandidateFallbackDiagnosticsSync)
+                return new Dictionary<string, long>(gpuCandidateFallbackReasonCounts, StringComparer.Ordinal);
         }
 
         internal static void RecordGpuRecordingSurfaceStart() => Interlocked.Increment(ref gpuRecordingSurfaceStartCount);

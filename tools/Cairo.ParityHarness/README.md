@@ -11,6 +11,13 @@ Generate the Cairo assembly's exported type and public/protected member inventor
 ```bash
 dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --api-manifest tools/Cairo.ParityHarness/cairo-api-manifest.json
 ```
+Generate the exact compiled wrapper's P/Invoke inventory with:
+
+```bash
+dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --native-import-manifest tools/Cairo.ParityHarness/cairo-native-import-manifest.json
+```
+
+The native inventory includes every P/Invoke method with its library, resolved entry point, wrapper signature, calling convention, and character set. It also reports distinct library/entry-point pairs separately from method count. Tie regenerated manifests to the candidate assembly hash.
 
 When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
 

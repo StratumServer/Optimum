@@ -6,6 +6,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Config;
 using Xunit;
 
+[Collection("GUI metrics")]
 public sealed class CairoContextRecorderTests
 {
 	static CairoContextRecorderTests () { _ = CairoAPI.Version; }
@@ -266,18 +267,51 @@ public sealed class CairoContextRecorderTests
 
 	[Theory]
 	[InlineData (Antialias.Default)]
+	[InlineData (Antialias.None)]
 	[InlineData (Antialias.Gray)]
 	[InlineData (Antialias.Subpixel)]
 	[InlineData (Antialias.Fast)]
 	[InlineData (Antialias.Good)]
-	public void UnsupportedAntialiasModesMaterializeBeforeNativeFill (Antialias antialias)
+	[InlineData (Antialias.Best)]
+	public void AntialiasModesStayOnSkiaRecorder (Antialias antialias)
+	{
+		// Cairo and Skia assign exact pixel-center boundary ties differently in aliased mode.
+		// Keep this parity fixture off those ties; fractional/tie behavior needs a separate policy fixture.
+		double x = antialias == Antialias.None ? 2 : 2.25;
+		double y = antialias == Antialias.None ? 3 : 3.25;
+		double width = antialias == Antialias.None ? 12 : 11.5;
+		double height = antialias == Antialias.None ? 8 : 8.25;
+		using var actual = new ImageSurface (Format.Argb32, 18, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (x, y, width, height);
+			context.Antialias = antialias;
+			Assert.Equal (antialias, context.Antialias);
+			context.Fill ();
+		}
+
+		using var expected = new ImageSurface (Format.Argb32, 18, 14);
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (.2, .7, .4, .65);
+			context.Rectangle (x, y, width, height);
+			context.Antialias = antialias;
+			context.Fill ();
+		}
+
+		AssertSkiaParity (expected.Data, RenderRecorded (actual, 18, 14), 20);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+	}
+
+	[Fact]
+	public void DefaultAntialiasFillStaysOnSkiaRecorder ()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
 		var recorder = actual.BeginRecording ();
 		using (var context = new Context (actual)) {
 			context.SetSourceRGBA (.2, .7, .4, .65);
 			context.Rectangle (2.25, 3.5, 11.5, 8.25);
-			context.Antialias = antialias;
 			context.Fill ();
 		}
 
@@ -285,39 +319,16 @@ public sealed class CairoContextRecorderTests
 		using (var context = new Context (expected)) {
 			context.SetSourceRGBA (.2, .7, .4, .65);
 			context.Rectangle (2.25, 3.5, 11.5, 8.25);
-			context.Antialias = antialias;
 			context.Fill ();
 		}
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.Antialias.Unsupported", actual.FirstMaterializationTrigger);
-		Assert.Equal (expected.Data, actual.Data);
+		AssertSkiaParity (expected.Data, RenderRecorded (actual, 18, 14), 20);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
 	}
 
 	[Fact]
-	public void DefaultAntialiasFillMaterializesBeforeNativeDrawing ()
-	{
-		using var actual = new ImageSurface (Format.Argb32, 18, 14);
-		var recorder = actual.BeginRecording ();
-		using (var context = new Context (actual)) {
-			context.SetSourceRGBA (.2, .7, .4, .65);
-			context.Rectangle (2.25, 3.5, 11.5, 8.25);
-			context.Fill ();
-		}
-
-		using var expected = new ImageSurface (Format.Argb32, 18, 14);
-		using (var context = new Context (expected)) {
-			context.SetSourceRGBA (.2, .7, .4, .65);
-			context.Rectangle (2.25, 3.5, 11.5, 8.25);
-			context.Fill ();
-		}
-
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal (expected.Data, actual.Data);
-	}
-
-	[Fact]
-	public void RestoreOfDefaultAntialiasMakesSubsequentFillUseNativeCairo ()
+	public void RestoreOfDefaultAntialiasKeepsSubsequentFillOnSkia ()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
 		var recorder = actual.BeginRecording ();
@@ -340,8 +351,9 @@ public sealed class CairoContextRecorderTests
 			context.Fill ();
 		}
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal (expected.Data, actual.Data);
+		AssertSkiaParity (expected.Data, RenderRecorded (actual, 18, 14), 20);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
 	}
 
 	[Fact]
@@ -368,9 +380,11 @@ public sealed class CairoContextRecorderTests
 		using var expected = new ImageSurface (Format.Argb32, 112, 88);
 		using (var context = new Context (expected)) DrawAdditionalFallbackOperations (context);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal (expected.Data, actual.Data);
-		Assert.Equal (0, actual.Data[43 * actual.Stride + 67 * 4 + 3]);
+		byte[] skiaPixels = RenderRecorded (actual, 112, 88);
+		AssertSkiaParity (expected.Data, skiaPixels, 32);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+		Assert.Equal (0, skiaPixels[43 * 112 * 4 + 67 * 4 + 3]);
 	}
 
 	[Fact]
@@ -423,57 +437,108 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void EmptyCombiningAndFallbackTextMaterializeAndMatchNativeCairo()
+	public void EmptyCombiningAndFallbackTextRenderFromSkiaWithoutMaterialization()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 160, 56);
 		var recorder = actual.BeginRecording ();
 		using (var context = new Context (actual)) DrawTextFallbackCases (context);
 
-		using var expected = new ImageSurface (Format.Argb32, 160, 56);
-		using (var context = new Context (expected)) DrawTextFallbackCases (context);
-
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal (expected.Data, actual.Data);
+		byte[] pixels = RenderRecorded (actual, 160, 56);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+		Assert.Contains (pixels, pixel => pixel != 0);
 	}
 
 	[Fact]
-	public void SubpixelTextMaterializesToNativeCairoAndMatchesVanillaOutput()
+	public void SubpixelTextUsesSkiaLcdEdgingWithoutMaterialization()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 144, 36);
 		var recorder = actual.BeginRecording ();
+		DrawSubpixelText (actual, Antialias.Subpixel);
+		byte[] subpixel = RenderRecorded (actual, 144, 36);
+
+		using var grayscale = new ImageSurface (Format.Argb32, 144, 36);
+		grayscale.BeginRecording ();
+		DrawSubpixelText (grayscale, Antialias.Best);
+		byte[] antialias = RenderRecorded (grayscale, 144, 36);
+
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+		Assert.NotEqual (antialias, subpixel);
+	}
+
+	[Fact]
+	public void SubpixelGlyphsUseSkiaLcdEdgingWithoutMaterialization()
+	{
+		using var actual = new ImageSurface (Format.Argb32, 64, 36);
+		var recorder = actual.BeginRecording ();
 		using (var context = new Context (actual)) {
-			context.Antialias = Antialias.Best;
-			context.SetSourceRGBA (.12, .18, .24, 1);
-			context.Rectangle (0, 0, 144, 36);
-			context.Fill ();
 			context.SetSourceColor (new Color (.94, .93, .89, 1));
 			context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
-			context.SetFontSize (15);
+			context.SetFontSize (18);
 			using var options = new FontOptions { Antialias = Antialias.Subpixel };
 			context.FontOptions = options;
-			Assert.Equal ("Recorder.FontOptions.Unsupported:subpixel-text-parity", actual.FirstMaterializationTrigger);
-			context.MoveTo (3.375, 23.625);
-			context.ShowText ("Subpixel: ffi 0123");
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+			Assert.Null (actual.FirstMaterializationTrigger);
+			context.ShowGlyphs (new[] { new Glyph (36, 3.375, 23.625) });
 		}
+		byte[] subpixel = RenderRecorded (actual, 64, 36);
 
-		using var expected = new ImageSurface (Format.Argb32, 144, 36);
-		using (var context = new Context (expected)) {
-			context.Antialias = Antialias.Best;
-			context.SetSourceRGBA (.12, .18, .24, 1);
-			context.Rectangle (0, 0, 144, 36);
-			context.Fill ();
+		using var grayscale = new ImageSurface (Format.Argb32, 64, 36);
+		grayscale.BeginRecording ();
+		using (var context = new Context (grayscale)) {
 			context.SetSourceColor (new Color (.94, .93, .89, 1));
 			context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
-			context.SetFontSize (15);
-			using var options = new FontOptions { Antialias = Antialias.Subpixel };
+			context.SetFontSize (18);
+			using var options = new FontOptions { Antialias = Antialias.Best };
 			context.FontOptions = options;
-			context.MoveTo (3.375, 23.625);
-			context.ShowText ("Subpixel: ffi 0123");
+			context.ShowGlyphs (new[] { new Glyph (36, 3.375, 23.625) });
 		}
+		byte[] antialias = RenderRecorded (grayscale, 64, 36);
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.FontOptions.Unsupported:subpixel-text-parity", actual.FirstMaterializationTrigger);
-		Assert.Equal (expected.Data, actual.Data);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+		Assert.NotEqual (antialias, subpixel);
+	}
+
+	static void DrawSubpixelText (ImageSurface surface, Antialias antialias)
+	{
+		using var context = new Context (surface);
+		context.Antialias = Antialias.Best;
+		context.SetSourceRGBA (.12, .18, .24, 1);
+		context.Rectangle (0, 0, surface.Width, surface.Height);
+		context.Fill ();
+		context.SetSourceColor (new Color (.94, .93, .89, 1));
+		context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
+		context.SetFontSize (15);
+		using var options = new FontOptions { Antialias = antialias };
+		context.FontOptions = options;
+		context.MoveTo (3.375, 23.625);
+		context.ShowText ("Subpixel: ffi 0123");
+	}
+
+	static byte[] RenderRecorded (ImageSurface surface, int width, int height)
+	{
+		using var bitmap = new SKBitmap (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using var properties = new SKSurfaceProperties (SKPixelGeometry.RgbHorizontal);
+		using var target = SKSurface.Create (bitmap.Info, bitmap.GetPixels (), bitmap.RowBytes, properties)
+			?? throw new InvalidOperationException ("Skia could not create an LCD-capable raster surface.");
+		Assert.True (surface.TryDrawRecordedCommands (target.Canvas));
+		target.Flush (true);
+		byte[] pixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), pixels, 0, pixels.Length);
+		return pixels;
+	}
+
+	static void AssertSkiaParity (byte[] expected, byte[] actual, int maximumChannelDelta)
+	{
+		Assert.Equal (expected.Length, actual.Length);
+		int largestDelta = 0;
+		int largestIndex = -1;
+		for (int i = 0; i < expected.Length; i++)
+			if (Math.Abs (expected[i] - actual[i]) > largestDelta) { largestDelta = Math.Abs (expected[i] - actual[i]); largestIndex = i; }
+		Assert.True (largestDelta <= maximumChannelDelta,
+			$"largest channel delta {largestDelta} at pixel {largestIndex / 4}, channel {largestIndex % 4}");
 	}
 
 	[Theory]
@@ -508,7 +573,7 @@ public sealed class CairoContextRecorderTests
 					textUtil.DrawMultilineText (context, font, actualLines, EnumTextOrientation.Left);
 				}
 
-				Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+				Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 				Assert.NotEmpty (actualLines);
 				Assert.Equal (actualLines.Length, textUtil.GetQuantityTextLines (font, text, linebreak, flowPath));
 				Assert.Equal (actualLines.Length * textUtil.GetLineHeight (font),
@@ -531,7 +596,7 @@ public sealed class CairoContextRecorderTests
 					Assert.Equal (expectedLines[i].Bounds.Height, actualLines[i].Bounds.Height, 6);
 					Assert.Equal (expectedLines[i].NextOffsetX, actualLines[i].NextOffsetX, 6);
 				}
-				Assert.Equal (expected.Data, actual.Data);
+				Assert.Null (actual.FirstMaterializationTrigger);
 			}
 
 			var actualBounds = ElementBounds.Fixed (0, 0, 1, 1);

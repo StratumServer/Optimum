@@ -33,7 +33,8 @@ namespace Cairo
 			if (dependencyDepth >= 64) throw new NotSupportedException("Surface dependency depth exceeds 64.");
 			dependencyDepth++;
 			try {
-				using (var target = SKSurface.Create(context, true, new SKImageInfo(recording.Width, recording.Height, SKColorType.Rgba8888, SKAlphaType.Premul))) {
+				using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+				using (var target = SKSurface.Create(context, true, new SKImageInfo(recording.Width, recording.Height, SKColorType.Rgba8888, SKAlphaType.Premul), properties)) {
 					if (target == null) throw new InvalidOperationException("Could not create a GPU surface dependency.");
 					recording.DrawTo(target, this); SurfaceRecordingDiagnostics.RenderDependency();
 					SKImage image = target.Snapshot();
@@ -180,11 +181,14 @@ float4 main(float2 p) {
     return float4(rgb, floor(255.0 * total)) / 255.0;
 }";
 
-		internal static void DrawImageOverlay(SKRuntimeEffect effect, RecordedGuiImage image, SKImage original, SKSurface destination, int width, int height)
+		internal static void DrawImageOverlay(SKRuntimeEffect effect, RecordedGuiImage image, SKImage original, SKCanvas destination, int width, int height)
 			=> DrawOverlay(effect, image.Image, original, destination, image.X, image.Y, image.Width, image.Height, width, height,
 				new SKSamplingOptions(SKCubicResampler.Mitchell), null, false, false);
 
-		internal static void DrawOverlay(SKRuntimeEffect effect, SKImage image, SKImage original, SKSurface destination,
+		internal static void DrawImageOverlay(SKRuntimeEffect effect, RecordedGuiImage image, SKImage original, SKSurface destination, int width, int height)
+			=> DrawImageOverlay(effect, image, original, destination.Canvas, width, height);
+
+		internal static void DrawOverlay(SKRuntimeEffect effect, SKImage image, SKImage original, SKCanvas destination,
 			int x, int y, int imageWidth, int imageHeight, int width, int height, SKSamplingOptions sampling, int? tint, bool textureColorOrder, bool svg)
 		{
 			var uniforms = new SKRuntimeEffectUniforms(effect) {
@@ -202,9 +206,40 @@ float4 main(float2 p) {
 				using (var shader = effect.ToShader(uniforms, children))
 				using (var paint = new SKPaint { Shader = shader, BlendMode = SKBlendMode.Src, IsAntialias = false }) {
 					if (shader == null) throw new InvalidOperationException("Skia rejected the recorded GUI image shader.");
-					destination.Canvas.DrawRect(0, 0, width, height, paint);
+						destination.DrawRect(0, 0, width, height, paint);
 				}
 			}
+		}
+
+		internal static void DrawOverlay(SKRuntimeEffect effect, SKImage image, SKImage original, SKSurface destination,
+			int x, int y, int imageWidth, int imageHeight, int width, int height, SKSamplingOptions sampling, int? tint, bool textureColorOrder, bool svg)
+			=> DrawOverlay(effect, image, original, destination.Canvas, x, y, imageWidth, imageHeight, width, height, sampling, tint, textureColorOrder, svg);
+
+		internal static SKRuntimeEffect CreateImageOverlayEffect(string purpose)
+		{
+			SKRuntimeEffect effect = SKRuntimeEffect.CreateShader(ImageOverlayShaderSource, out string errors);
+			return effect ?? throw new NotSupportedException("Recorded " + purpose + " overlay shader compilation failed: " + errors);
+		}
+
+		internal static void DrawImageCpu(RecordedGuiImage image, SKSurface destination, int width, int height, SKRuntimeEffect effect)
+		{
+			using SKImage original = destination.Snapshot();
+			DrawImageOverlay(effect, image, original, destination.Canvas, width, height);
+		}
+
+		internal static void DrawPictureCpu(RecordedGuiPicture picture, SKSurface destination, int width, int height, SKRuntimeEffect effect)
+		{
+			var info = new SKImageInfo(picture.Width, picture.Height, SKColorType.Rgba8888, SKAlphaType.Premul);
+			using var pixels = new SKBitmap(info);
+			using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
+			using var source = SKSurface.Create(info, pixels.GetPixels(), pixels.RowBytes, properties)
+				?? throw new InvalidOperationException("Skia could not allocate a CPU SVG surface.");
+			source.Canvas.Clear(SKColors.Transparent);
+			source.Canvas.DrawPicture(picture.Picture);
+			using SKImage image = source.Snapshot();
+			using SKImage original = destination.Snapshot();
+			DrawOverlay(effect, image, original, destination.Canvas, picture.X, picture.Y, picture.Width, picture.Height,
+				width, height, new SKSamplingOptions(SKFilterMode.Nearest), picture.Tint, picture.TextureColorOrder, true);
 		}
 
 		internal void DrawImage(RecordedGuiImage image, SKSurface target, int width, int height)
@@ -214,7 +249,7 @@ float4 main(float2 p) {
 				if (imageOverlayEffect == null) throw new NotSupportedException("Recorded GUI image shader compilation failed: " + errors);
 			}
 			EnsureSurfaces(width, height);
-			using (var original = target.Snapshot()) DrawImageOverlay(imageOverlayEffect, image, original, horizontal, width, height);
+			using (var original = target.Snapshot()) DrawImageOverlay(imageOverlayEffect, image, original, horizontal.Canvas, width, height);
 			using (var result = horizontal.Snapshot())
 			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
 		}
@@ -226,11 +261,12 @@ float4 main(float2 p) {
 				if (imageOverlayEffect == null) throw new NotSupportedException("Recorded SVG shader compilation failed: " + errors);
 			}
 			EnsureSurfaces(width, height);
-			using (var source = SKSurface.Create(context, true, new SKImageInfo(picture.Width, picture.Height, SKColorType.Rgba8888, SKAlphaType.Premul))) {
+				using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+				using (var source = SKSurface.Create(context, true, new SKImageInfo(picture.Width, picture.Height, SKColorType.Rgba8888, SKAlphaType.Premul), properties)) {
 				if (source == null) throw new InvalidOperationException("Skia could not allocate a GPU SVG surface.");
 				source.Canvas.Clear(SKColors.Transparent); source.Canvas.DrawPicture(picture.Picture);
 				using (var pixels = source.Snapshot())
-				using (var original = target.Snapshot()) DrawOverlay(imageOverlayEffect, pixels, original, horizontal,
+				using (var original = target.Snapshot()) DrawOverlay(imageOverlayEffect, pixels, original, horizontal.Canvas,
 					picture.X, picture.Y, picture.Width, picture.Height, width, height, new SKSamplingOptions(SKFilterMode.Nearest), picture.Tint, picture.TextureColorOrder, true);
 			}
 			using (var result = horizontal.Snapshot())

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-07T18:00:33.182791+00:00",
+  "generatedUtc": "2026-10-19T19:09:58.325421+00:00",
   "assemblyIdentity": "cairo-sharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 81,
-  "publicAndProtectedMemberCount": 868,
+  "publicAndProtectedMemberCount": 869,
   "classificationNote": "Automated initial classification; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -4011,6 +4011,12 @@
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.Format get_Format()",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.ImageSurface",
+      "signature": "Cairo.ImageSurface CreateForRecordedGui(Cairo.Format, System.Int32, System.Int32)",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },

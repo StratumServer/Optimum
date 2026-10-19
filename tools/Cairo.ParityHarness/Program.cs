@@ -29,6 +29,11 @@ internal static class Program
             WriteApiManifest(System.IO.Path.GetFullPath(args[1]));
             return 0;
         }
+        if (args.Length == 2 && args[0] == "--native-import-manifest")
+        {
+            WriteNativeImportManifest(System.IO.Path.GetFullPath(args[1]));
+            return 0;
+        }
         string? bundledFontDirectory = null;
         string output;
         if (args.Length == 3 && args[0] == "--font-matrix")
@@ -613,6 +618,45 @@ internal static class Program
             members
         }, new JsonSerializerOptions { WriteIndented = true }));
         Console.WriteLine($"Wrote public/protected ABI inventory: {exportedTypes.Length} types, {members.Count} members, assembly {assembly.GetName().FullName}.");
+    }
+
+    private static void WriteNativeImportManifest(string path)
+    {
+        var assembly = typeof(Context).Assembly;
+        var imports = assembly.GetTypes()
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            .Where(method => (method.Attributes & MethodAttributes.PinvokeImpl) != 0)
+            .Select(method =>
+            {
+                var import = method.GetCustomAttribute<DllImportAttribute>();
+                return new
+                {
+                    declaringType = method.DeclaringType?.FullName,
+                    signature = MemberSignature(method),
+                    library = import?.Value,
+                    entryPoint = import?.EntryPoint ?? method.Name,
+                    callingConvention = import?.CallingConvention.ToString(),
+                    characterSet = import?.CharSet.ToString(),
+                    exactSpelling = import?.ExactSpelling
+                };
+            })
+            .OrderBy(import => import.library, StringComparer.Ordinal)
+            .ThenBy(import => import.entryPoint, StringComparer.Ordinal)
+            .ThenBy(import => import.declaringType, StringComparer.Ordinal)
+            .ThenBy(import => import.signature, StringComparer.Ordinal)
+            .ToArray();
+
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            generatedUtc = DateTimeOffset.UtcNow,
+            assemblyIdentity = assembly.GetName().FullName,
+            importMethodCount = imports.Length,
+            distinctLibraryEntryPointCount = imports.Select(import => (import.library, import.entryPoint)).Distinct().Count(),
+            imports
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Wrote native import inventory: {imports.Length} methods, {imports.Select(import => (import.library, import.entryPoint)).Distinct().Count()} distinct library entry points.");
     }
 
     private static bool IsPublicOrProtected(MemberInfo member) => member switch

@@ -11,6 +11,10 @@ namespace Cairo
 	{
 		internal SKPath Path;
 		internal SKPaint Paint;
+		internal SKFont TextFont;
+		internal SKTextBlob TextBlob;
+		internal string Text;
+		internal float TextX, TextY;
 		internal SKMatrix Matrix;
 		internal RecordedGuiClip[] Clips;
 		internal bool PaintAll;
@@ -28,14 +32,16 @@ namespace Cairo
 		Matrix nativeSourceMatrix;
 
 		internal static RecordedGuiDrawing Capture(Context context, bool stroke, bool paintAll,
-			RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null, SurfaceRecorderSnapshot sourceSnapshot = null)
+			RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null, SurfaceRecorderSnapshot sourceSnapshot = null,
+			string text = null, SKFont textFont = null, SKTextBlob textBlob = null, float textX = 0, float textY = 0)
 		{
 			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.DrawingCapture);
 			RecordedGuiDrawing result;
 			using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState))
-				result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot };
+				result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot,
+					Text = text, TextFont = textFont, TextBlob = textBlob, TextX = textX, TextY = textY };
 			try {
-				result.Path = textPath ?? (paintAll ? null : CopyPath(context));
+				result.Path = textPath ?? (paintAll || textFont != null || textBlob != null ? null : CopyPath(context));
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState)) {
 					if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
 					result.Paint = new SKPaint {
@@ -207,7 +213,12 @@ namespace Cairo
 			bool ownsDependencyImage = gpu == null;
 			if (sourceSnapshot != null) {
 				if (gpu != null) dependencyImage = gpu.RenderSource(sourceSnapshot, out ownsDependencyImage);
-				else { using (var surface = SKSurface.Create(new SKImageInfo(sourceSnapshot.Width, sourceSnapshot.Height, SKColorType.Bgra8888, SKAlphaType.Premul))) { sourceSnapshot.DrawTo(surface.Canvas); dependencyImage = surface.Snapshot(); } }
+				else {
+					using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
+					using var surface = SKSurface.Create(new SKImageInfo(sourceSnapshot.Width, sourceSnapshot.Height, SKColorType.Bgra8888, SKAlphaType.Premul), properties)
+						?? throw new InvalidOperationException("Skia could not create a software GUI surface.");
+					sourceSnapshot.DrawTo(surface.Canvas); dependencyImage = surface.Snapshot();
+				}
 				dependencyShader = dependencyImage.ToShader(sourceTile, sourceTile, new SKSamplingOptions(sourceFilter), sourceTransform); Paint.Shader = dependencyShader;
 			}
 			int save = canvas.Save();
@@ -215,7 +226,10 @@ namespace Cairo
 				canvas.ResetMatrix();
 				foreach (RecordedGuiClip clip in Clips) canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
 				canvas.SetMatrix(Matrix);
-				if (PaintAll) canvas.DrawPaint(Paint); else canvas.DrawPath(Path, Paint);
+				if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
+				else if (TextFont != null) canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
+				else if (PaintAll) canvas.DrawPaint(Paint);
+				else canvas.DrawPath(Path, Paint);
 			} finally { canvas.RestoreToCount(save); if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); } if (ownsDependencyImage) dependencyImage?.Dispose(); }
 		}
 
@@ -291,7 +305,7 @@ namespace Cairo
 			} catch { result.Dispose(); throw; }
 		}
 		static SKPoint Point(IntPtr data, int index) => new SKPoint((float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16)), (float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16 + 8)));
-		public void Dispose() { Path?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
+		public void Dispose() { Path?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
 	}
 
 	internal sealed class RecordedGuiClip : IDisposable

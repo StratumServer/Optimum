@@ -19,7 +19,7 @@ public class OptimumGuiMetricsTests
             OptimumConfig.SetGuiGpuCertificationPassed(true, "vendor", "renderer", "4.6", 4, 6, 2, 0);
             Assert.True(OptimumConfig.GuiGpuRecordingEligible);
 
-            OptimumGuiMetrics.RecordMaterialization("Context.SelectFontFace", succeeded: true);
+            OptimumGuiMetrics.RecordMaterialization("Recorder.ShowText.Unsupported:text-antialias-Subpixel", succeeded: true);
 
             Assert.False(OptimumConfig.GuiGpuRecordingEligible);
             Assert.False(OptimumConfig.GuiGpuDeviceMatches("vendor", "renderer", "4.6", 4, 6, 2, 0));
@@ -111,6 +111,31 @@ public class OptimumGuiMetricsTests
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().GpuRecordingSurfaceStartCount);
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().TextExtentMeasurementCount);
             Assert.Equal(0, OptimumGuiMetrics.Snapshot().FontExtentMeasurementCount);
+        }
+        finally
+        {
+            OptimumGuiMetrics.Reset();
+            OptimumGuiMetrics.Enabled = wasEnabled;
+        }
+    }
+
+    [Fact]
+    public void SuccessfulSkiaCpuRetryIsCountedSeparatelyFromCandidateFailure()
+    {
+        bool wasEnabled = OptimumGuiMetrics.Enabled;
+        try
+        {
+            OptimumGuiMetrics.Enabled = true;
+            OptimumGuiMetrics.Reset();
+
+            OptimumGuiMetrics.RecordGpuCandidateTexture(succeeded: true,
+                fallbackReason: "skia-cpu-fallback:ganesh=InvalidOperationException");
+
+            OptimumGuiMetricsSnapshot snapshot = OptimumGuiMetrics.Snapshot();
+            Assert.Equal(1, snapshot.GpuCandidateAttemptCount);
+            Assert.Equal(1, snapshot.GpuCandidateSuccessCount);
+            Assert.Equal(0, snapshot.GpuCandidateFallbackCount);
+            Assert.Equal(1, OptimumGuiMetrics.GetGpuCandidateFallbackDiagnostics()["skia-cpu-fallback"]);
         }
         finally
         {

@@ -22,6 +22,7 @@ internal static class GuiCertification
     internal const string Policy = "exact-local-gui-v1";
     internal const string CertificateFile = "gui-certification.json";
     internal const string EvidenceFile = "gui-certification-evidence.json";
+    internal const string ApprovedGpuDecision = "skia-no-cairo-fallback";
     private const int MaximumJsonBytes = 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -54,20 +55,21 @@ internal static class GuiCertification
             RejectDuplicateProperties(root);
             if (root.GetProperty("schemaVersion").GetInt32() != 1 ||
                 root.GetProperty("scenarioId").GetString() != "optimum-gui-inventory-capture-v1" ||
-                root.GetProperty("gpuDecision").GetString() != "skia-only" ||
+                root.GetProperty("gpuDecision").GetString() != ApprovedGpuDecision ||
                 root.GetProperty("gpuDecisionReasons").GetArrayLength() != 0 ||
-                !root.GetProperty("materializationObserverStartupSmoke").GetProperty("passed").GetBoolean())
+                !root.GetProperty("materializationObserverRegistration").GetProperty("passed").GetBoolean())
                 return new(false, "evidence-not-approved");
             if (root.GetProperty("qualificationMode").GetString() != "pharos-current-context")
                 return new(false, "evidence-qualification-mode-unsupported");
             if (!HashEquals(certificate.RuntimeFingerprint,
                     Convert.FromHexString(root.GetProperty("runtimeProfileFingerprint").GetString() ?? "")))
                 return new(false, "evidence-profile-fingerprint-mismatch");
-            var startup = root.GetProperty("materializationObserverStartupSmoke");
-            if (startup.GetProperty("attemptCount").GetInt64() != 1 ||
-                startup.GetProperty("successCount").GetInt64() != 1 ||
-                startup.GetProperty("failureCount").GetInt64() != 0 ||
-                startup.GetProperty("causes").GetProperty("Context.MoveTo").GetInt64() != 1 ||
+            var observer = root.GetProperty("materializationObserverRegistration");
+            if (!observer.GetProperty("observerRegistered").GetBoolean() ||
+                observer.GetProperty("attemptCount").GetInt64() != 0 ||
+                observer.GetProperty("successCount").GetInt64() != 0 ||
+                observer.GetProperty("failureCount").GetInt64() != 0 ||
+                observer.GetProperty("causes").EnumerateObject().Any() ||
                 !IsCommit(root.GetProperty("optimumCommit").GetString()) ||
                 !IsCommit(root.GetProperty("pharosCommit").GetString()))
                 return new(false, "evidence-observer-or-commit-incomplete");
@@ -95,7 +97,7 @@ internal static class GuiCertification
             var expectedScales = new HashSet<decimal> { 1m, 1.5m, 2m };
             if (scales.GetArrayLength() != 3 || scales.EnumerateArray().Any(scale =>
                     !expectedScales.Remove(scale.GetProperty("scale").GetDecimal()) ||
-                    scale.GetProperty("gpuDecision").GetString() != "skia-only" ||
+                    scale.GetProperty("gpuDecision").GetString() != ApprovedGpuDecision ||
                     scale.GetProperty("gpuDecisionReasons").GetArrayLength() != 0 || !CleanWindow(scale, true)))
                 return new(false, "evidence-scales-incomplete");
             var nonSubset = root.GetProperty("gpuNonSubsetFixtureDiagnostics");
@@ -104,7 +106,7 @@ internal static class GuiCertification
                 !root.GetProperty("gpuPrimitiveFixtureParityWithinOneChannelValue").GetBoolean() ||
                 Enumerable.Range(1, 5).Any(index => nonSubset.GetProperty("fixture-" + index).GetString() != "GpuRendered") ||
                 svg.GetArrayLength() != 3 || svg.EnumerateArray().Any(row =>
-                    row.GetProperty("rasterizer").GetString() != "Skia GPU" ||
+                    row.GetProperty("rasterizerKind").GetString() != "skia-gpu-candidate" ||
                     !row.GetProperty("parityWithinOneChannelValue").GetBoolean() ||
                     row.GetProperty("materializationAttemptsAfterLoad").GetInt64() != row.GetProperty("materializationAttemptsBefore").GetInt64() ||
                     row.GetProperty("gpuCandidateAttemptsDuringLoad").GetInt64() <= 0))
@@ -261,9 +263,7 @@ internal static class GuiCertification
             }
             else if (name == "SkiaSharp native")
             {
-                string loadedPath = Path.GetFullPath(path);
-                StringComparer pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-                if (!nativeCandidates.Any(candidate => pathComparer.Equals(Path.GetFullPath(candidate), loadedPath) &&
+                if (!nativeCandidates.Any(candidate =>
                     HashEquals(artifact.GetProperty("Sha256").GetString(), Convert.FromHexString(HashFile(candidate))))) return false;
                 matchedRuntimeArtifacts.Add(name);
             }
@@ -278,13 +278,19 @@ internal static class GuiCertification
         long successes = window.GetProperty("gpuCandidateSuccesses").GetInt64();
         long fallbacks = window.GetProperty("gpuCandidateFallbacks").GetInt64();
         string suffix = scale ? "Count" : "s";
-        if (window.GetProperty("materializationCauses").EnumerateObject().Any()) return false;
+        var causes = window.GetProperty("materializationCauses");
+        var fallbackReasons = window.GetProperty("candidateFallbackReasons");
         var rendering = window.GetProperty("renderingDiagnostics");
         long materializationAttempts = window.GetProperty("materializationAttempt" + suffix).GetInt64();
         long materializationSuccesses = window.GetProperty("materializationSuccess" + (scale ? "Count" : "es")).GetInt64();
         long materializationFailures = window.GetProperty("materializationFailure" + suffix).GetInt64();
-        return attempts > 0 && successes == attempts && fallbacks == 0 &&
+        // A certificate is a zero-Cairo-runtime-fallback approval. Even the
+        // previously tolerated Subpixel/font materializations invalidate it.
+        // Unknown or malformed counters fail closed instead of being treated
+        // as an approved compatibility route.
+        return causes.EnumerateObject().Count() == 0 && fallbackReasons.EnumerateObject().Count() == 0 &&
             materializationAttempts == 0 && materializationSuccesses == 0 && materializationFailures == 0 &&
+            attempts > 0 && fallbacks == 0 && successes == attempts &&
             rendering.GetProperty("MaterializationAttemptCount").GetInt64() == materializationAttempts &&
             rendering.GetProperty("MaterializationSuccessCount").GetInt64() == materializationSuccesses &&
             rendering.GetProperty("MaterializationFailureCount").GetInt64() == materializationFailures;

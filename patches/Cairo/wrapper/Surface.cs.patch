@@ -1,8 +1,10 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..6a36661 100644
+index 6f7730e..ffe5e40 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -34,6 +34,8 @@
+@@ -32,10 +32,12 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
  
  using System;
@@ -11,7 +13,11 @@ index 6f7730e..6a36661 100644
  
  #nullable disable
  
-@@ -45,6 +47,13 @@ namespace Cairo
+ namespace Cairo
+ {
+@@ -43,10 +45,17 @@ namespace Cairo
+     public class Surface : IDisposable
+ 	{
  
  		IntPtr handle = IntPtr.Zero;
  		bool owner;
@@ -25,7 +31,11 @@ index 6f7730e..6a36661 100644
  
  		protected Surface (IntPtr handle, bool owner)
  		{
-@@ -59,6 +68,209 @@ namespace Cairo
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+@@ -57,10 +66,213 @@ namespace Cairo
+ 				NativeMethods.cairo_surface_reference (handle);
+ 			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
  
@@ -126,9 +136,9 @@ index 6f7730e..6a36661 100644
 +		internal bool RecordImage(SKBitmap bitmap, int x, int y, int width, int height) => TryRecord(rec => rec.RecordImage(bitmap, x, y, width, height));
 +		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false, RecordedPreparationCache.Picture pictureOwner = null) => TryRecord(rec => rec.RecordPicture(picture, x, y, width, height, tint, replay, textureColorOrder, pictureOwner));
 +		internal bool RecordPicture(SKPicture picture, int x, int y, Action<Context> replay) => RecordPicture(picture, x, y, 0, 0, null, replay);
-+		internal bool RecordText(byte[] text, bool pathOnly) => TryRecord(rec => rec.RecordText(text, pathOnly));
++		internal bool RecordText(Context ownerContext, byte[] text, bool pathOnly) => TryRecord(rec => rec.RecordText(ownerContext, text, pathOnly));
 +
-+		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly) => TryRecord(rec => rec.RecordGlyphs(glyphs, pathOnly));
++		internal bool RecordGlyphs(Context ownerContext, Glyph[] glyphs, bool pathOnly) => TryRecord(rec => rec.RecordGlyphs(ownerContext, glyphs, pathOnly));
 +
 +		bool TryRecord (Func<SurfaceRecorder, bool> record)
 +		{
@@ -235,7 +245,11 @@ index 6f7730e..6a36661 100644
  		public static Surface Lookup (IntPtr surface, bool owned)
  		{
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
-@@ -96,6 +308,7 @@ namespace Cairo
+ 			switch (st) {
+ 			case SurfaceType.Image:
+@@ -94,10 +306,11 @@ namespace Cairo
+ 
+ 
  		public Cairo.Surface CreateSimilar (
  			Cairo.Content content, int width, int height)
  		{
@@ -243,7 +257,11 @@ index 6f7730e..6a36661 100644
  			IntPtr p = NativeMethods.cairo_surface_create_similar (
  				this.Handle, content, width, height);
  
-@@ -110,6 +323,7 @@ namespace Cairo
+ 			return new Cairo.Surface (p, true);
+ 		}
+@@ -108,10 +321,11 @@ namespace Cairo
+ 		}
+ 
  		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
  		public void Show (Context gr, double x, double y)
  		{
@@ -251,7 +269,11 @@ index 6f7730e..6a36661 100644
  			NativeMethods.cairo_set_source_surface (gr.Handle, handle, x, y);
  			NativeMethods.cairo_paint (gr.Handle);
  		}
-@@ -125,14 +339,29 @@ namespace Cairo
+ 
+ 		public void Dispose ()
+@@ -123,36 +337,56 @@ namespace Cairo
+ 			}
+ 		}
  
  		protected virtual void Dispose (bool disposing)
  		{
@@ -281,7 +303,10 @@ index 6f7730e..6a36661 100644
  		}
  
  		protected void CheckDisposed ()
-@@ -143,14 +372,19 @@ namespace Cairo
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
  
  		public Status Finish ()
  		{
@@ -304,7 +329,11 @@ index 6f7730e..6a36661 100644
  			NativeMethods.cairo_surface_flush (handle);
  		}
  
-@@ -168,13 +402,20 @@ namespace Cairo
+ 		public void MarkDirty ()
+ 		{
+@@ -166,62 +400,76 @@ namespace Cairo
+ 			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
+ 		}
  
  		public IntPtr Handle {
  			get {
@@ -326,7 +355,7 @@ index 6f7730e..6a36661 100644
  				double x, y;
  				NativeMethods.cairo_surface_get_device_offset (handle, out x, out y);
  				return new PointD (x, y);
-@@ -182,6 +423,7 @@ namespace Cairo
+ 			}
  
  			set {
  				CheckDisposed ();
@@ -334,7 +363,7 @@ index 6f7730e..6a36661 100644
  				NativeMethods.cairo_surface_set_device_offset (handle, value.X, value.Y);
  			}
  		}
-@@ -189,18 +431,21 @@ namespace Cairo
+ 
  		public void SetFallbackResolution (double x, double y)
  		{
  			CheckDisposed ();
@@ -356,7 +385,7 @@ index 6f7730e..6a36661 100644
  				return NativeMethods.cairo_surface_status (handle);
  			}
  		}
-@@ -208,6 +453,7 @@ namespace Cairo
+ 
  		public Content Content {
  			get {
  				CheckDisposed ();
@@ -364,7 +393,7 @@ index 6f7730e..6a36661 100644
  				return NativeMethods.cairo_surface_get_content (handle);
  			}
  		}
-@@ -215,12 +461,14 @@ namespace Cairo
+ 
  		public SurfaceType SurfaceType {
  			get {
  				CheckDisposed ();
@@ -379,3 +408,4 @@ index 6f7730e..6a36661 100644
  				return NativeMethods.cairo_surface_get_reference_count (handle); }
  		}
  	}
+ }

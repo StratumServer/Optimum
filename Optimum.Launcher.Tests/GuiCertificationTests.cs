@@ -64,7 +64,7 @@ public sealed class GuiCertificationTests : IDisposable
     {
         WriteCertificate("""
             {"schemaVersion":1,"scenarioId":"optimum-gui-inventory-capture-v1",
-             "gpuDecision":"skia-only","gpuDecisionReasons":[],
+             "gpuDecision":"skia-with-subpixel-cairo-fallback","gpuDecisionReasons":[],
              "materializationObserverStartupSmoke":{"passed":true}}
             """);
         Assert.False(Validate().Passed);
@@ -106,6 +106,41 @@ public sealed class GuiCertificationTests : IDisposable
         Assert.Equal("local-device-identity-mismatch", Validate(identity with { ProfileMask = 1 }).Reason);
         Assert.Equal("local-device-identity-mismatch", Validate(identity with { ContextFlags = 1 }).Reason);
         Assert.Equal(new GuiCertificationDecision(false, "local-device-preflight-unavailable"), Validate(null));
+    }
+
+    [Fact]
+    public void CertificateRejectsPreviouslyAllowedSubpixelCairoFallbacks()
+    {
+        var evidence = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        void AddFallback(System.Text.Json.Nodes.JsonNode window, bool scale)
+        {
+            window["gpuCandidateAttempts"] = 2;
+            window["gpuCandidateSuccesses"] = 1;
+            window["gpuCandidateFallbacks"] = 1;
+            string attempt = scale ? "materializationAttemptCount" : "materializationAttempts";
+            string success = scale ? "materializationSuccessCount" : "materializationSuccesses";
+            string failure = scale ? "materializationFailureCount" : "materializationFailures";
+            window[attempt] = 1;
+            window[success] = 1;
+            window[failure] = 0;
+            window["materializationCauses"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["Recorder.ShowText.Unsupported:text-antialias-Subpixel"] = 1
+            };
+            window["candidateFallbackReasons"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["surface-not-recording:NativeMaterialized:first-trigger=Recorder.ShowText.Unsupported:text-antialias-Subpixel"] = 1
+            };
+            window["renderingDiagnostics"]!["MaterializationAttemptCount"] = 1;
+            window["renderingDiagnostics"]!["MaterializationSuccessCount"] = 1;
+            window["renderingDiagnostics"]!["MaterializationFailureCount"] = 0;
+        }
+
+        AddFallback(evidence["initialGuiComposition"]!, false);
+        AddFallback(evidence["recompositionBenchmark"]!, false);
+        foreach (var scale in evidence["guiScaleFixtures"]!.AsArray()) AddFallback(scale!, true);
+        WriteCertificate(evidence.ToJsonString());
+        Assert.False(Validate(new GuiDeviceIdentity("synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0)).Passed);
     }
 
     [Fact]
@@ -160,13 +195,15 @@ public sealed class GuiCertificationTests : IDisposable
             evidenceComplete = true, measuredFromBeforeFirstClientFramesThroughInventoryOpenAndSettle = true,
             gpuCandidateAttempts = 2, gpuCandidateSuccesses = 2, gpuCandidateFallbacks = 0,
             materializationAttempts = 0, materializationSuccesses = 0, materializationFailures = 0,
+            candidateFallbackReasons = new System.Collections.Generic.Dictionary<string, long>(),
             materializationCauses = new System.Collections.Generic.Dictionary<string, long>(), renderingDiagnostics = rendering
         };
         var scales = new[] { 1m, 1.5m, 2m }.Select(scale => new
         {
-            scale, gpuDecision = "skia-only", gpuDecisionReasons = Array.Empty<string>(),
+            scale, gpuDecision = "skia-no-cairo-fallback", gpuDecisionReasons = Array.Empty<string>(),
             gpuCandidateAttempts = 2, gpuCandidateSuccesses = 2, gpuCandidateFallbacks = 0,
             materializationAttemptCount = 0, materializationSuccessCount = 0, materializationFailureCount = 0,
+            candidateFallbackReasons = new System.Collections.Generic.Dictionary<string, long>(),
             materializationCauses = new System.Collections.Generic.Dictionary<string, long>(), renderingDiagnostics = rendering
         }).ToArray();
         var artifacts = new[]
@@ -180,13 +217,13 @@ public sealed class GuiCertificationTests : IDisposable
         };
         return JsonSerializer.Serialize(new
         {
-            schemaVersion = 1, scenarioId = "optimum-gui-inventory-capture-v1", gpuDecision = "skia-only",
+            schemaVersion = 1, scenarioId = "optimum-gui-inventory-capture-v1", gpuDecision = "skia-no-cairo-fallback",
             qualificationMode = "pharos-current-context",
             runtimeProfileFingerprint = Fingerprint(),
             optimumCommit = new string('a', 40), pharosCommit = new string('b', 40),
             gpuDecisionReasons = Array.Empty<string>(),
-            materializationObserverStartupSmoke = new { passed = true, attemptCount = 1, successCount = 1, failureCount = 0,
-                causes = new System.Collections.Generic.Dictionary<string, long> { ["Context.MoveTo"] = 1 } },
+            materializationObserverRegistration = new { passed = true, observerRegistered = true, attemptCount = 0, successCount = 0, failureCount = 0,
+                causes = new System.Collections.Generic.Dictionary<string, long>() },
             glStateSentinel = new { candidateAndProbeRestoredCapturedState = true, samplerBindingsSupported = true },
             runtimeProvenance = new { StagePath = Game, Complete = true, SamplerBindingsSupported = true, GlVendor = "synthetic vendor", GlRenderer = "synthetic renderer",
                 GlVersion = "4.6 synthetic", DriverVersion = "diagnostic-only", GlContextProfileMask = 2, GlContextFlags = 0, Artifacts = artifacts },
@@ -194,7 +231,7 @@ public sealed class GuiCertificationTests : IDisposable
             gpuPrimitiveFixture = "GpuRendered",
             gpuPrimitiveFixtureParityWithinOneChannelValue = true,
             gpuNonSubsetFixtureDiagnostics = Enumerable.Range(1, 5).ToDictionary(index => "fixture-" + index, _ => "GpuRendered"),
-            gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizer = "Skia GPU", parityWithinOneChannelValue = true,
+            gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizerKind = "skia-gpu-candidate", rasterizer = "SvgLoader.rasterizeSvg (Skia-rasterized via GPU candidate; no materialization)", parityWithinOneChannelValue = true,
                 materializationAttemptsAfterLoad = 0, materializationAttemptsBefore = 0, gpuCandidateAttemptsDuringLoad = 1 }).ToArray()
         });
     }
@@ -220,6 +257,19 @@ public sealed class GuiCertificationTests : IDisposable
         node["runtimeProvenance"]!["Artifacts"]![4]!["Path"] = external;
         WriteCertificate(node.ToJsonString());
         Assert.False(Validate().Passed);
+    }
+
+    [Fact]
+    public void NativeLibraryCopyInsideStageMustMatchThePackagedNativeBytes()
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        string packaged = node["runtimeProvenance"]!["Artifacts"]![4]!["Path"]!.GetValue<string>();
+        string loadedCopy = Path.Combine(Game, "evidence-artifacts", "libSkiaSharp.so");
+        Directory.CreateDirectory(Path.GetDirectoryName(loadedCopy)!);
+        File.Copy(packaged, loadedCopy);
+        node["runtimeProvenance"]!["Artifacts"]![4]!["Path"] = loadedCopy;
+        WriteCertificate(node.ToJsonString());
+        Assert.True(Validate(new GuiDeviceIdentity("synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0)).Passed);
     }
 
     private GuiCertificationDecision Validate(GuiDeviceIdentity? identity = null) =>
