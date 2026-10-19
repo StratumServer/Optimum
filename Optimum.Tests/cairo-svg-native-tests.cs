@@ -20,7 +20,6 @@ public sealed class CairoSvgNativeTests
 	}
 
 	[Theory]
-	[InlineData("<rect x='1' y='1' width='6' height='2'/>")]
 	[InlineData("<circle cx='4' cy='2' r='1.5'/>")]
 	[InlineData("<rect x='.3' y='.7' width='6' height='2'/>")]
 	[InlineData("<rect width='8' height='4' stroke='red' stroke-width='1'/>")]
@@ -35,9 +34,16 @@ public sealed class CairoSvgNativeTests
 	public void NativeViewportScaleDeterminesPixelAlignment()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4'/><rect x='3' width='5' height='4'/></svg>";
-		using var aligned = RecordedSvgGeometry.Parse(svg, 16, 8, 16, 8);
+		AssertRecordedSvgMatchesNative(svg, 16, 8, 16, 8, 2, 0, 0);
 		Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg, 12, 6, 12, 6));
-		Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg, 16, 12, 16, 12));
+		AssertRecordedSvgMatchesNative(svg, 16, 12, 16, 12, 2, 0, 2);
+	}
+
+	[Fact]
+	public void AlignedPartialSvgCoverageMatchesNativeRasterization()
+	{
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='1' y='1' width='6' height='2' fill='#3585cd'/></svg>";
+		AssertRecordedSvgMatchesNative(svg, 8, 4, 8, 4, 1, 0, 0);
 	}
 
 	[Theory]
@@ -110,15 +116,29 @@ public sealed class CairoSvgNativeTests
 		}
 	}
 
-	static byte[] Native(string svg)
+	static void AssertRecordedSvgMatchesNative(string svg, int textureWidth, int textureHeight, int width, int height, float scale, float offsetX, float offsetY)
+	{
+		using var picture = RecordedSvgGeometry.Parse(svg, textureWidth, textureHeight, width, height);
+		using var bitmap = new SKBitmap(textureWidth, textureHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas(bitmap)) { canvas.Clear(SKColors.Transparent); canvas.DrawPicture(picture); }
+		var actual = new byte[checked(textureWidth * textureHeight * 4)]; Marshal.Copy(bitmap.GetPixels(), actual, 0, actual.Length);
+		var expected = Native(svg, textureWidth, textureHeight, scale, offsetX, offsetY);
+		for (int i = 0; i < actual.Length; i += 4) {
+			Assert.InRange(Math.Abs(actual[i + 3] - expected[i + 3]), 0, 1);
+			if (expected[i + 3] == 0) continue; // NanoSVG may retain hidden RGB beneath transparent pixels.
+			for (int channel = 0; channel < 3; channel++) Assert.InRange(Math.Abs(actual[i + channel] - expected[i + channel]), 0, 1);
+		}
+	}
+
+	static byte[] Native(string svg, int width = 8, int height = 4, float scale = 1, float offsetX = 0, float offsetY = 0)
 	{
 		IntPtr image = SvgNativeMethods.nsvgParse(svg, "px", 96);
 		IntPtr rasterizer = SvgNativeMethods.nsvgCreateRasterizer();
-		IntPtr buffer = Marshal.AllocHGlobal(8 * 4 * 4);
+		IntPtr buffer = Marshal.AllocHGlobal(checked(width * height * 4));
 		try {
 			Assert.NotEqual(IntPtr.Zero, image); Assert.NotEqual(IntPtr.Zero, rasterizer);
-			SvgNativeMethods.nsvgRasterize(rasterizer, image, 0, 0, 1, buffer, 8, 4, 8 * 4);
-			var result = new byte[8 * 4 * 4]; Marshal.Copy(buffer, result, 0, result.Length); return result;
+			SvgNativeMethods.nsvgRasterize(rasterizer, image, offsetX, offsetY, scale, buffer, width, height, width * 4);
+			var result = new byte[checked(width * height * 4)]; Marshal.Copy(buffer, result, 0, result.Length); return result;
 		} finally { Marshal.FreeHGlobal(buffer); SvgNativeMethods.nsvgDeleteRasterizer(rasterizer); SvgNativeMethods.nsvgDelete(image); }
 	}
 }

@@ -861,7 +861,7 @@ index 03f9c76..888b9f7 100644
  				return options;
  			}
  			set {
-+				if (recordingSurface != null && value != null && value.Antialias == Antialias.Subpixel) recordingSurface.MaterializeRecorder(handle, "ShowText.Unsupported:text-font-parity", "Recorder");
++				if (recordingSurface != null && value != null && value.Antialias == Antialias.Subpixel) recordingSurface.MaterializeRecorder(handle, "FontOptions.Unsupported:subpixel-text-parity", "Recorder");
 +				if (recordingSurface != null) { var copy = value.Copy(); if (recordingSurface != null && RecordState(c => c.FontOptions = copy, copy)) return; copy.Dispose(); }
  				CheckDisposed ();
  				NativeMethods.cairo_set_font_options (handle, value.Handle);

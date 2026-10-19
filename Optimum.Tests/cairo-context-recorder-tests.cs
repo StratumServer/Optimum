@@ -451,6 +451,7 @@ public sealed class CairoContextRecorderTests
 			context.SetFontSize (15);
 			using var options = new FontOptions { Antialias = Antialias.Subpixel };
 			context.FontOptions = options;
+			Assert.Equal ("Recorder.FontOptions.Unsupported:subpixel-text-parity", actual.FirstMaterializationTrigger);
 			context.MoveTo (3.375, 23.625);
 			context.ShowText ("Subpixel: ffi 0123");
 		}
@@ -471,7 +472,7 @@ public sealed class CairoContextRecorderTests
 		}
 
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Equal ("Recorder.ShowText.Unsupported:text-font-parity", actual.FirstMaterializationTrigger);
+		Assert.Equal ("Recorder.FontOptions.Unsupported:subpixel-text-parity", actual.FirstMaterializationTrigger);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
