@@ -11,9 +11,13 @@ public sealed class CairoSolidColorTests
 	[Theory]
 	[InlineData(false, Extend.None)]
 	[InlineData(false, Extend.Repeat)]
+	[InlineData(false, Extend.Pad)]
+	[InlineData(false, Extend.Reflect)]
 	[InlineData(true, Extend.None)]
 	[InlineData(true, Extend.Repeat)]
-	public void DiscontinuousGradientsFallBackBeforeMutationAndPreserveNativeCoverage(bool radial, Extend extend)
+	[InlineData(true, Extend.Pad)]
+	[InlineData(true, Extend.Reflect)]
+	public void GradientsRemainRecordedAfterMutationAndPreserveNativeReplay(bool radial, Extend extend)
 	{
 		using var native = new ImageSurface(Format.Argb32, 48, 32);
 		_ = native.Handle;
@@ -35,8 +39,7 @@ public sealed class CairoSolidColorTests
 			context.Restore(); context.SetSourceRGBA(.3, .7, .1, 1);
 			context.Rectangle(0, 0, 1, 1); context.Fill();
 		}
-		Assert.Equal(SurfaceRecordingState.NativeMaterialized, recorded.RecordingState);
-		Assert.Contains("Gradient extension:", recorded.MaterializeCause);
+		Assert.Equal(SurfaceRecordingState.Recording, recorded.RecordingState);
 		Assert.Equal(native.Data, recorded.Data);
 	}
 

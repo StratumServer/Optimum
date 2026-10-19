@@ -62,7 +62,7 @@ namespace Cairo
 				}
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceCapture))
 				using (Pattern source = context.GetSource()) {
-					result.SetSource(source, alpha, sourceMatrix);
+					result.SetSource(source, alpha, sourceMatrix, context);
 					if (sourceSnapshot == null) result.FreezeSource(source);
 					else {
 						result.nativeSource = new SolidPattern(0, 0, 0, 0);
@@ -146,7 +146,7 @@ namespace Cairo
 			} finally { Marshal.FreeHGlobal(buffer); }
 		}
 
-		void SetSource(Pattern pattern, double alpha, Matrix sourceMatrix)
+		void SetSource(Pattern pattern, double alpha, Matrix sourceMatrix, Context context)
 		{
 			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceShader);
 			IntPtr handle = pattern.NativeHandleForRecorder;
@@ -159,28 +159,22 @@ namespace Cairo
 				Paint.ColorF = SolidColor(r, g, b, a * Math.Max(0, Math.Min(1, alpha)));
 				return;
 			}
+			SKMatrix matrix = ToSkia(pattern.Matrix);
+			if (!matrix.TryInvert(out SKMatrix inverse)) throw new InvalidOperationException("Singular source pattern matrix.");
+			if (sourceMatrix is not null) {
+				if (!Matrix.TryInvert(out SKMatrix drawInverse)) throw new NotSupportedException("Singular drawing transform.");
+				inverse = SKMatrix.Concat(SKMatrix.Concat(drawInverse, ToSkia(sourceMatrix)), inverse);
+			}
 			SKShaderTileMode tile = Tile(pattern.Extend);
 			if (type == PatternType.Linear || type == PatternType.Radial) {
-				// Cairo/Pixman and Skia classify discontinuous extension boundaries
-				// differently; radial Decal also changes native coverage.
-				// Preserve native coverage until those cases have an equivalent shader.
-				if (pattern.Extend is Extend.None or Extend.Repeat)
-					throw new NotSupportedException("Gradient extension: " + pattern.Extend);
-				NativeMethods.cairo_pattern_get_color_stop_count(handle, out int count);
-				if (count == 0) { Paint.Color = SKColors.Transparent; return; }
-				var colors = new SKColor[Math.Max(2, count)]; var positions = new float[colors.Length];
-				for (int i = 0; i < count; i++) {
-					NativeMethods.cairo_pattern_get_color_stop_rgba(handle, i, out double offset, out double r, out double g, out double b, out double a);
-					colors[i] = Color(r, g, b, a); positions[i] = (float)offset;
-				}
-				if (count == 1) { colors[1] = colors[0]; positions[0] = 0; positions[1] = 1; }
-				if (type == PatternType.Linear) {
-					NativeMethods.cairo_pattern_get_linear_points(handle, out double x0, out double y0, out double x1, out double y1);
-					shader = SKShader.CreateLinearGradient(new SKPoint((float)x0, (float)y0), new SKPoint((float)x1, (float)y1), colors, positions, tile);
-				} else {
-					NativeMethods.cairo_pattern_get_radial_circles(handle, out double x0, out double y0, out double r0, out double x1, out double y1, out double r1);
-					shader = SKShader.CreateTwoPointConicalGradient(new SKPoint((float)x0, (float)y0), (float)r0, new SKPoint((float)x1, (float)y1), (float)r1, colors, positions, tile);
-				}
+				var bindingInverse = (Matrix)(sourceMatrix ?? context.Matrix).Clone();
+				bindingInverse.Invert();
+				var patternFromDevice = Cairo.Matrix.Multiply(bindingInverse, pattern.Matrix);
+				IntPtr target = NativeMethods.cairo_get_target(context.NativeHandleForRecorder);
+				shader = RecordedCairoGradient.Create(handle, type, pattern.Extend, SKMatrix.Identity, patternFromDevice,
+					NativeMethods.cairo_image_surface_get_width(target), NativeMethods.cairo_image_surface_get_height(target), out image);
+				// Gradient parameters are evaluated in device coordinates, preserving double source binding.
+				if (!Matrix.TryInvert(out inverse)) throw new NotSupportedException("Singular drawing transform.");
 			} else if (type == PatternType.Surface && sourceSnapshot != null) {
 				sourceTile = tile; sourceFilter = pattern is SurfacePattern recorded && recorded.Filter == Filter.Nearest ? SKFilterMode.Nearest : SKFilterMode.Linear;
 			} else if (type == PatternType.Surface) {
@@ -198,12 +192,7 @@ namespace Cairo
 				}
 				shader = image.ToShader(tile, tile, new SKSamplingOptions(pattern is SurfacePattern sp && sp.Filter == Filter.Nearest ? SKFilterMode.Nearest : SKFilterMode.Linear));
 			} else throw new NotSupportedException("Recorded source pattern: " + type);
-			SKMatrix matrix = ToSkia(pattern.Matrix);
-			if (!matrix.TryInvert(out SKMatrix inverse)) throw new InvalidOperationException("Singular source pattern matrix.");
-			if (sourceMatrix is not null) {
-				if (!Matrix.TryInvert(out SKMatrix drawInverse)) throw new NotSupportedException("Singular drawing transform.");
-				inverse = SKMatrix.Concat(SKMatrix.Concat(drawInverse, ToSkia(sourceMatrix)), inverse);
-			}
+
 			if (sourceSnapshot != null) { sourceTransform = inverse; Paint.Color = Color(1, 1, 1, alpha); return; }
 			SKShader transformed = shader.WithLocalMatrix(inverse);
 			if (!ReferenceEquals(shader, transformed)) shader.Dispose();
