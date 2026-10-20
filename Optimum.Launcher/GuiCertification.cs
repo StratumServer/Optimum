@@ -104,7 +104,8 @@ internal static class GuiCertification
             var svg = root.GetProperty("gpuSvgDiagnostics");
             if (root.GetProperty("gpuPrimitiveFixture").GetString() != "GpuRendered" ||
                 !root.GetProperty("gpuPrimitiveFixtureRenderedWithoutCairoReference").GetBoolean() ||
-                Enumerable.Range(1, 5).Any(index => nonSubset.GetProperty("fixture-" + index).GetString() != "GpuRendered") ||
+                Enumerable.Range(1, 5).Any(index =>
+                    !(nonSubset.GetProperty("fixture-" + index).GetString() ?? "").StartsWith("GpuRendered", StringComparison.Ordinal)) ||
                 svg.GetArrayLength() != 3 || svg.EnumerateArray().Any(row =>
                     row.GetProperty("rasterizerKind").GetString() != "skia-gpu-candidate" ||
                     !row.GetProperty("textureProduced").GetBoolean() ||

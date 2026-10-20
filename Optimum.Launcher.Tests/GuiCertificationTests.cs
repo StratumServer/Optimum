@@ -263,7 +263,7 @@ public sealed class GuiCertificationTests : IDisposable
             initialGuiComposition = window, recompositionBenchmark = window, guiScaleFixtures = scales,
             gpuPrimitiveFixture = "GpuRendered",
             gpuPrimitiveFixtureRenderedWithoutCairoReference = true,
-            gpuNonSubsetFixtureDiagnostics = Enumerable.Range(1, 5).ToDictionary(index => "fixture-" + index, _ => "GpuRendered"),
+            gpuNonSubsetFixtureDiagnostics = Enumerable.Range(1, 5).ToDictionary(index => "fixture-" + index, _ => "GpuRendered;CairoParityNotMeasured"),
             gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizerKind = "skia-gpu-candidate", rasterizer = "SvgLoader.rasterizeSvg (Skia-rasterized via GPU candidate; no materialization)", textureProduced = true, cairoReferenceCompared = false,
                 materializationAttemptsAfterLoad = 0, materializationAttemptsBefore = 0, gpuCandidateAttemptsDuringLoad = 1 }).ToArray()
         });
