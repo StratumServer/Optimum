@@ -156,6 +156,30 @@ public sealed class RetypeFieldsTests
     }
 
     [Fact]
+    public void FieldInitializerRetargetKeepsAnAlreadyMatchingFieldCtor()
+    {
+        using var resolver = new DefaultAssemblyResolver();
+        AddRuntimeSearchDirectories(resolver);
+        using AssemblyDefinition vanilla = CreateAssembly("VintagestoryLib", resolver);
+        using AssemblyDefinition compiled = CreateAssembly("VintagestoryLib", resolver);
+
+        TypeDefinition vanillaType = AddFixtureType(vanilla.MainModule);
+        FieldDefinition vanillaGate = AddLockGateField(vanillaType, vanilla.MainModule);
+        AddCtorInitializingGate(vanillaType, vanilla.MainModule, vanillaGate, typeof(System.Threading.Lock));
+        TypeDefinition compiledType = AddFixtureType(compiled.MainModule);
+        AddLockGateField(compiledType, compiled.MainModule);
+
+        IReadOnlyList<FieldDefinition> retyped = MemberInjector.RetypeFields(
+            vanilla, compiled, "Fixture.Gate", new List<string> { "gate" });
+
+        Assert.Empty(ILPatcher.RetargetFieldInitializers(vanilla, retyped));
+        MethodDefinition ctor = vanillaType.Methods.Single(m => m.Name == ".ctor");
+        MethodReference ctorRef = Assert.IsType<MethodReference>(
+            ctor.Body.Instructions.Single(i => i.OpCode == OpCodes.Newobj).Operand);
+        Assert.Equal("System.Threading.Lock", ctorRef.DeclaringType.FullName);
+    }
+
+    [Fact]
     public void FieldInitializerRetargetThrowsOnAnUnexpectedPredecessor()
     {
         using var resolver = new DefaultAssemblyResolver();
@@ -295,13 +319,13 @@ public sealed class RetypeFieldsTests
     private static FieldDefinition GetGateField(TypeDefinition type) =>
         type.Fields.Single(f => f.Name == "gate");
 
-    private static void AddCtorInitializingGate(TypeDefinition type, ModuleDefinition module, FieldDefinition gate)
+    private static void AddCtorInitializingGate(TypeDefinition type, ModuleDefinition module, FieldDefinition gate, Type? initializerType = null)
     {
         MethodDefinition ctor = new(".ctor", MethodAttributes.Public | MethodAttributes.SpecialName
             | MethodAttributes.RTSpecialName, module.TypeSystem.Void);
         type.Methods.Add(ctor);
         ILProcessor il = ctor.Body.GetILProcessor();
-        MethodReference objectCtor = module.ImportReference(typeof(object).GetConstructor(Type.EmptyTypes));
+        MethodReference objectCtor = module.ImportReference((initializerType ?? typeof(object)).GetConstructor(Type.EmptyTypes));
         il.Append(Instruction.Create(OpCodes.Ldarg_0));
         il.Append(Instruction.Create(OpCodes.Newobj, objectCtor));
         il.Append(Instruction.Create(OpCodes.Stfld, gate));

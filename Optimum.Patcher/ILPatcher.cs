@@ -333,6 +333,17 @@ public static class ILPatcher
                     if (retypedField == null) continue;
 
                     var predecessor = instructions[i - 1];
+                    if (predecessor.OpCode == OpCodes.Newobj &&
+                        predecessor.Operand is MethodReference alreadyCompatibleCtor &&
+                        alreadyCompatibleCtor.Name == ".ctor" &&
+                        alreadyCompatibleCtor.DeclaringType.FullName == retypedField.FieldType.FullName)
+                    {
+                        // Some supported game builds already declare this lock
+                        // field with its donor type. Preserve that initializer;
+                        // the object-to-Lock rewrite is only needed for vanilla
+                        // builds that still construct System.Object here.
+                        continue;
+                    }
                     bool isPlainObjectCtorCall =
                         predecessor.OpCode == OpCodes.Newobj &&
                         predecessor.Operand is MethodReference ctorRef &&
