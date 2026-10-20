@@ -309,12 +309,19 @@ namespace Vintagestory.Client.NoObf
 
 				private static void UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
 				{
-					using (var bitmap = new SKBitmap(new SKImageInfo(surface.Width, surface.Height, SKColorType.Rgba8888, SKAlphaType.Premul)))
-					using (var canvas = new SKCanvas(bitmap))
+					int width = Math.Max(1, surface.Width);
+					int height = Math.Max(1, surface.Height);
+					using (var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul)))
+					using (var properties = new SKSurfaceProperties(SKPixelGeometry.BgrHorizontal))
+				using (var rasterSurface = SKSurface.Create(bitmap.Info, properties))
 					{
-						if (!surface.TryDrawRecordedCommands(canvas))
+						if (rasterSurface == null)
+							throw new InvalidOperationException("Skia could not create an LCD-capable software GUI surface.");
+						if (!surface.TryDrawRecordedCommands(rasterSurface.Canvas))
 							throw new InvalidOperationException("Skia CPU could not seal the GUI display list: " + (surface.FirstMaterializationTrigger ?? "unknown-seal-rejection"));
-						canvas.Flush();
+						rasterSurface.Flush(true);
+						if (!rasterSurface.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0))
+							throw new InvalidOperationException("Skia CPU could not copy the LCD raster into the GUI upload bitmap.");
 						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
 						try
 						{
@@ -327,8 +334,8 @@ namespace Vintagestory.Client.NoObf
 							GL.PixelStore((PixelStoreParameter)0x0CF2, 0); // UNPACK_ROW_LENGTH
 							GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
 							GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
-							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0,
-								PixelFormat.Rgba, PixelType.UnsignedByte, bitmap.GetPixels());
+							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,
+								PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
 							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
 							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
 								throw new InvalidOperationException("OpenGL Skia CPU texture upload failed: " + error + ".");
