@@ -90,6 +90,71 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public void ContextArcsMatchEquivalentManagedCubicSegments(bool negative)
+	{
+		using var actual = new ImageSurface (Format.Argb32, 24, 20);
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .65, .9, .8);
+			if (negative) context.ArcNegative (12, 10, 7, 0, -Math.PI / 2);
+			else context.Arc (12, 10, 7, 0, Math.PI / 2);
+			context.LineTo (12, 10);
+			context.ClosePath ();
+			context.Fill ();
+		}
+
+		using var expected = new ImageSurface (Format.Argb32, 24, 20);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.Best;
+			context.SetSourceRGBA (.2, .65, .9, .8);
+			context.MoveTo (19, 10);
+			if (negative)
+				context.CurveTo (19, 6.134006751184447, 15.865993248815553, 3, 12, 3);
+			else
+				context.CurveTo (19, 13.865993248815553, 15.865993248815553, 17, 12, 17);
+			context.LineTo (12, 10);
+			context.ClosePath ();
+			context.Fill ();
+		}
+
+		Assert.Equal (expected.Data, actual.Data);
+	}
+
+	[Theory]
+	[InlineData(false, 0.0, 0.0, 7.0, 3.0)]
+	[InlineData(true, 0.0, 0.0, 7.0, 3.0)]
+	[InlineData(false, 4.71238898038469, 3.141592653589793, -3.0, 3.0)]
+	[InlineData(true, 0.0, 1.5707963267948966, 2.0, 8.0)]
+	public void ArcSweepNormalizationAndZeroSweepKeepCairoCurrentPoint(bool negative, double angle1, double angle2, double expectedX, double expectedY)
+	{
+		using var surface = new ImageSurface (Format.Argb32, 16, 16);
+		using var context = new Context (surface);
+		if (negative) context.ArcNegative (2, 3, 5, angle1, angle2);
+		else context.Arc (2, 3, 5, angle1, angle2);
+		Assert.True (context.HasCurrentPoint);
+		PointD point = context.CurrentPoint;
+		Assert.InRange (Math.Abs (point.X - expectedX), 0, 1e-10);
+		Assert.InRange (Math.Abs (point.Y - expectedY), 0, 1e-10);
+	}
+
+	[Theory]
+	[InlineData(false, 0.0)]
+	[InlineData(false, -2.0)]
+	[InlineData(true, 0.0)]
+	[InlineData(true, -2.0)]
+	public void ArcWithNonPositiveRadiusKeepsCairoCenterPointBehavior(bool negative, double radius)
+	{
+		using var surface = new ImageSurface (Format.Argb32, 16, 16);
+		using var context = new Context (surface);
+		if (negative) context.ArcNegative (2, 3, radius, 0, Math.PI / 2);
+		else context.Arc (2, 3, radius, 0, Math.PI / 2);
+		Assert.True (context.HasCurrentPoint);
+		Assert.Equal (new PointD (2, 3), context.CurrentPoint);
+	}
+
 	[Fact]
 	public void SolidColorSettersStayRecordedAndMatchCairoAndSkia()
 	{

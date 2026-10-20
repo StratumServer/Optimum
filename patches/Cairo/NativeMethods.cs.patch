@@ -1,16 +1,22 @@
 diff --git a/Cairo/NativeMethods.cs b/Cairo/NativeMethods.cs
-index 7d2fc60..15f1985 100644
+index 7d2fc60..9a184a0 100644
 --- a/Cairo/NativeMethods.cs
 +++ b/Cairo/NativeMethods.cs
-@@ -52,27 +52,21 @@ namespace Cairo
-         internal static extern void cairo_arc(IntPtr cr, double xc, double yc, double radius, double angle1, double angle2);
+@@ -46,33 +46,20 @@ namespace Cairo
+         const string cairo = "libcairo-2";
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-         internal static extern void cairo_arc_negative(IntPtr cr, double xc, double yc, double radius, double angle1, double angle2);
+         internal static extern void cairo_append_path(IntPtr cr, IntPtr path);
  
 -        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_arc(IntPtr cr, double xc, double yc, double radius, double angle1, double angle2);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_arc_negative(IntPtr cr, double xc, double yc, double radius, double angle1, double angle2);
+-
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
 -        internal static extern IntPtr cairo_atsui_font_face_create_for_atsu_font_id(IntPtr font_id);
- 
+-
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
          internal static extern void cairo_clip(IntPtr cr);
  
@@ -30,7 +36,7 @@ index 7d2fc60..15f1985 100644
          internal static extern void cairo_copy_page(IntPtr cr);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -85,12 +79,10 @@ namespace Cairo
+@@ -85,12 +72,10 @@ namespace Cairo
          internal static extern IntPtr cairo_create(IntPtr target);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -43,7 +49,7 @@ index 7d2fc60..15f1985 100644
          internal static extern void cairo_destroy(IntPtr cr);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -214,27 +206,16 @@ namespace Cairo
+@@ -214,27 +199,16 @@ namespace Cairo
          internal static extern void cairo_font_options_set_subpixel_order(IntPtr options, SubpixelOrder order);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -71,7 +77,7 @@ index 7d2fc60..15f1985 100644
          internal static extern Antialias cairo_get_antialias(IntPtr cr);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -292,12 +273,10 @@ namespace Cairo
+@@ -292,12 +266,10 @@ namespace Cairo
          internal static extern IntPtr cairo_get_target(IntPtr cr);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -84,7 +90,7 @@ index 7d2fc60..15f1985 100644
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
          internal static extern IntPtr cairo_glitz_surface_create(IntPtr surface);
  
-@@ -371,45 +350,10 @@ namespace Cairo
+@@ -371,45 +343,10 @@ namespace Cairo
          internal static extern void cairo_mask(IntPtr cr, IntPtr pattern);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -130,7 +136,7 @@ index 7d2fc60..15f1985 100644
          internal static extern void cairo_move_to(IntPtr cr, double x, double y);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -425,12 +369,10 @@ namespace Cairo
+@@ -425,12 +362,10 @@ namespace Cairo
          internal static extern void cairo_paint_with_alpha(IntPtr cr, double alpha);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -143,7 +149,7 @@ index 7d2fc60..15f1985 100644
          internal static extern void cairo_pattern_add_color_stop_rgb(IntPtr pattern, double offset, double red, double green, double blue);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -579,12 +521,10 @@ namespace Cairo
+@@ -579,12 +514,10 @@ namespace Cairo
          //internal static extern IntPtr cairo_quartz_font_face_create_for_atsui_font_id (int font_id);
  
          //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
@@ -156,7 +162,7 @@ index 7d2fc60..15f1985 100644
          //internal static extern IntPtr cairo_quartz_surface_create_for_cg_context (IntPtr context, uint width, uint height);
  
          //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
-@@ -597,12 +537,10 @@ namespace Cairo
+@@ -597,12 +530,10 @@ namespace Cairo
          //internal static extern void cairo_recording_surface_ink_extents (IntPtr surface, out double x, out double y, out double width, out double height);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -169,7 +175,7 @@ index 7d2fc60..15f1985 100644
          internal static extern IntPtr cairo_reference(IntPtr cr);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -705,21 +643,15 @@ namespace Cairo
+@@ -705,21 +636,15 @@ namespace Cairo
          internal static extern IntPtr cairo_scaled_font_destroy(IntPtr scaled_font);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -191,7 +197,7 @@ index 7d2fc60..15f1985 100644
          //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
          //internal static extern uint cairo_scaled_font_get_reference_count (IntPtr scaled_font);
  
-@@ -744,12 +676,10 @@ namespace Cairo
+@@ -744,12 +669,10 @@ namespace Cairo
          //internal static extern Status cairo_scaled_font_set_user_data (IntPtr scaled_font, IntPtr key, IntPtr user_data, DestroyFunc destroy);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -204,7 +210,7 @@ index 7d2fc60..15f1985 100644
          //internal static extern Status cairo_scaled_font_text_to_glyphs (IntPtr scaled_font, double x, double y, IntPtr utf8, IntPtr glyphs, out int num_glyphs, IntPtr clusters, out int num_clusters, IntPtr cluster_flags);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -829,12 +759,10 @@ namespace Cairo
+@@ -829,12 +752,10 @@ namespace Cairo
          //internal static extern void cairo_show_text_glyphs (IntPtr cr, IntPtr utf8, int utf8_len, IntPtr glyphs, int num_glyphs, IntPtr clusters, int num_clusters, ClusterFlags cluster_flags);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -217,7 +223,7 @@ index 7d2fc60..15f1985 100644
          internal static extern void cairo_stroke(IntPtr cr);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -862,21 +790,17 @@ namespace Cairo
+@@ -862,21 +783,17 @@ namespace Cairo
          internal static extern void cairo_surface_flush(IntPtr surface);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -239,7 +245,7 @@ index 7d2fc60..15f1985 100644
          //internal static extern void cairo_surface_get_mime_data (IntPtr surface, IntPtr mime_type, out IntPtr data, out IntPtr length);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-@@ -1013,39 +937,29 @@ namespace Cairo
+@@ -1013,39 +930,29 @@ namespace Cairo
          internal static extern IntPtr cairo_directfb_surface_create(IntPtr dfb, IntPtr surface);
  
          //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
