@@ -262,9 +262,9 @@ public sealed class GuiCertificationTests : IDisposable
                 GlVersion = "4.6 synthetic", DriverVersion = "diagnostic-only", GlContextProfileMask = 2, GlContextFlags = 0, Artifacts = artifacts },
             initialGuiComposition = window, recompositionBenchmark = window, guiScaleFixtures = scales,
             gpuPrimitiveFixture = "GpuRendered",
-            gpuPrimitiveFixtureParityWithinOneChannelValue = true,
+            gpuPrimitiveFixtureRenderedWithoutCairoReference = true,
             gpuNonSubsetFixtureDiagnostics = Enumerable.Range(1, 5).ToDictionary(index => "fixture-" + index, _ => "GpuRendered"),
-            gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizerKind = "skia-gpu-candidate", rasterizer = "SvgLoader.rasterizeSvg (Skia-rasterized via GPU candidate; no materialization)", parityWithinOneChannelValue = true,
+            gpuSvgDiagnostics = Enumerable.Range(1, 3).Select(_ => new { rasterizerKind = "skia-gpu-candidate", rasterizer = "SvgLoader.rasterizeSvg (Skia-rasterized via GPU candidate; no materialization)", textureProduced = true, cairoReferenceCompared = false,
                 materializationAttemptsAfterLoad = 0, materializationAttemptsBefore = 0, gpuCandidateAttemptsDuringLoad = 1 }).ToArray()
         });
     }

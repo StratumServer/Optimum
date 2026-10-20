@@ -103,11 +103,12 @@ internal static class GuiCertification
             var nonSubset = root.GetProperty("gpuNonSubsetFixtureDiagnostics");
             var svg = root.GetProperty("gpuSvgDiagnostics");
             if (root.GetProperty("gpuPrimitiveFixture").GetString() != "GpuRendered" ||
-                !root.GetProperty("gpuPrimitiveFixtureParityWithinOneChannelValue").GetBoolean() ||
+                !root.GetProperty("gpuPrimitiveFixtureRenderedWithoutCairoReference").GetBoolean() ||
                 Enumerable.Range(1, 5).Any(index => nonSubset.GetProperty("fixture-" + index).GetString() != "GpuRendered") ||
                 svg.GetArrayLength() != 3 || svg.EnumerateArray().Any(row =>
                     row.GetProperty("rasterizerKind").GetString() != "skia-gpu-candidate" ||
-                    !row.GetProperty("parityWithinOneChannelValue").GetBoolean() ||
+                    !row.GetProperty("textureProduced").GetBoolean() ||
+                    row.GetProperty("cairoReferenceCompared").GetBoolean() ||
                     row.GetProperty("materializationAttemptsAfterLoad").GetInt64() != row.GetProperty("materializationAttemptsBefore").GetInt64() ||
                     row.GetProperty("gpuCandidateAttemptsDuringLoad").GetInt64() <= 0))
                 return new(false, "evidence-fixtures-incomplete");
