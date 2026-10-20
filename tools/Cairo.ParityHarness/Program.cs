@@ -34,6 +34,14 @@ internal static class Program
             WriteNativeImportManifest(System.IO.Path.GetFullPath(args[1]));
             return 0;
         }
+        if (args.Length >= 3 && args[0] == "--native-import-references")
+        {
+            NativeImportUsageManifest.Write(
+                System.IO.Path.GetFullPath(args[1]),
+                typeof(Context).Assembly.Location,
+                args.Skip(2).Select(System.IO.Path.GetFullPath));
+            return 0;
+        }
         string? bundledFontDirectory = null;
         string output;
         if (args.Length == 3 && args[0] == "--font-matrix")

@@ -19,6 +19,14 @@ dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.cs
 
 The native inventory includes every P/Invoke method with its library, resolved entry point, wrapper signature, calling convention, and character set. It also reports distinct library/entry-point pairs separately from method count. Tie regenerated manifests to the candidate assembly hash.
 
+Scan direct IL references to those imports across built first-party assemblies with:
+
+```bash
+dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --native-import-references /tmp/native-import-references.json bin/Release/net10.0 Optimum.Tests/bin/Release/net10.0 build/VintagestoryLib/bin/Release/net10.0
+```
+
+The report records the scanned assembly hashes and every direct call site. It cannot detect reflection, generated IL, native callbacks, or third-party mod calls. Treat an import with no reported call site as a removal candidate. Global unreachability still requires runtime and external-consumer evidence.
+
 When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
 
 ```bash
