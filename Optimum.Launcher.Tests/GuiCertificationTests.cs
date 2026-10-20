@@ -144,6 +144,39 @@ public sealed class GuiCertificationTests : IDisposable
     }
 
     [Fact]
+    public void CertificateAcceptsSkiaCpuRecoveryWithoutCairoMaterialization()
+    {
+        var evidence = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        void AddRecovery(System.Text.Json.Nodes.JsonNode window) =>
+            window["candidateFallbackReasons"] = new System.Text.Json.Nodes.JsonObject
+            {
+                ["skia-cpu-fallback"] = 1
+            };
+
+        AddRecovery(evidence["initialGuiComposition"]!);
+        AddRecovery(evidence["recompositionBenchmark"]!);
+        foreach (var scale in evidence["guiScaleFixtures"]!.AsArray()) AddRecovery(scale!);
+        WriteCertificate(evidence.ToJsonString());
+
+        var identity = new GuiDeviceIdentity("synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0);
+        Assert.Equal(new GuiCertificationDecision(true, "local-device-preflight-matched", identity), Validate(identity));
+    }
+
+    [Fact]
+    public void CertificateRejectsUnknownCandidateFallbackReasons()
+    {
+        var evidence = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;
+        evidence["initialGuiComposition"]!["candidateFallbackReasons"] = new System.Text.Json.Nodes.JsonObject
+        {
+            ["surface-not-recording:NativeMaterialized"] = 1
+        };
+        WriteCertificate(evidence.ToJsonString());
+
+        var identity = new GuiDeviceIdentity("synthetic vendor", "synthetic renderer", "4.6 synthetic", 4, 6, 2, 0);
+        Assert.Equal("evidence-window-incomplete", Validate(identity).Reason);
+    }
+
+    [Fact]
     public void EvidenceMustCarryTheProfileFingerprintFromTheSuccessfulRun()
     {
         var evidence = System.Text.Json.Nodes.JsonNode.Parse(CompleteSyntheticEvidence())!;

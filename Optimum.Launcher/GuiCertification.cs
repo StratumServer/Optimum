@@ -284,16 +284,26 @@ internal static class GuiCertification
         long materializationAttempts = window.GetProperty("materializationAttempt" + suffix).GetInt64();
         long materializationSuccesses = window.GetProperty("materializationSuccess" + (scale ? "Count" : "es")).GetInt64();
         long materializationFailures = window.GetProperty("materializationFailure" + suffix).GetInt64();
-        // A certificate is a zero-Cairo-runtime-fallback approval. Even the
-        // previously tolerated Subpixel/font materializations invalidate it.
-        // Unknown or malformed counters fail closed instead of being treated
-        // as an approved compatibility route.
-        return causes.EnumerateObject().Count() == 0 && fallbackReasons.EnumerateObject().Count() == 0 &&
+        // A certificate permits GPU candidates and explicit Skia CPU recovery.
+        // Cairo materialization and every unrecognized fallback remain denied.
+        return causes.EnumerateObject().Count() == 0 && HasOnlySkiaCpuFallbacks(fallbackReasons) &&
             materializationAttempts == 0 && materializationSuccesses == 0 && materializationFailures == 0 &&
             attempts > 0 && fallbacks == 0 && successes == attempts &&
             rendering.GetProperty("MaterializationAttemptCount").GetInt64() == materializationAttempts &&
             rendering.GetProperty("MaterializationSuccessCount").GetInt64() == materializationSuccesses &&
             rendering.GetProperty("MaterializationFailureCount").GetInt64() == materializationFailures;
+    }
+
+    private static bool HasOnlySkiaCpuFallbacks(JsonElement fallbackReasons)
+    {
+        foreach (var reason in fallbackReasons.EnumerateObject())
+        {
+            if (reason.Name != "skia-cpu-fallback" || reason.Value.ValueKind != JsonValueKind.Number ||
+                !reason.Value.TryGetInt64(out long count) || count <= 0)
+                return false;
+        }
+
+        return true;
     }
 
     private static void RejectDuplicateProperties(JsonElement element)
