@@ -11,6 +11,7 @@ namespace Optimum.Tests;
 /// (Phase 1 = CPU preprocessing, Phase 2 = GL compile).
 /// Runtime GL behavior cannot be tested without a live OpenGL context.
 /// </summary>
+[Collection("OptimumConfig")]
 public class ShaderPreprocessParallelTests
 {
     public ShaderPreprocessParallelTests()

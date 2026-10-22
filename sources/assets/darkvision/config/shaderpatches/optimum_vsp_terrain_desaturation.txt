@@ -1,0 +1,14 @@
+@@target_contains outColor.rgb = vspApplyUnderwaterEffectsAt
+@@target_type fragment
+@@priority 20
+
+@@patch optimum_vsp_add_desaturation_call
+op: insert_after
+match: regex
+flags: multiline
+expect: 1
+@@pattern
+^[ \t]*outColor\.rgb = vspApplyUnderwaterEffectsAt\(outColor\.rgb, murkiness, vspWorldPos\);
+@@content
+outColor.rgb = applyDesaturation(outColor.rgb);
+@@end
