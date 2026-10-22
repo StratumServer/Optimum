@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementVerticalTabs.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementVerticalTabs.cs
+index 45f4a2b..4a1d57f 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementVerticalTabs.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementVerticalTabs.cs
+@@ -75,11 +75,11 @@ namespace Vintagestory.API.Client
+ 			textOffsetY = (tabHeight + 1 - Font.GetFontExtents().Height) / 2;
+ 
+             double maxWidth = 0;
+             for (int i = 0; i < tabs.Length; i++)
+             {
+-                double w = (int)(ctx.TextExtents(tabs[i].Name).Width + 1 + 2 * padding);
++                double w = (int)(Font.GetTextExtents(tabs[i].Name).Width + 1 + 2 * padding);
+ 
+                 maxWidth = Math.Max(w, maxWidth);
+             }
+ 
+ 

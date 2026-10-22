@@ -1,0 +1,17 @@
+diff --git a/VSSurvivalMod/Gui/GuiDialogSignPost.cs b/VSSurvivalMod/Gui/GuiDialogSignPost.cs
+index 1ca1045..4ae9853 100644
+--- a/VSSurvivalMod/Gui/GuiDialogSignPost.cs
++++ b/VSSurvivalMod/Gui/GuiDialogSignPost.cs
+@@ -105,11 +105,11 @@ namespace Vintagestory.GameContent
+                 GuiElementTextInput texinput = SingleComposer.GetTextInput("text" + i);
+                 textByCardinal[i] = texinput.GetText();
+                 if (textByCardinal[i] == null) textByCardinal[i] = "";
+ 
+                 int j = 0;
+-                while (ctx.TextExtents(textByCardinal[i]).Width > 185 && j++ < 100)
++                while (signPostFont.GetTextExtents(textByCardinal[i]).Width > 185 && j++ < 100)
+                 {
+                     textByCardinal[i] = textByCardinal[i].Substring(0, textByCardinal[i].Length-1);
+                 }
+ 
+                 texinput.SetValue(textByCardinal[i]);

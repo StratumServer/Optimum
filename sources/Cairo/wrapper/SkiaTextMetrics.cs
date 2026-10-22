@@ -108,6 +108,11 @@ namespace Cairo
 		{
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
+			return FontExtents(font, options);
+		}
+
+		internal static FontExtents FontExtents(SKFont font, FontOptions options)
+		{
 			SKFontMetrics metrics = font.Metrics;
 			double ascent = -metrics.Ascent, descent = metrics.Descent, height = ascent + descent + metrics.Leading;
 			double maxAdvance = MaxAdvance(font);

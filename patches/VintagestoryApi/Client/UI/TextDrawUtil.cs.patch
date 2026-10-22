@@ -1,0 +1,175 @@
+diff --git a/VintagestoryApi/Client/UI/TextDrawUtil.cs b/VintagestoryApi/Client/UI/TextDrawUtil.cs
+index 18c9142..6a8c8f1 100644
+--- a/VintagestoryApi/Client/UI/TextDrawUtil.cs
++++ b/VintagestoryApi/Client/UI/TextDrawUtil.cs
+@@ -199,21 +199,11 @@ namespace Vintagestory.API.Client
+         /// <param name="lineY">The height of the line</param>
+         /// <returns>The number of lines.</returns>
+         public int GetQuantityTextLines(CairoFont font, string text, EnumLinebreakBehavior linebreak, TextFlowPath[] flowPath, double lineY = 0)
+         {
+             if (text == null || text.Length == 0) return 0;
+-
+-            ImageSurface surface = new ImageSurface(Format.Argb32, 1, 1);
+-            Context ctx = new Context(surface);
+-            font.SetupContext(ctx);
+-
+-            int quantityLines = Lineize(ctx, text, linebreak, flowPath, 0, lineY, font.LineHeightMultiplier).Length;
+-
+-            ctx.Dispose();
+-            surface.Dispose();
+-
+-            return quantityLines;
++            return LineizeCore(font.GetTextExtents, font.GetFontExtents(), text, linebreak, flowPath, 0, lineY, font.LineHeightMultiplier, false).Length;
+         }
+ 
+         /// <summary>
+         /// Get the final height of the text.
+         /// </summary>
+@@ -241,21 +231,11 @@ namespace Vintagestory.API.Client
+         /// <param name="keepLinebreakChar"></param>
+         /// <returns>The text broken up into lines.</returns>
+         public TextLine[] Lineize(CairoFont font, string fulltext, EnumLinebreakBehavior linebreak, TextFlowPath[] flowPath, double startOffsetX = 0, double startY = 0, bool keepLinebreakChar = false)
+         {
+             if (fulltext == null || fulltext.Length == 0) return Array.Empty<TextLine>();
+-
+-            ImageSurface surface = new ImageSurface(Format.Argb32, 1, 1);
+-            Context ctx = new Context(surface);
+-            font.SetupContext(ctx);
+-
+-            TextLine[] textlines = Lineize(ctx, fulltext, linebreak, flowPath, startOffsetX, startY, font.LineHeightMultiplier, keepLinebreakChar);
+-            
+-            ctx.Dispose();
+-            surface.Dispose();
+-
+-            return textlines;
++            return LineizeCore(font.GetTextExtents, font.GetFontExtents(), fulltext, linebreak, flowPath, startOffsetX, startY, font.LineHeightMultiplier, keepLinebreakChar);
+         }
+ 
+ 
+         /// <summary>
+         /// Turns the supplied text into line of text constrained by supplied flow path and starting at supplied start coordinates
+@@ -270,10 +250,16 @@ namespace Vintagestory.API.Client
+         /// <param name="keepLinebreakChar"></param>
+         /// <returns>The text broken up into lines.</returns>
+         public TextLine[] Lineize(Context ctx, string text, EnumLinebreakBehavior linebreak, TextFlowPath[] flowPath, double startOffsetX = 0, double startY = 0, double lineHeightMultiplier = 1f, bool keepLinebreakChar = false)
+         {
+             if (text == null || text.Length == 0) return Array.Empty<TextLine>();
++			return LineizeCore (ctx.TextExtents, ctx.FontExtents, text, linebreak, flowPath, startOffsetX, startY, lineHeightMultiplier, keepLinebreakChar);
++		}
++
++		TextLine[] LineizeCore (Func<string, TextExtents> measureText, FontExtents fontExtents, string text, EnumLinebreakBehavior linebreak,
++			TextFlowPath[] flowPath, double startOffsetX, double startY, double lineHeightMultiplier, bool keepLinebreakChar)
++		{
+ 
+             if (linebreak == EnumLinebreakBehavior.Default)
+             {
+                 linebreak = Lang.AvailableLanguages[Lang.CurrentLocale].LineBreakBehavior;
+             }
+@@ -283,22 +269,22 @@ namespace Vintagestory.API.Client
+ 
+             List<TextLine> lines = new List<TextLine>();
+             
+             caretPos = 0;
+             
+-            double lineheight = ctx.FontExtents.Height * lineHeightMultiplier;
++            double lineheight = fontExtents.Height * lineHeightMultiplier;
+ 
+             double curX = startOffsetX;
+             double curY = startY;
+             double usableWidth;
+             TextFlowPath currentSection;
+             
+             while ((word = getNextWord(text, linebreak)) != null)
+             {
+                 string spc = (gotLinebreak || caretPos >= text.Length || !gotSpace ? "" : " ");
+ 
+-                double nextWidth = ctx.TextExtents(lineTextBldr + word + spc).Width;
++                double nextWidth = measureText(lineTextBldr + word + spc).Width;
+ 
+                 currentSection = GetCurrentFlowPathSection(flowPath, curY);
+ 
+                 if (currentSection == null)
+                 {
+@@ -319,27 +305,27 @@ namespace Vintagestory.API.Client
+                     {
+                         int tries = 500;
+                         while (word.Length > 0 && nextWidth >= usableWidth && tries-- > 0)
+                         {
+                             word = word.Substring(0, word.Length - 1);
+-                            nextWidth = ctx.TextExtents(lineTextBldr + word + spc).Width;
++                            nextWidth = measureText(lineTextBldr + word + spc).Width;
+                             caretPos--;
+                         }
+ 
+                         //if (gotSpace) lineTextBldr.Append(" "); - what is this good for? we already add a space further down after the word. Also why before the word? dafuq?
+                         lineTextBldr.Append(word);
+                         word = "";
+                     }
+ 
+                     string linetext = lineTextBldr.ToString();
+-                    double withoutWidth = ctx.TextExtents(linetext).Width;
++                    double withoutWidth = measureText(linetext).Width;
+ 
+                     lines.Add(new TextLine()
+                     {
+                         Text = linetext,
+                         Bounds = new LineRectangled(currentSection.X1 + curX, curY, withoutWidth, lineheight) {
+-                            Ascent = ctx.FontExtents.Ascent
++                            Ascent = fontExtents.Ascent
+                         },
+                         LeftSpace = 0,
+                         RightSpace = usableWidth - withoutWidth
+                     });
+ 
+@@ -359,17 +345,17 @@ namespace Vintagestory.API.Client
+ 
+                 if (gotLinebreak)
+                 {
+                     if (keepLinebreakChar) lineTextBldr.Append("\n");
+                     string linetext = lineTextBldr.ToString();
+-                    double withoutWidth = ctx.TextExtents(linetext).Width;
++                    double withoutWidth = measureText(linetext).Width;
+ 
+                     lines.Add(new TextLine()
+                     {
+                         Text = linetext,
+                         Bounds = new LineRectangled(currentSection.X1 + curX, curY, withoutWidth, lineheight) {
+-                            Ascent = ctx.FontExtents.Ascent
++                            Ascent = fontExtents.Ascent
+                         },
+                         LeftSpace = 0,
+                         NextOffsetX = curX,
+                         RightSpace = usableWidth - withoutWidth
+                     });
+@@ -382,16 +368,16 @@ namespace Vintagestory.API.Client
+ 
+             currentSection = GetCurrentFlowPathSection(flowPath, curY);
+             if (currentSection == null) currentSection = new TextFlowPath();
+             usableWidth = currentSection.X2 - currentSection.X1 - curX;
+             string lineTextStr = lineTextBldr.ToString();
+-            double endWidth = ctx.TextExtents(lineTextStr).Width;
++            double endWidth = measureText(lineTextStr).Width;
+ 
+             lines.Add(new TextLine()
+             {
+                 Text = lineTextStr,
+-                Bounds = new LineRectangled(currentSection.X1 + curX, curY, endWidth, lineheight) { Ascent = ctx.FontExtents.Ascent },
++                Bounds = new LineRectangled(currentSection.X1 + curX, curY, endWidth, lineheight) { Ascent = fontExtents.Ascent },
+                 LeftSpace = 0,
+                 NextOffsetX = curX,
+                 RightSpace = usableWidth - endWidth
+             });
+             
+@@ -522,11 +508,11 @@ namespace Vintagestory.API.Client
+         /// <param name="textPathMode">Whether or not to use TextPathMode.</param>
+         public void DrawTextLine(Context ctx, CairoFont font, string text, double offsetX = 0, double offsetY = 0, bool textPathMode = false)
+         {
+             if (text == null || text.Length == 0) return;
+ 
+-            ctx.MoveTo((int)(offsetX), (int)(offsetY + ctx.FontExtents.Ascent));
++            ctx.MoveTo((int)(offsetX), (int)(offsetY + font.GetFontExtents().Ascent));
+ 
+             if (textPathMode)
+             {
+                 ctx.TextPath(text);
+             }
