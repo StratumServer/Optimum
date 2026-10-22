@@ -27,6 +27,16 @@ dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.cs
 
 The report records the scanned assembly hashes and every direct call site. It cannot detect reflection, generated IL, native callbacks, or third-party mod calls. Treat an import with no reported call site as a removal candidate. Global unreachability still requires runtime and external-consumer evidence.
 
+Build the callsite and reachability ledger for an exact runtime stage with:
+
+```bash
+dotnet run -c Release --project tools/Cairo.ParityHarness/Cairo.ParityHarness.csproj -- --cairo-callsite-ledger /path/to/stage /tmp/cairo-callsite-ledger.json [--trace cairo-api-usage.json]... [--all-traces] [--repo <optimumRoot>] [--vanilla <vanillaDir>]
+```
+
+The ledger scans the stage root `*.dll`, `Lib/**`, `Mods/**` and `.optimum/donors/*.dll` (stale copies such as `*before-subpixel*`, `*.vanilla.dll` and every other directory are excluded and reported). It records every `call`, `callvirt`, `newobj`, `ldftn`, `ldvirtftn` and field instruction that targets `cairo-sharp`, plus `ComposeElements`/`ComposeTextElements` overrides and wrapper subclassing, with the caller assembly, type, method, IL offset, reached member, origin (`vanilla`, `source-patch`, `cecil-owned`, `runtime-donor`, `optimum-own`, `modified-unattributed`) and category (GUI versus the non-GUI users). It then computes the transitive closure first-party callsite to wrapper member to P/Invoke import and prints `N/201 imports libcairo-2` reachable from code outside the wrapper. Donor assembly copies are listed but excluded from the denominators because their bodies are transplanted into the loaded assemblies. Without `--trace`, the most recent `evidence/**/cairo-api-usage.json` under the stage is validated: each member with `calls > 0` must be reachable, otherwise the tool exits with code `3`. The output has no timestamps or build paths, so two runs over the same stage produce the same SHA-256.
+
+The scan is static IL only. Reflection, emitted IL, Harmony runtime patches and third-party mods are not resolved; string and `ldtoken` hits are listed as reflection candidates. `ModCompilationContext` adds `cairo-sharp.dll` to runtime mod compilation, so mods can reach any public wrapper member.
+
 When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
 
 ```bash

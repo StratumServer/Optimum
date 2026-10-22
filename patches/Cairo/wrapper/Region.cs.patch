@@ -1,0 +1,975 @@
+diff --git a/Cairo/wrapper/Region.cs b/Cairo/wrapper/Region.cs
+index ee8e041..36299e5 100644
+--- a/Cairo/wrapper/Region.cs
++++ b/Cairo/wrapper/Region.cs
+@@ -19,10 +19,11 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Collections.Generic;
+ using System.Runtime.InteropServices;
+ 
+ #nullable disable
+ 
+ namespace Cairo
+@@ -40,13 +41,17 @@ namespace Cairo
+ 		In,
+ 		Out,
+ 		Part,
+ 	}
+ 
++	// Optimum: regions are computed in managed code (a port of the y-x banded region algebra libcairo delegates
++	// to pixman) instead of calling cairo_region_*. Handle stays an opaque non-zero IntPtr that identifies the
++	// region, but it is no longer a libcairo pointer: only handles issued by this class are accepted back.
+ 	public class Region : IDisposable {
+ 
+ 		IntPtr handle;
++		RegionState state;
+ 		public IntPtr Handle {
+ 			get { return handle; }
+ 		}
+ 
+ 		[Obsolete]
+@@ -55,35 +60,44 @@ namespace Cairo
+ 		public Region (IntPtr handle, bool owned)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+ 
++			this.state = RegionHandles.Get (handle);
+ 			this.handle = handle;
+ 			if (!owned)
+-				NativeMethods.cairo_region_reference (handle);
++				RegionHandles.Reference (handle);
+ 			if (CairoDebug.Enabled)
+ 				CairoDebug.OnAllocated (handle);
+ 		}
+ 
+-		public Region () : this (NativeMethods.cairo_region_create () , true)
++		public Region () : this (RegionHandles.Create (new RegionGeometry ()) , true)
+ 		{
+ 		}
+ 
+ 		public Region (RectangleInt rect)
+ 		{
+-			handle = NativeMethods.cairo_region_create_rectangle (ref rect);
++			var geometry = new RegionGeometry ();
++			geometry.InitRect (rect.X, rect.Y, rect.Width, rect.Height);
++			handle = RegionHandles.Create (geometry);
++			state = RegionHandles.Get (handle);
+ 		}
+ 
+ 		public Region (RectangleInt[] rects)
+ 		{
+-			handle = NativeMethods.cairo_region_create_rectangles (rects, rects.Length);
++			var geometry = new RegionGeometry ();
++			geometry.InitRects (rects, rects.Length);
++			handle = RegionHandles.Create (geometry);
++			state = RegionHandles.Get (handle);
+ 		}
+ 
+ 		public Region Copy ()
+ 		{
+ 			CheckDisposed ();
+-			return new Region (NativeMethods.cairo_region_copy (Handle), true);
++			var geometry = new RegionGeometry ();
++			RegionGeometry.Copy (geometry, state.Geometry);
++			return new Region (RegionHandles.Create (geometry), true);
+ 		}
+ 
+ 		~Region ()
+ 		{
+ 			Dispose (false);
+@@ -101,129 +115,868 @@ namespace Cairo
+ 				CairoDebug.OnDisposed<Region> (handle, disposing);
+ 
+ 			if (handle == IntPtr.Zero)
+ 				return;
+ 
+-			NativeMethods.cairo_region_destroy (Handle);
++			RegionHandles.Release (Handle);
+ 			handle = IntPtr.Zero;
++			state = null;
+ 		}
+ 
+ 		void CheckDisposed ()
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
+ 		public override bool Equals (object obj)
+ 		{
+-			return (obj is Region) && NativeMethods.cairo_region_equal (Handle, (obj as Region).Handle);
++			var other = obj as Region;
++			if (other == null)
++				return false;
++			// Same contract as cairo_region_equal: one region (or two disposed ones, both NULL) is equal to
++			// itself, a NULL handle never equals a live region, otherwise the pixman region data decides.
++			if (handle == other.handle)
++				return true;
++			if (handle == IntPtr.Zero || other.handle == IntPtr.Zero)
++				return false;
++			return RegionGeometry.Equal (state.Geometry, other.state.Geometry);
+ 		}
+ 
+ 		public override int GetHashCode ()
+ 		{
+ 			return Handle.GetHashCode ();
+ 		}
+ 
+ 		public Status Status {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_region_status (Handle); }
++				return Status.Success; }
+ 		}
+ 
+ 		public RectangleInt Extents {
+ 			get {
+ 				CheckDisposed ();
+-				RectangleInt result;
+-				NativeMethods.cairo_region_get_extents (Handle, out result);
+-				return result;
++				return state.Geometry.GetExtents ();
+ 			}
+ 		}
+ 
+ 		public int NumRectangles {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_region_num_rectangles (Handle);
++				return state.Geometry.Count;
+ 			}
+ 		}
+ 
+ 		public RectangleInt GetRectangle (int nth)
+ 		{
+ 			CheckDisposed ();
+-			RectangleInt val;
+-			NativeMethods.cairo_region_get_rectangle (Handle, nth, out val);
+-			return val;
++			return state.Geometry.GetRectangle (nth);
+ 		}
+ 
+ 		public bool IsEmpty {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_region_is_empty (Handle);
++				return state.Geometry.Count == 0;
+ 			}
+ 		}
+ 
+ 		public RegionOverlap ContainsPoint (RectangleInt rectangle)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_contains_rectangle (Handle, ref rectangle);
++			return state.Geometry.ContainsRectangle (rectangle);
+ 		}
+ 
+ 		public bool ContainsPoint (int x, int y)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_contains_point (Handle, x, y);
++			return state.Geometry.ContainsPoint (x, y);
+ 		}
+ 
+ 		public void Translate (int dx, int dy)
+ 		{
+ 			CheckDisposed ();
+-			NativeMethods.cairo_region_translate (Handle, dx, dy);
++			state.Geometry.Translate (dx, dy);
+ 		}
+ 
+ 		public Status Subtract (Region other)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_subtract (Handle, other.Handle);
++			other.CheckDisposed ();
++			RegionGeometry.Subtract (state.Geometry, state.Geometry, other.state.Geometry);
++			return Status.Success;
+ 		}
+ 
+ 		public Status SubtractRectangle (RectangleInt rectangle)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_subtract_rectangle (Handle, ref rectangle);
++			RegionGeometry.Subtract (state.Geometry, state.Geometry, RegionGeometry.FromRectangle (rectangle));
++			return Status.Success;
+ 		}
+ 
+ 		public Status Intersect (Region other)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_intersect (Handle, other.Handle);
++			other.CheckDisposed ();
++			RegionGeometry.Intersect (state.Geometry, state.Geometry, other.state.Geometry);
++			return Status.Success;
+ 		}
+ 
+ 		public Status IntersectRectangle (RectangleInt rectangle)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_intersect_rectangle (Handle, ref rectangle);
++			RegionGeometry.Intersect (state.Geometry, state.Geometry, RegionGeometry.FromRectangle (rectangle));
++			return Status.Success;
+ 		}
+ 
+ 		public Status Union (Region other)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_union (Handle, other.Handle);
++			other.CheckDisposed ();
++			RegionGeometry.Union (state.Geometry, state.Geometry, other.state.Geometry);
++			return Status.Success;
+ 		}
+ 
+ 		public Status UnionRectangle (RectangleInt rectangle)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_union_rectangle (Handle, ref rectangle);
++			RegionGeometry.Union (state.Geometry, state.Geometry, RegionGeometry.FromRectangle (rectangle));
++			return Status.Success;
+ 		}
+ 
+ 		public Status Xor (Region other)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_xor (Handle, other.Handle);
++			other.CheckDisposed ();
++			RegionGeometry.Xor (state.Geometry, other.state.Geometry);
++			return Status.Success;
+ 		}
+ 
+ 		public Status XorRectangle (RectangleInt rectangle)
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_region_xor_rectangle (Handle, ref rectangle);
++			RegionGeometry.Xor (state.Geometry, RegionGeometry.FromRectangle (rectangle));
++			return Status.Success;
++		}
++	}
++
++	// Reference-counted region object behind a Region handle (the managed cairo_region_t).
++	sealed class RegionState
++	{
++		internal int ReferenceCount = 1;
++		internal readonly RegionGeometry Geometry;
++
++		internal RegionState (RegionGeometry geometry)
++		{
++			Geometry = geometry;
++		}
++	}
++
++	// Issues opaque, never reused, non-zero handles and keeps the reference counts of live regions.
++	static class RegionHandles
++	{
++		static readonly object gate = new object ();
++		static readonly Dictionary<IntPtr, RegionState> live = new Dictionary<IntPtr, RegionState> ();
++		static long counter;
++
++		internal static IntPtr Create (RegionGeometry geometry)
++		{
++			lock (gate) {
++				IntPtr handle;
++				do {
++					counter++;
++					handle = (IntPtr) unchecked ((nint) (0x1000 + (counter << 4)));
++				} while (handle == IntPtr.Zero || live.ContainsKey (handle));
++				live.Add (handle, new RegionState (geometry));
++				return handle;
++			}
++		}
++
++		internal static RegionState Get (IntPtr handle)
++		{
++			lock (gate) {
++				RegionState state;
++				if (!live.TryGetValue (handle, out state))
++					throw new ArgumentException ("handle does not identify a live region", "handle");
++				return state;
++			}
++		}
++
++		internal static void Reference (IntPtr handle)
++		{
++			lock (gate) {
++				RegionState state;
++				if (live.TryGetValue (handle, out state))
++					state.ReferenceCount++;
++			}
++		}
++
++		internal static void Release (IntPtr handle)
++		{
++			lock (gate) {
++				RegionState state;
++				if (live.TryGetValue (handle, out state) && --state.ReferenceCount <= 0)
++					live.Remove (handle);
++			}
++		}
++
++		internal static int ReferenceCountOf (IntPtr handle)
++		{
++			lock (gate) {
++				RegionState state;
++				return live.TryGetValue (handle, out state) ? state.ReferenceCount : 0;
++			}
++		}
++	}
++
++	struct RegionBox {
++		internal int X1, Y1, X2, Y2;
++	}
++
++	// y-x banded rectangle set with an explicit extents box, following the pixman region32 contract that
++	// cairo regions expose: empty regions keep whatever extents origin the last operation left behind, one
++	// rectangle equals the extents, bands are maximal in x and vertically coalesced.
++	sealed class RegionGeometry
++	{
++		RegionBox extents;
++		RegionBox[] boxes = new RegionBox[0];
++		int count;
++
++		internal int Count { get { return count; } }
++
++		delegate void OverlapProc (List<RegionBox> region, RegionBox[] r1, int r1Start, int r1End, RegionBox[] r2, int r2Start, int r2End, int y1, int y2);
++
++		static bool ExtentCheck (RegionBox a, RegionBox b)
++		{
++			return !(a.X2 <= b.X1 || a.X1 >= b.X2 || a.Y2 <= b.Y1 || a.Y1 >= b.Y2);
++		}
++
++		static bool Subsumes (RegionBox outer, RegionBox inner)
++		{
++			return outer.X1 <= inner.X1 && outer.X2 >= inner.X2 && outer.Y1 <= inner.Y1 && outer.Y2 >= inner.Y2;
++		}
++
++		void SetEmpty ()
++		{
++			boxes = new RegionBox[0];
++			count = 0;
++		}
++
++		void SetSingle (RegionBox box)
++		{
++			extents = box;
++			boxes = new RegionBox[] { box };
++			count = 1;
++		}
++
++		void Reset ()
++		{
++			extents = default (RegionBox);
++			SetEmpty ();
++		}
++
++		internal static RegionGeometry FromRectangle (RectangleInt rectangle)
++		{
++			var geometry = new RegionGeometry ();
++			geometry.InitRect (rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
++			return geometry;
++		}
++
++		// pixman_region32_init_rect: width and height are unsigned there, so the end coordinates wrap like int sums.
++		internal void InitRect (int x, int y, int width, int height)
++		{
++			var box = new RegionBox { X1 = x, Y1 = y, X2 = unchecked (x + width), Y2 = unchecked (y + height) };
++			if (!(box.X1 < box.X2 && box.Y1 < box.Y2)) {
++				Reset ();
++				return;
++			}
++			SetSingle (box);
++		}
++
++		// cairo_region_create_rectangles + pixman_region32_init_rects: empty and malformed rectangles are dropped
++		// and the rest is merged into the canonical banded form.
++		internal void InitRects (RectangleInt[] rects, int length)
++		{
++			if (length == 1) {
++				InitRect (rects[0].X, rects[0].Y, rects[0].Width, rects[0].Height);
++				return;
++			}
++
++			var valid = new List<RegionBox> (length);
++			for (int i = 0; i < length; i++) {
++				var box = new RegionBox {
++					X1 = rects[i].X,
++					Y1 = rects[i].Y,
++					X2 = unchecked (rects[i].X + rects[i].Width),
++					Y2 = unchecked (rects[i].Y + rects[i].Height)
++				};
++				if (box.X1 < box.X2 && box.Y1 < box.Y2)
++					valid.Add (box);
++			}
++
++			if (valid.Count == 0) {
++				Reset ();
++			} else if (valid.Count == 1) {
++				SetSingle (valid[0]);
++			} else {
++				Copy (this, UnionAll (valid.ToArray (), 0, valid.Count));
++			}
++		}
++
++		static RegionGeometry UnionAll (RegionBox[] all, int start, int end)
++		{
++			var result = new RegionGeometry ();
++			if (end - start == 1) {
++				result.SetSingle (all[start]);
++				return result;
++			}
++			int middle = start + (end - start) / 2;
++			Union (result, UnionAll (all, start, middle), UnionAll (all, middle, end));
++			return result;
++		}
++
++		internal static void Copy (RegionGeometry dst, RegionGeometry src)
++		{
++			if (ReferenceEquals (dst, src))
++				return;
++			var copy = new RegionBox[src.count];
++			Array.Copy (src.boxes, copy, src.count);
++			dst.extents = src.extents;
++			dst.boxes = copy;
++			dst.count = src.count;
++		}
++
++		internal static bool Equal (RegionGeometry a, RegionGeometry b)
++		{
++			if (a.extents.X1 != b.extents.X1 || a.extents.X2 != b.extents.X2 ||
++			    a.extents.Y1 != b.extents.Y1 || a.extents.Y2 != b.extents.Y2 || a.count != b.count)
++				return false;
++			for (int i = 0; i < a.count; i++) {
++				if (a.boxes[i].X1 != b.boxes[i].X1 || a.boxes[i].X2 != b.boxes[i].X2 ||
++				    a.boxes[i].Y1 != b.boxes[i].Y1 || a.boxes[i].Y2 != b.boxes[i].Y2)
++					return false;
++			}
++			return true;
++		}
++
++		internal RectangleInt GetExtents ()
++		{
++			return new RectangleInt {
++				X = extents.X1,
++				Y = extents.Y1,
++				Width = unchecked (extents.X2 - extents.X1),
++				Height = unchecked (extents.Y2 - extents.Y1)
++			};
++		}
++
++		// libcairo reads past the rectangle array for an index outside 0..NumRectangles-1; the managed region
++		// reports an empty rectangle instead.
++		internal RectangleInt GetRectangle (int nth)
++		{
++			if (nth < 0 || nth >= count)
++				return default (RectangleInt);
++			var box = boxes[nth];
++			return new RectangleInt {
++				X = box.X1,
++				Y = box.Y1,
++				Width = unchecked (box.X2 - box.X1),
++				Height = unchecked (box.Y2 - box.Y1)
++			};
++		}
++
++		// Smallest index whose box ends below y, or count when none does (pixman find_box_for_y).
++		int FindBoxForY (int begin, int y)
++		{
++			while (begin < count && boxes[begin].Y2 <= y)
++				begin++;
++			return begin;
++		}
++
++		internal bool ContainsPoint (int x, int y)
++		{
++			if (count == 0 || !(extents.X2 > x && extents.X1 <= x && extents.Y2 > y && extents.Y1 <= y))
++				return false;
++			if (count == 1)
++				return true;
++			for (int i = FindBoxForY (0, y); i < count; i++) {
++				if (y < boxes[i].Y1 || x < boxes[i].X1)
++					break;
++				if (x >= boxes[i].X2)
++					continue;
++				return true;
++			}
++			return false;
++		}
++
++		internal RegionOverlap ContainsRectangle (RectangleInt rectangle)
++		{
++			var rect = new RegionBox {
++				X1 = rectangle.X,
++				Y1 = rectangle.Y,
++				X2 = unchecked (rectangle.X + rectangle.Width),
++				Y2 = unchecked (rectangle.Y + rectangle.Height)
++			};
++
++			if (count == 0 || !ExtentCheck (extents, rect))
++				return RegionOverlap.Out;
++			if (count == 1)
++				return Subsumes (extents, rect) ? RegionOverlap.In : RegionOverlap.Part;
++
++			bool partOut = false;
++			bool partIn = false;
++			int x = rect.X1;
++			int y = rect.Y1;
++			for (int i = 0; i != count; i++) {
++				if (boxes[i].Y2 <= y) {
++					i = FindBoxForY (i, y);
++					if (i == count)
++						break;
++				}
++				if (boxes[i].Y1 > y) {
++					partOut = true;
++					if (partIn || boxes[i].Y1 >= rect.Y2)
++						break;
++					y = boxes[i].Y1;
++				}
++				if (boxes[i].X2 <= x)
++					continue;
++				if (boxes[i].X1 > x) {
++					partOut = true;
++					if (partIn)
++						break;
++				}
++				if (boxes[i].X1 < rect.X2) {
++					partIn = true;
++					if (partOut)
++						break;
++				}
++				if (boxes[i].X2 >= rect.X2) {
++					y = boxes[i].Y2;
++					if (y >= rect.Y2)
++						break;
++					x = rect.X1;
++				} else {
++					partOut = true;
++					break;
++				}
++			}
++
++			if (partIn)
++				return y < rect.Y2 ? RegionOverlap.Part : RegionOverlap.In;
++			return RegionOverlap.Out;
++		}
++
++		// pixman_region32_translate with exact 64-bit sums: boxes pushed past the int range are clipped to it
++		// and dropped when nothing is left of them.
++		internal void Translate (int dx, int dy)
++		{
++			if (dx == 0 && dy == 0)
++				return;
++
++			long x1 = (long) extents.X1 + dx;
++			long y1 = (long) extents.Y1 + dy;
++			long x2 = (long) extents.X2 + dx;
++			long y2 = (long) extents.Y2 + dy;
++			const long min = int.MinValue;
++			const long max = int.MaxValue;
++
++			if (((x1 - min) | (y1 - min) | (max - x2) | (max - y2)) >= 0) {
++				extents = new RegionBox { X1 = (int) x1, Y1 = (int) y1, X2 = (int) x2, Y2 = (int) y2 };
++				for (int i = 0; i < count; i++) {
++					boxes[i].X1 += dx;
++					boxes[i].Y1 += dy;
++					boxes[i].X2 += dx;
++					boxes[i].Y2 += dy;
++				}
++				if (count == 1)
++					boxes[0] = extents;
++				return;
++			}
++
++			if (((x2 - min) | (y2 - min) | (max - x1) | (max - y1)) <= 0) {
++				extents.X1 = unchecked ((int) x1);
++				extents.Y1 = unchecked ((int) y1);
++				extents.X2 = extents.X1;
++				extents.Y2 = extents.Y1;
++				SetEmpty ();
++				return;
++			}
++
++			extents.X1 = unchecked ((int) x1);
++			extents.Y1 = unchecked ((int) y1);
++			extents.X2 = unchecked ((int) x2);
++			extents.Y2 = unchecked ((int) y2);
++			if (x1 < min)
++				extents.X1 = int.MinValue;
++			else if (x2 > max)
++				extents.X2 = int.MaxValue;
++			if (y1 < min)
++				extents.Y1 = int.MinValue;
++			else if (y2 > max)
++				extents.Y2 = int.MaxValue;
++
++			if (count == 1) {
++				boxes[0] = extents;
++			} else if (count > 1) {
++				var kept = new List<RegionBox> (count);
++				for (int i = 0; i < count; i++) {
++					long bx1 = (long) boxes[i].X1 + dx;
++					long by1 = (long) boxes[i].Y1 + dy;
++					long bx2 = (long) boxes[i].X2 + dx;
++					long by2 = (long) boxes[i].Y2 + dy;
++					if (((bx2 - min) | (by2 - min) | (max - bx1) | (max - by1)) <= 0)
++						continue;
++					var box = new RegionBox { X1 = unchecked ((int) bx1), Y1 = unchecked ((int) by1), X2 = unchecked ((int) bx2), Y2 = unchecked ((int) by2) };
++					if (bx1 < min)
++						box.X1 = int.MinValue;
++					else if (bx2 > max)
++						box.X2 = int.MaxValue;
++					if (by1 < min)
++						box.Y1 = int.MinValue;
++					else if (by2 > max)
++						box.Y2 = int.MaxValue;
++					kept.Add (box);
++				}
++				if (kept.Count != count) {
++					boxes = kept.ToArray ();
++					count = kept.Count;
++					if (count == 1)
++						extents = boxes[0];
++					else
++						SetExtents (this);
++				} else {
++					boxes = kept.ToArray ();
++				}
++			}
++		}
++
++		// pixman_set_extents: the extents of a banded region come from its first and last band; an empty
++		// region keeps its origin and collapses to zero size.
++		static void SetExtents (RegionGeometry region)
++		{
++			if (region.count == 1)
++				return;
++			if (region.count == 0) {
++				region.extents.X2 = region.extents.X1;
++				region.extents.Y2 = region.extents.Y1;
++				return;
++			}
++
++			var first = region.boxes[0];
++			var last = region.boxes[region.count - 1];
++			var result = new RegionBox { X1 = first.X1, Y1 = first.Y1, X2 = last.X2, Y2 = last.Y2 };
++			for (int i = 0; i < region.count; i++) {
++				if (region.boxes[i].X1 < result.X1)
++					result.X1 = region.boxes[i].X1;
++				if (region.boxes[i].X2 > result.X2)
++					result.X2 = region.boxes[i].X2;
++			}
++			region.extents = result;
++		}
++
++		static void IntersectBand (List<RegionBox> region, RegionBox[] r1, int i1, int r1End, RegionBox[] r2, int i2, int r2End, int y1, int y2)
++		{
++			do {
++				int x1 = Math.Max (r1[i1].X1, r2[i2].X1);
++				int x2 = Math.Min (r1[i1].X2, r2[i2].X2);
++				if (x1 < x2)
++					region.Add (new RegionBox { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2 });
++				if (r1[i1].X2 == x2)
++					i1++;
++				if (r2[i2].X2 == x2)
++					i2++;
++			} while (i1 != r1End && i2 != r2End);
++		}
++
++		static void UnionBand (List<RegionBox> region, RegionBox[] r1, int i1, int r1End, RegionBox[] r2, int i2, int r2End, int y1, int y2)
++		{
++			int x1, x2;
++			if (r1[i1].X1 < r2[i2].X1) {
++				x1 = r1[i1].X1;
++				x2 = r1[i1].X2;
++				i1++;
++			} else {
++				x1 = r2[i2].X1;
++				x2 = r2[i2].X2;
++				i2++;
++			}
++
++			while (i1 != r1End && i2 != r2End) {
++				if (r1[i1].X1 < r2[i2].X1)
++					MergeRect (region, r1[i1++], y1, y2, ref x1, ref x2);
++				else
++					MergeRect (region, r2[i2++], y1, y2, ref x1, ref x2);
++			}
++			while (i1 != r1End)
++				MergeRect (region, r1[i1++], y1, y2, ref x1, ref x2);
++			while (i2 != r2End)
++				MergeRect (region, r2[i2++], y1, y2, ref x1, ref x2);
++
++			region.Add (new RegionBox { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2 });
++		}
++
++		static void MergeRect (List<RegionBox> region, RegionBox r, int y1, int y2, ref int x1, ref int x2)
++		{
++			if (r.X1 <= x2) {
++				if (x2 < r.X2)
++					x2 = r.X2;
++			} else {
++				region.Add (new RegionBox { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2 });
++				x1 = r.X1;
++				x2 = r.X2;
++			}
++		}
++
++		static void SubtractBand (List<RegionBox> region, RegionBox[] r1, int i1, int r1End, RegionBox[] r2, int i2, int r2End, int y1, int y2)
++		{
++			int x1 = r1[i1].X1;
++			do {
++				if (r2[i2].X2 <= x1) {
++					i2++;
++				} else if (r2[i2].X1 <= x1) {
++					x1 = r2[i2].X2;
++					if (x1 >= r1[i1].X2) {
++						i1++;
++						if (i1 != r1End)
++							x1 = r1[i1].X1;
++					} else {
++						i2++;
++					}
++				} else if (r2[i2].X1 < r1[i1].X2) {
++					region.Add (new RegionBox { X1 = x1, Y1 = y1, X2 = r2[i2].X1, Y2 = y2 });
++					x1 = r2[i2].X2;
++					if (x1 >= r1[i1].X2) {
++						i1++;
++						if (i1 != r1End)
++							x1 = r1[i1].X1;
++					} else {
++						i2++;
++					}
++				} else {
++					if (r1[i1].X2 > x1)
++						region.Add (new RegionBox { X1 = x1, Y1 = y1, X2 = r1[i1].X2, Y2 = y2 });
++					i1++;
++					if (i1 != r1End)
++						x1 = r1[i1].X1;
++				}
++			} while (i1 != r1End && i2 != r2End);
++
++			while (i1 != r1End) {
++				region.Add (new RegionBox { X1 = x1, Y1 = y1, X2 = r1[i1].X2, Y2 = y2 });
++				i1++;
++				if (i1 != r1End)
++					x1 = r1[i1].X1;
++			}
++		}
++
++		static void AppendBand (List<RegionBox> region, RegionBox[] r, int start, int end, int y1, int y2)
++		{
++			for (int i = start; i < end; i++)
++				region.Add (new RegionBox { X1 = r[i].X1, Y1 = y1, X2 = r[i].X2, Y2 = y2 });
++		}
++
++		// Merges the band starting at curStart into the one starting at prevStart when both hold the same x spans
++		// and touch vertically (pixman_coalesce); returns the start of the band that is now the previous one.
++		static int Coalesce (List<RegionBox> region, int prevStart, int curStart)
++		{
++			int bandCount = curStart - prevStart;
++			if (bandCount != region.Count - curStart)
++				return curStart;
++			if (bandCount == 0)
++				return curStart;
++			if (region[prevStart].Y2 != region[curStart].Y1)
++				return curStart;
++
++			int y2 = region[curStart].Y2;
++			for (int i = 0; i < bandCount; i++) {
++				if (region[prevStart + i].X1 != region[curStart + i].X1 || region[prevStart + i].X2 != region[curStart + i].X2)
++					return curStart;
++			}
++
++			region.RemoveRange (curStart, bandCount);
++			for (int i = 0; i < bandCount; i++) {
++				var box = region[prevStart + i];
++				box.Y2 = y2;
++				region[prevStart + i] = box;
++			}
++			return prevStart;
++		}
++
++		static int BandEnd (RegionBox[] r, int start, int end)
++		{
++			int y1 = r[start].Y1;
++			int bandEnd = start + 1;
++			while (bandEnd != end && r[bandEnd].Y1 == y1)
++				bandEnd++;
++			return bandEnd;
++		}
++
++		// pixman_op: walks both band lists, calls overlap for the shared y ranges and optionally appends the bands
++		// that belong to one operand only. Neither operand is modified, so dst may alias either one.
++		static void Op (RegionGeometry dst, RegionGeometry reg1, RegionGeometry reg2, OverlapProc overlap, bool appendNon1, bool appendNon2)
++		{
++			RegionBox[] a = reg1.boxes;
++			RegionBox[] b = reg2.boxes;
++			int r1 = 0, r1End = reg1.count;
++			int r2 = 0, r2End = reg2.count;
++			var result = new List<RegionBox> (Math.Max (r1End, r2End) * 2);
++			int ybot = Math.Min (a[0].Y1, b[0].Y1);
++			int prevBand = 0;
++			int curBand;
++			int r1BandEnd, r2BandEnd;
++
++			do {
++				r1BandEnd = BandEnd (a, r1, r1End);
++				r2BandEnd = BandEnd (b, r2, r2End);
++				int r1y1 = a[r1].Y1;
++				int r2y1 = b[r2].Y1;
++				int ytop;
++
++				if (r1y1 < r2y1) {
++					if (appendNon1) {
++						int top = Math.Max (r1y1, ybot);
++						int bot = Math.Min (a[r1].Y2, r2y1);
++						if (top != bot) {
++							curBand = result.Count;
++							AppendBand (result, a, r1, r1BandEnd, top, bot);
++							prevBand = Coalesce (result, prevBand, curBand);
++						}
++					}
++					ytop = r2y1;
++				} else if (r2y1 < r1y1) {
++					if (appendNon2) {
++						int top = Math.Max (r2y1, ybot);
++						int bot = Math.Min (b[r2].Y2, r1y1);
++						if (top != bot) {
++							curBand = result.Count;
++							AppendBand (result, b, r2, r2BandEnd, top, bot);
++							prevBand = Coalesce (result, prevBand, curBand);
++						}
++					}
++					ytop = r1y1;
++				} else {
++					ytop = r1y1;
++				}
++
++				ybot = Math.Min (a[r1].Y2, b[r2].Y2);
++				if (ybot > ytop) {
++					curBand = result.Count;
++					overlap (result, a, r1, r1BandEnd, b, r2, r2BandEnd, ytop, ybot);
++					prevBand = Coalesce (result, prevBand, curBand);
++				}
++
++				if (a[r1].Y2 == ybot)
++					r1 = r1BandEnd;
++				if (b[r2].Y2 == ybot)
++					r2 = r2BandEnd;
++			} while (r1 != r1End && r2 != r2End);
++
++			if (r1 != r1End && appendNon1) {
++				r1BandEnd = BandEnd (a, r1, r1End);
++				curBand = result.Count;
++				AppendBand (result, a, r1, r1BandEnd, Math.Max (a[r1].Y1, ybot), a[r1].Y2);
++				prevBand = Coalesce (result, prevBand, curBand);
++				for (int i = r1BandEnd; i < r1End; i++)
++					result.Add (a[i]);
++			} else if (r2 != r2End && appendNon2) {
++				r2BandEnd = BandEnd (b, r2, r2End);
++				curBand = result.Count;
++				AppendBand (result, b, r2, r2BandEnd, Math.Max (b[r2].Y1, ybot), b[r2].Y2);
++				prevBand = Coalesce (result, prevBand, curBand);
++				for (int i = r2BandEnd; i < r2End; i++)
++					result.Add (b[i]);
++			}
++
++			dst.boxes = result.ToArray ();
++			dst.count = result.Count;
++			if (dst.count == 1)
++				dst.extents = dst.boxes[0];
++		}
++
++		// pixman_region32_intersect
++		internal static void Intersect (RegionGeometry dst, RegionGeometry reg1, RegionGeometry reg2)
++		{
++			if (reg1.count == 0 || reg2.count == 0 || !ExtentCheck (reg1.extents, reg2.extents)) {
++				dst.extents.X2 = dst.extents.X1;
++				dst.extents.Y2 = dst.extents.Y1;
++				dst.SetEmpty ();
++			} else if (reg1.count == 1 && reg2.count == 1) {
++				dst.SetSingle (new RegionBox {
++					X1 = Math.Max (reg1.extents.X1, reg2.extents.X1),
++					Y1 = Math.Max (reg1.extents.Y1, reg2.extents.Y1),
++					X2 = Math.Min (reg1.extents.X2, reg2.extents.X2),
++					Y2 = Math.Min (reg1.extents.Y2, reg2.extents.Y2)
++				});
++			} else if (reg2.count == 1 && Subsumes (reg2.extents, reg1.extents)) {
++				Copy (dst, reg1);
++			} else if (reg1.count == 1 && Subsumes (reg1.extents, reg2.extents)) {
++				Copy (dst, reg2);
++			} else if (ReferenceEquals (reg1, reg2)) {
++				Copy (dst, reg1);
++			} else {
++				Op (dst, reg1, reg2, IntersectBand, false, false);
++				SetExtents (dst);
++			}
++		}
++
++		// pixman_region32_union
++		internal static void Union (RegionGeometry dst, RegionGeometry reg1, RegionGeometry reg2)
++		{
++			if (ReferenceEquals (reg1, reg2)) {
++				Copy (dst, reg1);
++				return;
++			}
++			if (reg1.count == 0) {
++				Copy (dst, reg2);
++				return;
++			}
++			if (reg2.count == 0) {
++				Copy (dst, reg1);
++				return;
++			}
++			if (reg1.count == 1 && Subsumes (reg1.extents, reg2.extents)) {
++				Copy (dst, reg1);
++				return;
++			}
++			if (reg2.count == 1 && Subsumes (reg2.extents, reg1.extents)) {
++				Copy (dst, reg2);
++				return;
++			}
++
++			var extents = new RegionBox {
++				X1 = Math.Min (reg1.extents.X1, reg2.extents.X1),
++				Y1 = Math.Min (reg1.extents.Y1, reg2.extents.Y1),
++				X2 = Math.Max (reg1.extents.X2, reg2.extents.X2),
++				Y2 = Math.Max (reg1.extents.Y2, reg2.extents.Y2)
++			};
++			Op (dst, reg1, reg2, UnionBand, true, true);
++			dst.extents = extents;
++		}
++
++		// pixman_region32_subtract: dst = minuend - subtrahend
++		internal static void Subtract (RegionGeometry dst, RegionGeometry minuend, RegionGeometry subtrahend)
++		{
++			if (minuend.count == 0 || subtrahend.count == 0 || !ExtentCheck (minuend.extents, subtrahend.extents)) {
++				Copy (dst, minuend);
++				return;
++			}
++			if (ReferenceEquals (minuend, subtrahend)) {
++				dst.extents.X2 = dst.extents.X1;
++				dst.extents.Y2 = dst.extents.Y1;
++				dst.SetEmpty ();
++				return;
++			}
++
++			Op (dst, minuend, subtrahend, SubtractBand, true, false);
++			SetExtents (dst);
++		}
++
++		// cairo_region_xor: no xor in pixman, so cairo composes (other - dst) | (dst - other) and so do we.
++		internal static void Xor (RegionGeometry dst, RegionGeometry other)
++		{
++			var difference = new RegionGeometry ();
++			Subtract (difference, other, dst);
++			Subtract (dst, dst, other);
++			Union (dst, dst, difference);
+ 		}
+ 	}
+ }

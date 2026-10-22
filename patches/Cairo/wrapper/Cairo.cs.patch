@@ -1,0 +1,259 @@
+diff --git a/Cairo/wrapper/Cairo.cs b/Cairo/wrapper/Cairo.cs
+index 5902da0..96b590f 100644
+--- a/Cairo/wrapper/Cairo.cs
++++ b/Cairo/wrapper/Cairo.cs
+@@ -30,55 +30,239 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Collections.Generic;
++using System.Diagnostics;
++using System.IO;
+ using System.Reflection;
++using System.Runtime.CompilerServices;
+ using System.Runtime.InteropServices;
++using System.Text.Json;
+ 
+ #nullable disable
+ 
+ namespace Cairo
+ {
+     public static class CairoAPI
+     {
+         static CairoAPI()
+         {
+-            NativeLibrary.SetDllImportResolver(Assembly.GetExecutingAssembly(), DllImportResolver);
++            CairoNativeGuard.EnsureRegistered();
+         }
+ 
++        // Optimum: the wrapper no longer asks libcairo for its version. These are the values the libcairo this
++        // wrapper was validated against reports (cairo 1.18.4: 1 * 10000 + 18 * 100 + 4).
++        internal const int CompatibleVersion = 11804;
++        internal const string CompatibleVersionString = "1.18.4";
++
+         public static int Version
+         {
+-            get { return NativeMethods.cairo_version(); }
++            get { return CompatibleVersion; }
+         }
+ 
+         public static string VersionString
++        {
++            get { return CompatibleVersionString; }
++        }
++    }
++
++    /// <summary>
++    /// Registers the libcairo import resolver as soon as this module loads, so it no longer depends on the
++    /// <see cref="CairoAPI"/> static constructor running first. Setting <c>OPTIMUM_CAIRO_NATIVE=deny</c> makes the
++    /// resolver refuse libcairo and remember the first stack that asked for it, which proves a run needs no native Cairo.
++    /// </summary>
++    internal static class CairoNativeGuard
++    {
++        internal const string ModeVariable = "OPTIMUM_CAIRO_NATIVE";
++        internal const string ReportVariable = "OPTIMUM_CAIRO_NATIVE_REPORT";
++
++        private static readonly object s_gate = new object();
++        private static int s_registered;
++        private static bool s_deny;
++        private static int s_deniedCount;
++        private static string s_firstDeniedLibrary;
++        private static string s_firstDeniedStack;
++
++        /// <summary>The effective mode: <c>deny</c> or <c>allow</c>.</summary>
++        internal static string Mode
+         {
+             get
+             {
+-                IntPtr x = NativeMethods.cairo_version_string();
+-                return Marshal.PtrToStringAnsi(x);
++                EnsureRegistered();
++                return s_deny ? "deny" : "allow";
++            }
++        }
++
++        /// <summary>Number of times the resolver refused a libcairo request.</summary>
++        internal static int DeniedCount => System.Threading.Volatile.Read(ref s_deniedCount);
++
++        /// <summary>The library name of the first refused request, or null.</summary>
++        internal static string FirstDeniedLibrary
++        {
++            get { lock (s_gate) { return s_firstDeniedLibrary; } }
++        }
++
++        /// <summary>The managed stack of the first refused request, or null.</summary>
++        internal static string FirstDeniedStack
++        {
++            get { lock (s_gate) { return s_firstDeniedStack; } }
++        }
++
++#pragma warning disable CA2255 // Registering the import resolver before any P/Invoke is the intended use.
++        [ModuleInitializer]
++        internal static void Initialize()
++        {
++            EnsureRegistered();
++        }
++#pragma warning restore CA2255
++
++        internal static void EnsureRegistered()
++        {
++            if (System.Threading.Interlocked.Exchange(ref s_registered, 1) != 0)
++            {
++                return;
++            }
++
++            s_deny = string.Equals(Environment.GetEnvironmentVariable(ModeVariable)?.Trim(), "deny", StringComparison.OrdinalIgnoreCase);
++            try
++            {
++                NativeLibrary.SetDllImportResolver(typeof(CairoNativeGuard).Assembly, DllImportResolver);
++            }
++            catch (InvalidOperationException)
++            {
++                // A resolver is already registered for this assembly; keep it.
++            }
++
++            if (s_deny && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(ReportVariable)))
++            {
++                AppDomain.CurrentDomain.ProcessExit += (_, _) => WriteReport();
++            }
++        }
++
++        /// <summary>
++        /// Returns the file-backed mappings whose file name starts with <c>libcairo</c> in <c>/proc/self/maps</c>.
++        /// Returns null when the mappings cannot be read (non-Linux host or unreadable procfs): the caller must treat
++        /// that as "not verified", never as "not loaded".
++        /// </summary>
++        internal static string[] LoadedLibcairoMappings()
++        {
++            const string maps = "/proc/self/maps";
++            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
++            {
++                return null;
++            }
++
++            try
++            {
++                var found = new SortedSet<string>(StringComparer.Ordinal);
++                foreach (string line in File.ReadLines(maps))
++                {
++                    int slash = line.IndexOf('/');
++                    if (slash < 0)
++                    {
++                        continue;
++                    }
++
++                    string path = line.Substring(slash);
++                    string file = path.Substring(path.LastIndexOf('/') + 1);
++                    if (file.StartsWith("libcairo", StringComparison.Ordinal))
++                    {
++                        found.Add(path);
++                    }
++                }
++
++                var result = new string[found.Count];
++                found.CopyTo(result);
++                return result;
++            }
++            catch (IOException)
++            {
++                return null;
++            }
++            catch (UnauthorizedAccessException)
++            {
++                return null;
+             }
+         }
+ 
+         private static IntPtr DllImportResolver(string libraryName, Assembly assembly, DllImportSearchPath? searchPath)
+         {
+-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && libraryName.StartsWith("libcairo", StringComparison.Ordinal))
++            if (libraryName.StartsWith("libcairo", StringComparison.Ordinal))
+             {
+-                return NativeLibrary.Load("libcairo.so.2", assembly, searchPath);
+-            }
+-
+-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && libraryName.StartsWith("libcairo", StringComparison.Ordinal))
+-            {
+-                var libPath = System.IO.Path.Combine(Assembly.GetExecutingAssembly().Location, "Lib", "libcairo.2.dylib");
+-                if (NativeLibrary.TryLoad(libPath, out var handle))
++                if (s_deny)
+                 {
+-                    return handle;
++                    Deny(libraryName);
++                }
++
++                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
++                {
++                    return NativeLibrary.Load("libcairo.so.2", assembly, searchPath);
++                }
++
++                if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
++                {
++                    var libPath = System.IO.Path.Combine(Assembly.GetExecutingAssembly().Location, "Lib", "libcairo.2.dylib");
++                    if (NativeLibrary.TryLoad(libPath, out var handle))
++                    {
++                        return handle;
++                    }
++                    return NativeLibrary.Load("libcairo.2.dylib", assembly, searchPath);
+                 }
+-                return NativeLibrary.Load("libcairo.2.dylib", assembly, searchPath);
+             }
+ 
+             // Otherwise, fallback to default import resolver.
+             return IntPtr.Zero;
+         }
++
++        private static void Deny(string libraryName)
++        {
++            bool first;
++            lock (s_gate)
++            {
++                first = s_firstDeniedStack == null;
++                if (first)
++                {
++                    s_firstDeniedLibrary = libraryName;
++                    s_firstDeniedStack = new StackTrace(2, true).ToString();
++                }
++            }
++
++            System.Threading.Interlocked.Increment(ref s_deniedCount);
++            if (first)
++            {
++                Console.Error.WriteLine("[Cairo] " + ModeVariable + "=deny refused '" + libraryName + "'. First denied stack:" + Environment.NewLine + s_firstDeniedStack);
++            }
++
++            throw new DllNotFoundException("Native libcairo is denied by " + ModeVariable + "=deny (requested '" + libraryName + "').");
++        }
++
++        private static void WriteReport()
++        {
++            try
++            {
++                string path = Environment.GetEnvironmentVariable(ReportVariable);
++                if (string.IsNullOrEmpty(path))
++                {
++                    return;
++                }
++
++                string[] mappings = LoadedLibcairoMappings();
++                var report = new Dictionary<string, object>
++                {
++                    ["mode"] = Mode,
++                    ["deniedCount"] = DeniedCount,
++                    ["firstDeniedLibrary"] = FirstDeniedLibrary,
++                    ["firstDeniedStack"] = FirstDeniedStack,
++                    ["procSelfMapsVerified"] = mappings != null,
++                    ["libcairoMappings"] = mappings
++                };
++                File.WriteAllText(path, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
++            }
++            catch (Exception exception)
++            {
++                Console.Error.WriteLine("[Cairo] Could not write " + ReportVariable + ": " + exception.Message);
++            }
++        }
+     }
+ }
+\ No newline at end of file

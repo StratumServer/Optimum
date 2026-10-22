@@ -42,6 +42,10 @@ internal static class Program
                 args.Skip(2).Select(System.IO.Path.GetFullPath));
             return 0;
         }
+        if (args.Length >= 3 && args[0] == "--cairo-callsite-ledger")
+        {
+            return CairoCallsiteLedger.Run(args.Skip(1).ToArray());
+        }
         string? bundledFontDirectory = null;
         string output;
         if (args.Length == 3 && args[0] == "--font-matrix")

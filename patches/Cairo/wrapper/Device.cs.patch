@@ -1,0 +1,215 @@
+diff --git a/Cairo/wrapper/Device.cs b/Cairo/wrapper/Device.cs
+index 0ef6f0d..a6aaee7 100644
+--- a/Cairo/wrapper/Device.cs
++++ b/Cairo/wrapper/Device.cs
+@@ -19,10 +19,12 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Collections.Generic;
++using System.Threading;
+ 
+ #nullable disable
+ 
+ namespace Cairo
+ {
+@@ -34,33 +36,37 @@ namespace Cairo
+ 		Xcb,
+ 		Xlib,
+ 		Xml,
+ 	}
+ 
++	// Optimum: the device lock, finish and reference semantics of cairo_device_t run in managed code. No wrapper
++	// API hands out a native device, so a Device can only wrap a handle issued by DeviceHandles (internal).
+ 	public class Device : IDisposable
+ 	{
+ 
+ 		IntPtr handle;
++		DeviceState state;
+ 
+ 		internal Device (IntPtr handle)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+ 
+-			this.handle = NativeMethods.cairo_device_reference (handle);
++			this.state = DeviceHandles.Reference (handle);
++			this.handle = handle;
+ 		}
+ 
+ 		public Status Acquire ()
+ 		{
+ 			CheckDisposed ();
+-			return NativeMethods.cairo_device_acquire (handle);
++			return state.Acquire ();
+ 		}
+ 
+ 		public void Dispose ()
+ 		{
+ 			if (handle != IntPtr.Zero)
+-				NativeMethods.cairo_device_destroy (handle);
++				DeviceHandles.Destroy (handle);
+ 			handle = IntPtr.Zero;
+ 			GC.SuppressFinalize (this);
+ 		}
+ 
+ 		void CheckDisposed ()
+@@ -70,37 +76,150 @@ namespace Cairo
+ 		}
+ 
+ 		public void Finish ()
+ 		{
+ 			CheckDisposed ();
+-			NativeMethods.cairo_device_finish (handle);
++			state.Finish ();
+ 		}
+ 
+ 		public void Flush ()
+ 		{
+ 			CheckDisposed ();
+-			NativeMethods.cairo_device_flush (handle);
++			state.Flush ();
+ 		}
+ 
+ 		public void Release ()
+ 		{
+ 			CheckDisposed ();
+-			NativeMethods.cairo_device_release (handle);
++			state.Release ();
+ 		}
+ 
+ 		public Status Status {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_device_status (handle);
++				return state.Status;
+ 			}
+ 		}
+ 
+ 		public DeviceType Type {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_device_get_type (handle);
++				return state.Type;
+ 			}
+ 		}
+ 
+ 	}
+-}
+ 
++	// Managed cairo_device_t: reference count, sticky status, finished flag and the recursive acquire/release lock.
++	sealed class DeviceState
++	{
++		// CAIRO_STATUS_DEVICE_FINISHED: the public Status enum has no member for it, but the value is what
++		// cairo_device_acquire returned for a finished device.
++		internal const Status DeviceFinished = (Status) 37;
++
++		readonly object gate = new object ();
++		internal int ReferenceCount = 1;
++		internal readonly DeviceType Type;
++		internal Status Status = Status.Success;
++		internal bool Finished;
++		internal int MutexDepth;
++
++		internal DeviceState (DeviceType type)
++		{
++			Type = type;
++		}
++
++		internal Status Acquire ()
++		{
++			if (Status != Status.Success)
++				return Status;
++
++			if (Finished) {
++				Status = DeviceFinished;
++				return Status;
++			}
++
++			Monitor.Enter (gate);
++			MutexDepth++;
++			return Status.Success;
++		}
++
++		// cairo asserts that the caller holds the device; releasing without holding it is ignored here.
++		internal void Release ()
++		{
++			if (!Monitor.IsEntered (gate))
++				return;
++
++			MutexDepth--;
++			Monitor.Exit (gate);
++		}
++
++		internal void Flush ()
++		{
++			// No backend flush callback: nothing to write out.
++		}
++
++		internal void Finish ()
++		{
++			if (Finished)
++				return;
++
++			Flush ();
++			Finished = true;
++		}
++	}
++
++	// Issues opaque, never reused, non-zero handles for managed devices and keeps their reference counts.
++	static class DeviceHandles
++	{
++		static readonly object gate = new object ();
++		static readonly Dictionary<IntPtr, DeviceState> live = new Dictionary<IntPtr, DeviceState> ();
++		static long counter;
++
++		// Creates a device holding one reference, like the cairo_*_create functions return.
++		internal static IntPtr Create (DeviceType type)
++		{
++			lock (gate) {
++				IntPtr handle;
++				do {
++					counter++;
++					handle = (IntPtr) unchecked ((nint) (0x1000 + (counter << 4)));
++				} while (handle == IntPtr.Zero || live.ContainsKey (handle));
++				live.Add (handle, new DeviceState (type));
++				return handle;
++			}
++		}
++
++		internal static DeviceState Reference (IntPtr handle)
++		{
++			lock (gate) {
++				DeviceState state;
++				if (!live.TryGetValue (handle, out state))
++					throw new ArgumentException ("handle does not identify a live device", "handle");
++				state.ReferenceCount++;
++				return state;
++			}
++		}
++
++		internal static void Destroy (IntPtr handle)
++		{
++			DeviceState finished = null;
++			lock (gate) {
++				DeviceState state;
++				if (live.TryGetValue (handle, out state) && --state.ReferenceCount <= 0) {
++					live.Remove (handle);
++					finished = state;
++				}
++			}
++			if (finished != null)
++				finished.Finish ();
++		}
++
++		internal static int ReferenceCountOf (IntPtr handle)
++		{
++			lock (gate) {
++				DeviceState state;
++				return live.TryGetValue (handle, out state) ? state.ReferenceCount : 0;
++			}
++		}
++	}
++}
