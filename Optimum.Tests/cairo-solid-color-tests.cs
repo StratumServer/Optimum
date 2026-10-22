@@ -154,3 +154,38 @@ public sealed class CairoSolidColorTests
 		}
 	}
 }
+
+public sealed class CairoSolidMaskTests
+{
+	static CairoSolidMaskTests () { _ = CairoAPI.Version; }
+
+	[Theory]
+	[InlineData(-.25)]
+	[InlineData(0)]
+	[InlineData(.4)]
+	[InlineData(1)]
+	[InlineData(1.5)]
+	public void SolidMaskStaysRecordedAndMatchesNativeCairo(double maskAlpha)
+	{
+		const int width = 64, height = 16;
+		using var native = new ImageSurface(Format.Argb32, width, height);
+		_ = native.Handle;
+		using var recorded = new ImageSurface(Format.Argb32, width, height);
+		recorded.BeginRecording();
+		foreach (var surface in new[] { native, recorded }) {
+			using var context = new Context(surface);
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA(.9, .3, .1, .8);
+			context.Rectangle(2, 2, 40, 10); context.Clip();
+			using var mask = new SolidPattern(.2, .7, .5, maskAlpha);
+			context.Mask(mask);
+		}
+		Assert.Equal(SurfaceRecordingState.Recording, recorded.RecordingState);
+		using var bitmap = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas(bitmap)) Assert.True(recorded.TryDrawRecordedCommands(canvas));
+		var actual = new byte[width * height * 4];
+		Marshal.Copy(bitmap.GetPixels(), actual, 0, actual.Length);
+		byte[] expected = native.Data;
+		for (int i = 0; i < actual.Length; i++) Assert.InRange(Math.Abs(actual[i] - expected[i]), 0, 1);
+	}
+}

@@ -298,7 +298,9 @@ public sealed class CairoContextRecorderTests
 	{
 		using var actual = new ImageSurface (Format.Argb32, 20, 20);
 		var recorder = actual.BeginRecording ();
-		using var mask = new SolidPattern (.5, .5, .5, .5);
+		// A solid mask is recorded as an alpha paint; a gradient mask still needs Cairo.
+		using var mask = new LinearGradient (0, 0, 20, 0);
+		mask.AddColorStop (0, new Color (0, 0, 0, 0)); mask.AddColorStop (1, new Color (0, 0, 0, 1));
 		using (var context = new Context (actual)) {
 			context.SetSourceRGBA (.8, .1, .2, .55);
 			context.Rectangle (2, 2, 9, 7);
@@ -847,7 +849,7 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void InvalidRestoreFallsBackToCairoAndStillAllowsContextCleanup()
+	public void InvalidRestoreLatchesTheErrorAndKeepsRecording()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
 		var recorder = surface.BeginRecording ();
@@ -855,10 +857,20 @@ public sealed class CairoContextRecorderTests
 		context.SetSourceRGBA (1, 0, 0, .5);
 		context.Rectangle (1, 1, 4, 4);
 		context.Restore ();
+		context.Fill ();
 
 		Assert.Equal (Status.InvalidRestore, context.Status);
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.Null (Record.Exception (() => _ = surface.Data));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+
+		// Cairo ignores the fill after the error: reading the pixels replays the same program natively.
+		using var expected = new ImageSurface (Format.Argb32, 8, 8);
+		using (var reference = new Context (expected)) {
+			reference.SetSourceRGBA (1, 0, 0, .5);
+			reference.Rectangle (1, 1, 4, 4);
+			reference.Restore ();
+			reference.Fill ();
+		}
+		Assert.Equal (expected.Data, surface.Data);
 		Assert.Null (Record.Exception (() => context.Dispose ()));
 		Assert.Equal (IntPtr.Zero, context.Handle);
 	}

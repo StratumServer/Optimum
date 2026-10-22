@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..e8f7f4b 100644
+index 03f9c76..8159c33 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -349,12 +349,22 @@ index 03f9c76..e8f7f4b 100644
  
  		[Obsolete ("Use GetTarget/SetTarget")]
  		public Cairo.Surface Target {
-@@ -334,17 +420,23 @@ namespace Cairo
+@@ -331,20 +417,31 @@ namespace Cairo
+ 			}
+ 		}
+ 
  		public Surface GetTarget ()
  		{
- 			CheckDisposed ();
- 			return Surface.Lookup (NativeMethods.cairo_get_target (handle), false);
+-			CheckDisposed ();
+-			return Surface.Lookup (NativeMethods.cairo_get_target (handle), false);
++		CheckDisposedOnly ();
++		if (recordingSurface != null) {
++		Surface alias = recordingSurface.CreateRecordingAlias ();
++		if (alias != null) return alias;
  		}
++		CheckDisposed ();
++		return Surface.Lookup (NativeMethods.cairo_get_target (handle), false);
++		}
 +		internal Surface GetTargetForRecordedDrawing() { CheckDisposedOnly(); return recordingSurface ?? GetTarget(); }
  
  		public void SetTarget (Surface target)
@@ -376,7 +386,7 @@ index 03f9c76..e8f7f4b 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -356,16 +448,22 @@ namespace Cairo
+@@ -356,16 +453,22 @@ namespace Cairo
  			}
  		}
  
@@ -401,7 +411,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
         
-@@ -377,67 +475,88 @@ namespace Cairo
+@@ -377,67 +480,88 @@ namespace Cairo
  			}
  		}
  
@@ -501,7 +511,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		public void MoveTo (PointD p)
-@@ -445,10 +564,11 @@ namespace Cairo
+@@ -445,10 +569,11 @@ namespace Cairo
  			MoveTo (p.X, p.Y);
  		}
  
@@ -513,7 +523,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		public void LineTo (PointD p)
-@@ -456,10 +576,11 @@ namespace Cairo
+@@ -456,10 +581,11 @@ namespace Cairo
  			LineTo (p.X, p.Y);
  		}
  
@@ -525,7 +535,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		public void CurveTo (PointD p1, PointD p2, PointD p3)
-@@ -467,10 +588,11 @@ namespace Cairo
+@@ -467,10 +593,11 @@ namespace Cairo
  			CurveTo (p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y);
  		}
  
@@ -537,7 +547,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		public void RelMoveTo (Distance d)
-@@ -478,10 +600,11 @@ namespace Cairo
+@@ -478,10 +605,11 @@ namespace Cairo
  			RelMoveTo (d.Dx, d.Dy);
  		}
  
@@ -549,7 +559,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		public void RelLineTo (Distance d)
-@@ -489,10 +612,11 @@ namespace Cairo
+@@ -489,10 +617,11 @@ namespace Cairo
  			RelLineTo (d.Dx, d.Dy);
  		}
  
@@ -561,7 +571,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		public void RelCurveTo (Distance d1, Distance d2, Distance d3)
-@@ -500,24 +624,43 @@ namespace Cairo
+@@ -500,24 +629,43 @@ namespace Cairo
  			RelCurveTo (d1.Dx, d1.Dy, d2.Dx, d2.Dy, d3.Dx, d3.Dy);
  		}
  
@@ -607,7 +617,7 @@ index 03f9c76..e8f7f4b 100644
  		public void Rectangle (Rectangle rectangle)
  		{
  			Rectangle (rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
-@@ -528,34 +671,45 @@ namespace Cairo
+@@ -528,34 +676,45 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -658,7 +668,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
          #endregion
-@@ -565,134 +719,159 @@ namespace Cairo
+@@ -565,134 +724,169 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -681,9 +691,21 @@ index 03f9c76..e8f7f4b 100644
  
  		public void Mask (Pattern pattern)
  		{
- 			CheckDisposed ();
-+			SurfaceRecordingDiagnostics.Rasterize();
- 			NativeMethods.cairo_mask (handle, pattern.Handle);
+-			CheckDisposed ();
+-			NativeMethods.cairo_mask (handle, pattern.Handle);
++		CheckDisposedOnly ();
++		// A solid mask scales the source by its alpha, which is what PaintWithAlpha records.
++		if (recordingSurface != null && pattern != null && pattern.Status == Status.Success && pattern.PatternType == PatternType.Solid) {
++		Operator current = RecordedState.Operator;
++		if (current == Operator.Over || current == Operator.Atop || current == Operator.DestOver) {
++		IntPtr solid = pattern.NativeHandleForRecorder;
++		if (NativeMethods.cairo_pattern_get_rgba (solid, out _, out _, out _, out double alpha) == Status.Success &&
++		recordingSurface.RecordDrawing (c => c.PaintWithAlpha (alpha), paintAll: true, alpha: alpha)) return;
++		}
++		}
++		CheckDisposed ();
++		SurfaceRecordingDiagnostics.Rasterize();
++		NativeMethods.cairo_mask (handle, pattern.Handle);
  		}
  
  		public void MaskSurface (Surface surface, double surface_x, double surface_y)
@@ -832,7 +854,7 @@ index 03f9c76..e8f7f4b 100644
  
  		[Obsolete ("Use GetGroupTarget()")]
  		public Surface GroupTarget {
-@@ -701,35 +880,40 @@ namespace Cairo
+@@ -701,35 +895,40 @@ namespace Cairo
  			}
  		}
  
@@ -874,7 +896,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		[Obsolete("Use UserToDevice instead")]
-@@ -756,54 +940,60 @@ namespace Cairo
+@@ -756,54 +955,60 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -944,7 +966,7 @@ index 03f9c76..e8f7f4b 100644
  		}
  
  		[Obsolete ("Use SetFontSize() instead.")]
-@@ -817,29 +1007,36 @@ namespace Cairo
+@@ -817,29 +1022,36 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -985,7 +1007,7 @@ index 03f9c76..e8f7f4b 100644
  			}
  		}
  
-@@ -879,16 +1076,20 @@ namespace Cairo
+@@ -879,16 +1091,20 @@ namespace Cairo
  			return dest;
  		}
  
@@ -1006,7 +1028,7 @@ index 03f9c76..e8f7f4b 100644
  			Marshal.FreeHGlobal (ptr);
  		}
  
-@@ -904,10 +1105,12 @@ namespace Cairo
+@@ -904,10 +1120,12 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -1019,7 +1041,7 @@ index 03f9c76..e8f7f4b 100644
  			IntPtr ptr;
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
-@@ -917,11 +1120,15 @@ namespace Cairo
+@@ -917,11 +1135,15 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -1036,7 +1058,7 @@ index 03f9c76..e8f7f4b 100644
  				return f_extents;
  			}
  		}
-@@ -934,32 +1141,55 @@ namespace Cairo
+@@ -934,32 +1156,55 @@ namespace Cairo
  
          
  
@@ -1092,7 +1114,7 @@ index 03f9c76..e8f7f4b 100644
  			if (utf8.Length > 0 && utf8[utf8.Length - 1] == 0)
  				return utf8;
  			var termedArray = new byte[utf8.Length + 1];
-@@ -977,51 +1207,65 @@ namespace Cairo
+@@ -977,51 +1222,65 @@ namespace Cairo
  			return bytes;
  		}
  

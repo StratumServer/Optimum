@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Matrix.cs b/Cairo/wrapper/Matrix.cs
-index cb6590c..89c2b79 100644
+index cb6590c..c47085f 100644
 --- a/Cairo/wrapper/Matrix.cs
 +++ b/Cairo/wrapper/Matrix.cs
 @@ -65,12 +65,11 @@ namespace Cairo {
@@ -16,7 +16,7 @@ index cb6590c..89c2b79 100644
  		public void Init (double xx, double yx, double xy, double yy,
  				  double x0, double y0)
  		{
-@@ -78,71 +77,113 @@ namespace Cairo {
+@@ -78,71 +77,126 @@ namespace Cairo {
  			this.Yy = yy; this.X0 = x0; this.Y0 = y0;
  		}
  
@@ -81,23 +81,36 @@ index cb6590c..89c2b79 100644
  		public Cairo.Status Invert ()
  		{
 -			return NativeMethods.cairo_matrix_invert (this);
++			// Scale and translate matrices invert component-wise. Cairo mutates the matrix before it
++			// detects a zero scale, so a failed inversion leaves the negated offsets behind.
++			if (this.Xy == 0 && this.Yx == 0) {
++				this.X0 = -this.X0;
++				this.Y0 = -this.Y0;
++				if (this.Xx != 1) {
++					if (this.Xx == 0) return Status.InvalidMatrix;
++					this.Xx = 1 / this.Xx;
++					this.X0 *= this.Xx;
++				}
++				if (this.Yy != 1) {
++					if (this.Yy == 0) return Status.InvalidMatrix;
++					this.Yy = 1 / this.Yy;
++					this.Y0 *= this.Yy;
++				}
++				return Status.Success;
++			}
++
 +			double determinant = this.Xx * this.Yy - this.Yx * this.Xy;
-+			if (determinant == 0)
++			if (double.IsNaN (determinant) || double.IsInfinity (determinant) || determinant == 0)
 +				return Status.InvalidMatrix;
 +
-+			double xx = this.Xx;
-+			double yx = this.Yx;
-+			double xy = this.Xy;
-+			double yy = this.Yy;
-+			double x0 = this.X0;
-+			double y0 = this.Y0;
-+			double inverseDeterminant = 1.0 / determinant;
-+			this.Xx = yy * inverseDeterminant;
-+			this.Yx = -yx * inverseDeterminant;
-+			this.Xy = -xy * inverseDeterminant;
-+			this.Yy = xx * inverseDeterminant;
-+			this.X0 = (xy * y0 - yy * x0) * inverseDeterminant;
-+			this.Y0 = (yx * x0 - xx * y0) * inverseDeterminant;
++			double scale = 1 / determinant;
++			double xx = this.Yy * scale;
++			double yx = -this.Yx * scale;
++			double xy = -this.Xy * scale;
++			double yy = this.Xx * scale;
++			double x0 = (this.Xy * this.Y0 - this.Yy * this.X0) * scale;
++			double y0 = (this.Yx * this.X0 - this.Xx * this.Y0) * scale;
++			this.Init (xx, yx, xy, yy, x0, y0);
 +			return Status.Success;
  		}
  

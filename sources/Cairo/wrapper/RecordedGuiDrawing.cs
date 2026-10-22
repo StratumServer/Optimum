@@ -255,10 +255,21 @@ namespace Cairo
 					drawMatrix.TransY -= 1f / 1024f;
 				}
 				canvas.SetMatrix(drawMatrix);
+				// Cairo's IN, OUT, DEST_IN and DEST_ATOP are not bounded by the mask: they also rewrite the clipped area outside
+				// the shape, where the source is transparent. Composite the shape as a layer so the operator sees that whole area.
+				SKBlendMode operation = Paint.BlendMode;
+				bool unbounded = !PaintAll && (operation == SKBlendMode.SrcIn || operation == SKBlendMode.SrcOut || operation == SKBlendMode.DstIn || operation == SKBlendMode.DstATop);
+				if (unbounded) {
+				using var layerPaint = new SKPaint { BlendMode = operation };
+				canvas.SaveLayer(layerPaint);
+				Paint.BlendMode = SKBlendMode.SrcOver;
+				}
+				try {
 				if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
 				else if (TextFont != null) canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
 				else if (PaintAll) canvas.DrawPaint(Paint);
 				else canvas.DrawPath(Path, Paint);
+				} finally { if (unbounded) Paint.BlendMode = operation; }
 			} finally { canvas.RestoreToCount(save); if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); } if (ownsDependencyImage) dependencyImage?.Dispose(); }
 		}
 
@@ -510,7 +521,9 @@ half4 main(float2 p) {
 	{
 		internal readonly SKPath Path;
 		internal readonly bool Antialias;
-		internal RecordedGuiClip(ManagedGraphicsState context) { Path = RecordedGuiDrawing.CopyPath(context); Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding; Path.Transform(RecordedGuiDrawing.ToSkia(context.Matrix)); Antialias = context.Antialias != Cairo.Antialias.None; }
+		internal RecordedGuiClip(ManagedGraphicsState context) { Path = RecordedGuiDrawing.CopyPath(context); Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding; Path.Transform(RecordedGuiDrawing.ToSkia(context.Matrix)); Antialias = context.Antialias != Cairo.Antialias.None;
+			// Aliased clips follow the same pixel-centre tie ownership as aliased fills (see RecordedGuiDrawing.DrawCore).
+			if (!Antialias) Path.Transform(SKMatrix.CreateTranslation(-1f / 1024f, -1f / 1024f)); }
 		public void Dispose() => Path.Dispose();
 	}
 }

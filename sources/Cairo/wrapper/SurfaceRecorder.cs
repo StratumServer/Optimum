@@ -57,9 +57,19 @@ namespace Cairo
 			return added;
 		}
 
+		// A latched Cairo error (for example an unbalanced restore) turns every later drawing call into a no-op.
+		bool Faulted => graphicsState.Status != Status.Success;
+
 		internal bool RecordDrawing(Action<Context> replay, bool stroke = false, bool paintAll = false, double alpha = 1, bool clearsPath = false)
 		{
-			if (State != SurfaceRecordingState.Recording) return false;
+		if (State != SurfaceRecordingState.Recording) return false;
+		if (Faulted) return true;
+		if (stroke && graphicsState.LineWidth <= 0) {
+		// Cairo draws nothing for a zero-width stroke; the path is still consumed by Stroke.
+		bool ignored = Add(new Command(replay));
+		if (ignored && clearsPath) graphicsState.NewPath();
+		return ignored;
+		}
 			// These Cairo operators are not bounded by source: scaling source
 			// alpha cannot replace their coverage mask. Preserve native replay
 			// until the recorder has an equivalent mask compositor.
@@ -74,7 +84,8 @@ namespace Cairo
 
 		internal bool RecordClip(bool preserve)
 		{
-			if (State != SurfaceRecordingState.Recording) return false;
+		if (State != SurfaceRecordingState.Recording) return false;
+		if (Faulted) return true;
 			var clip = new RecordedGuiClip(graphicsState);
 			clips.Add(clip); resources.Add(new RecordedResource(clip));
 			return RecordNative(preserve ? c => c.ClipPreserve() : c => c.Clip(), stateUpdate: preserve ? null : s => s.NewPath());
@@ -92,6 +103,7 @@ namespace Cairo
 
 		internal bool RecordText(byte[] text, bool pathOnly)
 		{
+		if (Faulted) return State == SurfaceRecordingState.Recording;
 			using var textPreparation = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
 			byte[] copy = (byte[])text.Clone();
 			int terminator = Array.IndexOf(copy, (byte)0);
@@ -192,6 +204,7 @@ namespace Cairo
 
 		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly)
 		{
+		if (Faulted) return State == SurfaceRecordingState.Recording;
 			Glyph[] copy = (Glyph[])glyphs.Clone();
 			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), stateUpdate: s => SkiaTextPath.AppendGlyphs(s, copy));
 			using FontOptions options = graphicsState.GetFontOptions();
@@ -307,7 +320,7 @@ namespace Cairo
 			return RecordDrawing(c => c.Fill(), clearsPath: true);
 		}
 		internal bool RecordSave () { Antialias antialias = graphicsState.Antialias; bool recorded = RecordNative(c => c.Save(), stateUpdate: s => s.Save()); if (recorded) { savedClips.Push(clips.ToArray()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
-		internal bool RecordRestore () { if (saveDepth == 0) return false; savedAntialias.Pop(); clips.Clear(); clips.AddRange(savedClips.Pop()); saveDepth--; return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore()); }
+		internal bool RecordRestore () { if (saveDepth == 0) return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore());  savedAntialias.Pop(); clips.Clear(); clips.AddRange(savedClips.Pop()); saveDepth--; return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore()); }
 		internal bool RecordAntialias (Antialias value)
 		{
 			bool recorded = Add (new Command (CommandKind.SetAntialias, (double)value));
@@ -364,7 +377,8 @@ namespace Cairo
 						ThrowIfError (context.Status, "context creation");
 						for (int i = 0; i < commands.Count; i++) {
 							commands[i].Replay (context);
-							ThrowIfError (context.Status, "command replay");
+							// An error the recorded program itself raised (for example an unbalanced restore) is Cairo's own behavior, not a replay failure.
+							if (graphicsState.Status == Status.Success) ThrowIfError (context.Status, "command replay");
 							ThrowIfError (NativeMethods.cairo_surface_status (native), "surface replay");
 						}
 					}
