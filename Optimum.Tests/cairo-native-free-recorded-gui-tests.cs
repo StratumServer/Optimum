@@ -60,4 +60,49 @@ public sealed class CairoNativeFreeRecordedGuiTests
         Assert.Equal((byte)0, target.GetPixel(0, 0).Alpha);
         Assert.Equal(SurfaceRecordingState.Sealed, surface.RecordingState);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LinearAndRadialGradientsRecordAndRender(bool radial)
+    {
+        using var surface = ImageSurface.CreateForRecordedGui(Format.Argb32, 12, 6);
+        using Pattern gradient = radial
+            ? new RadialGradient(6, 3, 0, 6, 3, 6)
+            : new LinearGradient(0, 3, 12, 3);
+        Assert.Equal(Status.Success, ((Gradient)gradient).AddColorStop(0, new Color(1, 0, 0, 1)));
+        Assert.Equal(Status.Success, ((Gradient)gradient).AddColorStop(1, new Color(0, 0, 1, 1)));
+        gradient.Extend = Extend.Pad;
+        gradient.Matrix = new Matrix();
+        Assert.Equal(radial ? PatternType.Radial : PatternType.Linear, gradient.PatternType);
+        Assert.Equal(2, ((Gradient)gradient).ColorStopCount);
+        Assert.True(gradient.Matrix.IsIdentity());
+        Assert.Equal(CairoNativeGuard.Mode == "deny", !gradient.HandleValid);
+
+        using (var context = new Context(surface))
+        {
+            context.SetSource(gradient);
+            if (CairoNativeGuard.Mode == "deny")
+            {
+                ((Gradient)gradient).AddColorStop(.5, new Color(0, 1, 0, 1));
+                gradient.Matrix = new Matrix(1, 0, 0, 1, 1000, 1000);
+            }
+            context.Rectangle(1, 1, 10, 4);
+            context.Fill();
+        }
+
+        if (CairoNativeGuard.Mode == "deny")
+            Assert.Throws<InvalidOperationException>(() => _ = gradient.Handle);
+        gradient.Dispose();
+
+        using var target = new SKBitmap(new SKImageInfo(12, 6, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var canvas = new SKCanvas(target)) Assert.True(surface.TryDrawRecordedCommands(canvas));
+
+        SKColor first = target.GetPixel(radial ? 6 : 2, 3);
+        SKColor last = target.GetPixel(radial ? 10 : 9, 3);
+        Assert.True(first.Red > first.Blue, $"Expected the first gradient sample to be red-dominant, got {first}.");
+        Assert.True(last.Blue > last.Red, $"Expected the last gradient sample to be blue-dominant, got {last}.");
+        Assert.Equal((byte)0, target.GetPixel(0, 0).Alpha);
+        Assert.Equal(SurfaceRecordingState.Sealed, surface.RecordingState);
+    }
 }

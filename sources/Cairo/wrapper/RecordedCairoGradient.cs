@@ -11,23 +11,28 @@ namespace Cairo
 			return value ?? throw new InvalidOperationException(errors);
 		});
 
-		internal static SKShader Create(IntPtr handle, PatternType type, Extend extend, SKMatrix toDevice, Matrix fromDevice, int width, int height, out SKImage stops)
+		internal static SKShader Create(IntPtr handle, PatternType type, Extend extend, SKMatrix toDevice, Matrix fromDevice, int width, int height, out SKImage stops, ManagedGradientSource managed = null)
 		{
-			NativeMethods.cairo_pattern_get_color_stop_count(handle, out int count);
+			int count;
+			if (managed == null) NativeMethods.cairo_pattern_get_color_stop_count(handle, out count);
+			else count = managed.StopCount;
 			stops = null;
 			if (count == 0) return SKShader.CreateColor(SKColors.Transparent);
 			double x0, y0, x1, y1, r0 = 0, r1 = 0;
-			if (type == PatternType.Linear) NativeMethods.cairo_pattern_get_linear_points(handle, out x0, out y0, out x1, out y1);
+			if (managed != null) { x0 = managed.X0; y0 = managed.Y0; r0 = managed.Radius0; x1 = managed.X1; y1 = managed.Y1; r1 = managed.Radius1; }
+			else if (type == PatternType.Linear) NativeMethods.cairo_pattern_get_linear_points(handle, out x0, out y0, out x1, out y1);
 			else NativeMethods.cairo_pattern_get_radial_circles(handle, out x0, out y0, out r0, out x1, out y1, out r1);
 			const double epsilon = 2.2204460492503131e-16;
 			if (type == PatternType.Radial && Math.Abs(r1 - r0) < epsilon &&
 				(Math.Min(r0, r1) < epsilon || Math.Max(Math.Abs(x1 - x0), Math.Abs(y1 - y0)) < 2 * epsilon))
 				return SKShader.CreateColor(SKColors.Transparent);
 			if (type == PatternType.Linear && Math.Abs(x1 - x0) < epsilon && Math.Abs(y1 - y0) < epsilon)
-				return Average(handle, count, extend);
+				return Average(handle, managed, count, extend);
 			using (var bitmap = new SKBitmap(256, checked((count + 63) / 64), SKColorType.Rgba8888, SKAlphaType.Opaque)) {
 				for (int i = 0; i < count; i++) {
-					NativeMethods.cairo_pattern_get_color_stop_rgba(handle, i, out double offset, out double r, out double g, out double b, out double a);
+					double offset, r, g, b, a;
+					if (managed == null) NativeMethods.cairo_pattern_get_color_stop_rgba(handle, i, out offset, out r, out g, out b, out a);
+					else { var stop = managed.Stops[i]; offset = stop.Offset; r = stop.Red; g = stop.Green; b = stop.Blue; a = stop.Alpha; }
 					int position = (int)Math.Round(offset * 65536);
 					int column = (i % 64) * 4, row = i / 64;
 					int red = Short(r), green = Short(g), blue = Short(b), opacity = Short(a);
@@ -83,11 +88,14 @@ namespace Cairo
 			}
 			return value;
 		}
-		static SKShader Average(IntPtr handle, int count, Extend extend)
+		static SKShader Average(IntPtr handle, ManagedGradientSource managed, int count, Extend extend)
 		{
 			if (extend == Extend.None) return SKShader.CreateColor(SKColors.Transparent);
 			var positions = new double[count]; var colors = new double[count, 4];
-			for (int i = 0; i < count; i++) NativeMethods.cairo_pattern_get_color_stop_rgba(handle, i, out positions[i], out colors[i, 0], out colors[i, 1], out colors[i, 2], out colors[i, 3]);
+			for (int i = 0; i < count; i++) {
+				if (managed == null) NativeMethods.cairo_pattern_get_color_stop_rgba(handle, i, out positions[i], out colors[i, 0], out colors[i, 1], out colors[i, 2], out colors[i, 3]);
+				else { var stop = managed.Stops[i]; positions[i] = stop.Offset; colors[i, 0] = stop.Red; colors[i, 1] = stop.Green; colors[i, 2] = stop.Blue; colors[i, 3] = stop.Alpha; }
+			}
 			var sum = new double[4];
 			for (int i = 0; i < count; i++) {
 				double weight = count == 1 ? 2 : extend == Extend.Pad ? (i == 0 || i == count - 1 ? 1 : 0) :

@@ -1,0 +1,24 @@
+diff --git a/Cairo/wrapper/RadialGradient.cs b/Cairo/wrapper/RadialGradient.cs
+index eae4884..46b61ef 100644
+--- a/Cairo/wrapper/RadialGradient.cs
++++ b/Cairo/wrapper/RadialGradient.cs
+@@ -38,11 +38,18 @@ namespace Cairo {
+ 		internal RadialGradient (IntPtr handle, bool owned) : base (handle, owned)
+ 		{
+ 		}
+ 
+ 		public RadialGradient (double cx0, double cy0, double radius0, double cx1, double cy1, double radius1)
+-			: base (NativeMethods.cairo_pattern_create_radial (cx0, cy0, radius0, cx1, cy1, radius1), true)
++			: base (true)
+ 		{
++			if (CairoNativeGuard.Mode == "deny")
++				ManagedGradient = new ManagedGradientSource(PatternType.Radial, cx0, cy0, radius0, cx1, cy1, radius1);
++			else
++				NativeHandleForRecorder = NativeMethods.cairo_pattern_create_radial (cx0, cy0, radius0, cx1, cy1, radius1);
++			if (NativeHandleForRecorder != IntPtr.Zero && CairoDebug.Enabled) CairoDebug.OnAllocated (NativeHandleForRecorder);
+ 		}
++
++		internal RadialGradient(ManagedGradientSource source) : base(true) { ManagedGradient = source; }
+ 	}
+ }
+ 

@@ -115,6 +115,7 @@ namespace Cairo
 		{
 		using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceFreeze);
 		if (source == null) { deferredSolidSource = color; hasDeferredSolidSource = true; return; }
+		if (source.ManagedGradient != null) { nativeSource = source.CloneForRecorder(); return; }
 		IntPtr h = source.NativeHandleForRecorder;
 			switch (NativeMethods.cairo_pattern_get_type(h)) {
 			case PatternType.Solid:
@@ -165,7 +166,8 @@ namespace Cairo
 		{
 		using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceShader);
 		IntPtr handle = pattern == null ? IntPtr.Zero : pattern.NativeHandleForRecorder;
-		PatternType type = pattern == null ? PatternType.Solid : NativeMethods.cairo_pattern_get_type(handle);
+		ManagedGradientSource managedGradient = pattern?.ManagedGradient;
+		PatternType type = pattern == null ? PatternType.Solid : managedGradient != null ? managedGradient.Type : NativeMethods.cairo_pattern_get_type(handle);
 		if (type == PatternType.Solid) {
 		double r, g, b, a;
 		if (pattern == null) { r = color.Red; g = color.Green; b = color.Blue; a = color.Alpha; }
@@ -188,7 +190,7 @@ namespace Cairo
 				bindingInverse.Invert();
 				var patternFromDevice = Cairo.Matrix.Multiply(bindingInverse, pattern.Matrix);
 				shader = RecordedCairoGradient.Create(handle, type, pattern.Extend, SKMatrix.Identity, patternFromDevice,
-				targetWidth, targetHeight, out image);
+				targetWidth, targetHeight, out image, managedGradient);
 				// Gradient parameters are evaluated in device coordinates, preserving double source binding.
 				if (!Matrix.TryInvert(out inverse)) throw new NotSupportedException("Singular drawing transform.");
 			} else if (type == PatternType.Surface && sourceSnapshot != null) {

@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..ce8cd41 100644
+index 03f9c76..e095d10 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -309,7 +309,7 @@ index 03f9c76..ce8cd41 100644
  		public void SetSource (Pattern source)
  		{
 +			if (recordingSurface != null) {
-+				var snapshot = Pattern.Lookup(source.NativeHandleForRecorder, false);
++				var snapshot = source.CloneForRecorder();
 +				var binding = source.RecordedSource?.Retain();
 +				if (recordingSurface != null && RecordState(c => { if (binding != null) { NativeMethods.cairo_pattern_get_surface(snapshot.NativeHandleForRecorder, out IntPtr target); binding.Materialize(target); } c.SetSource(snapshot); }, s => s.SetSource(snapshot, binding), snapshot, sourceBinding: binding)) return;
 +				snapshot?.Dispose(); binding?.Dispose();
@@ -325,7 +325,7 @@ index 03f9c76..ce8cd41 100644
 +			ManagedGraphicsState state = RecordedState;
 +			if (state != null) {
 +			Pattern recorded = state.SourcePattern;
-+			if (recorded != null) return Cairo.Pattern.Lookup (recorded.NativeHandleForRecorder, false);
++			if (recorded != null) return recorded.CloneForRecorder();
 +			var color = state.SourceColor;
 +			return new SolidPattern (color.Red, color.Green, color.Blue, color.Alpha);
 +			}

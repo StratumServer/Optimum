@@ -1,0 +1,32 @@
+diff --git a/Cairo/wrapper/LinearGradient.cs b/Cairo/wrapper/LinearGradient.cs
+index 2e7eb46..4a84382 100644
+--- a/Cairo/wrapper/LinearGradient.cs
++++ b/Cairo/wrapper/LinearGradient.cs
+@@ -38,17 +38,26 @@ namespace Cairo {
+ 		internal LinearGradient (IntPtr handle, bool owned) : base (handle, owned)
+ 		{
+ 		}
+ 
+ 		public LinearGradient (double x0, double y0, double x1, double y1)
+-			: base (NativeMethods.cairo_pattern_create_linear (x0, y0, x1, y1), true)
++			: base (true)
+ 		{
++			if (CairoNativeGuard.Mode == "deny")
++				ManagedGradient = new ManagedGradientSource(PatternType.Linear, x0, y0, 0, x1, y1, 0);
++			else
++				NativeHandleForRecorder = NativeMethods.cairo_pattern_create_linear (x0, y0, x1, y1);
++			if (NativeHandleForRecorder != IntPtr.Zero && CairoDebug.Enabled) CairoDebug.OnAllocated (NativeHandleForRecorder);
+ 		}
+ 
++		internal LinearGradient(ManagedGradientSource source) : base(true) { ManagedGradient = source; }
++
+ 		public PointD[] LinearPoints {
+ 			get {
+ 				CheckDisposed ();
++				if (ManagedGradient != null)
++					return new[] { new PointD(ManagedGradient.X0, ManagedGradient.Y0), new PointD(ManagedGradient.X1, ManagedGradient.Y1) };
+ 				double x0, y0, x1, y1;
+ 				PointD[] points = new PointD [2];
+ 
+ 				NativeMethods.cairo_pattern_get_linear_points (Handle, out x0, out y0, out x1, out y1);
+ 
