@@ -29,6 +29,8 @@ namespace Cairo
 		float[] dashIntervals;
 		float dashOffset;
 		Pattern nativeSource;
+		(double Red, double Green, double Blue, double Alpha) deferredSolidSource;
+		bool hasDeferredSolidSource;
 		ImageSurface nativeImage;
 		Matrix nativeSourceMatrix;
 		static SKImage gammaInverseTable;
@@ -87,6 +89,8 @@ namespace Cairo
 		internal void Replay(Context context, Action<Context> operation)
 		{
 			context.Save();
+			Pattern replaySource = null;
+			bool ownsReplaySource = false;
 			try {
 				Matrix drawMatrix = context.Matrix;
 				context.Matrix = nativeSourceMatrix;
@@ -96,16 +100,21 @@ namespace Cairo
 					var pattern = new SurfacePattern(nativeImage) { Matrix = nativeSource.Matrix, Extend = nativeSource.Extend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
 					nativeSource.Dispose(); nativeSource = pattern;
 				}
-				context.SetSource(nativeSource);
+				replaySource = nativeSource;
+				if (replaySource == null && hasDeferredSolidSource) {
+					replaySource = new SolidPattern (deferredSolidSource.Red, deferredSolidSource.Green, deferredSolidSource.Blue, deferredSolidSource.Alpha);
+					ownsReplaySource = true;
+				}
+				context.SetSource(replaySource);
 				context.Matrix = drawMatrix;
 				operation(context);
-			} finally { context.Restore(); }
+			} finally { if (ownsReplaySource) replaySource.Dispose (); context.Restore(); }
 		}
 
 		void FreezeSource(Pattern source, (double Red, double Green, double Blue, double Alpha) color)
 		{
 		using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceFreeze);
-		if (source == null) { nativeSource = new SolidPattern(color.Red, color.Green, color.Blue, color.Alpha); return; }
+		if (source == null) { deferredSolidSource = color; hasDeferredSolidSource = true; return; }
 		IntPtr h = source.NativeHandleForRecorder;
 			switch (NativeMethods.cairo_pattern_get_type(h)) {
 			case PatternType.Solid:

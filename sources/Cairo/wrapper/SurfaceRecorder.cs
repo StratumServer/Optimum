@@ -236,7 +236,7 @@ namespace Cairo
 			sourceBindings.Clear();
 		}
 
-		internal SurfaceRecorder (Surface surface) { this.surface = surface; width = NativeMethods.cairo_image_surface_get_width(surface.NativeHandleForMetadata); height = NativeMethods.cairo_image_surface_get_height(surface.NativeHandleForMetadata); }
+		internal SurfaceRecorder (Surface surface) { this.surface = surface; width = surface.RecordedWidth; height = surface.RecordedHeight; }
 		internal SurfaceRecorderSnapshot CaptureSnapshot() { lock (sync) { if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null; return new SurfaceRecorderSnapshot(commands.ToArray(), width, height, resources.ToArray(), Identity); } }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
 		internal string FirstMaterializationTrigger { get { lock (sync) return firstMaterializationTrigger; } }

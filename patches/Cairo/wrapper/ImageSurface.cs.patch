@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..9b3c23d 100644
+index 8014c9e..7de6784 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -32,24 +32,40 @@
+@@ -32,26 +32,59 @@
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
  
@@ -22,31 +22,49 @@ index 8014c9e..9b3c23d 100644
  		{
  		}
 -        
--		public ImageSurface (Format format, int width, int height)
--			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
 +
-+		ImageSurface (ManagedImageSurfaceStorage storage) : base (storage.Handle, true, true)
- 		{
++		ImageSurface (ManagedImageSurfaceStorage storage, bool managedOnly = false) : base (storage.Handle, true, true, managedOnly)
++		{
 +			managedStorage = storage;
 +		}
 +
-+		public ImageSurface (Format format, int width, int height)
-+			: this (ManagedImageSurfaceStorage.Create (format, width, height))
++		protected override void Dispose (bool disposing)
 +		{
++			managedStorage?.ReleaseUnattachedPin ();
++			base.Dispose (disposing);
 +		}
 +
+ 		public ImageSurface (Format format, int width, int height)
+-			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
++			: this (ManagedImageSurfaceStorage.Create (format, width, height))
+ 		{
+ 		}
+ 
 +		public static ImageSurface CreateForRecordedGui (Format format, int width, int height)
 +		{
 +			// Cairo permits zero-sized image surfaces, but OpenGL textures and the
 +			// Skia recorder require positive dimensions. Empty dynamic GUI lists are
 +			// visually empty, so preserve that result with a transparent 1x1 target.
-+			return new ImageSurface (format, Math.Max (1, width), Math.Max (1, height));
- 		}
- 
++			width = Math.Max (1, width);
++			height = Math.Max (1, height);
++			if (format == Format.Argb32) {
++				var surface = new ImageSurface (ManagedImageSurfaceStorage.CreateManaged (format, width, height), true);
++				surface.BeginRecording ();
++				return surface;
++			}
++			return new ImageSurface (format, width, height);
++		}
++
++		internal int ManagedWidth => managedStorage.Width;
++		internal int ManagedHeight => managedStorage.Height;
++		internal IntPtr EnsureNativeSurface () => managedStorage.EnsureNativeSurface ();
++
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
  			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
  		{
-@@ -75,23 +91,28 @@ namespace Cairo {
+ 		}
+ 
+@@ -75,23 +108,28 @@ namespace Cairo {
  
  
          public int Width {
@@ -78,7 +96,7 @@ index 8014c9e..9b3c23d 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +120,137 @@ namespace Cairo {
+@@ -99,24 +137,167 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
@@ -134,7 +152,7 @@ index 8014c9e..9b3c23d 100644
 +	internal int Width { get; }
 +	internal int Height { get; }
 +	internal int Stride { get; }
-+	internal IntPtr DataPointer => dataPointer;
++		internal IntPtr DataPointer { get { EnsurePixelPin (); return dataPointer; } }
 +	internal bool HasManagedPixels => pixels != null;
 +
 +	ManagedImageSurfaceStorage (Format format, int width, int height, int stride, byte[] pixels)
@@ -157,29 +175,49 @@ index 8014c9e..9b3c23d 100644
 +		// create-for-data entry point requires a stable non-null address.
 +		var pixels = new byte[Math.Max (1, (int)byteCount)];
 +		var storage = new ManagedImageSurfaceStorage (format, width, height, stride, pixels);
-+		storage.pixelPin = GCHandle.Alloc (pixels, GCHandleType.Pinned);
-+		storage.dataPointer = storage.pixelPin.AddrOfPinnedObject ();
++		storage.EnsurePixelPin ();
++		return storage.AttachNativeSurface ();
++	}
++
++	internal static ManagedImageSurfaceStorage CreateManaged (Format format, int width, int height)
++	{
++		int stride = Surface.StrideForWidth (format, width);
++		long byteCount = (long)stride * height;
++		if (width < 0 || height < 0 || stride < 0 || byteCount < 0 || byteCount > int.MaxValue)
++			throw new ArgumentOutOfRangeException (nameof (width), "The managed recording surface dimensions are invalid.");
++		return new ManagedImageSurfaceStorage (format, width, height, stride, new byte[Math.Max (1, (int)byteCount)]);
++	}
++
++	internal IntPtr EnsureNativeSurface ()
++	{
++		if (Handle != IntPtr.Zero) return Handle;
++		return AttachNativeSurface ().Handle;
++	}
++
++	ManagedImageSurfaceStorage AttachNativeSurface ()
++	{
++		EnsurePixelPin ();
 +
 +		IntPtr surface = IntPtr.Zero;
 +		GCHandle storageHandle = default (GCHandle);
 +		bool attached = false;
 +		try {
-+			surface = NativeMethods.cairo_image_surface_create_for_data (storage.dataPointer, format, width, height, stride);
++			surface = NativeMethods.cairo_image_surface_create_for_data (dataPointer, Format, Width, Height, Stride);
 +			if (surface == IntPtr.Zero) throw new InvalidOperationException ("Cairo returned a null image surface.");
 +
-+			storageHandle = GCHandle.Alloc (storage);
++			storageHandle = GCHandle.Alloc (this);
 +			Status status = NativeMethods.cairo_surface_set_user_data (surface, userDataKey,
 +				GCHandle.ToIntPtr (storageHandle), destroyCallback);
 +			if (status != Status.Success)
 +				throw new InvalidOperationException ("Could not attach the managed image buffer to its Cairo surface: " + status + ".");
 +
 +			attached = true;
-+			storage.Handle = surface;
-+			return storage;
++			Handle = surface;
++			return this;
 +		} catch {
 +			if (storageHandle.IsAllocated && !attached) storageHandle.Free ();
 +			if (surface != IntPtr.Zero) NativeMethods.cairo_surface_destroy (surface);
-+			if (!attached) storage.ReleasePixelPin ();
++			if (!attached) ReleasePixelPin ();
 +			throw;
 +		}
 +	}
@@ -198,6 +236,16 @@ index 8014c9e..9b3c23d 100644
 +		if (length != 0) Buffer.BlockCopy (pixels, 0, copy, 0, length);
 +		return copy;
 +	}
++
++	void EnsurePixelPin ()
++	{
++		if (dataPointer != IntPtr.Zero) return;
++		if (released != 0) throw new ObjectDisposedException (nameof (ManagedImageSurfaceStorage));
++		pixelPin = GCHandle.Alloc (pixels, GCHandleType.Pinned);
++		dataPointer = pixelPin.AddrOfPinnedObject ();
++	}
++
++	internal void ReleaseUnattachedPin () { if (Handle == IntPtr.Zero) ReleasePixelPin (); }
 +
 +	void ReleasePixelPin ()
 +	{

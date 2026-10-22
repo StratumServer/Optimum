@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..7b750c7 100644
+index 6f7730e..bb6ce55 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,35 +32,284 @@
+@@ -32,35 +32,305 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -30,15 +30,26 @@ index 6f7730e..7b750c7 100644
 +		Thread recordingOwnerThread;
 +		Context recordingContext;
 +		bool finished;
++		bool disposed;
++		readonly bool managedOnly;
  
  		protected Surface (IntPtr handle, bool owner)
++			: this (handle, owner, false, false)
  		{
- 			if (handle == IntPtr.Zero)
+-			if (handle == IntPtr.Zero)
++		}
++
++		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly)
++		{
++			if (handle == IntPtr.Zero && !managedOnly)
  				throw new ArgumentException ("handle should not be NULL", "handle");
  
 -			this.owner = owner;
  			this.handle = handle;
- 			if (!owner)
+-			if (!owner)
++			this.managedOnly = managedOnly;
++			this.recordingCandidate = recordingCandidate;
++			if (!owner && handle != IntPtr.Zero)
  				NativeMethods.cairo_surface_reference (handle);
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
@@ -52,7 +63,7 @@ index 6f7730e..7b750c7 100644
 +		internal SurfaceRecordingState RecordingState {
 +			get {
 +				lock (recordingSync) {
-+					if (handle == IntPtr.Zero) return SurfaceRecordingState.Disposed;
++					if (disposed) return SurfaceRecordingState.Disposed;
 +					return recorder == null ? SurfaceRecordingState.Native : recorder.State;
 +				}
 +			}
@@ -74,10 +85,11 @@ index 6f7730e..7b750c7 100644
 +		{
 +			lock (recordingSync) {
 +				CheckDisposed ();
-+				if (!recordingCandidate || handleExposed || recorder != null || finished ||
-+				    !(this is ImageSurface) || NativeMethods.cairo_image_surface_get_format (handle) != Format.Argb32 ||
++				if (managedOnly && recorder != null && recorder.State == SurfaceRecordingState.Recording) return recorder;
++				if (!recordingCandidate || handleExposed || recorder != null || finished || !(this is ImageSurface) ||
++				    (!managedOnly && (NativeMethods.cairo_image_surface_get_format (handle) != Format.Argb32 ||
 +				    NativeMethods.cairo_surface_status (handle) != Status.Success ||
-+				    NativeMethods.cairo_surface_get_reference_count (handle) != 1)
++				    NativeMethods.cairo_surface_get_reference_count (handle) != 1)))
 +					throw new InvalidOperationException ("Surface is not eligible for geometry recording.");
 +				recordingOwnerThread = Thread.CurrentThread;
 +				recorder = new SurfaceRecorder (this);
@@ -86,9 +98,17 @@ index 6f7730e..7b750c7 100644
 +		}
 +
 +		internal IntPtr NativeHandleForRecorder {
-+			get { CheckDisposed (); EnsureRecordingOwnerThread (); return handle; }
++			get { CheckDisposed (); EnsureRecordingOwnerThread (); return EnsureNativeHandle (); }
 +		}
-+		internal IntPtr NativeHandleForMetadata { get { CheckDisposed (); return handle; } }
++		internal IntPtr NativeHandleForMetadata { get { CheckDisposed (); return EnsureNativeHandle (); } }
++		internal bool IsManagedOnly => managedOnly;
++		internal int RecordedWidth => this is ImageSurface image ? image.ManagedWidth : NativeMethods.cairo_image_surface_get_width (NativeHandleForMetadata);
++		internal int RecordedHeight => this is ImageSurface image ? image.ManagedHeight : NativeMethods.cairo_image_surface_get_height (NativeHandleForMetadata);
++		internal IntPtr EnsureNativeHandle ()
++		{
++			if (handle == IntPtr.Zero && managedOnly && this is ImageSurface image) handle = image.EnsureNativeSurface ();
++			return handle;
++		}
 +		internal string FirstMaterializationTrigger {
 +			get { lock (recordingSync) return recorder == null ? null : recorder.FirstMaterializationTrigger; }
 +		}
@@ -107,6 +127,7 @@ index 6f7730e..7b750c7 100644
 +			lock (recordingSync) {
 +				CheckDisposed ();
 +				EnsureRecordingOwnerThread ();
++				if (managedOnly) { if (recorder == null) BeginRecording (); return IntPtr.Zero; }
 +				if (AutomaticRecordingEnabled && recorder == null && recordingCandidate && !handleExposed && !finished && NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
 +				if (recorder != null && recorder.State == SurfaceRecordingState.Recording && recordingContext != null)
 +					MaterializeRecorder (recordingContext.NativeHandleForRecorder);
@@ -165,6 +186,7 @@ index 6f7730e..7b750c7 100644
 +		{
 +		if (aliasOwner != null) return aliasOwner.TryRecord (record);
 +			lock (recordingSync) {
++				if (managedOnly && recorder == null) BeginRecording ();
 +				if (recorder == null && AutomaticRecordingEnabled && recordingCandidate && !handleExposed && !finished &&
 +					NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
 +				if (recorder == null) return false;
@@ -239,7 +261,7 @@ index 6f7730e..7b750c7 100644
 +		{
 +			lock (recordingSync) {
 +				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
-+				if (NativeMethods.cairo_image_surface_get_width(handle) != 0 && NativeMethods.cairo_image_surface_get_height(handle) != 0) return false;
++				if (RecordedWidth != 0 && RecordedHeight != 0) return false;
 +				if (recorder == null || !recorder.TrySeal(out SurfaceRecorderSnapshot snapshot)) return false;
 +				snapshot.Dispose(); return true;
 +			}
@@ -252,9 +274,10 @@ index 6f7730e..7b750c7 100644
 +		{
 +		if (aliasOwner != null) { aliasOwner.MaterializeRecorder (contextHandle); return; }
 +			lock (recordingSync) {
-+				if (handle == IntPtr.Zero) return;
++				if (disposed) return;
 +				if (recordingContext != null) EnsureRecordingOwnerThread ();
 +				if (recorder == null || recorder.State == SurfaceRecordingState.NativeMaterialized || recorder.State == SurfaceRecordingState.Disposed) return;
++				EnsureNativeHandle ();
 +				IntPtr replayHandle = contextHandle != IntPtr.Zero ? contextHandle :
 +					(recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
 +				if (MaterializeCause == null && recorder.State == SurfaceRecordingState.Recording) MaterializeCause = new System.Diagnostics.StackTrace (1, false).ToString ().Split ((char)10)[0].Trim () + " <- " + new System.Diagnostics.StackTrace (2, false).ToString ().Split ((char)10)[0].Trim ();
@@ -289,7 +312,7 @@ index 6f7730e..7b750c7 100644
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
  			switch (st) {
  			case SurfaceType.Image:
-@@ -87,72 +336,116 @@ namespace Cairo
+@@ -87,72 +357,117 @@ namespace Cairo
  		}
  
  
@@ -374,22 +397,26 @@ index 6f7730e..7b750c7 100644
  			if (!disposing || CairoDebug.Enabled)
  				CairoDebug.OnDisposed<Surface> (handle, disposing);
  
- 			if (handle == IntPtr.Zero)
+-			if (handle == IntPtr.Zero)
++			if (disposed)
  				return;
  
+-			NativeMethods.cairo_surface_destroy (handle);
 +			if (recorder != null) {
 +				if (recordedSourceReferences > 0) disposedSourceSnapshot = recorder.CaptureSnapshot();
 +				recorder.DisposeFromSurface ();
 +			}
 +
- 			NativeMethods.cairo_surface_destroy (handle);
++			if (handle != IntPtr.Zero) NativeMethods.cairo_surface_destroy (handle);
  			handle = IntPtr.Zero;
++			disposed = true;
 +			}
  		}
  
  		protected void CheckDisposed ()
  		{
- 			if (handle == IntPtr.Zero)
+-			if (handle == IntPtr.Zero)
++			if (disposed)
  				throw new ObjectDisposedException ("Object has already been disposed");
  		}
  
@@ -416,7 +443,7 @@ index 6f7730e..7b750c7 100644
  
  		public void MarkDirty ()
  		{
-@@ -166,62 +459,76 @@ namespace Cairo
+@@ -166,62 +481,77 @@ namespace Cairo
  			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
  		}
  
@@ -424,9 +451,10 @@ index 6f7730e..7b750c7 100644
  			get {
 -				return handle;
 +				lock (recordingSync) {
-+					if (handle == IntPtr.Zero) return IntPtr.Zero;
++					if (disposed) return IntPtr.Zero;
 +					EnsureRecordingOwnerThread ();
 +					MaterializeRecorder (IntPtr.Zero, "Handle", "Surface");
++					EnsureNativeHandle ();
 +					handleExposed = true;
 +					return handle;
 +				}
