@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..d54057e 100644
+index 6f7730e..7b750c7 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,10 +32,12 @@
+@@ -32,35 +32,284 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -15,12 +15,12 @@ index 6f7730e..d54057e 100644
  
  namespace Cairo
  {
-@@ -43,10 +45,19 @@ namespace Cairo
+ 
      public class Surface : IDisposable
  	{
  
  		IntPtr handle = IntPtr.Zero;
- 		bool owner;
+-		bool owner;
 +		bool handleExposed;
 +		bool recordingCandidate;
 +		SurfaceRecorder recorder;
@@ -35,7 +35,10 @@ index 6f7730e..d54057e 100644
  		{
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
-@@ -57,10 +68,250 @@ namespace Cairo
+ 
+-			this.owner = owner;
+ 			this.handle = handle;
+ 			if (!owner)
  				NativeMethods.cairo_surface_reference (handle);
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
@@ -286,7 +289,7 @@ index 6f7730e..d54057e 100644
  			SurfaceType st = NativeMethods.cairo_surface_get_type (surface);
  			switch (st) {
  			case SurfaceType.Image:
-@@ -87,17 +338,43 @@ namespace Cairo
+@@ -87,72 +336,116 @@ namespace Cairo
  		}
  
  
@@ -331,7 +334,11 @@ index 6f7730e..d54057e 100644
  
  			return new Cairo.Surface (p, true);
  		}
-@@ -108,10 +385,11 @@ namespace Cairo
+ 
+ 		~Surface ()
+ 		{
+-			if (owner) Dispose (false);
++			Dispose (false);
  		}
  
  		//[Obsolete ("Use Context.SetSource() followed by Context.Paint()")]
@@ -343,8 +350,14 @@ index 6f7730e..d54057e 100644
  		}
  
  		public void Dispose ()
-@@ -123,36 +401,56 @@ namespace Cairo
- 			}
+ 		{
+-			if (owner)
+-			{
+-				Dispose(true);
+-				GC.SuppressFinalize(this);
+-			}
++			Dispose(true);
++			GC.SuppressFinalize(this);
  		}
  
  		protected virtual void Dispose (bool disposing)
@@ -403,7 +416,7 @@ index 6f7730e..d54057e 100644
  
  		public void MarkDirty ()
  		{
-@@ -166,62 +464,76 @@ namespace Cairo
+@@ -166,62 +459,76 @@ namespace Cairo
  			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
  		}
  
