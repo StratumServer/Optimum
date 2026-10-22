@@ -159,11 +159,13 @@ public sealed class GamePatcherTests
             string gameDir = Path.Combine(root, "game");
             Directory.CreateDirectory(gameDir);
             Directory.CreateDirectory(Path.Combine(gameDir, "Mods"));
+            Directory.CreateDirectory(Path.Combine(gameDir, "Lib"));
             Directory.CreateDirectory(Path.Combine(gameDir, "assets", "game", "shaders"));
             Directory.CreateDirectory(Path.Combine(gameDir, "assets", "game", "lang"));
 
             File.WriteAllText(Path.Combine(gameDir, "VintagestoryLib.dll"), "vanilla-lib");
             File.WriteAllText(Path.Combine(gameDir, "VintagestoryAPI.dll"), "vanilla-api");
+            File.WriteAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll"), "vanilla-cairo");
             File.WriteAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll"), "vanilla-essentials");
             File.WriteAllText(Path.Combine(gameDir, "run.sh"), "#!/bin/sh\n./Optimum\n");
 
@@ -175,6 +177,7 @@ public sealed class GamePatcherTests
 
             File.WriteAllText(Path.Combine(donorsDir, "VintagestoryLib.Donor.dll"), "donor-lib");
             File.WriteAllText(Path.Combine(donorsDir, "VintagestoryAPI.Contracts.dll"), "donor-api");
+            File.WriteAllText(Path.Combine(donorsDir, "cairo-sharp.dll"), "candidate-cairo");
             File.WriteAllText(Path.Combine(donorsDir, "VSEssentials.Donor.dll"), "donor-essentials");
             File.WriteAllText(Path.Combine(overlayDir, "Optimum.Api.Contracts.dll"), "contracts-dll");
             File.WriteAllText(Path.Combine(overlayDir, "Optimum.GameContent.dll"), "game-content-dll");
@@ -215,6 +218,7 @@ public sealed class GamePatcherTests
             Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, ".optimum", "vanilla", "VintagestoryLib.vanilla.dll")).Trim());
             Assert.True(File.Exists(Path.Combine(gameDir, ".optimum", "vanilla", "VintagestoryAPI.vanilla.dll")));
             Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, ".optimum", "vanilla", "VintagestoryAPI.vanilla.dll")).Trim());
+            Assert.Equal("vanilla-cairo", File.ReadAllText(Path.Combine(gameDir, ".optimum", "vanilla", "Lib", "cairo-sharp.dll")).Trim());
             Assert.True(File.Exists(Path.Combine(gameDir, ".optimum", "vanilla", "Mods", "VSEssentials.dll")));
 
             // Verify patched DLLs were written
@@ -224,6 +228,7 @@ public sealed class GamePatcherTests
 
             // Verify overlay assets deployed
             Assert.True(File.Exists(Path.Combine(gameDir, "Optimum.Api.Contracts.dll")));
+            Assert.Equal("candidate-cairo", File.ReadAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll")).Trim());
             Assert.Equal("game-content-dll", File.ReadAllText(Path.Combine(gameDir, "Optimum.GameContent.dll")));
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "shaders", "optimum.vsh")));
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
@@ -241,6 +246,7 @@ public sealed class GamePatcherTests
             Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
             Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
             Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.Equal("vanilla-cairo", File.ReadAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll")).Trim());
             Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.GameContent.dll")));
 
             // An existing assembly is restored instead of being removed on rollback.
@@ -251,6 +257,16 @@ public sealed class GamePatcherTests
             var existingAssetRollback = await patcher.PatchAsync(new PatchRequest(gameDir, Rollback: true));
             Assert.True(existingAssetRollback.Ok, existingAssetRollback.Message);
             Assert.Equal("existing-game-content", File.ReadAllText(Path.Combine(gameDir, "Optimum.GameContent.dll")));
+
+            // If the original game has no Cairo wrapper, rollback removes the
+            // candidate installed to satisfy the patched API's runtime helper.
+            File.Delete(Path.Combine(gameDir, "Lib", "cairo-sharp.dll"));
+            var absentCairoPatch = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.True(absentCairoPatch.Ok, absentCairoPatch.Message);
+            Assert.Equal("candidate-cairo", File.ReadAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll")).Trim());
+            var absentCairoRollback = await patcher.PatchAsync(new PatchRequest(gameDir, Rollback: true));
+            Assert.True(absentCairoRollback.Ok, absentCairoRollback.Message);
+            Assert.False(File.Exists(Path.Combine(gameDir, "Lib", "cairo-sharp.dll")));
         }
         finally
         {

@@ -162,6 +162,7 @@ cp -f "$MOD_OUT/Optimum.GameContent.dll" "$APP_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$APP_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$APP_DIR/Mods/"
+cp -f "$MOD_OUT/cairo-sharp.dll" "$APP_DIR/Lib/"
 
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
@@ -177,10 +178,8 @@ cp -f "$MOD_OUT/VSSurvivalMod.dll" "$DONOR_DIR/VSSurvivalMod.Donor.dll"
 # Vanilla mods as baseline for mod patching.
 cp -f "$BASE_APP/Mods/VSEssentials.dll" "$VANILLA_MOD_DIR/"
 cp -f "$BASE_APP/Mods/VSSurvivalMod.dll" "$VANILLA_MOD_DIR/"
-# cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches, so
-# rebuilding it only introduces a different compiler/SDK's codegen with no behavior change (see
-# docs/bugs/linux-font-hinting-review-2026-07-14.md). Leave the pristine vanilla copy already
-# staged above in place so text rendering matches upstream exactly.
+# The Cairo wrapper is rebuilt with Optimum's Skia recorder. Keep the macOS shell package aligned
+# with the PowerShell package and ship the patched assembly required by the recorder.
 
 # 5b. Overlay optimized shaders.
 SHADER_SRC="$REPO_ROOT/sources/shaders"
