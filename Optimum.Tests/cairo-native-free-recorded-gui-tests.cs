@@ -35,4 +35,29 @@ public sealed class CairoNativeFreeRecordedGuiTests
             Surface.ConfigureAutomaticRecording(automaticRecording);
         }
     }
+
+    [Fact]
+    public void ManagedGuiSurfaceCompositesImageAndPictureOverlaysWithoutCairo()
+    {
+        using var surface = ImageSurface.CreateForRecordedGui(Format.Argb32, 10, 6);
+        using var bitmap = new SKBitmap(new SKImageInfo(2, 2, SKColorType.Bgra8888, SKAlphaType.Premul));
+        bitmap.Erase(SKColors.Lime);
+        Assert.True(surface.RecordImage(bitmap, 1, 1, 2, 2));
+
+        using var pictureRecorder = new SKPictureRecorder();
+        SKCanvas pictureCanvas = pictureRecorder.BeginRecording(SKRect.Create(3, 3));
+        pictureCanvas.Clear(SKColors.Transparent);
+        pictureCanvas.DrawColor(SKColors.Magenta);
+        using SKPicture picture = pictureRecorder.EndRecording();
+        Assert.True(surface.RecordPicture(picture, 5, 1, 3, 3, null,
+            _ => throw new Xunit.Sdk.XunitException("Skia overlay replay invoked the native Cairo callback.")));
+
+        using var target = new SKBitmap(new SKImageInfo(10, 6, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using (var canvas = new SKCanvas(target)) Assert.True(surface.TryDrawRecordedCommands(canvas));
+
+        Assert.Equal(SKColors.Lime, target.GetPixel(1, 1));
+        Assert.Equal(SKColors.Magenta, target.GetPixel(6, 2));
+        Assert.Equal((byte)0, target.GetPixel(0, 0).Alpha);
+        Assert.Equal(SurfaceRecordingState.Sealed, surface.RecordingState);
+    }
 }
