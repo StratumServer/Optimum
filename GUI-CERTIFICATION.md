@@ -163,3 +163,13 @@ make patch-il
 
 A passing unit suite proves certificate rejection, input binding and runtime
 eligibility logic. It does not constitute Intel/NVIDIA/AMD hardware evidence.
+
+## Stage A Intel and NVIDIA certification (2026-10-17)
+
+This record comes from the former `feat/issue-130-recorder-stage-a` branch. It certifies that commit (which allowed Subpixel text to fall back to Cairo), not the head of `feat/issue-130-cairo-to-skiasharp`, and neither vendor has tested this branch yet.
+
+On Optimum commit `8b915e5b72071f590f3a4685f4a71dbe8d6d7def`, the full inventory GUI scenario passed twice in separate processes on each physical adapter. Intel used UHD 620 with Mesa 26.0.8-1ubuntu0.3 and OpenGL 4.6 Core. NVIDIA used GeForce MX150 with driver 580.178.04 and OpenGL 4.3.0. Each run selected `skia-with-subpixel-cairo-fallback`, reported no decision reasons, and passed local launcher certificate validation. All fixture families passed, with no materialization failures. Initial composition recorded 19 Skia successes and 19 allowed Subpixel fallbacks. Ten recompositions recorded 144 successes and 216 allowed fallbacks. Scales 1, 1.5 and 2 recorded 12/30, 108/171 and 109/173 successes/attempts. The three SVG comparisons passed within one channel value. None of the four GUI logs contained a `Cairo.ScaledFont is leaking` warning.
+
+The separate public Pharos SVG diagnostic passed all 14 cases on each adapter using Pharos v0.5.0. Its 12 supported solid SVG calls each used one candidate attempt and success with no fallback; maximum observed channel delta was 17, within the diagnostic's edge policy. Gradient and dashed-stroke cases used exact native output. This diagnostic does not issue a hardware certificate.
+
+The resource fix disposes recorded Cairo scaled fonts and Skia paths when recorded drawing commands are cleared or released. After the fix, bootstrap and patch validation passed with 130 applied patches and no failures; shader validation passed; build completed with zero warnings and errors; IL patching reported 146/146 required methods. Test suites passed: Optimum 986 (34 skipped), Launcher 65 (4 skipped), CLI 24, Bootstrap.Core 156 and Installer 78. The Intel GPU-disabled control also passed the inventory scenario and selected `vanilla`. `make check` could not run because PowerShell (`pwsh`), required by packaging checks, is not installed. No GPU performance gain is claimed by these functional results.
