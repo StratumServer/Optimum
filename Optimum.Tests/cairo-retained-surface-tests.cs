@@ -161,6 +161,26 @@ public sealed class CairoRetainedSurfaceTests
 	}
 
 	[Fact]
+	public void AbortedGpuRenderReopensTheSealedRecordingForReplay()
+	{
+		using var surface = new ImageSurface(Format.Argb32, 8, 8); surface.BeginRecording();
+		using var context = new Context(surface); context.Antialias = Antialias.None;
+		context.SetSourceRGBA(1, 0, 0, 1); context.Paint();
+		Assert.False(surface.AbortGpuRender());
+		using var bitmap = new SKBitmap(8, 8, SKColorType.Bgra8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas(bitmap)) Assert.True(surface.TryDrawRecordedCommands(canvas));
+		Assert.Equal(SurfaceRecordingState.Sealed, surface.RecordingState);
+		Assert.True(surface.AbortGpuRender());
+		Assert.Equal(SurfaceRecordingState.Recording, surface.RecordingState);
+		bitmap.Erase(SKColors.Transparent);
+		using (var canvas = new SKCanvas(bitmap)) Assert.True(surface.TryDrawRecordedCommands(canvas));
+		Assert.Equal(SKColors.Red, bitmap.GetPixel(2, 2));
+		Assert.True(surface.CommitGpuRenderedCommands());
+		Assert.False(surface.AbortGpuRender());
+		Assert.Equal(SurfaceRecordingState.GpuRendered, surface.RecordingState);
+	}
+
+	[Fact]
 	public void ClosingGpuRenderedSurfaceDoesNotReplayPixelsUnlessTheContextIsUsedAgain()
 	{
 		var surface = new ImageSurface(Format.Argb32, 8, 8); var recorder = surface.BeginRecording();

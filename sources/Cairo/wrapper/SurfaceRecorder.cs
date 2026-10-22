@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using SkiaSharp;
 
@@ -30,14 +31,12 @@ namespace Cairo
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
 		string firstMaterializationTrigger;
-		Context shadow;
-		int shadowIndex;
-		Matrix sourceMatrix = new Matrix();
-		readonly Stack<Matrix> savedSources = new Stack<Matrix>();
+		readonly ManagedGraphicsState graphicsState = new ManagedGraphicsState();
+				internal ManagedGraphicsState GraphicsState => graphicsState;
 		readonly List<RecordedResource> resources = new List<RecordedResource>();
 		readonly List<RecordedSurfaceSource> sourceBindings = new List<RecordedSurfaceSource>();
-		RecordedSurfaceSource currentSource;
-		readonly Stack<RecordedSurfaceSource> savedSurfaceSources = new Stack<RecordedSurfaceSource>();
+		Matrix sourceMatrix => graphicsState.SourceMatrix;
+		RecordedSurfaceSource currentSource => graphicsState.SourceBinding;
 		readonly int width, height;
 		internal readonly long Identity = System.Threading.Interlocked.Increment(ref nextIdentity);
 		static long nextIdentity;
@@ -49,52 +48,49 @@ namespace Cairo
 		// Cairo's default antialias mode maps to Skia's antialias-on paint, so helper operations using that default are qualified too.
 		bool antialiasConfigured = true;
 
-		internal Context Shadow {
-			get {
-				surface.EnsureRecordingOwnerThread();
-				var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.Shadow);
-				try {
-					if (shadow == null) { shadow = new Context(NativeMethods.cairo_create(surface.NativeHandleForRecorder), true); profile.CreatedShadow = true; }
-					while (shadowIndex < commands.Count) { commands[shadowIndex++].Replay(shadow, false); profile.ReplayedCommands++; }
-					return shadow;
-				} finally { profile.Dispose(); }
-			}
-		}
-
-		internal bool RecordNative(Action<Context> replay, IDisposable resource = null, Action<Context> shadowReplay = null, bool bindsSource = false, RecordedSurfaceSource sourceBinding = null)
+				internal bool RecordNative(Action<Context> replay, IDisposable resource = null, RecordedSurfaceSource sourceBinding = null, Action<ManagedGraphicsState> stateUpdate = null)
 		{
-			Action<Context> update = shadowReplay ?? replay;
-			if (bindsSource) { var operation = update; update = c => { operation(c); sourceMatrix = c.Matrix; currentSource = sourceBinding; }; }
-			bool added = Add(new Command(replay, update));
+			bool added = Add(new Command(replay));
+			if (added) stateUpdate?.Invoke(graphicsState);
 			if (added && resource != null) resources.Add(new RecordedResource(resource));
 			if (added && sourceBinding != null) sourceBindings.Add(sourceBinding);
 			return added;
 		}
 
-		internal bool RecordDrawing(Action<Context> replay, Action<Context> shadowReplay, bool stroke = false, bool paintAll = false, double alpha = 1)
+		internal bool RecordDrawing(Action<Context> replay, bool stroke = false, bool paintAll = false, double alpha = 1, bool clearsPath = false)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
 			// These Cairo operators are not bounded by source: scaling source
 			// alpha cannot replace their coverage mask. Preserve native replay
 			// until the recorder has an equivalent mask compositor.
-			if (alpha != 1 && Shadow.Operator is Operator.Clear or Operator.Source
+			if (alpha != 1 && graphicsState.Operator is Operator.Clear or Operator.Source
 				or Operator.In or Operator.Out or Operator.DestIn or Operator.DestAtop) return false;
-			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(Shadow, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
-			if (!Add(new Command(c => drawing.Replay(c, replay), shadowReplay, drawing))) { drawing.Dispose(); return false; }
+			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
+			if (!Add(new Command(c => drawing.Replay(c, replay), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
+			if (clearsPath) graphicsState.NewPath();
 			return true;
 		}
 
 		internal bool RecordClip(bool preserve)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
-			var clip = new RecordedGuiClip(Shadow);
+			var clip = new RecordedGuiClip(graphicsState);
 			clips.Add(clip); resources.Add(new RecordedResource(clip));
-			return RecordNative(preserve ? c => c.ClipPreserve() : c => c.Clip());
+			return RecordNative(preserve ? c => c.ClipPreserve() : c => c.Clip(), stateUpdate: preserve ? null : s => s.NewPath());
 		}
 		internal bool RecordResetClip() { clips.Clear(); return RecordNative(c => c.ResetClip()); }
 
-		internal bool RecordText(Context ownerContext, byte[] text, bool pathOnly)
+		/// <summary>cairo_in_clip: whether a user-space point is visible through every recorded clip and inside the surface.</summary>
+		internal bool InClip(double x, double y)
+		{
+		graphicsState.UserToDevice(ref x, ref y);
+		if (x < 0 || y < 0 || x >= width || y >= height) return false;
+		foreach (RecordedGuiClip clip in clips) if (!clip.Path.Contains((float)x, (float)y)) return false;
+		return true;
+		}
+
+		internal bool RecordText(byte[] text, bool pathOnly)
 		{
 			using var textPreparation = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
 			byte[] copy = (byte[])text.Clone();
@@ -103,28 +99,103 @@ namespace Cairo
 			string decoded;
 			try { decoded = new UTF8Encoding(false, true).GetString(copy, 0, length); }
 			catch (DecoderFallbackException exception) { throw new InvalidOperationException("Skia GUI text requires valid UTF-8; refusing Cairo materialization.", exception); }
-			if (pathOnly) return RecordNative(c => c.TextPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, copy));
-			Context context = Shadow;
-			PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
-			using FontOptions options = context.FontOptions;
-			SKFont font = CreateSkiaFont(ownerContext, options.Antialias);
+			if (pathOnly) {
+			bool appended = RecordNative(c => c.TextPath(copy), stateUpdate: s => SkiaTextPath.AppendText(s, decoded));
+			return appended;
+			}
+			graphicsState.TryGetCurrentPoint(out double pointX, out double pointY);
+			PointD point = new PointD(pointX, pointY);
+			using FontOptions options = graphicsState.GetFontOptions();
+			SKFont font = SkiaGuiFont.Create(graphicsState, options);
+			SKRect? textInkClip = options.Antialias == Antialias.Subpixel
+			? GetTextInkClip(font, options, decoded, point)
+			: null;
 			float advance;
-			using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
-				advance = font.MeasureText(decoded);
-			var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
-				sourceSnapshot: currentSource?.Capture(), text: decoded, textFont: font, textX: (float)point.X, textY: (float)point.Y);
-			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), c => c.MoveTo(point.X + advance, point.Y), drawing))) { drawing.Dispose(); return false; }
+			RecordedGuiDrawing drawing;
+			if (OperatingSystem.IsLinux() && options.HintStyle == HintStyle.Default &&
+				font.Hinting == SKFontHinting.Slight && decoded.Length > 0 && !ContainsSurrogate(decoded)) {
+				// FreeType's LIGHT target changes raster coverage but uses linear
+				// advances. Keep the existing Normal-hinted Skia advances for string
+				// placement while using Fontconfig's target for the glyph masks.
+				SKTextBlob blob = null;
+				try {
+					using var advanceFont = new SKFont(font.Typeface, font.Size) {
+						Edging = font.Edging,
+						Hinting = SKFontHinting.Normal,
+						LinearMetrics = false,
+						Subpixel = false
+					};
+					using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
+						advance = advanceFont.MeasureText(decoded);
+					var glyphs = new ushort[decoded.Length];
+					font.GetGlyphs(decoded, glyphs);
+					int glyphCount = glyphs.Length;
+					var widths = new float[glyphCount];
+					var bounds = new SKRect[glyphCount];
+					advanceFont.GetGlyphWidths(glyphs, widths, bounds);
+					var positions = new SKPoint[glyphCount];
+					float x = 0;
+					for (int i = 0; i < glyphCount; i++) {
+						positions[i] = new SKPoint(x, 0);
+						x += widths[i];
+					}
+					font.Subpixel = true;
+					using var blobBuilder = new SKTextBlobBuilder();
+					blobBuilder.AddPositionedRun(glyphs, font, positions);
+					blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to build a Fontconfig-hinted text run.");
+					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)point.X, textY: (float)point.Y,
+						textInkClip: textInkClip);
+					blob = null;
+				} finally { blob?.Dispose(); font.Dispose(); }
+			} else {
+				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
+					advance = font.MeasureText(decoded);
+				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+						sourceSnapshot: currentSource?.Capture(), text: decoded, textFont: font, textX: (float)point.X, textY: (float)point.Y,
+						textInkClip: textInkClip);
+			}
+			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
+			graphicsState.MoveTo(point.X + advance, point.Y);
 			return true;
 		}
 
-		internal bool RecordGlyphs(Context ownerContext, Glyph[] glyphs, bool pathOnly)
+		SKRect? GetTextInkClip(SKFont font, FontOptions options, string text, PointD point)
+		{
+		Matrix matrix = graphicsState.Matrix;
+		if (matrix.Xy != 0 || matrix.Yx != 0 || matrix.Xx <= 0 || matrix.Yy <= 0) return null;
+		TextExtents extents = SkiaTextMetrics.TextExtents(font, options, text);
+			if (extents.Width <= 0 || extents.Height <= 0) return null;
+			double left = matrix.Xx * (point.X + extents.XBearing) + matrix.X0;
+			double top = matrix.Yy * (point.Y + extents.YBearing) + matrix.Y0;
+			double right = matrix.Xx * (point.X + extents.XBearing + extents.Width) + matrix.X0;
+			double bottom = matrix.Yy * (point.Y + extents.YBearing + extents.Height) + matrix.Y0;
+			// Cairo clips LCD fringes to the run's ink bounds only when the run is
+			// clipped by the surface. Applying this to interior text changes its
+			// coverage, so keep the correction conditional on an actual edge clip.
+			if (left >= 0 && top >= 0 && right <= width && bottom <= height) return null;
+			float clipLeft = (float)Math.Ceiling(left);
+			float clipTop = (float)Math.Ceiling(top);
+			float clipRight = (float)Math.Floor(right);
+			float clipBottom = (float)Math.Floor(bottom);
+			return clipRight > clipLeft && clipBottom > clipTop
+				? new SKRect(clipLeft, clipTop, clipRight, clipBottom)
+				: null;
+		}
+
+		static bool ContainsSurrogate(string text)
+		{
+			foreach (char value in text) if (char.IsSurrogate(value)) return true;
+			return false;
+		}
+
+		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly)
 		{
 			Glyph[] copy = (Glyph[])glyphs.Clone();
-			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), shadowReplay: c => RecordedPreparationCache.AppendTextPath(c, null, copy));
-			Context context = Shadow;
-			using FontOptions options = context.FontOptions;
-			using SKFont font = CreateSkiaFont(ownerContext, options.Antialias);
+			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), stateUpdate: s => SkiaTextPath.AppendGlyphs(s, copy));
+			using FontOptions options = graphicsState.GetFontOptions();
+			using SKFont font = SkiaGuiFont.Create(graphicsState, options);
 			var glyphIndices = new ushort[copy.Length];
 			var positions = new SKPoint[copy.Length];
 			for (int i = 0; i < copy.Length; i++) {
@@ -136,38 +207,20 @@ namespace Cairo
 			using var blobBuilder = new SKTextBlobBuilder();
 			blobBuilder.AddPositionedRun(glyphIndices, font, positions);
 			SKTextBlob blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to create a positioned glyph run.");
-			var drawing = RecordedGuiDrawing.Capture(context, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+			var drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
 				sourceSnapshot: currentSource?.Capture(), textBlob: blob);
-			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), c => { }, drawing))) { drawing.Dispose(); return false; }
+			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
 			return true;
 		}
 
-		static SKFont CreateSkiaFont(Context context, Antialias antialias)
-		{
-			using var fontSelection = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
-			string family = context.RecordingFontFamily;
-			if (string.IsNullOrWhiteSpace(family))
-				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
-			var weight = context.RecordingFontWeight == FontWeight.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal;
-			var slant = context.RecordingFontSlant == FontSlant.Italic ? SKFontStyleSlant.Italic :
-				context.RecordingFontSlant == FontSlant.Oblique ? SKFontStyleSlant.Oblique : SKFontStyleSlant.Upright;
-			using SKTypeface typeface = SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant)
-				?? throw new InvalidOperationException("Skia could not resolve GUI font family '" + family + "'; Cairo materialization is disabled for recorded text.");
-			return new SKFont(typeface, (float)context.RecordingFontSize) {
-				Edging = antialias == Antialias.Subpixel ? SKFontEdging.SubpixelAntialias :
-					antialias == Antialias.None ? SKFontEdging.Alias : SKFontEdging.Antialias,
-				Subpixel = true
-			};
-		}
-
 		void ClearCommands()
 		{
-			commands.Clear(); shadow?.Dispose(); shadow = null; shadowIndex = 0;
+			commands.Clear();
 			foreach (IDisposable resource in resources) resource.Dispose();
-			resources.Clear(); clips.Clear(); savedClips.Clear(); savedAntialias.Clear(); savedSources.Clear();
+			resources.Clear(); clips.Clear(); savedClips.Clear(); savedAntialias.Clear();
 			foreach (var binding in sourceBindings) binding.Dispose();
-			sourceBindings.Clear(); currentSource = null; savedSurfaceSources.Clear();
+			sourceBindings.Clear();
 		}
 
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; width = NativeMethods.cairo_image_surface_get_width(surface.NativeHandleForMetadata); height = NativeMethods.cairo_image_surface_get_height(surface.NativeHandleForMetadata); }
@@ -210,59 +263,70 @@ namespace Cairo
 			}
 		}
 
+		/// <summary>Returns a recorder sealed for a GPU render that must be discarded (for example after a context reset) to Recording so the display list can be replayed.</summary>
+		internal bool AbortGpuRender() { lock (sync) { if (state != SurfaceRecordingState.Sealed) return false; state = SurfaceRecordingState.Recording; return true; } }
+
 		internal void ResumeRecording() { lock (sync) { if (state == SurfaceRecordingState.GpuRendered) state = SurfaceRecordingState.Recording; } }
 
-		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => RecordNative(c => c.SetSourceRGBA(r, g, b, a), bindsSource: true);
-		internal bool RecordPaint () => RecordDrawing(c => c.Paint(), c => { }, paintAll: true);
+		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => RecordNative(c => c.SetSourceRGBA(r, g, b, a), stateUpdate: s => s.SetSourceRgba(r, g, b, a));
+		internal bool RecordPaint () => RecordDrawing(c => c.Paint(), paintAll: true);
 		internal bool RecordBlur (double range, int edge, int x1, int y1, int x2, int y2, bool full)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
 			var blur = new RecordedBlur (range, edge, x1, y1, x2, y2, full);
-			return Add (new Command (c => blur.ApplyToSurface (NativeMethods.cairo_get_target(c.NativeHandleForRecorder)), c => { }, null, blur));
+			return Add (new Command (c => blur.ApplyToSurface (NativeMethods.cairo_get_target(c.NativeHandleForRecorder)), blur: blur));
 		}
-		internal bool RecordRectangle (double x, double y, double width, double height) => Add (new Command (CommandKind.Rectangle, x, y, width, height));
+		internal bool RecordRectangle (double x, double y, double width, double height)
+		{
+			bool added = Add (new Command (CommandKind.Rectangle, x, y, width, height));
+			if (added) graphicsState.Rectangle (x, y, width, height);
+			return added;
+		}
 		internal bool RecordDemultiplyAlpha() => Add(new Command(c => {
 			IntPtr target = NativeMethods.cairo_get_target(c.NativeHandleForRecorder);
 			NativeMethods.cairo_surface_flush(target);
 			SurfaceTransformDemulAlpha.ApplyToPixels(NativeMethods.cairo_image_surface_get_data(target), width, height);
 			NativeMethods.cairo_surface_mark_dirty(target);
-		}, c => { }, demultiply: true));
+		}, demultiply: true));
 		internal bool RecordImage(SKBitmap bitmap, int x, int y, int width, int height)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
 			var image = new RecordedGuiImage(bitmap, x, y, width, height);
-			if (!Add(new Command(c => image.Replay(NativeMethods.cairo_get_target(c.NativeHandleForRecorder)), c => { }, image: image))) { image.Dispose(); return false; }
+			if (!Add(new Command(c => image.Replay(NativeMethods.cairo_get_target(c.NativeHandleForRecorder)), image: image))) { image.Dispose(); return false; }
 			resources.Add(new RecordedResource(image)); return true;
 		}
 		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder, RecordedPreparationCache.Picture pictureOwner = null)
 		{
 			if (State != SurfaceRecordingState.Recording) return false;
 			var drawing = new RecordedGuiPicture(picture, x, y, width, height, tint, replay, textureColorOrder, pictureOwner?.Retain());
-			if (!Add(new Command(replay, c => { }, picture: drawing))) { drawing.Dispose(); return false; }
+			if (!Add(new Command(replay, picture: drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing)); return true;
 		}
 		internal bool RecordFill ()
 		{
-			return RecordDrawing(c => c.Fill(), c => c.NewPath());
+			return RecordDrawing(c => c.Fill(), clearsPath: true);
 		}
-		internal bool RecordSave () { Antialias antialias = Shadow.Antialias; bool recorded = RecordNative(c => c.Save(), shadowReplay: c => { c.Save(); savedSources.Push((Matrix)sourceMatrix.Clone()); savedSurfaceSources.Push(currentSource); }); if (recorded) { savedClips.Push(clips.ToArray()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
-		internal bool RecordRestore () { if (saveDepth == 0) return false; savedAntialias.Pop(); clips.Clear(); clips.AddRange(savedClips.Pop()); saveDepth--; return RecordNative(c => c.Restore(), shadowReplay: c => { c.Restore(); if (savedSources.Count > 0) sourceMatrix = savedSources.Pop(); if (savedSurfaceSources.Count > 0) currentSource = savedSurfaceSources.Pop(); }); }
+		internal bool RecordSave () { Antialias antialias = graphicsState.Antialias; bool recorded = RecordNative(c => c.Save(), stateUpdate: s => s.Save()); if (recorded) { savedClips.Push(clips.ToArray()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
+		internal bool RecordRestore () { if (saveDepth == 0) return false; savedAntialias.Pop(); clips.Clear(); clips.AddRange(savedClips.Pop()); saveDepth--; return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore()); }
 		internal bool RecordAntialias (Antialias value)
 		{
 			bool recorded = Add (new Command (CommandKind.SetAntialias, (double)value));
+			if (recorded) graphicsState.Antialias = value;
 			if (recorded && value != Antialias.Default) antialiasConfigured = true;
 			return recorded;
 		}
 		internal bool RecordOperator (Operator value)
 		{
 			if (value == Operator.Saturate) return false;
-			return Add (new Command (CommandKind.SetOperator, (double)value));
+			bool recorded = Add (new Command (CommandKind.SetOperator, (double)value));
+			if (recorded) graphicsState.Operator = value;
+			return recorded;
 		}
 
 		internal void FillRectangle (double x, double y, double width, double height, double red, double green, double blue, double alpha)
 		{
 			unqualifiedHelperDrawing |= !antialiasConfigured;
-			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !RecordDrawing(c => c.Fill(), c => c.NewPath()))
+			if (!RecordSetSourceRGBA (red, green, blue, alpha) || !RecordRectangle (x, y, width, height) || !RecordDrawing(c => c.Fill(), clearsPath: true))
 				throw new InvalidOperationException ("Recorder is no longer recording.");
 		}
 
@@ -332,24 +396,24 @@ namespace Cairo
 
 		internal readonly struct Command
 		{
-			internal readonly Action<Context> NativeReplay, ShadowReplay;
+			internal readonly Action<Context> NativeReplay;
 			internal readonly RecordedGuiDrawing Drawing;
 			internal readonly RecordedBlur Blur;
 			internal readonly bool Demultiply;
 			internal readonly RecordedGuiImage Image;
 			internal readonly RecordedGuiPicture Picture;
-			internal Command(Action<Context> replay, Action<Context> shadowReplay, RecordedGuiDrawing drawing = null, RecordedBlur blur = null, bool demultiply = false, RecordedGuiImage image = null, RecordedGuiPicture picture = null) { Kind = CommandKind.Native; A = B = C = D = 0; NativeReplay = replay; ShadowReplay = shadowReplay; Drawing = drawing; Blur = blur; Demultiply = demultiply; Image = image; Picture = picture; }
+			internal Command(Action<Context> replay, RecordedGuiDrawing drawing = null, RecordedBlur blur = null, bool demultiply = false, RecordedGuiImage image = null, RecordedGuiPicture picture = null) { Kind = CommandKind.Native; A = B = C = D = 0; NativeReplay = replay; Drawing = drawing; Blur = blur; Demultiply = demultiply; Image = image; Picture = picture; }
 			internal readonly CommandKind Kind;
 			internal readonly double A, B, C, D;
-			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { Kind = kind; A = a; B = b; C = c; D = d; NativeReplay = ShadowReplay = null; Drawing = null; Blur = null; Demultiply = false; Image = null; Picture = null; }
-			internal void Replay (Context context, bool draw = true)
+			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { Kind = kind; A = a; B = b; C = c; D = d; NativeReplay = null; Drawing = null; Blur = null; Demultiply = false; Image = null; Picture = null; }
+			internal void Replay (Context context)
 			{
 				switch (Kind) {
-				case CommandKind.Native: if (draw) NativeReplay(context); else ShadowReplay(context); break;
+				case CommandKind.Native: NativeReplay(context); break;
 				case CommandKind.SetSourceRGBA: context.SetSourceRGBA (A, B, C, D); break;
-				case CommandKind.Paint: if (draw) context.Paint (); break;
+				case CommandKind.Paint: context.Paint (); break;
 				case CommandKind.Rectangle: context.Rectangle (A, B, C, D); break;
-				case CommandKind.Fill: if (draw) context.Fill (); else context.NewPath(); break;
+				case CommandKind.Fill: context.Fill (); break;
 				case CommandKind.Save: context.Save (); break;
 				case CommandKind.Restore: context.Restore (); break;
 				case CommandKind.SetAntialias: context.Antialias = (Antialias)A; break;
@@ -386,13 +450,64 @@ namespace Cairo
 			try {
 				canvas.Clear (SKColors.Transparent);
 				foreach (SurfaceRecorder.Command command in commands) {
-					command.Drawing?.Draw (canvas, blur);
+					if (command.Drawing != null) command.Drawing.Draw(target, blur, null, width, height);
 					if (command.Blur != null) blur.Apply (command.Blur, target, width, height);
 					if (command.Demultiply) blur.Demultiply(target, width, height);
 					if (command.Image != null) blur.DrawImage(command.Image, target, width, height);
 					if (command.Picture != null) blur.DrawPicture(command.Picture, target, width, height);
 				}
 			} finally { canvas.RestoreToCount (save); }
+		}
+
+		internal void DrawTo (SKSurface target)
+		{
+			if (target == null) throw new ArgumentNullException(nameof(target));
+			SKRuntimeEffect lcdEffect = null;
+			try {
+				bool hasBlur = false;
+				foreach (SurfaceRecorder.Command command in commands) hasBlur |= command.Blur != null || command.Demultiply || command.Image != null || command.Picture != null;
+				SKCanvas canvas = target.Canvas;
+				int save = canvas.Save();
+				try {
+					canvas.Clear(SKColors.Transparent);
+					if (!hasBlur) {
+						foreach (SurfaceRecorder.Command command in commands) {
+							if (command.Drawing != null && command.Drawing.CanUseLcdCompositor) {
+								lcdEffect ??= CreateLcdTextEffect();
+								command.Drawing.Draw(target, null, lcdEffect, width, height);
+							} else command.Drawing?.Draw(canvas);
+						}
+						return;
+					}
+					SKRuntimeEffect overlayEffect = null;
+					try {
+						using (var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul)))
+						using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+						using (var rasterSurface = SKSurface.Create(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, properties)) {
+							if (rasterSurface == null) throw new InvalidOperationException("Skia could not create a software GUI surface with pixel geometry.");
+							SKCanvas raster = rasterSurface.Canvas;
+							raster.Clear(SKColors.Transparent);
+							foreach (SurfaceRecorder.Command command in commands) {
+								if (command.Drawing != null && command.Drawing.CanUseLcdCompositor) {
+									lcdEffect ??= CreateLcdTextEffect();
+									command.Drawing.Draw(rasterSurface, null, lcdEffect, width, height);
+								} else command.Drawing?.Draw(raster);
+								if (command.Blur != null) { raster.Flush(); command.Blur.ApplyToPixels(bitmap.GetPixels(), width, height); bitmap.NotifyPixelsChanged(); }
+								if (command.Demultiply) { raster.Flush(); SurfaceTransformDemulAlpha.ApplyToPixels(bitmap.GetPixels(), width, height); bitmap.NotifyPixelsChanged(); }
+								if (command.Image != null) { raster.Flush(); overlayEffect ??= RecordedGpuBlur.CreateImageOverlayEffect("CPU image"); RecordedGpuBlur.DrawImageCpu(command.Image, rasterSurface, width, height, overlayEffect); bitmap.NotifyPixelsChanged(); }
+								if (command.Picture != null) { raster.Flush(); overlayEffect ??= RecordedGpuBlur.CreateImageOverlayEffect("CPU picture"); RecordedGpuBlur.DrawPictureCpu(command.Picture, rasterSurface, width, height, overlayEffect); bitmap.NotifyPixelsChanged(); }
+							}
+							using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) canvas.DrawBitmap(bitmap, 0, 0, paint);
+						}
+					} finally { overlayEffect?.Dispose(); }
+				} finally { canvas.RestoreToCount(save); }
+			} finally { lcdEffect?.Dispose(); }
+		}
+
+		static SKRuntimeEffect CreateLcdTextEffect()
+		{
+			SKRuntimeEffect effect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
+			return effect ?? throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
 		}
 
 		internal void DrawTo (SKCanvas canvas)
@@ -439,4 +554,5 @@ namespace Cairo
 			} finally { canvas.RestoreToCount(save); }
 		}
 	}
+
 }

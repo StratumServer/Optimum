@@ -369,6 +369,67 @@ public sealed class CairoContextRecorderTests
 		Assert.Null (actual.FirstMaterializationTrigger);
 	}
 
+	[Theory]
+	[InlineData (2.0, 2.0)]
+	[InlineData (2.5, 2.0)]
+	[InlineData (3.5, 2.0)]
+	[InlineData (2.0, 2.5)]
+	[InlineData (2.0, 4.5)]
+	[InlineData (2.5, 2.5)]
+	[InlineData (3.5, 4.5)]
+	public void AntialiasNoneMatchesCairoAtPixelCenterTies (double x, double y)
+	{
+		using var actual = new ImageSurface (Format.Argb32, 12, 10);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (1, 1, 1, 1);
+			context.Rectangle (x, y, 4, 3);
+			context.Fill ();
+		}
+		using var expected = new ImageSurface (Format.Argb32, 12, 10);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.None;
+			context.SetSourceRGBA (1, 1, 1, 1);
+			context.Rectangle (x, y, 4, 3);
+			context.Fill ();
+		}
+
+		Assert.Equal (expected.Data, RenderRecorded (actual, 12, 10));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+	}
+
+	[Theory]
+	[InlineData (2.0, 1.25, 1.25, 0.0, 0.0)]
+	[InlineData (2.0, .75, .75, 1.0, 1.0)]
+	public void AntialiasNoneMatchesCairoAtPixelCenterTiesUnderTransform (double scale, double x, double y, double translateX, double translateY)
+	{
+		using var actual = new ImageSurface (Format.Argb32, 16, 14);
+		var recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) {
+			context.Antialias = Antialias.None;
+			context.Translate (translateX, translateY);
+			context.Scale (scale, scale);
+			context.SetSourceRGBA (1, 1, 1, 1);
+			context.Rectangle (x, y, 2, 1.5);
+			context.Fill ();
+		}
+		using var expected = new ImageSurface (Format.Argb32, 16, 14);
+		using (var context = new Context (expected)) {
+			context.Antialias = Antialias.None;
+			context.Translate (translateX, translateY);
+			context.Scale (scale, scale);
+			context.SetSourceRGBA (1, 1, 1, 1);
+			context.Rectangle (x, y, 2, 1.5);
+			context.Fill ();
+		}
+
+		Assert.Equal (expected.Data, RenderRecorded (actual, 16, 14));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+		Assert.Null (actual.FirstMaterializationTrigger);
+	}
+
 	[Fact]
 	public void DefaultAntialiasFillStaysOnSkiaRecorder ()
 	{

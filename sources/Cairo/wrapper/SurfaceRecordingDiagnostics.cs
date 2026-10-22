@@ -12,14 +12,9 @@ namespace Cairo
 		internal static bool Enabled;
 		// Independent of rendering diagnostics: timing is opt-in and retains no UI content.
 		static int profilingEnabled;
-		static long shadowAccesses, shadowTicks, shadowCreations, shadowCommands;
 		static long drawingCaptures, drawingCaptureTicks, pathCopies, pathCopyTicks;
 		static long pathConversions, pathConversionTicks, strokeOutlines, strokeOutlineTicks;
 		internal static bool ProfilingEnabled { get => Volatile.Read(ref profilingEnabled) != 0; set => Volatile.Write(ref profilingEnabled, value ? 1 : 0); }
-		internal static long ShadowAccesses => Interlocked.Read(ref shadowAccesses);
-		internal static long ShadowTicks => Interlocked.Read(ref shadowTicks);
-		internal static long ShadowCreations => Interlocked.Read(ref shadowCreations);
-		internal static long ShadowCommands => Interlocked.Read(ref shadowCommands);
 		internal static long DrawingCaptures => Interlocked.Read(ref drawingCaptures);
 		internal static long DrawingCaptureTicks => Interlocked.Read(ref drawingCaptureTicks);
 		internal static long PathCopies => Interlocked.Read(ref pathCopies);
@@ -28,7 +23,7 @@ namespace Cairo
 		internal static long PathConversionTicks => Interlocked.Read(ref pathConversionTicks);
 		internal static long StrokeOutlines => Interlocked.Read(ref strokeOutlines);
 		internal static long StrokeOutlineTicks => Interlocked.Read(ref strokeOutlineTicks);
-		internal enum ProfileStage { Shadow, DrawingCapture, PathCopy, PathConversion, StrokeOutline, CaptureState, SourceCapture, TextPreparation, TextMeasurement, FontSelection, GpuBlur, GpuReplay, GpuSubmission, SourceShader, SourceFreeze }
+		internal enum ProfileStage { DrawingCapture, PathCopy, PathConversion, StrokeOutline, CaptureState, SourceCapture, TextPreparation, TextMeasurement, FontSelection, GpuBlur, GpuReplay, GpuSubmission, SourceShader, SourceFreeze }
 		const int StageCount = (int)ProfileStage.SourceFreeze + 1;
 		static readonly long[] stageCounts = new long[StageCount], stageTicks = new long[StageCount];
 		internal static IReadOnlyDictionary<string, long> StageDiagnostics {
@@ -48,18 +43,13 @@ namespace Cairo
 		{
 			readonly ProfileStage stage;
 			readonly long start;
-			internal int ReplayedCommands;
-			internal bool CreatedShadow;
-			internal ProfileScope(ProfileStage stage, bool enabled) { this.stage = stage; start = enabled ? Stopwatch.GetTimestamp() : -1; ReplayedCommands = 0; CreatedShadow = false; }
+			internal ProfileScope(ProfileStage stage, bool enabled) { this.stage = stage; start = enabled ? Stopwatch.GetTimestamp() : -1; }
 			public void Dispose()
 			{
 				if (start < 0) return;
 				long ticks = System.Math.Max(0, Stopwatch.GetTimestamp() - start);
 				Interlocked.Increment(ref stageCounts[(int)stage]); Interlocked.Add(ref stageTicks[(int)stage], ticks);
 				switch (stage) {
-				case ProfileStage.Shadow:
-					Interlocked.Increment(ref shadowAccesses); Interlocked.Add(ref shadowTicks, ticks);
-					Interlocked.Add(ref shadowCommands, ReplayedCommands); if (CreatedShadow) Interlocked.Increment(ref shadowCreations); break;
 				case ProfileStage.DrawingCapture: Interlocked.Increment(ref drawingCaptures); Interlocked.Add(ref drawingCaptureTicks, ticks); break;
 				case ProfileStage.PathCopy: Interlocked.Increment(ref pathCopies); Interlocked.Add(ref pathCopyTicks, ticks); break;
 				case ProfileStage.PathConversion: Interlocked.Increment(ref pathConversions); Interlocked.Add(ref pathConversionTicks, ticks); break;
@@ -71,8 +61,6 @@ namespace Cairo
 		internal static void ResetProfiling()
 		{
 			for (int i = 0; i < stageCounts.Length; i++) { Interlocked.Exchange(ref stageCounts[i], 0); Interlocked.Exchange(ref stageTicks[i], 0); }
-			Interlocked.Exchange(ref shadowAccesses, 0); Interlocked.Exchange(ref shadowTicks, 0);
-			Interlocked.Exchange(ref shadowCreations, 0); Interlocked.Exchange(ref shadowCommands, 0);
 			Interlocked.Exchange(ref drawingCaptures, 0); Interlocked.Exchange(ref drawingCaptureTicks, 0);
 			Interlocked.Exchange(ref pathCopies, 0); Interlocked.Exchange(ref pathCopyTicks, 0);
 			Interlocked.Exchange(ref pathConversions, 0); Interlocked.Exchange(ref pathConversionTicks, 0);

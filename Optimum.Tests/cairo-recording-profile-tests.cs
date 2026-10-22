@@ -28,15 +28,11 @@ public sealed class CairoRecordingProfileTests
             Assert.Equal(disabled, enabled);
             Assert.Equal(disabledPoint.X, enabledPoint.X);
             Assert.Equal(disabledPoint.Y, enabledPoint.Y);
-            Assert.Equal(1, SurfaceRecordingDiagnostics.ShadowCreations);
-            Assert.True(SurfaceRecordingDiagnostics.ShadowCommands > 0);
-            Assert.True(SurfaceRecordingDiagnostics.ShadowAccesses > 0);
             Assert.Equal(2, SurfaceRecordingDiagnostics.DrawingCaptures);
             // One clip, one fill and one stroke. Each copies and converts its path once.
             Assert.Equal(3, SurfaceRecordingDiagnostics.PathCopies);
             Assert.Equal(3, SurfaceRecordingDiagnostics.PathConversions);
             Assert.Equal(1, SurfaceRecordingDiagnostics.StrokeOutlines);
-            Assert.True(SurfaceRecordingDiagnostics.ShadowTicks > 0);
             Assert.True(SurfaceRecordingDiagnostics.DrawingCaptureTicks >= SurfaceRecordingDiagnostics.StrokeOutlineTicks);
             Assert.True(SurfaceRecordingDiagnostics.PathCopyTicks >= SurfaceRecordingDiagnostics.PathConversionTicks);
 
@@ -110,8 +106,6 @@ public sealed class CairoRecordingProfileTests
         foreach (long value in SurfaceRecordingDiagnostics.StageDiagnostics.Values)
             Assert.Equal(0, value);
         foreach (long value in new[] {
-            SurfaceRecordingDiagnostics.ShadowAccesses, SurfaceRecordingDiagnostics.ShadowTicks,
-            SurfaceRecordingDiagnostics.ShadowCreations, SurfaceRecordingDiagnostics.ShadowCommands,
             SurfaceRecordingDiagnostics.DrawingCaptures, SurfaceRecordingDiagnostics.DrawingCaptureTicks,
             SurfaceRecordingDiagnostics.PathCopies, SurfaceRecordingDiagnostics.PathCopyTicks,
             SurfaceRecordingDiagnostics.PathConversions, SurfaceRecordingDiagnostics.PathConversionTicks,

@@ -20,6 +20,9 @@ namespace Cairo
 		SKRuntimeEffect demultiplyEffect;
 		SKImage demultiplyTable;
 		SKRuntimeEffect imageOverlayEffect;
+		SKRuntimeEffect lcdTextEffect;
+		SKSurface lcdBlack, lcdWhite;
+		int lcdWidth, lcdHeight;
 		int width, height;
 		internal long PassCount { get; private set; }
 
@@ -273,6 +276,41 @@ float4 main(float2 p) {
 			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
 		}
 
+		internal void DrawLcdText(RecordedGuiDrawing drawing, SKSurface target, int width, int height)
+		{
+			EnsureLcdSurfaces(target, width, height);
+			lcdBlack.Canvas.Clear(SKColors.Black);
+			lcdWhite.Canvas.Clear(SKColors.White);
+			drawing.DrawDirect(lcdBlack.Canvas);
+			drawing.DrawDirect(lcdWhite.Canvas);
+			using SKImage black = lcdBlack.Snapshot();
+			using SKImage white = lcdWhite.Snapshot();
+			using SKImage destination = target.Snapshot();
+			if (lcdTextEffect == null) {
+				lcdTextEffect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
+				if (lcdTextEffect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
+			}
+			RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, black, white, destination, target.Canvas,
+				drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, width, height);
+		}
+
+		void EnsureLcdSurfaces(SKSurface target, int nextWidth, int nextHeight)
+		{
+			if (lcdBlack != null && lcdWidth == nextWidth && lcdHeight == nextHeight) return;
+			lcdBlack?.Dispose(); lcdBlack = null;
+			lcdWhite?.Dispose(); lcdWhite = null;
+			lcdWidth = nextWidth; lcdHeight = nextHeight;
+			var info = new SKImageInfo(nextWidth, nextHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
+			using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
+			lcdBlack = SKSurface.Create(context, true, info, properties);
+			lcdWhite = SKSurface.Create(context, true, info, properties);
+			if (lcdBlack == null || lcdWhite == null) {
+				lcdBlack?.Dispose(); lcdBlack = null;
+				lcdWhite?.Dispose(); lcdWhite = null;
+				throw new InvalidOperationException("Skia could not allocate GPU LCD text surfaces.");
+			}
+		}
+
 		internal static void DrawPass (SKRuntimeEffect effect, SKImage input, SKImage original, SKSurface destination,
 			SKPaint paint, int left, int top, int right, int bottom, int edge, bool horizontalPass, int width, int height)
 		{
@@ -382,6 +420,8 @@ half4 main(float2 p) {
 			demultiplyEffect?.Dispose(); demultiplyEffect = null;
 			demultiplyTable?.Dispose(); demultiplyTable = null;
 			imageOverlayEffect?.Dispose(); imageOverlayEffect = null;
+			lcdTextEffect?.Dispose(); lcdTextEffect = null;
+			lcdBlack?.Dispose(); lcdBlack = null; lcdWhite?.Dispose(); lcdWhite = null;
 			horizontal?.Dispose (); horizontal = null;
 			vertical?.Dispose (); vertical = null;
 			foreach (SKRuntimeEffect effect in effects.Values) effect.Dispose ();

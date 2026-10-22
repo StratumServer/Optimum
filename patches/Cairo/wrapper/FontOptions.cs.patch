@@ -1,0 +1,231 @@
+diff --git a/Cairo/wrapper/FontOptions.cs b/Cairo/wrapper/FontOptions.cs
+index 05e11bc..2f0460d 100644
+--- a/Cairo/wrapper/FontOptions.cs
++++ b/Cairo/wrapper/FontOptions.cs
+@@ -30,37 +30,61 @@ using System;
+ 
+ #nullable disable
+ 
+ namespace Cairo
+ {
++	/// <summary>
++	/// Font rendering options. The values live in managed fields, as in cairo_font_options_t;
++	/// a native object is only created when <see cref="Handle"/> is read by code that hands it to Cairo.
++	/// </summary>
+ 	public class FontOptions : IDisposable
+ 	{
+-		IntPtr handle;
++		Antialias antialias = Antialias.Default;
++		HintMetrics hintMetrics = HintMetrics.Default;
++		HintStyle hintStyle = HintStyle.Default;
++		SubpixelOrder subpixelOrder = SubpixelOrder.Default;
++		bool disposed;
++		IntPtr nativeHandle;
++		bool nativeStale;
+ 
+-		public FontOptions () : this (NativeMethods.cairo_font_options_create ())
++		public FontOptions ()
+ 		{
+ 		}
+ 
+ 		~FontOptions ()
+ 		{
+-			Dispose (true);
++			Dispose (false);
+ 		}
+ 
+ 		internal FontOptions (IntPtr handle)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+ 
+-			this.handle = handle;
+-			if (CairoDebug.Enabled)
+-				CairoDebug.OnAllocated (handle);
++			// Adopt a native object: copy its values and release it.
++			try { LoadFromNative (handle); }
++			finally { NativeMethods.cairo_font_options_destroy (handle); }
++		}
++
++		internal static FontOptions FromValues (Antialias antialias, HintStyle hintStyle, HintMetrics hintMetrics, SubpixelOrder subpixelOrder)
++		{
++			return new FontOptions { antialias = antialias, hintStyle = hintStyle, hintMetrics = hintMetrics, subpixelOrder = subpixelOrder };
++		}
++
++		internal void LoadFromNative (IntPtr native)
++		{
++			antialias = NativeMethods.cairo_font_options_get_antialias (native);
++			hintMetrics = NativeMethods.cairo_font_options_get_hint_metrics (native);
++			hintStyle = NativeMethods.cairo_font_options_get_hint_style (native);
++			subpixelOrder = NativeMethods.cairo_font_options_get_subpixel_order (native);
++			nativeStale = true;
+ 		}
+ 
+ 		public FontOptions Copy ()
+ 		{
+ 			CheckDisposed ();
+-			return new FontOptions (NativeMethods.cairo_font_options_copy (handle));
++			return FromValues (antialias, hintStyle, hintMetrics, subpixelOrder);
+ 		}
+ 
+ 		[Obsolete ("Use Dispose()")]
+ 		public void Destroy ()
+ 		{
+@@ -73,25 +97,22 @@ namespace Cairo
+ 			GC.SuppressFinalize (this);
+ 		}
+ 
+ 		protected virtual void Dispose (bool disposing)
+ 		{
+-			if (!disposing || CairoDebug.Enabled)
+-            {
+-				CairoDebug.OnDisposed<FontOptions>(handle, disposing);
++			if (nativeHandle != IntPtr.Zero) {
++				if (!disposing || CairoDebug.Enabled)
++					CairoDebug.OnDisposed<FontOptions> (nativeHandle, disposing);
++				NativeMethods.cairo_font_options_destroy (nativeHandle);
++				nativeHandle = IntPtr.Zero;
+ 			}
+-
+-			if (handle == IntPtr.Zero)
+-				return;
+-
+-			NativeMethods.cairo_font_options_destroy (handle);
+-			handle = IntPtr.Zero;
++			disposed = true;
+ 		}
+ 
+ 		void CheckDisposed ()
+ 		{
+-			if (handle == IntPtr.Zero)
++			if (disposed)
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
+ 		public static bool operator == (FontOptions options, FontOptions other)
+ 		{
+@@ -108,78 +129,109 @@ namespace Cairo
+ 			return Equals (other as FontOptions);
+ 		}
+ 
+ 		bool Equals (FontOptions options)
+ 		{
+-			return options != null && NativeMethods.cairo_font_options_equal (Handle, options.Handle);
++			return options != null && antialias == options.antialias && hintMetrics == options.hintMetrics
++				&& hintStyle == options.hintStyle && subpixelOrder == options.subpixelOrder;
+ 		}
+ 
++		/// <summary>A native cairo_font_options_t with these values, created on first use and kept in step with later changes.</summary>
+ 		public IntPtr Handle {
+-			get { return handle; }
++			get {
++				if (disposed) return IntPtr.Zero;
++				if (nativeHandle == IntPtr.Zero) {
++					nativeHandle = NativeMethods.cairo_font_options_create ();
++					if (CairoDebug.Enabled) CairoDebug.OnAllocated (nativeHandle);
++					nativeStale = true;
++				}
++				if (nativeStale) {
++					NativeMethods.cairo_font_options_set_antialias (nativeHandle, antialias);
++					NativeMethods.cairo_font_options_set_hint_metrics (nativeHandle, hintMetrics);
++					NativeMethods.cairo_font_options_set_hint_style (nativeHandle, hintStyle);
++					NativeMethods.cairo_font_options_set_subpixel_order (nativeHandle, subpixelOrder);
++					nativeStale = false;
++				}
++				return nativeHandle;
++			}
+ 		}
+ 
+ 		public override int GetHashCode ()
+ 		{
+-			return (int) NativeMethods.cairo_font_options_hash (handle);
++			unchecked {
++				int hash = (int) antialias;
++				hash = hash * 31 + (int) subpixelOrder;
++				hash = hash * 31 + (int) hintStyle;
++				hash = hash * 31 + (int) hintMetrics;
++				return hash;
++			}
+ 		}
+-		
++
+ 		public void Merge (FontOptions other)
+ 		{
+ 			if (other == null)
+ 				throw new ArgumentNullException ("other");
+ 			CheckDisposed ();
+-			NativeMethods.cairo_font_options_merge (handle, other.Handle);
++			// Values left at Default in the other options do not override.
++			if (other.antialias != Antialias.Default) antialias = other.antialias;
++			if (other.subpixelOrder != SubpixelOrder.Default) subpixelOrder = other.subpixelOrder;
++			if (other.hintStyle != HintStyle.Default) hintStyle = other.hintStyle;
++			if (other.hintMetrics != HintMetrics.Default) hintMetrics = other.hintMetrics;
++			nativeStale = true;
+ 		}
+ 
+ 		public Antialias Antialias {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_font_options_get_antialias (handle);
++				return antialias;
+ 			}
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_font_options_set_antialias (handle, value);
++				antialias = value;
++				nativeStale = true;
+ 			}
+ 		}
+ 
+ 		public HintMetrics HintMetrics {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_font_options_get_hint_metrics (handle);
++				return hintMetrics;
+ 			}
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_font_options_set_hint_metrics (handle, value);
++				hintMetrics = value;
++				nativeStale = true;
+ 			}
+ 		}
+ 
+ 		public HintStyle HintStyle {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_font_options_get_hint_style (handle);
++				return hintStyle;
+ 			}
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_font_options_set_hint_style (handle, value);
++				hintStyle = value;
++				nativeStale = true;
+ 			}
+ 		}
+ 
+ 		public Status Status {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_font_options_status (handle);
++				return Status.Success;
+ 			}
+ 		}
+ 
+ 		public SubpixelOrder SubpixelOrder {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_font_options_get_subpixel_order (handle);
++				return subpixelOrder;
+ 			}
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_font_options_set_subpixel_order (handle, value);
++				subpixelOrder = value;
++				nativeStale = true;
+ 			}
+ 		}
+ 	}
+ }
+-

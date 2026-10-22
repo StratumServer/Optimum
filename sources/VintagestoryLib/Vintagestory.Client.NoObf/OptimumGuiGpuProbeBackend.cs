@@ -19,6 +19,43 @@ namespace Vintagestory.Client.NoObf
 		internal static bool ForceSkiaCpuFallbackForTest;
 		internal static bool ForceSkiaCpuPreflightFallbackForTest;
 		private static int attempted;
+		// GL_GUILTY/INNOCENT/UNKNOWN_CONTEXT_RESET. Zero means no simulated reset is pending.
+		// A real driver reports a reset once, so the simulated status is consumed on first read.
+		private static int simulatedContextResetStatusForTest;
+		private static int simulatedContextResetSkipChecksForTest;
+		private static long contextResetCount;
+		private static string lastContextResetReason;
+		// Once a reset is seen the context identity stays untrusted until the engine confirms a new context.
+		private static bool contextResetLatched;
+		private static IntPtr contextResetLatchedHandle;
+		private static IntPtr resetSupportHandle;
+		private static bool resetSupportValue;
+		/// <summary>Number of device/context resets that made GUI rendering fail closed.</summary>
+		public static long ContextResetCount => Interlocked.Read(ref contextResetCount);
+		/// <summary>Reason string of the last observed reset, or null.</summary>
+		public static string LastContextResetReason => Volatile.Read(ref lastContextResetReason);
+		/// <summary>True while a reset is latched against the current context.</summary>
+		public static bool ContextResetLatched => Volatile.Read(ref contextResetLatched);
+		/// <summary>
+		/// Makes a later reset-status read report the given GL status (0x8253 guilty, 0x8254 innocent, 0x8255 unknown).
+		/// <paramref name="skipChecks"/> reset-status reads return no error first, so a test can place the reset after
+		/// the pre-render checks. The status is consumed on delivery, as a driver reports a reset once.
+		/// </summary>
+		internal static void SimulateContextResetForTest(int glStatus = 0x8253, int skipChecks = 0)
+		{
+			Volatile.Write(ref simulatedContextResetSkipChecksForTest, Math.Max(0, skipChecks));
+			Volatile.Write(ref simulatedContextResetStatusForTest, glStatus);
+		}
+		/// <summary>Call after the OpenGL context was destroyed and recreated; clears the reset latch and per-context caches.</summary>
+		public static void AcknowledgeContextRecreated()
+		{
+			Volatile.Write(ref contextResetLatched, false);
+			contextResetLatchedHandle = IntPtr.Zero;
+			resetSupportHandle = IntPtr.Zero;
+			resetSupportValue = false;
+			Volatile.Write(ref simulatedContextResetStatusForTest, 0);
+			Volatile.Write(ref simulatedContextResetSkipChecksForTest, 0);
+		}
 		public static long MaterializationAttemptCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationAttemptCount;
 		public static long MaterializationSuccessCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationSuccessCount;
 		public static long MaterializationFailureCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationFailureCount;
@@ -47,6 +84,8 @@ namespace Vintagestory.Client.NoObf
 						return "Optimum Skia GL probe skipped: caller is not on the context-owning thread.";
 					if (!HasCurrentContext())
 						return "Optimum Skia GL probe skipped: no current GLFW OpenGL context.";
+					if (ContextWasReset(out string probeResetReason))
+						return "Optimum Skia GL probe skipped: " + probeResetReason + "; GUI rendering stays on the recorded display list until a new context is confirmed.";
 					if (!MatchesCertifiedDevice())
 					{
 						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
@@ -123,6 +162,13 @@ namespace Vintagestory.Client.NoObf
 					if (!HasCurrentContext())
 					{
 						failureReason = "missing-current-context";
+						return false;
+					}
+					// A lost or reset context invalidates every GL name and the certification; do not touch GL
+					// and leave the surface in Recording so the display list can be replayed on a new context.
+					if (ContextWasReset(out string resetReason))
+					{
+						failureReason = resetReason;
 						return false;
 					}
 					if (ForceSkiaCpuPreflightFallbackForTest)
@@ -207,8 +253,9 @@ namespace Vintagestory.Client.NoObf
 								if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
 								context.ResetContext(GRGlBackendState.All);
 								var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-							using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
+								using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
+								using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+								using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
 								{
 									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
 								using (var blur = new RecordedGpuBlur(context))
@@ -246,6 +293,15 @@ namespace Vintagestory.Client.NoObf
 							while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
 						}
 						catch (Exception exception) { rendered = false; failureReason = "gl-error-query-exception:" + exception.GetType().Name + ":" + exception.Message; }
+					}
+
+					// A reset during the render leaves undefined pixels: never commit them.
+					if (ContextWasReset(out string renderResetReason))
+					{
+						rendered = false;
+						failureReason = renderResetReason;
+						// The render sealed the recorder; reopen it so the display list can replay on a recreated context.
+						surface.AbortGpuRender();
 					}
 
 					// A failed Ganesh render can still publish this display list without
@@ -293,6 +349,13 @@ namespace Vintagestory.Client.NoObf
 					{
 						GL.GenTextures(1, out texture);
 						UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+						if (ContextWasReset(out string cpuResetReason))
+						{
+							try { GL.DeleteTextures(1, ref texture); } catch { }
+							failureReason = cpuResetReason;
+							surface.AbortGpuRender();
+							return false;
+						}
 						if (!surface.CommitGpuRenderedCommands())
 							throw new InvalidOperationException("Skia CPU output could not commit the GUI display list.");
 						candidateTexture = texture;
@@ -312,12 +375,12 @@ namespace Vintagestory.Client.NoObf
 					int width = Math.Max(1, surface.Width);
 					int height = Math.Max(1, surface.Height);
 					using (var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul)))
-					using (var properties = new SKSurfaceProperties(SKPixelGeometry.BgrHorizontal))
+					using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
 				using (var rasterSurface = SKSurface.Create(bitmap.Info, properties))
 					{
 						if (rasterSurface == null)
 							throw new InvalidOperationException("Skia could not create an LCD-capable software GUI surface.");
-						if (!surface.TryDrawRecordedCommands(rasterSurface.Canvas))
+						if (!surface.TryDrawRecordedCommands(rasterSurface))
 							throw new InvalidOperationException("Skia CPU could not seal the GUI display list: " + (surface.FirstMaterializationTrigger ?? "unknown-seal-rejection"));
 						rasterSurface.Flush(true);
 						if (!rasterSurface.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0))
@@ -358,6 +421,82 @@ namespace Vintagestory.Client.NoObf
 				}
 
 		private static unsafe bool HasCurrentContext() => GLFW.GetCurrentContext() != null;
+
+		private static unsafe IntPtr CurrentContextHandle() => (IntPtr)GLFW.GetCurrentContext();
+
+		/// <summary>
+		/// Checks glGetGraphicsResetStatus (OpenGL 4.5 or ARB/KHR_robustness) and the reset latch. On a reset it revokes the
+		/// GUI GPU certification and reports a "context-reset" reason; the caller must fail closed without GL or Cairo work.
+		/// </summary>
+		private static bool ContextWasReset(out string reason)
+		{
+			reason = null;
+			IntPtr handle = CurrentContextHandle();
+			if (contextResetLatched)
+			{
+				if (handle == contextResetLatchedHandle)
+				{
+					reason = "context-reset:latched:" + (Volatile.Read(ref lastContextResetReason) ?? "unknown");
+					return true;
+				}
+				// A different native context handle is a new context; the old status no longer applies.
+				AcknowledgeContextRecreated();
+			}
+			int status = ReadGraphicsResetStatus(handle);
+			if (status == 0) return false;
+			string name = status == 0x8253 ? "guilty" : status == 0x8254 ? "innocent" : status == 0x8255 ? "unknown" : "status-0x" + status.ToString("X");
+			reason = "context-reset:" + name;
+			Volatile.Write(ref lastContextResetReason, name);
+			Interlocked.Increment(ref contextResetCount);
+			contextResetLatchedHandle = handle;
+			Volatile.Write(ref contextResetLatched, true);
+			Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
+			return true;
+		}
+
+		private static int ReadGraphicsResetStatus(IntPtr handle)
+		{
+			if (Volatile.Read(ref simulatedContextResetStatusForTest) != 0)
+			{
+				if (simulatedContextResetSkipChecksForTest > 0)
+				{
+					simulatedContextResetSkipChecksForTest--;
+					return 0;
+				}
+				return Interlocked.Exchange(ref simulatedContextResetStatusForTest, 0);
+			}
+			if (!SupportsGraphicsResetStatus(handle)) return 0;
+			try { return (int)GL.GetGraphicsResetStatus(); }
+			catch { return 0; }
+		}
+
+		private static bool SupportsGraphicsResetStatus(IntPtr handle)
+		{
+			if (resetSupportHandle == handle && handle != IntPtr.Zero) return resetSupportValue;
+			bool supported = false;
+			try
+			{
+				if (IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
+				{
+					GL.GetInteger(GetPName.MajorVersion, out int major);
+					GL.GetInteger(GetPName.MinorVersion, out int minor);
+					supported = major > 4 || (major == 4 && minor >= 5);
+					if (!supported)
+					{
+						GL.GetInteger(GetPName.NumExtensions, out int count);
+						for (int i = 0; i < count && !supported; i++)
+						{
+							string extension = GL.GetString(StringNameIndexed.Extensions, i);
+							supported = extension == "GL_ARB_robustness" || extension == "GL_KHR_robustness";
+						}
+					}
+				}
+			}
+			catch { supported = false; }
+			resetSupportHandle = handle;
+			resetSupportValue = supported;
+			return supported;
+		}
 
 		private static bool MatchesCertifiedDevice()
 		{

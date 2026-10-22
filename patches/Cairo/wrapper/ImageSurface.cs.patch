@@ -1,8 +1,10 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..efbc817 100644
+index 8014c9e..a29d845 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -46,10 +46,18 @@ namespace Cairo {
+@@ -44,14 +44,22 @@ namespace Cairo {
+ 		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
  		}
          
  		public ImageSurface (Format format, int width, int height)
@@ -22,7 +24,11 @@ index 8014c9e..efbc817 100644
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
  			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
  		{
-@@ -77,19 +82,20 @@ namespace Cairo {
+ 		}
+ 
+@@ -75,23 +83,24 @@ namespace Cairo {
+ 
+ 
          public int Width {
  			get {
  				CheckDisposed ();
@@ -46,7 +52,11 @@ index 8014c9e..efbc817 100644
                  if (ptr == IntPtr.Zero) return null;
  				int length = Height * Stride;
  				byte[] data = new byte[length];
-@@ -101,21 +107,22 @@ namespace Cairo {
+ 				Marshal.Copy (ptr, data, 0, length);
+ 				return data;
+@@ -99,24 +108,25 @@ namespace Cairo {
+ 		}
+ 
  		public IntPtr DataPtr {
  			get {
  				CheckDisposed ();
@@ -72,3 +82,4 @@ index 8014c9e..efbc817 100644
  			}
  		}
  	}
+ }

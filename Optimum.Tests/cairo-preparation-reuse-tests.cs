@@ -30,7 +30,6 @@ public sealed class CairoPreparationReuseTests : IDisposable
         Assert.Equal(expectedPoint.X, coldPoint.X); Assert.Equal(expectedPoint.Y, coldPoint.Y);
         Assert.Equal(expectedPoint.X, warmPoint.X); Assert.Equal(expectedPoint.Y, warmPoint.Y);
         Assert.True(RecordedPreparationCache.Hits > hits);
-        Assert.True(RecordedPreparationCache.TextHits > 0);
         Assert.True(RecordedPreparationCache.PathHits > 0);
         Assert.True(RecordedPreparationCache.StrokeHits > 0);
     }
@@ -55,128 +54,6 @@ public sealed class CairoPreparationReuseTests : IDisposable
         byte[] expected = Draw(1.5, variant, out var expectedPoint);
         Assert.Equal(expected, reused);
         Assert.Equal(expectedPoint.X, reusedPoint.X); Assert.Equal(expectedPoint.Y, reusedPoint.Y);
-    }
-
-    [Fact]
-    public void TextPathAppendPreservesNativePathAndCurrentPoint()
-    {
-        foreach (double scale in new[] { 1.0, 1.5, 2.0 })
-        {
-            using var surface = new ImageSurface(Format.Argb32, 96, 48);
-            using var context = new Context(surface);
-            context.Scale(scale, scale); context.Rotate(.21); context.SelectFontFace("DejaVu Sans", FontSlant.Normal, FontWeight.Normal); context.SetFontSize(11);
-            context.Rectangle(1, 2, 3, 4); context.MoveTo(5, 18);
-            using var old = context.CopyPath();
-            context.TextPath("cache Á中");
-            using var expectedPath = RecordedGuiDrawing.CopyPath(context);
-            PointD expectedPoint = context.CurrentPoint;
-            foreach (int iteration in Enumerable.Range(0, 2))
-            {
-                context.NewPath(); context.AppendPath(old);
-                RecordedPreparationCache.AppendTextPath(context, Encoding.UTF8.GetBytes("cache Á中\0"));
-                using var actual = RecordedGuiDrawing.CopyPath(context);
-                Assert.Equal(expectedPath.Points, actual.Points);
-                Assert.Equal(expectedPath.VerbCount, actual.VerbCount);
-                Assert.Equal(expectedPoint.X, context.CurrentPoint.X); Assert.Equal(expectedPoint.Y, context.CurrentPoint.Y);
-            }
-        }
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void EmptyTextPathPreservesSubpathAndCurrentPoint(bool hasPath)
-    {
-        using var surface = new ImageSurface(Format.Argb32, 32, 32);
-        using var context = new Context(surface);
-        if (hasPath) { context.MoveTo(2, 2); context.LineTo(20, 2); }
-        using var expected = context.CopyPath();
-        bool expectedHasPoint = context.HasCurrentPoint;
-        foreach (byte[] text in new[] { Array.Empty<byte>(), new byte[] { 0 }, new byte[] { 0, 65, 0 } })
-        {
-            RecordedPreparationCache.AppendTextPath(context, text);
-            using var actual = RecordedGuiDrawing.CopyPath(context);
-            using var originalPath = RecordedGuiDrawing.CopyPath(expected.Handle);
-            Assert.Equal(originalPath.VerbCount, actual.VerbCount);
-            Assert.Equal(originalPath.Points, actual.Points);
-            Assert.Equal(expectedHasPoint, context.HasCurrentPoint);
-        }
-        Assert.Equal(0, RecordedPreparationCache.TextHits);
-    }
-
-    [Fact]
-    public void GlyphPathsAndExplicitFontMatricesPreserveNativeGeometry()
-    {
-        using var surface = new ImageSurface(Format.Argb32, 96, 48);
-        using var context = new Context(surface);
-        context.SelectFontFace("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
-        context.FontMatrix = new Matrix(13, 1, 2, 15, 0, 0);
-        foreach (Glyph[] glyphs in new[] { Array.Empty<Glyph>(), new[] { new Glyph(36, 3, 20), new Glyph(37, 18, 20) } })
-        {
-            context.NewPath(); context.MoveTo(1, 1); context.LineTo(2, 2);
-            using var old = context.CopyPath();
-            context.GlyphPath(glyphs);
-            using var expected = RecordedGuiDrawing.CopyPath(context);
-            var point = context.CurrentPoint;
-            for (int iteration = 0; iteration < 2; iteration++)
-            {
-                context.NewPath(); context.AppendPath(old);
-                RecordedPreparationCache.AppendTextPath(context, null, glyphs);
-                using var actual = RecordedGuiDrawing.CopyPath(context);
-                Assert.Equal(expected.VerbCount, actual.VerbCount);
-                Assert.Equal(expected.Points, actual.Points);
-                Assert.Equal(point.X, context.CurrentPoint.X); Assert.Equal(point.Y, context.CurrentPoint.Y);
-            }
-        }
-        Assert.True(RecordedPreparationCache.TextHits > 0);
-    }
-
-    [Fact]
-    public void MalformedUtf8TextPathPreservesNativeBehaviorWithoutPreparationException()
-    {
-        byte[] invalid = { 0xff, 0 };
-        using var expectedSurface = new ImageSurface(Format.Argb32, 16, 16);
-        using var expected = new Context(expectedSurface);
-        expected.TextPath(invalid);
-        using var actualSurface = new ImageSurface(Format.Argb32, 16, 16);
-        using var actual = new Context(actualSurface);
-        RecordedPreparationCache.AppendTextPath(actual, invalid);
-        Assert.Equal(expected.HasCurrentPoint, actual.HasCurrentPoint);
-        Assert.Equal(expected.Status, actual.Status);
-        Assert.Equal(0, RecordedPreparationCache.Count);
-    }
-
-    [Fact]
-    public void NativeErrorStatesBypassPreparation()
-    {
-        using var surface = new ImageSurface(Format.Argb32, 16, 16);
-        using var context = new Context(surface);
-        context.Restore(); // Native invalid-restore error must remain authoritative.
-        Assert.Null(RecordedPreparationCache.PrepareText(context, Encoding.UTF8.GetBytes("text\0")));
-        Assert.Equal(Status.InvalidRestore, context.Status);
-        Assert.Equal(0, RecordedPreparationCache.Count);
-    }
-
-    [Fact]
-    public void CachedNativeTextAndSvgSurviveEvictionWithLiveConsumers()
-    {
-        using var surface = new ImageSurface(Format.Argb32, 96, 48);
-        using var context = new Context(surface);
-        context.SetFontSize(12); context.MoveTo(2, 20);
-        using var text = RecordedPreparationCache.PrepareText(context, Encoding.UTF8.GetBytes("retained\0"));
-        using var picture = RecordedSvgGeometry.Acquire(Svg("red"), 32, 32, 32, 32);
-        Assert.NotNull(text);
-        for (int i = 0; i < RecordedPreparationCache.MaxEntries + 1; i++)
-        {
-            using var resource = new RecordedPreparationCache.Geometry(new SKPath());
-            RecordedPreparationCache.Store(new RecordedPreparationCache.Key(3, new long[] { i }), resource);
-        }
-        Assert.True(RecordedPreparationCache.Evictions >= 2);
-        context.AppendPath(text.NativePath); context.SetSourceRGBA(1, 1, 1, 1); context.Fill();
-        using var bitmap = new SKBitmap(32, 32);
-        using (var canvas = new SKCanvas(bitmap)) canvas.DrawPicture(picture.Value);
-        Assert.Equal(SKColors.Red, bitmap.GetPixel(8, 8));
-        Assert.Contains(surface.Data, b => b != 0);
     }
 
     [Fact]

@@ -18,18 +18,17 @@ namespace Cairo
         static readonly object sync = new object();
         static readonly Dictionary<Key, Entry> entries = new Dictionary<Key, Entry>();
         static readonly LinkedList<Key> order = new LinkedList<Key>();
-        static long bytes, hits, misses, evictions, textHits, pathHits, strokeHits, pictureHits;
+        static long bytes, hits, misses, evictions, pathHits, strokeHits, pictureHits;
         internal static bool Enabled { get => Volatile.Read(ref enabled) != 0; set => Volatile.Write(ref enabled, value ? 1 : 0); }
         internal static long Hits => Interlocked.Read(ref hits);
         internal static long Misses => Interlocked.Read(ref misses);
         internal static long Evictions => Interlocked.Read(ref evictions);
-        internal static long TextHits => Interlocked.Read(ref textHits);
         internal static long PathHits => Interlocked.Read(ref pathHits);
         internal static long StrokeHits => Interlocked.Read(ref strokeHits);
         internal static long PictureHits => Interlocked.Read(ref pictureHits);
         internal static long Bytes { get { lock (sync) return bytes; } }
         internal static long Count { get { lock (sync) return entries.Count; } }
-        internal static void ResetCounters() { Interlocked.Exchange(ref hits, 0); Interlocked.Exchange(ref misses, 0); Interlocked.Exchange(ref evictions, 0); Interlocked.Exchange(ref textHits, 0); Interlocked.Exchange(ref pathHits, 0); Interlocked.Exchange(ref strokeHits, 0); Interlocked.Exchange(ref pictureHits, 0); }
+        internal static void ResetCounters() { Interlocked.Exchange(ref hits, 0); Interlocked.Exchange(ref misses, 0); Interlocked.Exchange(ref evictions, 0); Interlocked.Exchange(ref pathHits, 0); Interlocked.Exchange(ref strokeHits, 0); Interlocked.Exchange(ref pictureHits, 0); }
         internal static void Clear()
         {
             lock (sync) { foreach (var entry in entries.Values) entry.Resource.Dispose(); entries.Clear(); order.Clear(); bytes = 0; }
@@ -81,17 +80,6 @@ namespace Cairo
             internal override long Bytes => PathBytes(Path);
             protected override void Release() => Path.Dispose();
         }
-        internal sealed class Text : Resource
-        {
-            internal readonly Path NativePath;
-            internal readonly SKPath Outline;
-            internal readonly TextExtents Extents;
-            readonly ScaledFont font;
-            readonly long nativeBytes;
-            internal Text(Path path, SKPath outline, TextExtents extents, ScaledFont font, long nativeBytes) { NativePath = path; Outline = outline; Extents = extents; this.font = font; this.nativeBytes = nativeBytes; }
-            internal override long Bytes => PathBytes(Outline) + nativeBytes + 1024;
-            protected override void Release() { NativePath.Dispose(); Outline.Dispose(); font.Dispose(); }
-        }
         internal sealed class Picture : Resource
         {
             internal readonly SKPicture Value;
@@ -106,8 +94,7 @@ namespace Cairo
             lock (sync) {
                 if (entries.TryGetValue(key, out Entry entry)) {
                     order.Remove(entry.Node); order.AddLast(entry.Node); Interlocked.Increment(ref hits);
-                    if (key.Kind == 1 || key.Kind == 2) Interlocked.Increment(ref textHits);
-                    else if (key.Kind == 3) Interlocked.Increment(ref pathHits);
+                    if (key.Kind == 3) Interlocked.Increment(ref pathHits);
                     else if (key.Kind == 4) Interlocked.Increment(ref strokeHits);
                     else if (key.Kind == 5) Interlocked.Increment(ref pictureHits);
                     return (T)entry.Resource.Retain();
@@ -156,53 +143,6 @@ namespace Cairo
             if (key != null) using (var prepared = new Geometry(new SKPath(outline))) Store(key, prepared);
             return outline;
         }
-        [StructLayout(LayoutKind.Sequential)] struct NativePathInfo { internal Status Status; internal IntPtr Data; internal int Count; }
         static long Bits(double value) => BitConverter.DoubleToInt64Bits(value);
-        internal static Text PrepareText(Context context, byte[] text, Glyph[] glyphs = null)
-        {
-            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
-            if (!Enabled || (text?.Length ?? 0) > MaxKeyBytes / 2 || (glyphs?.Length ?? 0) > MaxKeyBytes / 32) return null;
-            if (glyphs == null) {
-                if (text == null || text.Length == 0 || text[0] == 0) return null;
-                int end = Array.IndexOf(text, (byte)0);
-                try { strictUtf8.GetCharCount(text, 0, end < 0 ? text.Length : end); }
-                catch (DecoderFallbackException) { return null; } // Preserve native handling of malformed input.
-            }
-            if (NativeMethods.cairo_status(context.NativeHandleForRecorder) != Status.Success) return null;
-            IntPtr handle = NativeMethods.cairo_get_scaled_font(context.NativeHandleForRecorder);
-            FontType type = NativeMethods.cairo_scaled_font_get_type(handle);
-            if ((int)type < 0 || (int)type > 3 || NativeMethods.cairo_scaled_font_status(handle) != Status.Success) return null;
-            Matrix m = context.Matrix;
-            PointD point = context.HasCurrentPoint ? context.CurrentPoint : new PointD(0, 0);
-            var words = new long[9 + (glyphs?.Length ?? 0) * 3];
-            words[0] = handle.ToInt64(); words[1] = Bits(m.Xx); words[2] = Bits(m.Yx); words[3] = Bits(m.Xy); words[4] = Bits(m.Yy); words[5] = Bits(m.X0); words[6] = Bits(m.Y0); words[7] = Bits(point.X); words[8] = Bits(point.Y);
-            if (glyphs != null) for (int i = 0; i < glyphs.Length; i++) { words[9+i*3] = glyphs[i].Index; words[10+i*3] = Bits(glyphs[i].X); words[11+i*3] = Bits(glyphs[i].Y); }
-            var key = new Key(glyphs == null ? 1 : 2, words, text == null ? null : (byte[])text.Clone());
-            Text cached = Acquire<Text>(key); if (cached != null) return cached;
-            Path path = null; SKPath outline = null; ScaledFont font = null;
-            using (Path old = context.CopyPath()) {
-                try {
-                    TextExtents extents = glyphs == null ? context.TextExtents(text) : default;
-                    if (context.Status != Status.Success) return null;
-                    context.NewPath();
-                    if (glyphs == null) { context.MoveTo(point); context.TextPath(text); } else context.GlyphPath(glyphs);
-                    if (context.Status != Status.Success) return null;
-                    path = context.CopyPath(); outline = RecordedGuiDrawing.CopyPath(path.Handle);
-                    // Retain the actual immutable scaled font: its pointer cannot be recycled while cached.
-                    font = new ScaledFont(handle, false);
-                    int count = Marshal.PtrToStructure<NativePathInfo>(path.Handle).Count;
-                    var result = new Text(path, outline, extents, font, Math.Max(0L, count) * 16L + 32);
-                    path = null; outline = null; font = null;
-                    try { Store(key, result); return result; } catch { result.Dispose(); throw; }
-                } finally { context.NewPath(); context.AppendPath(old); path?.Dispose(); outline?.Dispose(); font?.Dispose(); }
-            }
-        }
-        internal static void AppendTextPath(Context context, byte[] text, Glyph[] glyphs = null)
-        {
-            using (Text prepared = PrepareText(context, text, glyphs)) {
-                if (prepared == null) { if (glyphs == null) context.TextPath(text); else context.GlyphPath(glyphs); }
-                else context.AppendPath(prepared.NativePath);
-            }
-        }
     }
 }
