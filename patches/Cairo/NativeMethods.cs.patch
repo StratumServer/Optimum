@@ -1,5 +1,5 @@
 diff --git a/Cairo/NativeMethods.cs b/Cairo/NativeMethods.cs
-index 7d2fc60..287de36 100644
+index 7d2fc60..0d0ae36 100644
 --- a/Cairo/NativeMethods.cs
 +++ b/Cairo/NativeMethods.cs
 @@ -46,34 +46,19 @@ namespace Cairo
@@ -425,7 +425,21 @@ index 7d2fc60..287de36 100644
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
          internal static extern uint cairo_surface_get_reference_count(IntPtr surface);
-@@ -1000,53 +789,32 @@ namespace Cairo
+@@ -900,10 +689,13 @@ namespace Cairo
+         internal static extern void cairo_surface_mark_dirty_rectangle(IntPtr surface, int x, int y, int width, int height);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern IntPtr cairo_surface_reference(IntPtr surface);
+ 
++        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
++        internal static extern Status cairo_surface_set_user_data(IntPtr surface, IntPtr key, IntPtr userData, CairoDestroyFunc destroy);
++
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_surface_set_device_offset(IntPtr surface, double x, double y);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_surface_set_fallback_resolution(IntPtr surface, double x, double y);
+@@ -1000,53 +792,32 @@ namespace Cairo
          internal static extern void cairo_user_to_device(IntPtr cr, ref double x, ref double y);
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
@@ -479,3 +493,13 @@ index 7d2fc60..287de36 100644
  
          //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
          //internal static extern IntPtr cairo_win32_surface_get_dc (IntPtr surface);
+@@ -1097,6 +868,9 @@ namespace Cairo
+         internal static extern void cairo_xlib_surface_set_drawable(IntPtr surface, IntPtr drawable, int width, int height);
+ 
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         internal static extern void cairo_xlib_surface_set_size(IntPtr surface, int width, int height);
+     }
++
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate void CairoDestroyFunc(IntPtr userData);
+ }

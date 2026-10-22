@@ -1,38 +1,59 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..a29d845 100644
+index 8014c9e..9b3c23d 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -44,14 +44,22 @@ namespace Cairo {
+@@ -32,24 +32,40 @@
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
+ using System.Runtime.InteropServices;
++using System.Threading;
+ 
+ #nullable disable
+ 
+ namespace Cairo {
+ 
+ 	public class ImageSurface : Surface
+ 	{
++		readonly ManagedImageSurfaceStorage managedStorage;
++
  		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
  		{
  		}
-         
- 		public ImageSurface (Format format, int width, int height)
+-        
+-		public ImageSurface (Format format, int width, int height)
 -			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
-+			: base (NativeMethods.cairo_image_surface_create (format, width, height), true, true)
++
++		ImageSurface (ManagedImageSurfaceStorage storage) : base (storage.Handle, true, true)
  		{
- 		}
- 
++			managedStorage = storage;
++		}
++
++		public ImageSurface (Format format, int width, int height)
++			: this (ManagedImageSurfaceStorage.Create (format, width, height))
++		{
++		}
++
 +		public static ImageSurface CreateForRecordedGui (Format format, int width, int height)
 +		{
 +			// Cairo permits zero-sized image surfaces, but OpenGL textures and the
 +			// Skia recorder require positive dimensions. Empty dynamic GUI lists are
 +			// visually empty, so preserve that result with a transparent 1x1 target.
 +			return new ImageSurface (format, Math.Max (1, width), Math.Max (1, height));
-+		}
-+
+ 		}
+ 
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
  			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
  		{
- 		}
- 
-@@ -75,23 +83,24 @@ namespace Cairo {
+@@ -75,23 +91,28 @@ namespace Cairo {
  
  
          public int Width {
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_width (Handle); }
++				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Width;
 +				return NativeMethods.cairo_image_surface_get_width (NativeHandleForMetadata); }
  		}
  
@@ -40,6 +61,7 @@ index 8014c9e..a29d845 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_height (Handle);
++				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Height;
 +				return NativeMethods.cairo_image_surface_get_height (NativeHandleForMetadata);
  			}
  		}
@@ -47,14 +69,16 @@ index 8014c9e..a29d845 100644
  		public byte[] Data {
  			get {
 -				IntPtr ptr = NativeMethods.cairo_image_surface_get_data (Handle);
++				CheckDisposed ();
 +				MaterializeRecorder ("Data", "SurfaceCpuReadback");
++				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.CopyPixels ();
 +				IntPtr ptr = NativeMethods.cairo_image_surface_get_data (NativeHandleForMetadata);
                  if (ptr == IntPtr.Zero) return null;
  				int length = Height * Stride;
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +108,25 @@ namespace Cairo {
+@@ -99,24 +120,137 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
@@ -62,6 +86,7 @@ index 8014c9e..a29d845 100644
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_data (Handle);
 +				MaterializeRecorder ("DataPtr", "SurfaceCpuReadback");
++				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.DataPointer;
 +				return NativeMethods.cairo_image_surface_get_data (NativeHandleForMetadata);
  			}
  		}
@@ -70,6 +95,7 @@ index 8014c9e..a29d845 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_format (Handle);
++				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Format;
 +				return NativeMethods.cairo_image_surface_get_format (NativeHandleForMetadata);
  			}
  		}
@@ -78,8 +104,118 @@ index 8014c9e..a29d845 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_stride (Handle);
++				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Stride;
 +				return NativeMethods.cairo_image_surface_get_stride (NativeHandleForMetadata);
  			}
  		}
++
++	}
++}
++
++namespace Cairo {
++
++/// <summary>
++/// Owns the pixel array behind a Cairo image surface. The pin is attached to
++/// the native surface with cairo_surface_set_user_data, so aliases may outlive
++/// the ImageSurface wrapper without leaving Cairo with a movable data pointer.
++/// </summary>
++internal sealed class ManagedImageSurfaceStorage
++{
++	static readonly IntPtr userDataKey = Marshal.AllocHGlobal (1);
++	static readonly CairoDestroyFunc destroyCallback = ReleaseFromNative;
++
++	readonly byte[] pixels;
++	GCHandle pixelPin;
++	IntPtr dataPointer;
++	int released;
++
++	internal IntPtr Handle { get; private set; }
++	internal Format Format { get; }
++	internal int Width { get; }
++	internal int Height { get; }
++	internal int Stride { get; }
++	internal IntPtr DataPointer => dataPointer;
++	internal bool HasManagedPixels => pixels != null;
++
++	ManagedImageSurfaceStorage (Format format, int width, int height, int stride, byte[] pixels)
++	{
++		Format = format;
++		Width = width;
++		Height = height;
++		Stride = stride;
++		this.pixels = pixels;
++	}
++
++	internal static ManagedImageSurfaceStorage Create (Format format, int width, int height)
++	{
++		int stride = Surface.StrideForWidth (format, width);
++		long byteCount = (long)stride * height;
++		if (width < 0 || height < 0 || stride < 0 || byteCount < 0 || byteCount > int.MaxValue)
++			return CreateNative (format, width, height, stride);
++
++		// Keep a non-empty pinned array for zero-area surfaces because Cairo's
++		// create-for-data entry point requires a stable non-null address.
++		var pixels = new byte[Math.Max (1, (int)byteCount)];
++		var storage = new ManagedImageSurfaceStorage (format, width, height, stride, pixels);
++		storage.pixelPin = GCHandle.Alloc (pixels, GCHandleType.Pinned);
++		storage.dataPointer = storage.pixelPin.AddrOfPinnedObject ();
++
++		IntPtr surface = IntPtr.Zero;
++		GCHandle storageHandle = default (GCHandle);
++		bool attached = false;
++		try {
++			surface = NativeMethods.cairo_image_surface_create_for_data (storage.dataPointer, format, width, height, stride);
++			if (surface == IntPtr.Zero) throw new InvalidOperationException ("Cairo returned a null image surface.");
++
++			storageHandle = GCHandle.Alloc (storage);
++			Status status = NativeMethods.cairo_surface_set_user_data (surface, userDataKey,
++				GCHandle.ToIntPtr (storageHandle), destroyCallback);
++			if (status != Status.Success)
++				throw new InvalidOperationException ("Could not attach the managed image buffer to its Cairo surface: " + status + ".");
++
++			attached = true;
++			storage.Handle = surface;
++			return storage;
++		} catch {
++			if (storageHandle.IsAllocated && !attached) storageHandle.Free ();
++			if (surface != IntPtr.Zero) NativeMethods.cairo_surface_destroy (surface);
++			if (!attached) storage.ReleasePixelPin ();
++			throw;
++		}
++	}
++
++	static ManagedImageSurfaceStorage CreateNative (Format format, int width, int height, int stride)
++	{
++		var storage = new ManagedImageSurfaceStorage (format, width, height, stride, null);
++		storage.Handle = NativeMethods.cairo_image_surface_create (format, width, height);
++		return storage;
++	}
++
++	internal byte[] CopyPixels ()
++	{
++		int length = checked (Stride * Height);
++		var copy = new byte[length];
++		if (length != 0) Buffer.BlockCopy (pixels, 0, copy, 0, length);
++		return copy;
++	}
++
++	void ReleasePixelPin ()
++	{
++		if (Interlocked.Exchange (ref released, 1) != 0) return;
++		dataPointer = IntPtr.Zero;
++		if (pixelPin.IsAllocated) pixelPin.Free ();
++	}
++
++	static void ReleaseFromNative (IntPtr userData)
++	{
++		try {
++			GCHandle handle = GCHandle.FromIntPtr (userData);
++			try { (handle.Target as ManagedImageSurfaceStorage)?.ReleasePixelPin (); }
++			finally { if (handle.IsAllocated) handle.Free (); }
++		} catch {
++			// A native destroy callback must not allow a managed exception to cross the ABI.
++		}
  	}
  }
++
++}
