@@ -1,3 +1,4 @@
+using System;
 using Cairo;
 using SkiaSharp;
 using Xunit;
@@ -20,5 +21,18 @@ public sealed class CairoNativeFreeRecordedGuiTests
         Assert.Equal(new SKColor(51, 153, 230, 255), target.GetPixel(4, 3));
         Assert.Equal((byte)0, target.GetPixel(0, 0).Alpha);
         Assert.Equal(SurfaceRecordingState.Sealed, surface.RecordingState);
+
+        bool automaticRecording = Surface.AutomaticRecordingEnabled;
+        try
+        {
+            Surface.ConfigureAutomaticRecording(true);
+            InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => _ = surface.Handle);
+            Assert.Contains("Cairo materialization is forbidden", exception.Message);
+            Assert.Equal(SurfaceRecordingState.Sealed, surface.RecordingState);
+        }
+        finally
+        {
+            Surface.ConfigureAutomaticRecording(automaticRecording);
+        }
     }
 }
