@@ -68,6 +68,14 @@ using (var context = new Context(surface))
         return 1;
     }
 
+    context.Antialias = Antialias.None;
+    context.LineWidth = 1;
+    context.SetDash(new[] { 4.0, 4.0 }, 0);
+    context.SetSourceRGB(1, 1, 1);
+    context.MoveTo(0, 34);
+    context.LineTo(48, 34);
+    context.Stroke();
+
     // Exercise the same public API used by precompiled third-party mods. The
     // target switch must keep both managed surfaces recordable without a native context.
     context.SetTarget(targetSurface);

@@ -162,6 +162,38 @@ public sealed class CairoNativeFreeRecordedGuiTests
 	}
 
 	[Fact]
+	public void ManagedDashStateRendersWithoutMaterializingCairo()
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			using var surface = new ImageSurface (Format.Argb32, 12, 4);
+			using (var context = new Context (surface)) {
+				context.Antialias = Antialias.None;
+				context.LineWidth = 1;
+				context.SetDash (new[] { 2.0, 2.0 }, 0);
+				context.SetSourceRGBA (1, 1, 1, 1);
+				context.MoveTo (0, 1.5);
+				context.LineTo (12, 1.5);
+				context.Stroke ();
+			}
+
+			byte[] pixels = surface.Data;
+			int stride = surface.Stride;
+			Assert.Equal (0xff, pixels[stride + 3]);
+			Assert.Equal (0, pixels[stride + 2 * 4 + 3]);
+			Assert.Equal (0xff, pixels[stride + 4 * 4 + 3]);
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			AssertNoCairoNativeLoad (deniedBefore);
+		}
+		finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+		}
+	}
+
+	[Fact]
 	public void ManagedImageSurfaceCanWrapAndFlushAnUnmanagedPixelBuffer()
 	{
 		bool automaticRecording = Surface.AutomaticRecordingEnabled;
