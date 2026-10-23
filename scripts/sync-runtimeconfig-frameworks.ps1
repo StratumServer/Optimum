@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 <#
 .SYNOPSIS
   Adds the shared frameworks named by vanilla's runtimeconfig to the launcher's runtimeconfig.

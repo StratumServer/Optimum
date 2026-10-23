@@ -13,6 +13,8 @@ on:
       - 'scripts/package-linux.ps1'
       - 'scripts/prepare-runtime-donors.sh'
       - 'scripts/prepare-runtime-donors.ps1'
+      - 'scripts/sync-runtimeconfig-frameworks.ps1'
+      - 'scripts/tests/sync-runtimeconfig-frameworks.ps1'
       - 'scripts/tests/**'
       - '.github/workflows/ci-scripts.yml'
   pull_request:
@@ -62,3 +64,14 @@ jobs:
 
       - name: Runtime donor candidate resolution test
         run: bash scripts/tests/runtime-donor-dotnet-selection.sh
+
+  windows-runtimeconfig:
+    name: Windows PowerShell 5.1 runtimeconfig merge
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run runtimeconfig sync under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/sync-runtimeconfig-frameworks.ps1
