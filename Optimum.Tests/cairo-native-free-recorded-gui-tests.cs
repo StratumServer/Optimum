@@ -239,6 +239,60 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		}
 	}
 
+	[Fact]
+	public void ManagedA8A1AndRgb565SurfacePatternsRenderWithoutCairo ()
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		using var alpha = new ImageSurface (Format.A8, 1, 1);
+		using (var context = new Context (alpha)) {
+			context.SetSourceRGBA (0, 0, 0, .5);
+			context.Paint ();
+		}
+		using var oneBit = new ImageSurface (Format.A1, 1, 1);
+		using (var context = new Context (oneBit)) {
+			context.SetSourceRGBA (0, 0, 0, 1);
+			context.Paint ();
+		}
+		Assert.Equal (1, oneBit.Data[0]);
+		using var rgb565 = new ImageSurface (Format.Rgb16565, 1, 1);
+		using (var context = new Context (rgb565)) {
+			context.SetSourceRGBA (0, 0, 1, 1);
+			context.Paint ();
+		}
+
+		using var target = new ImageSurface (Format.Argb32, 3, 1);
+		using (var context = new Context (target)) {
+			using (var pattern = new SurfacePattern (alpha) { Extend = Extend.Repeat, Filter = Filter.Nearest }) {
+				context.SetSource (pattern);
+				context.Rectangle (0, 0, 1, 1);
+				context.Fill ();
+			}
+			using (var pattern = new SurfacePattern (oneBit) { Extend = Extend.Repeat, Filter = Filter.Nearest }) {
+				context.SetSource (pattern);
+				context.Rectangle (1, 0, 1, 1);
+				context.Fill ();
+			}
+			using (var pattern = new SurfacePattern (rgb565) { Extend = Extend.Repeat, Filter = Filter.Nearest }) {
+				context.SetSource (pattern);
+				context.Rectangle (2, 0, 1, 1);
+				context.Fill ();
+			}
+		}
+
+		using var bitmap = new SKBitmap (3, 1, SKColorType.Bgra8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (target.TryDrawRecordedCommands (canvas));
+		SKColor alphaPixel = bitmap.GetPixel (0, 0);
+		Assert.Equal (0, alphaPixel.Red);
+		Assert.Equal (0, alphaPixel.Green);
+		Assert.Equal (0, alphaPixel.Blue);
+		Assert.InRange ((int)alphaPixel.Alpha, 126, 129);
+		Assert.Equal (new SKColor (0, 0, 0, 255), bitmap.GetPixel (1, 0));
+		Assert.Equal (SKColors.Blue, bitmap.GetPixel (2, 0));
+		Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+		AssertNoCairoNativeLoad (deniedBefore);
+	}
+
 	static void AssertPixel (Surface surface, int x, int y, SKColor expected)
 	{
 		using var bitmap = new SKBitmap (new SKImageInfo (surface is ImageSurface image ? image.Width : 4, surface is ImageSurface target ? target.Height : 2, SKColorType.Bgra8888, SKAlphaType.Premul));

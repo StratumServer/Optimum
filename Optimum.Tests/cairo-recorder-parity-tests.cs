@@ -593,6 +593,60 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void A8A1AndRgb565SurfacePatternsMatchCairoWithoutFallback ()
+	{
+		void Draw (Context context, ImageSurface target) {
+			bool managedTarget = target.RecordingState == SurfaceRecordingState.Recording;
+			using ImageSurface alpha = managedTarget
+				? ImageSurface.CreateManagedGroup (Format.A8, 1, 1)
+				: new ImageSurface (Format.A8, 1, 1);
+			using (var sourceContext = new Context (alpha)) {
+				sourceContext.SetSourceRGBA (0, 0, 0, .5);
+				sourceContext.Paint ();
+			}
+			using ImageSurface oneBit = managedTarget
+				? ImageSurface.CreateManagedGroup (Format.A1, 1, 1)
+				: new ImageSurface (Format.A1, 1, 1);
+			using (var sourceContext = new Context (oneBit)) {
+				sourceContext.SetSourceRGBA (0, 0, 0, 1);
+				sourceContext.Paint ();
+			}
+			using ImageSurface rgb565 = managedTarget
+				? ImageSurface.CreateManagedGroup (Format.Rgb16565, 1, 1)
+				: new ImageSurface (Format.Rgb16565, 1, 1);
+			using (var sourceContext = new Context (rgb565)) {
+				sourceContext.SetSourceRGBA (0, 0, 1, 1);
+				sourceContext.Paint ();
+			}
+
+			using (var pattern = new SurfacePattern (alpha) { Extend = Extend.Repeat, Filter = Filter.Nearest }) {
+				context.SetSource (pattern);
+				context.Rectangle (0, 0, 1, 1);
+				context.Fill ();
+			}
+			using (var pattern = new SurfacePattern (oneBit) { Extend = Extend.Repeat, Filter = Filter.Nearest }) {
+				context.SetSource (pattern);
+				context.Rectangle (1, 0, 1, 1);
+				context.Fill ();
+			}
+			using (var pattern = new SurfacePattern (rgb565) { Extend = Extend.Repeat, Filter = Filter.Nearest }) {
+				context.SetSource (pattern);
+				context.Rectangle (2, 0, 1, 1);
+				context.Fill ();
+			}
+		}
+
+		byte[] expected = RenderNative (3, 1, Draw);
+		using var actual = new ImageSurface (Format.Argb32, 3, 1);
+		SurfaceRecorder recorder = actual.BeginRecording ();
+		using (var context = new Context (actual)) Draw (context, actual);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		byte[] skia = RenderSkia (actual, 3, 1);
+		AssertWithinTolerance (expected, skia, 3, 1, edgeAllowance: false, flatTolerance: 0);
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
+	}
+
+	[Fact]
 	public void SourceIsLockedToUserSpaceAtSetSourceLikeCairo ()
 	{
 		using ImageSurface tile = NativeTile (6, 6);
