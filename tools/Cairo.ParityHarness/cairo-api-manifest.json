@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-23T15:07:32.2207405+00:00",
+  "generatedUtc": "2026-10-23T15:25:25.1797756+00:00",
   "assemblyIdentity": "cairo-sharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 82,
-  "publicAndProtectedMemberCount": 887,
+  "publicAndProtectedMemberCount": 909,
   "classificationNote": "Automated initial classification; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -892,6 +892,94 @@
         {
           "name": "ClipNotRepresentable",
           "value": 22
+        },
+        {
+          "name": "TempFileError",
+          "value": 23
+        },
+        {
+          "name": "InvalidStride",
+          "value": 24
+        },
+        {
+          "name": "FontTypeMismatch",
+          "value": 25
+        },
+        {
+          "name": "UserFontImmutable",
+          "value": 26
+        },
+        {
+          "name": "UserFontError",
+          "value": 27
+        },
+        {
+          "name": "NegativeCount",
+          "value": 28
+        },
+        {
+          "name": "InvalidClusters",
+          "value": 29
+        },
+        {
+          "name": "InvalidSlant",
+          "value": 30
+        },
+        {
+          "name": "InvalidWeight",
+          "value": 31
+        },
+        {
+          "name": "InvalidSize",
+          "value": 32
+        },
+        {
+          "name": "UserFontNotImplemented",
+          "value": 33
+        },
+        {
+          "name": "DeviceTypeMismatch",
+          "value": 34
+        },
+        {
+          "name": "DeviceError",
+          "value": 35
+        },
+        {
+          "name": "InvalidMeshConstruction",
+          "value": 36
+        },
+        {
+          "name": "DeviceFinished",
+          "value": 37
+        },
+        {
+          "name": "Jbig2GlobalMissing",
+          "value": 38
+        },
+        {
+          "name": "PngError",
+          "value": 39
+        },
+        {
+          "name": "FreetypeError",
+          "value": 40
+        },
+        {
+          "name": "Win32GdiError",
+          "value": 41
+        },
+        {
+          "name": "TagError",
+          "value": 42
+        },
+        {
+          "name": "DwriteError",
+          "value": 43
+        },
+        {
+          "name": "SvgFontError",
+          "value": 44
         }
       ]
     },
@@ -5432,8 +5520,50 @@
     },
     {
       "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status DeviceError = 35",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status DeviceFinished = 37",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status DeviceTypeMismatch = 34",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status DwriteError = 43",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
       "signature": "const Cairo.Status FileNotFound = 18",
       "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status FontTypeMismatch = 25",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status FreetypeError = 40",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status InvalidClusters = 29",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
@@ -5474,6 +5604,12 @@
     },
     {
       "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status InvalidMeshConstruction = 36",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
       "signature": "const Cairo.Status InvalidPathData = 9",
       "classification": "materialization-boundary",
       "classificationReview": "required"
@@ -5492,7 +5628,25 @@
     },
     {
       "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status InvalidSize = 32",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status InvalidSlant = 30",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
       "signature": "const Cairo.Status InvalidStatus = 6",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status InvalidStride = 24",
       "classification": "measurement",
       "classificationReview": "required"
     },
@@ -5506,6 +5660,24 @@
       "declaringType": "Cairo.Status",
       "signature": "const Cairo.Status InvalidVisual = 17",
       "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status InvalidWeight = 31",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status Jbig2GlobalMissing = 38",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status NegativeCount = 28",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5534,6 +5706,12 @@
     },
     {
       "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status PngError = 39",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
       "signature": "const Cairo.Status ReadError = 10",
       "classification": "metadata",
       "classificationReview": "required"
@@ -5553,6 +5731,48 @@
     {
       "declaringType": "Cairo.Status",
       "signature": "const Cairo.Status SurfaceTypeMismatch = 13",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status SvgFontError = 44",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status TagError = 42",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status TempFileError = 23",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status UserFontError = 27",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status UserFontImmutable = 26",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status UserFontNotImplemented = 33",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Status",
+      "signature": "const Cairo.Status Win32GdiError = 41",
       "classification": "metadata",
       "classificationReview": "required"
     },

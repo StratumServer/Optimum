@@ -15,6 +15,34 @@ using Xunit;
 /// </summary>
 public sealed class CairoDevicePolicyTests
 {
+	[Fact]
+	public void StatusEnumMatchesCairoStatusValues()
+	{
+		Assert.Equal (22, (int) Status.ClipNotRepresentable);
+		Assert.Equal (23, (int) Status.TempFileError);
+		Assert.Equal (24, (int) Status.InvalidStride);
+		Assert.Equal (25, (int) Status.FontTypeMismatch);
+		Assert.Equal (26, (int) Status.UserFontImmutable);
+		Assert.Equal (27, (int) Status.UserFontError);
+		Assert.Equal (28, (int) Status.NegativeCount);
+		Assert.Equal (29, (int) Status.InvalidClusters);
+		Assert.Equal (30, (int) Status.InvalidSlant);
+		Assert.Equal (31, (int) Status.InvalidWeight);
+		Assert.Equal (32, (int) Status.InvalidSize);
+		Assert.Equal (33, (int) Status.UserFontNotImplemented);
+		Assert.Equal (34, (int) Status.DeviceTypeMismatch);
+		Assert.Equal (35, (int) Status.DeviceError);
+		Assert.Equal (36, (int) Status.InvalidMeshConstruction);
+		Assert.Equal (37, (int) Status.DeviceFinished);
+		Assert.Equal (38, (int) Status.Jbig2GlobalMissing);
+		Assert.Equal (39, (int) Status.PngError);
+		Assert.Equal (40, (int) Status.FreetypeError);
+		Assert.Equal (41, (int) Status.Win32GdiError);
+		Assert.Equal (42, (int) Status.TagError);
+		Assert.Equal (43, (int) Status.DwriteError);
+		Assert.Equal (44, (int) Status.SvgFontError);
+	}
+
 	static class Native
 	{
 		const string Lib = "libcairo.so.2";
@@ -149,9 +177,9 @@ public sealed class CairoDevicePolicyTests
 		device.Finish ();
 		device.Flush ();
 		Assert.Equal (Status.Success, device.Status);
-		Assert.Equal ((Status) 37, device.Acquire ()); // CAIRO_STATUS_DEVICE_FINISHED, which Cairo.Status has no name for
-		Assert.Equal ((Status) 37, device.Status);
-		Assert.Equal ((Status) 37, device.Acquire ());
+		Assert.Equal (Status.DeviceFinished, device.Acquire ());
+		Assert.Equal (Status.DeviceFinished, device.Status);
+		Assert.Equal (Status.DeviceFinished, device.Acquire ());
 		DeviceHandles.Destroy (handle);
 	}
 

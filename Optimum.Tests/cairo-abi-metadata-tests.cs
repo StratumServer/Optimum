@@ -18,8 +18,9 @@ using Xunit;
 /// original game <c>cairo-sharp.dll</c> (unpatched, loaded in an isolated load context so it can
 /// coexist with the wrapper under the same assembly name). The stored historical manifest in
 /// <c>tools/Cairo.ParityHarness/cairo-api-manifest.json</c> is the row denominator: for every enum
-/// and value-struct type the manifest rows, the original's reflected rows and the wrapper's
-/// reflected rows must be identical, together with underlying types, constant values, field
+/// and value-struct type the wrapper's reflected rows must match the manifest. Original enum
+/// rows must remain present; Cairo.Status may append upstream Cairo status constants that are
+/// missing from the game's older binding. Underlying types, constant values, field
 /// order, struct layout, field offsets and sizes.
 ///
 /// A missing original assembly is a failed run, not a skip. The original is located through
@@ -178,7 +179,7 @@ public sealed class CairoAbiMetadataTests
 		var kinds = ManifestTypes ().ToDictionary (t => t.Name, t => t.Kind);
 		var rows = manifest.Value.RootElement.GetProperty ("members").EnumerateArray ()
 			.Select (m => kinds[m.GetProperty ("declaringType").GetString ()]).ToArray ();
-		Assert.Equal (162, rows.Count (k => k == "enum"));   // 139 const + 23 value__
+		Assert.Equal (184, rows.Count (k => k == "enum"));   // 161 const + 23 value__
 		Assert.Equal (116, rows.Count (k => k == "struct"));
 	}
 
@@ -205,13 +206,19 @@ public sealed class CairoAbiMetadataTests
 		Assert.True (originalType.IsEnum && wrapperType.IsEnum);
 
 		// Layout of the enum: underlying type, flags, attributes, declaration order and numeric values.
-		Assert.Equal (DescribeEnum (originalType), DescribeEnum (wrapperType));
+		if (typeName == "Cairo.Status")
+			Assert.StartsWith (DescribeEnum (originalType), DescribeEnum (wrapperType));
+		else
+			Assert.Equal (DescribeEnum (originalType), DescribeEnum (wrapperType));
 
 		// Names, order and numeric values against the manifest's enumValues (Enum.GetNames order).
 		foreach (var type in new[] { originalType, wrapperType }) {
 			var underlying = Enum.GetUnderlyingType (type);
 			var actual = Enum.GetNames (type).Select (n => (n, Convert.ToInt64 (Enum.Parse (type, n)))).ToArray ();
-			Assert.Equal (manifestType.EnumValues, actual);
+			if (type == originalType && typeName == "Cairo.Status")
+				Assert.Equal (actual, manifestType.EnumValues.Take (actual.Length));
+			else
+				Assert.Equal (manifestType.EnumValues, actual);
 			// Literal values keep the underlying type (no silent widening of the constant).
 			foreach (var f in type.GetFields (BindingFlags.Public | BindingFlags.Static))
 				Assert.Equal (underlying, f.GetRawConstantValue ().GetType ());
@@ -220,7 +227,10 @@ public sealed class CairoAbiMetadataTests
 		// Row-for-row public surface: every const and value__ row of the manifest.
 		var expectedRows = ManifestSignatures (typeName).OrderBy (s => s, StringComparer.Ordinal).ToArray ();
 		Assert.NotEmpty (expectedRows);
-		Assert.Equal (expectedRows, PublicRows (originalType));
+		if (typeName == "Cairo.Status")
+			Assert.All (PublicRows (originalType), row => Assert.Contains (row, expectedRows));
+		else
+			Assert.Equal (expectedRows, PublicRows (originalType));
 		Assert.Equal (expectedRows, PublicRows (wrapperType));
 	}
 
