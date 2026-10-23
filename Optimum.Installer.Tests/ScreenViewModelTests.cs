@@ -201,8 +201,9 @@ public class PrerequisitesViewModelTests
     }
 
     [Fact]
-    public void WindowsWithoutGitOffersItsDownloadPage()
+    public async Task WindowsOffersPortableInstallFirstAndManualDownloadOnlyAfterFailure()
     {
+        SynchronizationContext? acquisitionContext = null;
         var probe = new FakeSystemProbe { Os = Bootstrap.Core.Platform.OsKind.Windows, HomeDirectory = "C:/Users/tester" };
         probe.Path.Add("C:/ps");
         probe.AddFile("C:/ps/powershell.exe");
@@ -213,12 +214,118 @@ public class PrerequisitesViewModelTests
         probe.OnCommand("C:/dotnet/dotnet.exe", "--version", "10.0.100\n");
         probe.AddFile("C:/repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
 
-        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a());
+        var gitAcquisition = new FakeGitAcquisition
+        {
+            AsyncBehaviour = _ =>
+            {
+                acquisitionContext = SynchronizationContext.Current;
+                return Task.FromResult(ToolAcquisitionResult.Failure(
+                    FailureReason.SourceUnavailable,
+                    "All portable Git variants failed. Install manually: https://git-scm.com/install/windows"));
+            },
+        };
+        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a(), git: gitAcquisition);
 
         PrerequisiteRowViewModel git = vm.Rows.Single(
             r => r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Git);
-        Assert.Equal("Get it", git.ActionLabel);
+        Assert.Equal("Install", git.ActionLabel);
         Assert.NotNull(git.ActionCommand);
+        Assert.Null(git.ManualFallbackLabel);
+        Assert.NotNull(git.ManualDownloadCommand);
+        Assert.Contains("MinGit portable", git.Detail);
+        Assert.Contains("BusyBox", git.Detail);
+        Assert.DoesNotContain("https://git-scm.com/install/windows", git.Detail);
+
+        SynchronizationContext? previousContext = SynchronizationContext.Current;
+        var uiContext = new SynchronizationContext();
+        Task installation;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(uiContext);
+            installation = git.ActionCommand.ExecuteAsync(null);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+        await installation;
+
+        Assert.NotSame(uiContext, acquisitionContext);
+        Assert.Equal("Manual download", git.ManualFallbackLabel);
+        Assert.Contains("All portable Git variants failed", git.Detail);
+        Assert.Contains("https://git-scm.com/install/windows", git.Detail);
+    }
+
+    [Fact]
+    public async Task GitAcquisitionCanBeCancelledFromTheWizard()
+    {
+        var probe = new FakeSystemProbe { Os = Bootstrap.Core.Platform.OsKind.Windows, HomeDirectory = "C:/Users/tester" };
+        probe.Path.Add("C:/ps");
+        probe.AddFile("C:/ps/powershell.exe");
+        probe.AddFile("C:/repo/forks.json", "{}");
+        var gitAcquisition = new FakeGitAcquisition
+        {
+            AsyncBehaviour = async cancellationToken =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                    return ToolAcquisitionResult.Success("unused");
+                }
+                catch (OperationCanceledException)
+                {
+                    return ToolAcquisitionResult.Failure(FailureReason.Cancelled, "the Git installation was cancelled");
+                }
+            },
+        };
+        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a(), git: gitAcquisition);
+        PrerequisiteRowViewModel gitRow = vm.Rows.Single(
+            row => row.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Git);
+
+        Task installation = gitRow.ActionCommand!.ExecuteAsync(null);
+        Assert.True(gitRow.CanCancelInstall);
+        gitRow.CancelInstallCommand!.Execute(null);
+        await installation;
+
+        Assert.False(gitRow.CanCancelInstall);
+        Assert.Contains("cancelled", gitRow.Detail);
+        Assert.Null(gitRow.ManualFallbackLabel);
+    }
+
+    [Fact]
+    public async Task StandaloneWindowsInstallerAcquiresGitBeforeAllowingSourceDownload()
+    {
+        var probe = new FakeSystemProbe
+        {
+            Os = Bootstrap.Core.Platform.OsKind.Windows,
+            HomeDirectory = "C:/Users/tester",
+        };
+        var source = new FakeSourceProvider();
+        string gitPath = "C:/Users/tester/AppData/Local/Optimum/tools/git/cmd/git.exe";
+        var gitAcquisition = new FakeGitAcquisition
+        {
+            Behaviour = () =>
+            {
+                probe.Path.Insert(0, "C:/Users/tester/AppData/Local/Optimum/tools/git/cmd");
+                probe.AddFile(gitPath);
+                probe.OnCommand(gitPath, "--version", "git version 2.56.0.windows.3\n");
+                return ToolAcquisitionResult.Success(gitPath);
+            },
+        };
+        var vm = new PrerequisitesViewModel(
+            probe, repoRoot: null, source, uiPost: a => a(), git: gitAcquisition);
+
+        Assert.False(vm.CanAcquireSource);
+        Assert.Single(vm.AttentionRows);
+        PrerequisiteRowViewModel gitRow = vm.AttentionRows.Single();
+        Assert.Equal("Install", gitRow.ActionLabel);
+
+        await gitRow.ActionCommand!.ExecuteAsync(null);
+
+        Assert.Equal(1, gitAcquisition.Calls);
+        Assert.True(vm.CanAcquireSource);
+        await vm.AcquireSourceCommand.ExecuteAsync(null);
+        Assert.Equal(1, source.Calls);
     }
 
     [Fact]

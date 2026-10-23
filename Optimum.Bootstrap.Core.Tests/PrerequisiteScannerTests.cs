@@ -145,6 +145,7 @@ public class PrerequisiteScannerTests
         FakeSystemProbe probe = WindowsHost();
         probe.Path.Add("C:/Program Files/Git/cmd");
         probe.AddFile("C:/Program Files/Git/cmd/git.exe");
+        probe.OnCommand("C:/Program Files/Git/cmd/git.exe", "--version", "git version 2.56.0.windows.3\n");
         AddWindowsDotnet(probe);
 
         IReadOnlyList<PrerequisiteResult> results = new PrerequisiteScanner(probe, @"C:\repo").Scan();
@@ -171,7 +172,7 @@ public class PrerequisiteScannerTests
     }
 
     [Fact]
-    public void WindowsWithoutGitPointsAtGitForWindows()
+    public void WindowsWithoutGitOffersInWizardAcquisitionAndManualFallback()
     {
         FakeSystemProbe probe = WindowsHost();
         AddWindowsDotnet(probe);
@@ -180,8 +181,25 @@ public class PrerequisiteScannerTests
             .Single(r => r.Definition.Id == PrerequisiteId.Git);
 
         Assert.Equal(PrerequisiteState.Missing, git.State);
-        Assert.Equal(AcquisitionKind.DownloadPage, git.Acquisition);
+        Assert.Equal(AcquisitionKind.Automatic, git.Acquisition);
         Assert.Equal(PrerequisiteScanner.GitForWindowsUrl, git.DownloadUrl);
+        Assert.Contains("MinGit portable", git.AcquisitionCommand);
+        Assert.Contains("BusyBox", git.AcquisitionCommand);
+        Assert.Contains("Only if both portable variants fail", git.AcquisitionCommand);
+        Assert.DoesNotContain(PrerequisiteScanner.GitForWindowsUrl, git.AcquisitionCommand);
         Assert.True(git.BlocksBuild);
+    }
+
+    [Fact]
+    public void WindowsGitMustStartAndReportItsVersionToSatisfyPrerequisite()
+    {
+        FakeSystemProbe probe = WindowsHost();
+        probe.AddFile("C:/Program Files/Git/cmd/git.exe");
+        probe.OnCommand("C:/Program Files/Git/cmd/git.exe", "--version", "git version 2.56.0.windows.3\n");
+
+        PrerequisiteResult git = new PrerequisiteScanner(probe, "C:/repo").ScanGit();
+
+        Assert.Equal(PrerequisiteState.Ok, git.State);
+        Assert.Equal("2.56.0.windows.3", git.DetectedVersion);
     }
 }

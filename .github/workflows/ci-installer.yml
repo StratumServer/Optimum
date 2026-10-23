@@ -46,6 +46,31 @@ jobs:
       - name: Test
         run: dotnet test Optimum.Installer.slnf -c Release --nologo
 
+  build-test-windows:
+    name: Build and test on Windows
+    runs-on: windows-2025
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-installer-windows-${{ hashFiles('Optimum.Bootstrap.Core/**/*.csproj', 'Optimum.Cli/**/*.csproj', 'Optimum.Installer/**/*.csproj', 'Optimum.*.Tests/**/*.csproj') }}
+          restore-keys: |
+            nuget-installer-windows-
+
+      - name: Test
+        run: dotnet test Optimum.Installer.slnf -c Release --nologo
+
   cli-contract:
     name: CLI contract
     runs-on: ubuntu-latest

@@ -78,7 +78,7 @@ public sealed class SystemProbe : ISystemProbe
 
     public string? GetEnvironmentVariable(string name) => Environment.GetEnvironmentVariable(name);
 
-    public IReadOnlyList<string> PathDirectories { get; } =
+    public IReadOnlyList<string> PathDirectories =>
         (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToArray();

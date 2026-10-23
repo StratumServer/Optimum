@@ -1,4 +1,5 @@
 using Optimum.Bootstrap.Core.Platform;
+using Optimum.Bootstrap.Core.Acquisition;
 
 namespace Optimum.Bootstrap.Core.Prerequisites;
 
@@ -17,7 +18,7 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
-    internal const string GitForWindowsUrl = "https://git-scm.com/download/win";
+    internal const string GitForWindowsUrl = "https://git-scm.com/install/windows";
 
     private static readonly PrerequisiteDefinition[] UnixDefinitions =
     [
@@ -50,6 +51,13 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         probe.Os == OsKind.Windows ? WindowsDefinitions : UnixDefinitions;
 
     public IReadOnlyList<PrerequisiteResult> Scan() => Definitions.Select(Detect).ToArray();
+
+    /// <summary>Scans Git independently so the standalone installer can acquire it before it has source.</summary>
+    public PrerequisiteResult ScanGit()
+    {
+        PrerequisiteDefinition definition = Definitions.Single(item => item.Id == PrerequisiteId.Git);
+        return probe.Os == OsKind.Windows ? DetectGitOnWindows(definition) : DetectPlain(definition);
+    }
 
     public bool AllRequiredPresent() => Scan().All(r => !r.BlocksBuild);
 
@@ -91,15 +99,25 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             : Missing(def, DistroAcquisition("pwsh"));
     }
 
-    /// <summary>Git for Windows is a signed installer, not a package; point the user at it.</summary>
+    /// <summary>Accept a working system, user-scope or cached Git for Windows executable.</summary>
     private PrerequisiteResult DetectGitOnWindows(PrerequisiteDefinition def)
     {
-        string? path = CommandSearch.Which(probe, def.Command);
+        string? path = GitForWindows.FindExecutable(probe);
         if (path is not null)
-            return Ok(def, path, null);
+        {
+            ProcessOutcome outcome = probe.Run(path, ["--version"], ProbeTimeout);
+            string version = outcome.Started ? outcome.StandardOutput.Trim() : string.Empty;
+            if (outcome.Started && outcome.ExitCode == 0
+                && version.StartsWith("git version ", StringComparison.OrdinalIgnoreCase))
+                return Ok(def, path, version["git version ".Length..]);
+        }
 
         return new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
-            AcquisitionKind.DownloadPage, null, GitForWindowsUrl);
+            AcquisitionKind.Automatic,
+            "The installer tries the official MinGit portable package first, then its BusyBox variant. "
+                + "Both downloads are checked against the published SHA-256 digest and Git is verified before use. "
+                + "Only if both portable variants fail will the installer ask for manual installation.",
+            GitForWindowsUrl);
     }
 
     private PrerequisiteResult DetectEither(PrerequisiteDefinition def, string first, string second)

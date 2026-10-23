@@ -135,6 +135,25 @@ public sealed class FakeIlspycmdAcquisition : IIlspycmdAcquisition
     }
 }
 
+public sealed class FakeGitAcquisition : IGitAcquisition
+{
+    public Func<ToolAcquisitionResult> Behaviour { get; set; } =
+        static () => ToolAcquisitionResult.Success("C:/Users/tester/AppData/Local/Optimum/tools/git/cmd/git.exe");
+
+    public int Calls { get; private set; }
+    public Func<CancellationToken, Task<ToolAcquisitionResult>>? AsyncBehaviour { get; set; }
+
+    public Task<ToolAcquisitionResult> InstallAsync(
+        IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        if (AsyncBehaviour is not null)
+            return AsyncBehaviour(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour());
+    }
+}
+
 public sealed class FakeUpdateService : IUpdateService
 {
     public string? AvailableVersion { get; set; }
@@ -163,6 +182,7 @@ public static class TestServices
         IAppimagetoolAcquisition? appimagetool = null,
         ISdkAcquisition? sdk = null,
         IIlspycmdAcquisition? ilspycmd = null,
+        IGitAcquisition? git = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -196,6 +216,7 @@ public static class TestServices
             Appimagetool = appimagetool,
             Sdk = sdk,
             Ilspycmd = ilspycmd,
+            Git = git,
         };
     }
 }
