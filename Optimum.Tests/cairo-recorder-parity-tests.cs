@@ -1059,6 +1059,46 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
+	public void NativeCopiedPathCanBeAppendedToManagedRecorder ()
+	{
+		if (!CairoNativeGuard.NativeAllowed) return;
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			using var source = new ImageSurface (Format.Argb32, 24, 24);
+			using var sourceContext = new Context (source);
+			sourceContext.MoveTo (3, 3);
+			sourceContext.LineTo (19, 3);
+			sourceContext.CurveTo (22, 5, 21, 9, 18, 12);
+			sourceContext.LineTo (14, 19);
+			sourceContext.LineTo (5, 18);
+			sourceContext.ClosePath ();
+			using Path nativePath = sourceContext.CopyPath ();
+
+			using var expected = new ImageSurface (Format.Argb32, 24, 24);
+			using (var context = new Context (expected)) {
+				context.AppendPath (nativePath);
+				context.SetSourceRGBA (.2, .7, .4, 1);
+				context.Fill ();
+			}
+
+			using var actual = new ImageSurface (Format.Argb32, 24, 24);
+			SurfaceRecorder recorder = actual.BeginRecording ();
+			using (var context = new Context (actual)) {
+				context.AppendPath (nativePath);
+				context.SetSourceRGBA (.2, .7, .4, 1);
+				context.Fill ();
+			}
+			nativePath.Dispose ();
+			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+			AssertWithinTolerance (expected.Data, RenderSkia (actual, 24, 24), 24, 24, edgeAllowance: true);
+			Assert.Equal (expected.Data, actual.Data);
+		} finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+		}
+	}
+
+	[Fact]
 	public void GroupsMaterializeWhilePatternMasksStayManaged ()
 	{
 		AssertMaterializesWith (24, 24, context => {
