@@ -830,3 +830,19 @@ until every public API row and every runtime/package path has an implementation
 or an explicit limitation, and the packaged supported client runs with native
 Cairo loading denied. Record GPU certification separately; it does not prove
 Cairo independence.
+
+## Shared managed Cairo wrapper status (2026-10-23)
+
+The compatibility unit is the shipped `cairo-sharp` assembly. A managed mod that resolves this assembly receives its managed Skia-backed behavior through the same public API; Optimum does not need a separate edit for each consumer. The baseline-compiled ABI fixture verifies assembly replacement and exercises managed drawing, nested groups, target switching, and self-source copying with `OPTIMUM_CAIRO_NATIVE=deny`. At commit `6844f1081b87b8bd4e95daffec8888d8ba10ce68`, `CairoNativeFreeRecordedGuiTests` passed 51/51, the full `Optimum.Tests` suite passed 1,951 with 40 skipped, and the independent ABI fixture passed without a libcairo mapping. This does not prove every exported member or every compiled third-party mod.
+
+The recorder now snapshots a surface when a managed context uses that same surface as its source. `Context.SetSourceSurface`, `SetSource(Surface, x, y)`, and `SetSource(Surface)` stay on the Skia recorder for that case. A native `Cairo.Path` returned by `Context.CopyPath` can also be copied into managed path memory and appended to a managed context while preserving the Cairo path command layout. These routes remove specific materialization cases; they do not establish full Cairo semantic parity for all 909 public/protected members.
+
+### Contracts that require a native Cairo boundary
+
+A managed Skia object cannot provide an address that is a real `cairo_t*`, `cairo_surface_t*`, `cairo_pattern_t*`, `cairo_font_face_t*`, or `cairo_scaled_font_t*`. Code that reads or passes those `Handle` values, constructs those wrappers around foreign native handles, or calls Cairo functions directly must use the native compatibility backend or change its interop contract. Managed wrappers keep the `cairo-sharp` assembly identity, but that does not make native pointers interchangeable.
+
+A P/Invoke from a third-party assembly directly to `libcairo` does not pass through the `cairo-sharp` resolver and cannot be redirected by replacing the managed wrapper alone. That mod needs a managed Cairo call path or its own native compatibility layer. Its behavior remains unverified unless its binary and call sequence are available for testing.
+
+Xlib, XCB, Win32, DirectFB, and Glitz surfaces require platform handles or backend integration that Skia's ordinary raster and document surfaces do not supply. These constructors retain the explicit native boundary. PostScript output is raster-backed in the managed implementation, so it preserves page content but not Cairo's vector fidelity; large pages may use a reduced raster resolution to stay within the output memory budget.
+
+These limits are intentional compatibility boundaries, not passing evidence for the full migration. Keep the goal open until supported managed calls are covered by deny-mode tests and every remaining public member has a managed implementation or a documented native contract.
