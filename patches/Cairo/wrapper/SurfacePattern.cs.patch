@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/SurfacePattern.cs b/Cairo/wrapper/SurfacePattern.cs
-index 0c6dcd5..706f266 100644
+index 0c6dcd5..e90867e 100644
 --- a/Cairo/wrapper/SurfacePattern.cs
 +++ b/Cairo/wrapper/SurfacePattern.cs
-@@ -35,35 +35,68 @@ namespace Cairo {
+@@ -35,35 +35,82 @@ namespace Cairo {
  
  	public class SurfacePattern : Pattern
  	{
@@ -50,6 +50,20 @@ index 0c6dcd5..706f266 100644
 +            clone.Extend = Extend;
 +            clone.Matrix = Matrix;
 +            return clone;
++        }
++
++        internal SurfacePattern MaterializeNativeForReplay()
++        {
++            if (!IsManagedSource || RecordedSource == null)
++                throw new InvalidOperationException("Only a managed surface pattern with a recorded source can be materialized for native replay.");
++            CairoNativeGuard.RequireNativeAllowed("Managed surface pattern replay");
++            using (SurfaceRecorderSnapshot snapshot = RecordedSource.Capture()) {
++                if (snapshot == null) throw new InvalidOperationException("The recorded surface pattern source is no longer available.");
++                using (var surface = new ImageSurface(snapshot.PixelFormat, snapshot.Width, snapshot.Height)) {
++                    snapshot.ReplayNative(surface.NativeHandleForMetadata);
++                    return new SurfacePattern(surface) { Filter = Filter, Extend = Extend, Matrix = Matrix };
++                }
++            }
 +        }
 +
 +        SurfacePattern(int width, int height, RecordedSurfaceSource source) : base(true)

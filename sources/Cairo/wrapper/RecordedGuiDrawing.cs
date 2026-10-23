@@ -113,7 +113,7 @@ namespace Cairo
 				Matrix drawMatrix = context.Matrix;
 				context.Matrix = nativeSourceMatrix;
 				if (sourceSnapshot != null && nativeImage == null) {
-					nativeImage = new ImageSurface(Format.Argb32, sourceSnapshot.Width, sourceSnapshot.Height);
+					nativeImage = new ImageSurface(sourceSnapshot.PixelFormat, sourceSnapshot.Width, sourceSnapshot.Height);
 					sourceSnapshot.ReplayNative(nativeImage.NativeHandleForMetadata);
 					var pattern = new SurfacePattern(nativeImage) { Matrix = sourcePatternMatrix, Extend = sourceExtend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
 					nativeSource?.Dispose(); nativeSource = pattern;
