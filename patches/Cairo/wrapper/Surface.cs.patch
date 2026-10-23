@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..dac8682 100644
+index 6f7730e..e82536a 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,450 @@
+@@ -32,37 +32,461 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -243,6 +243,17 @@ index 6f7730e..dac8682 100644
 +			}
 +		}
 +
++		internal void ResetDetachedManagedContextState ()
++		{
++			lock (recordingSync) {
++				CheckDisposed ();
++				EnsureRecordingOwnerThread ();
++				if (!managedOnly || recordingContext != null || recorder == null || recorder.State != SurfaceRecordingState.Recording)
++					throw new InvalidOperationException ("Only a detached managed recording target can reset its Context state.");
++				recorder.ResetContextState ();
++			}
++		}
++
 +		internal bool StartNextManagedPage (bool copyCurrentPage)
 +		{
 +			if (aliasOwner != null && managedOnly) return aliasOwner.StartNextManagedPage (copyCurrentPage);
@@ -459,7 +470,7 @@ index 6f7730e..dac8682 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +500,281 @@ namespace Cairo
+@@ -87,141 +511,281 @@ namespace Cairo
  		}
  
  

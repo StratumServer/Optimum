@@ -162,6 +162,55 @@ public sealed class CairoNativeFreeRecordedGuiTests
 	}
 
 	[Fact]
+	public void SetTargetDiscardsManagedGroupsAndRetainsTheirSurfaces()
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			using var first = new ImageSurface (Format.Argb32, 4, 2);
+			using var second = new ImageSurface (Format.Argb32, 4, 2);
+			using var context = new Context (first);
+			context.SetSourceRGBA (1, 0, 0, 1);
+			context.Rectangle (0, 0, 1, 2);
+			context.Fill ();
+
+			context.PushGroup (Content.ColorAlpha);
+			context.SetSourceRGBA (0, 1, 0, 1);
+			context.Rectangle (0, 0, 1, 2);
+			context.Fill ();
+			using Surface outerGroupTarget = context.GetGroupTarget ();
+			context.PushGroup (Content.ColorAlpha);
+			context.SetSourceRGBA (0, 1, 0, 1);
+			context.Rectangle (1, 0, 1, 2);
+			context.Fill ();
+			using Surface groupTarget = context.GetGroupTarget ();
+			context.SetTarget (second);
+			Assert.Equal (Status.Success, context.Status);
+			context.SetSourceRGBA (0, 0, 1, 1);
+			context.Rectangle (2, 0, 2, 2);
+			context.Fill ();
+
+			AssertPixel (first, 0, 0, SKColors.Red);
+			AssertPixel (second, 2, 0, SKColors.Blue);
+			AssertPixel (outerGroupTarget, 0, 0, SKColors.Lime);
+			AssertPixel (groupTarget, 1, 0, SKColors.Lime);
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			AssertNoCairoNativeLoad (deniedBefore);
+		} finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+		}
+	}
+
+	static void AssertPixel (Surface surface, int x, int y, SKColor expected)
+	{
+		using var bitmap = new SKBitmap (new SKImageInfo (surface is ImageSurface image ? image.Width : 4, surface is ImageSurface target ? target.Height : 2, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (surface.TryDrawRecordedCommands (canvas));
+		Assert.Equal (expected, bitmap.GetPixel (x, y));
+	}
+
+	[Fact]
 	public void ManagedDashStateRendersWithoutMaterializingCairo()
 	{
 		if (CairoNativeGuard.NativeAllowed) return;
