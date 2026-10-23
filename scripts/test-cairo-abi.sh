@@ -25,4 +25,6 @@ reference_dir="$(dirname -- "$reference")"
 cp -n "$reference_dir"/*.dll "$output"/ 2>/dev/null || true
 cp -f "$reference" "$output/cairo-sharp.baseline.dll"
 cp -f "$candidate" "$output/cairo-sharp.dll"
-dotnet "$output/Cairo.AbiFixture.dll" "$output/legacy-mod-fixture.png"
+OPTIMUM_CAIRO_NATIVE=deny \
+OPTIMUM_CAIRO_EXPECTED_ASSEMBLY="$output/cairo-sharp.dll" \
+  dotnet "$output/Cairo.AbiFixture.dll" "$output/legacy-mod-fixture.png"

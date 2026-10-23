@@ -25,6 +25,19 @@ if (args.Length != 1)
     return 2;
 }
 
+string loadedCairoPath = System.IO.Path.GetFullPath(typeof(Context).Assembly.Location);
+string? expectedCairoPath = Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_EXPECTED_ASSEMBLY");
+if (!string.IsNullOrWhiteSpace(expectedCairoPath) &&
+    !string.Equals(loadedCairoPath, System.IO.Path.GetFullPath(expectedCairoPath), StringComparison.Ordinal))
+{
+    Console.Error.WriteLine($"The mod resolved Cairo from '{loadedCairoPath}', expected the Optimum wrapper at '{expectedCairoPath}'.");
+    return 1;
+}
+if (!string.Equals(typeof(Context).Assembly.GetName().Name, "cairo-sharp", StringComparison.Ordinal))
+{
+    Console.Error.WriteLine($"Unexpected Cairo assembly identity: {typeof(Context).Assembly.FullName}");
+    return 1;
+}
 try {
     NativeLibrary.SetDllImportResolver(typeof(Context).Assembly, (name, _, _) =>
         name == "libcairo-2" ? NativeLibrary.Load("libcairo.so.2") : IntPtr.Zero);
@@ -86,5 +99,11 @@ if (string.Equals(Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_NATIVE"), "d
     Console.Error.WriteLine("The managed Cairo API fixture loaded libcairo in deny mode.");
     return 1;
 }
-Console.WriteLine($"Legacy Cairo binary fixture passed: {surface.Width}x{surface.Height}, stride={surface.Stride}, png={System.IO.Path.GetFullPath(args[0])}, ps={System.IO.Path.GetFullPath(postscriptPath)}");
+if (string.Equals(Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_NATIVE"), "deny", StringComparison.OrdinalIgnoreCase) &&
+    !AppDomain.CurrentDomain.GetAssemblies().Any(assembly => string.Equals(assembly.GetName().Name, "SkiaSharp", StringComparison.Ordinal)))
+{
+    Console.Error.WriteLine("The managed third-party mod fixture did not load SkiaSharp.");
+    return 1;
+}
+Console.WriteLine($"Legacy third-party mod fixture passed under OPTIMUM_CAIRO_NATIVE={Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_NATIVE") ?? "unset"}: assembly={loadedCairoPath}, {surface.Width}x{surface.Height}, stride={surface.Stride}, png={System.IO.Path.GetFullPath(args[0])}, ps={System.IO.Path.GetFullPath(postscriptPath)}");
 return 0;

@@ -37,6 +37,12 @@ The ledger scans the stage root `*.dll`, `Lib/**`, `Mods/**` and `.optimum/donor
 
 The scan is static IL only. Reflection, emitted IL, Harmony runtime patches and third-party mods are not resolved; string and `ldtoken` hits are listed as reflection candidates. `ModCompilationContext` adds `cairo-sharp.dll` to runtime mod compilation, so mods can reach any public wrapper member.
 
+### Third-party managed mods
+
+Optimum keeps the `cairo-sharp` assembly identity used by existing mods. Precompiled managed mods resolve that shared assembly through the game's normal assembly loader, while source mods compile against the `cairo-sharp.dll` in the game's `Lib` directory. Both therefore enter the same managed wrapper and use its SkiaSharp backend for supported operations; they do not need an Optimum-specific mod patch. `scripts/test-cairo-abi.sh` builds a consumer against the pre-existing game assembly and runs it against the candidate wrapper with `OPTIMUM_CAIRO_NATIVE=deny`, checking the exact loaded assembly path and that no `libcairo` mapping appears.
+
+This route covers mods that call the managed `Cairo` API. A mod that imports `libcairo` itself, exchanges raw Cairo pointers/handles, or depends on a native-only window surface is outside the managed wrapper contract and cannot be transparently redirected to SkiaSharp.
+
 When the Vintage Story font directory is available, capture the bundled font and scale matrix with:
 
 ```bash

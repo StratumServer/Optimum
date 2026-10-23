@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-19T19:09:58.325421+00:00",
+  "generatedUtc": "2026-10-23T15:07:32.2207405+00:00",
   "assemblyIdentity": "cairo-sharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
   "targetFramework": ".NETCoreApp,Version=v10.0",
-  "exportedTypeCount": 81,
-  "publicAndProtectedMemberCount": 869,
+  "exportedTypeCount": 82,
+  "publicAndProtectedMemberCount": 887,
   "classificationNote": "Automated initial classification; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -675,6 +675,12 @@
           "value": 28
         }
       ]
+    },
+    {
+      "name": "Cairo.OptimumSkiaTextMetrics",
+      "kind": "class",
+      "baseType": "System.Object",
+      "enumValues": null
     },
     {
       "name": "Cairo.PSSurface",
@@ -2582,6 +2588,24 @@
     },
     {
       "declaringType": "Cairo.FontFace",
+      "signature": "Cairo.FontFace(System.String, Cairo.FontSlant, Cairo.FontWeight)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
+      "signature": "Cairo.FontSlant Slant [get_Slant]",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
+      "signature": "Cairo.FontSlant get_Slant()",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontType FontType [get_FontType]",
       "classification": "metadata",
       "classificationReview": "required"
@@ -2589,6 +2613,18 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontType get_FontType()",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
+      "signature": "Cairo.FontWeight Weight [get_Weight]",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
+      "signature": "Cairo.FontWeight get_Weight()",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },
@@ -2613,6 +2649,18 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.IntPtr get_Handle()",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
+      "signature": "System.String Family [get_Family]",
+      "classification": "metadata",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.FontFace",
+      "signature": "System.String get_Family()",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },
@@ -3902,6 +3950,12 @@
     },
     {
       "declaringType": "Cairo.Gradient",
+      "signature": "Cairo.Gradient(System.Boolean)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Gradient",
       "signature": "Cairo.Gradient(System.IntPtr, System.Boolean)",
       "classification": "native-only-pending",
       "classificationReview": "required"
@@ -4108,6 +4162,12 @@
       "declaringType": "Cairo.ImageSurface",
       "signature": "System.IntPtr get_DataPtr()",
       "classification": "materialization-boundary",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.ImageSurface",
+      "signature": "System.Void Dispose(System.Boolean)",
+      "classification": "native-only-pending",
       "classificationReview": "required"
     },
     {
@@ -4525,6 +4585,18 @@
       "classificationReview": "required"
     },
     {
+      "declaringType": "Cairo.OptimumSkiaTextMetrics",
+      "signature": "Cairo.FontExtents GetFontExtents(System.String, Cairo.FontWeight, Cairo.FontSlant, System.Double)",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.OptimumSkiaTextMetrics",
+      "signature": "Cairo.TextExtents GetTextExtents(System.String, Cairo.FontWeight, Cairo.FontSlant, System.Double, System.String)",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
       "declaringType": "Cairo.PSSurface",
       "signature": "Cairo.PSSurface(System.String, System.Double, System.Double)",
       "classification": "native-only-pending",
@@ -4539,6 +4611,12 @@
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "System.Void BeginSetup()",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.PSSurface",
+      "signature": "System.Void Dispose(System.Boolean)",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },
@@ -4617,6 +4695,12 @@
     {
       "declaringType": "Cairo.Pattern",
       "signature": "Cairo.Pattern()",
+      "classification": "recordable-candidate",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Pattern",
+      "signature": "Cairo.Pattern(System.Boolean)",
       "classification": "recordable-candidate",
       "classificationReview": "required"
     },
@@ -4761,6 +4845,12 @@
     {
       "declaringType": "Cairo.PdfSurface",
       "signature": "Cairo.PdfSurface(System.String, System.Double, System.Double)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.PdfSurface",
+      "signature": "System.Void Dispose(System.Boolean)",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },
@@ -5576,6 +5666,12 @@
     },
     {
       "declaringType": "Cairo.Surface",
+      "signature": "Cairo.Surface(System.IntPtr, System.Boolean, System.Boolean, System.Boolean)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Surface",
       "signature": "Cairo.SurfaceType SurfaceType [get_SurfaceType]",
       "classification": "metadata",
       "classificationReview": "required"
@@ -5648,6 +5744,12 @@
     },
     {
       "declaringType": "Cairo.Surface",
+      "signature": "System.Void InitializeManagedSurface(System.Int32, System.Int32, Cairo.SurfaceType)",
+      "classification": "measurement",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Surface",
       "signature": "System.Void MarkDirty()",
       "classification": "native-only-pending",
       "classificationReview": "required"
@@ -5655,6 +5757,12 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void MarkDirty(Cairo.Rectangle)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Surface",
+      "signature": "System.Void ResizeManagedSurface(System.Int32, System.Int32)",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },
@@ -5859,6 +5967,12 @@
     {
       "declaringType": "Cairo.SvgSurface",
       "signature": "Cairo.SvgSurface(System.String, System.Double, System.Double)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.SvgSurface",
+      "signature": "System.Void Dispose(System.Boolean)",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },
