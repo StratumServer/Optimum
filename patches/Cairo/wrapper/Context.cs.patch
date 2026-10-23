@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..5d7ada7 100644
+index 03f9c76..c0ad87a 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -560,7 +560,7 @@ index 03f9c76..5d7ada7 100644
  		{
 -			CheckDisposed ();
 -			NativeMethods.cairo_set_source_surface (handle, source.Handle, x, y);
-+			if (recordingSurface != null && !ReferenceEquals(recordingSurface, source)) {
++			if (recordingSurface != null) {
 +				using (var pattern = new SurfacePattern(source)) {
 +					pattern.Matrix = new Matrix(1, 0, 0, 1, -x, -y);
 +					SetSource(pattern); return;
@@ -574,7 +574,7 @@ index 03f9c76..5d7ada7 100644
  		{
 -			CheckDisposed ();
 -			NativeMethods.cairo_set_source_surface (handle, source.Handle, x, y);
-+			if (recordingSurface != null && !ReferenceEquals(recordingSurface, source)) {
++			if (recordingSurface != null) {
 +				using (var pattern = new SurfacePattern(source)) {
 +					pattern.Matrix = new Matrix(1, 0, 0, 1, -x, -y);
 +					SetSource(pattern); return;
@@ -588,7 +588,7 @@ index 03f9c76..5d7ada7 100644
  		{
 -			CheckDisposed ();
 -			NativeMethods.cairo_set_source_surface (handle, source.Handle, 0, 0);
-+			if (recordingSurface != null && !ReferenceEquals(recordingSurface, source)) {
++			if (recordingSurface != null) {
 +				using (var pattern = new SurfacePattern(source)) {
 +					pattern.Matrix = new Matrix(1, 0, 0, 1, -0, -0);
 +					SetSource(pattern); return;

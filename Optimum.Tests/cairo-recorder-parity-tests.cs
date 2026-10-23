@@ -789,8 +789,17 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
-	public void SelfSourceMaterializes ()
+	public void SelfSourceUsesManagedSnapshotWithoutMaterializing ()
 	{
+		using var expected = new ImageSurface (Format.Argb32, 8, 8);
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (1, 0, 0, 1);
+			context.Rectangle (0, 0, 4, 4);
+			context.Fill ();
+			context.SetSourceSurface (expected, 4, 4);
+			context.Paint ();
+		}
+
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
 		var recorder = surface.BeginRecording ();
 		using (var context = new Context (surface)) {
@@ -800,8 +809,10 @@ public sealed class CairoRecorderParityTests
 			context.SetSourceSurface (surface, 4, 4);
 			context.Paint ();
 		}
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
-		Assert.False (string.IsNullOrEmpty (surface.FirstMaterializationTrigger));
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		Assert.Null (surface.FirstMaterializationTrigger);
+		Assert.Equal (expected.Data, RenderSkia (surface, 8, 8));
+		Assert.Null (surface.FirstMaterializationTrigger);
 	}
 
 	[Theory]
@@ -1096,6 +1107,19 @@ public sealed class CairoRecorderParityTests
 		} finally {
 			Surface.ConfigureAutomaticRecording (automaticRecording);
 		}
+	}
+
+	[Fact]
+	public void SetSourceSurfaceCanSnapshotItsManagedTargetLikeCairo ()
+	{
+		AssertParity (4, 2, (context, surface) => {
+			context.SetSourceRGBA (1, 0, 0, 1);
+			context.Rectangle (0, 0, 1, 2);
+			context.Fill ();
+			context.SetSourceSurface (surface, 1, 0);
+			context.Rectangle (1, 0, 1, 2);
+			context.Fill ();
+		}, edgeAllowance: false);
 	}
 
 	[Fact]

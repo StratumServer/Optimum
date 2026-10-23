@@ -203,6 +203,42 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		}
 	}
 
+	[Fact]
+	public void SetSourceSurfaceCanSnapshotItsManagedTargetWithoutCairo ()
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			using var surface = new ImageSurface (Format.Argb32, 4, 2);
+			using var context = new Context (surface);
+			context.SetSourceRGBA (1, 0, 0, 1);
+			context.Rectangle (0, 0, 1, 2);
+			context.Fill ();
+
+			context.SetSourceSurface (surface, 1, 0);
+			context.Rectangle (1, 0, 1, 2);
+			context.Fill ();
+			context.SetSource (surface, 2.0, 0.0);
+			context.Rectangle (2, 0, 1, 2);
+			context.Fill ();
+			context.SetSource (surface);
+			context.Paint ();
+
+			using var bitmap = new SKBitmap (4, 2, SKColorType.Bgra8888, SKAlphaType.Premul);
+			using (var canvas = new SKCanvas (bitmap)) Assert.True (surface.TryDrawRecordedCommands (canvas));
+			Assert.Equal (SKColors.Red, bitmap.GetPixel (0, 0));
+			Assert.Equal (SKColors.Red, bitmap.GetPixel (1, 0));
+			Assert.Equal (SKColors.Red, bitmap.GetPixel (2, 0));
+			Assert.Equal (SKColor.Empty, bitmap.GetPixel (3, 0));
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			AssertNoCairoNativeLoad (deniedBefore);
+		} finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+		}
+	}
+
 	static void AssertPixel (Surface surface, int x, int y, SKColor expected)
 	{
 		using var bitmap = new SKBitmap (new SKImageInfo (surface is ImageSurface image ? image.Width : 4, surface is ImageSurface target ? target.Height : 2, SKColorType.Bgra8888, SKAlphaType.Premul));

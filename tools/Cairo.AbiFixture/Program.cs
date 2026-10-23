@@ -93,6 +93,12 @@ using (var context = new Context(surface))
     context.SetSourceRGBA(0.75, 0.2, 0.1, 1);
     context.Rectangle(2, 2, 8, 6);
     context.Fill();
+    context.SetSourceRGBA(0, 1, 0, 1);
+    context.Rectangle(0, 9, 1, 1);
+    context.Fill();
+    context.SetSourceSurface(targetSurface, 1, 0);
+    context.Rectangle(1, 9, 1, 1);
+    context.Fill();
 
     outerGroup.WriteToPng(System.IO.Path.ChangeExtension(args[0], ".outer-group.png"));
     innerGroup.WriteToPng(System.IO.Path.ChangeExtension(args[0], ".inner-group.png"));
@@ -105,10 +111,20 @@ if (!pixels.Any(value => value != 0))
     Console.Error.WriteLine("Cairo drawing produced an empty surface.");
     return 1;
 }
-if (!targetSurface.Data.Any(value => value != 0))
+byte[] targetPixels = targetSurface.Data;
+if (!targetPixels.Any(value => value != 0))
 {
     Console.Error.WriteLine("Cairo SetTarget did not draw to the managed third-party mod target.");
     return 1;
+}
+for (int x = 0; x < 2; x++)
+{
+    int pixel = 9 * targetSurface.Stride + x * 4;
+    if (targetPixels[pixel + 1] < 180 || targetPixels[pixel] > 40 || targetPixels[pixel + 2] > 40 || targetPixels[pixel + 3] < 240)
+    {
+        Console.Error.WriteLine($"Cairo SetSourceSurface self-copy did not preserve the green pixel at x={x}: BGRA={targetPixels[pixel]},{targetPixels[pixel + 1]},{targetPixels[pixel + 2]},{targetPixels[pixel + 3]}.");
+        return 1;
+    }
 }
 
 surface.WriteToPng(args[0]);
