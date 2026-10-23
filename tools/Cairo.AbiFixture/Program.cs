@@ -76,12 +76,26 @@ using (var context = new Context(surface))
     context.LineTo(48, 34);
     context.Stroke();
 
-    // Exercise the same public API used by precompiled third-party mods. The
-    // target switch must keep both managed surfaces recordable without a native context.
+    // Exercise the same public API used by precompiled third-party mods. A
+    // target switch with nested groups must retain their managed target surfaces.
+    context.PushGroup();
+    context.SetSourceRGBA(0.1, 0.8, 0.25, 1);
+    context.Rectangle(1, 1, 8, 6);
+    context.Fill();
+    using Surface outerGroup = context.GetGroupTarget();
+    context.PushGroup();
+    context.SetSourceRGBA(0.8, 0.7, 0.15, 1);
+    context.Rectangle(2, 2, 6, 4);
+    context.Fill();
+    using Surface innerGroup = context.GetGroupTarget();
+
     context.SetTarget(targetSurface);
     context.SetSourceRGBA(0.75, 0.2, 0.1, 1);
     context.Rectangle(2, 2, 8, 6);
     context.Fill();
+
+    outerGroup.WriteToPng(System.IO.Path.ChangeExtension(args[0], ".outer-group.png"));
+    innerGroup.WriteToPng(System.IO.Path.ChangeExtension(args[0], ".inner-group.png"));
 }
 
 surface.Flush();
