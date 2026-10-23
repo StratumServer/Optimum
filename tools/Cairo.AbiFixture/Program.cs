@@ -47,6 +47,19 @@ try {
 
 using var surface = new ImageSurface(Format.Argb32, 64, 40);
 using var targetSurface = new ImageSurface(Format.Argb32, 16, 12);
+using var clearSurface = new ImageSurface(Format.Argb32, 2, 2);
+using (var clearContext = new Context(clearSurface))
+{
+    clearContext.SetSourceRGBA(0.9, 0.1, 0.2, 1);
+    clearContext.Paint();
+    clearContext.Clear();
+}
+if (clearSurface.Data.Any(value => value != 0))
+{
+    Console.Error.WriteLine("Cairo ContextUtils.Clear did not clear the managed target.");
+    return 1;
+}
+
 using (var context = new Context(surface))
 {
     context.Save();
@@ -156,5 +169,5 @@ if (string.Equals(Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_NATIVE"), "d
     Console.Error.WriteLine("The managed third-party mod fixture did not load SkiaSharp.");
     return 1;
 }
-Console.WriteLine($"Legacy third-party mod fixture passed under OPTIMUM_CAIRO_NATIVE={Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_NATIVE") ?? "unset"}: assembly={loadedCairoPath}, {surface.Width}x{surface.Height}, stride={surface.Stride}, png={System.IO.Path.GetFullPath(args[0])}, ps={System.IO.Path.GetFullPath(postscriptPath)}");
+Console.WriteLine($"Legacy third-party mod fixture passed under OPTIMUM_CAIRO_NATIVE={Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_NATIVE") ?? "unset"}: assembly={loadedCairoPath}, ContextUtils.Clear, {surface.Width}x{surface.Height}, stride={surface.Stride}, png={System.IO.Path.GetFullPath(args[0])}, ps={System.IO.Path.GetFullPath(postscriptPath)}");
 return 0;
