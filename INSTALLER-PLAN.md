@@ -612,7 +612,9 @@ written against.
   `rollForward: latestFeature` rather than whatever the channel currently serves.
   Core then invokes that `dotnet` by absolute path with `DOTNET_ROOT` set on the
   child process only, and never mutates the user's `PATH`.
-- On Windows, winget is a fast path for the SDK and for Git when it is present.
+- On Windows, WinGet remains a possible SDK fast path. Git uses the official
+  MinGit portable archive first and its BusyBox variant second, both in the
+  user's Optimum cache; manual installation is offered only if both fail.
 - Distro packages are offered as a hint with a copyable command, not run. The
   Linux installer builds those commands at `scripts/install-linux.sh:260-267` for
   apt-get, dnf, pacman, and zypper. An installer that runs `sudo` on the user's
