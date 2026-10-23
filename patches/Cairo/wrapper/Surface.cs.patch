@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..0b3ce42 100644
+index 6f7730e..caac779 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,430 @@
+@@ -32,37 +32,446 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -210,17 +210,33 @@ index 6f7730e..0b3ce42 100644
 +			}
 +		}
 +
-+		internal bool AttachRecordingContext (Context context)
++		internal bool AttachRecordingContext (Context context, bool resetManagedState = false)
 +		{
 +			lock (recordingSync) {
 +				if (managedOnly && aliasOwner != null) {
-+					if (disposed || recordingContext != null) return false;
++					if (disposed || recordingContext != null || resetManagedState) return false;
 +					recordingContext = context;
 +					return true;
 +				}
 +				if (recorder == null || recorder.State != SurfaceRecordingState.Recording || recordingContext != null) return false;
++				if (resetManagedState) {
++					if (!managedOnly) return false;
++					EnsureRecordingOwnerThread ();
++					recorder.ResetContextState ();
++				}
 +				recordingContext = context;
 +				return true;
++			}
++		}
++
++		internal void ResetManagedContextState (Context context)
++		{
++			lock (recordingSync) {
++				CheckDisposed ();
++				EnsureRecordingOwnerThread ();
++				if (!managedOnly || !ReferenceEquals (recordingContext, context) || recorder == null || recorder.State != SurfaceRecordingState.Recording)
++					throw new InvalidOperationException ("The Context does not own a live managed recording target.");
++				recorder.ResetContextState ();
 +			}
 +		}
 +
@@ -439,7 +455,7 @@ index 6f7730e..0b3ce42 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +480,280 @@ namespace Cairo
+@@ -87,141 +496,280 @@ namespace Cairo
  		}
  
  

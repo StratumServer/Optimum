@@ -48,6 +48,19 @@ namespace Cairo
 		// Cairo's default antialias mode maps to Skia's antialias-on paint, so helper operations using that default are qualified too.
 		bool antialiasConfigured = true;
 
+		internal void ResetContextState ()
+		{
+			if (State != SurfaceRecordingState.Recording)
+				throw new InvalidOperationException ("Only a live managed recording target can reset its Context state.");
+			graphicsState = new ManagedGraphicsState ();
+			clips.Clear ();
+			savedClips.Clear ();
+			savedAntialias.Clear ();
+			saveDepth = 0;
+			unqualifiedHelperDrawing = false;
+			antialiasConfigured = true;
+		}
+
 		internal void InitializeGroupFrom (SurfaceRecorder parent)
 		{
 			graphicsState = parent.graphicsState.CloneForGroup ();

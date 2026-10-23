@@ -46,6 +46,7 @@ try {
 }
 
 using var surface = new ImageSurface(Format.Argb32, 64, 40);
+using var targetSurface = new ImageSurface(Format.Argb32, 16, 12);
 using (var context = new Context(surface))
 {
     context.Save();
@@ -66,6 +67,13 @@ using (var context = new Context(surface))
         Console.Error.WriteLine("Cairo text measurement returned empty metrics.");
         return 1;
     }
+
+    // Exercise the same public API used by precompiled third-party mods. The
+    // target switch must keep both managed surfaces recordable without a native context.
+    context.SetTarget(targetSurface);
+    context.SetSourceRGBA(0.75, 0.2, 0.1, 1);
+    context.Rectangle(2, 2, 8, 6);
+    context.Fill();
 }
 
 surface.Flush();
@@ -73,6 +81,11 @@ byte[] pixels = surface.Data;
 if (!pixels.Any(value => value != 0))
 {
     Console.Error.WriteLine("Cairo drawing produced an empty surface.");
+    return 1;
+}
+if (!targetSurface.Data.Any(value => value != 0))
+{
+    Console.Error.WriteLine("Cairo SetTarget did not draw to the managed third-party mod target.");
     return 1;
 }
 

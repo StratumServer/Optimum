@@ -118,6 +118,50 @@ public sealed class CairoNativeFreeRecordedGuiTests
 	}
 
 	[Fact]
+	public void SetTargetSwitchesManagedSurfacesWithoutMaterializingCairo()
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			using var first = new ImageSurface (Format.Argb32, 4, 2);
+			using var second = new ImageSurface (Format.Argb32, 4, 2);
+			using (var previousTargetContext = new Context (second)) {
+				previousTargetContext.Rectangle (0, 0, 1, 2);
+				previousTargetContext.Clip ();
+				previousTargetContext.SetSourceRGBA (0, 1, 0, 1);
+				previousTargetContext.Paint ();
+			}
+			using var context = new Context (first);
+			context.SetSourceRGBA (1, 0, 0, 1);
+			context.Rectangle (0, 0, 2, 2);
+			context.Fill ();
+
+			context.SetTarget (second);
+			Assert.Equal (Status.Success, context.Status);
+			context.SetSourceRGBA (0, 0, 1, 1);
+			context.Rectangle (2, 0, 2, 2);
+			context.Fill ();
+
+			byte[] firstPixels = first.Data;
+			byte[] secondPixels = second.Data;
+			Assert.Equal (0xff, firstPixels[2]);
+			Assert.Equal (0xff, firstPixels[3]);
+			Assert.Equal (0xff, secondPixels[1]);
+			Assert.Equal (0xff, secondPixels[3]);
+			Assert.Equal (0xff, secondPixels[4 * 2 + 0]);
+			Assert.Equal (0xff, secondPixels[4 * 2 + 3]);
+			Assert.Equal (0, secondPixels[0]);
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			AssertNoCairoNativeLoad (deniedBefore);
+		}
+		finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+		}
+	}
+
+	[Fact]
 	public void ManagedImageSurfaceCanWrapAndFlushAnUnmanagedPixelBuffer()
 	{
 		bool automaticRecording = Surface.AutomaticRecordingEnabled;
