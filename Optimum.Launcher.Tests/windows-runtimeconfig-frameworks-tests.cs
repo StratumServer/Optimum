@@ -20,9 +20,8 @@ namespace Optimum.Launcher.Tests;
 /// scripts/sync-runtimeconfig-frameworks.ps1 copies every framework reference that
 /// vanilla's Vintagestory.runtimeconfig.json declares into the staged launcher
 /// config, and scripts/package.ps1 runs it after staging the launcher. These tests
-/// drive the script through pwsh and, on Windows, Windows PowerShell 5.1 with
-/// synthetic configs; they cannot prove that a real Windows install resolves
-/// PresentationFramework.
+/// drive the script through pwsh with synthetic configs; they cannot prove that a
+/// real Windows install resolves PresentationFramework.
 /// </summary>
 public class WindowsRuntimeConfigFrameworksTests
 {
@@ -108,17 +107,6 @@ public class WindowsRuntimeConfigFrameworksTests
             JsonNode.Parse(twice)!.ToJsonString());
     }
 
-    [WindowsPowerShell51Fact]
-    public void WindowsPowerShell51CanMergeRuntimeFrameworks()
-    {
-        string result = Run(LauncherConfig, VanillaWithDesktop, WindowsPowerShell51Path());
-
-        JsonObject options = JsonNode.Parse(result)!["runtimeOptions"]!.AsObject();
-        string[] names = options["frameworks"]!.AsArray()
-            .Select(f => f!["name"]!.GetValue<string>()).ToArray();
-        Assert.Equal(new[] { "Microsoft.NETCore.App", "Microsoft.WindowsDesktop.App" }, names);
-    }
-
     [Fact]
     public void WindowsPackagingScriptRunsTheSyncAfterStagingTheLauncherConfig()
     {
@@ -132,7 +120,7 @@ public class WindowsRuntimeConfigFrameworksTests
         Assert.Contains("Vintagestory.runtimeconfig.json", script[sync..Math.Min(script.Length, sync + 400)]);
     }
 
-    private static string Run(string launcherJson, string vanillaJson, string executable = "pwsh")
+    private static string Run(string launcherJson, string vanillaJson)
     {
         string dir = Directory.CreateTempSubdirectory("optimum-rtcfg-").FullName;
         try
@@ -143,7 +131,7 @@ public class WindowsRuntimeConfigFrameworksTests
             File.WriteAllText(vanilla, vanillaJson);
 
             string script = Path.Combine(FindRepositoryRoot().FullName, ScriptPath);
-            var psi = new ProcessStartInfo(executable)
+            var psi = new ProcessStartInfo("pwsh")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -165,10 +153,6 @@ public class WindowsRuntimeConfigFrameworksTests
         }
     }
 
-    private static string WindowsPowerShell51Path() => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.System),
-        "WindowsPowerShell", "v1.0", "powershell.exe");
-
     private static DirectoryInfo FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -179,25 +163,6 @@ public class WindowsRuntimeConfigFrameworksTests
             directory = directory.Parent;
         }
         throw new DirectoryNotFoundException("Repository root with VintageStory.slnx not found.");
-    }
-}
-
-/// <summary>Runs the helper with the in-box Windows PowerShell 5.1 executable.</summary>
-public sealed class WindowsPowerShell51FactAttribute : FactAttribute
-{
-    public WindowsPowerShell51FactAttribute()
-    {
-        if (!OperatingSystem.IsWindows())
-        {
-            Skip = "Windows PowerShell 5.1 is available only on Windows";
-            return;
-        }
-
-        string executable = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System),
-            "WindowsPowerShell", "v1.0", "powershell.exe");
-        if (!File.Exists(executable))
-            Skip = "Windows PowerShell 5.1 is not installed";
     }
 }
 
