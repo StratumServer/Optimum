@@ -31,7 +31,7 @@ namespace Cairo
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
 		string firstMaterializationTrigger;
-		ManagedGraphicsState graphicsState = new ManagedGraphicsState();
+		ManagedGraphicsState graphicsState;
 				internal ManagedGraphicsState GraphicsState => graphicsState;
 		readonly List<RecordedResource> resources = new List<RecordedResource>();
 		readonly List<RecordedSurfaceSource> sourceBindings = new List<RecordedSurfaceSource>();
@@ -52,7 +52,7 @@ namespace Cairo
 		{
 			if (State != SurfaceRecordingState.Recording)
 				throw new InvalidOperationException ("Only a live managed recording target can reset its Context state.");
-			graphicsState = new ManagedGraphicsState ();
+			graphicsState = new ManagedGraphicsState (surface.ManagedStatus);
 			clips.Clear ();
 			savedClips.Clear ();
 			savedAntialias.Clear ();
@@ -320,7 +320,7 @@ namespace Cairo
 			}
 		}
 
-		internal SurfaceRecorder (Surface surface) { this.surface = surface; width = surface.RecordedWidth; height = surface.RecordedHeight; }
+		internal SurfaceRecorder (Surface surface) { this.surface = surface; graphicsState = new ManagedGraphicsState (surface.ManagedStatus); width = surface.RecordedWidth; height = surface.RecordedHeight; }
 		internal void Resize (int width, int height)
 		{
 			lock (sync) {

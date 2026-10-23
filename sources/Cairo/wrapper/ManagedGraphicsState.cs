@@ -71,6 +71,9 @@ namespace Cairo
 		readonly Stack<State> saved = new Stack<State>();
 		Status status = Status.Success;
 
+		internal ManagedGraphicsState () { }
+		internal ManagedGraphicsState (Status initialStatus) { status = initialStatus; }
+
 		// Path, in the same representation as cairo_path_fixed_t: operations plus their
 		// device-space fixed-point points, with a lazily emitted initial MOVE_TO.
 		readonly List<PathOp> ops = new List<PathOp>();

@@ -1427,6 +1427,66 @@ public sealed class CairoNativeFreeRecordedGuiTests
 	}
 
 	[Fact]
+	public void ManagedPngLoadPreservesCairoErrorSurfaceAndContextStatuses()
+	{
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		string missing = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "optimum-png-missing-" + Guid.NewGuid ().ToString ("N") + ".png");
+		string malformed = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "optimum-png-malformed-" + Guid.NewGuid ().ToString ("N") + ".png");
+		string corrupt = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "optimum-png-corrupt-" + Guid.NewGuid ().ToString ("N") + ".png");
+		try {
+			File.WriteAllBytes (malformed, new byte[] { 1, 2, 3, 4 });
+			File.WriteAllBytes (corrupt, Convert.FromBase64String ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/FZsAAAAASUVORK5CYII="));
+			Surface.ConfigureAutomaticRecording (true);
+			AssertManagedPngErrorSurface (missing, Status.FileNotFound);
+			AssertManagedPngErrorSurface (malformed, Status.ReadError);
+			AssertManagedPngErrorSurface (corrupt, Status.PngError);
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			AssertNoCairoNativeLoad (deniedBefore);
+		} finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+			if (File.Exists (malformed)) File.Delete (malformed);
+			if (File.Exists (corrupt)) File.Delete (corrupt);
+		}
+	}
+
+	static void AssertManagedPngErrorSurface (string filename, Status expectedStatus)
+	{
+		using var surface = new ImageSurface (filename);
+		Assert.Equal (expectedStatus, surface.Status);
+		Assert.Equal (0, surface.Width);
+		Assert.Equal (0, surface.Height);
+		Assert.Equal ((Format)(-1), surface.Format);
+		Assert.Equal (0, surface.Stride);
+		Assert.Equal (Content.Color, surface.Content);
+		Assert.Equal (SurfaceType.Image, surface.SurfaceType);
+		Assert.Null (surface.Data);
+		Assert.Equal (IntPtr.Zero, surface.DataPtr);
+		using var context = new Context (surface);
+		Assert.Equal (expectedStatus, context.Status);
+		context.SetSourceRGBA (1, 0, 0, 1);
+		context.Rectangle (0, 0, 4, 4);
+		context.Fill ();
+		Assert.Equal (expectedStatus, context.Status);
+		Assert.Equal (expectedStatus, surface.Finish ());
+		if (!CairoNativeGuard.NativeAllowed) return;
+
+		Surface.ConfigureAutomaticRecording (false);
+		using var nativeSurface = new ImageSurface (filename);
+		Assert.Equal (nativeSurface.Status, expectedStatus);
+		Assert.Equal (nativeSurface.Width, surface.Width);
+		Assert.Equal (nativeSurface.Height, surface.Height);
+		Assert.Equal (nativeSurface.Format, surface.Format);
+		Assert.Equal (nativeSurface.Stride, surface.Stride);
+		Assert.Equal (nativeSurface.Content, surface.Content);
+		Assert.Equal (nativeSurface.SurfaceType, surface.SurfaceType);
+		Assert.Null (nativeSurface.Data);
+		using var nativeContext = new Context (nativeSurface);
+		Assert.Equal (nativeContext.Status, expectedStatus);
+		Surface.ConfigureAutomaticRecording (true);
+	}
+
+	[Fact]
 	public void ManagedByteArrayImageSurfaceKeepsAliasedPixelsForPatternRendering()
 	{
 		bool automaticRecording = Surface.AutomaticRecordingEnabled;

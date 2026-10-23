@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..8b70601 100644
+index 8014c9e..c35119f 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,259 @@
+@@ -31,40 +31,277 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -91,6 +91,7 @@ index 8014c9e..8b70601 100644
 +
 +		internal bool TryWriteToPngManaged (string filename)
 +		{
++			if (ManagedStatus != Status.Success) return true;
 +			if (!IsManagedOnly || !ManagedImageSurfaceStorage.CanRecordFormat (Format)) return false;
 +			using var skSurface = SKSurface.Create (ManagedImageSurfaceStorage.SkiaInfo (Format, Width, Height));
 +			if (skSurface == null || !TryDrawRecordedCommands (skSurface)) return false;
@@ -186,7 +187,7 @@ index 8014c9e..8b70601 100644
 +		}
 +
 +		ImageSurface (ImageSurfaceLoadResult load)
-+			: base (load.ManagedOnly ? IntPtr.Zero : load.Handle, true, load.RecordingCandidate || load.ManagedOnly, load.ManagedOnly)
++			: base (load.ManagedOnly ? IntPtr.Zero : load.Handle, true, load.RecordingCandidate || load.ManagedOnly, load.ManagedOnly, load.Status)
 +		{
 +			managedStorage = load.Storage;
 +			if (load.ManagedOnly) BeginRecording ();
@@ -217,15 +218,16 @@ index 8014c9e..8b70601 100644
 +		static ImageSurfaceLoadResult LoadPng (string filename)
 +		{
 +			if (Surface.ManagedApiMode) {
-+				if (TryLoadPngManaged (filename, out ManagedImageSurfaceStorage storage)) return new ImageSurfaceLoadResult (storage);
-+				throw new InvalidDataException ("The managed image API could not decode a valid PNG from '" + filename + "'.");
++				if (TryLoadPngManaged (filename, out ManagedImageSurfaceStorage storage, out Status status)) return new ImageSurfaceLoadResult (storage);
++				return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), status);
 +			}
 +			return new ImageSurfaceLoadResult (NativeMethods.cairo_image_surface_create_from_png (filename));
 +		}
 +
-+		static bool TryLoadPngManaged (string filename, out ManagedImageSurfaceStorage storage)
++		static bool TryLoadPngManaged (string filename, out ManagedImageSurfaceStorage storage, out Status errorStatus)
 +		{
 +			storage = null;
++			errorStatus = Status.ReadError;
 +			if (!BitConverter.IsLittleEndian || string.IsNullOrEmpty (filename)) return false;
 +			try {
 +				using (var stream = File.OpenRead (filename)) {
@@ -235,6 +237,7 @@ index 8014c9e..8b70601 100644
 +						signature[4] != 13 || signature[5] != 10 || signature[6] != 26 || signature[7] != 10)
 +						return false;
 +				}
++				errorStatus = Status.PngError;
 +				using var decoded = SKBitmap.Decode (filename);
 +				if (decoded == null || decoded.Width <= 0 || decoded.Height <= 0) return false;
 +				int stride = checked (decoded.Width * 4);
@@ -249,7 +252,19 @@ index 8014c9e..8b70601 100644
 +				}
 +				storage = ManagedImageSurfaceStorage.CreateManaged (Format.Argb32, decoded.Width, decoded.Height, stride, pixels);
 +				return true;
-+			} catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException || exception is OverflowException) {
++			} catch (FileNotFoundException) {
++				errorStatus = Status.FileNotFound;
++				return false;
++			} catch (DirectoryNotFoundException) {
++				errorStatus = Status.FileNotFound;
++				return false;
++			} catch (UnauthorizedAccessException) {
++				errorStatus = Status.ReadError;
++				return false;
++			} catch (IOException) {
++				errorStatus = Status.ReadError;
++				return false;
++			} catch (Exception exception) when (exception is ArgumentException || exception is OverflowException) {
 +				return false;
 +			}
 +		}
@@ -259,23 +274,26 @@ index 8014c9e..8b70601 100644
 +			internal readonly ManagedImageSurfaceStorage Storage;
 +			internal readonly IntPtr Handle;
 +			internal readonly bool ManagedOnly;
++			internal readonly Status Status;
 +			internal bool RecordingCandidate { get; }
-+			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, bool managedOnly = true) : this (storage, managedOnly, managedOnly) { }
-+			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, bool managedOnly, bool recordingCandidate) { Storage = storage; Handle = storage.Handle; ManagedOnly = managedOnly; RecordingCandidate = managedOnly || recordingCandidate; }
-+			internal ImageSurfaceLoadResult (IntPtr handle, bool recordingCandidate = false, bool managedOnly = false) { Handle = handle; RecordingCandidate = recordingCandidate; ManagedOnly = managedOnly; }
++			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, bool managedOnly = true) : this (storage, Status.Success, managedOnly, managedOnly) { }
++			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, bool managedOnly, bool recordingCandidate) : this (storage, Status.Success, managedOnly, recordingCandidate) { }
++			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, Status status) : this (storage, status, true, true) { }
++			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, Status status, bool managedOnly, bool recordingCandidate) { Storage = storage; Handle = storage.Handle; Status = status; ManagedOnly = managedOnly; RecordingCandidate = managedOnly || recordingCandidate; }
++			internal ImageSurfaceLoadResult (IntPtr handle, bool recordingCandidate = false, bool managedOnly = false) { Handle = handle; Status = Status.Success; RecordingCandidate = recordingCandidate; ManagedOnly = managedOnly; }
  		}
  
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +294,33 @@ namespace Cairo {
+@@ -75,23 +312,34 @@ namespace Cairo {
  
  
          public int Width {
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_width (Handle); }
-+				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Width;
++				if (managedStorage != null) return managedStorage.Width;
 +				return NativeMethods.cairo_image_surface_get_width (NativeHandleForMetadata); }
  		}
  
@@ -283,7 +301,7 @@ index 8014c9e..8b70601 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_height (Handle);
-+				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Height;
++				if (managedStorage != null) return managedStorage.Height;
 +				return NativeMethods.cairo_image_surface_get_height (NativeHandleForMetadata);
  			}
  		}
@@ -293,6 +311,7 @@ index 8014c9e..8b70601 100644
 -				IntPtr ptr = NativeMethods.cairo_image_surface_get_data (Handle);
 +				CheckDisposed ();
 +				if (IsManagedOnly && managedStorage != null) {
++					if (ManagedStatus != Status.Success || !managedStorage.HasManagedPixels) return null;
 +					if (ManagedFinished) return managedStorage.CopyPixels ();
 +					using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
 +					return RenderManagedSnapshot (snapshot);
@@ -305,13 +324,14 @@ index 8014c9e..8b70601 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +328,254 @@ namespace Cairo {
+@@ -99,24 +347,258 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_data (Handle);
++				if (IsManagedOnly && ManagedStatus != Status.Success) return IntPtr.Zero;
 +				if (IsManagedOnly && managedStorage != null && managedStorage.HasManagedPixels)
 +				{
 +					CheckpointManagedPixels ();
@@ -327,7 +347,7 @@ index 8014c9e..8b70601 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_format (Handle);
-+				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Format;
++				if (managedStorage != null) return managedStorage.Format;
 +				return NativeMethods.cairo_image_surface_get_format (NativeHandleForMetadata);
  			}
  		}
@@ -336,7 +356,7 @@ index 8014c9e..8b70601 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_stride (Handle);
-+				if (managedStorage != null && managedStorage.HasManagedPixels) return managedStorage.Stride;
++				if (managedStorage != null) return managedStorage.Stride;
 +				return NativeMethods.cairo_image_surface_get_stride (NativeHandleForMetadata);
  			}
  		}
@@ -407,6 +427,9 @@ index 8014c9e..8b70601 100644
 +			throw new ArgumentOutOfRangeException (nameof (width), "The managed recording surface dimensions are invalid.");
 +		return new ManagedImageSurfaceStorage (format, width, height, stride, new byte[Math.Max (1, (int)byteCount)]);
 +	}
++
++	internal static ManagedImageSurfaceStorage CreateManagedError () =>
++		new ManagedImageSurfaceStorage ((Format)(-1), 0, 0, 0, null);
 +
 +	internal static ManagedImageSurfaceStorage CreateManagedExternal (IntPtr data, Format format, int width, int height, int stride)
 +	{

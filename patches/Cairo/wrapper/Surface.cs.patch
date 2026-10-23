@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..caac779 100644
+index 6f7730e..dac8682 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,446 @@
+@@ -32,37 +32,450 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -32,6 +32,7 @@ index 6f7730e..caac779 100644
 +		bool finished;
 +		bool disposed;
 +		readonly bool managedOnly;
++		readonly Status managedStatus;
 +		PointD managedDeviceOffset;
 +		double managedFallbackResolutionX, managedFallbackResolutionY;
 +		bool hasManagedFallbackResolution;
@@ -45,7 +46,7 @@ index 6f7730e..caac779 100644
 -				throw new ArgumentException ("handle should not be NULL", "handle");
 +		}
 +
-+		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly)
++		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly, Status managedStatus = Status.Success)
 +		{
 +			if (handle == IntPtr.Zero && !managedOnly)
 +				throw new ArgumentException ("handle should not be NULL", "handle");
@@ -56,6 +57,7 @@ index 6f7730e..caac779 100644
  			this.handle = handle;
 -			if (!owner)
 +			this.managedOnly = managedOnly;
++			this.managedStatus = managedStatus;
 +			this.recordingCandidate = recordingCandidate;
 +			if (!owner && handle != IntPtr.Zero)
  				NativeMethods.cairo_surface_reference (handle);
@@ -125,6 +127,7 @@ index 6f7730e..caac779 100644
 +		}
 +		internal IntPtr NativeHandleForMetadata { get { CheckDisposed (); return EnsureNativeHandle (); } }
 +		internal bool IsManagedOnly => managedOnly;
++		internal Status ManagedStatus => managedStatus;
 +		internal bool ManagedFinished => aliasOwner != null && managedOnly ? aliasOwner.ManagedFinished : finished;
 +		internal bool HasPendingRecordedCommands => aliasOwner != null && managedOnly
 +			? aliasOwner.HasPendingRecordedCommands : recorder?.HasPendingCommands ?? false;
@@ -326,6 +329,7 @@ index 6f7730e..caac779 100644
 +					if (!ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) throw new InvalidOperationException("A recording surface may only be modified from its recording thread.");
 +					recorder.ResumeRecording();
 +				}
++				if (recorder.GraphicsState.Status != Status.Success) return true;
 +				EnsureRecordingOwnerThread ();
 +				if (recorder.State != SurfaceRecordingState.Recording)
 +					MaterializeRecorder (recordingContext == null ? IntPtr.Zero : recordingContext.NativeHandleForRecorder);
@@ -455,7 +459,7 @@ index 6f7730e..caac779 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +496,280 @@ namespace Cairo
+@@ -87,141 +500,281 @@ namespace Cairo
  		}
  
  
@@ -595,6 +599,7 @@ index 6f7730e..caac779 100644
 +			lock (recordingSync) {
 +				CheckDisposed ();
 +				if (managedOnly) {
++					if (managedStatus != Status.Success) { finished = true; return managedStatus; }
 +					if (finished) return Status.Success;
 +					SurfaceRecorderSnapshot snapshot = null;
 +					if (recorder != null) {
@@ -711,7 +716,7 @@ index 6f7730e..caac779 100644
  		public Status Status {
  			get {
  				CheckDisposed ();
-+				if (managedOnly && handle == IntPtr.Zero) return Status.Success;
++				if (managedOnly && handle == IntPtr.Zero) return managedStatus;
 +				MaterializeRecorder ();
  				return NativeMethods.cairo_surface_status (handle);
  			}
