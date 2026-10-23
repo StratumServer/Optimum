@@ -1,8 +1,37 @@
 diff --git a/VintagestoryApi/Client/UI/CairoFont.cs b/VintagestoryApi/Client/UI/CairoFont.cs
-index 03bfd4f..c00b214 100644
+index 03bfd4f..ce9a665 100644
 --- a/VintagestoryApi/Client/UI/CairoFont.cs
 +++ b/VintagestoryApi/Client/UI/CairoFont.cs
-@@ -240,23 +240,38 @@ namespace Vintagestory.API.Client
+@@ -9,11 +9,10 @@ namespace Vintagestory.API.Client
+     /// <summary>
+     /// Represent a font with sizing and styling for use in rendering text
+     /// </summary>
+     public class CairoFont : FontConfig, IDisposable
+     {
+-        static ImageSurface surface;
+         /// <summary>
+         /// The static Context for all Cairo Fonts.
+         /// </summary>
+         public static Context FontMeasuringContext;
+         
+@@ -28,16 +27,10 @@ namespace Vintagestory.API.Client
+ 
+         public FontSlant Slant = FontSlant.Normal;
+ 
+         public EnumTextOrientation Orientation = EnumTextOrientation.Left;
+ 
+-        static CairoFont()
+-        {
+-            surface = new ImageSurface(Format.Argb32, 1, 1);
+-            FontMeasuringContext = new Context(surface);
+-        }
+-
+         /// <summary>
+         /// Creates an empty CairoFont instance.
+         /// </summary>
+         public CairoFont()
+         {
+@@ -240,23 +233,38 @@ namespace Vintagestory.API.Client
          /// Gets the font's extents.
          /// </summary>
          /// <returns>The FontExtents for this particular font.</returns>
@@ -45,7 +74,7 @@ index 03bfd4f..c00b214 100644
          /// <summary>
          /// Clone function.  Creates a duplicate of this Cairofont.
          /// </summary>
-@@ -435,11 +450,11 @@ namespace Vintagestory.API.Client
+@@ -435,11 +443,11 @@ namespace Vintagestory.API.Client
  
          }
  

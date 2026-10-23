@@ -651,8 +651,49 @@ public static class ApiPatcher
         RewriteFontMeasurementsWithSkia(module, cairo, font, textExtents, fontExtents);
         PatchFontMeasurementMethod(module, textExtents, enabledGetter, startTimestamp, recordTextExtents);
         PatchFontMeasurementMethod(module, fontExtents, enabledGetter, startTimestamp, recordFontExtents);
+        DisableNativeFontMeasuringContextInitializer(module, font);
         Console.WriteLine($"  API PATCHED: {fontTypeName}.GetTextExtents/GetFontExtents Skia metrics and null-safe disposal");
         return 2;
+    }
+
+    private static void DisableNativeFontMeasuringContextInitializer(ModuleDefinition module, TypeDefinition font)
+    {
+        var initializer = font.Methods.SingleOrDefault(method => method.Name == ".cctor" && method.IsStatic && method.Parameters.Count == 0);
+        if (initializer == null) return;
+        if (!initializer.HasBody)
+            throw new InvalidOperationException("CairoFont's static measuring-context initializer has no body.");
+
+        var surface = font.Fields.SingleOrDefault(field => field.Name == "surface" && field.IsStatic && field.FieldType.FullName == "Cairo.ImageSurface")
+            ?? throw new InvalidOperationException("CairoFont's native measuring surface field is missing.");
+        var measuringContext = font.Fields.SingleOrDefault(field => field.Name == "FontMeasuringContext" && field.IsStatic && field.FieldType.FullName == "Cairo.Context")
+            ?? throw new InvalidOperationException("CairoFont.FontMeasuringContext is missing.");
+        Instruction[] instructions = initializer.Body.Instructions.Where(instruction => instruction.OpCode != OpCodes.Nop).ToArray();
+        bool matchesVanillaInitializer = instructions.Length == 9 &&
+            instructions[0].OpCode == OpCodes.Ldc_I4_0 &&
+            instructions[1].OpCode == OpCodes.Ldc_I4_1 &&
+            instructions[2].OpCode == OpCodes.Ldc_I4_1 &&
+            IsConstructor(instructions[3], "Cairo.ImageSurface", "Cairo.Format", "System.Int32", "System.Int32") &&
+            IsField(instructions[4], OpCodes.Stsfld, surface) &&
+            IsField(instructions[5], OpCodes.Ldsfld, surface) &&
+            IsConstructor(instructions[6], "Cairo.Context", "Cairo.Surface") &&
+            IsField(instructions[7], OpCodes.Stsfld, measuringContext) &&
+            instructions[8].OpCode == OpCodes.Ret;
+        if (!matchesVanillaInitializer)
+            throw new InvalidOperationException("CairoFont's static initializer no longer matches the known native measuring-context construction.");
+
+        initializer.Body = new MethodBody(initializer);
+        initializer.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        initializer.DebugInformation.SequencePoints.Clear();
+        initializer.DebugInformation.Scope = null;
+        Console.WriteLine("  API PATCHED: CairoFont static initialization no longer creates a Cairo surface/context");
+
+        static bool IsConstructor(Instruction instruction, string declaringType, params string[] parameters) =>
+            instruction.OpCode == OpCodes.Newobj && instruction.Operand is MethodReference method &&
+            method.Name == ".ctor" && method.DeclaringType.FullName == declaringType &&
+            method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters);
+
+        static bool IsField(Instruction instruction, OpCode opcode, FieldDefinition field) =>
+            instruction.OpCode == opcode && instruction.Operand is FieldReference reference && reference.FullName == field.FullName;
     }
 
     private static void RewriteFontMeasurementsWithSkia(ModuleDefinition module, ModuleDefinition cairo,
