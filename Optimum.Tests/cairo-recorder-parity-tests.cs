@@ -987,7 +987,7 @@ public sealed class CairoRecorderParityTests
 		});
 	}
 
-	[Fact (Skip = "Known gap: Skia has no equivalent of CAIRO_OPERATOR_SATURATE, so the recorder rejects it and a strict recording surface cannot fall back to Cairo.")]
+	[Fact]
 	public void SaturateMatchesCairoWithoutFallback ()
 	{
 		AssertParity (24, 24, context => {
@@ -998,6 +998,27 @@ public sealed class CairoRecorderParityTests
 			context.Rectangle (4, 4, 10, 10);
 			context.Fill ();
 		});
+	}
+
+	[Fact]
+	public void SaturateMatchesCairoAcrossPremultipliedAlphaPairs ()
+	{
+		double[] alphas = { 0, .125, .5, .875, 1 };
+		AssertParity (100, 100, context => {
+			context.Antialias = Antialias.None;
+			for (int y = 0; y < alphas.Length; y++) {
+				for (int x = 0; x < alphas.Length; x++) {
+					context.Operator = Operator.Source;
+					context.SetSourceRGBA (x / 4.0, .37, 1 - y / 4.0, alphas[y]);
+					context.Rectangle (x * 20, y * 20, 20, 20);
+					context.Fill ();
+					context.Operator = Operator.Saturate;
+					context.SetSourceRGBA (1 - y / 4.0, .73, x / 4.0, alphas[x]);
+					context.Rectangle (x * 20 + 2, y * 20 + 2, 16, 16);
+					context.Fill ();
+				}
+			}
+		}, edgeAllowance: false);
 	}
 
 	[Fact]
@@ -1038,7 +1059,7 @@ public sealed class CairoRecorderParityTests
 	}
 
 	[Fact]
-	public void GroupsMaskAndTextStillMaterialize ()
+	public void GroupsMaterializeWhilePatternMasksStayManaged ()
 	{
 		AssertMaterializesWith (24, 24, context => {
 			context.SetSourceRGBA (.25, .5, .75, .6);
@@ -1048,20 +1069,20 @@ public sealed class CairoRecorderParityTests
 			using (Pattern group = context.PopGroup ()) context.SetSource (group);
 			context.Paint ();
 		}, "Context.PushGroup");
-		AssertMaterializesWith (24, 24, context => {
+		AssertParity (24, 24, context => {
 			context.SetSourceRGBA (.25, .5, .75, .6);
 			context.Paint ();
 			using var mask = new LinearGradient (0, 0, 24, 24);
 			mask.AddColorStop (0, new Color (0, 0, 0, 0));
 			mask.AddColorStop (1, new Color (0, 0, 0, .5));
 			context.Mask (mask);
-		}, "Context.Mask");
-		AssertMaterializesWith (24, 24, context => {
+		});
+		AssertParity (24, 24, context => {
 			context.SetSourceRGBA (.25, .5, .75, .6);
 			context.Paint ();
 			context.Operator = Operator.Screen;
 			using var mask = new SolidPattern (0, 0, 0, .5);
 			context.Mask (mask);
-		}, "Context.Mask");
+		});
 	}
 }

@@ -48,6 +48,116 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
+	[Fact]
+	public void RecordedMaskSurfaceMatchesNativeCairo()
+	{
+		const int width = 8, height = 4;
+		using var actual = new ImageSurface (Format.Argb32, width, height);
+		actual.BeginRecording ();
+		using var mask = new ImageSurface (Format.A8, 4, 2);
+		byte[] alpha = new byte[mask.Height * mask.Stride];
+		for (int y = 0; y < mask.Height; y++) {
+			alpha[y * mask.Stride] = 0;
+			alpha[y * mask.Stride + 1] = 64;
+			alpha[y * mask.Stride + 2] = 128;
+			alpha[y * mask.Stride + 3] = 255;
+		}
+		Marshal.Copy (alpha, 0, mask.DataPtr, alpha.Length);
+		mask.MarkDirty ();
+		using (var context = new Context (actual)) {
+			context.SetSourceRGBA (.8, .3, .1, .75);
+			context.Rectangle (0, 0, width, height);
+			context.MaskSurface (mask, 2, 1);
+		}
+		using var bitmap = new SKBitmap (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		byte[] skiaPixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), skiaPixels, 0, skiaPixels.Length);
+
+		using var expected = new ImageSurface (Format.Argb32, width, height);
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (.8, .3, .1, .75);
+			context.Rectangle (0, 0, width, height);
+			context.MaskSurface (mask, 2, 1);
+		}
+		byte[] cairoPixels = expected.Data;
+		int maxChannelDelta = 0;
+		for (int i = 0; i < skiaPixels.Length; i++) maxChannelDelta = Math.Max (maxChannelDelta, Math.Abs (skiaPixels[i] - cairoPixels[i]));
+		Assert.InRange (maxChannelDelta, 0, 10);
+		Assert.Equal (cairoPixels, actual.Data);
+	}
+
+	[Fact]
+	public void RecordedGradientMaskMatchesNativeCairo()
+	{
+		const int width = 16, height = 8;
+		using var actual = new ImageSurface (Format.Argb32, width, height);
+		actual.BeginRecording ();
+		using var actualMask = new LinearGradient (0, 0, width, 0);
+		actualMask.AddColorStop (0, new Color (1, 1, 1, 0));
+		actualMask.AddColorStop (1, new Color (1, 1, 1, 1));
+		using (var context = new Context (actual)) {
+			context.SetSourceRGBA (.1, .6, .9, 1);
+			context.Rectangle (0, 0, width, height);
+			context.Mask (actualMask);
+		}
+		using var bitmap = new SKBitmap (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		byte[] skiaPixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), skiaPixels, 0, skiaPixels.Length);
+
+		using var expected = new ImageSurface (Format.Argb32, width, height);
+		using var cairoMask = new LinearGradient (0, 0, width, 0);
+		cairoMask.AddColorStop (0, new Color (1, 1, 1, 0));
+		cairoMask.AddColorStop (1, new Color (1, 1, 1, 1));
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (.1, .6, .9, 1);
+			context.Rectangle (0, 0, width, height);
+			context.Mask (cairoMask);
+		}
+		byte[] cairoPixels = expected.Data;
+		int maxChannelDelta = 0;
+		for (int i = 0; i < skiaPixels.Length; i++) maxChannelDelta = Math.Max (maxChannelDelta, Math.Abs (skiaPixels[i] - cairoPixels[i]));
+		Assert.InRange (maxChannelDelta, 0, 10);
+		Assert.Equal (cairoPixels, actual.Data);
+	}
+
+	[Fact]
+	public void RecordedSurfacePatternMaskMatchesNativeCairo()
+	{
+		const int width = 8, height = 4;
+		using var actual = new ImageSurface (Format.Argb32, width, height);
+		actual.BeginRecording ();
+		using var mask = new ImageSurface (Format.Argb32, width, height);
+		byte[] maskPixels = new byte[mask.Height * mask.Stride];
+		for (int y = 0; y < height; y++) for (int x = 4; x < width; x++) maskPixels[y * mask.Stride + x * 4 + 3] = 255;
+		Marshal.Copy (maskPixels, 0, mask.DataPtr, maskPixels.Length);
+		mask.MarkDirty ();
+		using var actualMask = new SurfacePattern (mask);
+		using (var context = new Context (actual)) {
+			context.SetSourceRGBA (.8, .2, .4, 1);
+			context.Rectangle (0, 0, width, height);
+			context.Mask (actualMask);
+		}
+		using var bitmap = new SKBitmap (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		byte[] skiaPixels = new byte[bitmap.ByteCount];
+		Marshal.Copy (bitmap.GetPixels (), skiaPixels, 0, skiaPixels.Length);
+
+		using var expected = new ImageSurface (Format.Argb32, width, height);
+		using var expectedMask = new SurfacePattern (mask);
+		using (var context = new Context (expected)) {
+			context.SetSourceRGBA (.8, .2, .4, 1);
+			context.Rectangle (0, 0, width, height);
+			context.Mask (expectedMask);
+		}
+		byte[] cairoPixels = expected.Data;
+		int maxChannelDelta = 0;
+		for (int i = 0; i < skiaPixels.Length; i++) maxChannelDelta = Math.Max (maxChannelDelta, Math.Abs (skiaPixels[i] - cairoPixels[i]));
+		Assert.InRange (maxChannelDelta, 0, 10);
+		Assert.Equal (cairoPixels, actual.Data);
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]
@@ -294,11 +404,11 @@ public sealed class CairoContextRecorderTests
 	}
 
 	[Fact]
-	public void UnsupportedContextCallMaterializesPrefixBeforeNativeDrawing()
+	public void ManagedGradientMaskPreservesPrefixAndReplaysToCairo()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 20, 20);
 		var recorder = actual.BeginRecording ();
-		// A solid mask is recorded as an alpha paint; a gradient mask still needs Cairo.
+		// Both solid and gradient masks are captured as managed alpha sources.
 		using var mask = new LinearGradient (0, 0, 20, 0);
 		mask.AddColorStop (0, new Color (0, 0, 0, 0)); mask.AddColorStop (1, new Color (0, 0, 0, 1));
 		using (var context = new Context (actual)) {
@@ -316,7 +426,7 @@ public sealed class CairoContextRecorderTests
 			context.Mask (mask);
 		}
 
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
 		Assert.Equal (expected.Data, actual.Data);
 	}
 

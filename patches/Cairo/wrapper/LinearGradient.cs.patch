@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/LinearGradient.cs b/Cairo/wrapper/LinearGradient.cs
-index 2e7eb46..4a84382 100644
+index 2e7eb46..7f1654c 100644
 --- a/Cairo/wrapper/LinearGradient.cs
 +++ b/Cairo/wrapper/LinearGradient.cs
 @@ -38,17 +38,26 @@ namespace Cairo {
@@ -11,7 +11,7 @@ index 2e7eb46..4a84382 100644
 -			: base (NativeMethods.cairo_pattern_create_linear (x0, y0, x1, y1), true)
 +			: base (true)
  		{
-+			if (CairoNativeGuard.Mode == "deny")
++			if (Surface.ManagedApiMode)
 +				ManagedGradient = new ManagedGradientSource(PatternType.Linear, x0, y0, 0, x1, y1, 0);
 +			else
 +				NativeHandleForRecorder = NativeMethods.cairo_pattern_create_linear (x0, y0, x1, y1);

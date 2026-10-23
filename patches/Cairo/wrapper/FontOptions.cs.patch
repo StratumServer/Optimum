@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/FontOptions.cs b/Cairo/wrapper/FontOptions.cs
-index 05e11bc..2f0460d 100644
+index 05e11bc..10cce12 100644
 --- a/Cairo/wrapper/FontOptions.cs
 +++ b/Cairo/wrapper/FontOptions.cs
 @@ -30,37 +30,61 @@ using System;
@@ -104,7 +104,7 @@ index 05e11bc..2f0460d 100644
  
  		public static bool operator == (FontOptions options, FontOptions other)
  		{
-@@ -108,78 +129,109 @@ namespace Cairo
+@@ -108,78 +129,111 @@ namespace Cairo
  			return Equals (other as FontOptions);
  		}
  
@@ -120,6 +120,8 @@ index 05e11bc..2f0460d 100644
 -			get { return handle; }
 +			get {
 +				if (disposed) return IntPtr.Zero;
++				if (nativeHandle == IntPtr.Zero && !CairoNativeGuard.NativeAllowed)
++					throw new NotSupportedException ("FontOptions.Handle requires the explicitly enabled libcairo compatibility backend.");
 +				if (nativeHandle == IntPtr.Zero) {
 +					nativeHandle = NativeMethods.cairo_font_options_create ();
 +					if (CairoDebug.Enabled) CairoDebug.OnAllocated (nativeHandle);

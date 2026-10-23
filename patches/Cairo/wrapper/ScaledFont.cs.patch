@@ -1,0 +1,268 @@
+diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
+index 42d5e81..32c0091 100644
+--- a/Cairo/wrapper/ScaledFont.cs
++++ b/Cairo/wrapper/ScaledFont.cs
+@@ -1,43 +1,54 @@
+ //
+ // Mono.Cairo.ScaledFont.cs
+ //
+-// (c) 2008 Jordi Mas i Hernandez (jordimash@gmail.com)
++// Copyright (C) 2008 Jordi Mas i Hernandez
+ //
+ // Permission is hereby granted, free of charge, to any person obtaining
+ // a copy of this software and associated documentation files (the
+ // "Software"), to deal in the Software without restriction, including
+ // without limitation the rights to use, copy, modify, merge, publish,
+ // distribute, sublicense, and/or sell copies of the Software, and to
+ // permit persons to whom the Software is furnished to do so, subject to
+ // the following conditions:
+-// 
++//
+ // The above copyright notice and this permission notice shall be
+ // included in all copies or substantial portions of the Software.
+-// 
++//
+ // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+-// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+-// LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+-// OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+-// WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-//
++// NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
++// BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
++// ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
++// CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++// SOFTWARE.
+ 
+ using System;
+ using System.Runtime.InteropServices;
+ 
+ #nullable disable
+ 
+ namespace Cairo {
+-   
+ 	public class ScaledFont : IDisposable
+ 	{
+ 		protected IntPtr handle = IntPtr.Zero;
++		bool disposed;
++		string family;
++		FontSlant slant;
++		FontWeight weight;
++		Matrix fontMatrix;
++		Matrix ctm;
++		Antialias antialias;
++		HintStyle hintStyle;
++		HintMetrics hintMetrics;
++		SubpixelOrder subpixelOrder;
+ 
+ 		internal ScaledFont (IntPtr handle, bool owner)
+ 		{
++			if (!CairoNativeGuard.NativeAllowed)
++				throw new NotSupportedException ("A ScaledFont built from an IntPtr requires the explicit libcairo compatibility backend.");
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+ 
+ 			this.handle = handle;
+ 			if (!owner)
+@@ -45,67 +56,143 @@ namespace Cairo {
+ 			if (CairoDebug.Enabled)
+ 				CairoDebug.OnAllocated (handle);
+ 		}
+ 
+ 		public ScaledFont (FontFace fontFace, Matrix matrix, Matrix ctm, FontOptions options)
+-			: this (NativeMethods.cairo_scaled_font_create (fontFace.Handle, matrix, ctm, options.Handle), true)
+ 		{
++			if (fontFace == null) throw new ArgumentNullException (nameof (fontFace));
++			if (ReferenceEquals (matrix, null)) throw new ArgumentNullException (nameof (matrix));
++			if (ReferenceEquals (ctm, null)) throw new ArgumentNullException (nameof (ctm));
++			if (options == null) throw new ArgumentNullException (nameof (options));
++
++			if (fontFace.HasManagedMetadata) {
++				family = fontFace.ManagedFamily;
++				slant = fontFace.ManagedSlant;
++				weight = fontFace.ManagedWeight;
++				fontMatrix = (Matrix)matrix.Clone ();
++				this.ctm = (Matrix)ctm.Clone ();
++				antialias = options.Antialias;
++				hintStyle = options.HintStyle;
++				hintMetrics = options.HintMetrics;
++				subpixelOrder = options.SubpixelOrder;
++			}
++			if (!fontFace.HasManagedMetadata && !CairoNativeGuard.NativeAllowed)
++				throw new NotSupportedException ("A ScaledFont requires managed FontFace metadata or the explicit libcairo compatibility backend.");
++			if (!CairoNativeGuard.NativeAllowed) return;
++			handle = CreateNativeScaledFont (fontFace, matrix, ctm, options);
++			if (handle == IntPtr.Zero) throw new InvalidOperationException ("Cairo could not create a scaled font.");
++			if (CairoDebug.Enabled) CairoDebug.OnAllocated (handle);
++		}
++
++		static IntPtr CreateNativeScaledFont (FontFace fontFace, Matrix matrix, Matrix ctm, FontOptions options)
++		{
++			if (!CairoNativeGuard.NativeAllowed)
++				throw new NotSupportedException ("ScaledFont creation requires the explicit libcairo compatibility backend.");
++			return NativeMethods.cairo_scaled_font_create (fontFace.Handle, matrix, ctm, options.Handle);
+ 		}
+ 
+ 		~ScaledFont ()
+ 		{
+ 			Dispose (false);
+ 		}
+ 
+-		public IntPtr Handle {
+-			get {
+-				return handle;
+-			}
++		internal bool HasManagedMetadata => family != null;
++		internal string ManagedFamily => family;
++		internal FontSlant ManagedSlant => slant;
++		internal FontWeight ManagedWeight => weight;
++		internal double ManagedSize => ReferenceEquals (fontMatrix, null) ? 10 : Math.Sqrt (Math.Abs (fontMatrix.Xx * fontMatrix.Yy - fontMatrix.Xy * fontMatrix.Yx));
++		internal Matrix ManagedFontMatrix => ReferenceEquals (fontMatrix, null) ? null : (Matrix)fontMatrix.Clone ();
++		internal Matrix ManagedCtm => ReferenceEquals (ctm, null) ? null : (Matrix)ctm.Clone ();
++
++		internal FontOptions GetManagedFontOptions ()
++		{
++			CheckDisposed ();
++			return FontOptions.FromValues (antialias, hintStyle, hintMetrics, subpixelOrder);
+ 		}
+ 
++		internal ScaledFont CloneForRecorder ()
++		{
++			CheckDisposed ();
++			if (HasManagedMetadata) {
++				using var face = new FontFace (family, slant, weight);
++				using var options = GetManagedFontOptions ();
++				return new ScaledFont (face, fontMatrix, ctm, options);
++			}
++			return new ScaledFont (Handle, false);
++		}
++
++		IntPtr EnsureNativeHandle ()
++		{
++			CheckDisposed ();
++			if (handle == IntPtr.Zero) {
++				if (!HasManagedMetadata)
++					throw new NotSupportedException ("This ScaledFont has no managed description.");
++				if (!CairoNativeGuard.NativeAllowed)
++					throw new NotSupportedException ("A managed ScaledFont has no native handle unless the libcairo compatibility backend is explicitly enabled.");
++				using var face = new FontFace (family, slant, weight);
++				using var options = GetManagedFontOptions ();
++				handle = CreateNativeScaledFont (face, fontMatrix, ctm, options);
++				if (handle == IntPtr.Zero) throw new InvalidOperationException ("Cairo could not materialize a scaled font.");
++				if (CairoDebug.Enabled) CairoDebug.OnAllocated (handle);
++			}
++			return handle;
++		}
++
++		public IntPtr Handle { get { return EnsureNativeHandle (); } }
++
+ 		public FontExtents FontExtents {
+ 			get {
+ 				CheckDisposed ();
+-				FontExtents extents;
+-				NativeMethods.cairo_scaled_font_extents (handle, out extents);
+-				return extents;
++				if (handle != IntPtr.Zero) {
++					FontExtents nativeExtents;
++					NativeMethods.cairo_scaled_font_extents (handle, out nativeExtents);
++					return nativeExtents;
++				}
++				using var options = GetManagedFontOptions ();
++				ManagedGraphicsState state = ManagedGraphicsState.CreateFontMetricsState (family, slant, weight, ManagedSize, fontMatrix, options);
++				return SkiaTextMetrics.FontExtents (state);
+ 			}
+ 		}
+ 
+ 		public Matrix FontMatrix {
+ 			get {
+ 				CheckDisposed ();
+-				Matrix m;
+-				NativeMethods.cairo_scaled_font_get_font_matrix (handle, out m);
+-				return m;
++				if (HasManagedMetadata) return (Matrix)fontMatrix.Clone ();
++				Matrix matrix;
++				NativeMethods.cairo_scaled_font_get_font_matrix (handle, out matrix);
++				return matrix;
+ 			}
+ 		}
+ 
+ 		public FontType FontType {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_scaled_font_get_type (handle);
++				return handle == IntPtr.Zero ? Cairo.FontType.Toy : NativeMethods.cairo_scaled_font_get_type (handle);
+ 			}
+ 		}
+ 
+ 		public TextExtents GlyphExtents (Glyph[] glyphs)
+ 		{
+ 			CheckDisposed ();
+-			IntPtr ptr = Context.FromGlyphToUnManagedMemory (glyphs);
+-			TextExtents extents;
+-
+-			NativeMethods.cairo_scaled_font_glyph_extents (handle, ptr, glyphs.Length, out extents);
+-
+-			Marshal.FreeHGlobal (ptr);
+-			return extents;
++			if (glyphs == null) throw new ArgumentNullException (nameof (glyphs));
++			if (handle != IntPtr.Zero) {
++				IntPtr ptr = Context.FromGlyphToUnManagedMemory (glyphs);
++				try {
++					TextExtents nativeExtents;
++					NativeMethods.cairo_scaled_font_glyph_extents (handle, ptr, glyphs.Length, out nativeExtents);
++					return nativeExtents;
++				} finally { Marshal.FreeHGlobal (ptr); }
++			}
++			using var options = GetManagedFontOptions ();
++			ManagedGraphicsState state = ManagedGraphicsState.CreateFontMetricsState (family, slant, weight, ManagedSize, fontMatrix, options);
++			return SkiaTextMetrics.GlyphExtents (state, glyphs);
+ 		}
+-	
+-		public Status Status
+-		{
++
++		public Status Status {
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_scaled_font_status (handle);
++				return handle == IntPtr.Zero ? Cairo.Status.Success : NativeMethods.cairo_scaled_font_status (handle);
+ 			}
+ 		}
+ 
+ 		public void Dispose ()
+ 		{
+@@ -115,28 +202,24 @@ namespace Cairo {
+ 
+ 		protected virtual void Dispose (bool disposing)
+ 		{
+ 			if (!disposing || CairoDebug.Enabled)
+ 				CairoDebug.OnDisposed<ScaledFont> (handle, disposing);
+-
+-			if (handle == IntPtr.Zero)
+-				return;
+-
+-			NativeMethods.cairo_scaled_font_destroy (handle);
++			if (handle != IntPtr.Zero) NativeMethods.cairo_scaled_font_destroy (handle);
+ 			handle = IntPtr.Zero;
++			disposed = true;
+ 		}
+ 
+ 		void CheckDisposed ()
+ 		{
+-			if (handle == IntPtr.Zero)
++			if (disposed || (handle == IntPtr.Zero && family == null))
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
+ 		[Obsolete]
+ 		protected void Reference ()
+ 		{
+ 			CheckDisposed ();
+-			NativeMethods.cairo_scaled_font_reference (handle);
++			NativeMethods.cairo_scaled_font_reference (EnsureNativeHandle ());
+ 		}
+ 	}
+ }
+-

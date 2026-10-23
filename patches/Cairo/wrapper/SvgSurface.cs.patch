@@ -1,0 +1,77 @@
+diff --git a/Cairo/wrapper/SvgSurface.cs b/Cairo/wrapper/SvgSurface.cs
+index 6adc9fa..55a113e 100644
+--- a/Cairo/wrapper/SvgSurface.cs
++++ b/Cairo/wrapper/SvgSurface.cs
+@@ -25,29 +25,71 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.IO;
++using SkiaSharp;
+ 
+ #nullable disable
+ 
+ namespace Cairo {
+ 
+ 	public class SvgSurface : Surface
+ 	{
++		readonly string filename;
++		readonly double width, height;
++
+ 		internal SvgSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 
+ 		public SvgSurface (string filename, double width, double height)
+-			: base (NativeMethods.cairo_svg_surface_create (filename, width, height), true)
++			: base (CairoNativeGuard.NativeAllowed ? CreateNativeSurface (filename, width, height) : IntPtr.Zero,
++				CairoNativeGuard.NativeAllowed, true, !CairoNativeGuard.NativeAllowed)
+ 		{
++			if (!CairoNativeGuard.NativeAllowed) {
++				if (filename == null) throw new ArgumentNullException (nameof (filename));
++				if (!double.IsFinite (width) || !double.IsFinite (height) || width < 0 || height < 0)
++					throw new ArgumentOutOfRangeException (nameof (width), "SVG dimensions must be finite and non-negative.");
++				this.filename = filename;
++				this.width = width;
++				this.height = height;
++				InitializeManagedSurface (Math.Max (1, checked ((int)Math.Ceiling (width))), Math.Max (1, checked ((int)Math.Ceiling (height))), SurfaceType.Svg);
++				BeginRecording ();
++			}
++		}
++
++		static IntPtr CreateNativeSurface (string filename, double width, double height)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (SvgSurface));
++			return NativeMethods.cairo_svg_surface_create (filename, width, height);
+ 		}
+ 
+ 		public void RestrictToVersion (SvgVersion version)
+ 		{
+ 			CheckDisposed ();
++			if (IsManagedOnly)
++				return; // Skia's SVG backend emits SVG 1.1 for either Cairo version request.
+ 			NativeMethods.cairo_svg_surface_restrict_to_version (Handle, version);
+ 		}
++
++		internal override bool FinishManagedSurface (SurfaceRecorderSnapshot snapshot)
++		{
++			using var output = new FileStream (filename, FileMode.Create, FileAccess.Write, FileShare.Read);
++			using SKCanvas canvas = SKSvgCanvas.Create (new SKRect (0, 0, (float)width, (float)height), output);
++			snapshot?.DrawTo (canvas);
++			canvas.Flush ();
++			return true;
++		}
++
++		protected override void Dispose (bool disposing)
++		{
++			try {
++				if (disposing && IsManagedOnly && !ManagedFinished) Finish ();
++			} finally {
++				base.Dispose (disposing);
++			}
++		}
+ 	}
+ }
+ 

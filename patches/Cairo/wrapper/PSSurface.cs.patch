@@ -1,0 +1,281 @@
+diff --git a/Cairo/wrapper/PSSurface.cs b/Cairo/wrapper/PSSurface.cs
+index 11d6247..4ae4e60 100644
+--- a/Cairo/wrapper/PSSurface.cs
++++ b/Cairo/wrapper/PSSurface.cs
+@@ -11,60 +11,271 @@
+ // "Software"), to deal in the Software without restriction, including
+ // without limitation the rights to use, copy, modify, merge, publish,
+ // distribute, sublicense, and/or sell copies of the Software, and to
+ // permit persons to whom the Software is furnished to do so, subject to
+ // the following conditions:
+-// 
++//
+ // The above copyright notice and this permission notice shall be
+ // included in all copies or substantial portions of the Software.
+-// 
++//
+ // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+ // LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Collections.Generic;
++using System.Globalization;
++using System.IO;
++using System.IO.Compression;
++using System.Text;
++using SkiaSharp;
+ 
+ #nullable disable
+ 
+ namespace Cairo {
+ 
+ 	public class PSSurface : Surface
+ 	{
++		const float RasterResolution = 300f / 72f;
++		const long MaximumPageRasterPixels = 16 * 1024 * 1024;
++		readonly string filename;
++		readonly List<Page> pages = new List<Page> ();
++		readonly List<string> documentComments = new List<string> ();
++		readonly List<string> setupComments = new List<string> ();
++		readonly List<string> pageSetupComments = new List<string> ();
++		double width, height;
++		DscSection dscSection;
++
++		enum DscSection { Document, Setup, PageSetup }
++
++		sealed class Page : IDisposable
++		{
++			internal readonly SurfaceRecorderSnapshot Snapshot;
++			internal readonly double Width, Height;
++			internal readonly string[] SetupComments;
++			internal Page (SurfaceRecorderSnapshot snapshot, double width, double height, string[] setupComments)
++			{ Snapshot = snapshot; Width = width; Height = height; SetupComments = setupComments; }
++			public void Dispose () => Snapshot?.Dispose ();
++		}
++
+ 		internal PSSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 
+ 		public PSSurface (string filename, double width, double height)
+-			: base (NativeMethods.cairo_ps_surface_create (filename, width, height), true)
++			: base (CairoNativeGuard.NativeAllowed ? CreateNativeSurface (filename, width, height) : IntPtr.Zero,
++				CairoNativeGuard.NativeAllowed, true, !CairoNativeGuard.NativeAllowed)
+ 		{
++			if (!CairoNativeGuard.NativeAllowed) {
++				if (filename == null) throw new ArgumentNullException (nameof (filename));
++				ValidateSize (width, height);
++				this.filename = filename;
++				this.width = width;
++				this.height = height;
++				InitializeManagedSurface (Math.Max (1, checked ((int)Math.Ceiling (width))), Math.Max (1, checked ((int)Math.Ceiling (height))), SurfaceType.PS);
++				BeginRecording ();
++			}
++		}
++
++		static IntPtr CreateNativeSurface (string filename, double width, double height)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (PSSurface));
++			return NativeMethods.cairo_ps_surface_create (filename, width, height);
++		}
++
++		static void ValidateSize (double width, double height)
++		{
++			if (!double.IsFinite (width) || !double.IsFinite (height) || width <= 0 || height <= 0)
++				throw new ArgumentOutOfRangeException (nameof (width), "PostScript page dimensions must be finite and positive.");
+ 		}
+ 
+ 		public void BeginPageSetup ()
+ 		{
+ 			CheckDisposed ();
++			if (IsManagedOnly) { dscSection = DscSection.PageSetup; return; }
+ 			NativeMethods.cairo_ps_surface_dsc_begin_page_setup (Handle);
+ 		}
+ 
+ 		public void BeginSetup ()
+ 		{
+ 			CheckDisposed ();
++			if (IsManagedOnly) { dscSection = DscSection.Setup; return; }
+ 			NativeMethods.cairo_ps_surface_dsc_begin_setup (Handle);
+ 		}
+ 
+ 		public void DscComment (string comment)
+ 		{
+ 			CheckDisposed ();
+-			NativeMethods.cairo_ps_surface_dsc_comment (Handle, comment);
++			if (!IsManagedOnly) { NativeMethods.cairo_ps_surface_dsc_comment (Handle, comment); return; }
++			if (comment == null) throw new ArgumentNullException (nameof (comment));
++			if (!comment.StartsWith ("%%", StringComparison.Ordinal) || comment.IndexOfAny (new [] { '\r', '\n' }) >= 0)
++				throw new ArgumentException ("A DSC comment must be a single line beginning with '%%'.", nameof (comment));
++			switch (dscSection) {
++			case DscSection.Setup: setupComments.Add (comment); break;
++			case DscSection.PageSetup: pageSetupComments.Add (comment); break;
++			default: documentComments.Add (comment); break;
++			}
+ 		}
+ 
+ 		public void SetSize (double width, double height)
+ 		{
++			if (!IsManagedOnly) {
++				CheckDisposed ();
++				NativeMethods.cairo_ps_surface_set_size (Handle, width, height);
++				return;
++			}
+ 			CheckDisposed ();
+-			NativeMethods.cairo_ps_surface_set_size (Handle, width, height);
++			ValidateSize (width, height);
++			this.width = width;
++			this.height = height;
++			ResizeManagedSurface (Math.Max (1, checked ((int)Math.Ceiling (width))), Math.Max (1, checked ((int)Math.Ceiling (height))));
++		}
++
++		internal override bool AdvanceManagedPage (bool copyCurrentPage)
++		{
++			if (!IsManagedOnly) return false;
++			SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
++			if (snapshot == null) return false;
++			try {
++				if (!StartNextManagedPage (copyCurrentPage)) return false;
++				pages.Add (new Page (snapshot, width, height, pageSetupComments.ToArray ())); 
++				pageSetupComments.Clear ();
++				dscSection = DscSection.Document;
++				if (!copyCurrentPage) RecordingGraphicsState.NewPath ();
++				snapshot = null;
++				return true;
++			} finally { snapshot?.Dispose (); }
++		}
++
++		internal override bool FinishManagedSurface (SurfaceRecorderSnapshot snapshot)
++		{
++			var output = new FileStream (filename, FileMode.Create, FileAccess.Write, FileShare.Read);
++			try {
++				WriteAscii (output, "%!PS-Adobe-3.0\n%%Creator: Optimum SkiaSharp Cairo compatibility\n%%LanguageLevel: 2\n");
++				WriteAscii (output, "%%Pages: " + (pages.Count + (snapshot != null && (snapshot.Generation > 0 || pages.Count == 0) ? 1 : 0)).ToString (CultureInfo.InvariantCulture) + "\n");
++				foreach (string comment in documentComments) WriteAscii (output, comment + "\n");
++				WriteAscii (output, "%%EndComments\n%%BeginSetup\n");
++				foreach (string comment in setupComments) WriteAscii (output, comment + "\n");
++				WriteAscii (output, "%%EndSetup\n");
++				int pageNumber = 1;
++				foreach (Page page in pages) WritePage (output, page, pageNumber++);
++				if (snapshot != null && (snapshot.Generation > 0 || pages.Count == 0))
++					WritePage (output, new Page (snapshot, width, height, pageSetupComments.ToArray ()), pageNumber);
++				WriteAscii (output, "%%Trailer\n%%EOF\n");
++				output.Flush ();
++			} finally { output.Dispose (); }
++			foreach (Page page in pages) page.Dispose ();
++			pages.Clear ();
++			return true;
++		}
++
++		static void WritePage (Stream output, Page page, int pageNumber)
++		{
++			float rasterResolution = RasterResolution;
++			double maximumScale = Math.Sqrt (MaximumPageRasterPixels / page.Width / page.Height);
++			if (maximumScale < rasterResolution) rasterResolution = (float)maximumScale;
++			int pixelWidth = checked ((int)Math.Ceiling (page.Width * rasterResolution));
++			int pixelHeight = checked ((int)Math.Ceiling (page.Height * rasterResolution));
++			while ((long)pixelWidth * pixelHeight > MaximumPageRasterPixels) {
++				rasterResolution *= .999f;
++				pixelWidth = checked ((int)Math.Ceiling (page.Width * rasterResolution));
++				pixelHeight = checked ((int)Math.Ceiling (page.Height * rasterResolution));
++			}
++			long byteCount = checked ((long)pixelWidth * pixelHeight * 4);
++			if (pixelWidth <= 0 || pixelHeight <= 0 || byteCount > int.MaxValue)
++				throw new ArgumentOutOfRangeException (nameof (page), "The PostScript page dimensions exceed the managed raster limits.");
++			WriteAscii (output, "%%Page: " + pageNumber.ToString (CultureInfo.InvariantCulture) + " " + pageNumber.ToString (CultureInfo.InvariantCulture) + "\n");
++			WriteAscii (output, "%%PageBoundingBox: 0 0 " + Math.Ceiling (page.Width).ToString (CultureInfo.InvariantCulture) + " " + Math.Ceiling (page.Height).ToString (CultureInfo.InvariantCulture) + "\n%%BeginPageSetup\n");
++			WriteAscii (output, "<< /PageSize [" + FormatNumber (page.Width) + " " + FormatNumber (page.Height) + "] >> setpagedevice\n");
++			foreach (string comment in page.SetupComments) WriteAscii (output, comment + "\n");
++			WriteAscii (output, "%%EndPageSetup\ngsave\n" + FormatNumber (page.Width) + " " + FormatNumber (page.Height) + " scale\n");
++			using SKSurface surface = SKSurface.Create (new SKImageInfo (pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul))
++				?? throw new InvalidOperationException ("Skia could not allocate the PostScript page raster.");
++			page.Snapshot?.DrawTo (surface.Canvas, rasterResolution);
++			surface.Canvas.Flush ();
++			byte[] pixels = new byte [(int)byteCount];
++			var pin = System.Runtime.InteropServices.GCHandle.Alloc (pixels, System.Runtime.InteropServices.GCHandleType.Pinned);
++			try {
++				if (!surface.ReadPixels (new SKImageInfo (pixelWidth, pixelHeight, SKColorType.Bgra8888, SKAlphaType.Premul), pin.AddrOfPinnedObject (), checked (pixelWidth * 4), 0, 0))
++					throw new InvalidOperationException ("Skia could not read the PostScript page raster.");
++			} finally { pin.Free (); }
++			WriteAscii (output, "/DeviceRGB setcolorspace\n/picstr " + (pixelWidth * 3).ToString (CultureInfo.InvariantCulture) + " string def\n" + pixelWidth.ToString (CultureInfo.InvariantCulture) + " " + pixelHeight.ToString (CultureInfo.InvariantCulture) + " 8 [" + pixelWidth.ToString (CultureInfo.InvariantCulture) + " 0 0 -" + pixelHeight.ToString (CultureInfo.InvariantCulture) + " 0 " + pixelHeight.ToString (CultureInfo.InvariantCulture) + "]\n/Data currentfile /ASCII85Decode filter /FlateDecode filter def\n{ Data picstr readstring pop } false 3 colorimage\n");
++			WriteCompressedRgb (output, pixels, pixelWidth, pixelHeight);
++			WriteAscii (output, "grestore\nshowpage\n");
++		}
++
++		static void WriteCompressedRgb (Stream output, byte[] bgra, int width, int height)
++		{
++			using var compressed = new MemoryStream ();
++			using (var zlib = new ZLibStream (compressed, CompressionLevel.Optimal, true)) {
++				byte[] row = new byte [checked (width * 3)];
++				for (int y = 0; y < height; y++) {
++					int source = checked (y * width * 4);
++					for (int x = 0, target = 0; x < width; x++, source += 4) {
++						int white = 255 - bgra [source + 3];
++						row [target++] = (byte)Math.Min (255, bgra [source + 2] + white);
++						row [target++] = (byte)Math.Min (255, bgra [source + 1] + white);
++						row [target++] = (byte)Math.Min (255, bgra [source] + white);
++					}
++					zlib.Write (row, 0, row.Length);
++				}
++			}
++			compressed.Position = 0;
++			WriteAscii85 (output, compressed);
++		}
++
++		static void WriteAscii85 (Stream output, Stream input)
++		{
++			byte [] block = new byte [4];
++			Span<byte> encoded = stackalloc byte [5];
++			int lineLength = 0;
++			int count;
++			while ((count = ReadBlock (input, block)) > 0) {
++				uint value = ((uint)block [0] << 24) | ((uint)block [1] << 16) | ((uint)block [2] << 8) | block [3];
++				if (count == 4 && value == 0) {
++					WriteAscii85Char (output, 'z', ref lineLength);
++					continue;
++				}
++				for (int i = 4; i >= 0; i--) { encoded [i] = (byte)(value % 85 + '!'); value /= 85; }
++				for (int i = 0; i < count + 1; i++) WriteAscii85Char (output, (char)encoded [i], ref lineLength);
++			}
++			WriteAscii (output, "~>\n");
++		}
++
++		static int ReadBlock (Stream input, byte [] block)
++		{
++			Array.Clear (block, 0, block.Length);
++			int count = 0, read;
++			while (count < block.Length && (read = input.Read (block, count, block.Length - count)) > 0) count += read;
++			return count;
++		}
++
++		static void WriteAscii85Char (Stream output, char value, ref int lineLength)
++		{
++			output.WriteByte ((byte)value);
++			if (++lineLength >= 75) { output.WriteByte ((byte)'\n'); lineLength = 0; }
++		}
++
++		static void WriteAscii (Stream output, string value)
++		{
++			byte [] bytes = Encoding.ASCII.GetBytes (value);
++			output.Write (bytes, 0, bytes.Length);
++		}
++
++		static string FormatNumber (double value) => value.ToString ("0.################", CultureInfo.InvariantCulture);
++
++		protected override void Dispose (bool disposing)
++		{
++			try {
++				if (disposing && IsManagedOnly && !ManagedFinished) Finish ();
++			} finally {
++				if (disposing) { foreach (Page page in pages) page.Dispose (); pages.Clear (); }
++				base.Dispose (disposing);
++			}
+ 		}
+ 	}
+ }

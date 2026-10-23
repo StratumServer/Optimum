@@ -1,17 +1,30 @@
 diff --git a/Cairo/wrapper/Gradient.cs b/Cairo/wrapper/Gradient.cs
-index 1754611..2d3f740 100644
+index 1754611..ca57ad9 100644
 --- a/Cairo/wrapper/Gradient.cs
 +++ b/Cairo/wrapper/Gradient.cs
-@@ -37,34 +37,47 @@ namespace Cairo {
- 	{
- 		protected Gradient (IntPtr handle, bool owned) : base (handle, owned)
- 		{
- 		}
+@@ -33,38 +33,59 @@ using System;
  
-+		protected Gradient (bool managedOnly) : base (managedOnly)
+ namespace Cairo {
+ 
+ 	public class Gradient : Pattern
+ 	{
+-		protected Gradient (IntPtr handle, bool owned) : base (handle, owned)
++		static IntPtr RequireNativeHandle (IntPtr handle)
+ 		{
++			CairoNativeGuard.RequireNativeAllowed ("Gradient subclass native handle construction");
++			return handle;
++		}
++
++		protected Gradient (IntPtr handle, bool owned) : base (RequireNativeHandle (handle), owned)
 +		{
 +		}
 +
++		protected Gradient (bool managedOnly) : base (managedOnly)
++		{
++			if (!managedOnly)
++				CairoNativeGuard.RequireNativeAllowed ("Gradient subclass native handle construction");
+ 		}
+ 
  		[Obsolete]
  		protected Gradient ()
  		{

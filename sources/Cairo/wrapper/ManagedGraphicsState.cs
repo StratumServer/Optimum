@@ -82,6 +82,42 @@ namespace Cairo
 
 		internal Status Status => status;
 		internal int SaveDepth => saved.Count;
+		internal RecordedSurfaceSource[] GetRetainedSourceBindings ()
+		{
+			var result = new List<RecordedSurfaceSource> (saved.Count + 1);
+			if (current.SourceBinding != null) result.Add (current.SourceBinding);
+			foreach (State state in saved)
+				if (state.SourceBinding != null) result.Add (state.SourceBinding);
+			return result.ToArray ();
+		}
+
+		// A Cairo group starts with the caller's graphics state, but maintains an
+		// independent save stack while keeping the current path shared with the
+		// caller. The recorder copies the state at group entry and copies only the
+		// resulting path back at group exit.
+		internal ManagedGraphicsState CloneForGroup()
+		{
+			var copy = new ManagedGraphicsState {
+				current = current.Clone(), status = status,
+				hasCurrentPoint = hasCurrentPoint, needsMoveTo = needsMoveTo,
+				currentPoint = currentPoint, lastMovePoint = lastMovePoint
+			};
+			copy.ops.AddRange(ops);
+			copy.points.AddRange(points);
+			State[] stack = saved.ToArray();
+			for (int i = stack.Length - 1; i >= 0; i--) copy.saved.Push(stack[i].Clone());
+			return copy;
+		}
+
+		internal void CopyCurrentPathFrom(ManagedGraphicsState source)
+		{
+			ops.Clear(); ops.AddRange(source.ops);
+			points.Clear(); points.AddRange(source.points);
+			hasCurrentPoint = source.hasCurrentPoint;
+			needsMoveTo = source.needsMoveTo;
+			currentPoint = source.currentPoint;
+			lastMovePoint = source.lastMovePoint;
+		}
 
 		internal Matrix Matrix {
 			get => (Matrix)View.Ctm.Clone();
@@ -256,6 +292,30 @@ namespace Cairo
 			current.FontFamily = family; current.FontSlant = slant; current.FontWeight = weight;
 		}
 
+		internal void SetContextFontFace(FontFace fontFace)
+		{
+			if (status != Status.Success) return;
+			if (fontFace == null) { current.FontFamily = "Sans"; current.FontSlant = FontSlant.Normal; current.FontWeight = FontWeight.Normal; }
+			else if (fontFace.HasManagedMetadata) {
+				current.FontFamily = fontFace.ManagedFamily;
+				current.FontSlant = fontFace.ManagedSlant;
+				current.FontWeight = fontFace.ManagedWeight;
+			} else current.FontFamily = null;
+		}
+
+		internal void SetScaledFont(ScaledFont scaledFont)
+		{
+			if (status != Status.Success) return;
+			if (!scaledFont.HasManagedMetadata) { current.FontFamily = null; return; }
+			current.FontFamily = scaledFont.ManagedFamily;
+			current.FontSlant = scaledFont.ManagedSlant;
+			current.FontWeight = scaledFont.ManagedWeight;
+			current.FontMatrix = scaledFont.ManagedFontMatrix;
+			current.FontSize = scaledFont.ManagedSize;
+			using FontOptions options = scaledFont.GetManagedFontOptions();
+			SetFontOptions(options);
+		}
+
 		/// <summary>cairo_set_font_size: the font matrix becomes a uniform scale. <see cref="FontSize"/> tracks only this call.</summary>
 		internal void SetFontSize(double size)
 		{
@@ -282,6 +342,17 @@ namespace Cairo
 			if (status != Status.Success) return;
 			current.FontAntialias = options.Antialias; current.FontHintStyle = options.HintStyle;
 			current.FontHintMetrics = options.HintMetrics; current.FontSubpixelOrder = options.SubpixelOrder;
+		}
+
+		internal static ManagedGraphicsState CreateFontMetricsState(string family, FontSlant slant, FontWeight weight,
+			double size, Matrix fontMatrix, FontOptions options)
+		{
+			var state = new ManagedGraphicsState();
+			state.SelectFontFace(family, slant, weight);
+			state.SetFontSize(size);
+			state.SetFontMatrix(fontMatrix);
+			state.SetFontOptions(options);
+			return state;
 		}
 
 		/// <summary>cairo_get_font_options: the options set on the context. The surface's defaults (metrics hinting on) only apply when a scaled font is created.</summary>

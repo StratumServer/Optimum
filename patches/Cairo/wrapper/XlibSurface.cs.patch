@@ -1,0 +1,34 @@
+diff --git a/Cairo/wrapper/XlibSurface.cs b/Cairo/wrapper/XlibSurface.cs
+index d864739..8b029f5 100644
+--- a/Cairo/wrapper/XlibSurface.cs
++++ b/Cairo/wrapper/XlibSurface.cs
+@@ -39,20 +39,27 @@ using System;
+ namespace Cairo {
+ 
+ 	public class XlibSurface : Surface
+ 	{
+ 		public XlibSurface (IntPtr display, IntPtr drawable, IntPtr visual, int width, int height)
+-			: base (NativeMethods.cairo_xlib_surface_create (display, drawable, visual, width, height), true)
++			: base (CreateNativeSurface (display, drawable, visual, width, height), true)
+ 		{
+ 		}
+ 
+-		public XlibSurface (IntPtr ptr, bool own) : base (ptr, own)
++		static IntPtr CreateNativeSurface (IntPtr display, IntPtr drawable, IntPtr visual, int width, int height)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (XlibSurface));
++			return NativeMethods.cairo_xlib_surface_create (display, drawable, visual, width, height);
++		}
++
++		public XlibSurface (IntPtr ptr, bool own) : base (CairoNativeGuard.RequireNativeHandle (nameof (XlibSurface), ptr), own)
+ 		{
+ 		}
+ 
+ 		public static XlibSurface FromBitmap (IntPtr display, IntPtr bitmap, IntPtr screen, int width, int height)
+ 		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (XlibSurface) + ".FromBitmap");
+ 			IntPtr ptr = NativeMethods.cairo_xlib_surface_create_for_bitmap (display, bitmap, screen, width, height);
+ 			return new XlibSurface(ptr, true);
+ 		}
+ 
+ 		public void SetDrawable (IntPtr drawable, int width, int height)

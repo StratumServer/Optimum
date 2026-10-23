@@ -19,10 +19,17 @@ namespace Cairo
 		internal SKMatrix Matrix;
 		internal RecordedGuiClip[] Clips;
 		internal bool PaintAll;
+		bool saturate;
 		SKImage image;
+		SKImage maskImage;
+		RecordedGuiDrawing maskPatternDrawing;
+		Pattern maskReplayPattern;
+		float maskX, maskY;
 		SurfaceRecorderSnapshot sourceSnapshot;
 		SKShaderTileMode sourceTile;
 		SKFilterMode sourceFilter;
+		Matrix sourcePatternMatrix;
+		Extend sourceExtend;
 		SKMatrix sourceTransform;
 		SKShader shader;
 		SKPathEffect dash;
@@ -38,14 +45,24 @@ namespace Cairo
 		internal static RecordedGuiDrawing Capture(ManagedGraphicsState context, int targetWidth, int targetHeight, bool stroke, bool paintAll,
 		RecordedGuiClip[] clips, SKPath textPath = null, double alpha = 1, Matrix sourceMatrix = null, SurfaceRecorderSnapshot sourceSnapshot = null,
 			string text = null, SKFont textFont = null, SKTextBlob textBlob = null, float textX = 0, float textY = 0,
-			SKRect? textInkClip = null)
+			SKRect? textInkClip = null, ImageSurface maskSurface = null, Pattern maskPattern = null,
+			RecordedSurfaceSource maskBinding = null, double maskX = 0, double maskY = 0)
 		{
 			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.DrawingCapture);
 			RecordedGuiDrawing result;
 			using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState))
 				result = new RecordedGuiDrawing { Clips = clips, Matrix = ToSkia(context.Matrix), PaintAll = paintAll, sourceSnapshot = sourceSnapshot,
-					Text = text, TextFont = textFont, TextBlob = textBlob, TextX = textX, TextY = textY, TextInkClip = textInkClip };
+					Text = text, TextFont = textFont, TextBlob = textBlob, TextX = textX, TextY = textY, TextInkClip = textInkClip,
+					maskX = (float)maskX, maskY = (float)maskY };
 			try {
+				if (maskSurface != null) result.maskImage = CaptureMask(maskSurface);
+				if (maskPattern != null) {
+					result.maskReplayPattern = maskPattern.CloneForRecorder();
+					ManagedGraphicsState maskState = context.CloneForGroup();
+					maskState.SetSource(maskPattern, maskBinding);
+					result.maskPatternDrawing = Capture(maskState, targetWidth, targetHeight, false, true, clips,
+						sourceMatrix: maskState.SourceMatrix, sourceSnapshot: maskBinding?.Capture());
+				}
 				result.Path = textPath ?? (paintAll || textFont != null || textBlob != null ? null : CopyPath(context));
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState)) {
 					if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
@@ -58,6 +75,8 @@ namespace Cairo
 						StrokeJoin = (SKStrokeJoin)(int)context.LineJoin,
 						BlendMode = Blend(context.Operator)
 					};
+					result.saturate = context.Operator == Operator.Saturate;
+					if (result.saturate) result.Paint.Blender = RecordedCairoSaturate.Blender;
 				}
 				if (stroke) result.SetDash(context);
 				if (stroke && result.Paint.StrokeWidth > 0) {
@@ -76,9 +95,8 @@ namespace Cairo
 				result.SetSource(source, context.SourceColor, alpha, sourceMatrix, context, targetWidth, targetHeight);
 				if (sourceSnapshot == null) result.FreezeSource(source, context.SourceColor);
 				else {
-				result.nativeSource = new SolidPattern(0, 0, 0, 0);
-				result.nativeSource.Matrix = source.Matrix;
-				result.nativeSource.Extend = source.Extend;
+				result.sourcePatternMatrix = (Matrix)source.Matrix.Clone();
+				result.sourceExtend = source.Extend;
 				}
 				}
 				result.nativeSourceMatrix = sourceMatrix is null ? context.Matrix : (Matrix)sourceMatrix.Clone();
@@ -97,8 +115,8 @@ namespace Cairo
 				if (sourceSnapshot != null && nativeImage == null) {
 					nativeImage = new ImageSurface(Format.Argb32, sourceSnapshot.Width, sourceSnapshot.Height);
 					sourceSnapshot.ReplayNative(nativeImage.NativeHandleForMetadata);
-					var pattern = new SurfacePattern(nativeImage) { Matrix = nativeSource.Matrix, Extend = nativeSource.Extend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
-					nativeSource.Dispose(); nativeSource = pattern;
+					var pattern = new SurfacePattern(nativeImage) { Matrix = sourcePatternMatrix, Extend = sourceExtend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
+					nativeSource?.Dispose(); nativeSource = pattern;
 				}
 				replaySource = nativeSource;
 				if (replaySource == null && hasDeferredSolidSource) {
@@ -107,7 +125,8 @@ namespace Cairo
 				}
 				context.SetSource(replaySource);
 				context.Matrix = drawMatrix;
-				operation(context);
+				if (maskReplayPattern == null) operation(context);
+				else context.Mask(maskReplayPattern);
 			} finally { if (ownsReplaySource) replaySource.Dispose (); context.Restore(); }
 		}
 
@@ -115,6 +134,7 @@ namespace Cairo
 		{
 		using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceFreeze);
 		if (source == null) { deferredSolidSource = color; hasDeferredSolidSource = true; return; }
+		if (source.IsManagedSolidPattern) { nativeSource = source.CloneForRecorder(); return; }
 		if (source.ManagedGradient != null) { nativeSource = source.CloneForRecorder(); return; }
 		IntPtr h = source.NativeHandleForRecorder;
 			switch (NativeMethods.cairo_pattern_get_type(h)) {
@@ -167,10 +187,11 @@ namespace Cairo
 		using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceShader);
 		IntPtr handle = pattern == null ? IntPtr.Zero : pattern.NativeHandleForRecorder;
 		ManagedGradientSource managedGradient = pattern?.ManagedGradient;
-		PatternType type = pattern == null ? PatternType.Solid : managedGradient != null ? managedGradient.Type : NativeMethods.cairo_pattern_get_type(handle);
+		PatternType type = pattern == null ? PatternType.Solid : pattern.IsManagedSolidPattern ? PatternType.Solid : managedGradient != null ? managedGradient.Type : pattern is SurfacePattern surfacePattern && surfacePattern.IsManagedSource ? PatternType.Surface : NativeMethods.cairo_pattern_get_type(handle);
 		if (type == PatternType.Solid) {
 		double r, g, b, a;
 		if (pattern == null) { r = color.Red; g = color.Green; b = color.Blue; a = color.Alpha; }
+		else if (pattern.IsManagedSolidPattern) { r = pattern.ManagedSolidColor.R; g = pattern.ManagedSolidColor.G; b = pattern.ManagedSolidColor.B; a = pattern.ManagedSolidColor.A; }
 		else NativeMethods.cairo_pattern_get_rgba(handle, out r, out g, out b, out a);
 				// Cairo quantizes premultiplied solid channels to 16 bits, then
 				// Pixman takes the high byte. Quantizing straight RGBA first
@@ -218,30 +239,33 @@ namespace Cairo
 			Paint.Shader = shader; Paint.Color = Color(1, 1, 1, alpha);
 		}
 
-		internal void Draw(SKCanvas canvas, RecordedGpuBlur gpu = null)
+		internal void Draw(SKCanvas canvas, RecordedGpuBlur gpu = null, PointD deviceOffset = default, float outputScale = 1f)
 		{
-			DrawCore(canvas, gpu);
+			DrawCore(canvas, gpu, deviceOffset, outputScale);
 		}
 
-		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null &&
+		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null && !saturate &&
 			sourceSnapshot == null && (Paint.BlendMode == SKBlendMode.SrcOver || Paint.BlendMode == SKBlendMode.Src);
 
-		internal bool Draw(SKSurface target, RecordedGpuBlur gpu, SKRuntimeEffect lcdEffect, int width, int height)
+		internal bool Draw(SKSurface target, RecordedGpuBlur gpu, SKRuntimeEffect lcdEffect, int width, int height, PointD deviceOffset = default)
 		{
 			if (target == null) throw new ArgumentNullException(nameof(target));
-			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu); return false; }
-			if (gpu != null) gpu.DrawLcdText(this, target, width, height);
-			else DrawLcdTextCpu(target, lcdEffect, width, height);
+			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
+			if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
+			else DrawLcdTextCpu(target, lcdEffect, width, height, deviceOffset);
 			return true;
 		}
 
-		internal void DrawDirect(SKCanvas canvas, RecordedGpuBlur gpu = null) => DrawCore(canvas, gpu);
+		internal void DrawDirect(SKCanvas canvas, RecordedGpuBlur gpu = null, PointD deviceOffset = default) => DrawCore(canvas, gpu, deviceOffset);
 
-		void DrawCore(SKCanvas canvas, RecordedGpuBlur gpu)
+		void DrawCore(SKCanvas canvas, RecordedGpuBlur gpu, PointD deviceOffset = default, float outputScale = 1f)
 		{
 			SKShader dependencyShader = null;
 			SKImage dependencyImage = null;
+			SKShader maskDependencyShader = null;
+			SKImage maskDependencyImage = null;
 			bool ownsDependencyImage = gpu == null;
+			bool ownsMaskDependencyImage = gpu == null;
 			if (sourceSnapshot != null) {
 				if (gpu != null) dependencyImage = gpu.RenderSource(sourceSnapshot, out ownsDependencyImage);
 				else {
@@ -252,12 +276,28 @@ namespace Cairo
 				}
 				dependencyShader = dependencyImage.ToShader(sourceTile, sourceTile, new SKSamplingOptions(sourceFilter), sourceTransform); Paint.Shader = dependencyShader;
 			}
+			if (maskPatternDrawing?.sourceSnapshot != null) {
+				if (gpu != null) maskDependencyImage = gpu.RenderSource(maskPatternDrawing.sourceSnapshot, out ownsMaskDependencyImage);
+				else {
+					using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
+					using var surface = SKSurface.Create(new SKImageInfo(maskPatternDrawing.sourceSnapshot.Width, maskPatternDrawing.sourceSnapshot.Height, SKColorType.Bgra8888, SKAlphaType.Premul), properties)
+						?? throw new InvalidOperationException("Skia could not create a software Cairo mask surface.");
+					maskPatternDrawing.sourceSnapshot.DrawTo(surface); maskDependencyImage = surface.Snapshot();
+				}
+				maskDependencyShader = maskDependencyImage.ToShader(maskPatternDrawing.sourceTile, maskPatternDrawing.sourceTile,
+					new SKSamplingOptions(maskPatternDrawing.sourceFilter), maskPatternDrawing.sourceTransform);
+			}
 			int save = canvas.Save();
 			try {
 				canvas.ResetMatrix();
+				canvas.Scale (outputScale);
+				canvas.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
 				foreach (RecordedGuiClip clip in Clips) canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
 				if (TextInkClip.HasValue) canvas.ClipRect(TextInkClip.Value, SKClipOperation.Intersect, false);
-				SKMatrix drawMatrix = Matrix;
+				SKMatrix drawMatrix = new SKMatrix (
+					Matrix.ScaleX * outputScale, Matrix.SkewX * outputScale, (Matrix.TransX + (float)deviceOffset.X) * outputScale,
+					Matrix.SkewY * outputScale, Matrix.ScaleY * outputScale, (Matrix.TransY + (float)deviceOffset.Y) * outputScale,
+					0, 0, 1);
 				if (!Paint.IsAntialias) {
 					// Cairo assigns exact pixel-center ties to the upper/left sample.
 					// Bias aliased Skia edges by a tiny device-space amount to preserve
@@ -270,8 +310,10 @@ namespace Cairo
 				// the shape, where the source is transparent. Composite the shape as a layer so the operator sees that whole area.
 				SKBlendMode operation = Paint.BlendMode;
 				bool unbounded = !PaintAll && (operation == SKBlendMode.SrcIn || operation == SKBlendMode.SrcOut || operation == SKBlendMode.DstIn || operation == SKBlendMode.DstATop);
-				if (unbounded) {
+				bool layered = unbounded || maskImage != null || maskPatternDrawing != null;
+				if (layered) {
 				using var layerPaint = new SKPaint { BlendMode = operation };
+				if (saturate) layerPaint.Blender = RecordedCairoSaturate.Blender;
 				canvas.SaveLayer(layerPaint);
 				Paint.BlendMode = SKBlendMode.SrcOver;
 				}
@@ -280,11 +322,30 @@ namespace Cairo
 				else if (TextFont != null) canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
 				else if (PaintAll) canvas.DrawPaint(Paint);
 				else canvas.DrawPath(Path, Paint);
-				} finally { if (unbounded) Paint.BlendMode = operation; }
-			} finally { canvas.RestoreToCount(save); if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); } if (ownsDependencyImage) dependencyImage?.Dispose(); }
+				if (maskImage != null || maskPatternDrawing != null) {
+					using var maskShader = maskImage?.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal,
+						new SKSamplingOptions(SKFilterMode.Linear));
+					using var maskPaint = new SKPaint {
+						BlendMode = SKBlendMode.DstIn, IsAntialias = false,
+						Color = maskPatternDrawing?.Paint.Color ?? SKColors.White,
+						Shader = maskShader ?? maskDependencyShader ?? maskPatternDrawing?.Paint.Shader
+					};
+					canvas.Save();
+					if (maskImage != null) canvas.Translate(maskX, maskY);
+					canvas.DrawPaint(maskPaint);
+					canvas.Restore();
+				}
+				} finally { if (layered) { Paint.BlendMode = operation; canvas.Restore(); } }
+			} finally {
+				canvas.RestoreToCount(save);
+				if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); }
+				if (maskDependencyShader != null) maskDependencyShader.Dispose();
+				if (ownsDependencyImage) dependencyImage?.Dispose();
+				if (ownsMaskDependencyImage) maskDependencyImage?.Dispose();
+			}
 		}
 
-		internal void DrawLcdTextCpu(SKSurface target, SKRuntimeEffect effect, int width, int height)
+		internal void DrawLcdTextCpu(SKSurface target, SKRuntimeEffect effect, int width, int height, PointD deviceOffset = default)
 		{
 			if (effect == null) throw new ArgumentNullException(nameof(effect));
 			var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
@@ -292,16 +353,16 @@ namespace Cairo
 			using var black = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD black surface.");
 			using var white = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD white surface.");
 			black.Canvas.Clear(SKColors.Black); white.Canvas.Clear(SKColors.White);
-			DrawCore(black.Canvas, null); DrawCore(white.Canvas, null);
+			DrawCore(black.Canvas, null, deviceOffset); DrawCore(white.Canvas, null, deviceOffset);
 			using SKImage blackImage = black.Snapshot();
 			using SKImage whiteImage = white.Snapshot();
 			using SKImage destination = target.Snapshot();
 			DrawLcdComposite(effect, blackImage, whiteImage, destination, target.Canvas, Paint.BlendMode == SKBlendMode.Src,
-				Paint.ColorF.Alpha, Paint.Color, width, height);
+				Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset);
 		}
 
 		internal static void DrawLcdComposite(SKRuntimeEffect effect, SKImage black, SKImage white, SKImage destination,
-			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height)
+			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default)
 		{
 			bool invertGamma = Environment.GetEnvironmentVariable("OPTIMUM_GUI_LCD_GAMMA_INVERSE") switch {
 				"0" => false,
@@ -330,7 +391,7 @@ namespace Cairo
 			using var paint = new SKPaint { Shader = shader, BlendMode = SKBlendMode.Src, IsAntialias = false };
 			if (shader == null) throw new InvalidOperationException("Skia rejected the LCD text compositor shader.");
 			int save = canvas.Save();
-			try { canvas.ResetMatrix(); canvas.DrawRect(0, 0, width, height, paint); }
+			try { canvas.ResetMatrix(); canvas.Translate ((float)deviceOffset.X, (float)deviceOffset.Y); canvas.DrawRect(0, 0, width, height, paint); }
 			finally { canvas.RestoreToCount(save); }
 		}
 
@@ -437,6 +498,7 @@ half4 main(float2 p) {
 			Operator.Difference => SKBlendMode.Difference, Operator.Exclusion => SKBlendMode.Exclusion,
 			Operator.HSL_Hue => SKBlendMode.Hue, Operator.HSL_Saturation => SKBlendMode.Saturation,
 			Operator.HSL_Color => SKBlendMode.Color, Operator.HSL_Luminosity => SKBlendMode.Luminosity,
+			Operator.Saturate => SKBlendMode.SrcOver,
 			_ => throw new NotSupportedException("Cairo operator has no Skia equivalent: " + value)
 		};
 
@@ -525,7 +587,48 @@ half4 main(float2 p) {
 			} catch { result.Dispose(); throw; }
 		}
 		static SKPoint Point(IntPtr data, int index) => new SKPoint((float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16)), (float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16 + 8)));
-		public void Dispose() { Path?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
+		public void Dispose() { Path?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); maskImage?.Dispose(); maskPatternDrawing?.Dispose(); maskReplayPattern?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
+
+		static SKImage CaptureMask(ImageSurface surface)
+		{
+			if (surface == null) throw new ArgumentNullException(nameof(surface));
+			int width = surface.Width, height = surface.Height;
+			Format format = surface.Format;
+			int stride = surface.Stride;
+			byte[] data = surface.Data;
+			if (data == null) throw new InvalidOperationException("Cairo mask surface has no readable pixel data.");
+			var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+			using var bitmap = new SKBitmap(info);
+			IntPtr pixels = bitmap.GetPixels();
+			if (pixels == IntPtr.Zero) throw new InvalidOperationException("Skia could not allocate a Cairo mask snapshot.");
+			byte[] row = new byte[checked(width * 4)];
+			for (int y = 0; y < height; y++) {
+				Array.Clear(row, 0, row.Length);
+				int source = checked(y * stride);
+				switch (format) {
+				case Format.Argb32:
+				case Format.Rgb24:
+					Buffer.BlockCopy(data, source, row, 0, Math.Min(row.Length, stride));
+					if (format == Format.Rgb24) for (int x = 0; x < width; x++) row[x * 4 + 3] = 255;
+					break;
+				case Format.A8:
+					for (int x = 0; x < width; x++) row[x * 4 + 3] = data[source + x];
+					break;
+				case Format.A1:
+					for (int x = 0; x < width; x++) {
+						int bit = BitConverter.IsLittleEndian ? x & 7 : 7 - (x & 7);
+						row[x * 4 + 3] = (data[source + (x >> 3)] & (1 << bit)) != 0 ? (byte)255 : (byte)0;
+					}
+					break;
+				case Format.Rgb16565:
+					for (int x = 0; x < width; x++) row[x * 4 + 3] = 255;
+					break;
+				default: throw new NotSupportedException("Managed Cairo masks require ARGB32, RGB24, A8, A1, or RGB565 image surfaces.");
+				}
+				Marshal.Copy(row, 0, IntPtr.Add(pixels, y * bitmap.RowBytes), row.Length);
+			}
+			return SKImage.FromBitmap(bitmap);
+		}
 	}
 
 	internal sealed class RecordedGuiClip : IDisposable
@@ -535,6 +638,8 @@ half4 main(float2 p) {
 		internal RecordedGuiClip(ManagedGraphicsState context) { Path = RecordedGuiDrawing.CopyPath(context); Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding; Path.Transform(RecordedGuiDrawing.ToSkia(context.Matrix)); Antialias = context.Antialias != Cairo.Antialias.None;
 			// Aliased clips follow the same pixel-centre tie ownership as aliased fills (see RecordedGuiDrawing.DrawCore).
 			if (!Antialias) Path.Transform(SKMatrix.CreateTranslation(-1f / 1024f, -1f / 1024f)); }
+		internal RecordedGuiClip Clone() => new RecordedGuiClip (new SKPath (Path), Antialias);
+		RecordedGuiClip (SKPath path, bool antialias) { Path = path; Antialias = antialias; }
 		public void Dispose() => Path.Dispose();
 	}
 }

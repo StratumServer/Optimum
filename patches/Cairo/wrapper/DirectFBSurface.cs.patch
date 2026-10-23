@@ -1,0 +1,22 @@
+diff --git a/Cairo/wrapper/DirectFBSurface.cs b/Cairo/wrapper/DirectFBSurface.cs
+index 0fb0d60..097d346 100644
+--- a/Cairo/wrapper/DirectFBSurface.cs
++++ b/Cairo/wrapper/DirectFBSurface.cs
+@@ -36,10 +36,16 @@ namespace Cairo {
+ 		internal DirectFBSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 
+ 		public DirectFBSurface (IntPtr dfb, IntPtr dfb_surface)
+-			: base (NativeMethods.cairo_directfb_surface_create (dfb, dfb_surface), true)
++			: base (CreateNativeSurface (dfb, dfb_surface), true)
+ 		{
+ 		}
++
++		static IntPtr CreateNativeSurface (IntPtr dfb, IntPtr dfbSurface)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (DirectFBSurface));
++			return NativeMethods.cairo_directfb_surface_create (dfb, dfbSurface);
++		}
+ 	}
+ }

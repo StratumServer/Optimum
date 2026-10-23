@@ -1,0 +1,29 @@
+diff --git a/Cairo/wrapper/XcbSurface.cs b/Cairo/wrapper/XcbSurface.cs
+index c858536..7f4cfcc 100644
+--- a/Cairo/wrapper/XcbSurface.cs
++++ b/Cairo/wrapper/XcbSurface.cs
+@@ -36,16 +36,23 @@ namespace Cairo {
+ 		internal XcbSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 
+ 		public XcbSurface (IntPtr connection, uint drawable, IntPtr visual, int width, int height)
+-			: base (NativeMethods.cairo_xcb_surface_create (connection, drawable, visual, width, height), true)
++			: base (CreateNativeSurface (connection, drawable, visual, width, height), true)
+ 		{
+ 		}
+ 
++		static IntPtr CreateNativeSurface (IntPtr connection, uint drawable, IntPtr visual, int width, int height)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (XcbSurface));
++			return NativeMethods.cairo_xcb_surface_create (connection, drawable, visual, width, height);
++		}
++
+ 		public static XcbSurface FromBitmap (IntPtr connection, uint bitmap, IntPtr screen, int width, int height)
+ 		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (XcbSurface) + ".FromBitmap");
+ 			IntPtr ptr = NativeMethods.cairo_xcb_surface_create_for_bitmap (connection, bitmap, screen, width, height);
+ 			return new XcbSurface (ptr, true);
+ 		}
+ 
+ 		public void SetSize (int width, int height)

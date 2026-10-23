@@ -31,13 +31,13 @@ namespace Cairo
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
 		string firstMaterializationTrigger;
-		readonly ManagedGraphicsState graphicsState = new ManagedGraphicsState();
+		ManagedGraphicsState graphicsState = new ManagedGraphicsState();
 				internal ManagedGraphicsState GraphicsState => graphicsState;
 		readonly List<RecordedResource> resources = new List<RecordedResource>();
 		readonly List<RecordedSurfaceSource> sourceBindings = new List<RecordedSurfaceSource>();
 		Matrix sourceMatrix => graphicsState.SourceMatrix;
 		RecordedSurfaceSource currentSource => graphicsState.SourceBinding;
-		readonly int width, height;
+		int width, height;
 		internal readonly long Identity = System.Threading.Interlocked.Increment(ref nextIdentity);
 		static long nextIdentity;
 		readonly List<RecordedGuiClip> clips = new List<RecordedGuiClip>();
@@ -47,6 +47,57 @@ namespace Cairo
 		bool unqualifiedHelperDrawing;
 		// Cairo's default antialias mode maps to Skia's antialias-on paint, so helper operations using that default are qualified too.
 		bool antialiasConfigured = true;
+
+		internal void InitializeGroupFrom (SurfaceRecorder parent)
+		{
+			graphicsState = parent.graphicsState.CloneForGroup ();
+			foreach (RecordedGuiClip clip in parent.clips) {
+				RecordedGuiClip clone = clip.Clone ();
+				clips.Add (clone); resources.Add (new RecordedResource (clone));
+			}
+			RecordedGuiClip[][] clipStack = parent.savedClips.ToArray ();
+			for (int i = clipStack.Length - 1; i >= 0; i--) {
+				var frame = new RecordedGuiClip[clipStack[i].Length];
+				for (int j = 0; j < frame.Length; j++) {
+					frame[j] = clipStack[i][j].Clone ();
+					resources.Add (new RecordedResource (frame[j]));
+				}
+				savedClips.Push (frame);
+			}
+			Antialias[] antialiasStack = parent.savedAntialias.ToArray ();
+			for (int i = antialiasStack.Length - 1; i >= 0; i--) savedAntialias.Push (antialiasStack[i]);
+			saveDepth = parent.saveDepth;
+			unqualifiedHelperDrawing = parent.unqualifiedHelperDrawing;
+			antialiasConfigured = parent.antialiasConfigured;
+		}
+
+		internal void InitializePageFrom (SurfaceRecorder parent, bool copyCommands)
+		{
+			graphicsState = parent.graphicsState.CloneForGroup ();
+			foreach (RecordedGuiClip clip in parent.clips) {
+				RecordedGuiClip clone = clip.Clone ();
+				clips.Add (clone); resources.Add (new RecordedResource (clone));
+			}
+			RecordedGuiClip[][] clipStack = parent.savedClips.ToArray ();
+			for (int i = clipStack.Length - 1; i >= 0; i--) {
+				var frame = new RecordedGuiClip[clipStack[i].Length];
+				for (int j = 0; j < frame.Length; j++) {
+					frame[j] = clipStack[i][j].Clone ();
+					resources.Add (new RecordedResource (frame[j]));
+				}
+				savedClips.Push (frame);
+			}
+			Antialias[] antialiasStack = parent.savedAntialias.ToArray ();
+			for (int i = antialiasStack.Length - 1; i >= 0; i--) savedAntialias.Push (antialiasStack[i]);
+			saveDepth = parent.saveDepth;
+			unqualifiedHelperDrawing = parent.unqualifiedHelperDrawing;
+			antialiasConfigured = parent.antialiasConfigured;
+			if (copyCommands) {
+				commands.AddRange (parent.commands);
+				foreach (RecordedResource resource in parent.resources) resources.Add (resource.Retain ());
+				foreach (RecordedSurfaceSource binding in parent.sourceBindings) sourceBindings.Add (binding.Retain ());
+			}
+		}
 
 				internal bool RecordNative(Action<Context> replay, IDisposable resource = null, RecordedSurfaceSource sourceBinding = null, Action<ManagedGraphicsState> stateUpdate = null)
 		{
@@ -60,7 +111,7 @@ namespace Cairo
 		// A latched Cairo error (for example an unbalanced restore) turns every later drawing call into a no-op.
 		bool Faulted => graphicsState.Status != Status.Success;
 
-		internal bool RecordDrawing(Action<Context> replay, bool stroke = false, bool paintAll = false, double alpha = 1, bool clearsPath = false)
+		internal bool RecordDrawing(Action<Context> replay, bool stroke = false, bool paintAll = false, double alpha = 1, bool clearsPath = false, ImageSurface maskSurface = null, Pattern maskPattern = null, RecordedSurfaceSource maskBinding = null, double maskX = 0, double maskY = 0)
 		{
 		if (State != SurfaceRecordingState.Recording) return false;
 		if (Faulted) return true;
@@ -75,7 +126,7 @@ namespace Cairo
 			// until the recorder has an equivalent mask compositor.
 			if (alpha != 1 && graphicsState.Operator is Operator.Clear or Operator.Source
 				or Operator.In or Operator.Out or Operator.DestIn or Operator.DestAtop) return false;
-			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture());
+			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture(), maskSurface: maskSurface, maskPattern: maskPattern, maskBinding: maskBinding, maskX: maskX, maskY: maskY);
 			if (!Add(new Command(c => drawing.Replay(c, replay), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
 			if (clearsPath) graphicsState.NewPath();
@@ -236,9 +287,45 @@ namespace Cairo
 			sourceBindings.Clear();
 		}
 
+		internal void ClearCommandsForPixelCheckpoint ()
+		{
+			lock (sync) {
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered)
+					throw new InvalidOperationException ("The recording surface cannot checkpoint pixels in its current state.");
+				commands.Clear ();
+				foreach (IDisposable resource in resources) resource.Dispose ();
+				resources.Clear ();
+				var activeBindings = new HashSet<RecordedSurfaceSource> (graphicsState.GetRetainedSourceBindings ());
+				for (int i = sourceBindings.Count - 1; i >= 0; i--) {
+					if (activeBindings.Contains (sourceBindings[i])) continue;
+					sourceBindings[i].Dispose ();
+					sourceBindings.RemoveAt (i);
+				}
+				// Keep clips, save stacks, graphics state, and active source bindings
+				// alive. They may still be needed by later commands.
+				state = SurfaceRecordingState.Recording;
+			}
+		}
+
 		internal SurfaceRecorder (Surface surface) { this.surface = surface; width = surface.RecordedWidth; height = surface.RecordedHeight; }
-		internal SurfaceRecorderSnapshot CaptureSnapshot() { lock (sync) { if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null; return new SurfaceRecorderSnapshot(commands.ToArray(), width, height, resources.ToArray(), Identity); } }
+		internal void Resize (int width, int height)
+		{
+			lock (sync) {
+				if (state != SurfaceRecordingState.Recording) throw new InvalidOperationException ("Only an active managed recording can be resized.");
+				this.width = width;
+				this.height = height;
+			}
+		}
+		internal SurfaceRecorderSnapshot CaptureSnapshot() { lock (sync) { if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null; ImageSurface image = surface as ImageSurface; byte[] pixels = image?.CopyExposedPixels(); return new SurfaceRecorderSnapshot(commands.ToArray(), width, height, resources.ToArray(), Identity, pixels, pixels == null ? 0 : image.Stride, pixels == null ? Format.Argb32 : image.Format, surface.RecordingDeviceOffset); } }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
+		internal bool HasPendingCommands { get { lock (sync) return commands.Count != 0; } }
+		internal void CompleteManagedFinish ()
+		{
+			lock (sync) {
+				if (state != SurfaceRecordingState.Sealed) throw new InvalidOperationException ("The recorder must be sealed before finishing a managed surface.");
+				ClearCommands ();
+			}
+		}
 		internal string FirstMaterializationTrigger { get { lock (sync) return firstMaterializationTrigger; } }
 		internal void SetFirstMaterializationTrigger(string trigger)
 		{
@@ -262,7 +349,10 @@ namespace Cairo
 					snapshot = null; return false;
 				}
 				state = SurfaceRecordingState.Sealed;
-				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), width, height, resources.ToArray(), Identity);
+				ImageSurface image = surface as ImageSurface;
+				byte[] pixels = image?.CopyExposedPixels ();
+				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), width, height, resources.ToArray(), Identity,
+					pixels, pixels == null ? 0 : image.Stride, pixels == null ? Format.Argb32 : image.Format, surface.RecordingDeviceOffset);
 				return true;
 			}
 		}
@@ -330,7 +420,6 @@ namespace Cairo
 		}
 		internal bool RecordOperator (Operator value)
 		{
-			if (value == Operator.Saturate) return false;
 			bool recorded = Add (new Command (CommandKind.SetOperator, (double)value));
 			if (recorded) graphicsState.Operator = value;
 			return recorded;
@@ -359,6 +448,8 @@ namespace Cairo
 		{
 			if (Surface.AutomaticRecordingEnabled)
 				throw new InvalidOperationException ("Cairo materialization is forbidden while the Skia GUI renderer is requested.");
+			if (surface.IsManagedOnly)
+				throw new NotSupportedException ("A managed-only image surface cannot be materialized as a native Cairo surface.");
 			string trigger = null;
 			ExceptionDispatchInfo materializationFailure = null;
 			bool attempted = false;
@@ -444,13 +535,17 @@ namespace Cairo
 		readonly SurfaceRecorder.Command[] commands;
 		readonly int width, height;
 		readonly RecordedResource[] resources;
+		readonly byte[] pixels;
+		readonly int pixelStride;
+		readonly Format pixelFormat;
+		readonly PointD deviceOffset;
 		internal int Width => width;
 		internal int Height => height;
 		internal long Identity { get; }
 		internal int Generation => commands.Length;
 		bool disposed;
-		internal SurfaceRecorderSnapshot (SurfaceRecorder.Command[] commands, int width, int height, RecordedResource[] resources, long identity) { this.commands = commands; this.width = width; this.height = height; this.resources = resources; Identity = identity; foreach (var resource in resources) resource.Retain(); }
-		internal SurfaceRecorderSnapshot Retain() => new SurfaceRecorderSnapshot(commands, width, height, resources, Identity);
+		internal SurfaceRecorderSnapshot (SurfaceRecorder.Command[] commands, int width, int height, RecordedResource[] resources, long identity, byte[] pixels = null, int pixelStride = 0, Format pixelFormat = Format.Argb32, PointD deviceOffset = default) { this.commands = commands; this.width = width; this.height = height; this.resources = resources; this.pixels = pixels; this.pixelStride = pixelStride; this.pixelFormat = pixelFormat; this.deviceOffset = deviceOffset; Identity = identity; foreach (var resource in resources) resource.Retain(); }
+		internal SurfaceRecorderSnapshot Retain() => new SurfaceRecorderSnapshot(commands, width, height, resources, Identity, pixels, pixelStride, pixelFormat, deviceOffset);
 		internal void ReplayNative(IntPtr target) { using (var context = new Context(NativeMethods.cairo_create(target), true)) { context.Operator = Operator.Clear; context.Paint(); context.Operator = Operator.Over; foreach (var command in commands) command.Replay(context); } }
 		internal void ReplayNative(Context context) { SurfaceRecordingDiagnostics.Materialize(); foreach (var command in commands) command.Replay(context); }
 		public void Dispose() { if (disposed) return; disposed = true; foreach (var resource in resources) resource.Dispose(); }
@@ -463,8 +558,10 @@ namespace Cairo
 			int save = canvas.Save ();
 			try {
 				canvas.Clear (SKColors.Transparent);
+				canvas.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
+				DrawPixels(canvas);
 				foreach (SurfaceRecorder.Command command in commands) {
-					if (command.Drawing != null) command.Drawing.Draw(target, blur, null, width, height);
+					if (command.Drawing != null) command.Drawing.Draw(target, blur, null, width, height, deviceOffset);
 					if (command.Blur != null) blur.Apply (command.Blur, target, width, height);
 					if (command.Demultiply) blur.Demultiply(target, width, height);
 					if (command.Image != null) blur.DrawImage(command.Image, target, width, height);
@@ -484,12 +581,14 @@ namespace Cairo
 				int save = canvas.Save();
 				try {
 					canvas.Clear(SKColors.Transparent);
+					canvas.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
+					DrawPixels(canvas);
 					if (!hasBlur) {
 						foreach (SurfaceRecorder.Command command in commands) {
 							if (command.Drawing != null && command.Drawing.CanUseLcdCompositor) {
 								lcdEffect ??= CreateLcdTextEffect();
-								command.Drawing.Draw(target, null, lcdEffect, width, height);
-							} else command.Drawing?.Draw(canvas);
+								command.Drawing.Draw(target, null, lcdEffect, width, height, deviceOffset);
+							} else command.Drawing?.Draw(canvas, deviceOffset: deviceOffset);
 						}
 						return;
 					}
@@ -501,11 +600,13 @@ namespace Cairo
 							if (rasterSurface == null) throw new InvalidOperationException("Skia could not create a software GUI surface with pixel geometry.");
 							SKCanvas raster = rasterSurface.Canvas;
 							raster.Clear(SKColors.Transparent);
+							raster.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
+							DrawPixels(raster);
 							foreach (SurfaceRecorder.Command command in commands) {
 								if (command.Drawing != null && command.Drawing.CanUseLcdCompositor) {
 									lcdEffect ??= CreateLcdTextEffect();
-									command.Drawing.Draw(rasterSurface, null, lcdEffect, width, height);
-								} else command.Drawing?.Draw(raster);
+									command.Drawing.Draw(rasterSurface, null, lcdEffect, width, height, deviceOffset);
+								} else command.Drawing?.Draw(raster, deviceOffset: deviceOffset);
 								if (command.Blur != null) { raster.Flush(); command.Blur.ApplyToPixels(bitmap.GetPixels(), width, height); bitmap.NotifyPixelsChanged(); }
 								if (command.Demultiply) { raster.Flush(); SurfaceTransformDemulAlpha.ApplyToPixels(bitmap.GetPixels(), width, height); bitmap.NotifyPixelsChanged(); }
 								if (command.Image != null) { raster.Flush(); overlayEffect ??= RecordedGpuBlur.CreateImageOverlayEffect("CPU image"); RecordedGpuBlur.DrawImageCpu(command.Image, rasterSurface, width, height, overlayEffect); bitmap.NotifyPixelsChanged(); }
@@ -524,15 +625,18 @@ namespace Cairo
 			return effect ?? throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
 		}
 
-		internal void DrawTo (SKCanvas canvas)
+		internal void DrawTo (SKCanvas canvas, float outputScale = 1f)
 		{
 			if (canvas == null) throw new ArgumentNullException(nameof(canvas));
 			int save = canvas.Save();
 			try {
 				canvas.Clear(SKColors.Transparent);
+				canvas.Scale (outputScale);
+				canvas.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
+				DrawPixels(canvas);
 				bool hasBlur = false;
 				foreach (SurfaceRecorder.Command command in commands) hasBlur |= command.Blur != null || command.Demultiply || command.Image != null || command.Picture != null;
-				if (!hasBlur) { foreach (SurfaceRecorder.Command command in commands) command.Drawing?.Draw(canvas); return; }
+				if (!hasBlur) { foreach (SurfaceRecorder.Command command in commands) command.Drawing?.Draw(canvas, deviceOffset: deviceOffset, outputScale: outputScale); return; }
 				// The game's blur reads and rewrites pixels, so those segments run on a raster layer
 				// (still Skia) and the result is composited back onto the target canvas.
 				SKRuntimeEffect overlayEffect = null;
@@ -543,8 +647,10 @@ namespace Cairo
 						if (rasterSurface == null) throw new InvalidOperationException("Skia could not create a software GUI surface with pixel geometry.");
 						SKCanvas raster = rasterSurface.Canvas;
 						raster.Clear (SKColors.Transparent);
+						raster.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
+						DrawPixels(raster);
 						foreach (SurfaceRecorder.Command command in commands) {
-							command.Drawing?.Draw (raster);
+							command.Drawing?.Draw (raster, deviceOffset: deviceOffset);
 							if (command.Blur != null) { raster.Flush (); command.Blur.ApplyToPixels (bitmap.GetPixels (), width, height); bitmap.NotifyPixelsChanged (); }
 							if (command.Demultiply) { raster.Flush(); SurfaceTransformDemulAlpha.ApplyToPixels(bitmap.GetPixels(), width, height); bitmap.NotifyPixelsChanged(); }
 							if (command.Image != null) {
@@ -566,6 +672,31 @@ namespace Cairo
 				}
 				} finally { overlayEffect?.Dispose(); }
 			} finally { canvas.RestoreToCount(save); }
+		}
+
+		void DrawPixels(SKCanvas canvas)
+		{
+			if (pixels == null || !ManagedImageSurfaceStorage.CanRecordFormat (pixelFormat) || width <= 0 || height <= 0) return;
+			using var bitmap = new SKBitmap (ManagedImageSurfaceStorage.SkiaInfo (pixelFormat, width, height));
+			IntPtr output = bitmap.GetPixels();
+			if (pixelFormat == Format.A1) {
+				for (int y = 0; y < height; y++) {
+					int sourceRow = checked (y * pixelStride);
+					IntPtr targetRow = IntPtr.Add (output, checked (y * bitmap.RowBytes));
+					for (int x = 0; x < width; x++) {
+						byte alpha = (pixels[sourceRow + (x >> 3)] & (1 << (x & 7))) != 0 ? (byte)255 : (byte)0;
+						Marshal.WriteByte (targetRow, x, alpha);
+					}
+				}
+				using var alphaPaint = new SKPaint { BlendMode = SKBlendMode.Src };
+				canvas.DrawBitmap (bitmap, 0, 0, alphaPaint);
+				return;
+			}
+			int rowBytes = ManagedImageSurfaceStorage.MinimumRowBytes (pixelFormat, width);
+			for (int y = 0; y < height; y++)
+				Marshal.Copy(pixels, checked(y * pixelStride), IntPtr.Add(output, checked(y * bitmap.RowBytes)), rowBytes);
+			using var paint = new SKPaint { BlendMode = SKBlendMode.Src };
+			canvas.DrawBitmap(bitmap, 0, 0, paint);
 		}
 	}
 

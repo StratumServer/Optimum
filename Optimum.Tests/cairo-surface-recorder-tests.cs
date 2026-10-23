@@ -25,6 +25,19 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
+	public void NativeArgb32ConstructorRemainsExplicitRecordingCandidateWhenAutomaticModeIsOff()
+	{
+		if (!CairoNativeGuard.NativeAllowed) return;
+		bool automatic = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			using var surface = new ImageSurface (Format.Argb32, 12, 8);
+			Assert.Equal (SurfaceRecordingState.Native, surface.RecordingState);
+			Assert.Equal (SurfaceRecordingState.Recording, surface.BeginRecording ().State);
+		} finally { Surface.ConfigureAutomaticRecording (automatic); }
+	}
+
+	[Fact]
 	public void ReplayMaterializesRecordedPrefixAndAllowsNativeDrawing()
 	{
 		using var recorded = new ImageSurface (Format.Argb32, 32, 24);
@@ -107,7 +120,7 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
-	public void AutomaticSkiaRenderingRejectsCairoMaterialization()
+	public void AutomaticSkiaRenderingKeepsManagedDataReadableWithoutCairoMaterialization()
 	{
 		bool original = Surface.AutomaticRecordingEnabled;
 		try {
@@ -116,10 +129,9 @@ public sealed class CairoSurfaceRecorderTests
 			var recorder = surface.BeginRecording ();
 			recorder.FillRectangle (1, 1, 6, 6, 1, 0, 0, 1);
 
-			var exception = Assert.Throws<InvalidOperationException> (() => _ = surface.Data);
-			Assert.Contains ("Cairo materialization is forbidden", exception.Message);
+			Assert.NotEmpty (surface.Data);
 			Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
-			Assert.Equal ("SurfaceCpuReadback.Data", recorder.FirstMaterializationTrigger);
+			Assert.Null (recorder.FirstMaterializationTrigger);
 		} finally {
 			Surface.ConfigureAutomaticRecording (original);
 		}

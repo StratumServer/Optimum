@@ -1,0 +1,124 @@
+diff --git a/Cairo/wrapper/PdfSurface.cs b/Cairo/wrapper/PdfSurface.cs
+index f1a8688..16d9d3c 100644
+--- a/Cairo/wrapper/PdfSurface.cs
++++ b/Cairo/wrapper/PdfSurface.cs
+@@ -25,29 +25,118 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Collections.Generic;
++using SkiaSharp;
+ 
+ #nullable disable
+ 
+ namespace Cairo {
+ 
+ 	public class PdfSurface : Surface
+ 	{
++		readonly string filename;
++		readonly List<PdfPage> pages = new List<PdfPage> ();
++		double width, height;
++
++		sealed class PdfPage : IDisposable
++		{
++			internal readonly SurfaceRecorderSnapshot Snapshot;
++			internal readonly double Width, Height;
++			internal PdfPage (SurfaceRecorderSnapshot snapshot, double width, double height)
++			{ Snapshot = snapshot; Width = width; Height = height; }
++			public void Dispose () => Snapshot?.Dispose ();
++		}
++
+ 		internal PdfSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 
+ 		public PdfSurface (string filename, double width, double height)
+-			: base (NativeMethods.cairo_pdf_surface_create (filename, width, height), true)
++			: base (CairoNativeGuard.NativeAllowed ? CreateNativeSurface (filename, width, height) : IntPtr.Zero,
++				CairoNativeGuard.NativeAllowed, true, !CairoNativeGuard.NativeAllowed)
+ 		{
++			if (!CairoNativeGuard.NativeAllowed) {
++				if (filename == null) throw new ArgumentNullException (nameof (filename));
++				ValidateSize (width, height);
++				this.filename = filename;
++				this.width = width;
++				this.height = height;
++				InitializeManagedSurface (Math.Max (1, checked ((int)Math.Ceiling (width))), Math.Max (1, checked ((int)Math.Ceiling (height))), SurfaceType.Pdf);
++				BeginRecording ();
++			}
++		}
++
++		static IntPtr CreateNativeSurface (string filename, double width, double height)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (PdfSurface));
++			return NativeMethods.cairo_pdf_surface_create (filename, width, height);
+ 		}
+ 
+ 		public void SetSize (double width, double height)
+ 		{
++			if (IsManagedOnly) {
++				CheckDisposed ();
++				ValidateSize (width, height);
++				this.width = width;
++				this.height = height;
++				ResizeManagedSurface (Math.Max (1, checked ((int)Math.Ceiling (width))), Math.Max (1, checked ((int)Math.Ceiling (height))));
++				return;
++			}
+ 			CheckDisposed ();
+ 			NativeMethods.cairo_pdf_surface_set_size (Handle, width, height);
+ 		}
++
++		static void ValidateSize (double width, double height)
++		{
++			if (!double.IsFinite (width) || !double.IsFinite (height) || width <= 0 || height <= 0)
++				throw new ArgumentOutOfRangeException (nameof (width), "PDF dimensions must be finite and positive.");
++		}
++
++		internal override bool AdvanceManagedPage (bool copyCurrentPage)
++		{
++			if (!IsManagedOnly) return false;
++			SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
++			if (snapshot == null) return false;
++			try {
++				if (!StartNextManagedPage (copyCurrentPage)) return false;
++				pages.Add (new PdfPage (snapshot, width, height));
++				if (!copyCurrentPage) RecordingGraphicsState.NewPath ();
++				snapshot = null;
++				return true;
++			} finally { snapshot?.Dispose (); }
++		}
++
++		internal override bool FinishManagedSurface (SurfaceRecorderSnapshot snapshot)
++		{
++			using SKDocument document = SKDocument.CreatePdf (filename)
++				?? throw new InvalidOperationException ("Skia could not create a PDF document.");
++			foreach (PdfPage page in pages) WritePage (document, page.Snapshot, page.Width, page.Height);
++			if (snapshot != null && (snapshot.Generation > 0 || pages.Count == 0))
++				WritePage (document, snapshot, width, height);
++			document.Close ();
++			foreach (PdfPage page in pages) page.Dispose ();
++			pages.Clear ();
++			return true;
++		}
++
++		static void WritePage (SKDocument document, SurfaceRecorderSnapshot snapshot, double width, double height)
++		{
++			SKCanvas page = document.BeginPage ((float)width, (float)height);
++			if (page == null) throw new InvalidOperationException ("Skia could not begin a PDF page.");
++			try { snapshot?.DrawTo (page); }
++			finally { document.EndPage (); page.Dispose (); }
++		}
++
++		protected override void Dispose (bool disposing)
++		{
++			try {
++				if (disposing && IsManagedOnly && !ManagedFinished) Finish ();
++			} finally {
++				base.Dispose (disposing);
++			}
++		}
+ 	}
+ }
+ 

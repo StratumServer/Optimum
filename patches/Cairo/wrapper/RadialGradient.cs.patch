@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/RadialGradient.cs b/Cairo/wrapper/RadialGradient.cs
-index eae4884..46b61ef 100644
+index eae4884..1139ea0 100644
 --- a/Cairo/wrapper/RadialGradient.cs
 +++ b/Cairo/wrapper/RadialGradient.cs
 @@ -38,11 +38,18 @@ namespace Cairo {
@@ -11,7 +11,7 @@ index eae4884..46b61ef 100644
 -			: base (NativeMethods.cairo_pattern_create_radial (cx0, cy0, radius0, cx1, cy1, radius1), true)
 +			: base (true)
  		{
-+			if (CairoNativeGuard.Mode == "deny")
++			if (Surface.ManagedApiMode)
 +				ManagedGradient = new ManagedGradientSource(PatternType.Radial, cx0, cy0, radius0, cx1, cy1, radius1);
 +			else
 +				NativeHandleForRecorder = NativeMethods.cairo_pattern_create_radial (cx0, cy0, radius0, cx1, cy1, radius1);

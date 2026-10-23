@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Cairo.cs b/Cairo/wrapper/Cairo.cs
-index 5902da0..96b590f 100644
+index 5902da0..79bdb97 100644
 --- a/Cairo/wrapper/Cairo.cs
 +++ b/Cairo/wrapper/Cairo.cs
-@@ -30,55 +30,239 @@
+@@ -30,55 +30,268 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -46,9 +46,9 @@ index 5902da0..96b590f 100644
 +    }
 +
 +    /// <summary>
-+    /// Registers the libcairo import resolver as soon as this module loads, so it no longer depends on the
-+    /// <see cref="CairoAPI"/> static constructor running first. Setting <c>OPTIMUM_CAIRO_NATIVE=deny</c> makes the
-+    /// resolver refuse libcairo and remember the first stack that asked for it, which proves a run needs no native Cairo.
++    /// Registers the libcairo import resolver as soon as this module loads. The managed API is the default;
++    /// <c>OPTIMUM_CAIRO_NATIVE=allow</c> explicitly enables native compatibility, while <c>deny</c> instruments and
++    /// refuses accidental imports during native-free tests.
 +    /// </summary>
 +    internal static class CairoNativeGuard
 +    {
@@ -62,7 +62,7 @@ index 5902da0..96b590f 100644
 +        private static string s_firstDeniedLibrary;
 +        private static string s_firstDeniedStack;
 +
-+        /// <summary>The effective mode: <c>deny</c> or <c>allow</c>.</summary>
++        /// <summary>The effective policy: <c>managed</c> by default, <c>allow</c> by explicit opt-in, or <c>deny</c>.</summary>
 +        internal static string Mode
          {
              get
@@ -70,8 +70,32 @@ index 5902da0..96b590f 100644
 -                IntPtr x = NativeMethods.cairo_version_string();
 -                return Marshal.PtrToStringAnsi(x);
 +                EnsureRegistered();
-+                return s_deny ? "deny" : "allow";
++                if (s_deny) return "deny";
++                return string.Equals(Environment.GetEnvironmentVariable(ModeVariable)?.Trim(), "allow", StringComparison.OrdinalIgnoreCase)
++                    ? "allow" : "managed";
 +            }
++        }
++
++        /// <summary>Whether libcairo use was explicitly opted into; unset keeps the managed API path as the default.</summary>
++        internal static bool NativeAllowed
++        {
++            get
++            {
++                EnsureRegistered();
++                return string.Equals(Environment.GetEnvironmentVariable(ModeVariable)?.Trim(), "allow", StringComparison.OrdinalIgnoreCase);
++            }
++        }
++
++        internal static void RequireNativeAllowed(string api)
++        {
++            if (!NativeAllowed)
++                throw new NotSupportedException (api + " requires the explicit OPTIMUM_CAIRO_NATIVE=allow compatibility backend.");
++        }
++
++        internal static IntPtr RequireNativeHandle(string api, IntPtr handle)
++        {
++            RequireNativeAllowed (api);
++            return handle;
 +        }
 +
 +        /// <summary>Number of times the resolver refused a libcairo request.</summary>
@@ -184,6 +208,11 @@ index 5902da0..96b590f 100644
 +                    Deny(libraryName);
 +                }
 +
++                if (!NativeAllowed)
++                {
++                    throw new NotSupportedException ("This Cairo API requires the explicit OPTIMUM_CAIRO_NATIVE=allow compatibility backend; use the managed API or select an operation supported by its recorder.");
++                }
++
 +                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
 +                {
 +                    return NativeLibrary.Load("libcairo.so.2", assembly, searchPath);
@@ -255,5 +284,6 @@ index 5902da0..96b590f 100644
 +            }
 +        }
      }
- }
+-}
 \ No newline at end of file
++}

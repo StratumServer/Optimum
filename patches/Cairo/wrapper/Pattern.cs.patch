@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Pattern.cs b/Cairo/wrapper/Pattern.cs
-index fc26cf1..820ab91 100644
+index fc26cf1..c3c80fe 100644
 --- a/Cairo/wrapper/Pattern.cs
 +++ b/Cairo/wrapper/Pattern.cs
-@@ -34,11 +34,13 @@ using System;
+@@ -34,17 +34,28 @@ using System;
  namespace Cairo
  {
  
@@ -11,25 +11,45 @@ index fc26cf1..820ab91 100644
 -        public bool HandleValid { get { return Handle != IntPtr.Zero; } }
 +		bool disposed;
 +		internal ManagedGradientSource ManagedGradient;
++		internal bool IsManagedSurfacePattern;
++		internal Extend ManagedSurfaceExtend;
++		internal Matrix ManagedSurfaceMatrix;
++		internal bool IsManagedSolidPattern;
++		internal Color ManagedSolidColor;
++		internal Extend ManagedSolidExtend;
++		internal Matrix ManagedSolidMatrix;
 +        public bool HandleValid { get { return NativeHandleForRecorder != IntPtr.Zero; } }
  
          [Obsolete]
  		protected IntPtr pattern = IntPtr.Zero;
  
  		public static Pattern Lookup (IntPtr pattern, bool owner)
-@@ -63,17 +65,21 @@ namespace Cairo
+ 		{
++			if (!CairoNativeGuard.NativeAllowed)
++				throw new NotSupportedException ("Pattern.Lookup requires a native Cairo pattern handle and the explicit libcairo compatibility backend.");
+ 			if (pattern == IntPtr.Zero)
+ 				return null;
+ 			
+ 			PatternType pt = NativeMethods.cairo_pattern_get_type (pattern);
+ 			switch (pt) {
+@@ -62,18 +73,26 @@ namespace Cairo
+ 		}
  
  		[Obsolete]
  		protected Pattern ()
  		{
- 		}
++			CairoNativeGuard.RequireNativeAllowed ("Pattern subclass native handle construction");
++		}
 +
 +		protected Pattern (bool managedOnly)
 +		{
-+		}
++			if (!managedOnly)
++				CairoNativeGuard.RequireNativeAllowed ("Pattern subclass native handle construction");
+ 		}
  		
  		internal Pattern (IntPtr handle, bool owned)
  		{
++			CairoNativeGuard.RequireNativeAllowed ("Pattern native handle construction");
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
  
@@ -40,7 +60,7 @@ index fc26cf1..820ab91 100644
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
-@@ -91,22 +97,24 @@ namespace Cairo
+@@ -91,23 +110,30 @@ namespace Cairo
  		}
  
  		protected virtual void Dispose (bool disposing)
@@ -48,6 +68,8 @@ index fc26cf1..820ab91 100644
  			if (!disposing || CairoDebug.Enabled)
 -				CairoDebug.OnDisposed<Pattern> (Handle, disposing);
 +				CairoDebug.OnDisposed<Pattern> (NativeHandleForRecorder, disposing);
++			if (disposing && NativeHandleForRecorder != IntPtr.Zero)
++				CairoNativeGuard.RequireNativeAllowed ("Pattern.Dispose native handle release");
  
 -			if (Handle == IntPtr.Zero)
 -				return;
@@ -57,29 +79,33 @@ index fc26cf1..820ab91 100644
 +			disposed = true;
 +			RecordedSource?.Dispose(); RecordedSource = null;
 +			if (NativeHandleForRecorder != IntPtr.Zero) {
-+				NativeMethods.cairo_pattern_destroy (NativeHandleForRecorder);
++				if (CairoNativeGuard.NativeAllowed) NativeMethods.cairo_pattern_destroy (NativeHandleForRecorder);
 +				NativeHandleForRecorder = IntPtr.Zero;
 +			}
 +			ManagedGradient = null;
++			IsManagedSolidPattern = false;
  		}
  
  		protected void CheckDisposed ()
  		{
 -			if (Handle == IntPtr.Zero)
-+			if (disposed || (NativeHandleForRecorder == IntPtr.Zero && ManagedGradient == null))
++			if (disposed || (NativeHandleForRecorder == IntPtr.Zero && ManagedGradient == null && !IsManagedSurfacePattern && !IsManagedSolidPattern))
  				throw new ObjectDisposedException ("Object has already been disposed");
++			if (NativeHandleForRecorder != IntPtr.Zero)
++				CairoNativeGuard.RequireNativeAllowed ("Pattern native handle operation");
  		}
  
  		[Obsolete ("Use Dispose()")]
  		public void Destroy ()
-@@ -116,56 +124,86 @@ namespace Cairo
+ 		{
+@@ -116,56 +142,104 @@ namespace Cairo
  
  		public Status Status
  		{
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_pattern_status (Handle);
-+				if (ManagedGradient != null && NativeHandleForRecorder == IntPtr.Zero) return Status.Success;
++				if ((ManagedGradient != null || IsManagedSurfacePattern || IsManagedSolidPattern) && NativeHandleForRecorder == IntPtr.Zero) return Status.Success;
 +				return NativeMethods.cairo_pattern_status (NativeHandleForRecorder);
  			}
  		}
@@ -90,12 +116,16 @@ index fc26cf1..820ab91 100644
  				CheckDisposed ();
 -				return NativeMethods.cairo_pattern_get_extend (Handle);
 +				if (ManagedGradient != null) return ManagedGradient.Extend;
++				if (IsManagedSurfacePattern) return ManagedSurfaceExtend;
++				if (IsManagedSolidPattern) return ManagedSolidExtend;
 +				return NativeMethods.cairo_pattern_get_extend (NativeHandleForRecorder);
  			}
  			set {
  				CheckDisposed ();
 -				NativeMethods.cairo_pattern_set_extend (Handle, value);
 +				if (ManagedGradient != null) ManagedGradient.Extend = value;
++				if (IsManagedSurfacePattern) { ManagedSurfaceExtend = value; return; }
++				if (IsManagedSolidPattern) { ManagedSolidExtend = value; return; }
 +				if (NativeHandleForRecorder == IntPtr.Zero) return;
 +				NativeMethods.cairo_pattern_set_extend (NativeHandleForRecorder, value);
  			}
@@ -106,6 +136,8 @@ index fc26cf1..820ab91 100644
  				CheckDisposed ();
 -				NativeMethods.cairo_pattern_set_matrix (Handle, value);
 +				if (ManagedGradient != null) ManagedGradient.Matrix = (Matrix)value.Clone();
++				if (IsManagedSurfacePattern) { ManagedSurfaceMatrix = (Matrix)value.Clone(); return; }
++				if (IsManagedSolidPattern) { ManagedSolidMatrix = (Matrix)value.Clone(); return; }
 +				if (NativeHandleForRecorder == IntPtr.Zero) return;
 +				NativeMethods.cairo_pattern_set_matrix (NativeHandleForRecorder, value);
  			}
@@ -113,6 +145,8 @@ index fc26cf1..820ab91 100644
  			get {
  				CheckDisposed ();
 +				if (ManagedGradient != null) return (Matrix)ManagedGradient.Matrix.Clone();
++				if (IsManagedSurfacePattern) return (Matrix)ManagedSurfaceMatrix.Clone();
++				if (IsManagedSolidPattern) return (Matrix)ManagedSolidMatrix.Clone();
  				Matrix m = new Matrix ();
 -				NativeMethods.cairo_pattern_get_matrix (Handle, m);
 +				NativeMethods.cairo_pattern_get_matrix (NativeHandleForRecorder, m);
@@ -132,6 +166,8 @@ index fc26cf1..820ab91 100644
 +		internal Pattern CloneForRecorder()
 +		{
 +			CheckDisposed();
++			if (this is SurfacePattern surfacePattern && surfacePattern.IsManagedSource) return surfacePattern.CloneManagedSource();
++			if (IsManagedSolidPattern) return new SolidPattern(ManagedSolidColor, true, true);
 +			if (ManagedGradient == null) return Lookup(NativeHandleForRecorder, false);
 +			return ManagedGradient.Type == PatternType.Linear
 +				? new LinearGradient(ManagedGradient.Clone())
@@ -140,16 +176,22 @@ index fc26cf1..820ab91 100644
 +		internal IntPtr MaterializeNativePattern()
 +		{
 +			CheckDisposed();
++			if (IsManagedSurfacePattern) throw new NotSupportedException("A managed surface pattern has no native Cairo handle unless the compatibility backend is explicitly enabled.");
++			if (IsManagedSolidPattern && NativeHandleForRecorder == IntPtr.Zero) {
++				if (!CairoNativeGuard.NativeAllowed) throw new NotSupportedException("A managed solid pattern has no native Cairo handle unless the compatibility backend is explicitly enabled.");
++				NativeHandleForRecorder = NativeMethods.cairo_pattern_create_rgba(ManagedSolidColor.R, ManagedSolidColor.G, ManagedSolidColor.B, ManagedSolidColor.A);
++				if (NativeHandleForRecorder != IntPtr.Zero && CairoDebug.Enabled) CairoDebug.OnAllocated(NativeHandleForRecorder);
++			}
 +			if (NativeHandleForRecorder == IntPtr.Zero && ManagedGradient != null) {
-+				if (CairoNativeGuard.Mode == "deny")
-+					throw new InvalidOperationException("Cairo materialization is forbidden by OPTIMUM_CAIRO_NATIVE=deny.");
++				if (!CairoNativeGuard.NativeAllowed)
++					throw new NotSupportedException("A managed gradient has no native Cairo handle unless the compatibility backend is explicitly enabled.");
 +				NativeHandleForRecorder = ManagedGradient.CreateNativeHandle();
 +				if (NativeHandleForRecorder != IntPtr.Zero && CairoDebug.Enabled) CairoDebug.OnAllocated(NativeHandleForRecorder);
 +			}
 +			return NativeHandleForRecorder;
 +		}
-+		public IntPtr Handle { get { EnsureNativeSource(); return MaterializeNativePattern(); } }
-+		void EnsureNativeSource() { if (RecordedSource != null && NativeHandleForRecorder != IntPtr.Zero) { NativeMethods.cairo_pattern_get_surface(NativeHandleForRecorder, out IntPtr target); RecordedSource.Materialize(target); } }
++		public IntPtr Handle { get { CheckDisposed (); EnsureNativeSource(); return MaterializeNativePattern(); } }
++		void EnsureNativeSource() { if (RecordedSource != null && NativeHandleForRecorder != IntPtr.Zero) { CairoNativeGuard.RequireNativeAllowed ("Pattern source materialization"); NativeMethods.cairo_pattern_get_surface(NativeHandleForRecorder, out IntPtr target); RecordedSource.Materialize(target); } }
  
  		[Obsolete]
  		public IntPtr Pointer {
@@ -162,6 +204,8 @@ index fc26cf1..820ab91 100644
  				CheckDisposed ();
 -				return NativeMethods.cairo_pattern_get_type (Handle);
 +				if (ManagedGradient != null) return ManagedGradient.Type;
++				if (IsManagedSurfacePattern) return PatternType.Surface;
++				if (IsManagedSolidPattern) return PatternType.Solid;
 +				return NativeMethods.cairo_pattern_get_type (NativeHandleForRecorder);
  			}
  		}

@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Path.cs b/Cairo/wrapper/Path.cs
-index e77359f..e64dec5 100644
+index e77359f..9f44fa7 100644
 --- a/Cairo/wrapper/Path.cs
 +++ b/Cairo/wrapper/Path.cs
 @@ -27,19 +27,22 @@
@@ -25,7 +25,7 @@ index e77359f..e64dec5 100644
  		{
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
-@@ -47,10 +50,40 @@ namespace Cairo
+@@ -47,10 +50,61 @@ namespace Cairo
  			this.handle = handle;
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
@@ -55,6 +55,27 @@ index e77359f..e64dec5 100644
 +			return new Path (block) { ownsManagedMemory = true };
 +		}
 +
++		internal unsafe Path CloneForManagedRecording ()
++		{
++			if (!ownsManagedMemory)
++				throw new NotSupportedException ("A native Cairo Path cannot be appended to a managed recording Context.");
++			if (handle == IntPtr.Zero) throw new ObjectDisposedException (nameof (Path));
++			const int headerSize = 32;
++			int dataCount = Marshal.ReadInt32 (handle, 16);
++			if (dataCount < 0 || dataCount > (int.MaxValue - headerSize) / 16)
++				throw new InvalidOperationException ("The managed Cairo Path has an invalid data count.");
++			int length = checked (headerSize + dataCount * 16);
++			IntPtr copy = (IntPtr)NativeMemory.Alloc ((nuint)length);
++			try {
++				Buffer.MemoryCopy ((void*)handle, (void*)copy, length, length);
++				Marshal.WriteIntPtr (copy, 8, IntPtr.Add (copy, headerSize));
++				return new Path (copy) { ownsManagedMemory = true };
++			} catch {
++				NativeMemory.Free ((void*)copy);
++				throw;
++			}
++		}
++
 +		static void WritePoint (IntPtr slot, int number, double x, double y)
 +		{
 +			Marshal.WriteInt64 (slot, number * 16, BitConverter.DoubleToInt64Bits (x));
@@ -66,7 +87,7 @@ index e77359f..e64dec5 100644
  			Dispose (false);
  		}
  
-@@ -68,10 +101,13 @@ namespace Cairo
+@@ -68,10 +122,13 @@ namespace Cairo
  				CairoDebug.OnDisposed<Path> (handle, disposing);
  
  			if (handle == IntPtr.Zero)

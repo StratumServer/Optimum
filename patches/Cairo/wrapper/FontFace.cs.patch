@@ -1,0 +1,144 @@
+diff --git a/Cairo/wrapper/FontFace.cs b/Cairo/wrapper/FontFace.cs
+index 76f0d01..b458408 100644
+--- a/Cairo/wrapper/FontFace.cs
++++ b/Cairo/wrapper/FontFace.cs
+@@ -37,10 +37,14 @@ using System;
+ namespace Cairo
+ {
+ 	public class FontFace : IDisposable
+ 	{
+ 		IntPtr handle;
++		string family;
++		FontSlant slant;
++		FontWeight weight;
++		bool disposed;
+ 
+ 		internal static FontFace Lookup (IntPtr handle, bool owner)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				return null;
+@@ -61,58 +65,118 @@ namespace Cairo
+ 		protected virtual void Dispose (bool disposing)
+ 		{
+ 			if (!disposing || CairoDebug.Enabled)
+ 				CairoDebug.OnDisposed<FontFace> (handle, disposing);
+ 
+-			if (handle == IntPtr.Zero)
+-				return;
+-
+-			NativeMethods.cairo_font_face_destroy (handle);
++			if (handle != IntPtr.Zero) NativeMethods.cairo_font_face_destroy (handle);
+ 			handle = IntPtr.Zero;
++			disposed = true;
+ 		}
+ 
+ 		void CheckDisposed ()
+ 		{
+-			if (handle == IntPtr.Zero)
++			if (disposed || (handle == IntPtr.Zero && family == null))
+ 				throw new ObjectDisposedException ("Object has already been disposed");
+ 		}
+ 
+ 		public FontFace (IntPtr handle, bool owned)
+ 		{
++			if (!CairoNativeGuard.NativeAllowed)
++				throw new NotSupportedException ("A FontFace built from an IntPtr requires the explicit libcairo compatibility backend.");
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+ 
+ 			this.handle = handle;
+ 			if (!owned)
+ 				NativeMethods.cairo_font_face_reference (handle);
+ 			if (CairoDebug.Enabled)
+ 				CairoDebug.OnAllocated (handle);
+ 		}
+ 
++		/// <summary>Creates a font face from managed toy-font metadata.</summary>
++		public FontFace (string family, FontSlant slant, FontWeight weight)
++		{
++			if (string.IsNullOrWhiteSpace (family)) throw new ArgumentException ("A font family is required.", nameof (family));
++			this.family = family;
++			this.slant = slant;
++			this.weight = weight;
++		}
++
++		internal bool HasManagedMetadata => family != null;
++		internal string ManagedFamily => family;
++		internal FontSlant ManagedSlant => slant;
++		internal FontWeight ManagedWeight => weight;
++
++		internal FontFace CloneForRecorder ()
++		{
++			CheckDisposed ();
++			return HasManagedMetadata ? new FontFace (family, slant, weight) : new FontFace (Handle, false);
++		}
++
++		IntPtr EnsureNativeHandle ()
++		{
++			CheckDisposed ();
++			if (handle == IntPtr.Zero) {
++				if (!CairoNativeGuard.NativeAllowed)
++					throw new NotSupportedException ("A managed FontFace has no native handle unless the libcairo compatibility backend is explicitly enabled.");
++				handle = NativeMethods.cairo_toy_font_face_create (family, slant, weight);
++				if (handle == IntPtr.Zero) throw new InvalidOperationException ("Cairo could not create a toy font face.");
++				if (CairoDebug.Enabled) CairoDebug.OnAllocated (handle);
++			}
++			return handle;
++		}
++
+ 		public IntPtr Handle {
+ 			get {
+-				return handle;
++				return HasManagedMetadata ? EnsureNativeHandle () : handle;
++			}
++		}
++
++		public string Family {
++			get {
++				CheckDisposed ();
++				if (!HasManagedMetadata) throw new NotSupportedException ("This native FontFace has no managed family metadata.");
++				return family;
++			}
++		}
++
++		public FontSlant Slant {
++			get {
++				CheckDisposed ();
++				if (!HasManagedMetadata) throw new NotSupportedException ("This native FontFace has no managed slant metadata.");
++				return slant;
++			}
++		}
++
++		public FontWeight Weight {
++			get {
++				CheckDisposed ();
++				if (!HasManagedMetadata) throw new NotSupportedException ("This native FontFace has no managed weight metadata.");
++				return weight;
+ 			}
+ 		}
+ 
+ 		public Status Status {
+ 			get {
+ 				CheckDisposed ();
++				if (HasManagedMetadata && handle == IntPtr.Zero) return Status.Success;
+ 				return NativeMethods.cairo_font_face_status (handle);
+ 			}
+ 		}
+ 		
+ 		public FontType FontType {
+ 			get {
+ 				CheckDisposed ();
++				if (HasManagedMetadata && handle == IntPtr.Zero) return FontType.Toy;
+ 				return NativeMethods.cairo_font_face_get_type (handle);
+ 			}
+ 		}
+ 
+ 		public uint ReferenceCount {
+ 			get {
+ 				CheckDisposed ();
++				if (HasManagedMetadata && handle == IntPtr.Zero) return 1;
+ 				return NativeMethods.cairo_font_face_get_reference_count (handle);
+ 			}
+ 		}
+ 	}
+ }
