@@ -43,6 +43,9 @@ public sealed record InstallerServices(
     /// <summary>Acquires a user-scope or portable Git for Windows when Git is missing.</summary>
     public IGitAcquisition? Git { get; init; }
 
+    /// <summary>Installs a selected Linux distro package after user confirmation.</summary>
+    public IDistroPackageAcquisition? DistroPackages { get; init; }
+
     public static InstallerServices CreateReal()
     {
         var probe = SystemProbe.Default;
@@ -58,6 +61,7 @@ public sealed record InstallerServices(
             Sdk = new SdkInstaller(probe),
             Ilspycmd = new IlspycmdInstaller(probe),
             Git = new GitInstaller(probe),
+            DistroPackages = new DistroPackageAcquisition(probe),
         };
     }
 }
