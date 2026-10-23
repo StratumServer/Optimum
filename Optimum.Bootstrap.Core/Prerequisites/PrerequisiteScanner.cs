@@ -19,6 +19,7 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
     internal const string GitForWindowsUrl = "https://git-scm.com/install/windows";
+    private const string PowerShellLinuxInstallUrl = "https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux";
 
     private static readonly PrerequisiteDefinition[] UnixDefinitions =
     [
@@ -96,7 +97,7 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         return probe.Os == OsKind.Windows
             ? new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
                 AcquisitionKind.DownloadPage, null, "https://aka.ms/powershell")
-            : Missing(def, DistroAcquisition("pwsh"));
+            : Missing(def, AcquisitionKind.DownloadPage, null, PowerShellLinuxInstallUrl);
     }
 
     /// <summary>Accept a working system, user-scope or cached Git for Windows executable.</summary>
@@ -183,8 +184,13 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             ?? ExecutableOrNull(Path.Combine(repoRoot, ".tools", binaryName))
             ?? ExecutableOrNull(Path.Combine(probe.HomeDirectory, ".tools", binaryName));
         if (path is null)
-            return Missing(def, AcquisitionKind.DownloadPage, null,
-                "https://github.com/crazy-max/innoextract/releases");
+        {
+            AcquisitionKind acquisition = DistroAcquisition(def.Command);
+            return acquisition == AcquisitionKind.Manual
+                ? Missing(def, acquisition)
+                : Missing(def, AcquisitionKind.DownloadPage, null,
+                    "https://github.com/crazy-max/innoextract/releases");
+        }
 
         ProcessOutcome outcome = probe.Run(path, ["--version"], ProbeTimeout);
         (int major, int minor)? parsed = ParseInnoextractVersion(outcome.StandardOutput);
@@ -221,8 +227,13 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             version is null ? def.DisplayName : $"{def.DisplayName} ({version})",
             path, version, AcquisitionKind.None, null, null);
 
-    private PrerequisiteResult Missing(PrerequisiteDefinition def, AcquisitionKind acquisition) =>
-        Missing(def, acquisition, DistroPackageHints.InstallCommand(probe, def.Command), null);
+    private PrerequisiteResult Missing(PrerequisiteDefinition def, AcquisitionKind acquisition)
+    {
+        string? command = DistroPackageHints.InstallCommand(probe, def.Command);
+        if (command is null && acquisition == AcquisitionKind.None)
+            command = DistroPackageHints.ManualInstruction(probe, def.Command);
+        return Missing(def, acquisition, command, null);
+    }
 
     private PrerequisiteResult Missing(PrerequisiteDefinition def, AcquisitionKind acquisition, string? command, string? url)
     {

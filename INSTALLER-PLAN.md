@@ -615,10 +615,16 @@ written against.
 - On Windows, WinGet remains a possible SDK fast path. Git uses the official
   MinGit portable archive first and its BusyBox variant second, both in the
   user's Optimum cache; manual installation is offered only if both fail.
-- Distro packages are offered as a hint with a copyable command, not run. The
-  Linux installer builds those commands at `scripts/install-linux.sh:260-267` for
-  apt-get, dnf, pacman, and zypper. An installer that runs `sudo` on the user's
-  behalf is a support burden and a security question this plan declines to open.
+- On Linux, the installer offers a per-tool review step for known packages when
+  apt-get, dnf, pacman, or zypper and `pkexec` are present. The user sees the
+  package and exact equivalent package-manager command before confirming. The
+  installer runs the selected manager through `pkexec` with an argument list,
+  never through a shell or `sudo`; the desktop authorization agent handles the
+  administrator prompt. It checks the exit status and rescans after success.
+  Copyable `sudo` commands remain available when `pkexec` is absent or an install
+  fails. Other Linux systems get distribution-level manual instructions, and no
+  package manager is installed or configured by Optimum. `pwsh` stays a manual
+  Microsoft install because its packages require an external repository.
 
 ### NixOS and non-FHS routing
 

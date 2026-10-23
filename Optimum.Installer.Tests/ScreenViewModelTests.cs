@@ -114,6 +114,164 @@ public class OptionsViewModelTests
 public class PrerequisitesViewModelTests
 {
     [Fact]
+    public void LabelsPackagingAndOptionalToolsSeparatelyFromBuildRequirements()
+    {
+        var probe = new FakeSystemProbe();
+        InstallerServices services = TestServices.Build(probe: probe);
+        probe.Files.Remove("/usr/bin/pwsh");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot, uiPost: services.UiPost);
+
+        PrerequisiteRowViewModel powershell = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Pwsh);
+        PrerequisiteRowViewModel appimage = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool);
+
+        Assert.Equal("Packaging", powershell.StatusLabel);
+        Assert.False(powershell.Result.BlocksBuild);
+        Assert.Equal("Optional", appimage.StatusLabel);
+        Assert.False(appimage.Result.BlocksBuild);
+    }
+
+    [Fact]
+    public void ShowsManualRepositoryInstructionsWhenNoSupportedPackageManagerExists()
+    {
+        var probe = new FakeSystemProbe();
+        InstallerServices services = TestServices.Build(probe: probe);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot, uiPost: services.UiPost);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        Assert.Null(row.ActionCommand);
+        Assert.Contains("No supported apt, dnf, pacman, or zypper manager was detected", row.ManualCommand);
+    }
+
+    [Fact]
+    public async Task LinuxPackageInstallRequiresReviewAndConfirmationThenRescans()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/apt-get");
+        probe.AddFile("/usr/bin/pkexec");
+        var acquisition = new FakeDistroPackageAcquisition(probe)
+        {
+            Behaviour = plan =>
+            {
+                Assert.Equal("perl", plan.Package);
+                probe.AddFile("/usr/bin/perl");
+                return ToolAcquisitionResult.Success(plan.Package);
+            },
+        };
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        Assert.Equal("Review install", row.ActionLabel);
+        Assert.Equal("sudo apt-get install -y perl", row.ManualCommand);
+        await row.ActionCommand!.ExecuteAsync(null);
+        Assert.True(row.AwaitingConfirmation);
+        Assert.Equal(0, acquisition.Calls);
+        Assert.Contains("install perl", row.ConfirmationDetail);
+
+        await row.ConfirmInstallCommand!.ExecuteAsync(null);
+
+        Assert.Equal(1, acquisition.Calls);
+        Assert.False(row.AwaitingConfirmation);
+        Assert.DoesNotContain(vm.Rows, r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl
+            && r.Result.State == Bootstrap.Core.Prerequisites.PrerequisiteState.Missing);
+    }
+
+    [Fact]
+    public async Task CancellingPackageReviewDoesNotRunAnythingAndKeepsManualCommand()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/apt-get");
+        probe.AddFile("/usr/bin/pkexec");
+        var acquisition = new FakeDistroPackageAcquisition(probe);
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+        row.CancelConfirmationCommand!.Execute(null);
+
+        Assert.False(row.AwaitingConfirmation);
+        Assert.Equal(0, acquisition.Calls);
+        Assert.Equal("sudo apt-get install -y perl", row.ManualCommand);
+    }
+
+    [Fact]
+    public async Task CancellingRunningPackageInstallReportsCancellationAndKeepsManualCommand()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/apt-get");
+        probe.AddFile("/usr/bin/pkexec");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acquisition = new FakeDistroPackageAcquisition(probe)
+        {
+            AsyncBehaviour = async (_, token) =>
+            {
+                started.SetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return ToolAcquisitionResult.Failure(FailureReason.Cancelled, "installation cancelled");
+                }
+                return ToolAcquisitionResult.Success("perl");
+            },
+        };
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+        Task install = row.ConfirmInstallCommand!.ExecuteAsync(null);
+        await started.Task;
+        row.CancelInstallCommand!.Execute(null);
+        await install;
+
+        Assert.Equal("sudo apt-get install -y perl", row.ManualCommand);
+        Assert.Contains("installation cancelled", row.Detail);
+    }
+
+    [Fact]
+    public async Task PackageFailureLeavesManualInstructionsVisible()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/dnf");
+        probe.AddFile("/usr/bin/pkexec");
+        var acquisition = new FakeDistroPackageAcquisition(probe)
+        {
+            Behaviour = _ => ToolAcquisitionResult.Failure(FailureReason.SourceUnavailable,
+                "authentication was dismissed; retry or use the manual command"),
+        };
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+        await row.ConfirmInstallCommand!.ExecuteAsync(null);
+
+        Assert.Equal("sudo dnf install -y perl", row.ManualCommand);
+        Assert.Contains("authentication was dismissed", row.Detail);
+    }
+
+    [Fact]
     public async Task AppimagetoolInstallActionRunsAndRescansTheTool()
     {
         var probe = new FakeSystemProbe();

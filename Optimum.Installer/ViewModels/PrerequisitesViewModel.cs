@@ -34,6 +34,12 @@ public sealed class PrerequisiteRowActions
 
     /// <summary>Called after a successful in-place install so the screen can rescan.</summary>
     public Action? OnInstalled { get; init; }
+
+    /// <summary>Requires a separate confirmation before invoking a system package manager.</summary>
+    public bool RequiresConfirmation { get; init; }
+
+    /// <summary>Exact package and command shown in the confirmation step.</summary>
+    public string? ConfirmationDetail { get; init; }
 }
 
 /// <summary>
@@ -48,6 +54,7 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     private string? _actionStatus;
     private CancellationTokenSource? _installCancellation;
     private bool _manualFallbackAvailable;
+    private bool _awaitingConfirmation;
 
     public PrerequisiteRowViewModel(PrerequisiteResult result, PrerequisiteRowActions? actions = null)
     {
@@ -57,6 +64,11 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
             ActionCommand = new AsyncRelayCommand(RunActionAsync, () => !Installing);
         if (_actions?.InstallCancellable is not null)
             CancelInstallCommand = new RelayCommand(CancelInstall, () => Installing);
+        if (_actions?.RequiresConfirmation == true)
+        {
+            ConfirmInstallCommand = new AsyncRelayCommand(ConfirmInstallAsync, () => AwaitingConfirmation && !Installing);
+            CancelConfirmationCommand = new RelayCommand(CancelConfirmation, () => AwaitingConfirmation);
+        }
         if (_actions?.OpenManualPage is not null)
             ManualDownloadCommand = new RelayCommand(() => _actions.OpenManualPage());
     }
@@ -64,6 +76,8 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     public PrerequisiteResult Result { get; }
     public IAsyncRelayCommand? ActionCommand { get; }
     public IRelayCommand? CancelInstallCommand { get; }
+    public IAsyncRelayCommand? ConfirmInstallCommand { get; }
+    public IRelayCommand? CancelConfirmationCommand { get; }
     public IRelayCommand? ManualDownloadCommand { get; }
 
     private bool HasAction => _actions?.Install is not null
@@ -75,6 +89,7 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
         PrerequisiteState.Ok => "Ready",
         PrerequisiteState.OptionalMissing => "Optional",
         PrerequisiteState.Outdated => "Update needed",
+        PrerequisiteState.Missing when Result.Definition.Level == RequirementLevel.RequiredForPackaging => "Packaging",
         _ => "Required",
     };
 
@@ -82,6 +97,20 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     public bool IsOptional => Result.State == PrerequisiteState.OptionalMissing;
     public bool NeedsAttention => Result.State is PrerequisiteState.Missing or PrerequisiteState.Outdated;
     public bool CanCancelInstall => Installing && _actions?.InstallCancellable is not null;
+    public bool AwaitingConfirmation
+    {
+        get => _awaitingConfirmation;
+        private set
+        {
+            if (!SetProperty(ref _awaitingConfirmation, value))
+                return;
+            OnPropertyChanged(nameof(CanRequestInstall));
+            (ConfirmInstallCommand as AsyncRelayCommand)?.NotifyCanExecuteChanged();
+            (CancelConfirmationCommand as RelayCommand)?.NotifyCanExecuteChanged();
+        }
+    }
+    public bool CanRequestInstall => !AwaitingConfirmation && !Installing;
+    public string? ConfirmationDetail => _actions?.ConfirmationDetail;
 
     public string Detail => ActionStatus ?? Result.State switch
     {
@@ -101,6 +130,8 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     {
         get
         {
+            if (_actions?.RequiresConfirmation == true)
+                return "Review install";
             if (_actions?.Install is not null || _actions?.InstallCancellable is not null)
                 return Installing ? "Installing..." : "Install";
             if (_actions?.OpenPage is not null)
@@ -115,7 +146,8 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
 
     /// <summary>A copyable distro / nix command, shown inline when there is one.</summary>
     public string? ManualCommand =>
-        Result.Acquisition == AcquisitionKind.Manual ? Result.AcquisitionCommand : null;
+        Result.Acquisition is AcquisitionKind.Manual or AcquisitionKind.None
+            ? Result.AcquisitionCommand : null;
 
     public bool Installing
     {
@@ -147,6 +179,35 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     }
 
     private async Task RunActionAsync()
+    {
+        if (_actions is null || Installing)
+            return;
+
+        if (_actions.RequiresConfirmation)
+        {
+            AwaitingConfirmation = true;
+            ActionStatus = null;
+            return;
+        }
+
+        await InstallAsync();
+    }
+
+    private async Task ConfirmInstallAsync()
+    {
+        if (!AwaitingConfirmation || Installing)
+            return;
+        AwaitingConfirmation = false;
+        await InstallAsync();
+    }
+
+    private void CancelConfirmation()
+    {
+        AwaitingConfirmation = false;
+        ActionStatus = "Installation was not started. You can use the command shown below.";
+    }
+
+    private async Task InstallAsync()
     {
         if (_actions is null || Installing)
             return;
@@ -232,6 +293,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
     private readonly ISdkAcquisition? _sdk;
     private readonly IIlspycmdAcquisition? _ilspycmd;
     private readonly IGitAcquisition? _git;
+    private readonly IDistroPackageAcquisition? _distroPackages;
     private readonly Action<Action> _post;
     private string? _repoRoot;
     private bool _gitReadyForSource;
@@ -244,7 +306,8 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         Action<Action>? uiPost = null,
         ISdkAcquisition? sdk = null,
         IIlspycmdAcquisition? ilspycmd = null,
-        IGitAcquisition? git = null)
+        IGitAcquisition? git = null,
+        IDistroPackageAcquisition? distroPackages = null)
     {
         _probe = probe;
         _repoRoot = repoRoot;
@@ -253,6 +316,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         _sdk = sdk;
         _ilspycmd = ilspycmd;
         _git = git;
+        _distroPackages = distroPackages;
         _post = uiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
         Rescan();
     }
@@ -415,8 +479,8 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
     /// <summary>
     /// Maps a scan result to what the row can do about it. <c>Automatic</c> wires
     /// the matching in-place installer; <c>DownloadPage</c> wires a browser open;
-    /// <c>Manual</c> and <c>None</c> get no button (Manual shows its command
-    /// inline).
+    /// supported <c>Manual</c> Linux package plans offer a confirmed install and
+    /// always retain the copyable command.
     /// </summary>
     private PrerequisiteRowActions? ActionsFor(PrerequisiteResult result)
     {
@@ -435,13 +499,23 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
                 ? (obs, token) => _git.InstallAsync(obs, token)
                 : null;
 
-        if (install is null && installCancellable is null && openPage is null)
+        DistroPackagePlan? distroPlan = result.Acquisition == AcquisitionKind.Manual
+            ? _distroPackages?.PlanFor(result.Definition.Command)
+            : null;
+        if (distroPlan is not null && _distroPackages is not null)
+            installCancellable = (obs, token) => _distroPackages.InstallAsync(distroPlan, obs, token);
+
+        if (install is null && installCancellable is null && openPage is null
+            && distroPlan is null)
             return null;
 
         return new PrerequisiteRowActions
         {
             Install = install,
             InstallCancellable = installCancellable,
+            RequiresConfirmation = distroPlan is not null,
+            ConfirmationDetail = distroPlan is null ? null
+                : $"Optimum will ask the system authorization service to install {distroPlan.Package} using {distroPlan.Manager}. The package manager command is: {distroPlan.ManualCommand}",
             OpenPage = openPage,
             OpenManualPage = result.Definition.Id == PrerequisiteId.Git
                 && result.Acquisition == AcquisitionKind.Automatic
