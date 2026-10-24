@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
-index 42d5e81..32c0091 100644
+index 42d5e81..a4f8f78 100644
 --- a/Cairo/wrapper/ScaledFont.cs
 +++ b/Cairo/wrapper/ScaledFont.cs
-@@ -1,43 +1,54 @@
+@@ -1,43 +1,55 @@
  //
  // Mono.Cairo.ScaledFont.cs
  //
@@ -48,6 +48,7 @@ index 42d5e81..32c0091 100644
  		protected IntPtr handle = IntPtr.Zero;
 +		bool disposed;
 +		string family;
++		ManagedFileFontSource fileSource;
 +		FontSlant slant;
 +		FontWeight weight;
 +		Matrix fontMatrix;
@@ -66,7 +67,7 @@ index 42d5e81..32c0091 100644
  
  			this.handle = handle;
  			if (!owner)
-@@ -45,67 +56,143 @@ namespace Cairo {
+@@ -45,67 +57,145 @@ namespace Cairo {
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
@@ -80,6 +81,7 @@ index 42d5e81..32c0091 100644
 +			if (options == null) throw new ArgumentNullException (nameof (options));
 +
 +			if (fontFace.HasManagedMetadata) {
++				fileSource = fontFace.ManagedFileSource;
 +				family = fontFace.ManagedFamily;
 +				slant = fontFace.ManagedSlant;
 +				weight = fontFace.ManagedWeight;
@@ -114,6 +116,7 @@ index 42d5e81..32c0091 100644
 -			get {
 -				return handle;
 -			}
++		internal ManagedFileFontSource ManagedFileSource => fileSource;
 +		internal bool HasManagedMetadata => family != null;
 +		internal string ManagedFamily => family;
 +		internal FontSlant ManagedSlant => slant;
@@ -132,7 +135,7 @@ index 42d5e81..32c0091 100644
 +		{
 +			CheckDisposed ();
 +			if (HasManagedMetadata) {
-+				using var face = new FontFace (family, slant, weight);
++				using var face = new FontFace (family, slant, weight, fileSource);
 +				using var options = GetManagedFontOptions ();
 +				return new ScaledFont (face, fontMatrix, ctm, options);
 +			}
@@ -147,7 +150,7 @@ index 42d5e81..32c0091 100644
 +					throw new NotSupportedException ("This ScaledFont has no managed description.");
 +				if (!CairoNativeGuard.NativeAllowed)
 +					throw new NotSupportedException ("A managed ScaledFont has no native handle unless the libcairo compatibility backend is explicitly enabled.");
-+				using var face = new FontFace (family, slant, weight);
++				using var face = new FontFace (family, slant, weight, fileSource);
 +				using var options = GetManagedFontOptions ();
 +				handle = CreateNativeScaledFont (face, fontMatrix, ctm, options);
 +				if (handle == IntPtr.Zero) throw new InvalidOperationException ("Cairo could not materialize a scaled font.");
@@ -170,7 +173,7 @@ index 42d5e81..32c0091 100644
 +					return nativeExtents;
 +				}
 +				using var options = GetManagedFontOptions ();
-+				ManagedGraphicsState state = ManagedGraphicsState.CreateFontMetricsState (family, slant, weight, ManagedSize, fontMatrix, options);
++				ManagedGraphicsState state = ManagedGraphicsState.CreateFontMetricsState (family, slant, weight, ManagedSize, fontMatrix, options, fileSource);
 +				return SkiaTextMetrics.FontExtents (state);
  			}
  		}
@@ -192,7 +195,7 @@ index 42d5e81..32c0091 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_scaled_font_get_type (handle);
-+				return handle == IntPtr.Zero ? Cairo.FontType.Toy : NativeMethods.cairo_scaled_font_get_type (handle);
++				return handle == IntPtr.Zero ? (fileSource == null ? Cairo.FontType.Toy : Cairo.FontType.FreeType) : NativeMethods.cairo_scaled_font_get_type (handle);
  			}
  		}
  
@@ -216,7 +219,7 @@ index 42d5e81..32c0091 100644
 +				} finally { Marshal.FreeHGlobal (ptr); }
 +			}
 +			using var options = GetManagedFontOptions ();
-+			ManagedGraphicsState state = ManagedGraphicsState.CreateFontMetricsState (family, slant, weight, ManagedSize, fontMatrix, options);
++			ManagedGraphicsState state = ManagedGraphicsState.CreateFontMetricsState (family, slant, weight, ManagedSize, fontMatrix, options, fileSource);
 +			return SkiaTextMetrics.GlyphExtents (state, glyphs);
  		}
 -	
@@ -233,7 +236,7 @@ index 42d5e81..32c0091 100644
  
  		public void Dispose ()
  		{
-@@ -115,28 +202,24 @@ namespace Cairo {
+@@ -115,28 +205,25 @@ namespace Cairo {
  
  		protected virtual void Dispose (bool disposing)
  		{
@@ -246,6 +249,7 @@ index 42d5e81..32c0091 100644
 -			NativeMethods.cairo_scaled_font_destroy (handle);
 +			if (handle != IntPtr.Zero) NativeMethods.cairo_scaled_font_destroy (handle);
  			handle = IntPtr.Zero;
++			fileSource = null;
 +			disposed = true;
  		}
  

@@ -188,18 +188,27 @@ namespace Cairo
 			: null;
 			float advance;
 			RecordedGuiDrawing drawing;
-			if (SkiaTextMetrics.UsesNormalHintedAdvances(font, options, decoded)) {
+			if (graphicsState.FontFileSource != null) {
+				// Use the platform outlines for file faces as well as TextPath: Skia's
+				// bundled hinter can differ from Cairo's system FreeType interpreter.
+				font.Dispose();
+				ManagedGraphicsState textState = graphicsState.CloneForGroup();
+				textState.NewPath();
+				textState.MoveTo(point.X, point.Y);
+				SkiaTextPath.AppendText(textState, decoded);
+				textState.TryGetCurrentPoint(out double endX, out _);
+				advance = (float)(endX - point.X);
+				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(),
+					textPath: RecordedGuiDrawing.CopyPath(textState), sourceMatrix: sourceMatrix,
+					sourceSnapshot: currentSource?.Capture());
+				drawing.Paint.IsAntialias = options.Antialias != Antialias.None;
+			} else if (SkiaTextMetrics.UsesNormalHintedAdvances(font, options, decoded)) {
 				// FreeType's LIGHT target changes raster coverage but uses linear
 				// advances. Keep the existing Normal-hinted Skia advances for string
 				// placement while using Fontconfig's target for the glyph masks.
 				SKTextBlob blob = null;
 				try {
-					using var advanceFont = new SKFont(font.Typeface, font.Size) {
-						Edging = font.Edging,
-						Hinting = SKFontHinting.Normal,
-						LinearMetrics = false,
-						Subpixel = false
-					};
+					using var advanceFont = SkiaTextMetrics.CreateAdvanceFont(font);
 					using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
 						advance = advanceFont.MeasureText(decoded);
 					var glyphs = new ushort[decoded.Length];
@@ -271,6 +280,18 @@ namespace Cairo
 			Glyph[] copy = (Glyph[])glyphs.Clone();
 			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), stateUpdate: s => SkiaTextPath.AppendGlyphs(s, copy));
 			using FontOptions options = graphicsState.GetFontOptions();
+			if (graphicsState.FontFileSource != null) {
+				ManagedGraphicsState textState = graphicsState.CloneForGroup();
+				textState.NewPath();
+				SkiaTextPath.AppendGlyphs(textState, copy);
+				var outlinedDrawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(),
+					textPath: RecordedGuiDrawing.CopyPath(textState), sourceMatrix: sourceMatrix,
+					sourceSnapshot: currentSource?.Capture());
+				outlinedDrawing.Paint.IsAntialias = options.Antialias != Antialias.None;
+				if (!Add(new Command(c => outlinedDrawing.Replay(c, target => target.ShowGlyphs(copy)), outlinedDrawing))) { outlinedDrawing.Dispose(); return false; }
+				resources.Add(new RecordedResource(outlinedDrawing));
+				return true;
+			}
 			using SKFont font = SkiaGuiFont.Create(graphicsState, options);
 			var glyphIndices = new ushort[copy.Length];
 			var positions = new SKPoint[copy.Length];

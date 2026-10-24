@@ -17,6 +17,8 @@ namespace Cairo
 			Edging = font.Edging,
 			Hinting = SKFontHinting.Normal,
 			LinearMetrics = false,
+			ForceAutoHinting = font.ForceAutoHinting,
+			EmbeddedBitmaps = font.EmbeddedBitmaps,
 			Subpixel = false
 		};
 
@@ -31,7 +33,32 @@ namespace Cairo
 		{
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
+			if (state.FontFileSource != null) {
+				using var outlined = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource.LoadOptions);
+				if (outlined != null) return FileTextExtents(font, options, text, outlined);
+			}
 			return TextExtents(font, options, text);
+		}
+
+		static TextExtents FileTextExtents(SKFont font, FontOptions options, string text, SkiaHintedFontOutlines outlined)
+		{
+			var result = new TextExtents();
+			if (string.IsNullOrEmpty(text)) return result;
+			bool round = options.HintMetrics != HintMetrics.Off;
+			double x = 0, left = double.MaxValue, top = double.MaxValue, right = double.MinValue, bottom = double.MinValue;
+			foreach (ushort glyph in font.GetGlyphs(text)) {
+				SKRect bounds = outlined.GetGlyphBounds(glyph, round);
+				if (bounds.Width > 0 && bounds.Height > 0) {
+					left = Math.Min(left, x + bounds.Left); right = Math.Max(right, x + bounds.Right);
+					top = Math.Min(top, bounds.Top); bottom = Math.Max(bottom, bounds.Bottom);
+				}
+				x += outlined.GetGlyphAdvance(glyph, round);
+			}
+			result.XAdvance = x;
+			if (right > left && bottom > top) {
+				result.XBearing = left; result.YBearing = top; result.Width = right - left; result.Height = bottom - top;
+			}
+			return result;
 		}
 
 		internal static TextExtents TextExtents(SKFont font, FontOptions options, string text)
@@ -83,6 +110,13 @@ namespace Cairo
 			float[] widths = new float[indices.Length];
 			SKRect[] bounds = new SKRect[indices.Length];
 			font.GetGlyphWidths(indices, widths, bounds);
+			using var outlined = state.FontFileSource == null ? null : SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource.LoadOptions);
+			if (outlined != null) {
+				for (int i = 0; i < indices.Length; i++) {
+					widths[i] = (float)outlined.GetGlyphAdvance(indices[i], options.HintMetrics != HintMetrics.Off);
+					bounds[i] = outlined.GetGlyphBounds(indices[i], options.HintMetrics != HintMetrics.Off);
+				}
+			}
 			double left = double.MaxValue, top = double.MaxValue, right = double.MinValue, bottom = double.MinValue;
 			for (int i = 0; i < glyphs.Length; i++) {
 				SKRect ink = bounds[i];

@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/FontFace.cs b/Cairo/wrapper/FontFace.cs
-index 76f0d01..b458408 100644
+index 76f0d01..1dfd76f 100644
 --- a/Cairo/wrapper/FontFace.cs
 +++ b/Cairo/wrapper/FontFace.cs
-@@ -37,10 +37,14 @@ using System;
+@@ -37,10 +37,15 @@ using System;
  namespace Cairo
  {
  	public class FontFace : IDisposable
@@ -12,12 +12,13 @@ index 76f0d01..b458408 100644
 +		FontSlant slant;
 +		FontWeight weight;
 +		bool disposed;
++		ManagedFileFontSource fileSource;
  
  		internal static FontFace Lookup (IntPtr handle, bool owner)
  		{
  			if (handle == IntPtr.Zero)
  				return null;
-@@ -61,58 +65,118 @@ namespace Cairo
+@@ -61,58 +66,123 @@ namespace Cairo
  		protected virtual void Dispose (bool disposing)
  		{
  			if (!disposing || CairoDebug.Enabled)
@@ -29,6 +30,7 @@ index 76f0d01..b458408 100644
 -			NativeMethods.cairo_font_face_destroy (handle);
 +			if (handle != IntPtr.Zero) NativeMethods.cairo_font_face_destroy (handle);
  			handle = IntPtr.Zero;
++			fileSource = null;
 +			disposed = true;
  		}
  
@@ -54,14 +56,18 @@ index 76f0d01..b458408 100644
  		}
  
 +		/// <summary>Creates a font face from managed toy-font metadata.</summary>
-+		public FontFace (string family, FontSlant slant, FontWeight weight)
++		public FontFace (string family, FontSlant slant, FontWeight weight) : this (family, slant, weight, null) { }
++
++		internal FontFace (string family, FontSlant slant, FontWeight weight, ManagedFileFontSource fileSource)
 +		{
 +			if (string.IsNullOrWhiteSpace (family)) throw new ArgumentException ("A font family is required.", nameof (family));
++			this.fileSource = fileSource;
 +			this.family = family;
 +			this.slant = slant;
 +			this.weight = weight;
 +		}
 +
++		internal ManagedFileFontSource ManagedFileSource => fileSource;
 +		internal bool HasManagedMetadata => family != null;
 +		internal string ManagedFamily => family;
 +		internal FontSlant ManagedSlant => slant;
@@ -70,7 +76,7 @@ index 76f0d01..b458408 100644
 +		internal FontFace CloneForRecorder ()
 +		{
 +			CheckDisposed ();
-+			return HasManagedMetadata ? new FontFace (family, slant, weight) : new FontFace (Handle, false);
++			return HasManagedMetadata ? new FontFace (family, slant, weight, fileSource) : new FontFace (Handle, false);
 +		}
 +
 +		IntPtr EnsureNativeHandle ()
@@ -79,7 +85,7 @@ index 76f0d01..b458408 100644
 +			if (handle == IntPtr.Zero) {
 +				if (!CairoNativeGuard.NativeAllowed)
 +					throw new NotSupportedException ("A managed FontFace has no native handle unless the libcairo compatibility backend is explicitly enabled.");
-+				handle = NativeMethods.cairo_toy_font_face_create (family, slant, weight);
++				handle = fileSource != null ? fileSource.CreateNativeHandle () : NativeMethods.cairo_toy_font_face_create (family, slant, weight);
 +				if (handle == IntPtr.Zero) throw new InvalidOperationException ("Cairo could not create a toy font face.");
 +				if (CairoDebug.Enabled) CairoDebug.OnAllocated (handle);
 +			}
@@ -128,7 +134,7 @@ index 76f0d01..b458408 100644
  		public FontType FontType {
  			get {
  				CheckDisposed ();
-+				if (HasManagedMetadata && handle == IntPtr.Zero) return FontType.Toy;
++				if (HasManagedMetadata && handle == IntPtr.Zero) return fileSource == null ? FontType.Toy : FontType.FreeType;
  				return NativeMethods.cairo_font_face_get_type (handle);
  			}
  		}

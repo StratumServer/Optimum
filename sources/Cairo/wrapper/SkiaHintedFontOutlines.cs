@@ -14,28 +14,29 @@ namespace Cairo
 		GCHandle pinnedBytes;
 		IntPtr library, face;
 
-		internal static SkiaHintedFontOutlines Create(SKFont font, Matrix matrix)
+		internal static SkiaHintedFontOutlines Create(SKFont font, Matrix matrix, int fontLoadOptions = 0)
 		{
 			// The device grid determines hinting. Rotated or sheared outlines keep
 			// Skia's scalable geometry rather than hinting against the wrong axes.
-			if (!OperatingSystem.IsLinux() || font.Hinting == SKFontHinting.None ||
+			if (!OperatingSystem.IsLinux() || (font.Hinting == SKFontHinting.None && fontLoadOptions == 0) ||
 				matrix.Xy != 0 || matrix.Yx != 0 || matrix.Xx <= 0 || matrix.Yy <= 0 || font.Size <= 0 ||
 				!double.IsFinite(matrix.Xx * font.Size) || !double.IsFinite(matrix.Yy * font.Size))
 				return null;
-			try { return new SkiaHintedFontOutlines(font, matrix.Xx, matrix.Yy); }
+			try { return new SkiaHintedFontOutlines(font, matrix.Xx, matrix.Yy, fontLoadOptions); }
 			// Skia's scalable outlines remain available on systems without the
 			// optional platform hinter. Neither route requires native Cairo.
 			catch (DllNotFoundException) { return null; }
 			catch (EntryPointNotFoundException) { return null; }
 		}
 
-		SkiaHintedFontOutlines(SKFont font, double scaleX, double scaleY)
+		SkiaHintedFontOutlines(SKFont font, double scaleX, double scaleY, int fontLoadOptions)
 		{
 			this.scaleX = scaleX; this.scaleY = scaleY;
 			// LIGHT is Cairo/Fontconfig's slight vertical hinting. GetGlyphPath
 			// deliberately returns unhinted outlines even on a hinted SKFont.
-			loadFlags = 8 /* FT_LOAD_NO_BITMAP */ | (font.Hinting == SKFontHinting.Slight ? 1 << 16 :
-				font.Edging == SKFontEdging.SubpixelAntialias ? 3 << 16 : 0);
+			loadFlags = (fontLoadOptions & ~(15 << 16)) | 8 /* FT_LOAD_NO_BITMAP */;
+			loadFlags |= font.Hinting == SKFontHinting.Slight ? 1 << 16 :
+					font.Edging == SKFontEdging.SubpixelAntialias ? 3 << 16 : 0;
 			try {
 				stream = font.Typeface.OpenStream(out int faceIndex)
 					?? throw new InvalidOperationException("The selected Skia font has no outline stream.");
@@ -51,6 +52,28 @@ namespace Cairo
 				Check(FT_Set_Char_Size(face, (nint)Math.Round(font.Size * scaleX * 64),
 					(nint)Math.Round(font.Size * scaleY * 64), 72, 72), "size font");
 			} catch { Dispose(); throw; }
+		}
+
+		internal SKRect GetGlyphBounds(ushort glyph, bool round)
+		{
+			Check(FT_Load_Glyph(face, glyph, loadFlags), "load glyph metrics");
+			var metrics = Marshal.PtrToStructure<SlotPrefix>(Marshal.PtrToStructure<FacePrefix>(face).Glyph).Metrics;
+			double x = (double)metrics.BearingX / 64, y = (double)metrics.BearingY / 64;
+			double width = (double)metrics.Width / 64, height = (double)metrics.Height / 64;
+			double right = x + width, top = -y, bottom = height - y;
+			if (round) { x = Math.Floor(x); top = Math.Floor(top); right = Math.Ceiling(right); bottom = Math.Ceiling(bottom); }
+			return new SKRect((float)(x / scaleX), (float)(top / scaleY), (float)(right / scaleX), (float)(bottom / scaleY));
+		}
+
+		internal double GetGlyphAdvance(ushort glyph, bool round)
+		{
+			Check(FT_Load_Glyph(face, glyph, loadFlags), "load glyph advance");
+			IntPtr slot = Marshal.PtrToStructure<FacePrefix>(face).Glyph;
+			Check(FT_Get_Glyph(slot, out IntPtr image), "copy glyph advance");
+			try {
+				double advance = (double)Marshal.PtrToStructure<OutlineGlyph>(image).Advance.X / (65536 * scaleX);
+				return round ? Math.Floor(advance * scaleX + 0.5) / scaleX : advance;
+			} finally { FT_Done_Glyph(image); }
 		}
 
 		internal SKPath GetGlyphPath(ushort glyph)
@@ -117,6 +140,16 @@ namespace Cairo
 		[StructLayout(LayoutKind.Sequential)] struct Vector { public nint X, Y; }
 		[StructLayout(LayoutKind.Sequential)] struct Generic { public IntPtr Data, Finalizer; }
 		[StructLayout(LayoutKind.Sequential)] struct Box { public nint XMin, YMin, XMax, YMax; }
+		[StructLayout(LayoutKind.Sequential)] struct GlyphMetrics {
+			public nint Width, Height, BearingX, BearingY, Advance, VerticalBearingX, VerticalBearingY, VerticalAdvance;
+		}
+		[StructLayout(LayoutKind.Sequential)] struct SlotPrefix {
+			public IntPtr Library, Face, Next;
+			public uint GlyphIndex;
+			public Generic Generic;
+			public GlyphMetrics Metrics;
+		}
+
 		[StructLayout(LayoutKind.Sequential)] struct FacePrefix {
 			public nint NumFaces, FaceIndex, FaceFlags, StyleFlags, NumGlyphs;
 			public IntPtr FamilyName, StyleName;

@@ -873,3 +873,16 @@ Live summary SHA-256: `8a7602057c52a4162a1f9c80804b65a4a28303098bae4647228841105
 The baseline and new Pharos client logs contain final-composition/blit OpenGL `InvalidOperation` reports (1,328 and 1,324 respectively); this comparison does not resolve that separate renderer issue.
 
 This closes the 56 measured text failures on the tested Linux/Radeon matrix. The complete API migration remains open: file-font creation through `Cairo.Util.FreeTypeFontFace.Create` still needs a managed route, skipped primitive cases need further work, native-pointer contracts retain their documented boundary, and other platforms and adapters require their own evidence.
+
+
+## Managed file-font factory (2026-10-24)
+
+`Cairo.Util.FreeTypeFontFace.Create(filename, loadoptions)` now reads the file into a retained managed descriptor and selects its exact Skia typeface. The recorded context, saved graphics state, retrieved FontFace, and ScaledFont retain that descriptor independently of the original file and face. Managed drawing does not create a Cairo font face. Explicit native-handle interoperability in allow mode creates the Cairo face lazily and attaches the pinned font bytes and FreeType owner to Cairo user data, so disposing the original wrapper does not invalidate a retained native context.
+
+On Linux, file-font text and positioned glyphs use the system FreeType outlines and advances, rasterized by Skia. This avoids the measured differences between Skia's bundled hinter and the system Cairo hinter. TextExtents, GlyphExtents, ShowText, ShowGlyphs, and TextPath share the retained font. The public factory, FreeType exports, and protected Dispose override keep their existing signatures.
+
+The new tests cover load flags 0, 2 (NO_HINTING), 32 (FORCE_AUTOHINT), and 65536 (TARGET_LIGHT), with explicit Gray antialiasing and Full hint style. All four Cairo oracle comparisons pass the existing local antialias policy and exact native replay checks. They also compare text, glyph, scaled-font, and font metrics. The four lifecycle cases and invalid-file case pass with libcairo denied. The original-assembly-compiled mod consumer now exercises file-font creation, deletion of the source file, original face disposal, ScaledFont, text, and text paths against the replacement wrapper under deny mode.
+
+Validation: clean bootstrap applied 167 patches with zero failures; Release build passed with one pre-existing xUnit1026 warning; Optimum.Tests passed 1,986 with 40 existing skips; Launcher 70, CLI 24, Bootstrap.Core 173, Installer 86; the deny subset passed 60/60. Patch validation reports 114 source patches, 53 Cecil patches, 22 exact runtime donors, and zero conflicts. Prerequisite and shader checks passed. The first full test invocation lacked the game's NanoSVG library search path; the corrected invocation passed the complete suite.
+
+This file-font increment has not repeated the full live GUI capture matrix. The previous 6,200-row GPU and CPU result remains the evidence for family-selected GUI text. File-font parity here covers the tested Linux flags and options; arbitrary FreeType flags, transformed font matrices, subpixel file-font rendering, other platforms, skipped primitive cases, and native-pointer contracts still need their own coverage. The API migration remains open.

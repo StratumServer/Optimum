@@ -13,7 +13,7 @@ namespace Cairo
 			state.TryGetCurrentPoint(out double originX, out double originY);
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
-			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix);
+			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
 			SKFont advanceFont = SkiaTextMetrics.UsesNormalHintedAdvances(font, options, text) ? SkiaTextMetrics.CreateAdvanceFont(font) : null;
 			try {
 				SKFont measure = advanceFont ?? font;
@@ -23,7 +23,7 @@ namespace Cairo
 				double x = originX;
 				for (int i = 0; i < glyphs.Length; i++) {
 					AppendGlyph(state, font, hinted, glyphs[i], x, originY);
-					x += widths[i];
+					x += state.FontFileSource != null && hinted != null ? hinted.GetGlyphAdvance(glyphs[i], options.HintMetrics != HintMetrics.Off) : widths[i];
 				}
 				state.MoveTo(x, originY);
 			} finally { advanceFont?.Dispose(); }
@@ -35,7 +35,7 @@ namespace Cairo
 			if (glyphs == null || glyphs.Length == 0) return;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
-			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix);
+			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
 			foreach (Glyph glyph in glyphs) {
 				if (glyph.Index < 0 || glyph.Index > ushort.MaxValue)
 					throw new InvalidOperationException("Skia glyph indices are 16-bit; glyph " + glyph.Index + " has no outline.");

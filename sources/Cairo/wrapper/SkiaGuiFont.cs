@@ -11,10 +11,13 @@ namespace Cairo
 			string family = state.FontFamily;
 			if (string.IsNullOrWhiteSpace(family))
 				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
-			return Create(family, state.FontSlant, state.FontWeight, state.FontSize, options);
+			return Create(family, state.FontSlant, state.FontWeight, state.FontSize, options, state.FontFileSource);
 		}
 
 		internal static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, FontOptions options)
+			=> Create(family, fontSlant, fontWeight, size, options, null);
+
+		static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, FontOptions options, ManagedFileFontSource fileSource)
 		{
 			using var fontSelection = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
 			if (string.IsNullOrWhiteSpace(family))
@@ -22,9 +25,11 @@ namespace Cairo
 			var weight = fontWeight == FontWeight.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal;
 			var slant = fontSlant == FontSlant.Italic ? SKFontStyleSlant.Italic :
 				fontSlant == FontSlant.Oblique ? SKFontStyleSlant.Oblique : SKFontStyleSlant.Upright;
-			using SKTypeface typeface = SkiaFontResolver.Resolve(family, weight, slant, out SKFontHinting fontconfigHinting)
+			SKFontHinting fontconfigHinting = SKFontHinting.Full;
+			SKTypeface typeface = fileSource?.Typeface ?? SkiaFontResolver.Resolve(family, weight, slant, out fontconfigHinting)
 				?? throw new InvalidOperationException("Skia could not resolve GUI font family '" + family + "'; Cairo materialization is disabled for recorded text.");
-			return new SKFont(typeface, (float)size) {
+			try {
+			var font = new SKFont(typeface, (float)size) {
 				Edging = options.Antialias == Antialias.Subpixel ? SKFontEdging.SubpixelAntialias :
 					options.Antialias == Antialias.None ? SKFontEdging.Alias : SKFontEdging.Antialias,
 				Hinting = options.HintStyle switch {
@@ -38,6 +43,9 @@ namespace Cairo
 				LinearMetrics = options.HintMetrics == HintMetrics.Off,
 				Subpixel = false
 			};
+			fileSource?.ApplyLoadOptions(font, options);
+			return font;
+			} finally { if (fileSource == null) typeface.Dispose(); }
 		}
 	}
 }

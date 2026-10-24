@@ -81,6 +81,33 @@ using (var context = new Context(surface))
         return 1;
     }
 
+    string? fileFontPath = Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_ABI_FONT");
+    if (!string.IsNullOrWhiteSpace(fileFontPath))
+    {
+        string copy = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-abi-font-" + Guid.NewGuid().ToString("N") + ".ttf");
+        File.Copy(fileFontPath, copy);
+        try
+        {
+            using var face = Cairo.Util.FreeTypeFontFace.Create(copy, 0);
+            context.Save();
+            context.SetContextFontFace(face);
+            context.SetFontSize(12);
+            File.Delete(copy);
+            face.Dispose();
+            using var scaled = context.GetScaledFont();
+            context.SetScaledFont(scaled);
+            if (scaled.FontType != FontType.FreeType || context.TextExtents("File mod").XAdvance <= 0)
+                throw new InvalidOperationException("The legacy file-font API lost its selected face.");
+            context.MoveTo(2, 19);
+            context.ShowText("File mod");
+            context.MoveTo(2, 31);
+            context.TextPath("File mod");
+            context.Fill();
+            context.Restore();
+        }
+        finally { if (File.Exists(copy)) File.Delete(copy); }
+    }
+
     context.Antialias = Antialias.None;
     context.LineWidth = 1;
     context.SetDash(new[] { 4.0, 4.0 }, 0);

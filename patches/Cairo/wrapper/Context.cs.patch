@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..a517e03 100644
+index 03f9c76..b059c67 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -489,7 +489,7 @@ index 03f9c76..a517e03 100644
 +			CheckDisposedOnly ();
 +			ManagedGraphicsState state = RecordedState;
 +			if (state != null && state.FontFamily != null) {
-+				using var face = new FontFace (state.FontFamily, state.FontSlant, state.FontWeight);
++				using var face = new FontFace (state.FontFamily, state.FontSlant, state.FontWeight, state.FontFileSource);
 +				using var options = state.GetFontOptions ();
 +				return new ScaledFont (face, state.FontMatrix, state.Matrix, options);
 +			}
@@ -1276,7 +1276,7 @@ index 03f9c76..a517e03 100644
 +			CheckDisposedOnly ();
 +			ManagedGraphicsState state = RecordedState;
 +			if (state != null && state.FontFamily != null)
-+				return new FontFace (state.FontFamily, state.FontSlant, state.FontWeight);
++				return new FontFace (state.FontFamily, state.FontSlant, state.FontWeight, state.FontFileSource);
 +			if (state != null && !CairoNativeGuard.NativeAllowed)
 +				throw new NotSupportedException ("The current FontFace has no managed metadata.");
  			CheckDisposed ();

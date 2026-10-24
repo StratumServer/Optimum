@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Cairo.cs b/Cairo/wrapper/Cairo.cs
-index 5902da0..79bdb97 100644
+index 5902da0..1e36af7 100644
 --- a/Cairo/wrapper/Cairo.cs
 +++ b/Cairo/wrapper/Cairo.cs
-@@ -30,55 +30,268 @@
+@@ -30,55 +30,273 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -196,15 +196,8 @@ index 5902da0..79bdb97 100644
 +            if (libraryName.StartsWith("libcairo", StringComparison.Ordinal))
              {
 -                return NativeLibrary.Load("libcairo.so.2", assembly, searchPath);
--            }
--
--            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && libraryName.StartsWith("libcairo", StringComparison.Ordinal))
--            {
--                var libPath = System.IO.Path.Combine(Assembly.GetExecutingAssembly().Location, "Lib", "libcairo.2.dylib");
--                if (NativeLibrary.TryLoad(libPath, out var handle))
 +                if (s_deny)
-                 {
--                    return handle;
++                {
 +                    Deny(libraryName);
 +                }
 +
@@ -226,9 +219,22 @@ index 5902da0..79bdb97 100644
 +                        return handle;
 +                    }
 +                    return NativeLibrary.Load("libcairo.2.dylib", assembly, searchPath);
-                 }
--                return NativeLibrary.Load("libcairo.2.dylib", assembly, searchPath);
++                }
              }
+ 
+-            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX) && libraryName.StartsWith("libcairo", StringComparison.Ordinal))
+-            {
+-                var libPath = System.IO.Path.Combine(Assembly.GetExecutingAssembly().Location, "Lib", "libcairo.2.dylib");
+-                if (NativeLibrary.TryLoad(libPath, out var handle))
+-                {
+-                    return handle;
+-                }
+-                return NativeLibrary.Load("libcairo.2.dylib", assembly, searchPath);
+-            }
++            if (libraryName == "freetype6" && OperatingSystem.IsLinux())
++                return NativeLibrary.Load("libfreetype.so.6", assembly, searchPath);
++            if (libraryName == "freetype6" && OperatingSystem.IsMacOS())
++                return NativeLibrary.Load("libfreetype.6.dylib", assembly, searchPath);
  
              // Otherwise, fallback to default import resolver.
              return IntPtr.Zero;

@@ -45,6 +45,7 @@ namespace Cairo
 			internal RecordedSurfaceSource SourceBinding;
 			// Font selection. A null family means the face was set from a native object and has no managed description.
 			internal string FontFamily = "Sans";
+			internal ManagedFileFontSource FontFileSource;
 			internal FontSlant FontSlant = FontSlant.Normal;
 			internal FontWeight FontWeight = FontWeight.Normal;
 			internal double FontSize = 10;
@@ -284,6 +285,7 @@ namespace Cairo
 		// ---- fonts ----
 
 		internal string FontFamily => View.FontFamily;
+		internal ManagedFileFontSource FontFileSource => View.FontFileSource;
 		internal FontSlant FontSlant => View.FontSlant;
 		internal FontWeight FontWeight => View.FontWeight;
 		internal double FontSize => View.FontSize;
@@ -292,12 +294,14 @@ namespace Cairo
 		internal void SelectFontFace(string family, FontSlant slant, FontWeight weight)
 		{
 			if (status != Status.Success) return;
+			current.FontFileSource = null;
 			current.FontFamily = family; current.FontSlant = slant; current.FontWeight = weight;
 		}
 
 		internal void SetContextFontFace(FontFace fontFace)
 		{
 			if (status != Status.Success) return;
+			current.FontFileSource = fontFace?.ManagedFileSource;
 			if (fontFace == null) { current.FontFamily = "Sans"; current.FontSlant = FontSlant.Normal; current.FontWeight = FontWeight.Normal; }
 			else if (fontFace.HasManagedMetadata) {
 				current.FontFamily = fontFace.ManagedFamily;
@@ -309,6 +313,7 @@ namespace Cairo
 		internal void SetScaledFont(ScaledFont scaledFont)
 		{
 			if (status != Status.Success) return;
+			current.FontFileSource = scaledFont.ManagedFileSource;
 			if (!scaledFont.HasManagedMetadata) { current.FontFamily = null; return; }
 			current.FontFamily = scaledFont.ManagedFamily;
 			current.FontSlant = scaledFont.ManagedSlant;
@@ -337,6 +342,7 @@ namespace Cairo
 		internal void InvalidateFontFace()
 		{
 			if (status != Status.Success) return;
+			current.FontFileSource = null;
 			current.FontFamily = null;
 		}
 
@@ -348,10 +354,11 @@ namespace Cairo
 		}
 
 		internal static ManagedGraphicsState CreateFontMetricsState(string family, FontSlant slant, FontWeight weight,
-			double size, Matrix fontMatrix, FontOptions options)
+			double size, Matrix fontMatrix, FontOptions options, ManagedFileFontSource fileSource = null)
 		{
 			var state = new ManagedGraphicsState();
 			state.SelectFontFace(family, slant, weight);
+			state.current.FontFileSource = fileSource;
 			state.SetFontSize(size);
 			state.SetFontMatrix(fontMatrix);
 			state.SetFontOptions(options);
