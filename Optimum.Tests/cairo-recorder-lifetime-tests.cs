@@ -48,6 +48,29 @@ public sealed class CairoRecorderLifetimeTests
 	}
 
 	[Fact]
+	public void NativeReplayKeepsPixelsFromExposedManagedSourceSnapshot ()
+	{
+		bool previousRecording = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (false);
+			Surface.ConfigureAutomaticRecording (true);
+			using var source = new ImageSurface (Format.Argb32, 4, 4);
+			byte[] redPixel = { 0, 0, 255, 255 };
+			Marshal.Copy (redPixel, 0, source.DataPtr, redPixel.Length);
+			Assert.Equal ((byte)255, source.Data[2]);
+			using SurfaceRecorderSnapshot snapshot = source.CaptureRecordedSource ();
+			Surface.ConfigureAutomaticRecording (false);
+			using var native = new ImageSurface (snapshot.PixelFormat, snapshot.Width, snapshot.Height);
+			snapshot.ReplayNative (native.NativeHandleForMetadata);
+			byte[] pixels = native.Data;
+			int pixelOffset = 0;
+			Assert.Equal (new byte[] { 0, 0, 255, 255 }, new byte[] { pixels[pixelOffset], pixels[pixelOffset + 1], pixels[pixelOffset + 2], pixels[pixelOffset + 3] });
+		} finally {
+			Surface.ConfigureAutomaticRecording (previousRecording);
+		}
+	}
+
+	[Fact]
 	public void ContextOutlivingItsSurfaceKeepsRecordingAndGetTargetSeesAllPixels ()
 	{
 		Action<Context> draw = context => {

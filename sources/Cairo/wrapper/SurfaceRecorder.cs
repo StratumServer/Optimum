@@ -554,12 +554,32 @@ namespace Cairo
 		readonly PointD deviceOffset;
 		internal int Width => width;
 		internal int Height => height;
+		internal Format PixelFormat => pixelFormat;
 		internal long Identity { get; }
 		internal int Generation => commands.Length;
 		bool disposed;
 		internal SurfaceRecorderSnapshot (SurfaceRecorder.Command[] commands, int width, int height, RecordedResource[] resources, long identity, byte[] pixels = null, int pixelStride = 0, Format pixelFormat = Format.Argb32, PointD deviceOffset = default) { this.commands = commands; this.width = width; this.height = height; this.resources = resources; this.pixels = pixels; this.pixelStride = pixelStride; this.pixelFormat = pixelFormat; this.deviceOffset = deviceOffset; Identity = identity; foreach (var resource in resources) resource.Retain(); }
 		internal SurfaceRecorderSnapshot Retain() => new SurfaceRecorderSnapshot(commands, width, height, resources, Identity, pixels, pixelStride, pixelFormat, deviceOffset);
-		internal void ReplayNative(IntPtr target) { using (var context = new Context(NativeMethods.cairo_create(target), true)) { context.Operator = Operator.Clear; context.Paint(); context.Operator = Operator.Over; foreach (var command in commands) command.Replay(context); } }
+		internal void ReplayNative(IntPtr target)
+		{
+			using (var context = new Context (NativeMethods.cairo_create (target), true)) {
+				context.Operator = Operator.Clear;
+				context.Paint ();
+				context.Operator = Operator.Over;
+				if (pixels != null) {
+					NativeMethods.cairo_surface_flush (target);
+					IntPtr data = NativeMethods.cairo_image_surface_get_data (target);
+					int targetStride = NativeMethods.cairo_image_surface_get_stride (target);
+					int rowBytes = ManagedImageSurfaceStorage.MinimumRowBytes (pixelFormat, width);
+					if (data == IntPtr.Zero || targetStride < rowBytes || pixelStride < rowBytes || pixels.Length < checked (pixelStride * height))
+						throw new InvalidOperationException ("The recorded image pixels do not match the native Cairo surface layout.");
+					for (int y = 0; y < height; y++)
+						Marshal.Copy (pixels, checked (y * pixelStride), IntPtr.Add (data, checked (y * targetStride)), rowBytes);
+					NativeMethods.cairo_surface_mark_dirty (target);
+				}
+				foreach (var command in commands) command.Replay (context);
+			}
+		}
 		internal void ReplayNative(Context context) { SurfaceRecordingDiagnostics.Materialize(); foreach (var command in commands) command.Replay(context); }
 		public void Dispose() { if (disposed) return; disposed = true; foreach (var resource in resources) resource.Dispose(); }
 
