@@ -8,6 +8,43 @@ using Xunit;
 [Collection ("GUI metrics")]
 public sealed class CairoNativeFreeRecordedGuiTests
 {
+	[Theory]
+	[InlineData (1f)]
+	[InlineData (1.5f)]
+	[InlineData (2f)]
+	public void HintedOutlinedHudTextNeedsNoNativeCairo (float scale)
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		float previous = Vintagestory.API.Config.RuntimeEnv.GUIScale;
+		try {
+			Vintagestory.API.Config.RuntimeEnv.GUIScale = scale;
+			using var surface = new ImageSurface (Format.Argb32, 360, 80);
+			surface.BeginRecording ();
+			using (var context = new Context (surface)) {
+				using var font = Vintagestory.API.Client.CairoFont.WhiteSmallishText ()
+					.WithStroke (Vintagestory.API.MathTools.ColorUtil.BlackArgbDouble, 1.5);
+				font.SetupContext (context);
+				context.MoveTo (5, 5 + font.GetFontExtents ().Ascent);
+				context.TextPath ("15 / 15 Avg FPS: 59");
+				context.LineWidth = font.StrokeWidth;
+				context.SetSourceRGBA (font.StrokeColor);
+				context.StrokePreserve ();
+				context.SetSourceRGBA (font.Color);
+				context.Fill ();
+			}
+			using var target = SKSurface.Create (new SKImageInfo (360, 80));
+			target.Canvas.Clear (SKColors.Transparent);
+			Assert.True (surface.TryDrawRecordedCommands (target));
+			using var image = target.Snapshot ();
+			using var bitmap = SKBitmap.FromImage (image);
+			int visible = 0;
+			foreach (SKColor pixel in bitmap.Pixels) if (pixel.Alpha > 0) visible++;
+			Assert.True (visible > 50, "The hinted outline must draw visible glyphs.");
+			AssertNoCairoNativeLoad (deniedBefore);
+		} finally { Vintagestory.API.Config.RuntimeEnv.GUIScale = previous; }
+	}
+
 	static void AssertNoCairoNativeLoad (int deniedBefore)
 	{
 		Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);

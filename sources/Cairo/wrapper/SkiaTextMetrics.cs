@@ -11,7 +11,7 @@ namespace Cairo
 		/// font is measured with a Normal-hinted twin. Returns the font to measure advances with.
 		/// </summary>
 		internal static bool UsesNormalHintedAdvances(SKFont font, FontOptions options, string text)
-			=> OperatingSystem.IsLinux() && options.HintStyle == HintStyle.Default && font.Hinting == SKFontHinting.Slight && text.Length > 0 && !ContainsSurrogate(text);
+			=> OperatingSystem.IsLinux() && options.HintMetrics != HintMetrics.Off && font.Hinting == SKFontHinting.Slight && text.Length > 0 && !ContainsSurrogate(text);
 
 		internal static SKFont CreateAdvanceFont(SKFont font) => new SKFont(font.Typeface, font.Size) {
 			Edging = font.Edging,

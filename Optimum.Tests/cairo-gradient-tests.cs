@@ -5,6 +5,7 @@ using Cairo;
 using SkiaSharp;
 using Xunit;
 
+[Collection ("Cairo materialization metrics")]
 public sealed class CairoGradientTests
 {
     static CairoGradientTests() { _ = CairoAPI.Version; }

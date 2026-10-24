@@ -3,7 +3,7 @@ using SkiaSharp;
 
 namespace Cairo
 {
-	/// <summary>cairo_text_path and cairo_glyph_path built from Skia glyph outlines, appended to a managed path.</summary>
+	/// <summary>Builds text paths from the selected Skia typeface, preserving Linux device-grid hinting.</summary>
 	internal static class SkiaTextPath
 	{
 		/// <summary>Appends the outlines of a string laid out from the current point, then moves the current point past it.</summary>
@@ -13,6 +13,7 @@ namespace Cairo
 			state.TryGetCurrentPoint(out double originX, out double originY);
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
+			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix);
 			SKFont advanceFont = SkiaTextMetrics.UsesNormalHintedAdvances(font, options, text) ? SkiaTextMetrics.CreateAdvanceFont(font) : null;
 			try {
 				SKFont measure = advanceFont ?? font;
@@ -21,7 +22,7 @@ namespace Cairo
 				measure.GetGlyphWidths(glyphs, widths, null);
 				double x = originX;
 				for (int i = 0; i < glyphs.Length; i++) {
-					AppendGlyph(state, font, glyphs[i], x, originY);
+					AppendGlyph(state, font, hinted, glyphs[i], x, originY);
 					x += widths[i];
 				}
 				state.MoveTo(x, originY);
@@ -34,16 +35,17 @@ namespace Cairo
 			if (glyphs == null || glyphs.Length == 0) return;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
+			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix);
 			foreach (Glyph glyph in glyphs) {
 				if (glyph.Index < 0 || glyph.Index > ushort.MaxValue)
 					throw new InvalidOperationException("Skia glyph indices are 16-bit; glyph " + glyph.Index + " has no outline.");
-				AppendGlyph(state, font, (ushort)glyph.Index, glyph.X, glyph.Y);
+				AppendGlyph(state, font, hinted, (ushort)glyph.Index, glyph.X, glyph.Y);
 			}
 		}
 
-		static void AppendGlyph(ManagedGraphicsState state, SKFont font, ushort glyph, double x, double y)
+		static void AppendGlyph(ManagedGraphicsState state, SKFont font, SkiaHintedFontOutlines hinted, ushort glyph, double x, double y)
 		{
-			using SKPath outline = font.GetGlyphPath(glyph);
+			using SKPath outline = hinted?.GetGlyphPath(glyph) ?? font.GetGlyphPath(glyph);
 			if (outline == null || outline.PointCount == 0) return;
 			using SKPath.RawIterator iterator = outline.CreateRawIterator();
 			var points = new SKPoint[4];

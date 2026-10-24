@@ -188,8 +188,7 @@ namespace Cairo
 			: null;
 			float advance;
 			RecordedGuiDrawing drawing;
-			if (OperatingSystem.IsLinux() && options.HintStyle == HintStyle.Default &&
-				font.Hinting == SKFontHinting.Slight && decoded.Length > 0 && !ContainsSurrogate(decoded)) {
+			if (SkiaTextMetrics.UsesNormalHintedAdvances(font, options, decoded)) {
 				// FreeType's LIGHT target changes raster coverage but uses linear
 				// advances. Keep the existing Normal-hinted Skia advances for string
 				// placement while using Fontconfig's target for the glyph masks.
