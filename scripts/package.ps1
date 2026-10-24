@@ -352,6 +352,13 @@ try {
         Get-ChildItem $shaderSrc -File | ForEach-Object { Copy-Item -Force $_.FullName $shaderDst }
     }
 
+    # Ship compatibility patches in their own Vintage Story asset domains.
+    $compatAssetSrc = Join-Path $repoRoot 'sources/assets'
+    $assetDst = Join-Path $stageDir 'assets'
+    if (Test-Path $compatAssetSrc) {
+        Copy-Item -Recurse -Force (Join-Path $compatAssetSrc '*') $assetDst
+    }
+
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).
     # Read/write explicitly as UTF-8 via .NET, not Get-Content/Set-Content:
     # Windows PowerShell 5.1 (what the Windows installer launches) defaults

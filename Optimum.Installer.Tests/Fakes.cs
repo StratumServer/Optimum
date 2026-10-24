@@ -2,6 +2,7 @@ using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
+using Optimum.Bootstrap.Core.Prerequisites;
 using Optimum.Bootstrap.Core.Tests;
 using Optimum.Installer.Services;
 
@@ -135,6 +136,50 @@ public sealed class FakeIlspycmdAcquisition : IIlspycmdAcquisition
     }
 }
 
+public sealed class FakeGitAcquisition : IGitAcquisition
+{
+    public Func<ToolAcquisitionResult> Behaviour { get; set; } =
+        static () => ToolAcquisitionResult.Success("C:/Users/tester/AppData/Local/Optimum/tools/git/cmd/git.exe");
+
+    public int Calls { get; private set; }
+    public Func<CancellationToken, Task<ToolAcquisitionResult>>? AsyncBehaviour { get; set; }
+
+    public Task<ToolAcquisitionResult> InstallAsync(
+        IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        if (AsyncBehaviour is not null)
+            return AsyncBehaviour(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour());
+    }
+}
+
+public sealed class FakeDistroPackageAcquisition : IDistroPackageAcquisition
+{
+    private readonly Optimum.Bootstrap.Core.Platform.ISystemProbe _probe;
+
+    public FakeDistroPackageAcquisition(Optimum.Bootstrap.Core.Platform.ISystemProbe probe) => _probe = probe;
+
+    public Func<DistroPackagePlan, ToolAcquisitionResult> Behaviour { get; set; } =
+        static plan => ToolAcquisitionResult.Success(plan.Package);
+    public Func<DistroPackagePlan, CancellationToken, Task<ToolAcquisitionResult>>? AsyncBehaviour { get; set; }
+
+    public int Calls { get; private set; }
+
+    public DistroPackagePlan? PlanFor(string command) => DistroPackageHints.Plan(_probe, command);
+
+    public Task<ToolAcquisitionResult> InstallAsync(
+        DistroPackagePlan plan, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        Calls++;
+        if (AsyncBehaviour is not null)
+            return AsyncBehaviour(plan, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(Behaviour(plan));
+    }
+}
+
 public sealed class FakeUpdateService : IUpdateService
 {
     public string? AvailableVersion { get; set; }
@@ -163,6 +208,8 @@ public static class TestServices
         IAppimagetoolAcquisition? appimagetool = null,
         ISdkAcquisition? sdk = null,
         IIlspycmdAcquisition? ilspycmd = null,
+        IGitAcquisition? git = null,
+        IDistroPackageAcquisition? distroPackages = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -196,6 +243,8 @@ public static class TestServices
             Appimagetool = appimagetool,
             Sdk = sdk,
             Ilspycmd = ilspycmd,
+            Git = git,
+            DistroPackages = distroPackages,
         };
     }
 }

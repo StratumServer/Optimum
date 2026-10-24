@@ -174,6 +174,8 @@ public sealed class GamePatcherTests
             Directory.CreateDirectory(donorsDir);
             Directory.CreateDirectory(Path.Combine(overlayDir, "assets", "game", "shaders"));
             Directory.CreateDirectory(Path.Combine(overlayDir, "assets", "game", "lang"));
+            string darkVisionPatchDir = Path.Combine(overlayDir, "assets", "darkvision", "config", "shaderpatches");
+            Directory.CreateDirectory(darkVisionPatchDir);
 
             File.WriteAllText(Path.Combine(donorsDir, "VintagestoryLib.Donor.dll"), "donor-lib");
             File.WriteAllText(Path.Combine(donorsDir, "VintagestoryAPI.Contracts.dll"), "donor-api");
@@ -184,6 +186,7 @@ public sealed class GamePatcherTests
             File.WriteAllText(Path.Combine(overlayDir, "Optimum"), "#!/bin/sh\necho optimum\n");
             File.WriteAllText(Path.Combine(overlayDir, "assets", "game", "shaders", "optimum.vsh"), "void main() {}");
             File.WriteAllText(Path.Combine(overlayDir, "assets", "game", "lang", "en.json"), "{\"optimum-key\": \"Optimum Value\"}");
+            File.WriteAllText(Path.Combine(darkVisionPatchDir, "optimum_vsp_terrain_desaturation.txt"), "darkvision compatibility patch");
 
             // Create executable stub patcher
             string patcherExe = Path.Combine(overlayDir, OperatingSystem.IsWindows() ? "Optimum.Patcher.bat" : "Optimum.Patcher");
@@ -233,6 +236,9 @@ public sealed class GamePatcherTests
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "shaders", "optimum.vsh")));
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
             Assert.Contains("Optimum Value", File.ReadAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
+            string deployedDarkVisionPatch = Path.Combine(gameDir, "assets", "darkvision", "config", "shaderpatches", "optimum_vsp_terrain_desaturation.txt");
+            Assert.True(File.Exists(deployedDarkVisionPatch));
+            Assert.Equal("darkvision compatibility patch", File.ReadAllText(deployedDarkVisionPatch));
             Assert.True(File.Exists(Path.Combine(gameDir, ".optimum", "manifest.json")));
 
             // 2. Idempotent re-patch (reads from .optimum/vanilla, does not fail)
@@ -247,6 +253,7 @@ public sealed class GamePatcherTests
             Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
             Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
             Assert.Equal("vanilla-cairo", File.ReadAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll")).Trim());
+            Assert.True(File.Exists(deployedDarkVisionPatch));
             Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.GameContent.dll")));
 
             // An existing assembly is restored instead of being removed on rollback.

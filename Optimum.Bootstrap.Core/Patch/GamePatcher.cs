@@ -455,7 +455,19 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             }
         }
 
-        // 5. Launcher wrapper
+        // 5. DarkVision compatibility shader patches
+        string? darkVisionPatchesSrc = FindDirectory(overlayDir, "assets/darkvision/config/shaderpatches");
+        if (darkVisionPatchesSrc is not null && probe.DirectoryExists(darkVisionPatchesSrc))
+        {
+            string darkVisionPatchesDst = Path.Combine(gameDir, "assets", "darkvision", "config", "shaderpatches");
+            EnsureDirectory(darkVisionPatchesDst);
+            foreach (string file in probe.EnumerateFiles(darkVisionPatchesSrc, "*.txt"))
+            {
+                CopyFile(file, Path.Combine(darkVisionPatchesDst, Path.GetFileName(file)));
+            }
+        }
+
+        // 6. Launcher wrapper
         string launcherName = probe.Os == OsKind.Windows ? "Optimum.exe" : "Optimum";
         string? launcherSrc = FindFile(overlayDir, launcherName);
         if (launcherSrc is not null && probe.FileExists(launcherSrc))

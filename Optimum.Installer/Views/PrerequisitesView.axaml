@@ -57,12 +57,27 @@
                     <SelectableTextBlock Text="{Binding ManualCommand}"
                                          FontFamily="Cascadia Code, Consolas, monospace"
                                          IsVisible="{Binding ManualCommand, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <TextBlock Text="{Binding ConfirmationDetail}" IsVisible="{Binding AwaitingConfirmation}"
+                               TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                   </StackPanel>
-                  <Button Grid.Column="1" Content="{Binding ActionLabel}" Classes="accent" Margin="16,0,0,0"
-                          VerticalAlignment="Center"
-                          IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                          Command="{Binding ActionCommand}"
-                          ToolTip.Tip="{Binding ActionDetail}" />
+                  <StackPanel Grid.Column="1" Spacing="6" Margin="16,0,0,0"
+                              VerticalAlignment="Center">
+                    <Button Content="{Binding ActionLabel}" Classes="accent"
+                            IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                            IsEnabled="{Binding CanRequestInstall}"
+                            Command="{Binding ActionCommand}"
+                            ToolTip.Tip="{Binding ActionDetail}" />
+                    <Button Content="Confirm and install" Classes="accent"
+                            IsVisible="{Binding AwaitingConfirmation}"
+                            Command="{Binding ConfirmInstallCommand}" />
+                    <Button Content="Not now" IsVisible="{Binding AwaitingConfirmation}"
+                            Command="{Binding CancelConfirmationCommand}" />
+                    <Button Content="Cancel installation" IsVisible="{Binding CanCancelInstall}"
+                            Command="{Binding CancelInstallCommand}" />
+                    <Button Content="{Binding ManualFallbackLabel}"
+                            IsVisible="{Binding ManualFallbackLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                            Command="{Binding ManualDownloadCommand}" />
+                  </StackPanel>
                 </Grid>
               </Border>
             </DataTemplate>

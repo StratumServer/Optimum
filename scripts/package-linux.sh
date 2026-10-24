@@ -290,7 +290,13 @@ if [[ -d "$SHADER_SRC" ]]; then
     find "$SHADER_SRC" -maxdepth 1 -type f -exec cp -f {} "$SHADER_DST/" \;
 fi
 
-# 5c. Merge translation strings.
+# 5c. Ship compatibility patches in their own Vintage Story asset domains.
+COMPAT_ASSET_SRC="$REPO_ROOT/sources/assets"
+if [[ -d "$COMPAT_ASSET_SRC" ]]; then
+    cp -a "$COMPAT_ASSET_SRC/." "$STAGE_DIR/assets/"
+fi
+
+# 5d. Merge translation strings.
 LANG_SRC="$REPO_ROOT/sources/lang"
 LANG_DST="$STAGE_DIR/assets/game/lang"
 if [[ -d "$LANG_SRC" ]]; then

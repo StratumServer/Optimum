@@ -10,6 +10,7 @@ namespace Optimum.Tests;
 /// Tests for the parallel ServerChunk.FromBytes deserialization feature (Step 29).
 /// Covers config toggles, clamping, and diagnostics recording.
 /// </summary>
+[Collection("OptimumConfig")]
 public class ChunkDeserializeParallelTests
 {
     public ChunkDeserializeParallelTests()

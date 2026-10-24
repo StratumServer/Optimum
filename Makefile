@@ -39,7 +39,7 @@ ifneq ($(CLIENT_ARCHIVE),)
 endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
-.PHONY: help check check-patches check-compat check-shaders bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
+.PHONY: help check check-patches check-compat check-shaders test-runtimeconfig bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
@@ -57,6 +57,9 @@ check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
 
 check-shaders: ## Verify optimized shader overlays are not truncated
 	bash scripts/validate-shader-assets.sh sources/shaders
+
+test-runtimeconfig: ## Test runtimeconfig sync without bootstrapping the game
+	pwsh -NoProfile -NonInteractive -File scripts/tests/sync-runtimeconfig-frameworks.ps1
 
 bootstrap: ## Download client, decompile, clone forks, apply patches
 	bash scripts/bootstrap.sh $(BOOTSTRAP_ARGS)

@@ -8,7 +8,7 @@
 #   - Optimum.Api.Contracts.dll
 #   - Optimum.GameContent.dll
 #   - .optimum/donors/ (VintagestoryLib.Donor.dll, VintagestoryAPI.Contracts.dll, etc.)
-#   - Shaders and language strings
+#   - Shaders, language strings, and cross-mod shader compatibility patches
 #   - optimum-manifest-<rid>.json sidecar (hashes, supported game versions, targets)
 #
 # DOES NOT contain any proprietary Anego game binaries or decompiled vanilla code.
@@ -163,6 +163,11 @@ PY
 # 5. Shaders
 if [[ -d "$REPO_ROOT/sources/shaders" ]]; then
     find "$REPO_ROOT/sources/shaders" -maxdepth 1 -type f -exec cp -f {} "$STAGE_DIR/assets/game/shaders/" \;
+fi
+
+# 5b. DarkVision shader compatibility patches (asset domain outside game:).
+if [[ -d "$REPO_ROOT/sources/assets" ]]; then
+    cp -a "$REPO_ROOT/sources/assets/." "$STAGE_DIR/assets/"
 fi
 
 # 6. Language strings

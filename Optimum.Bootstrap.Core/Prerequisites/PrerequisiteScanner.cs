@@ -1,4 +1,5 @@
 using Optimum.Bootstrap.Core.Platform;
+using Optimum.Bootstrap.Core.Acquisition;
 
 namespace Optimum.Bootstrap.Core.Prerequisites;
 
@@ -17,7 +18,8 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
 
-    internal const string GitForWindowsUrl = "https://git-scm.com/download/win";
+    internal const string GitForWindowsUrl = "https://git-scm.com/install/windows";
+    private const string PowerShellLinuxInstallUrl = "https://learn.microsoft.com/powershell/scripting/install/installing-powershell-on-linux";
 
     private static readonly PrerequisiteDefinition[] UnixDefinitions =
     [
@@ -50,6 +52,13 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         probe.Os == OsKind.Windows ? WindowsDefinitions : UnixDefinitions;
 
     public IReadOnlyList<PrerequisiteResult> Scan() => Definitions.Select(Detect).ToArray();
+
+    /// <summary>Scans Git independently so the standalone installer can acquire it before it has source.</summary>
+    public PrerequisiteResult ScanGit()
+    {
+        PrerequisiteDefinition definition = Definitions.Single(item => item.Id == PrerequisiteId.Git);
+        return probe.Os == OsKind.Windows ? DetectGitOnWindows(definition) : DetectPlain(definition);
+    }
 
     public bool AllRequiredPresent() => Scan().All(r => !r.BlocksBuild);
 
@@ -88,18 +97,28 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         return probe.Os == OsKind.Windows
             ? new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
                 AcquisitionKind.DownloadPage, null, "https://aka.ms/powershell")
-            : Missing(def, DistroAcquisition("pwsh"));
+            : Missing(def, AcquisitionKind.DownloadPage, null, PowerShellLinuxInstallUrl);
     }
 
-    /// <summary>Git for Windows is a signed installer, not a package; point the user at it.</summary>
+    /// <summary>Accept a working system, user-scope or cached Git for Windows executable.</summary>
     private PrerequisiteResult DetectGitOnWindows(PrerequisiteDefinition def)
     {
-        string? path = CommandSearch.Which(probe, def.Command);
+        string? path = GitForWindows.FindExecutable(probe);
         if (path is not null)
-            return Ok(def, path, null);
+        {
+            ProcessOutcome outcome = probe.Run(path, ["--version"], ProbeTimeout);
+            string version = outcome.Started ? outcome.StandardOutput.Trim() : string.Empty;
+            if (outcome.Started && outcome.ExitCode == 0
+                && version.StartsWith("git version ", StringComparison.OrdinalIgnoreCase))
+                return Ok(def, path, version["git version ".Length..]);
+        }
 
         return new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
-            AcquisitionKind.DownloadPage, null, GitForWindowsUrl);
+            AcquisitionKind.Automatic,
+            "The installer tries the official MinGit portable package first, then its BusyBox variant. "
+                + "Both downloads are checked against the published SHA-256 digest and Git is verified before use. "
+                + "Only if both portable variants fail will the installer ask for manual installation.",
+            GitForWindowsUrl);
     }
 
     private PrerequisiteResult DetectEither(PrerequisiteDefinition def, string first, string second)
@@ -165,8 +184,13 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             ?? ExecutableOrNull(Path.Combine(repoRoot, ".tools", binaryName))
             ?? ExecutableOrNull(Path.Combine(probe.HomeDirectory, ".tools", binaryName));
         if (path is null)
-            return Missing(def, AcquisitionKind.DownloadPage, null,
-                "https://github.com/crazy-max/innoextract/releases");
+        {
+            AcquisitionKind acquisition = DistroAcquisition(def.Command);
+            return acquisition == AcquisitionKind.Manual
+                ? Missing(def, acquisition)
+                : Missing(def, AcquisitionKind.DownloadPage, null,
+                    "https://github.com/crazy-max/innoextract/releases");
+        }
 
         ProcessOutcome outcome = probe.Run(path, ["--version"], ProbeTimeout);
         (int major, int minor)? parsed = ParseInnoextractVersion(outcome.StandardOutput);
@@ -203,8 +227,13 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             version is null ? def.DisplayName : $"{def.DisplayName} ({version})",
             path, version, AcquisitionKind.None, null, null);
 
-    private PrerequisiteResult Missing(PrerequisiteDefinition def, AcquisitionKind acquisition) =>
-        Missing(def, acquisition, DistroPackageHints.InstallCommand(probe, def.Command), null);
+    private PrerequisiteResult Missing(PrerequisiteDefinition def, AcquisitionKind acquisition)
+    {
+        string? command = DistroPackageHints.InstallCommand(probe, def.Command);
+        if (command is null && acquisition == AcquisitionKind.None)
+            command = DistroPackageHints.ManualInstruction(probe, def.Command);
+        return Missing(def, acquisition, command, null);
+    }
 
     private PrerequisiteResult Missing(PrerequisiteDefinition def, AcquisitionKind acquisition, string? command, string? url)
     {

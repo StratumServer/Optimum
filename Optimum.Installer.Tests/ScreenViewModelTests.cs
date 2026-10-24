@@ -114,6 +114,164 @@ public class OptionsViewModelTests
 public class PrerequisitesViewModelTests
 {
     [Fact]
+    public void LabelsPackagingAndOptionalToolsSeparatelyFromBuildRequirements()
+    {
+        var probe = new FakeSystemProbe();
+        InstallerServices services = TestServices.Build(probe: probe);
+        probe.Files.Remove("/usr/bin/pwsh");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot, uiPost: services.UiPost);
+
+        PrerequisiteRowViewModel powershell = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Pwsh);
+        PrerequisiteRowViewModel appimage = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Appimagetool);
+
+        Assert.Equal("Packaging", powershell.StatusLabel);
+        Assert.False(powershell.Result.BlocksBuild);
+        Assert.Equal("Optional", appimage.StatusLabel);
+        Assert.False(appimage.Result.BlocksBuild);
+    }
+
+    [Fact]
+    public void ShowsManualRepositoryInstructionsWhenNoSupportedPackageManagerExists()
+    {
+        var probe = new FakeSystemProbe();
+        InstallerServices services = TestServices.Build(probe: probe);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot, uiPost: services.UiPost);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        Assert.Null(row.ActionCommand);
+        Assert.Contains("No supported apt, dnf, pacman, or zypper manager was detected", row.ManualCommand);
+    }
+
+    [Fact]
+    public async Task LinuxPackageInstallRequiresReviewAndConfirmationThenRescans()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/apt-get");
+        probe.AddFile("/usr/bin/pkexec");
+        var acquisition = new FakeDistroPackageAcquisition(probe)
+        {
+            Behaviour = plan =>
+            {
+                Assert.Equal("perl", plan.Package);
+                probe.AddFile("/usr/bin/perl");
+                return ToolAcquisitionResult.Success(plan.Package);
+            },
+        };
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        Assert.Equal("Review install", row.ActionLabel);
+        Assert.Equal("sudo apt-get install -y perl", row.ManualCommand);
+        await row.ActionCommand!.ExecuteAsync(null);
+        Assert.True(row.AwaitingConfirmation);
+        Assert.Equal(0, acquisition.Calls);
+        Assert.Contains("install perl", row.ConfirmationDetail);
+
+        await row.ConfirmInstallCommand!.ExecuteAsync(null);
+
+        Assert.Equal(1, acquisition.Calls);
+        Assert.False(row.AwaitingConfirmation);
+        Assert.DoesNotContain(vm.Rows, r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl
+            && r.Result.State == Bootstrap.Core.Prerequisites.PrerequisiteState.Missing);
+    }
+
+    [Fact]
+    public async Task CancellingPackageReviewDoesNotRunAnythingAndKeepsManualCommand()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/apt-get");
+        probe.AddFile("/usr/bin/pkexec");
+        var acquisition = new FakeDistroPackageAcquisition(probe);
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+        row.CancelConfirmationCommand!.Execute(null);
+
+        Assert.False(row.AwaitingConfirmation);
+        Assert.Equal(0, acquisition.Calls);
+        Assert.Equal("sudo apt-get install -y perl", row.ManualCommand);
+    }
+
+    [Fact]
+    public async Task CancellingRunningPackageInstallReportsCancellationAndKeepsManualCommand()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/apt-get");
+        probe.AddFile("/usr/bin/pkexec");
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var acquisition = new FakeDistroPackageAcquisition(probe)
+        {
+            AsyncBehaviour = async (_, token) =>
+            {
+                started.SetResult();
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return ToolAcquisitionResult.Failure(FailureReason.Cancelled, "installation cancelled");
+                }
+                return ToolAcquisitionResult.Success("perl");
+            },
+        };
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+        Task install = row.ConfirmInstallCommand!.ExecuteAsync(null);
+        await started.Task;
+        row.CancelInstallCommand!.Execute(null);
+        await install;
+
+        Assert.Equal("sudo apt-get install -y perl", row.ManualCommand);
+        Assert.Contains("installation cancelled", row.Detail);
+    }
+
+    [Fact]
+    public async Task PackageFailureLeavesManualInstructionsVisible()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddFile("/usr/bin/dnf");
+        probe.AddFile("/usr/bin/pkexec");
+        var acquisition = new FakeDistroPackageAcquisition(probe)
+        {
+            Behaviour = _ => ToolAcquisitionResult.Failure(FailureReason.SourceUnavailable,
+                "authentication was dismissed; retry or use the manual command"),
+        };
+        InstallerServices services = TestServices.Build(probe: probe, distroPackages: acquisition);
+        probe.Files.Remove("/usr/bin/perl");
+        var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot,
+            uiPost: services.UiPost, distroPackages: acquisition);
+        PrerequisiteRowViewModel row = vm.Rows.Single(r =>
+            r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Perl);
+
+        await row.ActionCommand!.ExecuteAsync(null);
+        await row.ConfirmInstallCommand!.ExecuteAsync(null);
+
+        Assert.Equal("sudo dnf install -y perl", row.ManualCommand);
+        Assert.Contains("authentication was dismissed", row.Detail);
+    }
+
+    [Fact]
     public async Task AppimagetoolInstallActionRunsAndRescansTheTool()
     {
         var probe = new FakeSystemProbe();
@@ -201,8 +359,9 @@ public class PrerequisitesViewModelTests
     }
 
     [Fact]
-    public void WindowsWithoutGitOffersItsDownloadPage()
+    public async Task WindowsOffersPortableInstallFirstAndManualDownloadOnlyAfterFailure()
     {
+        SynchronizationContext? acquisitionContext = null;
         var probe = new FakeSystemProbe { Os = Bootstrap.Core.Platform.OsKind.Windows, HomeDirectory = "C:/Users/tester" };
         probe.Path.Add("C:/ps");
         probe.AddFile("C:/ps/powershell.exe");
@@ -213,12 +372,118 @@ public class PrerequisitesViewModelTests
         probe.OnCommand("C:/dotnet/dotnet.exe", "--version", "10.0.100\n");
         probe.AddFile("C:/repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
 
-        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a());
+        var gitAcquisition = new FakeGitAcquisition
+        {
+            AsyncBehaviour = _ =>
+            {
+                acquisitionContext = SynchronizationContext.Current;
+                return Task.FromResult(ToolAcquisitionResult.Failure(
+                    FailureReason.SourceUnavailable,
+                    "All portable Git variants failed. Install manually: https://git-scm.com/install/windows"));
+            },
+        };
+        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a(), git: gitAcquisition);
 
         PrerequisiteRowViewModel git = vm.Rows.Single(
             r => r.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Git);
-        Assert.Equal("Get it", git.ActionLabel);
+        Assert.Equal("Install", git.ActionLabel);
         Assert.NotNull(git.ActionCommand);
+        Assert.Null(git.ManualFallbackLabel);
+        Assert.NotNull(git.ManualDownloadCommand);
+        Assert.Contains("MinGit portable", git.Detail);
+        Assert.Contains("BusyBox", git.Detail);
+        Assert.DoesNotContain("https://git-scm.com/install/windows", git.Detail);
+
+        SynchronizationContext? previousContext = SynchronizationContext.Current;
+        var uiContext = new SynchronizationContext();
+        Task installation;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(uiContext);
+            installation = git.ActionCommand.ExecuteAsync(null);
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previousContext);
+        }
+        await installation;
+
+        Assert.NotSame(uiContext, acquisitionContext);
+        Assert.Equal("Manual download", git.ManualFallbackLabel);
+        Assert.Contains("All portable Git variants failed", git.Detail);
+        Assert.Contains("https://git-scm.com/install/windows", git.Detail);
+    }
+
+    [Fact]
+    public async Task GitAcquisitionCanBeCancelledFromTheWizard()
+    {
+        var probe = new FakeSystemProbe { Os = Bootstrap.Core.Platform.OsKind.Windows, HomeDirectory = "C:/Users/tester" };
+        probe.Path.Add("C:/ps");
+        probe.AddFile("C:/ps/powershell.exe");
+        probe.AddFile("C:/repo/forks.json", "{}");
+        var gitAcquisition = new FakeGitAcquisition
+        {
+            AsyncBehaviour = async cancellationToken =>
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                    return ToolAcquisitionResult.Success("unused");
+                }
+                catch (OperationCanceledException)
+                {
+                    return ToolAcquisitionResult.Failure(FailureReason.Cancelled, "the Git installation was cancelled");
+                }
+            },
+        };
+        var vm = new PrerequisitesViewModel(probe, "C:/repo", uiPost: a => a(), git: gitAcquisition);
+        PrerequisiteRowViewModel gitRow = vm.Rows.Single(
+            row => row.Result.Definition.Id == Bootstrap.Core.Prerequisites.PrerequisiteId.Git);
+
+        Task installation = gitRow.ActionCommand!.ExecuteAsync(null);
+        Assert.True(gitRow.CanCancelInstall);
+        gitRow.CancelInstallCommand!.Execute(null);
+        await installation;
+
+        Assert.False(gitRow.CanCancelInstall);
+        Assert.Contains("cancelled", gitRow.Detail);
+        Assert.Null(gitRow.ManualFallbackLabel);
+    }
+
+    [Fact]
+    public async Task StandaloneWindowsInstallerAcquiresGitBeforeAllowingSourceDownload()
+    {
+        var probe = new FakeSystemProbe
+        {
+            Os = Bootstrap.Core.Platform.OsKind.Windows,
+            HomeDirectory = "C:/Users/tester",
+        };
+        var source = new FakeSourceProvider();
+        string gitPath = "C:/Users/tester/AppData/Local/Optimum/tools/git/cmd/git.exe";
+        var gitAcquisition = new FakeGitAcquisition
+        {
+            Behaviour = () =>
+            {
+                probe.Path.Insert(0, "C:/Users/tester/AppData/Local/Optimum/tools/git/cmd");
+                probe.AddFile(gitPath);
+                probe.OnCommand(gitPath, "--version", "git version 2.56.0.windows.3\n");
+                return ToolAcquisitionResult.Success(gitPath);
+            },
+        };
+        var vm = new PrerequisitesViewModel(
+            probe, repoRoot: null, source, uiPost: a => a(), git: gitAcquisition);
+
+        Assert.False(vm.CanAcquireSource);
+        Assert.Single(vm.AttentionRows);
+        PrerequisiteRowViewModel gitRow = vm.AttentionRows.Single();
+        Assert.Equal("Install", gitRow.ActionLabel);
+
+        await gitRow.ActionCommand!.ExecuteAsync(null);
+
+        Assert.Equal(1, gitAcquisition.Calls);
+        Assert.True(vm.CanAcquireSource);
+        await vm.AcquireSourceCommand.ExecuteAsync(null);
+        Assert.Equal(1, source.Calls);
     }
 
     [Fact]
