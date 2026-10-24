@@ -49,15 +49,15 @@ public sealed class CairoManagedImageSurfaceTests
 	}
 
 	[Fact]
-	public void ZeroSizedImageSurfaceKeepsAStableNonNullDataPointer ()
+	public void ZeroSizedImageSurfaceKeepsNullPixelStorageLikeCairo ()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 0, 0);
 		Assert.Equal (0, surface.Width);
 		Assert.Equal (0, surface.Height);
 		Assert.Equal (0, surface.Stride);
-		Assert.Empty (surface.Data);
-		Assert.NotEqual (IntPtr.Zero, surface.DataPtr);
-		Assert.True (GetStorage (surface).HasManagedPixels);
+		Assert.Null (surface.Data);
+		Assert.Equal (IntPtr.Zero, surface.DataPtr);
+		Assert.False (GetStorage (surface).HasManagedPixels);
 	}
 
 	[MethodImpl (MethodImplOptions.NoInlining)]

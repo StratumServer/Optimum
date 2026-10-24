@@ -46,6 +46,12 @@ try {
 }
 
 using var surface = new ImageSurface(Format.Argb32, 64, 40);
+using (var invalid = new ImageSurface(Format.Argb32, -1, 1))
+{
+    if ((int)invalid.Status != 32 || invalid.Width != 0 || invalid.Height != 0 || invalid.ReferenceCount != 0)
+        throw new InvalidOperationException("The legacy image factory lost its Cairo error-surface contract.");
+}
+surface.WriteToPng(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-missing-" + Guid.NewGuid().ToString("N"), "image.png"));
 using var targetSurface = new ImageSurface(Format.Argb32, 16, 12);
 using var clearSurface = new ImageSurface(Format.Argb32, 2, 2);
 using (var clearContext = new Context(clearSurface))

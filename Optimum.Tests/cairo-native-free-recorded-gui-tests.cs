@@ -1510,7 +1510,8 @@ public sealed class CairoNativeFreeRecordedGuiTests
 			Assert.NotNull (image);
 			Assert.Equal (new SKColor (255, 0, 0, 255), image.GetPixel (0, 0));
 			Assert.Equal (new SKColor (0, 0, 255, 255), image.GetPixel (1, 1));
-			Assert.Equal (SurfaceRecordingState.Sealed, surface.RecordingState);
+			// PNG export takes an immutable snapshot and keeps the drawing surface live.
+			Assert.Equal (SurfaceRecordingState.Recording, surface.RecordingState);
 			Assert.Equal (0, CairoNativeGuard.DeniedCount);
 		}
 		finally

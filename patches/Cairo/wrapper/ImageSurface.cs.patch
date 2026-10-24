@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..c35119f 100644
+index 8014c9e..3358137 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,277 @@
+@@ -31,40 +31,299 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -31,6 +31,9 @@ index 8014c9e..c35119f 100644
 +		{
 +			managedStorage = storage;
 +		}
++
++		internal static ImageSurface CreateManagedErrorSurface (Status status) =>
++			new ImageSurface (new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), status));
 +
 +		internal ImageSurface CreateManagedRecordingAlias ()
 +		{
@@ -93,13 +96,24 @@ index 8014c9e..c35119f 100644
 +		{
 +			if (ManagedStatus != Status.Success) return true;
 +			if (!IsManagedOnly || !ManagedImageSurfaceStorage.CanRecordFormat (Format)) return false;
++			if (Width == 0 || Height == 0) {
++				// The native void wrapper ignores PNG write errors for an empty image.
++				try { using var empty = File.Create (filename); }
++				catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException) { }
++				return true;
++			}
 +			using var skSurface = SKSurface.Create (ManagedImageSurfaceStorage.SkiaInfo (Format, Width, Height));
-+			if (skSurface == null || !TryDrawRecordedCommands (skSurface)) return false;
++			if (skSurface == null) return false;
++			using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
++			if (snapshot == null) return false;
++			snapshot.DrawTo (skSurface);
 +			using SKImage image = skSurface.Snapshot ();
 +			using SKData png = image.Encode (SKEncodedImageFormat.Png, 100);
 +			if (png == null) return false;
-+			using FileStream output = File.Create (filename);
-+			png.SaveTo (output);
++			try {
++				using FileStream output = File.Create (filename);
++				png.SaveTo (output);
++			} catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException) { }
 +			return true;
 +		}
 +
@@ -142,7 +156,7 @@ index 8014c9e..c35119f 100644
 +		internal void MarkManagedPixelsForSnapshots () => managedStorage.MarkPixelsForSnapshots ();
 +		internal void CheckpointManagedPixels ()
 +		{
-+			if (!IsManagedOnly || managedStorage == null || !HasPendingRecordedCommands) return;
++			if (!IsManagedOnly || managedStorage == null || managedStorage.Width == 0 || managedStorage.Height == 0 || !HasPendingRecordedCommands) return;
 +			using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
 +			if (snapshot == null) return;
 +			ReplaceManagedPixels (RenderManagedSnapshot (snapshot));
@@ -196,9 +210,17 @@ index 8014c9e..c35119f 100644
 +		static ImageSurfaceLoadResult LoadSurface (Format format, int width, int height)
 +		{
 +			if (Surface.ManagedApiMode) {
++				if ((int)format < 0 || (int)format > 7)
++					return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.InvalidFormat);
 +				if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
 +					throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, and RGB565 surfaces.");
-+				return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManaged (format, width, height));
++				if (width < 0 || height < 0 || width > 32767 || height > 32767)
++					return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.InvalidSize);
++				long byteCount = (long)Surface.StrideForWidth (format, width) * height;
++				if (byteCount > int.MaxValue)
++					return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.NoMemory);
++				try { return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManaged (format, width, height)); }
++				catch (OutOfMemoryException) { return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.NoMemory); }
 +			}
 +			return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.Create (format, width, height), false, format == Format.Argb32);
 +		}
@@ -286,7 +308,7 @@ index 8014c9e..c35119f 100644
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +312,34 @@ namespace Cairo {
+@@ -75,23 +334,34 @@ namespace Cairo {
  
  
          public int Width {
@@ -324,7 +346,7 @@ index 8014c9e..c35119f 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +347,258 @@ namespace Cairo {
+@@ -99,24 +369,260 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
@@ -332,8 +354,9 @@ index 8014c9e..c35119f 100644
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_data (Handle);
 +				if (IsManagedOnly && ManagedStatus != Status.Success) return IntPtr.Zero;
-+				if (IsManagedOnly && managedStorage != null && managedStorage.HasManagedPixels)
++				if (IsManagedOnly && managedStorage != null)
 +				{
++					if (!managedStorage.HasManagedPixels) return IntPtr.Zero;
 +					CheckpointManagedPixels ();
 +					return managedStorage.DataPointer;
 +				}
@@ -408,7 +431,7 @@ index 8014c9e..c35119f 100644
 +	{
 +		int stride = Surface.StrideForWidth (format, width);
 +		long byteCount = (long)stride * height;
-+		if (width < 0 || height < 0 || stride < 0 || byteCount < 0 || byteCount > int.MaxValue)
++		if (width < 0 || height < 0 || width > 32767 || height > 32767 || stride < 0 || byteCount <= 0 || byteCount > int.MaxValue)
 +			return CreateNative (format, width, height, stride);
 +
 +		// Keep a non-empty pinned array for zero-area surfaces because Cairo's
@@ -425,7 +448,7 @@ index 8014c9e..c35119f 100644
 +		long byteCount = (long)stride * height;
 +		if (width < 0 || height < 0 || stride < 0 || byteCount < 0 || byteCount > int.MaxValue)
 +			throw new ArgumentOutOfRangeException (nameof (width), "The managed recording surface dimensions are invalid.");
-+		return new ManagedImageSurfaceStorage (format, width, height, stride, new byte[Math.Max (1, (int)byteCount)]);
++		return new ManagedImageSurfaceStorage (format, width, height, byteCount == 0 ? 0 : stride, byteCount == 0 ? null : new byte[(int)byteCount]);
 +	}
 +
 +	internal static ManagedImageSurfaceStorage CreateManagedError () =>
@@ -520,9 +543,10 @@ index 8014c9e..c35119f 100644
 +
 +	static ManagedImageSurfaceStorage CreateNative (Format format, int width, int height, int stride)
 +	{
-+		var storage = new ManagedImageSurfaceStorage (format, width, height, stride, null);
-+		storage.Handle = NativeMethods.cairo_image_surface_create (format, width, height);
-+		return storage;
++		IntPtr handle = NativeMethods.cairo_image_surface_create (format, width, height);
++		return new ManagedImageSurfaceStorage (NativeMethods.cairo_image_surface_get_format (handle),
++			NativeMethods.cairo_image_surface_get_width (handle), NativeMethods.cairo_image_surface_get_height (handle),
++			NativeMethods.cairo_image_surface_get_stride (handle), null) { Handle = handle };
 +	}
 +
 +	internal byte[] CopyPixels ()

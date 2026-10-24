@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..e82536a 100644
+index 6f7730e..2a6105f 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,37 +32,461 @@
@@ -470,7 +470,7 @@ index 6f7730e..e82536a 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +511,281 @@ namespace Cairo
+@@ -87,141 +511,284 @@ namespace Cairo
  		}
  
  
@@ -510,6 +510,9 @@ index 6f7730e..e82536a 100644
  			Cairo.Content content, int width, int height)
  		{
 +			if (IsManagedOnly && this is ImageSurface) {
++				if (managedStatus != Status.Success) return ImageSurface.CreateManagedErrorSurface (managedStatus);
++				if (content != Cairo.Content.Color && content != Cairo.Content.Alpha && content != Cairo.Content.ColorAlpha)
++					return ImageSurface.CreateManagedErrorSurface (Status.InvalidContent);
 +				Format format = content switch {
 +					Cairo.Content.Color => Format.Rgb24,
 +					Cairo.Content.Alpha => Format.A8,
@@ -620,7 +623,7 @@ index 6f7730e..e82536a 100644
 +					}
 +					try {
 +						if (this is ImageSurface image) {
-+							if (snapshot != null) image.ReplaceManagedPixels (image.RenderManagedSnapshot (snapshot));
++							if (snapshot != null && image.ManagedWidth > 0 && image.ManagedHeight > 0) image.ReplaceManagedPixels (image.RenderManagedSnapshot (snapshot));
 +							image.MarkManagedPixelsForSnapshots ();
 +						} else if (!FinishManagedSurface (snapshot))
 +							throw new NotSupportedException ("This managed surface has no Skia output backend.");
@@ -761,7 +764,7 @@ index 6f7730e..e82536a 100644
  		public uint ReferenceCount {
  			get {
 +				CheckDisposed ();
-+				if (managedOnly && handle == IntPtr.Zero) return 1;
++				if (managedOnly && handle == IntPtr.Zero) return managedStatus == Status.Success ? 1u : 0u;
 +				MaterializeRecorder ();
  				return NativeMethods.cairo_surface_get_reference_count (handle); }
  		}
