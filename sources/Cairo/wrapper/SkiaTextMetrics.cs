@@ -35,12 +35,12 @@ namespace Cairo
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			if (state.FontFileSource != null) {
 				using var outlined = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource.LoadOptions);
-				if (outlined != null) return FileTextExtents(font, options, text, outlined);
+				if (outlined != null) return OutlineTextExtents(font, options, text, outlined);
 			}
 			return TextExtents(font, options, text);
 		}
 
-		static TextExtents FileTextExtents(SKFont font, FontOptions options, string text, SkiaHintedFontOutlines outlined)
+		internal static TextExtents OutlineTextExtents(SKFont font, FontOptions options, string text, SkiaHintedFontOutlines outlined)
 		{
 			var result = new TextExtents();
 			if (string.IsNullOrEmpty(text)) return result;

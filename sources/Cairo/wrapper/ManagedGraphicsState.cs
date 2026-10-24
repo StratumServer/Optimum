@@ -765,29 +765,10 @@ namespace Cairo
 				Style = SKPaintStyle.Stroke, StrokeWidth = (float)current.LineWidth, StrokeMiter = (float)current.MiterLimit,
 				StrokeCap = (SKStrokeCap)(int)current.LineCap, StrokeJoin = (SKStrokeJoin)(int)current.LineJoin
 			};
-			using SKPathEffect dash = current.Dashes.Length == 0 ? null : SKPathEffect.CreateDash(DashIntervals(current.Dashes), (float)current.DashOffset);
+			float[] intervals = current.Dashes.Length == 0 ? null : DashIntervals(current.Dashes);
+			using SKPathEffect dash = intervals == null ? null : SKPathEffect.CreateDash(intervals, (float)current.DashOffset);
 			paint.PathEffect = dash;
-			var outline = new SKPath();
-			if (!paint.GetFillPath(path, outline)) { outline.Dispose(); return null; }
-			return outline;
-		}
-
-		SKPath DevicePath()
-		{
-			var result = new SKPath { FillType = current.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding };
-			int index = 0;
-			foreach (PathOp op in ops) {
-				switch (op) {
-				case PathOp.MoveTo: result.MoveTo((float)FromFixed(points[index].X), (float)FromFixed(points[index].Y)); index++; break;
-				case PathOp.LineTo: result.LineTo((float)FromFixed(points[index].X), (float)FromFixed(points[index].Y)); index++; break;
-				case PathOp.CurveTo:
-					result.CubicTo((float)FromFixed(points[index].X), (float)FromFixed(points[index].Y), (float)FromFixed(points[index + 1].X), (float)FromFixed(points[index + 1].Y), (float)FromFixed(points[index + 2].X), (float)FromFixed(points[index + 2].Y));
-					index += 3;
-					break;
-				default: result.Close(); break;
-				}
-			}
-			return result;
+			return RecordedPreparationCache.StrokeOutline(path, paint, intervals, (float)current.DashOffset);
 		}
 
 		/// <summary>cairo_in_fill: whether a user-space point lies inside the filled area of the current path.</summary>
@@ -795,7 +776,9 @@ namespace Cairo
 		{
 			if (status != Status.Success || ops.Count == 0) return false;
 			current.Ctm.TransformPoint(ref x, ref y);
-			using SKPath path = DevicePath();
+			using SKPath path = RecordedGuiDrawing.CopyPath(CopyPathFlat());
+			path.FillType = current.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
+			path.Transform(RecordedGuiDrawing.ToSkia(current.Ctm));
 			return path.Contains((float)x, (float)y);
 		}
 
@@ -824,6 +807,8 @@ namespace Cairo
 			internal PathElement(PathOp op, double x1 = 0, double y1 = 0, double x2 = 0, double y2 = 0, double x3 = 0, double y3 = 0)
 			{ Op = op; X1 = x1; Y1 = y1; X2 = x2; Y2 = y2; X3 = x3; Y3 = y3; }
 		}
+
+		internal bool HasCurves => ops.Contains(PathOp.CurveTo);
 
 		internal PathElement[] CopyPath()
 		{

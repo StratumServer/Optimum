@@ -86,7 +86,7 @@ public sealed class CairoRecorderBlendModeTests
 		});
 	}
 
-	[Theory (Skip = "Known difference: Skia's Difference and Exclusion formulas land two channel values from Cairo's; the flat tolerance is one.")]
+	[Theory]
 	[InlineData (Operator.Difference)]
 	[InlineData (Operator.Exclusion)]
 	public void DifferenceAndExclusionMatchCairoWithoutFallback (Operator op)
@@ -99,6 +99,27 @@ public sealed class CairoRecorderBlendModeTests
 			context.Rectangle (2, 2, 10, 10);
 			context.Fill ();
 		});
+	}
+
+	[Theory]
+	[InlineData (Operator.Difference)]
+	[InlineData (Operator.Exclusion)]
+	public void ByteRoundedBlendsCoverVariedPremultipliedColours (Operator op)
+	{
+		CairoRecorderParityTests.AssertParity (128, 128, context => {
+			var random = new Random (130);
+			context.Antialias = Antialias.None;
+			for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++) {
+				context.Operator = Operator.Source;
+				context.SetSourceRGBA (random.NextDouble (), random.NextDouble (), random.NextDouble (), random.NextDouble ());
+				context.Rectangle (x * 4, y * 4, 4, 4);
+				context.Fill ();
+				context.Operator = op;
+				context.SetSourceRGBA (random.NextDouble (), random.NextDouble (), random.NextDouble (), random.NextDouble ());
+				context.Rectangle (x * 4, y * 4, 4, 4);
+				context.Fill ();
+			}
+		}, edgeAllowance: false);
 	}
 
 	[Fact]
@@ -125,7 +146,7 @@ public sealed class CairoRecorderBlendModeTests
 		}, edgeAllowance: false);
 	}
 
-	[Theory (Skip = "Known difference: Screen-blended text is rasterized by Skia without the LCD compositor, so glyph edges differ from Cairo by up to 82 channel values. There is no Cairo fallback on this branch.")]
+	[Theory]
 	[InlineData (Antialias.Gray)]
 	[InlineData (Antialias.Subpixel)]
 	public void ScreenTextMatchesCairoWithoutFallback (Antialias antialias)
@@ -141,6 +162,50 @@ public sealed class CairoRecorderBlendModeTests
 			context.SetSourceRGBA (.81, .36, .19, 1);
 			context.MoveTo (3.375, 22.625);
 			context.ShowText ("Screen ffi 123");
+		});
+	}
+
+	[Theory]
+	[InlineData (Antialias.Default, 1d)]
+	[InlineData (Antialias.Default, 1.5d)]
+	[InlineData (Antialias.Default, 2d)]
+	[InlineData (Antialias.Gray, 1d)]
+	[InlineData (Antialias.Gray, 1.5d)]
+	[InlineData (Antialias.Gray, 2d)]
+	[InlineData (Antialias.Subpixel, 1d)]
+	[InlineData (Antialias.Subpixel, 1.5d)]
+	[InlineData (Antialias.Subpixel, 2d)]
+	public void ScreenTextPreservesFractionalPhasesAndSourceAlpha (Antialias antialias, double scale)
+	{
+		CairoRecorderParityTests.AssertParity (240, 160, context => {
+			context.SetSourceRGBA (.21, .48, .76, .7); context.Paint ();
+			context.Operator = Operator.Screen;
+			context.Scale (scale, scale);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+			using (var options = new FontOptions { Antialias = antialias }) context.FontOptions = options;
+			for (int i = 0; i < 3; i++) {
+				context.SetSourceRGBA (.81, .36, .19, 1 - i * .35);
+				context.MoveTo (3.125 + i * .25, 22.125 + i * 23.25);
+				context.ShowText ("Screen ffi 123");
+			}
+		});
+	}
+
+	[Theory]
+	[InlineData (SubpixelOrder.Rgb)]
+	[InlineData (SubpixelOrder.Bgr)]
+	[InlineData (SubpixelOrder.Vrgb)]
+	[InlineData (SubpixelOrder.Vbgr)]
+	public void ScreenTextHonoursSubpixelOrder (SubpixelOrder order)
+	{
+		CairoRecorderParityTests.AssertParity (240, 80, context => {
+			context.SetSourceRGBA (.21, .48, .76, .7); context.Paint ();
+			context.Operator = Operator.Screen;
+			context.Scale (1.5, 1.5);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+			using (var options = new FontOptions { Antialias = Antialias.Subpixel, SubpixelOrder = order }) context.FontOptions = options;
+			context.SetSourceRGBA (.81, .36, .19, .65);
+			context.MoveTo (3.375, 22.625); context.ShowText ("Screen ffi 123");
 		});
 	}
 

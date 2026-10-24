@@ -54,6 +54,39 @@ namespace Cairo
 			} catch { Dispose(); throw; }
 		}
 
+		internal SKBitmap GetGlyphCoverage(ushort glyph, Antialias antialias, SubpixelOrder order, out int left, out int top, double fractionX = 0, double fractionY = 0)
+		{
+			var delta = new Vector { X = (nint)Math.Round(fractionX * 64), Y = (nint)Math.Round(-fractionY * 64) };
+			FT_Set_Transform(face, IntPtr.Zero, ref delta);
+			bool lcd = antialias == Antialias.Subpixel;
+			bool vertical = order == SubpixelOrder.Vrgb || order == SubpixelOrder.Vbgr;
+			bool reverse = order == SubpixelOrder.Bgr || order == SubpixelOrder.Vbgr;
+			if (lcd) Check(FT_Library_SetLcdFilter(library, 1), "set LCD filter");
+			Check(FT_Load_Glyph(face, glyph, loadFlags), "load coverage glyph");
+			IntPtr slot = Marshal.PtrToStructure<FacePrefix>(face).Glyph;
+			Check(FT_Render_Glyph(slot, lcd ? (vertical ? 4 : 3) : antialias == Antialias.None ? 2 : 0), "render coverage glyph");
+			var rendered = Marshal.PtrToStructure<RenderedSlot>(slot);
+			left = rendered.Left; top = rendered.Top;
+			int width = checked((int)rendered.Bitmap.Width), rows = checked((int)rendered.Bitmap.Rows);
+			int height = lcd && vertical ? rows / 3 : rows;
+			if (lcd && !vertical) width /= 3;
+			if (width == 0 || height == 0) return null;
+			var result = new SKBitmap(width, height, SKColorType.Rgba8888, SKAlphaType.Opaque);
+			for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) {
+				byte Read(int px, int py) {
+					IntPtr row = IntPtr.Add(rendered.Bitmap.Buffer, rendered.Bitmap.Pitch >= 0 ? py * rendered.Bitmap.Pitch : (rows - 1 - py) * -rendered.Bitmap.Pitch);
+					if (rendered.Bitmap.PixelMode == 1) return (Marshal.ReadByte(row, px >> 3) & (128 >> (px & 7))) != 0 ? (byte)255 : (byte)0;
+					return Marshal.ReadByte(row, px);
+				}
+				byte r, g, b;
+				if (lcd && vertical) { r = Read(x, y * 3); g = Read(x, y * 3 + 1); b = Read(x, y * 3 + 2); }
+				else if (lcd) { r = Read(x * 3, y); g = Read(x * 3 + 1, y); b = Read(x * 3 + 2, y); }
+				else r = g = b = Read(x, y);
+				result.SetPixel(x, y, new SKColor(reverse ? b : r, g, reverse ? r : b, 255));
+			}
+			return result;
+		}
+
 		internal SKRect GetGlyphBounds(ushort glyph, bool round)
 		{
 			Check(FT_Load_Glyph(face, glyph, loadFlags), "load glyph metrics");
@@ -150,6 +183,23 @@ namespace Cairo
 			public GlyphMetrics Metrics;
 		}
 
+		[StructLayout(LayoutKind.Sequential)] struct Bitmap {
+			public uint Rows, Width;
+			public int Pitch;
+			public IntPtr Buffer;
+			public ushort GrayCount;
+			public byte PixelMode, PaletteMode;
+			public IntPtr Palette;
+		}
+		[StructLayout(LayoutKind.Sequential)] struct RenderedSlot {
+			public SlotPrefix Prefix;
+			public nint LinearHorizontalAdvance, LinearVerticalAdvance;
+			public Vector Advance;
+			public uint Format;
+			public Bitmap Bitmap;
+			public int Left, Top;
+		}
+
 		[StructLayout(LayoutKind.Sequential)] struct FacePrefix {
 			public nint NumFaces, FaceIndex, FaceFlags, StyleFlags, NumGlyphs;
 			public IntPtr FamilyName, StyleName;
@@ -178,6 +228,9 @@ namespace Cairo
 			public MoveCallback Move, Line; public ConicCallback Conic; public CubicCallback Cubic;
 			public int Shift; public nint Delta;
 		}
+		[DllImport(FreeType, CallingConvention = CallingConvention.Cdecl)] static extern void FT_Set_Transform(IntPtr face, IntPtr matrix, ref Vector delta);
+		[DllImport(FreeType, CallingConvention = CallingConvention.Cdecl)] static extern int FT_Render_Glyph(IntPtr slot, int mode);
+		[DllImport(FreeType, CallingConvention = CallingConvention.Cdecl)] static extern int FT_Library_SetLcdFilter(IntPtr library, int filter);
 		[DllImport(FreeType, CallingConvention = CallingConvention.Cdecl)] static extern int FT_Init_FreeType(out IntPtr library);
 		[DllImport(FreeType, CallingConvention = CallingConvention.Cdecl)] static extern int FT_Done_FreeType(IntPtr library);
 		[DllImport(FreeType, CallingConvention = CallingConvention.Cdecl)] static extern int FT_New_Memory_Face(IntPtr library, IntPtr bytes, nint length, nint index, out IntPtr face);

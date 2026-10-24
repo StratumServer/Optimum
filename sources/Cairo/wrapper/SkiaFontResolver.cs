@@ -19,8 +19,14 @@ namespace Cairo
 		const int FcHintFull = 3;
 
 		internal static SKTypeface Resolve(string family, SKFontStyleWeight weight, SKFontStyleSlant slant, out SKFontHinting fontconfigHinting)
+			=> Resolve(family, weight, slant, out fontconfigHinting, out _, out _);
+
+		internal static SKTypeface Resolve(string family, SKFontStyleWeight weight, SKFontStyleSlant slant,
+			out SKFontHinting fontconfigHinting, out Antialias fontconfigAntialias, out SubpixelOrder fontconfigOrder)
 		{
 			fontconfigHinting = SKFontHinting.Normal;
+			fontconfigAntialias = Antialias.Gray;
+			fontconfigOrder = SubpixelOrder.Rgb;
 			if (!OperatingSystem.IsLinux())
 				return SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant);
 			if (FcInit() == 0) throw new InvalidOperationException("Fontconfig could not initialize GUI font resolution.");
@@ -54,6 +60,11 @@ namespace Cairo
 								_ => SKFontHinting.Normal
 							};
 					}
+					if (FcPatternGetInteger(match, "rgba", 0, out int rgba) == 0) {
+						fontconfigOrder = rgba switch { 2 => SubpixelOrder.Bgr, 3 => SubpixelOrder.Vrgb, 4 => SubpixelOrder.Vbgr, _ => SubpixelOrder.Rgb };
+						if (rgba >= 1 && rgba <= 4) fontconfigAntialias = Antialias.Subpixel;
+					}
+					if (FcPatternGetBool(match, "antialias", 0, out int antialias) == 0 && antialias == 0) fontconfigAntialias = Antialias.None;
 					string path = Marshal.PtrToStringUTF8(filePointer);
 					if (FcPatternGetInteger(match, "index", 0, out int faceIndex) != 0) faceIndex = 0;
 					return SKTypeface.FromFile(path, faceIndex)

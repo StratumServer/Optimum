@@ -9,6 +9,47 @@ using Xunit;
 public sealed class CairoNativeFreeRecordedGuiTests
 {
 	[Theory]
+	[InlineData (0)]
+	[InlineData (1)]
+	[InlineData (2)]
+	[InlineData (3)]
+	[InlineData (4)]
+	[InlineData (5)]
+	[InlineData (6)]
+	[InlineData (7)]
+	public void FormerParityGapsRenderWithCairoDenied (int scenario)
+	{
+		if (CairoNativeGuard.NativeAllowed) return;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		using var surface = ImageSurface.CreateForRecordedGui (Format.Argb32, 160, 80);
+		using (var context = new Context (surface)) {
+			context.SetSourceRGBA (.2, .3, .4, .7); context.Paint ();
+			context.Operator = scenario == 0 ? Operator.Difference : scenario == 1 ? Operator.Exclusion : scenario < 4 ? Operator.Screen : Operator.Over;
+			context.Antialias = scenario == 4 ? Antialias.None : scenario == 5 ? Antialias.Fast : Antialias.Gray;
+			context.SetSourceRGBA (.8, .5, .1, .7);
+			context.Arc (18, 18, 8.3, 0, 6.2); context.Fill ();
+			if (scenario == 6 || scenario == 7) {
+				context.LineWidth = scenario == 6 ? 2 : 2.25;
+				context.LineCap = LineCap.Round;
+				context.SetDash (scenario == 6 ? new[] { 0d, 4d } : new[] { 10d, .003 }, 0);
+				context.MoveTo (2, 48); context.LineTo (82, 48); context.Stroke ();
+			}
+			if (scenario == 2 || scenario == 3) {
+				context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+				using var options = new FontOptions { Antialias = scenario == 2 ? Antialias.Gray : Antialias.Subpixel };
+				context.FontOptions = options;
+				context.MoveTo (3.375, 70.625); context.ShowText ("Screen ffi 123");
+			}
+		}
+		using var target = SKSurface.Create (new SKImageInfo (160, 80));
+		Assert.True (surface.TryDrawRecordedCommands (target));
+		using var image = target.Snapshot ();
+		using var bitmap = SKBitmap.FromImage (image);
+		Assert.Contains (bitmap.Pixels, pixel => pixel.Alpha > 0);
+		AssertNoCairoNativeLoad (deniedBefore);
+	}
+
+	[Theory]
 	[InlineData (1f)]
 	[InlineData (1.5f)]
 	[InlineData (2f)]

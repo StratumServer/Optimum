@@ -12,6 +12,47 @@ public sealed class CairoManagedGraphicsStateTests
 
 	[StructLayout(LayoutKind.Sequential)] struct NativePath { public Status Status; public IntPtr Data; public int Count; }
 
+	[Theory]
+	[InlineData(1d)]
+	[InlineData(1.5d)]
+	[InlineData(2d)]
+	public void TransformedArcAndBezierFlatPathsMatch(double scale)
+	{
+		using var surface = new ImageSurface(Format.Argb32, 128, 96);
+		using var native = new Context(surface);
+		var managed = new ManagedGraphicsState();
+		native.Scale(scale,scale); managed.Scale(scale,scale);
+		native.Translate(.375,.625); managed.Translate(.375,.625);
+		native.Arc(40,16,9.1,0,Math.PI*2); managed.Arc(40,16,9.1,0,Math.PI*2);
+		native.NewSubPath(); managed.NewSubPath();
+		native.Arc(40,16,4.3,0,Math.PI*2); managed.Arc(40,16,4.3,0,Math.PI*2);
+		AssertFlatPathsMatch(native,managed,"transformed arcs");
+		native.NewPath(); managed.NewPath();
+		native.MoveTo(4,36); managed.MoveTo(4,36);
+		native.CurveTo(20,18,32,47,52,32); managed.CurveTo(20,18,32,47,52,32);
+		native.ClosePath(); managed.ClosePath();
+		AssertFlatPathsMatch(native,managed,"transformed Bezier");
+	}
+
+	[Theory]
+	[InlineData(LineCap.Round)]
+	[InlineData(LineCap.Square)]
+	public void TerminalZeroDashCapsRetainStrokeQueries(LineCap cap)
+	{
+		using var surface = new ImageSurface(Format.Argb32,32,16);
+		using var native = new Context(surface);
+		var managed = new ManagedGraphicsState();
+		native.LineWidth=2; managed.LineWidth=2;
+		native.LineCap=cap; managed.LineCap=cap;
+		native.SetDash(new[]{0d,4d},0); managed.SetDash(new[]{0d,4d},0);
+		native.MoveTo(2,6); managed.MoveTo(2,6);
+		native.LineTo(22,6); managed.LineTo(22,6);
+		Assert.Equal(native.InStroke(22,6),managed.InStroke(22,6));
+		Rectangle expected=native.StrokeExtents(), actual=managed.StrokeExtents();
+		Assert.Equal(expected.X,actual.X,4); Assert.Equal(expected.Y,actual.Y,4);
+		Assert.Equal(expected.Width,actual.Width,4); Assert.Equal(expected.Height,actual.Height,4);
+	}
+
 	static List<ManagedGraphicsState.PathElement> ReadNativePath(Context context)
 	{
 		var result = new List<ManagedGraphicsState.PathElement>();

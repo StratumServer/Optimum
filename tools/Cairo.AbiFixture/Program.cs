@@ -81,6 +81,18 @@ using (var context = new Context(surface))
         return 1;
     }
 
+    context.Save();
+    context.Operator = Operator.Exclusion;
+    context.Antialias = Antialias.Fast;
+    context.SetSourceRGBA(.6, .3, .8, .7);
+    context.Arc(12, 12, 8.3, 0, 6.2);
+    context.Fill();
+    context.Operator = Operator.Screen;
+    using (var options = new FontOptions { Antialias = Antialias.Gray }) context.FontOptions = options;
+    context.MoveTo(3.375, 22.625);
+    context.ShowText("Legacy mod");
+    context.Restore();
+
     string? fileFontPath = Environment.GetEnvironmentVariable("OPTIMUM_CAIRO_ABI_FONT");
     if (!string.IsNullOrWhiteSpace(fileFontPath))
     {

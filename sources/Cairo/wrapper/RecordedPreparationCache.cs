@@ -140,6 +140,7 @@ namespace Cairo
             using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.StrokeOutline);
             var outline = new SKPath();
             if (!paint.GetFillPath(path, outline)) { outline.Dispose(); return null; }
+            RecordedDashCaps.Append(path, outline, paint, intervals, offset);
             if (key != null) using (var prepared = new Geometry(new SKPath(outline))) Store(key, prepared);
             return outline;
         }

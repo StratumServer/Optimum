@@ -13,6 +13,7 @@ namespace Cairo
 		internal SKPaint Paint;
 		internal SKFont TextFont;
 		internal SKTextBlob TextBlob;
+		internal SKImage TextCoverage;
 		internal string Text;
 		internal float TextX, TextY;
 		internal SKRect? TextInkClip;
@@ -20,6 +21,8 @@ namespace Cairo
 		internal RecordedGuiClip[] Clips;
 		internal bool PaintAll;
 		bool saturate;
+		SKBlender integerBlender;
+		RecordedGeometryCoverage geometryCoverage;
 		SKImage image;
 		SKImage maskImage;
 		RecordedGuiDrawing maskPatternDrawing;
@@ -63,7 +66,9 @@ namespace Cairo
 					result.maskPatternDrawing = Capture(maskState, targetWidth, targetHeight, false, true, clips,
 						sourceMatrix: maskState.SourceMatrix, sourceSnapshot: maskBinding?.Capture());
 				}
-				result.Path = textPath ?? (paintAll || textFont != null || textBlob != null ? null : CopyPath(context));
+				result.Path = textPath ?? (paintAll || textFont != null || textBlob != null ? null :
+					context.Antialias == Antialias.None && context.HasCurves ? CopyFlatPath(context) :
+					context.Antialias == Antialias.Fast && !stroke ? RecordedCoarseGeometry.QuantizeFast(context) : CopyPath(context));
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState)) {
 					if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
 					result.Paint = new SKPaint {
@@ -77,6 +82,8 @@ namespace Cairo
 					};
 					result.saturate = context.Operator == Operator.Saturate;
 					if (result.saturate) result.Paint.Blender = RecordedCairoSaturate.Blender;
+					result.integerBlender = RecordedCairoIntegerBlend.For(context.Operator);
+					if (result.integerBlender != null) result.Paint.Blender = result.integerBlender;
 				}
 				if (stroke) result.SetDash(context);
 				if (stroke && result.Paint.StrokeWidth > 0) {
@@ -90,6 +97,15 @@ namespace Cairo
 						result.Paint.PathEffect = null;
 					}
 				}
+				if (stroke && result.Paint.Style == SKPaintStyle.Fill && context.Antialias != Antialias.None &&
+					RecordedGeometryCoverage.Needed(result.dashIntervals, context.Matrix, result.Paint.StrokeCap))
+					result.geometryCoverage = RecordedGeometryCoverage.Capture(result.Path, context.Matrix, targetWidth, targetHeight);
+				if (result.Path != null && context.Antialias == Antialias.None && context.HasCurves) {
+					SKPath sampled = RecordedCoarseGeometry.Aliased(result.Path, context.Matrix, targetWidth, targetHeight);
+					result.Path.Dispose(); result.Path = sampled;
+				}
+				if (!stroke && result.Path != null && context.Antialias == Antialias.Fast)
+					result.geometryCoverage = RecordedCoarseGeometry.Fast(result.Path, context.Matrix, targetWidth, targetHeight);
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceCapture)) {
 				Pattern source = context.SourcePattern;
 				result.SetSource(source, context.SourceColor, alpha, sourceMatrix, context, targetWidth, targetHeight);
@@ -244,21 +260,35 @@ namespace Cairo
 			DrawCore(canvas, gpu, deviceOffset, outputScale);
 		}
 
-		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null && !saturate &&
-			sourceSnapshot == null && (Paint.BlendMode == SKBlendMode.SrcOver || Paint.BlendMode == SKBlendMode.Src);
+		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null && !saturate && integerBlender == null &&
+			sourceSnapshot == null && (Paint.BlendMode == SKBlendMode.SrcOver || Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Screen);
 
 		internal bool Draw(SKSurface target, RecordedGpuBlur gpu, SKRuntimeEffect lcdEffect, int width, int height, PointD deviceOffset = default)
 		{
 			if (target == null) throw new ArgumentNullException(nameof(target));
+			if (geometryCoverage != null && (Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Clear)) { DrawGeometrySourceOrClear(target, deviceOffset); return false; }
 			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
-			if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
+			if (TextCoverage != null && gpu == null) {
+				using var destination = target.Snapshot();
+				DrawLcdComposite(lcdEffect, TextCoverage, TextCoverage, destination, target.Canvas, false,
+					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true);
+			} else if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
 			else DrawLcdTextCpu(target, lcdEffect, width, height, deviceOffset);
 			return true;
 		}
 
 		internal void DrawDirect(SKCanvas canvas, RecordedGpuBlur gpu = null, PointD deviceOffset = default) => DrawCore(canvas, gpu, deviceOffset);
 
-		void DrawCore(SKCanvas canvas, RecordedGpuBlur gpu, PointD deviceOffset = default, float outputScale = 1f)
+		internal void DrawTextMask(SKCanvas canvas, PointD deviceOffset = default)
+		{
+			SKBlendMode operation = Paint.BlendMode;
+			try {
+				if (operation == SKBlendMode.Screen) Paint.BlendMode = SKBlendMode.SrcOver;
+				DrawCore(canvas, null, deviceOffset);
+			} finally { Paint.BlendMode = operation; }
+		}
+
+		void DrawCore(SKCanvas canvas, RecordedGpuBlur gpu, PointD deviceOffset = default, float outputScale = 1f, bool sourceOnly = false)
 		{
 			SKShader dependencyShader = null;
 			SKImage dependencyImage = null;
@@ -292,7 +322,7 @@ namespace Cairo
 				canvas.ResetMatrix();
 				canvas.Scale (outputScale);
 				canvas.Translate ((float)deviceOffset.X, (float)deviceOffset.Y);
-				foreach (RecordedGuiClip clip in Clips) canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
+				if (!sourceOnly) foreach (RecordedGuiClip clip in Clips) canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
 				if (TextInkClip.HasValue) canvas.ClipRect(TextInkClip.Value, SKClipOperation.Intersect, false);
 				SKMatrix drawMatrix = new SKMatrix (
 					Matrix.ScaleX * outputScale, Matrix.SkewX * outputScale, (Matrix.TransX + (float)deviceOffset.X) * outputScale,
@@ -310,19 +340,32 @@ namespace Cairo
 				// the shape, where the source is transparent. Composite the shape as a layer so the operator sees that whole area.
 				SKBlendMode operation = Paint.BlendMode;
 				bool unbounded = !PaintAll && (operation == SKBlendMode.SrcIn || operation == SKBlendMode.SrcOut || operation == SKBlendMode.DstIn || operation == SKBlendMode.DstATop);
-				bool layered = unbounded || maskImage != null || maskPatternDrawing != null;
+				bool useGeometryCoverage = geometryCoverage != null && operation != SKBlendMode.Src && operation != SKBlendMode.Clear;
+				bool layered = !sourceOnly && (unbounded || maskImage != null || maskPatternDrawing != null || useGeometryCoverage);
 				if (layered) {
 				using var layerPaint = new SKPaint { BlendMode = operation };
 				if (saturate) layerPaint.Blender = RecordedCairoSaturate.Blender;
+				if (integerBlender != null) layerPaint.Blender = integerBlender;
 				canvas.SaveLayer(layerPaint);
 				Paint.BlendMode = SKBlendMode.SrcOver;
 				}
 				try {
-				if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
+				if (sourceOnly) canvas.DrawPaint(Paint);
+				else if (useGeometryCoverage) {
+					int coverageSave = canvas.Save();
+					try {
+						canvas.ResetMatrix(); canvas.Scale(outputScale); canvas.Translate((float)deviceOffset.X, (float)deviceOffset.Y);
+						canvas.ClipRect(geometryCoverage.Bounds, SKClipOperation.Intersect, false);
+						canvas.SetMatrix(drawMatrix); canvas.DrawPaint(Paint);
+						canvas.ResetMatrix(); canvas.Scale(outputScale); canvas.Translate((float)deviceOffset.X, (float)deviceOffset.Y);
+						using var coveragePaint = new SKPaint { BlendMode = SKBlendMode.DstIn };
+						canvas.DrawImage(geometryCoverage.Image, geometryCoverage.Bounds.Left, geometryCoverage.Bounds.Top, coveragePaint);
+					} finally { canvas.RestoreToCount(coverageSave); }
+				} else if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
 				else if (TextFont != null) canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
 				else if (PaintAll) canvas.DrawPaint(Paint);
 				else canvas.DrawPath(Path, Paint);
-				if (maskImage != null || maskPatternDrawing != null) {
+				if (!sourceOnly && (maskImage != null || maskPatternDrawing != null)) {
 					using var maskShader = maskImage?.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal,
 						new SKSamplingOptions(SKFilterMode.Linear));
 					using var maskPaint = new SKPaint {
@@ -335,7 +378,7 @@ namespace Cairo
 					canvas.DrawPaint(maskPaint);
 					canvas.Restore();
 				}
-				} finally { if (layered) { Paint.BlendMode = operation; canvas.Restore(); } }
+				} finally { if (layered) { Paint.BlendMode = operation; if (saturate) Paint.Blender = RecordedCairoSaturate.Blender; if (integerBlender != null) Paint.Blender = integerBlender; canvas.Restore(); } }
 			} finally {
 				canvas.RestoreToCount(save);
 				if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); }
@@ -343,6 +386,47 @@ namespace Cairo
 				if (ownsDependencyImage) dependencyImage?.Dispose();
 				if (ownsMaskDependencyImage) maskDependencyImage?.Dispose();
 			}
+		}
+
+		static readonly Lazy<SKRuntimeEffect> geometrySourceEffect = new Lazy<SKRuntimeEffect>(() => {
+			var effect = SKRuntimeEffect.CreateShader(@"
+uniform shader sourceImage;
+uniform shader destinationImage;
+uniform shader coverageImage;
+uniform float2 coverageOrigin;
+uniform int clearOperator;
+half4 main(float2 p) {
+    half4 destination = destinationImage.eval(p);
+    half4 source = clearOperator != 0 ? half4(0) : sourceImage.eval(p);
+    half coverage = coverageImage.eval(p - coverageOrigin).a;
+    return mix(destination, source, coverage);
+}", out string errors);
+			return effect ?? throw new InvalidOperationException("Skia could not create the stroke coverage compositor: " + errors);
+		}, true);
+
+		void DrawGeometrySourceOrClear(SKSurface target, PointD deviceOffset)
+		{
+			using var destinationImage = target.Snapshot();
+			using var source = SKSurface.Create(new SKImageInfo(destinationImage.Width, destinationImage.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+			SKBlendMode operation = Paint.BlendMode;
+			try { Paint.BlendMode = SKBlendMode.Src; DrawCore(source.Canvas, null, deviceOffset, sourceOnly: true); }
+			finally { Paint.BlendMode = operation; }
+			using var sourceImage = source.Snapshot();
+			using var sourceShader = sourceImage.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal);
+			using var destinationShader = destinationImage.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal);
+			using var coverageShader = geometryCoverage.Image.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal);
+			SKRuntimeEffect effect = geometrySourceEffect.Value;
+			var children = new SKRuntimeEffectChildren(effect) { ["sourceImage"] = sourceShader, ["destinationImage"] = destinationShader, ["coverageImage"] = coverageShader };
+			var uniforms = new SKRuntimeEffectUniforms(effect) { ["clearOperator"] = operation == SKBlendMode.Clear ? 1 : 0,
+				["coverageOrigin"] = new float[] { geometryCoverage.Bounds.Left + (float)deviceOffset.X, geometryCoverage.Bounds.Top + (float)deviceOffset.Y } };
+			using var shader = effect.ToShader(uniforms, children);
+			using var paint = new SKPaint { Shader = shader, BlendMode = SKBlendMode.Src };
+			int save = target.Canvas.Save();
+			try {
+				target.Canvas.ResetMatrix(); target.Canvas.Translate((float)deviceOffset.X, (float)deviceOffset.Y);
+				foreach (var clip in Clips) target.Canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
+				target.Canvas.ResetMatrix(); target.Canvas.DrawPaint(paint);
+			} finally { target.Canvas.RestoreToCount(save); }
 		}
 
 		internal void DrawLcdTextCpu(SKSurface target, SKRuntimeEffect effect, int width, int height, PointD deviceOffset = default)
@@ -353,16 +437,16 @@ namespace Cairo
 			using var black = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD black surface.");
 			using var white = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD white surface.");
 			black.Canvas.Clear(SKColors.Black); white.Canvas.Clear(SKColors.White);
-			DrawCore(black.Canvas, null, deviceOffset); DrawCore(white.Canvas, null, deviceOffset);
+			DrawTextMask(black.Canvas, deviceOffset); DrawTextMask(white.Canvas, deviceOffset);
 			using SKImage blackImage = black.Snapshot();
 			using SKImage whiteImage = white.Snapshot();
 			using SKImage destination = target.Snapshot();
 			DrawLcdComposite(effect, blackImage, whiteImage, destination, target.Canvas, Paint.BlendMode == SKBlendMode.Src,
-				Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset);
+				Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen);
 		}
 
 		internal static void DrawLcdComposite(SKRuntimeEffect effect, SKImage black, SKImage white, SKImage destination,
-			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default)
+			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default, bool screenOperator = false, bool directCoverage = false)
 		{
 			bool invertGamma = Environment.GetEnvironmentVariable("OPTIMUM_GUI_LCD_GAMMA_INVERSE") switch {
 				"0" => false,
@@ -371,6 +455,8 @@ namespace Cairo
 			};
 			var uniforms = new SKRuntimeEffectUniforms(effect) {
 				["sourceOperator"] = sourceOperator ? 1 : 0,
+				["screenOperator"] = screenOperator ? 1 : 0,
+				["directCoverage"] = directCoverage ? 1 : 0,
 				["sourceAlpha"] = sourceAlpha,
 				["invertGamma"] = invertGamma ? 1 : 0,
 				["sourceColor"] = new float[] { sourceColor.Red / 255f, sourceColor.Green / 255f, sourceColor.Blue / 255f },
@@ -401,6 +487,8 @@ uniform shader whiteImage;
 uniform shader destinationImage;
 uniform shader inverseGammaTable;
 uniform int sourceOperator;
+uniform int screenOperator;
+uniform int directCoverage;
 uniform float sourceAlpha;
 uniform int invertGamma;
 uniform float3 sourceColor;
@@ -409,6 +497,12 @@ half4 main(float2 p) {
     float4 black = blackImage.eval(p);
     float4 white = whiteImage.eval(p);
     float4 destination = destinationImage.eval(p);
+    if (directCoverage != 0) {
+        float3 source = sourceColor * sourceAlpha * black.rgb;
+        float alpha = sourceAlpha * black.g;
+        return half4(source + destination.rgb * (screenOperator != 0 ? 1.0 - source : 1.0 - sourceAlpha * black.rgb),
+            alpha + destination.a * (1.0 - alpha));
+    }
     float3 retention = clamp(white.rgb - black.rgb, 0.0, 1.0);
     if (invertGamma != 0) {
         float3 coverage = clamp(1.0 - retention, 0.0, 1.0);
@@ -419,11 +513,11 @@ half4 main(float2 p) {
             inverseGammaTable.eval(float2(coverage.b * 255.0 + 0.5, float(colorIndices.b) + 0.5)).r);
         float3 sourcePremul = sourceColor * sourceAlpha;
         float3 destinationRetention = sourceOperator != 0 ? 1.0 - rawCoverage : 1.0 - sourceAlpha * rawCoverage;
-        float3 rgb = sourcePremul * rawCoverage + destination.rgb * destinationRetention;
+        float3 rgb = sourcePremul * rawCoverage + destination.rgb * (screenOperator != 0 ? 1.0 - sourcePremul * rawCoverage : destinationRetention);
         float alpha = sourceAlpha * rawCoverage.g + destination.a * destinationRetention.g;
         return half4(rgb, alpha);
     }
-    float3 rgb = black.rgb + retention * destination.rgb;
+    float3 rgb = black.rgb + (screenOperator != 0 ? 1.0 - black.rgb : retention) * destination.rgb;
     float alpha = sourceOperator != 0
         ? sourceAlpha * (1.0 - retention.g) + destination.a * retention.g
         : (1.0 - retention.g) + destination.a * retention.g;
@@ -503,6 +597,12 @@ half4 main(float2 p) {
 		};
 
 		[StructLayout(LayoutKind.Sequential)] struct NativePath { internal Status Status; internal IntPtr Data; internal int Count; }
+		static SKPath CopyFlatPath(ManagedGraphicsState state)
+		{
+			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.PathCopy);
+			return CopyPath(state.CopyPathFlat());
+		}
+
 		internal static SKPath CopyPath(ManagedGraphicsState state)
 		{
 		using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.PathCopy);
@@ -587,7 +687,7 @@ half4 main(float2 p) {
 			} catch { result.Dispose(); throw; }
 		}
 		static SKPoint Point(IntPtr data, int index) => new SKPoint((float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16)), (float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16 + 8)));
-		public void Dispose() { Path?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); maskImage?.Dispose(); maskPatternDrawing?.Dispose(); maskReplayPattern?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
+		public void Dispose() { Path?.Dispose(); geometryCoverage?.Dispose(); TextCoverage?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); maskImage?.Dispose(); maskPatternDrawing?.Dispose(); maskReplayPattern?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
 
 		static SKImage CaptureMask(ImageSurface surface)
 		{

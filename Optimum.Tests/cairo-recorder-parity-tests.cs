@@ -52,6 +52,8 @@ public sealed class CairoRecorderParityTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
+	internal static Func<ImageSurface, int, int, byte[]> RenderOverride;
+
 	static void Dump (byte[] expected, byte[] actual, int width, int height)
 	{
 		string dir = Environment.GetEnvironmentVariable ("OPTIMUM_PARITY_DUMP");
@@ -82,6 +84,7 @@ public sealed class CairoRecorderParityTests
 
 	internal static byte[] RenderSkia (ImageSurface recorded, int width, int height)
 	{
+		if (RenderOverride != null) return RenderOverride (recorded, width, height);
 		using SKSurface raster = SKSurface.Create (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
 		Assert.True (recorded.TryDrawRecordedCommands (raster));
 		Assert.Equal (SurfaceRecordingState.Sealed, recorded.RecordingState);
@@ -320,7 +323,7 @@ public sealed class CairoRecorderParityTests
 		}, edgeAllowance: false);
 	}
 
-	[Fact (Skip = "Known difference: aliased curved edges sample pixel centres differently in Skia, shifting some edge pixels by one. Aliased rectilinear geometry matches.")]
+	[Fact]
 	public void AliasedCurvesMatchCairoWithoutFallback ()
 	{
 		AssertParity (24, 24, context => {
@@ -328,6 +331,41 @@ public sealed class CairoRecorderParityTests
 			context.SetSourceRGBA (.82, .55, .21, .9);
 			context.Arc (12, 12, 8.3, 0, 6.2);
 			context.Fill ();
+		});
+	}
+
+	[Theory]
+	[InlineData (Antialias.None, 1d)]
+	[InlineData (Antialias.None, 1.5d)]
+	[InlineData (Antialias.None, 2d)]
+	[InlineData (Antialias.Fast, 1d)]
+	[InlineData (Antialias.Fast, 1.5d)]
+	[InlineData (Antialias.Fast, 2d)]
+	public void CoarseAntialiasRetainsTransformedCurvesAndFillRules (Antialias antialias, double scale)
+	{
+		AssertParity (128, 96, context => {
+			context.SetSourceRGBA (.1, .2, .3, .6); context.Paint ();
+			context.Scale (scale, scale); context.Translate (.375, .625);
+			context.Antialias = antialias;
+			context.SetSourceRGBA (.8, .5, .2, .7);
+			context.Arc (16, 16, 8.3, 0, 6.2); context.Fill ();
+			context.FillRule = FillRule.EvenOdd;
+			context.Arc (40, 16, 9.1, 0, Math.PI * 2);
+			context.NewSubPath (); context.Arc (40, 16, 4.3, 0, Math.PI * 2); context.Fill ();
+			context.MoveTo (4, 36); context.CurveTo (20, 18, 32, 47, 52, 32); context.ClosePath (); context.Fill ();
+		});
+	}
+
+	[Fact]
+	public void CurvedInFillUsesTheSameFlattenedBoundaryAsCairo ()
+	{
+		bool? expected = null;
+		AssertParity (24, 24, context => {
+			context.Antialias = Antialias.None;
+			context.Arc (12, 12, 8.3, 0, 6.2);
+			bool inside = context.InFill (4.5, 8.5);
+			if (expected.HasValue) Assert.Equal (expected.Value, inside); else expected = inside;
+			context.SetSourceRGB (1, 0, 0); context.Fill ();
 		});
 	}
 
@@ -350,7 +388,7 @@ public sealed class CairoRecorderParityTests
 			Assert.Equal (best, RenderNative (48, 44, Draw (mode)));
 	}
 
-	[Fact (Skip = "Known difference: Cairo CAIRO_ANTIALIAS_FAST uses coarser coverage than Skia antialiasing (edge delta 63). The game does not request it.")]
+	[Fact]
 	public void FastAntialiasMatchesCairoWithoutFallback ()
 	{
 		AssertParity (20, 16, context => {
@@ -428,7 +466,7 @@ public sealed class CairoRecorderParityTests
 		});
 	}
 
-	[Fact (Skip = "Known difference: Skia drops zero-length dash segments, Cairo draws round caps as dots.")]
+	[Fact]
 	public void ZeroLengthDashWithRoundCapMatchesCairoWithoutFallback ()
 	{
 		AssertParity (24, 12, context => {
@@ -437,6 +475,26 @@ public sealed class CairoRecorderParityTests
 			context.LineCap = LineCap.Round;
 			context.SetDash (new[] { 0.0, 4.0 }, 0);
 			context.MoveTo (2, 6); context.LineTo (22, 6);
+			context.Stroke ();
+		});
+	}
+
+	[Theory]
+	[InlineData (LineCap.Round, 0d)]
+	[InlineData (LineCap.Round, -4d)]
+	[InlineData (LineCap.Round, 1d)]
+	[InlineData (LineCap.Square, 0d)]
+	[InlineData (LineCap.Square, -4d)]
+	[InlineData (LineCap.Square, 1d)]
+	public void ZeroOnDashRetainsCapsOnEveryContour (LineCap cap, double offset)
+	{
+		AssertParity (48, 36, context => {
+			context.SetSourceRGBA (.2, .6, .9, .7);
+			context.LineWidth = 2;
+			context.LineCap = cap;
+			context.SetDash (new[] { 0d, 4d }, offset);
+			context.MoveTo (4, 6); context.LineTo (24, 6);
+			context.MoveTo (32, 4); context.LineTo (32, 24);
 			context.Stroke ();
 		});
 	}
@@ -772,7 +830,7 @@ public sealed class CairoRecorderParityTests
 		}
 	}
 
-	[Fact (Skip = "Known difference: dash gaps narrower than a device pixel antialias differently in Skia (edge delta 33). There is no Cairo fallback on this branch.")]
+	[Fact]
 	public void SubpixelDashIntervalsMatchCairoWithoutFallback ()
 	{
 		AssertParity (48, 20, context => {
@@ -782,6 +840,26 @@ public sealed class CairoRecorderParityTests
 			context.MoveTo (2, 10);
 			context.LineTo (46, 10);
 			context.Stroke ();
+		});
+	}
+
+	[Theory]
+	[InlineData (Operator.Over)]
+	[InlineData (Operator.Source)]
+	[InlineData (Operator.Clear)]
+	[InlineData (Operator.Screen)]
+	[InlineData (Operator.Difference)]
+	[InlineData (Operator.Saturate)]
+	public void NarrowDashCoverageRetainsTheOperatorAndBackdrop (Operator op)
+	{
+		AssertLocalAaParity (64, 32, context => {
+			context.SetSourceRGBA (.4, .2, .6, .7); context.Paint ();
+			context.Operator = op;
+			context.SetSourceRGBA (.18, .48, .82, .6);
+			context.LineWidth = 2.25;
+			context.SetDash (new[] { 10.0, .003 }, 0);
+			context.MoveTo (2, 10); context.LineTo (46, 10); context.Stroke ();
+			context.MoveTo (4, 24); context.LineTo (50, 24); context.Stroke ();
 		});
 	}
 
