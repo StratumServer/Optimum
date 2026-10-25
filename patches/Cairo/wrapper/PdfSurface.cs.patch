@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/PdfSurface.cs b/Cairo/wrapper/PdfSurface.cs
-index f1a8688..16d9d3c 100644
+index f1a8688..a8cef14 100644
 --- a/Cairo/wrapper/PdfSurface.cs
 +++ b/Cairo/wrapper/PdfSurface.cs
 @@ -25,29 +25,118 @@
@@ -84,7 +84,7 @@ index f1a8688..16d9d3c 100644
 +			try {
 +				if (!StartNextManagedPage (copyCurrentPage)) return false;
 +				pages.Add (new PdfPage (snapshot, width, height));
-+				if (!copyCurrentPage) RecordingGraphicsState.NewPath ();
++				if (!copyCurrentPage) ManagedRecordingOwner.RecordingGraphicsState.NewPath ();
 +				snapshot = null;
 +				return true;
 +			} finally { snapshot?.Dispose (); }
@@ -114,7 +114,7 @@ index f1a8688..16d9d3c 100644
 +		protected override void Dispose (bool disposing)
 +		{
 +			try {
-+				if (disposing && IsManagedOnly && !ManagedFinished) Finish ();
++				if (disposing && IsManagedOnly && !ManagedFinished && !HasManagedLifetimeOwners) Finish ();
 +			} finally {
 +				base.Dispose (disposing);
 +			}

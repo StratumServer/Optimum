@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..aeed494 100644
+index 8014c9e..c811940 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,322 @@
+@@ -31,40 +31,328 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -27,7 +27,7 @@ index 8014c9e..aeed494 100644
  		}
 -        
 +
-+		ImageSurface (ManagedImageSurfaceStorage storage, bool managedOnly = false) : base (storage.Handle, true, true, managedOnly)
++		ImageSurface (ManagedImageSurfaceStorage storage, bool managedOnly = false, Status status = Status.Success) : base (managedOnly ? IntPtr.Zero : storage.Handle, true, true, managedOnly, status)
 +		{
 +			managedStorage = storage;
 +		}
@@ -39,13 +39,13 @@ index 8014c9e..aeed494 100644
 +		{
 +			if (!IsManagedOnly || managedStorage == null) return null;
 +			managedStorage.Retain ();
-+			return new ImageSurface (managedStorage, true);
++			return new ImageSurface (managedStorage, true, ManagedStatus);
 +		}
 +
 +		protected override void Dispose (bool disposing)
 +		{
-+			if (Interlocked.Exchange (ref storageReleased, 1) == 0) managedStorage?.ReleaseUnattachedPin ();
 +			base.Dispose (disposing);
++			if (Interlocked.Exchange (ref storageReleased, 1) == 0) managedStorage?.ReleaseUnattachedPin ();
 +		}
 +
  		public ImageSurface (Format format, int width, int height)
@@ -90,7 +90,13 @@ index 8014c9e..aeed494 100644
 +		internal int ManagedHeight => managedStorage.Height;
 +		internal int ManagedPixelStride => managedStorage.PixelStride;
 +		internal bool ManagedPixelPinReleased => managedStorage.IsPixelPinReleased;
-+		internal IntPtr EnsureNativeSurface () => managedStorage.EnsureNativeSurface ();
++		internal IntPtr EnsureNativeSurface ()
++        {
++            bool shared = managedStorage.Handle != IntPtr.Zero;
++            IntPtr result = managedStorage.EnsureNativeSurface ();
++            if (shared) NativeMethods.cairo_surface_reference (result);
++            return result;
++        }
 +		internal byte[] CopyExposedPixels () => managedStorage?.CopyExposedPixels ();
 +
 +		internal bool TryWriteToPngManaged (string filename)
@@ -331,7 +337,7 @@ index 8014c9e..aeed494 100644
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +357,36 @@ namespace Cairo {
+@@ -75,23 +363,36 @@ namespace Cairo {
  
  
          public int Width {
@@ -371,7 +377,7 @@ index 8014c9e..aeed494 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +394,264 @@ namespace Cairo {
+@@ -99,24 +400,264 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {

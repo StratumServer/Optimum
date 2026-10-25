@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..9ee34d5 100644
+index 6f7730e..aefa203 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,484 @@
+@@ -32,37 +32,585 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -28,9 +28,26 @@ index 6f7730e..9ee34d5 100644
 +		Surface aliasOwner;
 +		readonly object recordingSync = new object ();
 +		Thread recordingOwnerThread;
-+		Context recordingContext;
++		Context nativeRecordingContext;
++        WeakReference<Context> managedRecordingContext;
++        Context recordingContext {
++            get {
++                if (!managedOnly) return nativeRecordingContext;
++                return managedRecordingContext != null && managedRecordingContext.TryGetTarget (out Context context) ? context : null;
++            }
++            set {
++                if (!managedOnly) nativeRecordingContext = value;
++                else if (value == null) managedRecordingContext = null;
++                else if (managedRecordingContext == null) managedRecordingContext = new WeakReference<Context> (value);
++                else managedRecordingContext.SetTarget (value);
++            }
++        }
 +		bool finished;
 +		bool disposed;
++        bool transferredManagedBackend;
++        bool retainedManagedBackend;
++        bool disposingManagedBackend;
++        int managedAliasReferences;
 +		readonly bool managedOnly;
 +		readonly Status managedStatus;
 +		PointD managedDeviceOffset;
@@ -74,7 +91,7 @@ index 6f7730e..9ee34d5 100644
 +		internal SurfaceRecordingState RecordingState {
 +			get {
 +				if (aliasOwner != null && managedOnly) {
-+					CheckDisposed ();
++					if (!transferredManagedBackend) CheckDisposed ();
 +					return aliasOwner.RecordingState;
 +				}
 +				lock (recordingSync) {
@@ -95,12 +112,15 @@ index 6f7730e..9ee34d5 100644
 +		if (recorder == null || recorder.State != SurfaceRecordingState.Recording) return null;
 +		if (managedOnly && this is ImageSurface managedImage) {
 +			ImageSurface alias = managedImage.CreateManagedRecordingAlias ();
-+			if (alias != null) alias.aliasOwner = this;
++			if (alias != null) { alias.aliasOwner = this; managedAliasReferences++; }
 +			return alias;
 +		}
-+		if (managedOnly) return new Surface (IntPtr.Zero, false, false, true) {
-+			aliasOwner = this, managedWidth = managedWidth, managedHeight = managedHeight, managedSurfaceType = managedSurfaceType
-+		};
++		if (managedOnly) {
++            managedAliasReferences++;
++            return new Surface (IntPtr.Zero, false, false, true) {
++                aliasOwner = this, managedWidth = managedWidth, managedHeight = managedHeight, managedSurfaceType = managedSurfaceType
++            };
++        }
 +		if (handle == IntPtr.Zero) return null;
 +		return new ImageSurface (handle, false) { aliasOwner = this };
 +		}
@@ -127,6 +147,86 @@ index 6f7730e..9ee34d5 100644
 +		}
 +		internal IntPtr NativeHandleForMetadata { get { CheckDisposed (); return EnsureNativeHandle (); } }
 +		internal bool IsManagedOnly => managedOnly;
++        internal Surface ManagedRecordingOwner => managedOnly && aliasOwner != null ? aliasOwner.ManagedRecordingOwner : this;
++        internal void ReleaseUnusedManagedBackend ()
++        {
++            Surface owner = ManagedRecordingOwner;
++            if (!ReferenceEquals (owner, this)) { owner.ReleaseUnusedManagedBackend (); return; }
++            lock (recordingSync) {
++                if (!retainedManagedBackend || disposed || disposingManagedBackend || managedAliasReferences != 0 || recordedSourceReferences != 0) return;
++                if (recorder != null) foreach (Context context in recorder.GetContexts ())
++                    if (context.HasManagedLifetimeOwner (this)) return;
++                Dispose (ReferenceEquals (recordingOwnerThread, Thread.CurrentThread));
++            }
++        }
++        internal bool HasManagedLifetimeOwners {
++            get {
++                if (managedOnly && aliasOwner != null) return aliasOwner.HasManagedLifetimeOwners;
++                lock (recordingSync) {
++                    if (managedAliasReferences != 0 || recordedSourceReferences != 0) return true;
++                    if (recorder != null) foreach (Context context in recorder.GetContexts ())
++                        if (context.HasManagedLifetimeOwner (this)) return true;
++                    return false;
++                }
++            }
++        }
++        sealed class RetainedDocumentSurface : Surface
++        {
++            readonly Surface document;
++            internal RetainedDocumentSurface (Surface document) : base (IntPtr.Zero, false, true, true, document.ManagedStatus) { this.document = document; }
++            internal override bool AdvanceManagedPage (bool copyCurrentPage) => document.AdvanceManagedPage (copyCurrentPage);
++            internal override bool FinishManagedSurface (SurfaceRecorderSnapshot snapshot) => document.FinishManagedSurface (snapshot);
++            protected override void Dispose (bool disposing)
++            {
++                if (disposed) return;
++                disposingManagedBackend = true;
++                try {
++                    if (!finished) {
++                        using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
++                        FinishManagedSurface (snapshot);
++                        finished = true;
++                    }
++                } catch when (!disposing) { /* Finalizers cannot propagate document I/O failures. */ }
++                finally { base.Dispose (disposing); }
++            }
++        }
++
++        bool RetainManagedBackendForOwners ()
++        {
++            if (recorder == null) return false;
++            Context[] contexts = recorder.GetContexts ();
++            bool needed = managedAliasReferences != 0 || recordedSourceReferences != 0;
++            foreach (Context context in contexts) needed |= context.HasManagedLifetimeOwner (this);
++            if (!needed) return false;
++            Surface retained = this is ImageSurface image ? image.CreateManagedRecordingAlias () : new RetainedDocumentSurface (this);
++            retained.recorder?.DisposeFromSurface ();
++            retained.recorder = recorder;
++            retained.recorder.MoveSurfaceOwner (retained);
++            retained.recordingOwnerThread = recordingOwnerThread;
++            retained.recordingContext = recordingContext;
++            retained.finished = finished;
++            retained.managedDeviceOffset = managedDeviceOffset;
++            retained.managedWidth = managedWidth;
++            retained.managedHeight = managedHeight;
++            retained.managedSurfaceType = managedSurfaceType;
++            retained.managedFallbackResolutionX = managedFallbackResolutionX;
++            retained.managedFallbackResolutionY = managedFallbackResolutionY;
++            retained.hasManagedFallbackResolution = hasManagedFallbackResolution;
++            retained.managedAliasReferences = managedAliasReferences;
++            retained.recordedSourceReferences = recordedSourceReferences;
++            retained.retainedManagedBackend = true;
++            retained.handle = handle;
++            handle = IntPtr.Zero;
++            recorder = null;
++            recordingContext = null;
++            managedAliasReferences = recordedSourceReferences = 0;
++            transferredManagedBackend = true;
++            aliasOwner = retained;
++            foreach (Context context in contexts) context.MoveManagedLifetimeOwner (this, retained);
++            disposed = true;
++            return true;
++        }
++
 +		internal Status ManagedStatus => managedStatus;
 +		internal bool ManagedFinished => aliasOwner != null && managedOnly ? aliasOwner.ManagedFinished : finished;
 +		internal bool HasPendingRecordedCommands => aliasOwner != null && managedOnly
@@ -298,6 +398,7 @@ index 6f7730e..9ee34d5 100644
 +		{
 +            if (managedOnly && aliasOwner != null) { aliasOwner.DetachRecordingContext (context); return; }
 +			lock (recordingSync) { if (ReferenceEquals (recordingContext, context)) recordingContext = null; }
++            ReleaseUnusedManagedBackend ();
 +		}
 +
 +		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) { return TryRecord (rec => rec.RecordSetSourceRGBA (r, g, b, a)); }
@@ -314,7 +415,7 @@ index 6f7730e..9ee34d5 100644
 +		internal RecordedSurfaceSource AcquireRecordedSource() { if (aliasOwner != null && managedOnly) return aliasOwner.AcquireRecordedSource (); lock (recordingSync) { return recorder?.CaptureSnapshot() is SurfaceRecorderSnapshot probe ? AcquireSource(probe) : null; } }
 +		RecordedSurfaceSource AcquireSource(SurfaceRecorderSnapshot probe) { probe.Dispose(); return new RecordedSurfaceSource(this); }
 +		internal void RetainRecordedSource() { if (aliasOwner != null && managedOnly) { aliasOwner.RetainRecordedSource (); return; } lock (recordingSync) recordedSourceReferences++; }
-+		internal void ReleaseRecordedSource() { if (aliasOwner != null && managedOnly) { aliasOwner.ReleaseRecordedSource (); return; } lock (recordingSync) { if (--recordedSourceReferences == 0) { disposedSourceSnapshot?.Dispose(); disposedSourceSnapshot = null; } } }
++		internal void ReleaseRecordedSource() { if (aliasOwner != null && managedOnly) { aliasOwner.ReleaseRecordedSource (); return; } lock (recordingSync) { if (--recordedSourceReferences == 0) { disposedSourceSnapshot?.Dispose(); disposedSourceSnapshot = null; } } ReleaseUnusedManagedBackend (); }
 +		internal SurfaceRecorderSnapshot CaptureRecordedSource() { if (aliasOwner != null && managedOnly) return aliasOwner.CaptureRecordedSource (); lock (recordingSync) { if (recordingContext != null) EnsureRecordingOwnerThread(); return disposedSourceSnapshot?.Retain() ?? recorder?.CaptureSnapshot(); } }
 +		internal void InvalidateDisposedSourceRecording() { if (aliasOwner != null && managedOnly) { aliasOwner.InvalidateDisposedSourceRecording (); return; } lock (recordingSync) { disposedSourceSnapshot?.Dispose(); disposedSourceSnapshot = null; } }
 +
@@ -493,7 +594,7 @@ index 6f7730e..9ee34d5 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +534,284 @@ namespace Cairo
+@@ -87,141 +635,303 @@ namespace Cairo
  		}
  
  
@@ -532,6 +633,7 @@ index 6f7730e..9ee34d5 100644
  		public Cairo.Surface CreateSimilar (
  			Cairo.Content content, int width, int height)
  		{
++            CheckDisposed ();
 +			if (IsManagedOnly && this is ImageSurface) {
 +				if (managedStatus != Status.Success) return ImageSurface.CreateManagedErrorSurface (managedStatus);
 +				if (content != Cairo.Content.Color && content != Cairo.Content.Alpha && content != Cairo.Content.ColorAlpha)
@@ -561,6 +663,7 @@ index 6f7730e..9ee34d5 100644
  		public void Show (Context gr, double x, double y)
  		{
 +			if (gr == null) throw new ArgumentNullException (nameof (gr));
++            CheckDisposed ();
 +			if (managedOnly && gr.IsManagedRecording) {
 +				using var pattern = new SurfacePattern (this) {
 +					Matrix = new Matrix (1, 0, 0, 1, -x, -y)
@@ -592,11 +695,18 @@ index 6f7730e..9ee34d5 100644
 +			// base constructor initializes recordingSync (for example, a disabled
 +			// backend rejected by the import resolver).
 +			if (recordingSync == null) { disposed = true; return; }
-+			lock (recordingSync) {
-+				if (disposing) {
++            lock (recordingSync) {
++                if (disposed) return;
++                if (disposing && managedOnly && aliasOwner == null) {
++                    EnsureRecordingOwnerThread ();
++                    if (RetainManagedBackendForOwners ()) return;
++                }
++                disposingManagedBackend = true;
++                if (disposing) {
 +					EnsureRecordingOwnerThread ();
-+					if (recorder != null && recordingContext != null)
-+						recordingContext.RetainDisposedSurfaceRecording(recorder.CaptureSnapshot(), this);
++					Context current = recordingContext;
++					if (recorder != null && current != null)
++						current.RetainDisposedSurfaceRecording(recorder.CaptureSnapshot(), this);
 +				}
 +				Context oldContext = recordingContext;
 +				recordingContext = null;
@@ -609,18 +719,26 @@ index 6f7730e..9ee34d5 100644
  				return;
  
 -			NativeMethods.cairo_surface_destroy (handle);
+-			handle = IntPtr.Zero;
+-		}
 +			if (recorder != null) {
 +				if (recordedSourceReferences > 0) disposedSourceSnapshot = recorder.CaptureSnapshot();
 +				recorder.DisposeFromSurface ();
 +			}
-+
-+			if (handle != IntPtr.Zero) NativeMethods.cairo_surface_destroy (handle);
- 			handle = IntPtr.Zero;
-+			disposed = true;
-+			}
- 		}
  
- 		protected void CheckDisposed ()
+-		protected void CheckDisposed ()
++			if (handle != IntPtr.Zero) NativeMethods.cairo_surface_destroy (handle);
++			handle = IntPtr.Zero;
++            disposed = true;
++            if (managedOnly && aliasOwner != null && !transferredManagedBackend) {
++                Surface owner = aliasOwner.ManagedRecordingOwner;
++                lock (owner.recordingSync) owner.managedAliasReferences--;
++                owner.ReleaseUnusedManagedBackend ();
++            }
++            }
++        }
++
++        protected void CheckDisposed ()
  		{
 -			if (handle == IntPtr.Zero)
 +			if (disposed)
@@ -632,6 +750,7 @@ index 6f7730e..9ee34d5 100644
 -			CheckDisposed ();
 -			NativeMethods.cairo_surface_finish (handle);
 -			return Status;
++            CheckDisposed ();
 +			if (aliasOwner != null && managedOnly) return aliasOwner.Finish ();
 +			lock (recordingSync) {
 +				CheckDisposed ();
@@ -666,6 +785,7 @@ index 6f7730e..9ee34d5 100644
 +
  		public void Flush ()
  		{
++            CheckDisposed ();
 +			if (aliasOwner != null && managedOnly) { aliasOwner.Flush (); return; }
  			CheckDisposed ();
 +			if (managedOnly) { if (this is ImageSurface image) image.CheckpointManagedPixels (); return; }
@@ -703,6 +823,7 @@ index 6f7730e..9ee34d5 100644
  
  		public PointD DeviceOffset {
  			get {
++                CheckDisposed ();
 +				if (aliasOwner != null && managedOnly) return aliasOwner.DeviceOffset;
  				CheckDisposed ();
 +				if (managedOnly) return managedDeviceOffset;
@@ -713,6 +834,7 @@ index 6f7730e..9ee34d5 100644
  			}
  
  			set {
++                CheckDisposed ();
 +				if (aliasOwner != null && managedOnly) { aliasOwner.DeviceOffset = value; return; }
  				CheckDisposed ();
 +				if (managedOnly) {
@@ -728,6 +850,7 @@ index 6f7730e..9ee34d5 100644
  
  		public void SetFallbackResolution (double x, double y)
  		{
++            CheckDisposed ();
 +			if (aliasOwner != null && managedOnly) { aliasOwner.SetFallbackResolution (x, y); return; }
  			CheckDisposed ();
 +			if (managedOnly) {

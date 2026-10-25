@@ -77,6 +77,16 @@ using (var second = new Context(shared))
         throw new InvalidOperationException("Interleaved contexts lost their draw order or paths.");
 }
 
+var disposedOwner = new ImageSurface(Format.Argb32, 2, 2);
+using (var surviving = new Context(disposedOwner))
+{
+    disposedOwner.Dispose();
+    surviving.SetSourceRGB(0, 1, 0); surviving.Paint();
+    using var retained = (ImageSurface)surviving.GetTarget();
+    if (BitConverter.ToUInt32(retained.Data, 0) != 0xff00ff00)
+        throw new InvalidOperationException("Disposing the surface wrapper invalidated its context.");
+}
+
 using var surface = new ImageSurface(Format.Argb32, 64, 40);
 using (var invalid = new ImageSurface(Format.Argb32, -1, 1))
 {

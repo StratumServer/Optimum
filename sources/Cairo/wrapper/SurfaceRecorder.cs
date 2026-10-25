@@ -26,7 +26,7 @@ namespace Cairo
 		// Observers are diagnostic-only and never run while the recorder lock is held.
 		internal static event Action<string, bool> MaterializationCompleted;
 
-		readonly Surface surface;
+		Surface surface;
 		readonly List<Command> commands = new List<Command> ();
 		readonly object sync = new object ();
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
@@ -59,6 +59,17 @@ namespace Cairo
                 currentState = selected;
             }
         }
+        internal void MoveSurfaceOwner (Surface owner) { lock (sync) surface = owner; }
+
+        internal Context[] GetContexts ()
+        {
+            lock (sync) {
+                var result = new List<Context> ();
+                foreach (var entry in contextStates) result.Add (entry.Key);
+                return result.ToArray ();
+            }
+        }
+
 				internal ManagedGraphicsState GraphicsState => graphicsState;
 		readonly List<RecordedResource> resources = new List<RecordedResource>();
 		readonly List<RecordedSurfaceSource> sourceBindings = new List<RecordedSurfaceSource>();

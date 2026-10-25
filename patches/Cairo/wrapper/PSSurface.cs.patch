@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/PSSurface.cs b/Cairo/wrapper/PSSurface.cs
-index 11d6247..4ae4e60 100644
+index 11d6247..2a28a4e 100644
 --- a/Cairo/wrapper/PSSurface.cs
 +++ b/Cairo/wrapper/PSSurface.cs
-@@ -11,60 +11,271 @@
+@@ -11,60 +11,272 @@
  // "Software"), to deal in the Software without restriction, including
  // without limitation the rights to use, copy, modify, merge, publish,
  // distribute, sublicense, and/or sell copies of the Software, and to
@@ -145,7 +145,7 @@ index 11d6247..4ae4e60 100644
 +				pages.Add (new Page (snapshot, width, height, pageSetupComments.ToArray ())); 
 +				pageSetupComments.Clear ();
 +				dscSection = DscSection.Document;
-+				if (!copyCurrentPage) RecordingGraphicsState.NewPath ();
++				if (!copyCurrentPage) ManagedRecordingOwner.RecordingGraphicsState.NewPath ();
 +				snapshot = null;
 +				return true;
 +			} finally { snapshot?.Dispose (); }
@@ -270,10 +270,11 @@ index 11d6247..4ae4e60 100644
 +
 +		protected override void Dispose (bool disposing)
 +		{
++            bool defer = disposing && IsManagedOnly && !ManagedFinished && HasManagedLifetimeOwners;
 +			try {
-+				if (disposing && IsManagedOnly && !ManagedFinished) Finish ();
++				if (disposing && IsManagedOnly && !ManagedFinished && !HasManagedLifetimeOwners) Finish ();
 +			} finally {
-+				if (disposing) { foreach (Page page in pages) page.Dispose (); pages.Clear (); }
++				if (disposing && !defer) { foreach (Page page in pages) page.Dispose (); pages.Clear (); }
 +				base.Dispose (disposing);
 +			}
  		}

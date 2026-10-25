@@ -946,3 +946,14 @@ Clean bootstrap applied 167/167 patches. Release build passed with zero errors a
 The shared assembly route continues to apply to managed mods without a mod-name filter. These results do not certify all disposal, numeric format, font, platform or foreign-native-handle contracts. Direct libcairo P/Invoke bypasses the facade. The universal API migration remains open.
 
 A separate complete run with libcairo denied passed in 10 minutes 18 seconds: 16 scenarios, 168 members, 18,420 successful texture candidates, 1,777 Skia CPU recoveries, zero scenario errors, failed candidates or Cairo materialization causes. The loader reports verified 0/199 traced imports reached, zero denied attempts, readable process maps and no libcairo mapping. The same pinned wrapper ran without native visual references. Existing engine final-composition/blit GL errors and Pattern finalization notices remain in the logs.
+
+
+## Surface wrappers and retained drawing lifetimes (2026-10-25)
+
+Disposing a managed Surface wrapper now keeps its backend alive for contexts, aliases and recorded source bindings. Contexts retain independent state and draw into the same pixels after the original wrapper is disposed. Group stacks retain their parent surfaces. The disposed public wrapper still rejects access. Weak active-context references let finalization release the final pixel pin, and explicit native image aliases own separate native references.
+
+PDF, PS and SVG contexts can finish drawing and advance pages after their original wrappers are disposed. The final owner writes the document. Thirteen new cases cover these lifetimes, error surfaces, source-pattern updates and disposed-wrapper guards. The original-game-assembly consumer also draws after disposing its original image wrapper.
+
+Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,118 with 34 unrelated skips; the deny subset passed 145/145. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. Prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact runtime donors). The original-game-ABI consumer passed under native denial. Actual Radeon probes passed 69 oracle cases and 26 deny cases without a libcairo mapping. Full live GUI evidence for this increment is pending; the preceding section records the prior checkpoint.
+
+The shared assembly replacement applies to managed mods without a mod-name filter. Foreign native pointers, direct libcairo P/Invoke, additional numeric formats and broader font/platform coverage remain outside this evidence. Universal API certification remains open.

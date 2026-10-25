@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/SvgSurface.cs b/Cairo/wrapper/SvgSurface.cs
-index 6adc9fa..55a113e 100644
+index 6adc9fa..9dd1a3e 100644
 --- a/Cairo/wrapper/SvgSurface.cs
 +++ b/Cairo/wrapper/SvgSurface.cs
 @@ -25,29 +25,71 @@
@@ -67,7 +67,7 @@ index 6adc9fa..55a113e 100644
 +		protected override void Dispose (bool disposing)
 +		{
 +			try {
-+				if (disposing && IsManagedOnly && !ManagedFinished) Finish ();
++				if (disposing && IsManagedOnly && !ManagedFinished && !HasManagedLifetimeOwners) Finish ();
 +			} finally {
 +				base.Dispose (disposing);
 +			}

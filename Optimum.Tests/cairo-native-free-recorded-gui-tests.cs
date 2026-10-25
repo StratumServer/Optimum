@@ -1470,8 +1470,9 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		Assert.Equal (firstPointer, firstAlias.DataPtr);
 		firstOwner.Dispose ();
 		firstAlias.Dispose ();
-		Assert.True (firstAlias.ManagedPixelPinReleased);
+        Assert.False (firstAlias.ManagedPixelPinReleased);
 		firstContext.Dispose ();
+        Assert.True (firstAlias.ManagedPixelPinReleased);
 
 		var secondOwner = new ImageSurface (Format.Argb32, 8, 8);
 		var secondContext = new Context (secondOwner);
@@ -1480,8 +1481,9 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		secondAlias.Dispose ();
 		Assert.False (secondAlias.ManagedPixelPinReleased);
 		secondOwner.Dispose ();
-		Assert.True (secondAlias.ManagedPixelPinReleased);
+        Assert.False (secondAlias.ManagedPixelPinReleased);
 		secondContext.Dispose ();
+        Assert.True (secondAlias.ManagedPixelPinReleased);
 		Assert.Equal (0, CairoNativeGuard.DeniedCount);
 		AssertNoCairoNativeLoad (0);
 	}
