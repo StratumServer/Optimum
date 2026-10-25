@@ -790,7 +790,8 @@ public sealed class CairoNativeFreeRecordedGuiTests
 			using var targetContext = new Context (target);
 			targetContext.LineWidth = 5;
 			Assert.Equal (5, targetContext.LineWidth);
-			Assert.Equal (5, context.LineWidth);
+			// The alias shares pixels, while each cairo_t owns its drawing state.
+			Assert.Equal (2, context.LineWidth);
 			targetContext.Rectangle (12, 12, 2, 2);
 			targetContext.Fill ();
 		}
@@ -934,11 +935,11 @@ public sealed class CairoNativeFreeRecordedGuiTests
 				using var groupContext = new Context (groupTarget);
 				groupContext.LineTo (1, 1);
 			}
-			Assert.Equal (1, context.CurrentPoint.X, 5);
-			Assert.Equal (1, context.CurrentPoint.Y, 5);
+			Assert.Equal (0, context.CurrentPoint.X, 5);
+			Assert.Equal (0, context.CurrentPoint.Y, 5);
 			using (Pattern pathGroup = context.PopGroup ()) { }
-			Assert.Equal (1, context.CurrentPoint.X, 5);
-			Assert.Equal (1, context.CurrentPoint.Y, 5);
+			Assert.Equal (0, context.CurrentPoint.X, 5);
+			Assert.Equal (0, context.CurrentPoint.Y, 5);
 			context.NewPath ();
 			context.PushGroup ();
 			context.PushGroup ();

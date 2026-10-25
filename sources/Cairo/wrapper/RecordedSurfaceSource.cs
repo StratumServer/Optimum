@@ -18,6 +18,7 @@ namespace Cairo
 	internal sealed class RecordedResource : IDisposable
 	{
 		IDisposable value;
+		internal IDisposable Value => value;
 		int references = 1;
 		internal RecordedResource(IDisposable value) { this.value = value; }
 		internal RecordedResource Retain() { Interlocked.Increment(ref references); return this; }

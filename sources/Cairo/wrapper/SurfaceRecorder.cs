@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
 using System.Text;
 using SkiaSharp;
 
@@ -31,7 +32,33 @@ namespace Cairo
 		SurfaceRecordingState state = SurfaceRecordingState.Recording;
 		ExceptionDispatchInfo failure;
 		string firstMaterializationTrigger;
-		ManagedGraphicsState graphicsState;
+		sealed class ContextState
+        {
+            internal readonly object Identity;
+            internal ManagedGraphicsState Graphics;
+            internal readonly List<RecordedGuiClip> Clips = new List<RecordedGuiClip> ();
+            internal readonly Stack<RecordedGuiClip[]> SavedClips = new Stack<RecordedGuiClip[]> ();
+            internal readonly Stack<Antialias> SavedAntialias = new Stack<Antialias> ();
+            internal int SaveDepth;
+            internal bool Unqualified;
+            internal bool AntialiasConfigured = true;
+            internal ContextState (Status status, object identity = null) { Identity = identity ?? new object (); Graphics = new ManagedGraphicsState (status); }
+        }
+        readonly ConditionalWeakTable<Context, ContextState> contextStates = new ConditionalWeakTable<Context, ContextState> ();
+        ContextState currentState = new ContextState (Status.Success);
+        bool defaultStateClaimed;
+        ManagedGraphicsState graphicsState { get => currentState.Graphics; set => currentState.Graphics = value; }
+        internal void ActivateContext (Context context, bool fresh = false)
+        {
+            lock (sync) {
+                if (!contextStates.TryGetValue (context, out ContextState selected)) {
+                    selected = !defaultStateClaimed && (!fresh || commands.Count == 0) ? currentState : new ContextState (surface.ManagedStatus);
+                    contextStates.Add (context, selected);
+                    defaultStateClaimed = true;
+                }
+                currentState = selected;
+            }
+        }
 				internal ManagedGraphicsState GraphicsState => graphicsState;
 		readonly List<RecordedResource> resources = new List<RecordedResource>();
 		readonly List<RecordedSurfaceSource> sourceBindings = new List<RecordedSurfaceSource>();
@@ -40,13 +67,13 @@ namespace Cairo
 		int width, height;
 		internal readonly long Identity = System.Threading.Interlocked.Increment(ref nextIdentity);
 		static long nextIdentity;
-		readonly List<RecordedGuiClip> clips = new List<RecordedGuiClip>();
-		readonly Stack<RecordedGuiClip[]> savedClips = new Stack<RecordedGuiClip[]>();
-		readonly Stack<Antialias> savedAntialias = new Stack<Antialias>();
-		int saveDepth;
-		bool unqualifiedHelperDrawing;
+		List<RecordedGuiClip> clips => currentState.Clips;
+		Stack<RecordedGuiClip[]> savedClips => currentState.SavedClips;
+		Stack<Antialias> savedAntialias => currentState.SavedAntialias;
+		int saveDepth { get => currentState.SaveDepth; set => currentState.SaveDepth = value; }
+		bool unqualifiedHelperDrawing { get => currentState.Unqualified; set => currentState.Unqualified = value; }
 		// Cairo's default antialias mode maps to Skia's antialias-on paint, so helper operations using that default are qualified too.
-		bool antialiasConfigured = true;
+		bool antialiasConfigured { get => currentState.AntialiasConfigured; set => currentState.AntialiasConfigured = value; }
 
 		internal void ResetContextState ()
 		{
@@ -86,6 +113,7 @@ namespace Cairo
 
 		internal void InitializePageFrom (SurfaceRecorder parent, bool copyCommands)
 		{
+            currentState = new ContextState (surface.ManagedStatus, parent.currentState.Identity);
 			graphicsState = parent.graphicsState.CloneForGroup ();
 			foreach (RecordedGuiClip clip in parent.clips) {
 				RecordedGuiClip clone = clip.Clone ();
@@ -105,12 +133,43 @@ namespace Cairo
 			saveDepth = parent.saveDepth;
 			unqualifiedHelperDrawing = parent.unqualifiedHelperDrawing;
 			antialiasConfigured = parent.antialiasConfigured;
+            foreach (var entry in parent.contextStates) {
+                ContextState cloned = ReferenceEquals (entry.Value, parent.currentState) ? currentState : CloneContextState (entry.Value);
+                contextStates.Add (entry.Key, cloned);
+                defaultStateClaimed = true;
+            }
+            if (!copyCommands) {
+                foreach (RecordedResource resource in parent.resources)
+                    if (IsStateResource (resource.Value)) resources.Add (resource.Retain ());
+                foreach (RecordedSurfaceSource binding in parent.sourceBindings) sourceBindings.Add (binding.Retain ());
+            }
 			if (copyCommands) {
 				commands.AddRange (parent.commands);
 				foreach (RecordedResource resource in parent.resources) resources.Add (resource.Retain ());
 				foreach (RecordedSurfaceSource binding in parent.sourceBindings) sourceBindings.Add (binding.Retain ());
 			}
 		}
+
+        static bool IsStateResource (IDisposable value) => value is Pattern || value is FontFace || value is ScaledFont || value is RecordedGuiClip;
+        ContextState CloneContextState (ContextState source)
+        {
+            var result = new ContextState (surface.ManagedStatus, source.Identity) {
+                Graphics = source.Graphics.CloneForGroup (), SaveDepth = source.SaveDepth,
+                Unqualified = source.Unqualified, AntialiasConfigured = source.AntialiasConfigured
+            };
+            foreach (var clip in source.Clips) {
+                var clone = clip.Clone (); result.Clips.Add (clone); resources.Add (new RecordedResource (clone));
+            }
+            var stack = source.SavedClips.ToArray ();
+            for (int i = stack.Length - 1; i >= 0; i--) {
+                var frame = new RecordedGuiClip[stack[i].Length];
+                for (int j = 0; j < frame.Length; j++) { frame[j] = stack[i][j].Clone (); resources.Add (new RecordedResource (frame[j])); }
+                result.SavedClips.Push (frame);
+            }
+            var antialias = source.SavedAntialias.ToArray ();
+            for (int i = antialias.Length - 1; i >= 0; i--) result.SavedAntialias.Push (antialias[i]);
+            return result;
+        }
 
 				internal bool RecordNative(Action<Context> replay, IDisposable resource = null, RecordedSurfaceSource sourceBinding = null, Action<ManagedGraphicsState> stateUpdate = null)
 		{
@@ -332,9 +391,12 @@ namespace Cairo
 				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered)
 					throw new InvalidOperationException ("The recording surface cannot checkpoint pixels in its current state.");
 				commands.Clear ();
-				foreach (IDisposable resource in resources) resource.Dispose ();
-				resources.Clear ();
+				for (int i = resources.Count - 1; i >= 0; i--) {
+                    if (IsStateResource (resources[i].Value)) continue;
+                    resources[i].Dispose (); resources.RemoveAt (i);
+                }
 				var activeBindings = new HashSet<RecordedSurfaceSource> (graphicsState.GetRetainedSourceBindings ());
+                foreach (var entry in contextStates) activeBindings.UnionWith (entry.Value.Graphics.GetRetainedSourceBindings ());
 				for (int i = sourceBindings.Count - 1; i >= 0; i--) {
 					if (activeBindings.Contains (sourceBindings[i])) continue;
 					sourceBindings[i].Dispose ();
@@ -408,7 +470,7 @@ namespace Cairo
 		/// <summary>Returns a recorder sealed for a GPU render that must be discarded (for example after a context reset) to Recording so the display list can be replayed.</summary>
 		internal bool AbortGpuRender() { lock (sync) { if (state != SurfaceRecordingState.Sealed) return false; state = SurfaceRecordingState.Recording; return true; } }
 
-		internal void ResumeRecording() { lock (sync) { if (state == SurfaceRecordingState.GpuRendered) state = SurfaceRecordingState.Recording; } }
+		internal void ResumeRecording(bool permitSealed = false) { lock (sync) { if (state == SurfaceRecordingState.GpuRendered || (permitSealed && state == SurfaceRecordingState.Sealed)) state = SurfaceRecordingState.Recording; } }
 
 		internal bool RecordSetSourceRGBA (double r, double g, double b, double a) => RecordNative(c => c.SetSourceRGBA(r, g, b, a), stateUpdate: s => s.SetSourceRgba(r, g, b, a));
 		internal bool RecordPaint () => RecordDrawing(c => c.Paint(), paintAll: true);
@@ -478,7 +540,7 @@ namespace Cairo
 				if (state == SurfaceRecordingState.Disposed) throw new ObjectDisposedException (nameof (SurfaceRecorder));
 				if (state == SurfaceRecordingState.Failed) failure.Throw ();
 				if (state != SurfaceRecordingState.Recording) return false;
-				commands.Add (command);
+				commands.Add (surface.IsManagedOnly ? command.WithContext (currentState.Identity) : command);
 				return true;
 			}
 		}
@@ -540,16 +602,19 @@ namespace Cairo
 
 		internal readonly struct Command
 		{
-			internal readonly Action<Context> NativeReplay;
+			internal readonly object ContextIdentity;
+            internal Command WithContext (object identity) => new Command (this, identity);
+            Command (Command command, object identity) { this = command; ContextIdentity = identity; }
+            internal readonly Action<Context> NativeReplay;
 			internal readonly RecordedGuiDrawing Drawing;
 			internal readonly RecordedBlur Blur;
 			internal readonly bool Demultiply;
 			internal readonly RecordedGuiImage Image;
 			internal readonly RecordedGuiPicture Picture;
-			internal Command(Action<Context> replay, RecordedGuiDrawing drawing = null, RecordedBlur blur = null, bool demultiply = false, RecordedGuiImage image = null, RecordedGuiPicture picture = null) { Kind = CommandKind.Native; A = B = C = D = 0; NativeReplay = replay; Drawing = drawing; Blur = blur; Demultiply = demultiply; Image = image; Picture = picture; }
+			internal Command(Action<Context> replay, RecordedGuiDrawing drawing = null, RecordedBlur blur = null, bool demultiply = false, RecordedGuiImage image = null, RecordedGuiPicture picture = null) { ContextIdentity = null; Kind = CommandKind.Native; A = B = C = D = 0; NativeReplay = replay; Drawing = drawing; Blur = blur; Demultiply = demultiply; Image = image; Picture = picture; }
 			internal readonly CommandKind Kind;
 			internal readonly double A, B, C, D;
-			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { Kind = kind; A = a; B = b; C = c; D = d; NativeReplay = null; Drawing = null; Blur = null; Demultiply = false; Image = null; Picture = null; }
+			internal Command (CommandKind kind, double a = 0, double b = 0, double c = 0, double d = 0) { ContextIdentity = null; Kind = kind; A = a; B = b; C = c; D = d; NativeReplay = null; Drawing = null; Blur = null; Demultiply = false; Image = null; Picture = null; }
 			internal void Replay (Context context)
 			{
 				switch (Kind) {
@@ -568,6 +633,23 @@ namespace Cairo
 
 		internal enum CommandKind { Native, SetSourceRGBA, Paint, Rectangle, Fill, Save, Restore, SetAntialias, SetOperator }
 	}
+
+    internal sealed class NativeContextReplay : IDisposable
+    {
+        readonly Context target;
+        readonly Dictionary<object, Context> contexts = new Dictionary<object, Context> ();
+        internal NativeContextReplay (Context target) { this.target = target; }
+        internal void Execute (SurfaceRecorder.Command command)
+        {
+            Context selected = target;
+            if (command.ContextIdentity != null && !contexts.TryGetValue (command.ContextIdentity, out selected)) {
+                selected = new Context (NativeMethods.cairo_create (NativeMethods.cairo_get_target (target.NativeHandleForRecorder)), true);
+                contexts.Add (command.ContextIdentity, selected);
+            }
+            command.Replay (selected);
+        }
+        public void Dispose () { foreach (Context context in contexts.Values) context.Dispose (); }
+    }
 
 	internal sealed class SurfaceRecorderSnapshot : IDisposable
 	{
@@ -603,10 +685,10 @@ namespace Cairo
 						Marshal.Copy (pixels, checked (y * pixelStride), IntPtr.Add (data, checked (y * targetStride)), rowBytes);
 					NativeMethods.cairo_surface_mark_dirty (target);
 				}
-				foreach (var command in commands) command.Replay (context);
+				using (var replay = new NativeContextReplay (context)) foreach (var command in commands) replay.Execute (command);
 			}
 		}
-		internal void ReplayNative(Context context) { SurfaceRecordingDiagnostics.Materialize(); foreach (var command in commands) command.Replay(context); }
+		internal void ReplayNative(Context context) { SurfaceRecordingDiagnostics.Materialize(); using var replay = new NativeContextReplay (context); foreach (var command in commands) replay.Execute (command); }
 		public void Dispose() { if (disposed) return; disposed = true; foreach (var resource in resources) resource.Dispose(); }
 
 		internal void DrawTo (SKSurface target, RecordedGpuBlur blur)

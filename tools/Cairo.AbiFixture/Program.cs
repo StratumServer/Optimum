@@ -62,6 +62,21 @@ try
 }
 finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(bottomUp); }
 
+using (var shared = new ImageSurface(Format.Argb32, 8, 4))
+using (var first = new Context(shared))
+using (var second = new Context(shared))
+{
+    first.LineWidth = 7;
+    if (second.LineWidth != 2) throw new InvalidOperationException("Independent contexts shared drawing state.");
+    first.SetSourceRGB(1, 0, 0); first.Rectangle(0, 0, 3, 4);
+    second.Translate(4, 0); second.SetSourceRGB(0, 0, 1); second.Rectangle(0, 0, 3, 4);
+    first.Fill(); second.Fill();
+    IntPtr rows = shared.DataPtr;
+    if (System.Runtime.InteropServices.Marshal.ReadInt32(rows) != unchecked((int)0xffff0000)
+        || System.Runtime.InteropServices.Marshal.ReadInt32(rows, 16) != unchecked((int)0xff0000ff))
+        throw new InvalidOperationException("Interleaved contexts lost their draw order or paths.");
+}
+
 using var surface = new ImageSurface(Format.Argb32, 64, 40);
 using (var invalid = new ImageSurface(Format.Argb32, -1, 1))
 {
