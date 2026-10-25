@@ -45,6 +45,23 @@ try {
     // The Optimum cairo-sharp wrapper installs its own deny/allow resolver in a module initializer.
 }
 
+// A third-party consumer uses the original constructors and raw row pointer.
+using (var allocated = new ImageSurface(IntPtr.Zero, Format.Argb32, 2, 2, -16))
+{
+    if (allocated.Stride != 8 || allocated.DataPtr == IntPtr.Zero)
+        throw new InvalidOperationException("Null image data did not allocate native-compatible rows.");
+}
+IntPtr bottomUp = System.Runtime.InteropServices.Marshal.AllocHGlobal(16);
+try
+{
+    using var external = new ImageSurface(IntPtr.Add(bottomUp, 8), Format.Argb32, 2, 2, -8);
+    using (var drawing = new Context(external)) { drawing.SetSourceRGB(1, 0, 0); drawing.Paint(); }
+    _ = external.DataPtr;
+    if (System.Runtime.InteropServices.Marshal.ReadInt32(bottomUp) != unchecked((int)0xffff0000))
+        throw new InvalidOperationException("Bottom-up image rows did not reach the caller's buffer.");
+}
+finally { System.Runtime.InteropServices.Marshal.FreeHGlobal(bottomUp); }
+
 using var surface = new ImageSurface(Format.Argb32, 64, 40);
 using (var invalid = new ImageSurface(Format.Argb32, -1, 1))
 {

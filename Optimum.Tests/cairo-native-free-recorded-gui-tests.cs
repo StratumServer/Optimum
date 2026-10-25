@@ -987,7 +987,7 @@ public sealed class CairoNativeFreeRecordedGuiTests
 	}
 
 	[Fact]
-	public void DisposingContextWithOpenManagedGroupsRestoresParentRecorder()
+	public void DisposingContextWithOpenManagedGroupsAllowsFreshDefaultContext()
 	{
 		if (CairoNativeGuard.NativeAllowed) return;
 		int deniedBefore = CairoNativeGuard.DeniedCount;
@@ -998,7 +998,8 @@ public sealed class CairoNativeFreeRecordedGuiTests
 			context.PushGroup ();
 		}
 		using (var context = new Context (surface)) {
-			Assert.Equal (6, context.LineWidth);
+			// cairo_create starts a new state even if the old context had open groups.
+			Assert.Equal (2, context.LineWidth);
 			context.SetSourceRGBA (0, 1, 0, 1);
 			context.Rectangle (1, 1, 2, 2);
 			context.Fill ();

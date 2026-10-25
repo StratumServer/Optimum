@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..3358137 100644
+index 8014c9e..aeed494 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,299 @@
+@@ -31,40 +31,322 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -88,6 +88,7 @@ index 8014c9e..3358137 100644
 +
 +		internal int ManagedWidth => managedStorage.Width;
 +		internal int ManagedHeight => managedStorage.Height;
++		internal int ManagedPixelStride => managedStorage.PixelStride;
 +		internal bool ManagedPixelPinReleased => managedStorage.IsPixelPinReleased;
 +		internal IntPtr EnsureNativeSurface () => managedStorage.EnsureNativeSurface ();
 +		internal byte[] CopyExposedPixels () => managedStorage?.CopyExposedPixels ();
@@ -134,19 +135,20 @@ index 8014c9e..3358137 100644
 +						throw new InvalidOperationException ("Skia could not read the managed A1 image snapshot.");
 +				} finally { alphaPin.Free (); }
 +				var packed = managedStorage.CopyPixels ();
-+				Array.Clear (packed, 0, packed.Length);
++				// Preserve padding bits and bytes owned by the external buffer.
 +				for (int y = 0; y < Height; y++) {
 +					int sourceRow = checked (y * alphaStride);
-+					int targetRow = checked (y * Stride);
++					int targetRow = checked (y * ManagedPixelStride);
 +					for (int x = 0; x < Width; x++)
 +						if (alpha[sourceRow + x] >= 128) packed[targetRow + (x >> 3)] |= (byte)(1 << (x & 7));
++						else packed[targetRow + (x >> 3)] &= (byte)~(1 << (x & 7));
 +				}
 +			return packed;
 +			}
 +			byte[] pixels = managedStorage.CopyPixels ();
 +			var pin = GCHandle.Alloc (pixels, GCHandleType.Pinned);
 +			try {
-+				if (!target.ReadPixels (info, pin.AddrOfPinnedObject (), Stride, 0, 0))
++				if (!target.ReadPixels (info, pin.AddrOfPinnedObject (), ManagedPixelStride, 0, 0))
 +					throw new InvalidOperationException ("Skia could not read the managed image snapshot.");
 +			} finally { pin.Free (); }
 +			return pixels;
@@ -181,9 +183,15 @@ index 8014c9e..3358137 100644
 +		static ImageSurfaceLoadResult LoadPointer (IntPtr data, Format format, int width, int height, int stride)
  		{
 +			if (Surface.ManagedApiMode) {
-+				if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
-+					throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, and RGB565 surfaces.");
-+				return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedExternal (data, format, width, height, stride));
++				Status status = ValidateDataSurface (format, width, height, stride);
++				if (status != Status.Success) return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), status);
++				if (data != IntPtr.Zero && (Math.Abs ((long)stride) > int.MaxValue || Math.Abs ((long)stride) * height > int.MaxValue))
++					return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.NoMemory);
++				try {
++					return new ImageSurfaceLoadResult (data == IntPtr.Zero
++						? ManagedImageSurfaceStorage.CreateManagedData (format, width, height, stride)
++						: ManagedImageSurfaceStorage.CreateManagedExternal (data, format, width, height, stride));
++				} catch (OutOfMemoryException) { return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.NoMemory); }
 +			}
 +			return new ImageSurfaceLoadResult (CreateNativeDataSurface (data, format, width, height, stride), false, false);
 +		}
@@ -225,13 +233,28 @@ index 8014c9e..3358137 100644
 +			return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.Create (format, width, height), false, format == Format.Argb32);
 +		}
 +
++		static Status ValidateDataSurface (Format format, int width, int height, int stride)
++		{
++			if ((int)format < 0 || (int)format > 7) return Status.InvalidFormat;
++			if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
++				throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, and RGB565 surfaces.");
++			if (width < 0 || height < 0 || width > 32767 || height > 32767) return Status.InvalidSize;
++			long rowBytes = Math.Abs ((long)stride);
++			if ((stride & 3) != 0 || rowBytes < Surface.StrideForWidth (format, width)) return Status.InvalidStride;
++						return Status.Success;
++		}
++
 +		static ImageSurfaceLoadResult LoadArray (byte[] data, Format format, int width, int height, int stride)
 +		{
-+			bool canWrap = ManagedImageSurfaceStorage.CanWrapManagedArray (data, format, width, height, stride);
 +			if (Surface.ManagedApiMode) {
-+				if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
-+					throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, and RGB565 byte-array surfaces.");
-+				if (!canWrap) throw new ArgumentException ("The managed image buffer does not match the requested dimensions and stride.", nameof (data));
++				Status status = ValidateDataSurface (format, width, height, stride);
++				if (status != Status.Success) return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), status);
++				if (data == null) {
++					try { return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedData (format, width, height, stride)); }
++					catch (OutOfMemoryException) { return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.NoMemory); }
++				}
++				if (!ManagedImageSurfaceStorage.CanWrapManagedArray (data, format, width, height, stride))
++					throw new ArgumentException ("The managed image buffer does not contain all requested rows; negative multi-row strides require a pointer to the first logical row.", nameof (data));
 +				return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManaged (format, width, height, stride, data));
 +			}
 +			return new ImageSurfaceLoadResult (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), false, false);
@@ -308,7 +331,7 @@ index 8014c9e..3358137 100644
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +334,34 @@ namespace Cairo {
+@@ -75,23 +357,36 @@ namespace Cairo {
  
  
          public int Width {
@@ -334,6 +357,8 @@ index 8014c9e..3358137 100644
 +				CheckDisposed ();
 +				if (IsManagedOnly && managedStorage != null) {
 +					if (ManagedStatus != Status.Success || !managedStorage.HasManagedPixels) return null;
++					if (Stride < 0 && Height > 0) throw new OverflowException ();
++					if (Width == 0 || Height == 0) return managedStorage.CopyPixels ();
 +					if (ManagedFinished) return managedStorage.CopyPixels ();
 +					using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
 +					return RenderManagedSnapshot (snapshot);
@@ -346,7 +371,7 @@ index 8014c9e..3358137 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +369,260 @@ namespace Cairo {
+@@ -99,24 +394,264 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
@@ -410,6 +435,7 @@ index 8014c9e..3358137 100644
 +	internal int Width { get; }
 +	internal int Height { get; }
 +	internal int Stride { get; }
++	internal int PixelStride => Math.Abs (Stride);
 +		internal IntPtr DataPointer { get { EnsurePixelPin (); WasDataPointerExposed = true; return dataPointer; } }
 +	internal bool HasManagedPixels => pixels != null || externalPixels != IntPtr.Zero;
 +	internal bool WasDataPointerExposed { get; private set; }
@@ -454,21 +480,23 @@ index 8014c9e..3358137 100644
 +	internal static ManagedImageSurfaceStorage CreateManagedError () =>
 +		new ManagedImageSurfaceStorage ((Format)(-1), 0, 0, 0, null);
 +
-+	internal static ManagedImageSurfaceStorage CreateManagedExternal (IntPtr data, Format format, int width, int height, int stride)
++	internal static ManagedImageSurfaceStorage CreateManagedData (Format format, int width, int height, int stride)
 +	{
-+		if (data == IntPtr.Zero) throw new ArgumentException ("The unmanaged image buffer must not be null.", nameof (data));
-+		if (!CanRecordFormat (format) || width <= 0 || height <= 0 || stride < MinimumRowBytes (format, width))
-+			throw new ArgumentException ("The unmanaged image buffer does not match the requested dimensions, format, and stride.", nameof (data));
-+		long byteCount = (long)stride * height;
-+		if (byteCount <= 0 || byteCount > int.MaxValue) throw new ArgumentOutOfRangeException (nameof (height), "The unmanaged image buffer dimensions are too large.");
-+		return new ManagedImageSurfaceStorage (format, width, height, stride, null, data) { dataPointer = data, WasDataPointerExposed = true };
++		// Cairo allocates a tightly packed buffer for null data, but preserves
++		// the supplied stride for zero-area images, which have no allocation.
++		if (width > 0 && height > 0) stride = Surface.StrideForWidth (format, width);
++		byte[] data = width == 0 || height == 0 ? null : new byte[checked (stride * height)];
++		return new ManagedImageSurfaceStorage (format, width, height, stride, data) { WasDataPointerExposed = true };
 +	}
++
++	internal static ManagedImageSurfaceStorage CreateManagedExternal (IntPtr data, Format format, int width, int height, int stride) =>
++		new ManagedImageSurfaceStorage (format, width, height, stride, null, data) { dataPointer = data, WasDataPointerExposed = true };
 +
 +	internal static bool CanWrapManagedArray (byte[] data, Format format, int width, int height, int stride)
 +	{
-+		if (data == null || !CanRecordFormat (format) || !BitConverter.IsLittleEndian || width <= 0 || height <= 0 || stride < MinimumRowBytes (format, width)) return false;
-+		long byteCount = (long)stride * height;
-+		return byteCount <= data.Length;
++		if (data == null || !CanRecordFormat (format) || width < 0 || height < 0 || (stride < 0 && height > 1)) return false;
++		long rowBytes = Math.Abs ((long)stride);
++		return (stride & 3) == 0 && rowBytes >= Surface.StrideForWidth (format, width) && rowBytes * height <= data.Length;
 +	}
 +
 +	internal static bool CanRecordFormat (Format format) => BitConverter.IsLittleEndian &&
@@ -551,21 +579,22 @@ index 8014c9e..3358137 100644
 +
 +	internal byte[] CopyPixels ()
 +	{
-+		int length = checked (Stride * Height);
++		int length = checked (PixelStride * Height);
 +		var copy = new byte[length];
 +		if (length != 0) {
 +			if (pixels != null) Buffer.BlockCopy (pixels, 0, copy, 0, length);
-+			else if (externalPixels != IntPtr.Zero) Marshal.Copy (externalPixels, copy, 0, length);
++			else if (externalPixels != IntPtr.Zero)
++				for (int y = 0; y < Height; y++) Marshal.Copy (IntPtr.Add (externalPixels, checked (y * Stride)), copy, checked (y * PixelStride), PixelStride);
 +		}
 +		return copy;
 +	}
 +
 +	internal void ReplacePixels (byte[] source)
 +	{
-+		if (!HasManagedPixels || source == null || source.Length != checked (Stride * Height))
++		if (!HasManagedPixels || source == null || source.Length != checked (PixelStride * Height))
 +			throw new ArgumentException ("Managed pixel data does not match the surface dimensions.", nameof (source));
 +		if (pixels != null) Buffer.BlockCopy (source, 0, pixels, 0, source.Length);
-+		else Marshal.Copy (source, 0, externalPixels, source.Length);
++		else for (int y = 0; y < Height; y++) Marshal.Copy (source, checked (y * PixelStride), IntPtr.Add (externalPixels, checked (y * Stride)), PixelStride);
 +	}
 +
 +	internal void MarkPixelsForSnapshots () { WasDataPointerExposed = true; }

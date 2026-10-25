@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..2a6105f 100644
+index 6f7730e..e1b8194 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,461 @@
+@@ -32,37 +32,476 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -29,6 +29,7 @@ index 6f7730e..2a6105f 100644
 +		readonly object recordingSync = new object ();
 +		Thread recordingOwnerThread;
 +		Context recordingContext;
++		bool managedImageContextCreated;
 +		bool finished;
 +		bool disposed;
 +		readonly bool managedOnly;
@@ -205,7 +206,21 @@ index 6f7730e..2a6105f 100644
 +				CheckDisposed ();
 +				EnsureRecordingOwnerThread ();
 +				if (managedOnly && aliasOwner != null) return IntPtr.Zero;
-+				if (managedOnly) { if (recorder == null) BeginRecording (); return IntPtr.Zero; }
++				if (managedOnly) {
++                    if (recorder == null) BeginRecording ();
++                    if (this is ImageSurface image && !finished && recordingContext == null) {
++                        if (managedImageContextCreated) {
++                            // A new cairo_t starts with default state. Retain earlier drawing
++                            // as pixels before replacing its path, clip and save stack.
++                            image.CheckpointManagedPixels ();
++                            SurfaceRecorder previous = recorder;
++                            recorder = new SurfaceRecorder (this);
++                            previous.DisposeFromSurface ();
++                        }
++                        managedImageContextCreated = true;
++                    }
++                    return IntPtr.Zero;
++                }
 +				if (AutomaticRecordingEnabled && recorder == null && recordingCandidate && !handleExposed && !finished && NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
 +				if (recorder != null && recorder.State == SurfaceRecordingState.Recording && recordingContext != null)
 +					MaterializeRecorder (recordingContext.NativeHandleForRecorder);
@@ -470,7 +485,7 @@ index 6f7730e..2a6105f 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +511,284 @@ namespace Cairo
+@@ -87,141 +526,284 @@ namespace Cairo
  		}
  
  

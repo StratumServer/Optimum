@@ -355,7 +355,7 @@ namespace Cairo
 				this.height = height;
 			}
 		}
-		internal SurfaceRecorderSnapshot CaptureSnapshot() { lock (sync) { if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null; ImageSurface image = surface as ImageSurface; byte[] pixels = image?.CopyExposedPixels(); return new SurfaceRecorderSnapshot(commands.ToArray(), width, height, resources.ToArray(), Identity, pixels, pixels == null ? 0 : image.Stride, pixels == null ? Format.Argb32 : image.Format, surface.RecordingDeviceOffset); } }
+		internal SurfaceRecorderSnapshot CaptureSnapshot() { lock (sync) { if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) return null; ImageSurface image = surface as ImageSurface; byte[] pixels = image?.CopyExposedPixels(); return new SurfaceRecorderSnapshot(commands.ToArray(), width, height, resources.ToArray(), Identity, pixels, pixels == null ? 0 : image.ManagedPixelStride, pixels == null ? Format.Argb32 : image.Format, surface.RecordingDeviceOffset); } }
 		internal SurfaceRecordingState State { get { lock (sync) return state; } }
 		internal bool HasPendingCommands { get { lock (sync) return commands.Count != 0; } }
 		internal void CompleteManagedFinish ()
@@ -391,7 +391,7 @@ namespace Cairo
 				ImageSurface image = surface as ImageSurface;
 				byte[] pixels = image?.CopyExposedPixels ();
 				snapshot = new SurfaceRecorderSnapshot (commands.ToArray (), width, height, resources.ToArray(), Identity,
-					pixels, pixels == null ? 0 : image.Stride, pixels == null ? Format.Argb32 : image.Format, surface.RecordingDeviceOffset);
+					pixels, pixels == null ? 0 : image.ManagedPixelStride, pixels == null ? Format.Argb32 : image.Format, surface.RecordingDeviceOffset);
 				return true;
 			}
 		}
