@@ -200,11 +200,12 @@ namespace Cairo
 		if (State != SurfaceRecordingState.Recording) return false;
 		if (Faulted) return true;
         if (surface.ManagedFinished) {
-            bool noOp = graphicsState.Operator == Operator.Dest || alpha <= 0;
-            foreach (RecordedGuiClip clip in clips) noOp |= clip.Path.IsEmpty;
-            // Cairo skips an empty fill but still validates the target for an empty stroke.
+            bool noOp = graphicsState.Operator == Operator.Dest || alpha <= 0 ||
+                (stroke && graphicsState.LineWidth <= 0) || HasEmptyFinishedClip () ||
+                (maskSurface != null && (maskSurface.Width == 0 || maskSurface.Height == 0));
+            // Cairo skips a fill without segments, but validates degenerate line/rectangle fills.
             if (!paintAll && !stroke && maskSurface == null && maskPattern == null)
-                noOp |= graphicsState.CopyPath ().Length == 0;
+                noOp |= !graphicsState.HasFillSegments;
             if (!noOp) surface.RejectFinishedDrawing ();
             if (clearsPath) graphicsState.NewPath ();
             return true;
@@ -226,6 +227,20 @@ namespace Cairo
 			if (clearsPath) graphicsState.NewPath();
 			return true;
 		}
+
+        bool HasEmptyFinishedClip ()
+        {
+            if (clips.Count == 0) return false;
+            SKRect bounds = clips[0].Path.Bounds;
+            for (int i = 1; i < clips.Count; i++) {
+                SKRect next = clips[i].Path.Bounds;
+                bounds = new SKRect (Math.Max (bounds.Left, next.Left), Math.Max (bounds.Top, next.Top),
+                    Math.Min (bounds.Right, next.Right), Math.Min (bounds.Bottom, next.Bottom));
+            }
+            // Cairo can reject empty clip bounds before validating the target. It does
+            // not resolve arbitrary path intersections or target extents at this point.
+            return bounds.Right <= bounds.Left || bounds.Bottom <= bounds.Top;
+        }
 
 		internal bool RecordClip(bool preserve)
 		{

@@ -99,6 +99,13 @@ using (var finishedContext = new Context(finishedSurface))
 {
     finishedContext.Save();
     finishedSurface.Finish();
+    finishedContext.LineWidth = 0;
+    finishedContext.Stroke();
+    finishedContext.Rectangle(0, 0, 0, 2);
+    finishedContext.Clip();
+    finishedContext.Paint();
+    if (finishedContext.Status != Status.Success)
+        throw new InvalidOperationException("Finished-surface no-op drawing must preserve the legacy context status.");
     finishedContext.Restore();
     finishedContext.Paint();
     if (finishedContext.Status != Status.SurfaceFinished || finishedSurface.Status != Status.SurfaceFinished)

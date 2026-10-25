@@ -809,6 +809,7 @@ namespace Cairo
 		}
 
 		internal bool HasCurves => ops.Contains(PathOp.CurveTo);
+        internal bool HasFillSegments => ops.Contains (PathOp.LineTo) || ops.Contains (PathOp.CurveTo);
 
 		internal PathElement[] CopyPath()
 		{
