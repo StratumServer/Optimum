@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..aefa203 100644
+index 6f7730e2..1160475f 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,585 @@
+@@ -32,37 +32,596 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -49,7 +49,7 @@ index 6f7730e..aefa203 100644
 +        bool disposingManagedBackend;
 +        int managedAliasReferences;
 +		readonly bool managedOnly;
-+		readonly Status managedStatus;
++		Status managedStatus;
 +		PointD managedDeviceOffset;
 +		double managedFallbackResolutionX, managedFallbackResolutionY;
 +		bool hasManagedFallbackResolution;
@@ -227,7 +227,18 @@ index 6f7730e..aefa203 100644
 +            return true;
 +        }
 +
-+		internal Status ManagedStatus => managedStatus;
++		internal Status ManagedStatus => aliasOwner != null && managedOnly ? aliasOwner.ManagedStatus : managedStatus;
++        internal Status ManagedContextInitialStatus => ManagedStatus != Status.Success ? ManagedStatus : ManagedFinished ? Status.SurfaceFinished : Status.Success;
++        internal void LatchManagedStatus (Status error) {
++            Surface owner = ManagedRecordingOwner;
++            if (owner.managedStatus == Status.Success) owner.managedStatus = error;
++        }
++        internal bool RejectFinishedDrawing () {
++            if (!managedOnly || !ManagedFinished) return false;
++            LatchManagedStatus (Status.SurfaceFinished);
++            RecordingGraphicsState.Latch (Status.SurfaceFinished);
++            return true;
++        }
 +		internal bool ManagedFinished => aliasOwner != null && managedOnly ? aliasOwner.ManagedFinished : finished;
 +		internal bool HasPendingRecordedCommands => aliasOwner != null && managedOnly
 +			? aliasOwner.HasPendingRecordedCommands : recorder?.HasPendingCommands ?? false;
@@ -455,7 +466,7 @@ index 6f7730e..aefa203 100644
 +		if (aliasOwner != null) return aliasOwner.TryRecord (record);
 +			lock (recordingSync) {
 +				CheckDisposed ();
-+				if (managedOnly && finished) throw new InvalidOperationException ("Cannot draw to a finished managed image surface.");
++				
 +				if (managedOnly && recorder == null) BeginRecording ();
 +				if (recorder == null && AutomaticRecordingEnabled && recordingCandidate && !handleExposed && !finished &&
 +					NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
@@ -594,7 +605,7 @@ index 6f7730e..aefa203 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +635,303 @@ namespace Cairo
+@@ -87,141 +646,299 @@ namespace Cairo
  		}
  
  
@@ -757,12 +768,8 @@ index 6f7730e..aefa203 100644
 +				if (managedOnly) {
 +					if (managedStatus != Status.Success) { finished = true; return managedStatus; }
 +					if (finished) return Status.Success;
-+					SurfaceRecorderSnapshot snapshot = null;
-+					if (recorder != null) {
-+						if (recorder.State == SurfaceRecordingState.Recording || recorder.State == SurfaceRecordingState.GpuRendered) {
-+						if (!recorder.TrySeal (out snapshot)) throw new NotSupportedException ("This drawing sequence cannot be finished by the managed image backend.");
-+						} else if (recorder.State == SurfaceRecordingState.Sealed) snapshot = recorder.CaptureSnapshot ();
-+					}
++                    if (recorder == null) BeginRecording ();
++                    SurfaceRecorderSnapshot snapshot = recorder.CaptureSnapshot ();
 +					try {
 +						if (this is ImageSurface image) {
 +							if (snapshot != null && image.ManagedWidth > 0 && image.ManagedHeight > 0) image.ReplaceManagedPixels (image.RenderManagedSnapshot (snapshot));
@@ -796,14 +803,14 @@ index 6f7730e..aefa203 100644
  		public void MarkDirty ()
  		{
  			CheckDisposed ();
-+			if (managedOnly) return;
++			if (managedOnly) { if (ManagedFinished) LatchManagedStatus (Status.SurfaceFinished); return; }
  			NativeMethods.cairo_surface_mark_dirty (Handle);
  		}
  
  		public void MarkDirty (Rectangle rectangle)
  		{
  			CheckDisposed ();
-+			if (managedOnly) return;
++			if (managedOnly) { if (ManagedFinished) LatchManagedStatus (Status.SurfaceFinished); return; }
  			NativeMethods.cairo_surface_mark_dirty_rectangle (Handle, (int)rectangle.X, (int)rectangle.Y, (int)rectangle.Width, (int)rectangle.Height);
  		}
  
@@ -876,7 +883,7 @@ index 6f7730e..aefa203 100644
  		public Status Status {
  			get {
  				CheckDisposed ();
-+				if (managedOnly && handle == IntPtr.Zero) return managedStatus;
++				if (managedOnly && handle == IntPtr.Zero) return ManagedStatus;
 +				MaterializeRecorder ();
  				return NativeMethods.cairo_surface_status (handle);
  			}

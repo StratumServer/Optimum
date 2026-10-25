@@ -109,7 +109,7 @@ public sealed class CairoSurfaceLifetimeParityTests
             using var context = new Context (source); source.Dispose ();
             Assert.Equal (Status.InvalidSize, context.Status); context.Paint ();
             using var target = context.GetTarget ();
-            Assert.Equal (Status.InvalidSize, target.Status);
+            Assert.Equal (Status.NoMemory, target.Status);
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 

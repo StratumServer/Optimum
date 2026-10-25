@@ -143,7 +143,7 @@ namespace Cairo
 		internal double DashOffset => View.DashOffset;
 		internal double[] GetDashes() => (double[])View.Dashes.Clone();
 
-		void Latch(Status error) { if (status == Status.Success) status = error; }
+		internal void Latch(Status error) { if (status == Status.Success) status = error; }
 
 		static bool IsInvertible(Matrix m)
 		{

@@ -52,7 +52,8 @@ namespace Cairo
         {
             lock (sync) {
                 if (!contextStates.TryGetValue (context, out ContextState selected)) {
-                    selected = !defaultStateClaimed && (!fresh || commands.Count == 0) ? currentState : new ContextState (surface.ManagedStatus);
+                    selected = !defaultStateClaimed && (!fresh || commands.Count == 0) ? currentState : new ContextState (surface.ManagedContextInitialStatus);
+                    if (surface.ManagedFinished) selected.Graphics.Latch (surface.ManagedContextInitialStatus);
                     contextStates.Add (context, selected);
                     defaultStateClaimed = true;
                 }
@@ -198,6 +199,16 @@ namespace Cairo
 		{
 		if (State != SurfaceRecordingState.Recording) return false;
 		if (Faulted) return true;
+        if (surface.ManagedFinished) {
+            bool noOp = graphicsState.Operator == Operator.Dest || alpha <= 0;
+            foreach (RecordedGuiClip clip in clips) noOp |= clip.Path.IsEmpty;
+            // Cairo skips an empty fill but still validates the target for an empty stroke.
+            if (!paintAll && !stroke && maskSurface == null && maskPattern == null)
+                noOp |= graphicsState.CopyPath ().Length == 0;
+            if (!noOp) surface.RejectFinishedDrawing ();
+            if (clearsPath) graphicsState.NewPath ();
+            return true;
+        }
 		if (stroke && graphicsState.LineWidth <= 0) {
 		// Cairo draws nothing for a zero-width stroke; the path is still consumed by Stroke.
 		bool ignored = Add(new Command(replay));
@@ -434,8 +445,9 @@ namespace Cairo
 		internal void CompleteManagedFinish ()
 		{
 			lock (sync) {
-				if (state != SurfaceRecordingState.Sealed) throw new InvalidOperationException ("The recorder must be sealed before finishing a managed surface.");
-				ClearCommands ();
+				if (state != SurfaceRecordingState.Recording && state != SurfaceRecordingState.Sealed && state != SurfaceRecordingState.GpuRendered) throw new InvalidOperationException ("The recorder must be live before finishing a managed surface.");
+                ClearCommandsForPixelCheckpoint ();
+                state = SurfaceRecordingState.Recording;
 			}
 		}
 		internal string FirstMaterializationTrigger { get { lock (sync) return firstMaterializationTrigger; } }
@@ -551,7 +563,7 @@ namespace Cairo
 				if (state == SurfaceRecordingState.Disposed) throw new ObjectDisposedException (nameof (SurfaceRecorder));
 				if (state == SurfaceRecordingState.Failed) failure.Throw ();
 				if (state != SurfaceRecordingState.Recording) return false;
-				commands.Add (surface.IsManagedOnly ? command.WithContext (currentState.Identity) : command);
+				if (!surface.ManagedFinished) commands.Add (surface.IsManagedOnly ? command.WithContext (currentState.Identity) : command);
 				return true;
 			}
 		}

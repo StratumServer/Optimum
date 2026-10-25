@@ -1393,10 +1393,21 @@ public sealed class CairoNativeFreeRecordedGuiTests
 			}
 			surface.Flush ();
 			byte[] beforeFinish = surface.Data;
+            IntPtr preservedPixels = !CairoNativeGuard.NativeAllowed ? surface.DataPtr : IntPtr.Zero;
 			Assert.Equal (Status.Success, surface.Finish ());
 			Assert.Equal (beforeFinish, surface.Data);
-			if (!CairoNativeGuard.NativeAllowed)
-				Assert.Throws<InvalidOperationException> (() => context.Rectangle (3, 0, 1, 1));
+            if (!CairoNativeGuard.NativeAllowed) {
+                context.Rectangle (3, 0, 1, 1);
+                Assert.Equal (Status.Success, context.Status);
+                context.Fill ();
+                Assert.Equal (Status.SurfaceFinished, context.Status);
+                Assert.Equal (Status.SurfaceFinished, surface.Status);
+                Assert.Null (surface.Data);
+                byte[] afterFailedDrawing = new byte[beforeFinish.Length];
+                Marshal.Copy (preservedPixels, afterFailedDrawing, 0, afterFailedDrawing.Length);
+                Assert.Equal (beforeFinish, afterFailedDrawing);
+                AssertNoCairoNativeLoad (deniedBefore);
+            }
 		} finally {
 			Surface.ConfigureAutomaticRecording (automaticRecording);
 		}

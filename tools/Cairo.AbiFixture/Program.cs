@@ -94,6 +94,19 @@ using (var invalid = new ImageSurface(Format.Argb32, -1, 1))
         throw new InvalidOperationException("The legacy image factory lost its Cairo error-surface contract.");
 }
 surface.WriteToPng(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-missing-" + Guid.NewGuid().ToString("N"), "image.png"));
+using (var finishedSurface = new ImageSurface(Format.Argb32, 4, 4))
+using (var finishedContext = new Context(finishedSurface))
+{
+    finishedContext.Save();
+    finishedSurface.Finish();
+    finishedContext.Restore();
+    finishedContext.Paint();
+    if (finishedContext.Status != Status.SurfaceFinished || finishedSurface.Status != Status.SurfaceFinished)
+        throw new InvalidOperationException("The replacement lost the legacy finished-surface error contract.");
+    using var nilContext = new Context(finishedSurface);
+    if (nilContext.Status != Status.SurfaceFinished)
+        throw new InvalidOperationException("A new context must inherit the finished target error.");
+}
 using var targetSurface = new ImageSurface(Format.Argb32, 16, 12);
 using var clearSurface = new ImageSurface(Format.Argb32, 2, 2);
 using (var clearContext = new Context(clearSurface))

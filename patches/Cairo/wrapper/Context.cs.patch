@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..3e694ae 100644
+index 03f9c760..c17fc5f2 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -452,7 +452,7 @@ index 03f9c76..3e694ae 100644
  
  		[Obsolete ("Use GetTarget/SetTarget")]
  		public Cairo.Surface Target {
-@@ -331,20 +520,59 @@ namespace Cairo
+@@ -331,20 +520,61 @@ namespace Cairo
  			}
  		}
  
@@ -462,6 +462,8 @@ index 03f9c76..3e694ae 100644
 -			return Surface.Lookup (NativeMethods.cairo_get_target (handle), false);
 +		CheckDisposedOnly ();
 +		if (recordingSurface != null) {
++        if (recordingSurface.RecordingGraphicsState.Status != Status.Success)
++            return ImageSurface.CreateManagedErrorSurface (Status.NoMemory);
 +		Surface alias = recordingSurface.CreateRecordingAlias ();
 +		if (alias != null) return alias;
  		}
@@ -517,7 +519,7 @@ index 03f9c76..3e694ae 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -356,88 +584,134 @@ namespace Cairo
+@@ -356,88 +586,134 @@ namespace Cairo
  			}
  		}
  
@@ -662,7 +664,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		public void MoveTo (PointD p)
-@@ -445,10 +719,11 @@ namespace Cairo
+@@ -445,10 +721,11 @@ namespace Cairo
  			MoveTo (p.X, p.Y);
  		}
  
@@ -674,7 +676,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		public void LineTo (PointD p)
-@@ -456,10 +731,11 @@ namespace Cairo
+@@ -456,10 +733,11 @@ namespace Cairo
  			LineTo (p.X, p.Y);
  		}
  
@@ -686,7 +688,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		public void CurveTo (PointD p1, PointD p2, PointD p3)
-@@ -467,10 +743,11 @@ namespace Cairo
+@@ -467,10 +745,11 @@ namespace Cairo
  			CurveTo (p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y);
  		}
  
@@ -698,7 +700,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		public void RelMoveTo (Distance d)
-@@ -478,10 +755,11 @@ namespace Cairo
+@@ -478,10 +757,11 @@ namespace Cairo
  			RelMoveTo (d.Dx, d.Dy);
  		}
  
@@ -710,7 +712,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		public void RelLineTo (Distance d)
-@@ -489,10 +767,11 @@ namespace Cairo
+@@ -489,10 +769,11 @@ namespace Cairo
  			RelLineTo (d.Dx, d.Dy);
  		}
  
@@ -722,7 +724,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		public void RelCurveTo (Distance d1, Distance d2, Distance d3)
-@@ -500,24 +779,43 @@ namespace Cairo
+@@ -500,24 +781,43 @@ namespace Cairo
  			RelCurveTo (d1.Dx, d1.Dy, d2.Dx, d2.Dy, d3.Dx, d3.Dy);
  		}
  
@@ -768,7 +770,7 @@ index 03f9c76..3e694ae 100644
  		public void Rectangle (Rectangle rectangle)
  		{
  			Rectangle (rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
-@@ -528,34 +826,46 @@ namespace Cairo
+@@ -528,34 +828,46 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -819,7 +821,7 @@ index 03f9c76..3e694ae 100644
  		}
  
          #endregion
-@@ -565,134 +875,201 @@ namespace Cairo
+@@ -565,134 +877,201 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -1033,7 +1035,7 @@ index 03f9c76..3e694ae 100644
  
  		[Obsolete ("Use GetGroupTarget()")]
  		public Surface GroupTarget {
-@@ -701,35 +1078,97 @@ namespace Cairo
+@@ -701,35 +1080,99 @@ namespace Cairo
  			}
  		}
  
@@ -1042,6 +1044,8 @@ index 03f9c76..3e694ae 100644
 -			CheckDisposed ();
 +			CheckDisposedOnly ();
 +			if (recordingSurface != null && recordingSurface.IsManagedOnly) {
++                if (recordingSurface.RecordingGraphicsState.Status != Status.Success)
++                    return ImageSurface.CreateManagedErrorSurface (Status.NoMemory);
 +				Surface target = managedGroups.Count == 0 ? recordingSurface : managedGroups.Peek ().Target;
 +				return target.CreateRecordingAlias ();
 +			}
@@ -1132,7 +1136,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		[Obsolete("Use UserToDevice instead")]
-@@ -756,54 +1195,60 @@ namespace Cairo
+@@ -756,54 +1199,60 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -1202,7 +1206,7 @@ index 03f9c76..3e694ae 100644
  		}
  
  		[Obsolete ("Use SetFontSize() instead.")]
-@@ -817,29 +1262,36 @@ namespace Cairo
+@@ -817,29 +1266,36 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -1243,7 +1247,7 @@ index 03f9c76..3e694ae 100644
  			}
  		}
  
-@@ -879,16 +1331,20 @@ namespace Cairo
+@@ -879,16 +1335,20 @@ namespace Cairo
  			return dest;
  		}
  
@@ -1264,7 +1268,7 @@ index 03f9c76..3e694ae 100644
  			Marshal.FreeHGlobal (ptr);
  		}
  
-@@ -904,10 +1360,12 @@ namespace Cairo
+@@ -904,10 +1364,12 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -1277,7 +1281,7 @@ index 03f9c76..3e694ae 100644
  			IntPtr ptr;
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
-@@ -917,49 +1375,93 @@ namespace Cairo
+@@ -917,49 +1379,95 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -1299,6 +1303,7 @@ index 03f9c76..3e694ae 100644
  		{
 +			CheckDisposedOnly ();
 +			if (recordingSurface != null && recordingSurface.IsManagedOnly) {
++                if (recordingSurface.RecordingGraphicsState.Status != Status.Success || recordingSurface.RejectFinishedDrawing ()) return;
 +				if (recordingSurface.SurfaceType == SurfaceType.Pdf || recordingSurface.SurfaceType == SurfaceType.PS) recordingSurface.AdvanceManagedPage (copyCurrentPage: true);
 +				return;
 +			}
@@ -1345,6 +1350,7 @@ index 03f9c76..3e694ae 100644
  		{
 +			CheckDisposedOnly ();
 +			if (recordingSurface != null && recordingSurface.IsManagedOnly) {
++                if (recordingSurface.RecordingGraphicsState.Status != Status.Success || recordingSurface.RejectFinishedDrawing ()) return;
 +				if (recordingSurface.SurfaceType == SurfaceType.Pdf || recordingSurface.SurfaceType == SurfaceType.PS) recordingSurface.AdvanceManagedPage (copyCurrentPage: false);
 +				return;
 +			}
@@ -1372,7 +1378,7 @@ index 03f9c76..3e694ae 100644
  			if (utf8.Length > 0 && utf8[utf8.Length - 1] == 0)
  				return utf8;
  			var termedArray = new byte[utf8.Length + 1];
-@@ -977,51 +1479,65 @@ namespace Cairo
+@@ -977,51 +1485,65 @@ namespace Cairo
  			return bytes;
  		}
  
