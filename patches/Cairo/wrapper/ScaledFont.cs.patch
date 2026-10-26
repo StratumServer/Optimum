@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
-index 42d5e81..a4f8f78 100644
+index 42d5e815..704f10cd 100644
 --- a/Cairo/wrapper/ScaledFont.cs
 +++ b/Cairo/wrapper/ScaledFont.cs
-@@ -1,43 +1,55 @@
+@@ -1,43 +1,64 @@
  //
  // Mono.Cairo.ScaledFont.cs
  //
@@ -47,6 +47,7 @@ index 42d5e81..a4f8f78 100644
  	{
  		protected IntPtr handle = IntPtr.Zero;
 +		bool disposed;
++        readonly Status managedStatus;
 +		string family;
 +		ManagedFileFontSource fileSource;
 +		FontSlant slant;
@@ -57,6 +58,14 @@ index 42d5e81..a4f8f78 100644
 +		HintStyle hintStyle;
 +		HintMetrics hintMetrics;
 +		SubpixelOrder subpixelOrder;
++
++        internal ScaledFont (Status error)
++        {
++            managedStatus = error;
++            family = "Sans";
++            fontMatrix = new Matrix ();
++            ctm = new Matrix ();
++        }
  
  		internal ScaledFont (IntPtr handle, bool owner)
  		{
@@ -67,7 +76,7 @@ index 42d5e81..a4f8f78 100644
  
  			this.handle = handle;
  			if (!owner)
-@@ -45,67 +57,145 @@ namespace Cairo {
+@@ -45,67 +66,150 @@ namespace Cairo {
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
@@ -134,6 +143,7 @@ index 42d5e81..a4f8f78 100644
 +		internal ScaledFont CloneForRecorder ()
 +		{
 +			CheckDisposed ();
++            if (managedStatus != Status.Success) return new ScaledFont (managedStatus);
 +			if (HasManagedMetadata) {
 +				using var face = new FontFace (family, slant, weight, fileSource);
 +				using var options = GetManagedFontOptions ();
@@ -145,6 +155,8 @@ index 42d5e81..a4f8f78 100644
 +		IntPtr EnsureNativeHandle ()
 +		{
 +			CheckDisposed ();
++            if (managedStatus != Status.Success)
++                throw new NotSupportedException ("A managed error ScaledFont has no native handle.");
 +			if (handle == IntPtr.Zero) {
 +				if (!HasManagedMetadata)
 +					throw new NotSupportedException ("This ScaledFont has no managed description.");
@@ -167,6 +179,7 @@ index 42d5e81..a4f8f78 100644
 -				FontExtents extents;
 -				NativeMethods.cairo_scaled_font_extents (handle, out extents);
 -				return extents;
++                if (managedStatus != Status.Success) return default;
 +				if (handle != IntPtr.Zero) {
 +					FontExtents nativeExtents;
 +					NativeMethods.cairo_scaled_font_extents (handle, out nativeExtents);
@@ -185,8 +198,8 @@ index 42d5e81..a4f8f78 100644
 -				NativeMethods.cairo_scaled_font_get_font_matrix (handle, out m);
 -				return m;
 +				if (HasManagedMetadata) return (Matrix)fontMatrix.Clone ();
-+				Matrix matrix;
-+				NativeMethods.cairo_scaled_font_get_font_matrix (handle, out matrix);
++				Matrix matrix = new Matrix ();
++				NativeMethods.cairo_scaled_font_get_font_matrix (handle, matrix);
 +				return matrix;
  			}
  		}
@@ -210,6 +223,7 @@ index 42d5e81..a4f8f78 100644
 -			Marshal.FreeHGlobal (ptr);
 -			return extents;
 +			if (glyphs == null) throw new ArgumentNullException (nameof (glyphs));
++            if (managedStatus != Status.Success) return default;
 +			if (handle != IntPtr.Zero) {
 +				IntPtr ptr = Context.FromGlyphToUnManagedMemory (glyphs);
 +				try {
@@ -230,13 +244,13 @@ index 42d5e81..a4f8f78 100644
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_scaled_font_status (handle);
-+				return handle == IntPtr.Zero ? Cairo.Status.Success : NativeMethods.cairo_scaled_font_status (handle);
++				return handle == IntPtr.Zero ? managedStatus : NativeMethods.cairo_scaled_font_status (handle);
  			}
  		}
  
  		public void Dispose ()
  		{
-@@ -115,28 +205,25 @@ namespace Cairo {
+@@ -115,28 +219,25 @@ namespace Cairo {
  
  		protected virtual void Dispose (bool disposing)
  		{

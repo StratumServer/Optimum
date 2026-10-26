@@ -110,9 +110,25 @@ using (var finishedContext = new Context(finishedSurface))
     finishedContext.Paint();
     if (finishedContext.Status != Status.SurfaceFinished || finishedSurface.Status != Status.SurfaceFinished)
         throw new InvalidOperationException("The replacement lost the legacy finished-surface error contract.");
+    using var failedFont = finishedContext.GetScaledFont();
+    if (failedFont.Status != Status.SurfaceFinished || failedFont.FontExtents.Height != 0 || failedFont.FontMatrix.Xx != 1)
+        throw new InvalidOperationException("An errored legacy context must return a nil scaled font.");
     using var nilContext = new Context(finishedSurface);
     if (nilContext.Status != Status.SurfaceFinished)
         throw new InvalidOperationException("A new context must inherit the finished target error.");
+}
+using (var textSurface = new ImageSurface(Format.Argb32, 8, 8))
+using (var textContext = new Context(textSurface))
+{
+    textContext.MoveTo(1, 4);
+    textSurface.Finish();
+    textContext.ShowText("");
+    textContext.ShowGlyphs(Array.Empty<Glyph>());
+    if (textSurface.Status != Status.SurfaceFinished || textContext.Status != Status.Success)
+        throw new InvalidOperationException("Finished text drawing must keep native surface/context errors separate.");
+    textContext.TextExtents(new byte[] { 0xff });
+    if (textContext.Status != Status.InvalidString || textContext.FontExtents.Height != 0)
+        throw new InvalidOperationException("Invalid UTF-8 must latch the legacy error without native fallback.");
 }
 using var targetSurface = new ImageSurface(Format.Argb32, 16, 12);
 using var clearSurface = new ImageSurface(Format.Argb32, 2, 2);

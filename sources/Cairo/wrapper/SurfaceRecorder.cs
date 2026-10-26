@@ -264,17 +264,30 @@ namespace Cairo
 		internal bool RecordText(byte[] text, bool pathOnly)
 		{
 		if (Faulted) return State == SurfaceRecordingState.Recording;
+            // Cairo queries text/glyph support even for an empty string. On a finished
+            // target this latches the surface error without faulting the context.
+            if (!pathOnly && surface.ManagedFinished) surface.LatchManagedStatus (Status.SurfaceFinished);
 			using var textPreparation = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
 			byte[] copy = (byte[])text.Clone();
 			int terminator = Array.IndexOf(copy, (byte)0);
 			int length = terminator < 0 ? copy.Length : terminator;
 			string decoded;
 			try { decoded = new UTF8Encoding(false, true).GetString(copy, 0, length); }
-			catch (DecoderFallbackException exception) { throw new InvalidOperationException("Skia GUI text requires valid UTF-8; refusing Cairo materialization.", exception); }
+            catch (DecoderFallbackException) {
+                // cairo_text_path ignores conversion failure; show_text latches it.
+                if (!pathOnly) graphicsState.Latch (Status.InvalidString);
+                return true;
+            }
 			if (pathOnly) {
 			bool appended = RecordNative(c => c.TextPath(copy), stateUpdate: s => SkiaTextPath.AppendText(s, decoded));
 			return appended;
 			}
+            if (surface.ManagedFinished) {
+                graphicsState.TryGetCurrentPoint (out double x, out double y);
+                TextExtents metrics = SkiaTextMetrics.TextExtents (graphicsState, decoded);
+                graphicsState.MoveTo (x + metrics.XAdvance, y + metrics.YAdvance);
+                return true;
+            }
 			graphicsState.TryGetCurrentPoint(out double pointX, out double pointY);
 			PointD point = new PointD(pointX, pointY);
 			using FontOptions options = graphicsState.GetFontOptions();
@@ -379,6 +392,12 @@ namespace Cairo
 		internal bool RecordGlyphs(Glyph[] glyphs, bool pathOnly)
 		{
 		if (Faulted) return State == SurfaceRecordingState.Recording;
+            if (glyphs.Length == 0) return true;
+            if (!pathOnly && surface.ManagedFinished) {
+                if (graphicsState.Operator != Operator.Dest && !HasEmptyFinishedClip ())
+                    surface.LatchManagedStatus (Status.SurfaceFinished);
+                return true;
+            }
 			Glyph[] copy = (Glyph[])glyphs.Clone();
 			if (pathOnly) return RecordNative(c => c.GlyphPath(copy), stateUpdate: s => SkiaTextPath.AppendGlyphs(s, copy));
 			using FontOptions options = graphicsState.GetFontOptions();

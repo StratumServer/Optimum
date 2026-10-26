@@ -1,5 +1,5 @@
 diff --git a/Cairo/NativeMethods.cs b/Cairo/NativeMethods.cs
-index 7d2fc60..f4ae322 100644
+index 7d2fc604..7bff904b 100644
 --- a/Cairo/NativeMethods.cs
 +++ b/Cairo/NativeMethods.cs
 @@ -46,34 +46,19 @@ namespace Cairo
@@ -361,29 +361,28 @@ index 7d2fc60..f4ae322 100644
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
          internal static extern void cairo_rel_line_to(IntPtr cr, double dx, double dy);
-@@ -705,22 +517,13 @@ namespace Cairo
-         internal static extern IntPtr cairo_scaled_font_destroy(IntPtr scaled_font);
+@@ -706,20 +518,11 @@ namespace Cairo
  
          [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
          internal static extern void cairo_scaled_font_extents(IntPtr scaled_font, out FontExtents extents);
  
--        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
 -        internal static extern void cairo_scaled_font_get_ctm(IntPtr scaled_font, out Matrix matrix);
 -
 -        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
 -        internal static extern IntPtr cairo_scaled_font_get_font_face(IntPtr scaled_font);
 -
-         [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
-         internal static extern void cairo_scaled_font_get_font_matrix(IntPtr scaled_font, out Matrix matrix);
- 
+-        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
+-        internal static extern void cairo_scaled_font_get_font_matrix(IntPtr scaled_font, out Matrix matrix);
+-
 -        [DllImport(cairo, CallingConvention = CallingConvention.Cdecl)]
 -        internal static extern IntPtr cairo_scaled_font_get_font_options(IntPtr scaled_font);
--
++        internal static extern void cairo_scaled_font_get_font_matrix(IntPtr scaled_font, [Out] Matrix matrix);
+ 
          // DONTCARE
          //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
          //internal static extern uint cairo_scaled_font_get_reference_count (IntPtr scaled_font);
  
-         //[DllImport (cairo, CallingConvention=CallingConvention.Cdecl)]
 @@ -744,13 +547,10 @@ namespace Cairo
          //internal static extern Status cairo_scaled_font_set_user_data (IntPtr scaled_font, IntPtr key, IntPtr user_data, DestroyFunc destroy);
  

@@ -313,6 +313,7 @@ namespace Cairo
 		internal void SetScaledFont(ScaledFont scaledFont)
 		{
 			if (status != Status.Success) return;
+            if (scaledFont.Status != Status.Success) { Latch (scaledFont.Status); return; }
 			current.FontFileSource = scaledFont.ManagedFileSource;
 			if (!scaledFont.HasManagedMetadata) { current.FontFamily = null; return; }
 			current.FontFamily = scaledFont.ManagedFamily;
