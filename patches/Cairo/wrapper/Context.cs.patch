@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..d58c659 100644
+index 03f9c76..286b8f6 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -528,7 +528,7 @@ index 03f9c76..d58c659 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -356,88 +595,137 @@ namespace Cairo
+@@ -356,88 +595,141 @@ namespace Cairo
  			}
  		}
  
@@ -538,11 +538,15 @@ index 03f9c76..d58c659 100644
 +			ManagedGraphicsState state = RecordedState;
 +            if (state != null && state.Status != Status.Success) return new ScaledFont (state.Status);
 +			if (state != null && state.FontFamily != null) {
++				state.EnsureScaledFontOwner ();
++				if (state.Status != Status.Success) return new ScaledFont (state.Status);
++				ManagedScaledFontCache.Lease retained = state.RetainScaledFontOwner ();
++				if (retained != null) return new ScaledFont (retained);
 +				using var face = state.FontResource != null
 +					? new FontFace (state.FontResource, state.FontFamily, ownsReference: false)
 +					: new FontFace (state.FontFamily, state.FontSlant, state.FontWeight, state.FontFileSource);
-+				using var options = state.GetFontOptions ();
-+				return new ScaledFont (face, state.FontMatrix, state.Matrix, options, ownsFaceReference: false);
++				using var options = state.GetScaledFontOptions ();
++				return new ScaledFont (face, state.FontMatrix, state.Matrix, options, acquireScaledFontReference: true);
 +			}
 +			if (state != null && !CairoNativeGuard.NativeAllowed)
 +				throw new NotSupportedException ("The current FontFace has no managed metadata required to create a ScaledFont.");
@@ -555,7 +559,7 @@ index 03f9c76..d58c659 100644
 +			if (font == null) throw new ArgumentNullException (nameof (font));
 +			if (recordingSurface != null && font.HasManagedMetadata) {
 +				var snapshot = font.CloneForRecorder ();
-+				if (RecordState (c => c.SetScaledFont (snapshot), s => s.SetScaledFont (snapshot), snapshot)) return;
++				if (RecordState (c => c.SetScaledFont (snapshot), s => s.SetScaledFont (font), snapshot)) return;
 +				snapshot.Dispose ();
 +			}
 +			if (recordingSurface != null && !CairoNativeGuard.NativeAllowed)
@@ -676,7 +680,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		public void MoveTo (PointD p)
-@@ -445,10 +733,11 @@ namespace Cairo
+@@ -445,10 +737,11 @@ namespace Cairo
  			MoveTo (p.X, p.Y);
  		}
  
@@ -688,7 +692,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		public void LineTo (PointD p)
-@@ -456,10 +745,11 @@ namespace Cairo
+@@ -456,10 +749,11 @@ namespace Cairo
  			LineTo (p.X, p.Y);
  		}
  
@@ -700,7 +704,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		public void CurveTo (PointD p1, PointD p2, PointD p3)
-@@ -467,10 +757,11 @@ namespace Cairo
+@@ -467,10 +761,11 @@ namespace Cairo
  			CurveTo (p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y);
  		}
  
@@ -712,7 +716,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		public void RelMoveTo (Distance d)
-@@ -478,10 +769,11 @@ namespace Cairo
+@@ -478,10 +773,11 @@ namespace Cairo
  			RelMoveTo (d.Dx, d.Dy);
  		}
  
@@ -724,7 +728,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		public void RelLineTo (Distance d)
-@@ -489,10 +781,11 @@ namespace Cairo
+@@ -489,10 +785,11 @@ namespace Cairo
  			RelLineTo (d.Dx, d.Dy);
  		}
  
@@ -736,7 +740,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		public void RelCurveTo (Distance d1, Distance d2, Distance d3)
-@@ -500,24 +793,43 @@ namespace Cairo
+@@ -500,24 +797,43 @@ namespace Cairo
  			RelCurveTo (d1.Dx, d1.Dy, d2.Dx, d2.Dy, d3.Dx, d3.Dy);
  		}
  
@@ -782,7 +786,7 @@ index 03f9c76..d58c659 100644
  		public void Rectangle (Rectangle rectangle)
  		{
  			Rectangle (rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
-@@ -528,34 +840,46 @@ namespace Cairo
+@@ -528,34 +844,46 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -833,7 +837,7 @@ index 03f9c76..d58c659 100644
  		}
  
          #endregion
-@@ -565,134 +889,201 @@ namespace Cairo
+@@ -565,134 +893,201 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -1047,7 +1051,7 @@ index 03f9c76..d58c659 100644
  
  		[Obsolete ("Use GetGroupTarget()")]
  		public Surface GroupTarget {
-@@ -701,35 +1092,100 @@ namespace Cairo
+@@ -701,35 +1096,100 @@ namespace Cairo
  			}
  		}
  
@@ -1149,7 +1153,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		[Obsolete("Use UserToDevice instead")]
-@@ -756,54 +1212,60 @@ namespace Cairo
+@@ -756,54 +1216,60 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -1219,7 +1223,7 @@ index 03f9c76..d58c659 100644
  		}
  
  		[Obsolete ("Use SetFontSize() instead.")]
-@@ -817,29 +1279,36 @@ namespace Cairo
+@@ -817,29 +1283,36 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -1260,7 +1264,7 @@ index 03f9c76..d58c659 100644
  			}
  		}
  
-@@ -879,16 +1348,20 @@ namespace Cairo
+@@ -879,16 +1352,20 @@ namespace Cairo
  			return dest;
  		}
  
@@ -1281,7 +1285,7 @@ index 03f9c76..d58c659 100644
  			Marshal.FreeHGlobal (ptr);
  		}
  
-@@ -904,10 +1377,12 @@ namespace Cairo
+@@ -904,10 +1381,12 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -1294,7 +1298,7 @@ index 03f9c76..d58c659 100644
  			IntPtr ptr;
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
-@@ -917,49 +1392,99 @@ namespace Cairo
+@@ -917,49 +1396,104 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -1304,7 +1308,10 @@ index 03f9c76..d58c659 100644
 +            using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement);
 +				CheckDisposedOnly ();
 +				ManagedGraphicsState state = RecordedState;
-+				if (state != null && state.FontFamily != null) return SkiaTextMetrics.FontExtents (state);
++				if (state != null && state.FontFamily != null) {
++					state.EnsureScaledFontOwner ();
++					return state.Status == Status.Success ? SkiaTextMetrics.FontExtents (state) : default;
++				}
 +				if (state != null) recordingSurface.MaterializeRecorder (handle, "FontExtents", "Context");
  				FontExtents f_extents;
  				NativeMethods.cairo_font_extents (handle, out f_extents);
@@ -1382,6 +1389,8 @@ index 03f9c76..d58c659 100644
 +		ManagedGraphicsState state = RecordedState;
 +		if (state == null) return false;
 +		if (state.FontFamily == null) { recordingSurface.MaterializeRecorder (handle, "TextExtents", "Context"); return false; }
++		state.EnsureScaledFontOwner ();
++		if (state.Status != Status.Success) return true;
 +		int end = Array.IndexOf (terminated, (byte)0);
 +		string text;
 +		try { text = new UTF8Encoding (false, true).GetString (terminated, 0, end < 0 ? terminated.Length : end); }
@@ -1395,7 +1404,7 @@ index 03f9c76..d58c659 100644
  			if (utf8.Length > 0 && utf8[utf8.Length - 1] == 0)
  				return utf8;
  			var termedArray = new byte[utf8.Length + 1];
-@@ -977,51 +1502,65 @@ namespace Cairo
+@@ -977,51 +1511,65 @@ namespace Cairo
  			return bytes;
  		}
  

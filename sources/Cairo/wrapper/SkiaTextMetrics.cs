@@ -31,7 +31,9 @@ namespace Cairo
 		/// <summary>cairo_text_extents for the managed font selection: ink box relative to the origin plus the pen advance.</summary>
 		internal static TextExtents TextExtents(ManagedGraphicsState state, string text)
 		{
-            if (state.Status != Status.Success) return default;
+			if (state.Status != Status.Success) return default;
+			state.EnsureScaledFontOwner ();
+			if (state.Status != Status.Success) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			if (state.FontFileSource != null) {
@@ -98,9 +100,11 @@ namespace Cairo
 		/// <summary>cairo_glyph_extents: the same box and advance, with explicit glyph positions.</summary>
 		internal static TextExtents GlyphExtents(ManagedGraphicsState state, Glyph[] glyphs)
 		{
-            if (state.Status != Status.Success) return default;
+			if (state.Status != Status.Success) return default;
 			var result = new TextExtents();
 			if (glyphs == null || glyphs.Length == 0) return result;
+			state.EnsureScaledFontOwner ();
+			if (state.Status != Status.Success) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			var indices = new ushort[glyphs.Length];
@@ -142,7 +146,9 @@ namespace Cairo
 		/// </summary>
 		internal static FontExtents FontExtents(ManagedGraphicsState state)
 		{
-            if (state.Status != Status.Success) return default;
+			if (state.Status != Status.Success) return default;
+			state.EnsureScaledFontOwner ();
+			if (state.Status != Status.Success) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			return FontExtents(font, options);

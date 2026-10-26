@@ -283,6 +283,8 @@ namespace Cairo
             // Cairo queries text/glyph support even for an empty string. On a finished
             // target this latches the surface error without faulting the context.
             if (!pathOnly && surface.ManagedFinished) surface.LatchManagedStatus (Status.SurfaceFinished);
+			graphicsState.EnsureScaledFontOwner ();
+			if (graphicsState.Status != Status.Success) return true;
 			using var textPreparation = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextPreparation);
 			byte[] copy = (byte[])text.Clone();
 			int terminator = Array.IndexOf(copy, (byte)0);
@@ -409,6 +411,8 @@ namespace Cairo
 		{
 		if (Faulted) return State == SurfaceRecordingState.Recording;
             if (glyphs.Length == 0) return true;
+			graphicsState.EnsureScaledFontOwner ();
+			if (graphicsState.Status != Status.Success) return true;
             if (!pathOnly && surface.ManagedFinished) {
                 if (graphicsState.Operator != Operator.Dest && !HasEmptyFinishedClip ())
                     surface.LatchManagedStatus (Status.SurfaceFinished);

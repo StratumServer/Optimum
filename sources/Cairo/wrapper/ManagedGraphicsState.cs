@@ -50,6 +50,8 @@ namespace Cairo
 			internal ManagedFileFontSource FontFileSource;
 			internal ManagedFontFaceResource FontResource;
 			internal bool OwnsFontResource;
+			internal ManagedScaledFontCache.Lease ScaledFontLease;
+			internal bool ScaledFontKeyDirty = true;
 			internal FontSlant FontSlant = FontSlant.Normal;
 			internal FontWeight FontWeight = FontWeight.Normal;
 			internal double FontSize = 10;
@@ -67,15 +69,30 @@ namespace Cairo
 				copy.Ctm = (Matrix)Ctm.Clone();
 				copy.FontMatrix = (Matrix)FontMatrix.Clone();
 				copy.OwnsFontResource = retainFontResource && OwnsFontResource && FontResource != null;
+				copy.ScaledFontLease = retainFontResource ? ScaledFontLease?.Retain () : null;
+				copy.ScaledFontKeyDirty = ScaledFontKeyDirty;
 				if (copy.OwnsFontResource) copy.FontResource.AddReference ();
 				return copy;
 			}
 
 			internal void ReleaseFontResource ()
 			{
+				ReleaseScaledFontLease ();
+				ReleaseManagedFontResource ();
+			}
+
+			internal void ReleaseManagedFontResource ()
+			{
 				if (!OwnsFontResource) return;
 				OwnsFontResource = false;
 				FontResource.Release ();
+			}
+
+			internal void ReleaseScaledFontLease ()
+			{
+				ScaledFontLease?.Dispose ();
+				ScaledFontLease = null;
+				ScaledFontKeyDirty = true;
 			}
 		}
 
@@ -145,6 +162,11 @@ namespace Cairo
 			target.current.FontResource = current.FontResource;
 			target.current.OwnsFontResource = current.OwnsFontResource;
 			current.OwnsFontResource = false;
+			target.current.ReleaseScaledFontLease ();
+			target.current.ScaledFontLease = current.ScaledFontLease;
+			target.current.ScaledFontKeyDirty = current.ScaledFontKeyDirty;
+			current.ScaledFontLease = null;
+			current.ScaledFontKeyDirty = true;
 		}
 
 		internal void CopyCurrentPathFrom(ManagedGraphicsState source)
@@ -163,6 +185,7 @@ namespace Cairo
 				if (status != Status.Success) return;
 				if (!IsInvertible(value)) { Latch(Status.InvalidMatrix); return; }
 				current.Ctm = (Matrix)value.Clone();
+				current.ScaledFontKeyDirty = true;
 			}
 		}
 
@@ -215,7 +238,7 @@ namespace Cairo
 
 		// ---- transforms ----
 
-		internal void IdentityMatrix() { if (status == Status.Success) current.Ctm = new Matrix(); }
+		internal void IdentityMatrix() { if (status == Status.Success) { current.Ctm = new Matrix(); current.ScaledFontKeyDirty = true; } }
 
 		internal void Translate(double tx, double ty)
 		{
@@ -250,6 +273,7 @@ namespace Cairo
 			Matrix product = Matrix.Multiply(tmp, current.Ctm);
 			if (!IsInvertible(product)) { Latch(Status.InvalidMatrix); return; }
 			current.Ctm = product;
+			current.ScaledFontKeyDirty = true;
 		}
 
 		internal void UserToDevice(ref double x, ref double y) { if (status == Status.Success) current.Ctm.TransformPoint(ref x, ref y); }
@@ -382,9 +406,10 @@ namespace Cairo
 			}
 			if (trackFontOwnership && !acquired && resource != null) resource.AddReference ();
 			if (!trackFontOwnership && acquired) resource?.Release ();
-			current.ReleaseFontResource ();
+			current.ReleaseManagedFontResource ();
 			current.FontResource = resource;
 			current.OwnsFontResource = trackFontOwnership && resource != null;
+			current.ScaledFontKeyDirty = true;
 		}
 
 		internal void SetScaledFont(ScaledFont scaledFont)
@@ -403,6 +428,50 @@ namespace Cairo
 			current.FontSize = scaledFont.ManagedSize;
 			using FontOptions options = scaledFont.GetManagedFontOptions();
 			SetFontOptions(options);
+			TrackScaledFont (scaledFont);
+		}
+
+		/// <summary>Resolve the current state to its lazy scaled-font cache owner on first text use.</summary>
+		internal void EnsureScaledFontOwner ()
+		{
+			if (!trackFontOwnership || status != Status.Success || current.FontFamily == null) return;
+			if (!current.ScaledFontKeyDirty && current.ScaledFontLease != null) return;
+			ManagedFontFaceResource resource = FontResource;
+			if (resource == null) return;
+			using FontOptions options = GetScaledFontOptions ();
+			ManagedScaledFontCache.Lease acquired;
+			try { acquired = ManagedScaledFontCache.Shared.Acquire (resource, current.FontMatrix, current.Ctm, options); }
+			catch (ArgumentException) { Latch (Status.InvalidMatrix); return; }
+			if (ReferenceEquals (current.ScaledFontLease?.Resource, acquired.Resource)) {
+				acquired.Dispose ();
+				current.ScaledFontKeyDirty = false;
+				return;
+			}
+			current.ReleaseScaledFontLease ();
+			current.ScaledFontLease = acquired;
+			current.ScaledFontKeyDirty = false;
+		}
+
+		internal ManagedScaledFontCache.Lease RetainScaledFontOwner ()
+		{
+			EnsureScaledFontOwner ();
+			if (status != Status.Success) return null;
+			return current.ScaledFontLease?.Retain ();
+		}
+
+		void TrackScaledFont (ScaledFont scaledFont)
+		{
+			if (!trackFontOwnership || scaledFont.ManagedStatus != Status.Success) return;
+			ManagedScaledFontCache.Lease acquired = scaledFont.RetainManagedReference () ?? scaledFont.AcquireManagedReference ();
+			if (acquired == null) return;
+			if (ReferenceEquals (current.ScaledFontLease?.Resource, acquired.Resource)) {
+				acquired.Dispose ();
+				current.ScaledFontKeyDirty = true;
+				return;
+			}
+			current.ReleaseScaledFontLease ();
+			current.ScaledFontLease = acquired;
+			current.ScaledFontKeyDirty = true;
 		}
 
 		/// <summary>cairo_set_font_size: the font matrix becomes a uniform scale. <see cref="FontSize"/> tracks only this call.</summary>
@@ -411,12 +480,14 @@ namespace Cairo
 			if (status != Status.Success) return;
 			current.FontSize = size;
 			current.FontMatrix = State.FontScale(size);
+			current.ScaledFontKeyDirty = true;
 		}
 
 		internal void SetFontMatrix(Matrix matrix)
 		{
 			if (status != Status.Success) return;
 			current.FontMatrix = (Matrix)matrix.Clone();
+			current.ScaledFontKeyDirty = true;
 		}
 
 		/// <summary>The face was replaced by a native scaled font or face; there is no managed description of it.</summary>
@@ -434,6 +505,7 @@ namespace Cairo
 			if (status != Status.Success) return;
 			current.FontAntialias = options.Antialias; current.FontHintStyle = options.HintStyle;
 			current.FontHintMetrics = options.HintMetrics; current.FontSubpixelOrder = options.SubpixelOrder;
+			current.ScaledFontKeyDirty = true;
 		}
 
 		internal static ManagedGraphicsState CreateFontMetricsState(string family, FontSlant slant, FontWeight weight,
@@ -453,6 +525,14 @@ namespace Cairo
 		{
 			State view = View;
 			return FontOptions.FromValues(view.FontAntialias, view.FontHintStyle, view.FontHintMetrics, view.FontSubpixelOrder);
+		}
+
+		/// <summary>Context-created scaled fonts merge the image/surface default metrics hinting before cache lookup.</summary>
+		internal FontOptions GetScaledFontOptions ()
+		{
+			FontOptions options = GetFontOptions ();
+			if (options.HintMetrics == HintMetrics.Default) options.HintMetrics = HintMetrics.On;
+			return options;
 		}
 
 		// ---- dash ----

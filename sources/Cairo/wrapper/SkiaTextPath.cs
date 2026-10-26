@@ -9,6 +9,9 @@ namespace Cairo
 		/// <summary>Appends the outlines of a string laid out from the current point, then moves the current point past it.</summary>
 		internal static void AppendText(ManagedGraphicsState state, string text)
 		{
+			if (state.Status != Status.Success) return;
+			state.EnsureScaledFontOwner ();
+			if (state.Status != Status.Success) return;
 			if (string.IsNullOrEmpty(text)) return;
 			state.TryGetCurrentPoint(out double originX, out double originY);
 			using FontOptions options = state.GetFontOptions();
@@ -32,7 +35,10 @@ namespace Cairo
 		/// <summary>Appends the outlines of explicitly positioned glyphs.</summary>
 		internal static void AppendGlyphs(ManagedGraphicsState state, Glyph[] glyphs)
 		{
+			if (state.Status != Status.Success) return;
 			if (glyphs == null || glyphs.Length == 0) return;
+			state.EnsureScaledFontOwner ();
+			if (state.Status != Status.Success) return;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
