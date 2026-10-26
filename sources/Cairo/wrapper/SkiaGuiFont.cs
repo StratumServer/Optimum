@@ -9,7 +9,7 @@ namespace Cairo
 		internal static SKFont Create(ManagedGraphicsState state, FontOptions options)
 		{
 			string family = state.FontFamily;
-			if (string.IsNullOrWhiteSpace(family))
+			if (family == null)
 				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
 			return Create(family, state.FontSlant, state.FontWeight, state.FontSize, options, state.FontFileSource);
 		}
@@ -20,8 +20,7 @@ namespace Cairo
 		static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, FontOptions options, ManagedFileFontSource fileSource)
 		{
 			using var fontSelection = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
-			if (string.IsNullOrWhiteSpace(family))
-				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
+            if (string.IsNullOrWhiteSpace (family)) family = "Sans";
 			var weight = fontWeight == FontWeight.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal;
 			var slant = fontSlant == FontSlant.Italic ? SKFontStyleSlant.Italic :
 				fontSlant == FontSlant.Oblique ? SKFontStyleSlant.Oblique : SKFontStyleSlant.Upright;

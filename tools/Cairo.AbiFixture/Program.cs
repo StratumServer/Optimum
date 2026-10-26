@@ -137,6 +137,19 @@ using (var textContext = new Context(textSurface))
     if (textContext.Status != Status.InvalidString || textContext.FontExtents.Height != 0)
         throw new InvalidOperationException("Invalid UTF-8 must latch the legacy error without native fallback.");
 }
+using (var selectionSurface = new ImageSurface(Format.Argb32, 64, 24))
+using (var selectionContext = new Context(selectionSurface))
+{
+    selectionContext.SelectFontFace("", FontSlant.Normal, FontWeight.Normal);
+    selectionContext.SetFontSize(12);
+    if (selectionContext.TextExtents("Ab").XAdvance <= 0)
+        throw new InvalidOperationException("An empty legacy family must resolve the default font.");
+    selectionContext.SelectFontFace("DejaVu Sans\0ignored", FontSlant.Normal, FontWeight.Normal);
+    selectionContext.MoveTo(1, 16); selectionContext.ShowText("Ab");
+    selectionContext.SelectFontFace(null, FontSlant.Normal, FontWeight.Normal);
+    if (selectionContext.Status != Status.NullPointer || selectionSurface.Status != Status.Success)
+        throw new InvalidOperationException("Null font selection must preserve the legacy sticky error contract.");
+}
 using var targetSurface = new ImageSurface(Format.Argb32, 16, 12);
 using var clearSurface = new ImageSurface(Format.Argb32, 2, 2);
 using (var clearContext = new Context(clearSurface))

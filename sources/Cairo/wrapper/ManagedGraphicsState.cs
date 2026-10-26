@@ -294,8 +294,10 @@ namespace Cairo
 		internal void SelectFontFace(string family, FontSlant slant, FontWeight weight)
 		{
 			if (status != Status.Success) return;
+            Status error = FontFace.SelectionStatus (family, slant, weight);
+            if (error != Status.Success) { Latch (error); return; }
 			current.FontFileSource = null;
-			current.FontFamily = family; current.FontSlant = slant; current.FontWeight = weight;
+			current.FontFamily = FontFace.NormalizeFamily (family); current.FontSlant = slant; current.FontWeight = weight;
 		}
 
 		internal void SetContextFontFace(FontFace fontFace)

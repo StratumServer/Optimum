@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/FontFace.cs b/Cairo/wrapper/FontFace.cs
-index 76f0d01c..3a7c7273 100644
+index 76f0d01c..2f0e2e2d 100644
 --- a/Cairo/wrapper/FontFace.cs
 +++ b/Cairo/wrapper/FontFace.cs
 @@ -37,10 +37,22 @@ using System;
@@ -25,7 +25,7 @@ index 76f0d01c..3a7c7273 100644
  		{
  			if (handle == IntPtr.Zero)
  				return null;
-@@ -61,58 +73,126 @@ namespace Cairo
+@@ -61,58 +73,140 @@ namespace Cairo
  		protected virtual void Dispose (bool disposing)
  		{
  			if (!disposing || CairoDebug.Enabled)
@@ -67,12 +67,26 @@ index 76f0d01c..3a7c7273 100644
 +
 +		internal FontFace (string family, FontSlant slant, FontWeight weight, ManagedFileFontSource fileSource)
 +		{
-+			if (string.IsNullOrWhiteSpace (family)) throw new ArgumentException ("A font family is required.", nameof (family));
++            managedStatus = SelectionStatus (family, slant, weight);
++            if (managedStatus != Status.Success) { this.family = string.Empty; return; }
 +			this.fileSource = fileSource;
-+			this.family = family;
++			this.family = NormalizeFamily (family);
 +			this.slant = slant;
 +			this.weight = weight;
 +		}
++
++        internal static Status SelectionStatus (string family, FontSlant slant, FontWeight weight)
++        {
++            if (family == null) return Status.NullPointer;
++            if ((uint)slant > (uint)FontSlant.Oblique) return Status.InvalidSlant;
++            if ((uint)weight > (uint)FontWeight.Bold) return Status.InvalidWeight;
++            return Status.Success;
++        }
++        internal static string NormalizeFamily (string family)
++        {
++            int terminator = family.IndexOf ('\0');
++            return terminator < 0 ? family : family.Substring (0, terminator);
++        }
 +
 +		internal ManagedFileFontSource ManagedFileSource => fileSource;
 +		internal bool HasManagedMetadata => family != null;
