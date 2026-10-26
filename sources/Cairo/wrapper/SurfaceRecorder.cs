@@ -45,7 +45,7 @@ namespace Cairo
             internal ContextState (Status status, object identity = null) { Identity = identity ?? new object (); Graphics = new ManagedGraphicsState (status); }
         }
         readonly ConditionalWeakTable<Context, ContextState> contextStates = new ConditionalWeakTable<Context, ContextState> ();
-        ContextState currentState = new ContextState (Status.Success);
+        ContextState currentState;
         bool defaultStateClaimed;
         ManagedGraphicsState graphicsState { get => currentState.Graphics; set => currentState.Graphics = value; }
         internal void ActivateContext (Context context, bool fresh = false)
@@ -91,7 +91,7 @@ namespace Cairo
 		{
 			if (State != SurfaceRecordingState.Recording)
 				throw new InvalidOperationException ("Only a live managed recording target can reset its Context state.");
-			graphicsState = new ManagedGraphicsState (surface.ManagedStatus);
+			ReplaceGraphicsState (new ManagedGraphicsState (surface.ManagedStatus));
 			clips.Clear ();
 			savedClips.Clear ();
 			savedAntialias.Clear ();
@@ -102,7 +102,8 @@ namespace Cairo
 
 		internal void InitializeGroupFrom (SurfaceRecorder parent)
 		{
-			graphicsState = parent.graphicsState.CloneForGroup ();
+			ReplaceGraphicsState (parent.graphicsState.CloneForGroup (contextState: true));
+			parent.graphicsState.TransferCurrentFontOwnershipTo (graphicsState);
 			foreach (RecordedGuiClip clip in parent.clips) {
 				RecordedGuiClip clone = clip.Clone ();
 				clips.Add (clone); resources.Add (new RecordedResource (clone));
@@ -126,7 +127,7 @@ namespace Cairo
 		internal void InitializePageFrom (SurfaceRecorder parent, bool copyCommands)
 		{
             currentState = new ContextState (surface.ManagedStatus, parent.currentState.Identity);
-			graphicsState = parent.graphicsState.CloneForGroup ();
+			ReplaceGraphicsState (parent.graphicsState.CloneForGroup (retainFontOwnership: true));
 			foreach (RecordedGuiClip clip in parent.clips) {
 				RecordedGuiClip clone = clip.Clone ();
 				clips.Add (clone); resources.Add (new RecordedResource (clone));
@@ -165,10 +166,12 @@ namespace Cairo
         static bool IsStateResource (IDisposable value) => value is Pattern || value is FontFace || value is ScaledFont || value is RecordedGuiClip;
         ContextState CloneContextState (ContextState source)
         {
-            var result = new ContextState (surface.ManagedStatus, source.Identity) {
-                Graphics = source.Graphics.CloneForGroup (), SaveDepth = source.SaveDepth,
-                Unqualified = source.Unqualified, AntialiasConfigured = source.AntialiasConfigured
-            };
+            var result = new ContextState (surface.ManagedStatus, source.Identity);
+            result.Graphics.ReleaseFontOwnership ();
+            result.Graphics = source.Graphics.CloneForGroup (retainFontOwnership: true);
+            result.SaveDepth = source.SaveDepth;
+            result.Unqualified = source.Unqualified;
+            result.AntialiasConfigured = source.AntialiasConfigured;
             foreach (var clip in source.Clips) {
                 var clone = clip.Clone (); result.Clips.Add (clone); resources.Add (new RecordedResource (clone));
             }
@@ -182,6 +185,19 @@ namespace Cairo
             for (int i = antialias.Length - 1; i >= 0; i--) result.SavedAntialias.Push (antialias[i]);
             return result;
         }
+
+		void ReplaceGraphicsState (ManagedGraphicsState replacement)
+		{
+			graphicsState?.ReleaseFontOwnership ();
+			graphicsState = replacement;
+		}
+
+		internal void ReleaseContextFontOwnership (Context context)
+		{
+			lock (sync) {
+				if (contextStates.TryGetValue (context, out ContextState contextState)) contextState.Graphics.ReleaseFontOwnership ();
+			}
+		}
 
 				internal bool RecordNative(Action<Context> replay, IDisposable resource = null, RecordedSurfaceSource sourceBinding = null, Action<ManagedGraphicsState> stateUpdate = null)
 		{
@@ -464,7 +480,7 @@ namespace Cairo
 			}
 		}
 
-		internal SurfaceRecorder (Surface surface) { this.surface = surface; graphicsState = new ManagedGraphicsState (surface.ManagedStatus); width = surface.RecordedWidth; height = surface.RecordedHeight; }
+		internal SurfaceRecorder (Surface surface) { this.surface = surface; currentState = new ContextState (surface.ManagedStatus); width = surface.RecordedWidth; height = surface.RecordedHeight; }
 		internal void Resize (int width, int height)
 		{
 			lock (sync) {
@@ -649,7 +665,12 @@ namespace Cairo
 
 		internal void DisposeFromSurface ()
 		{
-			lock (sync) { ClearCommands (); state = SurfaceRecordingState.Disposed; }
+			lock (sync) {
+				ClearCommands ();
+				currentState.Graphics.ReleaseFontOwnership ();
+				foreach (KeyValuePair<Context, ContextState> entry in contextStates) entry.Value.Graphics.ReleaseFontOwnership ();
+				state = SurfaceRecordingState.Disposed;
+			}
 		}
 
 		static void ThrowIfError (Status status, string phase)

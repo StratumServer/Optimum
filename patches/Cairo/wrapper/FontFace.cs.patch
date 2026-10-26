@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/FontFace.cs b/Cairo/wrapper/FontFace.cs
-index 76f0d01c..2f0e2e2d 100644
+index 76f0d01..304b55d 100644
 --- a/Cairo/wrapper/FontFace.cs
 +++ b/Cairo/wrapper/FontFace.cs
-@@ -37,10 +37,22 @@ using System;
+@@ -37,10 +37,24 @@ using System;
  namespace Cairo
  {
  	public class FontFace : IDisposable
@@ -14,6 +14,8 @@ index 76f0d01c..2f0e2e2d 100644
 +		bool disposed;
 +        readonly Status managedStatus;
 +		ManagedFileFontSource fileSource;
++		ManagedFontFaceResource managedResource;
++		bool ownsManagedResource;
 +
 +        internal FontFace (Status error)
 +        {
@@ -25,7 +27,7 @@ index 76f0d01c..2f0e2e2d 100644
  		{
  			if (handle == IntPtr.Zero)
  				return null;
-@@ -61,58 +73,140 @@ namespace Cairo
+@@ -61,58 +75,166 @@ namespace Cairo
  		protected virtual void Dispose (bool disposing)
  		{
  			if (!disposing || CairoDebug.Enabled)
@@ -37,6 +39,9 @@ index 76f0d01c..2f0e2e2d 100644
 -			NativeMethods.cairo_font_face_destroy (handle);
 +			if (handle != IntPtr.Zero) NativeMethods.cairo_font_face_destroy (handle);
  			handle = IntPtr.Zero;
++			if (ownsManagedResource) managedResource?.Release ();
++			ownsManagedResource = false;
++			managedResource = null;
 +			fileSource = null;
 +			disposed = true;
  		}
@@ -73,6 +78,28 @@ index 76f0d01c..2f0e2e2d 100644
 +			this.family = NormalizeFamily (family);
 +			this.slant = slant;
 +			this.weight = weight;
++			managedResource = fileSource == null
++				? ManagedFontFaceResource.AcquireToy (this.family, slant, weight)
++				: ManagedFontFaceResource.CreateFile (fileSource);
++			ownsManagedResource = true;
++		}
++
++		internal FontFace (ManagedFontFaceResource resource, bool ownsReference = true)
++			: this (resource, resource?.Family, ownsReference)
++		{
++		}
++
++		internal FontFace (ManagedFontFaceResource resource, string managedFamily, bool ownsReference = true)
++		{
++			if (resource == null) throw new ArgumentNullException (nameof (resource));
++			managedStatus = Status.Success;
++			managedResource = resource;
++			ownsManagedResource = ownsReference;
++			if (ownsReference) resource.AddReference ();
++			family = managedFamily;
++			slant = resource.Slant;
++			weight = resource.Weight;
++			fileSource = resource.FileSource;
 +		}
 +
 +        internal static Status SelectionStatus (string family, FontSlant slant, FontWeight weight)
@@ -89,6 +116,7 @@ index 76f0d01c..2f0e2e2d 100644
 +        }
 +
 +		internal ManagedFileFontSource ManagedFileSource => fileSource;
++		internal ManagedFontFaceResource ManagedResource => managedResource;
 +		internal bool HasManagedMetadata => family != null;
 +		internal string ManagedFamily => family;
 +		internal FontSlant ManagedSlant => slant;
@@ -98,7 +126,7 @@ index 76f0d01c..2f0e2e2d 100644
 +		{
 +			CheckDisposed ();
 +            if (managedStatus != Status.Success) return new FontFace (managedStatus);
-+			return HasManagedMetadata ? new FontFace (family, slant, weight, fileSource) : new FontFace (Handle, false);
++			return HasManagedMetadata ? new FontFace (managedResource, family, ownsReference: false) : new FontFace (Handle, false);
 +		}
 +
 +		IntPtr EnsureNativeHandle ()
@@ -109,7 +137,7 @@ index 76f0d01c..2f0e2e2d 100644
 +			if (handle == IntPtr.Zero) {
 +				if (!CairoNativeGuard.NativeAllowed)
 +					throw new NotSupportedException ("A managed FontFace has no native handle unless the libcairo compatibility backend is explicitly enabled.");
-+				handle = fileSource != null ? fileSource.CreateNativeHandle () : NativeMethods.cairo_toy_font_face_create (family, slant, weight);
++				handle = fileSource != null ? fileSource.CreateNativeHandle () : NativeMethods.cairo_toy_font_face_create (managedResource?.Family ?? family, slant, weight);
 +				if (handle == IntPtr.Zero) throw new InvalidOperationException ("Cairo could not create a toy font face.");
 +				if (CairoDebug.Enabled) CairoDebug.OnAllocated (handle);
 +			}
@@ -166,7 +194,7 @@ index 76f0d01c..2f0e2e2d 100644
  		public uint ReferenceCount {
  			get {
  				CheckDisposed ();
-+				if (HasManagedMetadata && handle == IntPtr.Zero) return managedStatus == Status.Success ? 1u : 0u;
++				if (HasManagedMetadata && handle == IntPtr.Zero) return managedStatus == Status.Success ? managedResource.ReferenceCount : 0u;
  				return NativeMethods.cairo_font_face_get_reference_count (handle);
  			}
  		}

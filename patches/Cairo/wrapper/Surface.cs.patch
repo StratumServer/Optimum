@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..ff3d74e 100644
+index 6f7730e..d5e4777 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,601 @@
+@@ -32,37 +32,607 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -443,6 +443,12 @@ index 6f7730e..ff3d74e 100644
 +			}
 +		}
 +
++		internal void ReleaseRecordingContextFontOwnership (Context context)
++		{
++			if (aliasOwner != null && managedOnly) { aliasOwner.ReleaseRecordingContextFontOwnership (context); return; }
++			lock (recordingSync) recorder?.ReleaseContextFontOwnership (context);
++		}
++
 +		internal void InitializeGroupStateFrom (Surface parent)
 +		{
 +			if (aliasOwner != null && managedOnly) { aliasOwner.InitializeGroupStateFrom (parent); return; }
@@ -610,7 +616,7 @@ index 6f7730e..ff3d74e 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +651,299 @@ namespace Cairo
+@@ -87,141 +657,299 @@ namespace Cairo
  		}
  
  

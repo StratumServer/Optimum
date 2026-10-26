@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
-index 42d5e815..38cf3fa5 100644
+index 42d5e81..0bcd81d 100644
 --- a/Cairo/wrapper/ScaledFont.cs
 +++ b/Cairo/wrapper/ScaledFont.cs
-@@ -1,43 +1,64 @@
+@@ -1,43 +1,66 @@
  //
  // Mono.Cairo.ScaledFont.cs
  //
@@ -58,6 +58,8 @@ index 42d5e815..38cf3fa5 100644
 +		HintStyle hintStyle;
 +		HintMetrics hintMetrics;
 +		SubpixelOrder subpixelOrder;
++		ManagedFontFaceResource managedResource;
++		bool ownsManagedResource;
 +
 +        internal ScaledFont (Status error)
 +        {
@@ -76,14 +78,19 @@ index 42d5e815..38cf3fa5 100644
  
  			this.handle = handle;
  			if (!owner)
-@@ -45,67 +66,157 @@ namespace Cairo {
+@@ -45,67 +68,168 @@ namespace Cairo {
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
  
  		public ScaledFont (FontFace fontFace, Matrix matrix, Matrix ctm, FontOptions options)
 -			: this (NativeMethods.cairo_scaled_font_create (fontFace.Handle, matrix, ctm, options.Handle), true)
++			: this (fontFace, matrix, ctm, options, ownsFaceReference: true)
  		{
+ 		}
+ 
++		internal ScaledFont (FontFace fontFace, Matrix matrix, Matrix ctm, FontOptions options, bool ownsFaceReference)
++		{
 +			if (fontFace == null) throw new ArgumentNullException (nameof (fontFace));
 +			if (ReferenceEquals (matrix, null)) throw new ArgumentNullException (nameof (matrix));
 +			if (ReferenceEquals (ctm, null)) throw new ArgumentNullException (nameof (ctm));
@@ -97,6 +104,9 @@ index 42d5e815..38cf3fa5 100644
 +                return;
 +            }
 +			if (fontFace.HasManagedMetadata) {
++				managedResource = fontFace.ManagedResource;
++				if (ownsFaceReference) managedResource?.AddReference ();
++				ownsManagedResource = ownsFaceReference && managedResource != null;
 +				fileSource = fontFace.ManagedFileSource;
 +				family = fontFace.ManagedFamily;
 +				slant = fontFace.ManagedSlant;
@@ -121,8 +131,8 @@ index 42d5e815..38cf3fa5 100644
 +			if (!CairoNativeGuard.NativeAllowed)
 +				throw new NotSupportedException ("ScaledFont creation requires the explicit libcairo compatibility backend.");
 +			return NativeMethods.cairo_scaled_font_create (fontFace.Handle, matrix, ctm, options.Handle);
- 		}
- 
++		}
++
  		~ScaledFont ()
  		{
  			Dispose (false);
@@ -133,6 +143,7 @@ index 42d5e815..38cf3fa5 100644
 -				return handle;
 -			}
 +		internal ManagedFileFontSource ManagedFileSource => fileSource;
++		internal ManagedFontFaceResource ManagedResource => managedResource;
 +		internal bool HasManagedMetadata => family != null;
 +		internal string ManagedFamily => family;
 +		internal FontSlant ManagedSlant => slant;
@@ -152,9 +163,11 @@ index 42d5e815..38cf3fa5 100644
 +			CheckDisposed ();
 +            if (managedStatus != Status.Success) return new ScaledFont (managedStatus);
 +			if (HasManagedMetadata) {
-+				using var face = new FontFace (family, slant, weight, fileSource);
++				using var face = managedResource != null
++					? new FontFace (managedResource, family, ownsReference: false)
++					: new FontFace (family, slant, weight, fileSource);
 +				using var options = GetManagedFontOptions ();
-+				return new ScaledFont (face, fontMatrix, ctm, options);
++				return new ScaledFont (face, fontMatrix, ctm, options, ownsFaceReference: false);
 +			}
 +			return new ScaledFont (Handle, false);
 +		}
@@ -257,7 +270,7 @@ index 42d5e815..38cf3fa5 100644
  
  		public void Dispose ()
  		{
-@@ -115,28 +226,25 @@ namespace Cairo {
+@@ -115,28 +239,28 @@ namespace Cairo {
  
  		protected virtual void Dispose (bool disposing)
  		{
@@ -270,6 +283,9 @@ index 42d5e815..38cf3fa5 100644
 -			NativeMethods.cairo_scaled_font_destroy (handle);
 +			if (handle != IntPtr.Zero) NativeMethods.cairo_scaled_font_destroy (handle);
  			handle = IntPtr.Zero;
++			if (ownsManagedResource) managedResource?.Release ();
++			ownsManagedResource = false;
++			managedResource = null;
 +			fileSource = null;
 +			disposed = true;
  		}

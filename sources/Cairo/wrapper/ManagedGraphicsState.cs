@@ -45,7 +45,11 @@ namespace Cairo
 			internal RecordedSurfaceSource SourceBinding;
 			// Font selection. A null family means the face was set from a native object and has no managed description.
 			internal string FontFamily = "Sans";
+			// Cairo's fresh context owns the empty-family toy face, which resolves to Sans for drawing.
+			internal string FontResourceFamily = string.Empty;
 			internal ManagedFileFontSource FontFileSource;
+			internal ManagedFontFaceResource FontResource;
+			internal bool OwnsFontResource;
 			internal FontSlant FontSlant = FontSlant.Normal;
 			internal FontWeight FontWeight = FontWeight.Normal;
 			internal double FontSize = 10;
@@ -57,12 +61,21 @@ namespace Cairo
 
 			internal static Matrix FontScale(double size) { var matrix = new Matrix(); matrix.InitScale(size, size); return matrix; }
 
-			internal State Clone()
+			internal State Clone(bool retainFontResource)
 			{
 				var copy = (State)MemberwiseClone();
 				copy.Ctm = (Matrix)Ctm.Clone();
 				copy.FontMatrix = (Matrix)FontMatrix.Clone();
+				copy.OwnsFontResource = retainFontResource && OwnsFontResource && FontResource != null;
+				if (copy.OwnsFontResource) copy.FontResource.AddReference ();
 				return copy;
+			}
+
+			internal void ReleaseFontResource ()
+			{
+				if (!OwnsFontResource) return;
+				OwnsFontResource = false;
+				FontResource.Release ();
 			}
 		}
 
@@ -71,9 +84,15 @@ namespace Cairo
 		State View => status == Status.Success ? current : new State { SourceAlpha = 0, FontMatrix = new Matrix() };
 		readonly Stack<State> saved = new Stack<State>();
 		Status status = Status.Success;
+		readonly bool trackFontOwnership;
 
-		internal ManagedGraphicsState () { }
-		internal ManagedGraphicsState (Status initialStatus) { status = initialStatus; }
+		internal ManagedGraphicsState () : this (Status.Success, true) { }
+		internal ManagedGraphicsState (Status initialStatus) : this (initialStatus, true) { }
+		ManagedGraphicsState (Status initialStatus, bool trackFontOwnership)
+		{
+			status = initialStatus;
+			this.trackFontOwnership = trackFontOwnership;
+		}
 
 		// Path, in the same representation as cairo_path_fixed_t: operations plus their
 		// device-space fixed-point points, with a lazily emitted initial MOVE_TO.
@@ -99,18 +118,33 @@ namespace Cairo
 		// independent save stack while keeping the current path shared with the
 		// caller. The recorder copies the state at group entry and copies only the
 		// resulting path back at group exit.
-		internal ManagedGraphicsState CloneForGroup()
+		internal ManagedGraphicsState CloneForGroup(bool retainFontOwnership = false, bool contextState = false)
 		{
-			var copy = new ManagedGraphicsState {
-				current = current.Clone(), status = status,
+			var copy = new ManagedGraphicsState (status, retainFontOwnership || contextState) {
+				current = current.Clone (retainFontOwnership), status = status,
 				hasCurrentPoint = hasCurrentPoint, needsMoveTo = needsMoveTo,
 				currentPoint = currentPoint, lastMovePoint = lastMovePoint
 			};
 			copy.ops.AddRange(ops);
 			copy.points.AddRange(points);
 			State[] stack = saved.ToArray();
-			for (int i = stack.Length - 1; i >= 0; i--) copy.saved.Push(stack[i].Clone());
+			for (int i = stack.Length - 1; i >= 0; i--) copy.saved.Push(stack[i].Clone (retainFontOwnership));
 			return copy;
+		}
+
+		internal void ReleaseFontOwnership ()
+		{
+			current.ReleaseFontResource ();
+			foreach (State state in saved) state.ReleaseFontResource ();
+		}
+
+		internal void TransferCurrentFontOwnershipTo (ManagedGraphicsState target)
+		{
+			if (target == null) throw new ArgumentNullException (nameof (target));
+			target.current.ReleaseFontResource ();
+			target.current.FontResource = current.FontResource;
+			target.current.OwnsFontResource = current.OwnsFontResource;
+			current.OwnsFontResource = false;
 		}
 
 		internal void CopyCurrentPathFrom(ManagedGraphicsState source)
@@ -167,14 +201,16 @@ namespace Cairo
 		internal void Save()
 		{
 			if (status != Status.Success) return;
-			saved.Push(current.Clone());
+			saved.Push(current.Clone (trackFontOwnership));
 		}
 
 		internal void Restore()
 		{
 			if (status != Status.Success) return;
 			if (saved.Count == 0) { Latch(Status.InvalidRestore); return; }
-			current = saved.Pop();
+			State restored = saved.Pop ();
+			current.ReleaseFontResource ();
+			current = restored;
 		}
 
 		// ---- transforms ----
@@ -290,36 +326,77 @@ namespace Cairo
 		internal FontWeight FontWeight => View.FontWeight;
 		internal double FontSize => View.FontSize;
 		internal Matrix FontMatrix { get => (Matrix)View.FontMatrix.Clone(); }
+		internal ManagedFontFaceResource FontResource
+		{
+			get {
+				if (status != Status.Success || current.FontFamily == null) return null;
+			InitializeContextFontOwnership ();
+				return current.FontResource;
+			}
+		}
+
+		internal void InitializeContextFontOwnership ()
+		{
+			if (status != Status.Success || current.FontFamily == null) return;
+			if (current.FontResource == null) {
+				current.FontResource = ManagedFontFaceResource.AcquireToy (current.FontResourceFamily, current.FontSlant, current.FontWeight);
+				current.OwnsFontResource = trackFontOwnership;
+				if (!trackFontOwnership) current.FontResource.Release ();
+			} else if (trackFontOwnership && !current.OwnsFontResource) {
+				current.FontResource.AddReference ();
+				current.OwnsFontResource = true;
+			}
+		}
 
 		internal void SelectFontFace(string family, FontSlant slant, FontWeight weight)
 		{
 			if (status != Status.Success) return;
             Status error = FontFace.SelectionStatus (family, slant, weight);
             if (error != Status.Success) { Latch (error); return; }
+			ReplaceFontResource (ManagedFontFaceResource.AcquireToy (family, slant, weight), acquired: true);
 			current.FontFileSource = null;
-			current.FontFamily = FontFace.NormalizeFamily (family); current.FontSlant = slant; current.FontWeight = weight;
+			current.FontFamily = FontFace.NormalizeFamily (family); current.FontResourceFamily = current.FontFamily;
+			current.FontSlant = slant; current.FontWeight = weight;
 		}
 
 		internal void SetContextFontFace(FontFace fontFace)
 		{
 			if (status != Status.Success) return;
             if (fontFace != null && fontFace.Status != Status.Success) { Latch (fontFace.Status); return; }
+			ReplaceFontResource (fontFace?.ManagedResource, acquired: false);
 			current.FontFileSource = fontFace?.ManagedFileSource;
-			if (fontFace == null) { current.FontFamily = "Sans"; current.FontSlant = FontSlant.Normal; current.FontWeight = FontWeight.Normal; }
+			if (fontFace == null) { current.FontFamily = "Sans"; current.FontResourceFamily = string.Empty; current.FontSlant = FontSlant.Normal; current.FontWeight = FontWeight.Normal; }
 			else if (fontFace.HasManagedMetadata) {
 				current.FontFamily = fontFace.ManagedFamily;
+				current.FontResourceFamily = fontFace.ManagedResource?.Family ?? fontFace.ManagedFamily;
 				current.FontSlant = fontFace.ManagedSlant;
 				current.FontWeight = fontFace.ManagedWeight;
-			} else current.FontFamily = null;
+			} else { current.FontFamily = null; current.FontResourceFamily = null; }
+		}
+
+		void ReplaceFontResource (ManagedFontFaceResource resource, bool acquired)
+		{
+			if (ReferenceEquals (current.FontResource, resource)) {
+				if (acquired) resource?.Release ();
+				return;
+			}
+			if (trackFontOwnership && !acquired && resource != null) resource.AddReference ();
+			if (!trackFontOwnership && acquired) resource?.Release ();
+			current.ReleaseFontResource ();
+			current.FontResource = resource;
+			current.OwnsFontResource = trackFontOwnership && resource != null;
 		}
 
 		internal void SetScaledFont(ScaledFont scaledFont)
 		{
 			if (status != Status.Success) return;
             if (scaledFont.Status != Status.Success) { Latch (scaledFont.Status); return; }
+			if (!scaledFont.HasManagedMetadata) { InvalidateFontFace (); return; }
+			if (scaledFont.ManagedResource != null) ReplaceFontResource (scaledFont.ManagedResource, acquired: false);
+			else ReplaceFontResource (ManagedFontFaceResource.AcquireToy (scaledFont.ManagedFamily, scaledFont.ManagedSlant, scaledFont.ManagedWeight), acquired: true);
 			current.FontFileSource = scaledFont.ManagedFileSource;
-			if (!scaledFont.HasManagedMetadata) { current.FontFamily = null; return; }
 			current.FontFamily = scaledFont.ManagedFamily;
+			current.FontResourceFamily = scaledFont.ManagedResource?.Family ?? scaledFont.ManagedFamily;
 			current.FontSlant = scaledFont.ManagedSlant;
 			current.FontWeight = scaledFont.ManagedWeight;
 			current.FontMatrix = scaledFont.ManagedFontMatrix;
@@ -346,8 +423,10 @@ namespace Cairo
 		internal void InvalidateFontFace()
 		{
 			if (status != Status.Success) return;
+			ReplaceFontResource (null, acquired: false);
 			current.FontFileSource = null;
 			current.FontFamily = null;
+			current.FontResourceFamily = null;
 		}
 
 		internal void SetFontOptions(FontOptions options)
@@ -360,7 +439,7 @@ namespace Cairo
 		internal static ManagedGraphicsState CreateFontMetricsState(string family, FontSlant slant, FontWeight weight,
 			double size, Matrix fontMatrix, FontOptions options, ManagedFileFontSource fileSource = null)
 		{
-			var state = new ManagedGraphicsState();
+			var state = new ManagedGraphicsState (Status.Success, false);
 			state.SelectFontFace(family, slant, weight);
 			state.current.FontFileSource = fileSource;
 			state.SetFontSize(size);
