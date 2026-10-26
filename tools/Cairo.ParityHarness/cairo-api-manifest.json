@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-23T15:25:25.1797756+00:00",
+  "generatedUtc": "2026-10-26T14:36:20.2252762+00:00",
   "assemblyIdentity": "cairo-sharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 82,
-  "publicAndProtectedMemberCount": 909,
+  "publicAndProtectedMemberCount": 910,
   "classificationNote": "Automated initial classification; every row requires human review before ABI compatibility is claimed.",
   "types": [
     {
@@ -5887,6 +5887,12 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Surface(System.IntPtr, System.Boolean, System.Boolean, System.Boolean)",
+      "classification": "native-only-pending",
+      "classificationReview": "required"
+    },
+    {
+      "declaringType": "Cairo.Surface",
+      "signature": "Cairo.Surface(System.IntPtr, System.Boolean, System.Boolean, System.Boolean, Cairo.Status = optional)",
       "classification": "native-only-pending",
       "classificationReview": "required"
     },

@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e2..1160475f 100644
+index 6f7730e..ff3d74e 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,596 @@
+@@ -32,37 +32,601 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -61,6 +61,11 @@ index 6f7730e2..1160475f 100644
  		{
 -			if (handle == IntPtr.Zero)
 -				throw new ArgumentException ("handle should not be NULL", "handle");
++		}
++
++		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly)
++			: this (handle, owner, recordingCandidate, managedOnly, Status.Success)
++		{
 +		}
 +
 +		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly, Status managedStatus = Status.Success)
@@ -605,7 +610,7 @@ index 6f7730e2..1160475f 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +646,299 @@ namespace Cairo
+@@ -87,141 +651,299 @@ namespace Cairo
  		}
  
  
