@@ -301,6 +301,7 @@ namespace Cairo
 		internal void SetContextFontFace(FontFace fontFace)
 		{
 			if (status != Status.Success) return;
+            if (fontFace != null && fontFace.Status != Status.Success) { Latch (fontFace.Status); return; }
 			current.FontFileSource = fontFace?.ManagedFileSource;
 			if (fontFace == null) { current.FontFamily = "Sans"; current.FontSlant = FontSlant.Normal; current.FontWeight = FontWeight.Normal; }
 			else if (fontFace.HasManagedMetadata) {

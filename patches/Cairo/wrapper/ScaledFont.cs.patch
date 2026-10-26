@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
-index 42d5e815..704f10cd 100644
+index 42d5e815..38cf3fa5 100644
 --- a/Cairo/wrapper/ScaledFont.cs
 +++ b/Cairo/wrapper/ScaledFont.cs
 @@ -1,43 +1,64 @@
@@ -76,7 +76,7 @@ index 42d5e815..704f10cd 100644
  
  			this.handle = handle;
  			if (!owner)
-@@ -45,67 +66,150 @@ namespace Cairo {
+@@ -45,67 +66,157 @@ namespace Cairo {
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
@@ -89,6 +89,13 @@ index 42d5e815..704f10cd 100644
 +			if (ReferenceEquals (ctm, null)) throw new ArgumentNullException (nameof (ctm));
 +			if (options == null) throw new ArgumentNullException (nameof (options));
 +
++            if (fontFace.HasManagedMetadata && fontFace.Status != Status.Success) {
++                managedStatus = fontFace.Status;
++                family = "Sans";
++                fontMatrix = new Matrix ();
++                this.ctm = new Matrix ();
++                return;
++            }
 +			if (fontFace.HasManagedMetadata) {
 +				fileSource = fontFace.ManagedFileSource;
 +				family = fontFace.ManagedFamily;
@@ -250,7 +257,7 @@ index 42d5e815..704f10cd 100644
  
  		public void Dispose ()
  		{
-@@ -115,28 +219,25 @@ namespace Cairo {
+@@ -115,28 +226,25 @@ namespace Cairo {
  
  		protected virtual void Dispose (bool disposing)
  		{

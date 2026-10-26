@@ -110,6 +110,13 @@ using (var finishedContext = new Context(finishedSurface))
     finishedContext.Paint();
     if (finishedContext.Status != Status.SurfaceFinished || finishedSurface.Status != Status.SurfaceFinished)
         throw new InvalidOperationException("The replacement lost the legacy finished-surface error contract.");
+    using var failedFace = finishedContext.GetContextFontFace();
+    if (failedFace.Status != Status.NoMemory || failedFace.FontType != FontType.Toy || failedFace.ReferenceCount != 0)
+        throw new InvalidOperationException("An errored legacy context must return a nil font face.");
+    using var failedFaceOptions = new FontOptions();
+    using var faceFont = new ScaledFont(failedFace, new Matrix(), new Matrix(), failedFaceOptions);
+    if (faceFont.Status != Status.NoMemory || faceFont.FontExtents.Height != 0)
+        throw new InvalidOperationException("A nil legacy face must preserve its error when scaled.");
     using var failedFont = finishedContext.GetScaledFont();
     if (failedFont.Status != Status.SurfaceFinished || failedFont.FontExtents.Height != 0 || failedFont.FontMatrix.Xx != 1)
         throw new InvalidOperationException("An errored legacy context must return a nil scaled font.");
