@@ -350,6 +350,16 @@ namespace Cairo
 		internal FontWeight FontWeight => View.FontWeight;
 		internal double FontSize => View.FontSize;
 		internal Matrix FontMatrix { get => (Matrix)View.FontMatrix.Clone(); }
+		internal double EffectiveFontSize
+		{
+			get {
+				Matrix matrix = View.FontMatrix;
+				if (double.IsFinite (matrix.Xx) && matrix.Xx > 0 && matrix.Xx == matrix.Yy &&
+					matrix.Yx == 0 && matrix.Xy == 0 && matrix.X0 == 0 && matrix.Y0 == 0)
+					return matrix.Xx;
+				return View.FontSize;
+			}
+		}
 		internal ManagedFontFaceResource FontResource
 		{
 			get {

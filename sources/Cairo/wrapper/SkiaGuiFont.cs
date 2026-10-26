@@ -11,7 +11,7 @@ namespace Cairo
 			string family = state.FontFamily;
 			if (family == null)
 				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
-			return Create(family, state.FontSlant, state.FontWeight, state.FontSize, options, state.FontFileSource);
+			return Create(family, state.FontSlant, state.FontWeight, state.EffectiveFontSize, options, state.FontFileSource);
 		}
 
 		internal static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, FontOptions options)
