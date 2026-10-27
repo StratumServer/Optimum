@@ -8,7 +8,8 @@ namespace Cairo
 	internal static class SkiaFontResolver
 	{
 		const int FcMatchPattern = 0;
-		const int FcWeightRegular = 80;
+		// Cairo's toy font backend maps Normal to FC_WEIGHT_MEDIUM, not REGULAR.
+		const int FcWeightMedium = 100;
 		const int FcWeightBold = 200;
 		const int FcSlantRoman = 0;
 		const int FcSlantItalic = 100;
@@ -36,7 +37,7 @@ namespace Cairo
 			try
 			{
 				if (FcPatternAddString(pattern, "family", family) == 0 ||
-					FcPatternAddInteger(pattern, "weight", weight == SKFontStyleWeight.Bold ? FcWeightBold : FcWeightRegular) == 0 ||
+					FcPatternAddInteger(pattern, "weight", weight == SKFontStyleWeight.Bold ? FcWeightBold : FcWeightMedium) == 0 ||
 					FcPatternAddInteger(pattern, "slant", slant == SKFontStyleSlant.Italic ? FcSlantItalic :
 						slant == SKFontStyleSlant.Oblique ? FcSlantOblique : FcSlantRoman) == 0)
 					throw new InvalidOperationException("Fontconfig rejected GUI font family '" + family + "'.");
