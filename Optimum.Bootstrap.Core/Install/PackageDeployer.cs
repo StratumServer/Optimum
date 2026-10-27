@@ -10,6 +10,7 @@ public enum ShortcutKinds
     None = 0,
     Menu = 1,
     Desktop = 2,
+    UriHandler = 4,
 }
 
 public sealed record DeployRequest(
@@ -60,6 +61,8 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         bool hasExisting = Directory.Exists(installDir) && Directory.EnumerateFileSystemEntries(installDir).Any();
         if (hasExisting && !request.CleanDestination && !File.Exists(Path.Combine(installDir, InstallManifest.RelativePath)))
             return DeployResult.Failure(FailureReason.OutputExists, $"the install directory is not empty: {installDir}");
+
+        InstallManifest? previousManifest = TryReadManifest(installDir);
 
         Directory.CreateDirectory(parent);
         string token = Guid.NewGuid().ToString("N")[..12];
@@ -117,7 +120,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             {
                 if (backedUp && Directory.Exists(backupDir))
                     TryDelete(backupDir);
-                RegisterInstall(installDir, request, finalLauncher, observer);
+                RegisterInstall(installDir, request, finalLauncher, previousManifest, observer);
             }
             catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
             {
@@ -154,22 +157,47 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
     /// the manifest cannot be updated the shortcuts and registry entry are undone
     /// so nothing is left that the manifest does not record.
     /// </summary>
-    private void RegisterInstall(string installDir, DeployRequest request, string? launcher, IBuildObserver? observer)
+    private void RegisterInstall(
+        string installDir,
+        DeployRequest request,
+        string? launcher,
+        InstallManifest? previousManifest,
+        IBuildObserver? observer)
     {
-        string manifestPath = Path.Combine(installDir, InstallManifest.RelativePath);
-        string? manifestJson;
-        try { manifestJson = File.Exists(manifestPath) ? File.ReadAllText(manifestPath) : null; }
-        catch (IOException) { return; }
-        catch (UnauthorizedAccessException) { return; }
-
-        if (manifestJson is null || InstallManifest.Deserialize(manifestJson) is not { } manifest)
+        if (TryReadManifest(installDir) is not { } manifest)
             return;
 
+        string manifestPath = Path.Combine(installDir, InstallManifest.RelativePath);
+        var shortcutWriter = new ShortcutWriter(probe);
+        bool registerUriHandler = probe.Os == OsKind.Linux && request.Shortcuts.HasFlag(ShortcutKinds.UriHandler);
+
+        string? currentUriHandler = probe.Os == OsKind.Linux ? shortcutWriter.QueryDefaultUriHandler() : null;
+        string? baselinePreviousHandler = previousManifest is { RegisteredUriHandler: true }
+            ? previousManifest.PreviousUriHandler
+            : !string.IsNullOrWhiteSpace(currentUriHandler)
+                && !string.Equals(currentUriHandler, ShortcutWriter.LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
+                ? currentUriHandler
+                : null;
+
         IReadOnlyList<string> shortcuts = launcher is not null && request.Shortcuts != ShortcutKinds.None
-            ? new ShortcutWriter(probe).Create(installDir, launcher, request.Shortcuts)
+            ? shortcutWriter.Create(installDir, launcher, request.Shortcuts)
             : [];
         if (shortcuts.Count > 0)
             observer?.Log(LogLevel.Info, $"created {shortcuts.Count} shortcut(s)");
+
+        if (previousManifest is not null)
+        {
+            string[] staleShortcuts = previousManifest.Shortcuts
+                .Except(shortcuts, StringComparer.Ordinal)
+                .ToArray();
+            if (staleShortcuts.Length > 0)
+                shortcutWriter.Remove(staleShortcuts);
+        }
+
+        if (previousManifest is { RegisteredUriHandler: true } && !registerUriHandler)
+        {
+            shortcutWriter.RemoveUriHandlerAssociation(previousManifest.PreviousUriHandler);
+        }
 
         string? registryKey = UninstallRegistration.Register(installDir, manifest.OptimumVersion);
 
@@ -179,16 +207,29 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             {
                 Shortcuts = shortcuts,
                 UninstallRegistryKey = registryKey,
+                RegisteredUriHandler = registerUriHandler,
+                PreviousUriHandler = registerUriHandler ? baselinePreviousHandler : null,
             }).Serialize());
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // The manifest is the only record the uninstaller reads, so undo
             // what it will not know about.
-            new ShortcutWriter(probe).Remove(shortcuts);
+            shortcutWriter.Remove(shortcuts, removeUriAssociation: registerUriHandler, previousUriHandler: baselinePreviousHandler);
             UninstallRegistration.Unregister(registryKey);
             observer?.Log(LogLevel.Warn, "could not record shortcuts in the manifest; they were removed");
         }
+    }
+
+    private static InstallManifest? TryReadManifest(string installDir)
+    {
+        string manifestPath = Path.Combine(installDir, InstallManifest.RelativePath);
+        try
+        {
+            return File.Exists(manifestPath) ? InstallManifest.Deserialize(File.ReadAllText(manifestPath)) : null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
     }
 
     /// <summary>
@@ -278,14 +319,121 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         }
 
         string sh = Path.Combine(stageDir, "optimum-launch.sh");
-        File.WriteAllText(sh, dataPath is not null
-            ? $"#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"${{BASH_SOURCE[0]}}\")\"\nexec ./run.sh --dataPath {ShellQuote(dataPath)} \"$@\"\n"
-            : "#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"${BASH_SOURCE[0]}\")\"\nexec ./run.sh \"$@\"\n");
+        File.WriteAllText(sh, BuildLinuxLauncherScript(dataPath));
         MakeExecutable(sh);
         if (dataPath is not null)
             File.WriteAllText(Path.Combine(stageDir, "datapath.cfg"), dataPath);
         _ = finalInstallDir;
         return sh;
+    }
+
+    internal static string BuildLinuxLauncherScript(string? dataPath)
+    {
+        string execBlock = dataPath is not null
+            ? $$"""
+            HAS_CUSTOM_DATA_PATH=0
+            for arg in "${LAUNCH_ARGS[@]}"; do
+                case "$arg" in
+                    -d|--dataPath|-d=*|--dataPath=*) HAS_CUSTOM_DATA_PATH=1; break ;;
+                esac
+            done
+            if [[ "$HAS_CUSTOM_DATA_PATH" -eq 0 ]]; then
+                exec ./run.sh --dataPath {{ShellQuote(dataPath)}} "${LAUNCH_ARGS[@]}"
+            fi
+            exec ./run.sh "${LAUNCH_ARGS[@]}"
+            """
+            : """
+            exec ./run.sh "${LAUNCH_ARGS[@]}"
+            """;
+
+        return
+            $$"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            cd "$(dirname "${BASH_SOURCE[0]}")"
+
+            NORMALIZED_MOD_ARG=""
+
+            validate_mod_uri() {
+                local raw="$1"
+                if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+                    echo "Optimum: rejecting mod install URI containing a newline." >&2
+                    return 1
+                fi
+                local lower="${raw,,}"
+                if [[ "$lower" != vintagestorymodinstall://* ]]; then
+                    echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+                    return 1
+                fi
+                local spec="${raw#*:}"
+                spec="${spec#//}"
+                spec="${spec%/}"
+                spec="${spec//%40/@}"
+                spec="${spec//%2b/+}"
+                spec="${spec//%2B/+}"
+                if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+                    echo "Optimum: malformed mod install URI." >&2
+                    return 1
+                fi
+                NORMALIZED_MOD_ARG="vintagestorymodinstall://${spec}"
+            }
+
+            validate_mod_arg() {
+                local raw="$1"
+                if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+                    echo "Optimum: rejecting mod install argument containing a newline." >&2
+                    return 1
+                fi
+                local lower="${raw,,}"
+                if [[ "$lower" == vintagestorymodinstall:* || "$raw" == *://* ]]; then
+                    validate_mod_uri "$raw"
+                    return $?
+                fi
+                local spec="${raw%/}"
+                spec="${spec//%40/@}"
+                if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+                    echo "Optimum: malformed mod install argument." >&2
+                    return 1
+                fi
+                NORMALIZED_MOD_ARG="$spec"
+            }
+
+            LAUNCH_ARGS=()
+            if [[ $# -gt 0 && "$1" != -* ]]; then
+                if [[ $# -ne 1 ]]; then
+                    echo "Optimum: URI launch expects a single vintagestorymodinstall:// argument." >&2
+                    exit 2
+                fi
+                validate_mod_uri "$1" || exit 2
+                LAUNCH_ARGS=(-i "$NORMALIZED_MOD_ARG")
+            else
+                while [[ $# -gt 0 ]]; do
+                    case "$1" in
+                        -i|--installmod)
+                            if [[ $# -lt 2 ]]; then
+                                echo "Optimum: $1 requires a mod identifier or vintagestorymodinstall:// URI." >&2
+                                exit 2
+                            fi
+                            validate_mod_arg "$2" || exit 2
+                            LAUNCH_ARGS+=("$1" "$NORMALIZED_MOD_ARG")
+                            shift 2
+                            ;;
+                        -i=*|--installmod=*)
+                            validate_mod_arg "${1#*=}" || exit 2
+                            LAUNCH_ARGS+=("${1%%=*}=$NORMALIZED_MOD_ARG")
+                            shift
+                            ;;
+                        *)
+                            LAUNCH_ARGS+=("$1")
+                            shift
+                            ;;
+                    esac
+                done
+            fi
+
+            {{execBlock}}
+
+            """;
     }
 
     private static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''") + "'";

@@ -62,6 +62,12 @@
                         IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
               <CheckBox Content="Create a desktop shortcut"
                         IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
+              <StackPanel Spacing="4" IsVisible="{Binding IsLinux}">
+                <CheckBox Content="Set Optimum as default handler for ModDB 1-click install links"
+                          IsChecked="{Binding RegisterUriHandler}" TabIndex="5" />
+                <TextBlock Text="{Binding UriHandlerHint}"
+                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+              </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="1" Spacing="7" Width="250" Margin="20,0,0,0"
                         IsVisible="{Binding ShowVersionChoice}">

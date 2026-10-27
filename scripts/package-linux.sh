@@ -366,10 +366,15 @@ fi
 
 # Brand the .desktop launcher entry.
 if [[ -f "$STAGE_DIR/Vintagestory.desktop" ]]; then
-    sed -E 's/Name(\[[a-z]+\])?=Vintage Story [0-9.]+/Name\1=Optimum/g' \
+    sed -E \
+        -e 's/Name(\[[a-z]+\])?=Vintage Story [0-9.]+/Name\1=Optimum/g' \
+        -e 's|^Exec="\$\{INST_DIR\}"/Vintagestory$|Exec="${INST_DIR}/Optimum" %u|' \
+        -e 's|^Icon=vintagestory$|Icon=optimum|' \
+        -e 's|^StartupWMClass=.*|MimeType=x-scheme-handler/vintagestorymodinstall;\nStartupWMClass=Optimum|' \
         "$STAGE_DIR/Vintagestory.desktop" > "$STAGE_DIR/Optimum.desktop"
     rm -f "$STAGE_DIR/Vintagestory.desktop"
 fi
+rm -f "$STAGE_DIR/Vintagestory_url_mod.desktop" "$STAGE_DIR/Vintagestory_url_connect.desktop"
 
 echo "Folder ready: $STAGE_DIR"
 
@@ -395,7 +400,46 @@ set -euo pipefail
 HERE="$(dirname "$(readlink -f "$0")")"
 GAME_DIR="$HERE/usr/share/optimum"
 cd "$GAME_DIR"
-exec ./Optimum "$@"
+
+NORMALIZED_MOD_ARG=""
+
+validate_mod_uri() {
+    local raw="$1"
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+        echo "Optimum: rejecting mod install URI containing a newline." >&2
+        return 1
+    fi
+    local lower="${raw,,}"
+    if [[ "$lower" != vintagestorymodinstall://* ]]; then
+        echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+        return 1
+    fi
+    local spec="${raw#*:}"
+    spec="${spec#//}"
+    spec="${spec%/}"
+    spec="${spec//%40/@}"
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+        echo "Optimum: malformed mod install URI." >&2
+        return 1
+    fi
+    NORMALIZED_MOD_ARG="vintagestorymodinstall://${spec}"
+}
+
+LAUNCH_ARGS=()
+if [[ $# -gt 0 && "$1" != -* ]]; then
+    if [[ $# -ne 1 ]]; then
+        echo "Optimum: URI launch expects a single vintagestorymodinstall:// argument." >&2
+        exit 2
+    fi
+    validate_mod_uri "$1" || exit 2
+    LAUNCH_ARGS=(-i "$NORMALIZED_MOD_ARG")
+else
+    LAUNCH_ARGS=("$@")
+fi
+
+exec ./Optimum "${LAUNCH_ARGS[@]}"
 APPRUN
     chmod +x "$appdir/AppRun"
 
@@ -407,10 +451,11 @@ Name=Optimum
 GenericName=Vintage Story optimized client
 Comment=High-performance client for Vintage Story
 Keywords=vintage;story;vs;optimum;client;
-Exec=Optimum
+Exec=Optimum %u
 Icon=optimum
 Terminal=false
 Categories=Game;
+MimeType=x-scheme-handler/vintagestorymodinstall;
 StartupWMClass=Optimum
 DESKTOP
 

@@ -657,6 +657,33 @@ public class InstallerReleaseCoverageTests
         Assert.True(process.ExitCode == 0, process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd());
     }
 
+    [Fact]
+    public void LinuxInstallersAndPackagersSupportModDbUriHandler()
+    {
+        foreach (string relativePath in new[] { "scripts/install-linux.sh", "scripts/install-linux-legacy.sh" })
+        {
+            string installer = Read(relativePath);
+            Assert.Contains("x-scheme-handler/vintagestorymodinstall", installer);
+            Assert.Contains("--set-default-uri-handler", installer);
+            Assert.Contains("--no-default-uri-handler", installer);
+            Assert.Contains("Exec=\"%s\" %%u", installer);
+            Assert.Contains("validate_mod_uri", installer);
+            Assert.Contains("LAUNCH_ARGS=(-i \"$NORMALIZED_MOD_ARG\")", installer);
+        }
+
+        foreach (string relativePath in new[] { "scripts/package-linux.sh", "scripts/package-linux.ps1" })
+        {
+            string packager = Read(relativePath);
+            Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", packager);
+            Assert.DoesNotContain("Vintagestory_url_mod.desktop", packager);
+            Assert.DoesNotContain("Vintagestory_url_connect.desktop", packager);
+        }
+
+        string uninstall = Read("scripts/uninstall.sh");
+        Assert.Contains("x-scheme-handler/vintagestorymodinstall", uninstall);
+        Assert.Contains("mimeapps.list", uninstall);
+    }
+
     private static string Match(string source, string pattern)
     {
         System.Text.RegularExpressions.Match match = Regex.Match(source, pattern);

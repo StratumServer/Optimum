@@ -109,6 +109,22 @@ public class OptionsViewModelTests
         probe.AddDirectory("/repo/patches-1.22.6-bridge");
         Assert.True(new OptionsViewModel(probe, "/repo").ShowVersionChoice);
     }
+
+    [Fact]
+    public void LinuxOptionsExposesExplicitModUriHandlerChoiceWithoutOverwritingExistingDefault()
+    {
+        var probe = RepoProbe();
+        probe.AddFile(
+            "/home/tester/.config/mimeapps.list",
+            "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=Vintagestory_url_mod.desktop\n");
+
+        var vm = new OptionsViewModel(probe, "/repo");
+
+        Assert.True(vm.IsLinux);
+        Assert.False(vm.RegisterUriHandler);
+        Assert.Equal("Vintagestory_url_mod.desktop", vm.ExistingUriHandler);
+        Assert.Contains("Vintagestory_url_mod.desktop", vm.UriHandlerHint);
+    }
 }
 
 public class PrerequisitesViewModelTests

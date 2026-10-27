@@ -197,9 +197,16 @@ try {
     # Brand the .desktop launcher entry.
     $desktop = Join-Path $stageDir 'Vintagestory.desktop'
     if (Test-Path $desktop) {
-        (Get-Content $desktop -Raw) -replace 'Name(\[[a-z]+\])?=Vintage Story [0-9.]+', 'Name$1=Optimum' |
-            Set-Content -Path (Join-Path $stageDir 'Optimum.desktop') -NoNewline
+        $desktopContent = (Get-Content $desktop -Raw) -replace 'Name(\[[a-z]+\])?=Vintage Story [0-9.]+', 'Name$1=Optimum'
+        $desktopContent = $desktopContent -replace '(?m)^Exec="\$\{INST_DIR\}"/Vintagestory\r?$', 'Exec="${INST_DIR}/Optimum" %u'
+        $desktopContent = $desktopContent -replace '(?m)^Icon=vintagestory\r?$', 'Icon=optimum'
+        $desktopContent = $desktopContent -replace '(?m)^StartupWMClass=.*\r?$', "MimeType=x-scheme-handler/vintagestorymodinstall;`nStartupWMClass=Optimum"
+        Set-Content -Path (Join-Path $stageDir 'Optimum.desktop') -Value $desktopContent -NoNewline
         Remove-Item -Force $desktop
+    }
+    foreach ($urlDesktop in @('Vintagestory_url_mod.desktop', 'Vintagestory_url_connect.desktop')) {
+        $urlPath = Join-Path $stageDir $urlDesktop
+        if (Test-Path $urlPath) { Remove-Item -Force $urlPath }
     }
 
     Write-Host "Folder ready: $stageDir" -ForegroundColor Green

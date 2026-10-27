@@ -89,7 +89,41 @@ done
 if [[ -d "$INSTALL_DIR/.optimum" ]]; then
     if rm -rf -- "$INSTALL_DIR/.optimum"; then removed=$((removed + 1)); else failed=1; fi
 fi
-rm -f -- "$HOME/.local/share/applications/optimum.desktop" "$HOME/Desktop/Optimum.desktop" 2>/dev/null || true
+rm -f -- "${XDG_DATA_HOME:-$HOME/.local/share}/applications/optimum.desktop" "$HOME/Desktop/Optimum.desktop" 2>/dev/null || true
+if command -v python3 >/dev/null 2>&1; then
+    python3 - "${XDG_CONFIG_HOME:-$HOME/.config}/mimeapps.list" \
+              "${XDG_DATA_HOME:-$HOME/.local/share}/applications/mimeapps.list" \
+              "${XDG_DATA_HOME:-$HOME/.local/share}/applications/defaults.list" \
+              "${XDG_DATA_HOME:-$HOME/.local/share}/applications/mimeinfo.cache" <<'PY' 2>/dev/null || true
+import os, sys
+prefix = "x-scheme-handler/vintagestorymodinstall="
+for path in sys.argv[1:]:
+    if not os.path.exists(path):
+        continue
+    with open(path, "r", encoding="utf-8", errors="replace") as fp:
+        lines = fp.read().replace("\r\n", "\n").split("\n")
+    changed = False
+    out = []
+    for line in lines:
+        s = line.strip()
+        if s.lower().startswith(prefix):
+            items = [x.strip() for x in s[len(prefix):].split(";") if x.strip() and x.strip().lower() != "optimum.desktop"]
+            changed = True
+            if items:
+                semi = ";" if (s.endswith(";") or len(items) > 1 or path.endswith("mimeinfo.cache")) else ""
+                out.append(f"{prefix}{';'.join(items)}{semi}")
+            continue
+        out.append(line)
+    if changed:
+        while out and out[-1] == "":
+            out.pop()
+        with open(path, "w", encoding="utf-8") as fp:
+            fp.write(("\n".join(out) + "\n") if out else "")
+PY
+fi
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "${XDG_DATA_HOME:-$HOME/.local/share}/applications" >/dev/null 2>&1 || true
+fi
 
 if [[ "$failed" -ne 0 ]]; then
     printf "${RED}Some Optimum files could not be removed. Close any running Optimum process and retry.${RESET}\n" >&2

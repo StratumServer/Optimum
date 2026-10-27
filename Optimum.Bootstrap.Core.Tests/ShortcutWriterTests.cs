@@ -12,8 +12,10 @@ public sealed class ShortcutWriterTests : IDisposable
 
     private FakeSystemProbe LinuxProbe()
     {
-        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = _home.Replace('\\', '/') };
-        probe.Environment["XDG_DATA_HOME"] = _home.Replace('\\', '/') + "/.local/share";
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = home };
+        probe.Environment["XDG_DATA_HOME"] = home + "/.local/share";
+        probe.Environment["XDG_CONFIG_HOME"] = home + "/.config";
         return probe;
     }
 
@@ -38,11 +40,90 @@ public sealed class ShortcutWriterTests : IDisposable
         Assert.Contains(menuEntry, created);
         Assert.Contains(desktopEntry, created);
         Assert.True(File.Exists(menuEntry));
-        Assert.Contains($"Exec=\"{launcher}\"", File.ReadAllText(menuEntry));
+        string content = File.ReadAllText(menuEntry);
+        Assert.Contains($"Exec=\"{launcher}\" %u", content);
+        Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", content);
+        Assert.DoesNotContain("NoDisplay=true", content);
 
         writer.Remove(created);
         Assert.False(File.Exists(menuEntry));
         Assert.False(File.Exists(desktopEntry));
+    }
+
+    [Fact]
+    public void QuotesAndEscapesPathsWithSpacesAndSpecialCharactersInLinuxDesktopEntry()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/My Games/Optimum \"Special\" $1";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.Menu);
+
+        string menuEntry = Assert.Single(created);
+        string content = File.ReadAllText(menuEntry);
+        Assert.Contains($"Exec=\"{home}/My Games/Optimum \\\"Special\\\" \\$1/optimum-launch.sh\" %u", content);
+        Assert.Contains($"Path={installDir}", content);
+        Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", content);
+    }
+
+    [Fact]
+    public void ExplicitUriHandlerSelectionRespectsAndRestoresExistingDefaultHandler()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        string appsDir = $"{home}/.local/share/applications";
+        string mimeApps = $"{home}/.config/mimeapps.list";
+        Directory.CreateDirectory(installDir);
+        Directory.CreateDirectory(appsDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(mimeApps)!);
+
+        // Simulate an existing vanilla Vintage Story URI handler choice.
+        File.WriteAllText($"{appsDir}/Vintagestory_url_mod.desktop", "[Desktop Entry]\nName=VS\n");
+        File.WriteAllText(mimeApps, "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=Vintagestory_url_mod.desktop\n");
+
+        var writer = new ShortcutWriter(probe);
+        Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+
+        // Menu shortcut alone must NOT overwrite the existing default handler.
+        IReadOnlyList<string> menuOnly = writer.Create(installDir, launcher, ShortcutKinds.Menu);
+        Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+
+        // Explicit UriHandler selection sets optimum.desktop as default.
+        IReadOnlyList<string> withUri = writer.Create(installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.UriHandler);
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+
+        // Removing with previousUriHandler restores Vintagestory_url_mod.desktop.
+        writer.Remove(withUri, removeUriAssociation: true, previousUriHandler: "Vintagestory_url_mod.desktop");
+        Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+        _ = menuOnly;
+    }
+
+    [Fact]
+    public void UriHandlerWithoutMenuShortcutWritesHiddenDesktopEntryAndCleansUpOnRemove()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.UriHandler);
+
+        string menuEntry = Assert.Single(created);
+        string content = File.ReadAllText(menuEntry);
+        Assert.Contains("NoDisplay=true", content);
+        Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", content);
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+
+        writer.Remove(created, removeUriAssociation: true, previousUriHandler: null);
+        Assert.False(File.Exists(menuEntry));
+        Assert.Null(writer.QueryDefaultUriHandler());
     }
 
     [Fact]

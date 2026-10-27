@@ -9,6 +9,9 @@ namespace Optimum.Bootstrap.Core.Install;
 /// </summary>
 public sealed class ShortcutWriter(ISystemProbe probe)
 {
+    public const string ModInstallMimeType = "x-scheme-handler/vintagestorymodinstall";
+    public const string LinuxDesktopFileName = "optimum.desktop";
+
     /// <summary>Creates the requested shortcuts and returns the paths that were written.</summary>
     public IReadOnlyList<string> Create(string installDirectory, string launcherPath, ShortcutKinds kinds)
     {
@@ -23,10 +26,17 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         };
     }
 
-    public void Remove(IEnumerable<string> shortcutPaths)
+    public void Remove(IEnumerable<string> shortcutPaths, bool removeUriAssociation = false, string? previousUriHandler = null)
     {
+        bool removedLinuxDesktop = false;
         foreach (string path in shortcutPaths)
         {
+            if (path.EndsWith("/" + LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith("\\" + LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                removedLinuxDesktop = true;
+            }
+
             try
             {
                 if (File.Exists(path))
@@ -37,25 +47,443 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             catch (IOException) { /* best effort */ }
             catch (UnauthorizedAccessException) { /* best effort */ }
         }
+
+        if (probe.Os == OsKind.Linux && (removeUriAssociation || removedLinuxDesktop))
+        {
+            if (removeUriAssociation
+                || string.Equals(QueryDefaultUriHandler(), LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                RemoveUriHandlerAssociation(previousUriHandler);
+            }
+            else
+            {
+                string applicationsDir = Posix(DataHome(), "applications");
+                RemoveDesktopFromMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName);
+                RefreshDesktopDatabase(applicationsDir);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Queries the current default desktop handler for <c>x-scheme-handler/vintagestorymodinstall</c>
+    /// on Linux, or returns <c>null</c> when none is configured or on non-Linux hosts.
+    /// </summary>
+    public string? QueryDefaultUriHandler()
+    {
+        if (probe.Os != OsKind.Linux)
+            return null;
+
+        string configHome = ConfigHome();
+        string dataHome = DataHome();
+        string[] mimeAppsFiles =
+        [
+            Posix(configHome, "mimeapps.list"),
+            Posix(dataHome, "applications", "mimeapps.list"),
+            Posix(dataHome, "applications", "defaults.list"),
+        ];
+
+        foreach (string file in mimeAppsFiles)
+        {
+            if (TryReadIniAssociation(ReadFileText(file), "Default Applications", ModInstallMimeType) is { } handler)
+                return handler;
+        }
+
+        ProcessOutcome query = probe.Run("xdg-mime", ["query", "default", ModInstallMimeType], TimeSpan.FromSeconds(5));
+        if (query.Started && query.ExitCode == 0)
+        {
+            string trimmed = query.StandardOutput.Trim();
+            if (trimmed.Length > 0)
+                return trimmed.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        }
+
+        string mimeCache = Posix(dataHome, "applications", "mimeinfo.cache");
+        return TryReadIniAssociation(ReadFileText(mimeCache), "MIME Cache", ModInstallMimeType);
+    }
+
+    /// <summary>
+    /// Removes Optimum's default URI handler association on Linux and restores
+    /// <paramref name="previousUriHandler"/> when that desktop entry still exists.
+    /// </summary>
+    public void RemoveUriHandlerAssociation(string? previousUriHandler = null)
+    {
+        if (probe.Os != OsKind.Linux)
+            return;
+
+        string configHome = ConfigHome();
+        string dataHome = DataHome();
+        string applicationsDir = Posix(dataHome, "applications");
+        string? restoreTarget = !string.IsNullOrWhiteSpace(previousUriHandler)
+            && !string.Equals(previousUriHandler, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
+            && DesktopEntryExists(previousUriHandler)
+            ? previousUriHandler.Trim()
+            : null;
+
+        string[] mimeAppsFiles =
+        [
+            Posix(configHome, "mimeapps.list"),
+            Posix(applicationsDir, "mimeapps.list"),
+            Posix(applicationsDir, "defaults.list"),
+        ];
+
+        foreach (string file in mimeAppsFiles)
+        {
+            RemoveOrRestoreMimeAppsEntry(file, LinuxDesktopFileName, restoreTarget);
+        }
+
+        if (restoreTarget is not null)
+        {
+            SetDefaultUriHandler(restoreTarget);
+        }
+
+        RefreshDesktopDatabase(applicationsDir);
+        string menuDesktopPath = Posix(applicationsDir, LinuxDesktopFileName);
+        if (probe.FileExists(menuDesktopPath))
+        {
+            UpdateMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName, restoreTarget);
+        }
+        else
+        {
+            RemoveDesktopFromMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName);
+        }
     }
 
     private List<string> CreateLinux(string installDirectory, string launcherPath, ShortcutKinds kinds)
     {
         var written = new List<string>();
         string home = probe.HomeDirectory;
-        string dataHome = probe.GetEnvironmentVariable("XDG_DATA_HOME") is { Length: > 0 } x
-            ? x
-            : Posix(home, ".local", "share");
+        string dataHome = DataHome();
+        string applicationsDir = Posix(dataHome, "applications");
+        string? priorDefault = QueryDefaultUriHandler();
+        string? preferredDefault = kinds.HasFlag(ShortcutKinds.UriHandler)
+            ? LinuxDesktopFileName
+            : (!string.IsNullOrWhiteSpace(priorDefault)
+                && !string.Equals(priorDefault, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
+                ? priorDefault
+                : null);
 
         string? icon = InstallIcon(installDirectory, Posix(dataHome, "icons", "hicolor", "256x256", "apps", "optimum.png"));
-        string entry = DesktopEntry(launcherPath, installDirectory, icon);
 
-        if (kinds.HasFlag(ShortcutKinds.Menu))
-            written.AddRange(WriteText(Posix(dataHome, "applications", "optimum.desktop"), entry, executable: true));
+        if (kinds.HasFlag(ShortcutKinds.Menu) || kinds.HasFlag(ShortcutKinds.UriHandler))
+        {
+            bool noDisplay = !kinds.HasFlag(ShortcutKinds.Menu);
+            string menuEntry = DesktopEntry(launcherPath, installDirectory, icon, noDisplay);
+            written.AddRange(WriteText(Posix(applicationsDir, LinuxDesktopFileName), menuEntry, executable: true));
+            RefreshDesktopDatabase(applicationsDir);
+            UpdateMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName, preferredDefault);
+        }
+
         if (kinds.HasFlag(ShortcutKinds.Desktop))
-            written.AddRange(WriteText(Posix(home, "Desktop", "Optimum.desktop"), entry, executable: true));
+        {
+            string desktopEntry = DesktopEntry(launcherPath, installDirectory, icon, noDisplay: false);
+            written.AddRange(WriteText(Posix(home, "Desktop", "Optimum.desktop"), desktopEntry, executable: true));
+        }
+
+        if (kinds.HasFlag(ShortcutKinds.UriHandler))
+        {
+            SetDefaultUriHandler(LinuxDesktopFileName);
+        }
+        else if (!string.IsNullOrWhiteSpace(priorDefault)
+            && !string.Equals(priorDefault, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            // Keep the user's prior choice pinned in mimeapps.list so rebuilding
+            // mimeinfo.cache never silently steals the association based on
+            // alphabetical .desktop ordering.
+            SetDefaultUriHandler(priorDefault);
+        }
 
         return written;
+    }
+
+    private string DataHome() =>
+        probe.GetEnvironmentVariable("XDG_DATA_HOME") is { Length: > 0 } x
+            ? x
+            : Posix(probe.HomeDirectory, ".local", "share");
+
+    private string ConfigHome() =>
+        probe.GetEnvironmentVariable("XDG_CONFIG_HOME") is { Length: > 0 } x
+            ? x
+            : Posix(probe.HomeDirectory, ".config");
+
+    private void SetDefaultUriHandler(string desktopFileId)
+    {
+        string mimeAppsPath = Posix(ConfigHome(), "mimeapps.list");
+        UpsertMimeAppsDefault(mimeAppsPath, ModInstallMimeType, desktopFileId);
+        _ = probe.Run("xdg-mime", ["default", desktopFileId, ModInstallMimeType], TimeSpan.FromSeconds(5));
+    }
+
+    private void RefreshDesktopDatabase(string applicationsDir)
+    {
+        _ = probe.Run("update-desktop-database", [applicationsDir], TimeSpan.FromSeconds(5));
+    }
+
+    private bool DesktopEntryExists(string desktopFileId)
+    {
+        string[] candidateDirs =
+        [
+            Posix(DataHome(), "applications"),
+            "/usr/local/share/applications",
+            "/usr/share/applications",
+        ];
+        foreach (string dir in candidateDirs)
+        {
+            string candidate = Posix(dir, desktopFileId);
+            if (probe.FileExists(candidate) || File.Exists(candidate))
+                return true;
+        }
+        return false;
+    }
+
+    private string? ReadFileText(string path)
+    {
+        if (probe.ReadText(path) is { } fromProbe)
+            return fromProbe;
+        try
+        {
+            return File.Exists(path) ? File.ReadAllText(path) : null;
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+    }
+
+    private static string? TryReadIniAssociation(string? content, string sectionName, string mimeType)
+    {
+        if (string.IsNullOrEmpty(content))
+            return null;
+
+        string targetHeader = $"[{sectionName}]";
+        bool inSection = false;
+        string prefix = mimeType + "=";
+
+        foreach (string rawLine in content.Split('\n'))
+        {
+            string line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+                continue;
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                inSection = string.Equals(line, targetHeader, StringComparison.OrdinalIgnoreCase);
+                continue;
+            }
+            if (!inSection || !line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string rhs = line[prefix.Length..].Trim();
+            string? first = rhs
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrEmpty(first))
+                return first;
+        }
+
+        return null;
+    }
+
+    private void UpsertMimeAppsDefault(string path, string mimeType, string desktopFileId)
+    {
+        const string sectionHeader = "[Default Applications]";
+        string keyPrefix = mimeType + "=";
+        string newEntry = $"{mimeType}={desktopFileId}";
+        string? existing = ReadFileText(path);
+
+        var lines = existing is not null
+            ? existing.Replace("\r\n", "\n").Split('\n').ToList()
+            : new List<string>();
+
+        while (lines.Count > 0 && lines[^1].Length == 0)
+            lines.RemoveAt(lines.Count - 1);
+
+        int sectionIndex = -1;
+        int nextSectionIndex = lines.Count;
+        int keyIndex = -1;
+
+        for (int i = 0; i < lines.Count; i++)
+        {
+            string trimmed = lines[i].Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                if (string.Equals(trimmed, sectionHeader, StringComparison.OrdinalIgnoreCase))
+                {
+                    sectionIndex = i;
+                }
+                else if (sectionIndex >= 0 && nextSectionIndex == lines.Count)
+                {
+                    nextSectionIndex = i;
+                }
+                continue;
+            }
+
+            if (sectionIndex >= 0 && nextSectionIndex == lines.Count
+                && trimmed.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                keyIndex = i;
+            }
+        }
+
+        if (keyIndex >= 0)
+        {
+            lines[keyIndex] = newEntry;
+        }
+        else if (sectionIndex >= 0)
+        {
+            lines.Insert(nextSectionIndex, newEntry);
+        }
+        else
+        {
+            if (lines.Count > 0)
+                lines.Add(string.Empty);
+            lines.Add(sectionHeader);
+            lines.Add(newEntry);
+        }
+
+        _ = WriteText(path, string.Join('\n', lines) + "\n", executable: false);
+    }
+
+    private void RemoveOrRestoreMimeAppsEntry(string path, string desktopToRemove, string? restoreDesktop)
+    {
+        string? existing = ReadFileText(path);
+        if (existing is null)
+            return;
+
+        string keyPrefix = ModInstallMimeType + "=";
+        var lines = existing.Replace("\r\n", "\n").Split('\n').ToList();
+        string currentSection = string.Empty;
+        bool modified = false;
+        var updated = new List<string>(lines.Count);
+
+        foreach (string line in lines)
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith('[') && trimmed.EndsWith(']'))
+            {
+                currentSection = trimmed;
+                updated.Add(line);
+                continue;
+            }
+
+            if ((string.Equals(currentSection, "[Default Applications]", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(currentSection, "[Added Associations]", StringComparison.OrdinalIgnoreCase))
+                && trimmed.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string rhs = trimmed[keyPrefix.Length..];
+                bool hadTrailingSemicolon = rhs.TrimEnd().EndsWith(';');
+                var entries = rhs
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+
+                int removedCount = entries.RemoveAll(e => string.Equals(e, desktopToRemove, StringComparison.OrdinalIgnoreCase));
+                if (removedCount > 0)
+                {
+                    modified = true;
+                    if (restoreDesktop is not null
+                        && string.Equals(currentSection, "[Default Applications]", StringComparison.OrdinalIgnoreCase)
+                        && !entries.Any(e => string.Equals(e, restoreDesktop, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        entries.Insert(0, restoreDesktop);
+                    }
+
+                    if (entries.Count > 0)
+                    {
+                        string joined = string.Join(';', entries) + (hadTrailingSemicolon || entries.Count > 1 ? ";" : string.Empty);
+                        updated.Add($"{ModInstallMimeType}={joined}");
+                    }
+                    continue;
+                }
+            }
+
+            updated.Add(line);
+        }
+
+        if (modified)
+        {
+            while (updated.Count > 0 && updated[^1].Length == 0)
+                updated.RemoveAt(updated.Count - 1);
+            _ = WriteText(path, updated.Count == 0 ? string.Empty : string.Join('\n', updated) + "\n", executable: false);
+        }
+    }
+
+    private void UpdateMimeCache(string mimeCachePath, string desktopFileId, string? preferredFirst = null)
+    {
+        const string header = "[MIME Cache]";
+        string keyPrefix = ModInstallMimeType + "=";
+        string? existing = ReadFileText(mimeCachePath);
+        var lines = existing is not null
+            ? existing.Replace("\r\n", "\n").Split('\n').ToList()
+            : new List<string> { header };
+
+        while (lines.Count > 0 && lines[^1].Length == 0)
+            lines.RemoveAt(lines.Count - 1);
+
+        if (!lines.Any(l => string.Equals(l.Trim(), header, StringComparison.OrdinalIgnoreCase)))
+            lines.Insert(0, header);
+
+        string? validPreferred = !string.IsNullOrWhiteSpace(preferredFirst)
+            && (string.Equals(preferredFirst, desktopFileId, StringComparison.OrdinalIgnoreCase)
+                || DesktopEntryExists(preferredFirst))
+            ? preferredFirst.Trim()
+            : null;
+
+        int idx = lines.FindIndex(l => l.Trim().StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            var entries = lines[idx].Trim()[keyPrefix.Length..]
+                .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+            if (!entries.Any(e => string.Equals(e, desktopFileId, StringComparison.OrdinalIgnoreCase)))
+                entries.Add(desktopFileId);
+            if (validPreferred is not null)
+            {
+                entries.RemoveAll(e => string.Equals(e, validPreferred, StringComparison.OrdinalIgnoreCase));
+                entries.Insert(0, validPreferred);
+            }
+            lines[idx] = $"{ModInstallMimeType}={string.Join(';', entries)};";
+        }
+        else
+        {
+            string lineValue = validPreferred is not null && !string.Equals(validPreferred, desktopFileId, StringComparison.OrdinalIgnoreCase)
+                ? $"{validPreferred};{desktopFileId};"
+                : $"{desktopFileId};";
+            lines.Add($"{ModInstallMimeType}={lineValue}");
+        }
+
+        _ = WriteText(mimeCachePath, string.Join('\n', lines) + "\n", executable: false);
+    }
+
+    private void RemoveDesktopFromMimeCache(string mimeCachePath, string desktopFileId)
+    {
+        string? existing = ReadFileText(mimeCachePath);
+        if (existing is null)
+            return;
+
+        string keyPrefix = ModInstallMimeType + "=";
+        var lines = existing.Replace("\r\n", "\n").Split('\n').ToList();
+        bool modified = false;
+        var updated = new List<string>(lines.Count);
+
+        foreach (string line in lines)
+        {
+            string trimmed = line.Trim();
+            if (trimmed.StartsWith(keyPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                var entries = trimmed[keyPrefix.Length..]
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+                if (entries.RemoveAll(e => string.Equals(e, desktopFileId, StringComparison.OrdinalIgnoreCase)) > 0)
+                {
+                    modified = true;
+                    if (entries.Count > 0)
+                        updated.Add($"{ModInstallMimeType}={string.Join(';', entries)};");
+                    continue;
+                }
+            }
+            updated.Add(line);
+        }
+
+        if (modified)
+        {
+            while (updated.Count > 0 && updated[^1].Length == 0)
+                updated.RemoveAt(updated.Count - 1);
+            _ = WriteText(mimeCachePath, updated.Count == 0 ? string.Empty : string.Join('\n', updated) + "\n", executable: false);
+        }
     }
 
     /// <summary>
@@ -110,20 +538,25 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         return written;
     }
 
-    private static string DesktopEntry(string launcherPath, string workingDirectory, string? icon) =>
-        $"""
-        [Desktop Entry]
-        Type=Application
-        Name=Optimum
-        Comment=High-performance client for Vintage Story
-        Exec="{EscapeExec(launcherPath)}"
-        Path={workingDirectory}
-        Icon={icon ?? "optimum"}
-        Terminal=false
-        Categories=Game;
-        StartupWMClass=Optimum
+    private static string DesktopEntry(string launcherPath, string workingDirectory, string? icon, bool noDisplay = false)
+    {
+        string displayLine = noDisplay ? "NoDisplay=true\n" : string.Empty;
+        return
+            $"""
+            [Desktop Entry]
+            Type=Application
+            Name=Optimum
+            Comment=High-performance client for Vintage Story
+            Exec="{EscapeExec(launcherPath)}" %u
+            Path={workingDirectory}
+            Icon={icon ?? "optimum"}
+            Terminal=false
+            Categories=Game;
+            MimeType={ModInstallMimeType};
+            {displayLine}StartupWMClass=Optimum
 
-        """;
+            """;
+    }
 
     /// <summary>
     /// Escapes a value for a quoted <c>Exec</c> per the Desktop Entry spec:
