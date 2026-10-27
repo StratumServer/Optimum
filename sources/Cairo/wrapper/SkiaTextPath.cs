@@ -25,12 +25,37 @@ namespace Cairo
 				ushort[] glyphs = measure.GetGlyphs(text);
 				float[] widths = new float[glyphs.Length];
 				measure.GetGlyphWidths(glyphs, widths, null);
-				double x = originX;
-				for (int i = 0; i < glyphs.Length; i++) {
-					AppendGlyph(state, font, hinted, glyphs[i], x + trans.X, originY + trans.Y);
-					x += state.FontFileSource != null && hinted != null ? hinted.GetGlyphAdvance(glyphs[i], options.HintMetrics != HintMetrics.Off) : widths[i];
+				if (state.HasAffineFontMatrix) {
+					Matrix m = state.FontMatrix;
+					double S = state.EffectiveFontSize;
+					double invS = 1.0 / S;
+					var transform = new SKMatrix {
+						ScaleX = (float)(m.Xx * invS),
+						SkewX  = (float)(m.Xy * invS),
+						TransX = 0,
+						SkewY  = (float)(m.Yx * invS),
+						ScaleY = (float)(m.Yy * invS),
+						TransY = 0,
+						Persp0 = 0,
+						Persp1 = 0,
+						Persp2 = 1
+					};
+					double currX = originX;
+					double currY = originY;
+					for (int i = 0; i < glyphs.Length; i++) {
+						AppendGlyph(state, font, null, glyphs[i], currX + trans.X, currY + trans.Y, transform);
+						currX += (m.Xx * invS) * widths[i];
+						currY += (m.Yx * invS) * widths[i];
+					}
+					state.MoveTo(currX, currY);
+				} else {
+					double x = originX;
+					for (int i = 0; i < glyphs.Length; i++) {
+						AppendGlyph(state, font, hinted, glyphs[i], x + trans.X, originY + trans.Y);
+						x += state.FontFileSource != null && hinted != null ? hinted.GetGlyphAdvance(glyphs[i], options.HintMetrics != HintMetrics.Off) : widths[i];
+					}
+					state.MoveTo(x, originY);
 				}
-				state.MoveTo(x, originY);
 			} finally { advanceFont?.Dispose(); }
 		}
 
@@ -46,17 +71,40 @@ namespace Cairo
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
-			foreach (Glyph glyph in glyphs) {
-				if (glyph.Index < 0 || glyph.Index > ushort.MaxValue)
-					throw new InvalidOperationException("Skia glyph indices are 16-bit; glyph " + glyph.Index + " has no outline.");
-				AppendGlyph(state, font, hinted, (ushort)glyph.Index, glyph.X + trans.X, glyph.Y + trans.Y);
+			if (state.HasAffineFontMatrix) {
+				Matrix m = state.FontMatrix;
+				double S = state.EffectiveFontSize;
+				double invS = 1.0 / S;
+				var transform = new SKMatrix {
+					ScaleX = (float)(m.Xx * invS),
+					SkewX  = (float)(m.Xy * invS),
+					TransX = 0,
+					SkewY  = (float)(m.Yx * invS),
+					ScaleY = (float)(m.Yy * invS),
+					TransY = 0,
+					Persp0 = 0,
+					Persp1 = 0,
+					Persp2 = 1
+				};
+				foreach (Glyph glyph in glyphs) {
+					if (glyph.Index < 0 || glyph.Index > ushort.MaxValue)
+						throw new InvalidOperationException("Skia glyph indices are 16-bit; glyph " + glyph.Index + " has no outline.");
+					AppendGlyph(state, font, null, (ushort)glyph.Index, glyph.X + trans.X, glyph.Y + trans.Y, transform);
+				}
+			} else {
+				foreach (Glyph glyph in glyphs) {
+					if (glyph.Index < 0 || glyph.Index > ushort.MaxValue)
+						throw new InvalidOperationException("Skia glyph indices are 16-bit; glyph " + glyph.Index + " has no outline.");
+					AppendGlyph(state, font, hinted, (ushort)glyph.Index, glyph.X + trans.X, glyph.Y + trans.Y);
+				}
 			}
 		}
 
-		static void AppendGlyph(ManagedGraphicsState state, SKFont font, SkiaHintedFontOutlines hinted, ushort glyph, double x, double y)
+		static void AppendGlyph(ManagedGraphicsState state, SKFont font, SkiaHintedFontOutlines hinted, ushort glyph, double x, double y, SKMatrix? transform = null)
 		{
 			using SKPath outline = hinted?.GetGlyphPath(glyph) ?? font.GetGlyphPath(glyph);
 			if (outline == null || outline.PointCount == 0) return;
+			if (transform.HasValue) outline.Transform(transform.Value);
 			using SKPath.RawIterator iterator = outline.CreateRawIterator();
 			var points = new SKPoint[4];
 			SKPoint current = default;

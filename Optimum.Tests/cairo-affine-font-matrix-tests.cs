@@ -9,6 +9,7 @@ using Xunit;
 public sealed class CairoAffineFontMatrixTests
 {
 	const double AdvanceTolerance = 1.0 / 256.0;
+	const double AffineAdvanceTolerance = 0.1;
 	const double MetricTolerance = 2.0;
 
 	[StructLayout (LayoutKind.Sequential)]
@@ -255,6 +256,209 @@ public sealed class CairoAffineFontMatrixTests
 		}
 	}
 
+	[Theory]
+	[InlineData ("sans-serif", 0.0, 20.0, -20.0, 0.0, 0.0, 0.0, "rot90")]
+	[InlineData ("sans-serif", -20.0, 0.0, 0.0, -20.0, 0.0, 0.0, "rot180")]
+	[InlineData ("sans-serif", 0.0, -20.0, 20.0, 0.0, 0.0, 0.0, "rot270")]
+	[InlineData ("sans-serif", 14.1421356, 14.1421356, -14.1421356, 14.1421356, 0.0, 0.0, "rot45")]
+	[InlineData ("sans-serif", 17.320508, 10.0, -10.0, 17.320508, 0.0, 0.0, "rot30")]
+	[InlineData ("Montserrat", 0.0, 24.0, -24.0, 0.0, 10.0, -5.0, "rot90+trans")]
+	[InlineData ("Lora", 14.1421356, 14.1421356, -14.1421356, 14.1421356, 0.0, 0.0, "rot45")]
+	public void RotatedFontMatrixMatchesCairoNativeAndDeny (
+		string family, double xx, double yx, double xy, double yy, double x0, double y0, string tag)
+	{
+		CairoBundledFonts.Register ();
+		bool oldRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		try {
+			Probe? native = null;
+			if (CairoNativeGuard.NativeAllowed) {
+				Surface.ConfigureAutomaticRecording (false);
+				native = Run (managed: false, family, xx, yx, xy, yy, x0, y0, "Hello", HintMetrics.Off);
+			}
+
+			Surface.ConfigureAutomaticRecording (true);
+			Probe managed = Run (managed: true, family, xx, yx, xy, yy, x0, y0, "Hello", HintMetrics.Off);
+
+			Assert.Equal (Status.Success, managed.Status);
+			Assert.True (managed.Text.Width > 0, "managed width > 0");
+			Assert.True (managed.Text.Height > 0, "managed height > 0");
+			AssertClose (managed.Text.XAdvance, managed.AfterShow.X - 50, $"{tag} ShowText x advance");
+			AssertClose (managed.Text.YAdvance, managed.AfterShow.Y - 50, $"{tag} ShowText y advance");
+			AssertClose (managed.Text.XAdvance, managed.AfterPath.X - 50, $"{tag} TextPath x advance");
+			AssertClose (managed.Text.YAdvance, managed.AfterPath.Y - 50, $"{tag} TextPath y advance");
+
+			if (native.HasValue) {
+				Probe expected = native.Value;
+				string scenario = $"{family} {tag} ({xx},{yx},{xy},{yy},{x0},{y0})";
+				AssertClose (expected.Text.XAdvance, managed.Text.XAdvance, scenario + " x advance", AffineAdvanceTolerance);
+				AssertClose (expected.Text.YAdvance, managed.Text.YAdvance, scenario + " y advance", AffineAdvanceTolerance);
+				AssertClose (expected.AfterShow.X, managed.AfterShow.X, scenario + " show x", AffineAdvanceTolerance);
+				AssertClose (expected.AfterShow.Y, managed.AfterShow.Y, scenario + " show y", AffineAdvanceTolerance);
+				AssertClose (expected.AfterPath.X, managed.AfterPath.X, scenario + " path x", AffineAdvanceTolerance);
+				AssertClose (expected.AfterPath.Y, managed.AfterPath.Y, scenario + " path y", AffineAdvanceTolerance);
+
+				Assert.InRange (Math.Abs (expected.Text.XBearing - managed.Text.XBearing), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Text.YBearing - managed.Text.YBearing), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Text.Width - managed.Text.Width), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Text.Height - managed.Text.Height), 0, MetricTolerance);
+
+				Assert.InRange (Math.Abs (expected.Font.Ascent - managed.Font.Ascent), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Font.Descent - managed.Font.Descent), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Font.Height - managed.Font.Height), 0, MetricTolerance + 1);
+				Assert.InRange (Math.Abs (expected.Font.MaxXAdvance - managed.Font.MaxXAdvance), 0, MetricTolerance);
+			}
+
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+		} finally {
+			Surface.ConfigureAutomaticRecording (oldRecording);
+		}
+	}
+
+	[Theory]
+	[InlineData ("sans-serif", 20.0, 0.0, 10.0, 20.0, 0.0, 0.0, "shearX")]
+	[InlineData ("sans-serif", 20.0, 10.0, 0.0, 20.0, 0.0, 0.0, "shearY")]
+	[InlineData ("sans-serif", 15.0, 8.0, -6.0, 12.0, 0.0, 0.0, "generalShear")]
+	[InlineData ("Montserrat", 20.0, 5.0, 5.0, 20.0, 10.0, -10.0, "shear+trans")]
+	public void ShearedFontMatrixMatchesCairoNativeAndDeny (
+		string family, double xx, double yx, double xy, double yy, double x0, double y0, string tag)
+	{
+		CairoBundledFonts.Register ();
+		bool oldRecording = Surface.AutomaticRecordingEnabled;
+		int deniedBefore = CairoNativeGuard.DeniedCount;
+		try {
+			Probe? native = null;
+			if (CairoNativeGuard.NativeAllowed) {
+				Surface.ConfigureAutomaticRecording (false);
+				native = Run (managed: false, family, xx, yx, xy, yy, x0, y0, "Sample", HintMetrics.Off);
+			}
+
+			Surface.ConfigureAutomaticRecording (true);
+			Probe managed = Run (managed: true, family, xx, yx, xy, yy, x0, y0, "Sample", HintMetrics.Off);
+
+			Assert.Equal (Status.Success, managed.Status);
+			Assert.True (managed.Text.Width > 0, "managed width > 0");
+			Assert.True (managed.Text.Height > 0, "managed height > 0");
+			AssertClose (managed.Text.XAdvance, managed.AfterShow.X - 50, $"{tag} ShowText x advance");
+			AssertClose (managed.Text.YAdvance, managed.AfterShow.Y - 50, $"{tag} ShowText y advance");
+			AssertClose (managed.Text.XAdvance, managed.AfterPath.X - 50, $"{tag} TextPath x advance");
+			AssertClose (managed.Text.YAdvance, managed.AfterPath.Y - 50, $"{tag} TextPath y advance");
+
+			if (native.HasValue) {
+				Probe expected = native.Value;
+				string scenario = $"{family} {tag} ({xx},{yx},{xy},{yy},{x0},{y0})";
+				AssertClose (expected.Text.XAdvance, managed.Text.XAdvance, scenario + " x advance", AffineAdvanceTolerance);
+				AssertClose (expected.Text.YAdvance, managed.Text.YAdvance, scenario + " y advance", AffineAdvanceTolerance);
+				AssertClose (expected.AfterShow.X, managed.AfterShow.X, scenario + " show x", AffineAdvanceTolerance);
+				AssertClose (expected.AfterShow.Y, managed.AfterShow.Y, scenario + " show y", AffineAdvanceTolerance);
+				AssertClose (expected.AfterPath.X, managed.AfterPath.X, scenario + " path x", AffineAdvanceTolerance);
+				AssertClose (expected.AfterPath.Y, managed.AfterPath.Y, scenario + " path y", AffineAdvanceTolerance);
+
+				Assert.InRange (Math.Abs (expected.Text.XBearing - managed.Text.XBearing), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Text.YBearing - managed.Text.YBearing), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Text.Width - managed.Text.Width), 0, MetricTolerance);
+				Assert.InRange (Math.Abs (expected.Text.Height - managed.Text.Height), 0, MetricTolerance);
+			}
+
+			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
+			if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+		} finally {
+			Surface.ConfigureAutomaticRecording (oldRecording);
+		}
+	}
+
+	[Fact]
+	public void RotatedFontMatrixTranslationShiftsExtentsWithoutAffectingAdvance ()
+	{
+		CairoBundledFonts.Register ();
+		bool oldRecording = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (true);
+			Probe baseline = Run (managed: true, "sans-serif", 0.0, 20.0, -20.0, 0.0, 0.0, 0.0, "Test", HintMetrics.Off);
+			Probe translated = Run (managed: true, "sans-serif", 0.0, 20.0, -20.0, 0.0, 15.0, -25.0, "Test", HintMetrics.Off);
+
+			Assert.Equal (Status.Success, baseline.Status);
+			Assert.Equal (Status.Success, translated.Status);
+
+			AssertClose (baseline.Text.XAdvance, translated.Text.XAdvance, "x advance must be identical");
+			AssertClose (baseline.Text.YAdvance, translated.Text.YAdvance, "y advance must be identical");
+			AssertClose (baseline.Text.Width, translated.Text.Width, "width must be identical");
+			AssertClose (baseline.Text.Height, translated.Text.Height, "height must be identical");
+
+			AssertClose (baseline.Text.XBearing + 15.0, translated.Text.XBearing, "x bearing shift");
+			AssertClose (baseline.Text.YBearing - 25.0, translated.Text.YBearing, "y bearing shift");
+
+			AssertClose (baseline.AfterShow.X, translated.AfterShow.X, "after show x");
+			AssertClose (baseline.AfterShow.Y, translated.AfterShow.Y, "after show y");
+			AssertClose (baseline.AfterPath.X, translated.AfterPath.X, "after path x");
+			AssertClose (baseline.AfterPath.Y, translated.AfterPath.Y, "after path y");
+		} finally {
+			Surface.ConfigureAutomaticRecording (oldRecording);
+		}
+	}
+
+	[Fact]
+	public void ScaledFontWithAffineMatrixMatchesContext ()
+	{
+		CairoBundledFonts.Register ();
+		bool oldRecording = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (true);
+			using var surface = ImageSurface.CreateForRecordedGui (Format.Argb32, 200, 200);
+			using var cr = new Context (surface);
+			cr.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
+			var fontMatrix = new Matrix (0.0, 20.0, -20.0, 0.0, 5.0, -10.0);
+			cr.FontMatrix = fontMatrix;
+
+			FontExtents ctxFontExt = cr.FontExtents;
+			TextExtents ctxTextExt = cr.TextExtents ("Scaled");
+
+			using var sf = cr.GetScaledFont ();
+			Assert.Equal (Status.Success, sf.Status);
+			Assert.Equal (fontMatrix.Xx, sf.FontMatrix.Xx);
+			Assert.Equal (fontMatrix.Yx, sf.FontMatrix.Yx);
+			Assert.Equal (fontMatrix.Xy, sf.FontMatrix.Xy);
+			Assert.Equal (fontMatrix.Yy, sf.FontMatrix.Yy);
+			Assert.Equal (fontMatrix.X0, sf.FontMatrix.X0);
+			Assert.Equal (fontMatrix.Y0, sf.FontMatrix.Y0);
+
+			FontExtents sfFontExt = sf.FontExtents;
+			AssertClose (ctxFontExt.Ascent, sfFontExt.Ascent, "ascent");
+			AssertClose (ctxFontExt.Descent, sfFontExt.Descent, "descent");
+			AssertClose (ctxFontExt.Height, sfFontExt.Height, "height");
+			AssertClose (ctxFontExt.MaxXAdvance, sfFontExt.MaxXAdvance, "max x advance");
+		} finally {
+			Surface.ConfigureAutomaticRecording (oldRecording);
+		}
+	}
+
+	[Fact]
+	public void RotatedTextRendersInkIntoExpectedArea ()
+	{
+		CairoBundledFonts.Register ();
+		bool oldRecording = Surface.AutomaticRecordingEnabled;
+		try {
+			Surface.ConfigureAutomaticRecording (true);
+			using var surface = ImageSurface.CreateForRecordedGui (Format.Argb32, 200, 200);
+			using var cr = new Context (surface);
+			cr.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
+			// 90 degree clockwise rotation: x' = -y, y' = x
+			cr.FontMatrix = new Matrix (0.0, 20.0, -20.0, 0.0, 0.0, 0.0);
+			cr.SetSourceRGBA (1, 1, 1, 1);
+			cr.MoveTo (100, 50);
+			cr.ShowText ("Hello");
+
+			// ShowText should move the pen down in Y
+			PointD pt = cr.CurrentPoint;
+			AssertClose (100.0, pt.X, "pen x unchanged");
+			Assert.True (pt.Y > 50.0, "pen y advanced downward");
+			Assert.Equal (Status.Success, cr.Status);
+		} finally {
+			Surface.ConfigureAutomaticRecording (oldRecording);
+		}
+	}
+
 	static Probe Run (bool managed, string family, double xx, double yy, double x0, double y0, string text, HintMetrics hintMetrics)
 	{
 		using var surface = managed
@@ -297,9 +501,51 @@ public sealed class CairoAffineFontMatrixTests
 		return new Probe (textExtents, fontExtents, glyphExtents, afterShow, afterPath, pathBounds, pathDataCount, cr.Status);
 	}
 
-	static void AssertClose (double expected, double actual, string what)
+	static Probe Run (bool managed, string family, double xx, double yx, double xy, double yy, double x0, double y0, string text, HintMetrics hintMetrics)
 	{
-		Assert.True (Math.Abs (expected - actual) <= AdvanceTolerance + 1e-9 * Math.Abs (expected),
+		using var surface = managed
+			? ImageSurface.CreateForRecordedGui (Format.Argb32, 300, 300)
+			: new ImageSurface (Format.Argb32, 300, 300);
+		using var cr = new Context (surface);
+		cr.SelectFontFace (family, FontSlant.Normal, FontWeight.Normal);
+		using var options = new FontOptions ();
+		options.Antialias = Antialias.Gray;
+		options.HintStyle = HintStyle.Full;
+		options.HintMetrics = hintMetrics;
+		cr.FontOptions = options;
+		cr.FontMatrix = new Matrix (xx, yx, xy, yy, x0, y0);
+
+		TextExtents textExtents = cr.TextExtents (text);
+		FontExtents fontExtents = cr.FontExtents;
+		TextExtents glyphExtents = cr.GlyphExtents (new[] {
+			new Glyph (1, 0, 0),
+			new Glyph (2, 10, 0)
+		});
+
+		cr.MoveTo (50, 50);
+		cr.ShowText (text);
+		PointD afterShow = cr.CurrentPoint;
+
+		cr.NewPath ();
+		cr.MoveTo (50, 50);
+		cr.TextPath (text);
+		PointD afterPath = cr.CurrentPoint;
+
+		Rectangle pathBounds = cr.FillExtents ();
+		int pathDataCount = 0;
+		using (Path path = cr.CopyPath ()) {
+			if (path != null && path.Handle != IntPtr.Zero) {
+				var header = Marshal.PtrToStructure<NativePathHeader> (path.Handle);
+				pathDataCount = header.Count;
+			}
+		}
+
+		return new Probe (textExtents, fontExtents, glyphExtents, afterShow, afterPath, pathBounds, pathDataCount, cr.Status);
+	}
+
+	static void AssertClose (double expected, double actual, string what, double tolerance = AdvanceTolerance)
+	{
+		Assert.True (Math.Abs (expected - actual) <= tolerance + 1e-9 * Math.Abs (expected),
 			$"{what}: expected {expected:R}, actual {actual:R}");
 	}
 }

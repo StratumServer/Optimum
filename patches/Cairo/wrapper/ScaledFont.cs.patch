@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
-index 42d5e81..9261266 100644
+index 42d5e81..803d7f7 100644
 --- a/Cairo/wrapper/ScaledFont.cs
 +++ b/Cairo/wrapper/ScaledFont.cs
-@@ -1,111 +1,288 @@
+@@ -1,7 +1,7 @@
  //
  // Mono.Cairo.ScaledFont.cs
  //
@@ -11,8 +11,7 @@ index 42d5e81..9261266 100644
  //
  // Permission is hereby granted, free of charge, to any person obtaining
  // a copy of this software and associated documentation files (the
- // "Software"), to deal in the Software without restriction, including
- // without limitation the rights to use, copy, modify, merge, publish,
+@@ -10,18 +10,18 @@
  // distribute, sublicense, and/or sell copies of the Software, and to
  // permit persons to whom the Software is furnished to do so, subject to
  // the following conditions:
@@ -38,7 +37,7 @@ index 42d5e81..9261266 100644
  
  using System;
  using System.Runtime.InteropServices;
- 
+@@ -29,13 +29,36 @@ using System.Runtime.InteropServices;
  #nullable disable
  
  namespace Cairo {
@@ -76,10 +75,7 @@ index 42d5e81..9261266 100644
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
  
- 			this.handle = handle;
- 			if (!owner)
- 				NativeMethods.cairo_scaled_font_reference (handle);
- 			if (CairoDebug.Enabled)
+@@ -46,9 +69,90 @@ namespace Cairo {
  				CairoDebug.OnAllocated (handle);
  		}
  
@@ -172,14 +168,11 @@ index 42d5e81..9261266 100644
  		}
  
  		~ScaledFont ()
- 		{
+@@ -56,54 +160,138 @@ namespace Cairo {
  			Dispose (false);
  		}
  
 -		public IntPtr Handle {
--			get {
--				return handle;
--			}
 +		internal ManagedFileFontSource ManagedFileSource => fileSource;
 +		internal ManagedFontFaceResource ManagedResource => managedResource;
 +		internal ManagedScaledFontResource ManagedScaledResource => managedScaledFontLease?.Resource;
@@ -188,7 +181,19 @@ index 42d5e81..9261266 100644
 +		internal string ManagedFamily => family;
 +		internal FontSlant ManagedSlant => slant;
 +		internal FontWeight ManagedWeight => weight;
-+		internal double ManagedSize => ReferenceEquals (fontMatrix, null) ? 10 : Math.Sqrt (Math.Abs (fontMatrix.Xx * fontMatrix.Yy - fontMatrix.Xy * fontMatrix.Yx));
++		internal double ManagedSize {
+ 			get {
+-				return handle;
++				if (ReferenceEquals (fontMatrix, null)) return 10;
++				if (fontMatrix.Yx != 0 || fontMatrix.Xy != 0 || fontMatrix.Yy < 0) {
++					double Ly = Math.Sqrt (fontMatrix.Xy * fontMatrix.Xy + fontMatrix.Yy * fontMatrix.Yy);
++					if (double.IsFinite (Ly) && Ly > 0) return Ly;
++				}
++				if (double.IsFinite (fontMatrix.Yy) && fontMatrix.Yy > 0) return fontMatrix.Yy;
++				double det = Math.Sqrt (Math.Abs (fontMatrix.Xx * fontMatrix.Yy - fontMatrix.Xy * fontMatrix.Yx));
++				return det > 0 ? det : 10;
+ 			}
+ 		}
 +		internal Matrix ManagedFontMatrix => ReferenceEquals (fontMatrix, null) ? null : (Matrix)fontMatrix.Clone ();
 +		internal Matrix ManagedCtm => ReferenceEquals (ctm, null) ? null : (Matrix)ctm.Clone ();
 +
@@ -196,8 +201,8 @@ index 42d5e81..9261266 100644
 +		{
 +			CheckDisposed ();
 +			return FontOptions.FromValues (antialias, hintStyle, hintMetrics, subpixelOrder);
- 		}
- 
++		}
++
 +		internal ManagedScaledFontCache.Lease AcquireManagedReference ()
 +		{
 +			CheckDisposed ();
@@ -246,7 +251,7 @@ index 42d5e81..9261266 100644
 +		}
 +
 +		public IntPtr Handle { get { return EnsureNativeHandle (); } }
-+
+ 
  		public FontExtents FontExtents {
  			get {
  				CheckDisposed ();
@@ -322,11 +327,7 @@ index 42d5e81..9261266 100644
  			}
  		}
  
- 		public void Dispose ()
- 		{
-@@ -115,28 +292,28 @@ namespace Cairo {
- 
- 		protected virtual void Dispose (bool disposing)
+@@ -117,17 +305,18 @@ namespace Cairo {
  		{
  			if (!disposing || CairoDebug.Enabled)
  				CairoDebug.OnDisposed<ScaledFont> (handle, disposing);
@@ -351,7 +352,7 @@ index 42d5e81..9261266 100644
  				throw new ObjectDisposedException ("Object has already been disposed");
  		}
  
- 		[Obsolete]
+@@ -135,8 +324,7 @@ namespace Cairo {
  		protected void Reference ()
  		{
  			CheckDisposed ();

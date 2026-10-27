@@ -356,6 +356,11 @@ namespace Cairo
 				Matrix matrix = View.FontMatrix;
 				if (double.IsFinite (matrix.Yy) && matrix.Yy > 0 && matrix.Yx == 0 && matrix.Xy == 0)
 					return matrix.Yy;
+				if (matrix.Yx != 0 || matrix.Xy != 0 || matrix.Yy < 0) {
+					double Ly = Math.Sqrt (matrix.Xy * matrix.Xy + matrix.Yy * matrix.Yy);
+					if (double.IsFinite (Ly) && Ly > 0)
+						return Ly;
+				}
 				return View.FontSize;
 			}
 		}
@@ -366,6 +371,13 @@ namespace Cairo
 				if (double.IsFinite (matrix.Xx) && double.IsFinite (matrix.Yy) && matrix.Yy > 0 && matrix.Xx != 0 && matrix.Yx == 0 && matrix.Xy == 0)
 					return (float)(matrix.Xx / matrix.Yy);
 				return 1f;
+			}
+		}
+		internal bool HasAffineFontMatrix
+		{
+			get {
+				Matrix matrix = View.FontMatrix;
+				return matrix.Yx != 0 || matrix.Xy != 0 || matrix.Yy < 0;
 			}
 		}
 		internal bool IsZeroFontMatrix
