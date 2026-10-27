@@ -11,7 +11,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 . "$scriptDir/_exec.ps1"
 
-foreach ($gitEnv in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE') {
+foreach ($gitEnv in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX') {
     Remove-Item -Path "Env:$gitEnv" -ErrorAction SilentlyContinue
 }
 
@@ -118,7 +118,8 @@ if (-not $dotnetPath) {
 $dotnetDir = Split-Path -Parent $dotnetPath
 $env:DOTNET_ROOT = $dotnetDir
 $toolsDir = Join-Path $profileRoot '.dotnet/tools'
-$env:PATH = "$dotnetDir;$toolsDir;$env:PATH"
+$sep = [System.IO.Path]::PathSeparator
+$env:PATH = "$dotnetDir$sep$toolsDir$sep$env:PATH"
 
 if (-not $VanillaDir) {
     $VanillaDir = Join-Path $repoRoot '.vanilla/win-x64/vintagestory'
@@ -140,7 +141,7 @@ $apiDll = Join-Path $outputRoot 'VintagestoryAPI.dll'
 
 function Convert-ToLf([string]$Root) {
     if (-not (Test-Path $Root)) { return }
-    Get-ChildItem -Path $Root -Recurse -File -Include '*.patch','*.cs','*.csproj' | ForEach-Object {
+    Get-ChildItem -Path (Join-Path $Root '*') -Recurse -File -Include '*.patch','*.cs','*.csproj' | ForEach-Object {
         $bytes = [IO.File]::ReadAllBytes($_.FullName)
         if ($bytes -contains 13) {
             $text = [Text.Encoding]::UTF8.GetString($bytes) -creplace ([char]13 + [char]10), [char]10 -creplace [char]13, [char]10
@@ -259,30 +260,38 @@ function Decompile-Mod {
     }
     $attempts = 3
     $projectFile = $null
-    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
-        if (Test-Path $output) { Remove-Item -Recurse -Force $output }
-        New-Item -ItemType Directory -Force -Path $output | Out-Null
-        Invoke-NativeStep {
-            & $ilspyPath `
-                --project `
-                --disable-updatecheck `
-                --nested-directories `
-                $referenceArgs `
-                --outputdir $output `
-                $Assembly 2>$null | Out-Null
+    $stderrFile = [IO.Path]::GetTempFileName()
+    try {
+        for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+            if (Test-Path $output) { Remove-Item -Recurse -Force $output }
+            New-Item -ItemType Directory -Force -Path $output | Out-Null
+            Invoke-NativeStep {
+                & $ilspyPath `
+                    --project `
+                    --disable-updatecheck `
+                    --nested-directories `
+                    $referenceArgs `
+                    --outputdir $output `
+                    $Assembly 2>$stderrFile | Out-Null
+            }
+            $projectFile = Get-ChildItem -Path $output -Filter '*.csproj' -File |
+                Select-Object -First 1 -ExpandProperty FullName
+            $sourceFiles = @(Get-ChildItem -Path $output -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($projectFile -and $sourceFiles.Count -gt 0) {
+                break
+            }
+            if ($attempt -lt $attempts) {
+                Write-Warning "ilspycmd produced an incomplete $Project project, retrying ($attempt/$attempts)..."
+            }
         }
-        $projectFile = Get-ChildItem -Path $output -Filter '*.csproj' -File |
-            Select-Object -First 1 -ExpandProperty FullName
-        $sourceFiles = @(Get-ChildItem -Path $output -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
-        if ($projectFile -and $sourceFiles.Count -gt 0) {
-            break
+        if (-not $projectFile -or $sourceFiles.Count -eq 0) {
+            if (Test-Path $stderrFile) {
+                Get-Content $stderrFile | Where-Object { $_ -notmatch 'not using the latest version' } | ForEach-Object { Write-Error $_ }
+            }
+            throw "ilspycmd did not create a project for $Project."
         }
-        if ($attempt -lt $attempts) {
-            Write-Warning "ilspycmd produced an incomplete $Project project, retrying ($attempt/$attempts)..."
-        }
-    }
-    if (-not $projectFile -or $sourceFiles.Count -eq 0) {
-        throw "ilspycmd did not create a project for $Project."
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $stderrFile
     }
 
     $text = [IO.File]::ReadAllText($projectFile)
@@ -386,7 +395,7 @@ function Resolve-ProjectReferences {
             }
         }
         # If it is a framework assembly that does not exist in donor paths, strip it so Microsoft.NETCore.App handles it
-        if ($assemblyName -match '^(?:System\.|Microsoft\.|mscorlib$|netstandard$|WindowsBase$)') {
+        if ($assemblyName -match '^(?:System\.|Microsoft\.|mscorlib(?:,|$)|netstandard(?:,|$)|WindowsBase(?:,|$))') {
             return ''
         }
         return $m.Value
@@ -395,7 +404,7 @@ function Resolve-ProjectReferences {
     $text = [regex]::Replace($text, '<Reference Include="([^"]+)">\s*<HintPath>([^<]+)</HintPath>\s*(?:<Private>[^<]+</Private>\s*)?</Reference>', {
         param($m)
         $assemblyName = $m.Groups[1].Value
-        $hintPath = $m.Groups[2].Value
+        $hintPath = $m.Groups[2].Value.Trim()
 
         # Check donor search paths first
         foreach ($dir in $searchPaths) {
@@ -406,17 +415,19 @@ function Resolve-ProjectReferences {
         }
 
         # Check if the HintPath resolved relative to the project file exists on disk
-        $resolvedHintPath = if ([IO.Path]::IsPathRooted($hintPath)) {
-            $hintPath
-        } else {
-            [IO.Path]::GetFullPath((Join-Path $projectDir $hintPath))
-        }
-        if ((Test-Path $resolvedHintPath) -and ($hintPath -notmatch '(?i)[\\/]Microsoft\.NET[\\/]Framework')) {
+        $resolvedHintPath = try {
+            if ([IO.Path]::IsPathRooted($hintPath)) {
+                $hintPath
+            } else {
+                [IO.Path]::GetFullPath((Join-Path $projectDir $hintPath))
+            }
+        } catch { $null }
+        if ($resolvedHintPath -and (Test-Path $resolvedHintPath) -and ($hintPath -notmatch '(?i)[\\/]Microsoft\.NET[\\/]Framework')) {
             return $m.Value
         }
 
         # Framework assemblies should not have explicit broken or GAC references
-        if ($assemblyName -match '^(?:System\.|Microsoft\.|mscorlib$|netstandard$|WindowsBase$)') {
+        if ($assemblyName -match '^(?:System\.|Microsoft\.|mscorlib(?:,|$)|netstandard(?:,|$)|WindowsBase(?:,|$))') {
             return ''
         }
         return $m.Value

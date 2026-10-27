@@ -573,7 +573,7 @@ try {
             $partial = "$ClientArchive.partial"
             Remove-Item -Force -ErrorAction SilentlyContinue $partial
 
-            Invoke-NativeStep { curl.exe -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - --progress-bar -o $partial $url }
+            Invoke-NativeStep { curl.exe -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - --progress-bar -o $partial $url }
             if ($LASTEXITCODE -ne 0) {
                 Remove-Item -Force -ErrorAction SilentlyContinue $partial
                 throw "Download failed: $url"
@@ -1110,7 +1110,7 @@ try {
     <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <PlatformTarget>x64</PlatformTarget>
+    <PlatformTarget>AnyCPU</PlatformTarget>
   </PropertyGroup>
   <PropertyGroup>
     <LangVersion>preview</LangVersion>

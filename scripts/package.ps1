@@ -53,6 +53,39 @@ if (-not $Version) {
 
 # Ensure DOTNET_ROOT and PATH point to the SDK candidate so dotnet build and
 # prepare-runtime-donors can run even when dotnet was installed without adding it to PATH.
+function Test-DotNetResolvesGlobalJson([string]$DotnetExe, [string]$Repo) {
+    if (-not (Test-Path $DotnetExe)) { return $false }
+    $dotnetDir = Split-Path -Parent $DotnetExe
+    $oldDotnetRoot = $env:DOTNET_ROOT
+    try {
+        $env:DOTNET_ROOT = $dotnetDir
+        $prevLocation = Get-Location
+        try {
+            Set-Location $Repo
+            $versionOutput = & $DotnetExe --version 2>$null
+            if ($LASTEXITCODE -eq 0 -and $versionOutput) {
+                return $true
+            }
+        } finally {
+            Set-Location $prevLocation
+        }
+        $sdks = & $DotnetExe --list-sdks 2>$null
+        $globalJsonPath = Join-Path $Repo 'global.json'
+        $requiredMajor = '10'
+        if (Test-Path $globalJsonPath) {
+            try {
+                $gj = Get-Content -LiteralPath $globalJsonPath -Raw | ConvertFrom-Json
+                if ($gj.sdk.version -match '^(\d+)\.') {
+                    $requiredMajor = $Matches[1]
+                }
+            } catch {}
+        }
+        return ($sdks -match "(?m)^$requiredMajor\.")
+    } finally {
+        $env:DOTNET_ROOT = $oldDotnetRoot
+    }
+}
+
 $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
 $dotnetCandidates = @()
 $onPathDotnet = Get-Command dotnet -ErrorAction SilentlyContinue
@@ -66,7 +99,7 @@ if ($env:LOCALAPPDATA) {
 }
 $resolvedDotnetExe = $null
 foreach ($cand in $dotnetCandidates) {
-    if (Test-Path $cand) {
+    if ((Test-Path $cand) -and (Test-DotNetResolvesGlobalJson $cand $repoRoot)) {
         $resolvedDotnetExe = $cand
         break
     }
@@ -75,7 +108,8 @@ if ($resolvedDotnetExe) {
     $resolvedDotnetDir = Split-Path -Parent $resolvedDotnetExe
     $env:DOTNET_ROOT = $resolvedDotnetDir
     $toolsDir = Join-Path $profileRoot '.dotnet/tools'
-    $env:PATH = "$resolvedDotnetDir;$toolsDir;$env:PATH"
+    $sep = [System.IO.Path]::PathSeparator
+    $env:PATH = "$resolvedDotnetDir$sep$toolsDir$sep$env:PATH"
 }
 
 function Test-WindowsHost {
@@ -145,9 +179,9 @@ function Resolve-WindowsVanilla {
     if (-not (Test-Path $InstallerPath)) {
         $url = "https://cdn.vintagestory.at/gamefiles/stable/vs_install_win-x64_$RequestedVersion.exe"
         Write-Host "Downloading $url (~570MB)"
-        $partial = "$InstallerPath.$([Guid]::NewGuid().ToString('N')).partial"
+        $partial = "$InstallerPath.partial"
         Remove-Item -Force -ErrorAction SilentlyContinue $partial
-        Invoke-NativeStep { curl -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - --progress-bar -o $partial $url }
+        Invoke-NativeStep { curl.exe -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - --progress-bar -o $partial $url }
         if ($LASTEXITCODE -ne 0) {
             Remove-Item -Force -ErrorAction SilentlyContinue $partial
             throw "Download failed: $url"

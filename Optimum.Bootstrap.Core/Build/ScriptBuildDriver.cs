@@ -219,6 +219,9 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                     env.Set("Platform", null).Set("PLATFORM", null);
                 }
 
+                char sep = probe.Os == OsKind.Windows ? ';' : ':';
+                List<string> prependParts = [];
+
                 string? dotnet = DotnetSdkProbe.Find(probe);
                 if (dotnet is not null)
                 {
@@ -226,23 +229,30 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                     if (!string.IsNullOrEmpty(dotnetDir))
                     {
                         env.Set("DOTNET_ROOT", dotnetDir);
-                        string toolsDir = Path.Combine(probe.HomeDirectory, ".dotnet", "tools");
-                        string? currentPath = probe.GetEnvironmentVariable("PATH");
-                        char sep = probe.Os == OsKind.Windows ? ';' : ':';
-                        List<string> prependParts = [dotnetDir, toolsDir];
-                        if (probe.Os == OsKind.Windows)
-                        {
-                            string? git = GitForWindows.FindExecutable(probe);
-                            if (git is not null)
-                            {
-                                string? gitDir = Path.GetDirectoryName(git);
-                                if (!string.IsNullOrEmpty(gitDir))
-                                    prependParts.Add(gitDir);
-                            }
-                        }
-                        string newPath = string.Join(sep, prependParts) + sep + (currentPath ?? string.Empty);
-                        env.Set("PATH", newPath);
+                        prependParts.Add(dotnetDir);
+                        prependParts.Add(Path.Combine(probe.HomeDirectory, ".dotnet", "tools"));
                     }
+                }
+
+                if (probe.Os == OsKind.Windows)
+                {
+                    string? git = GitForWindows.FindExecutable(probe);
+                    if (git is not null)
+                    {
+                        string? gitDir = Path.GetDirectoryName(git);
+                        if (!string.IsNullOrEmpty(gitDir) && !prependParts.Contains(gitDir))
+                            prependParts.Add(gitDir);
+                    }
+                }
+
+                if (prependParts.Count > 0)
+                {
+                    string? currentPath = probe.GetEnvironmentVariable("PATH");
+                    string prepended = string.Join(sep, prependParts);
+                    string newPath = string.IsNullOrWhiteSpace(currentPath)
+                        ? prepended
+                        : prepended + sep + currentPath.Trim(sep);
+                    env.Set("PATH", newPath);
                 }
             });
 

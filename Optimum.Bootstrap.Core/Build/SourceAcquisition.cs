@@ -158,6 +158,13 @@ public sealed class GitSourceProvider(ISystemProbe probe) : ISourceProvider
                 "git was not found on PATH; install git so the installer can download the Optimum source");
         }
 
+        ProcessOutcome gitCheck = probe.Run(git, ["--version"], TimeSpan.FromSeconds(5));
+        if (!gitCheck.Started || gitCheck.ExitCode != 0)
+        {
+            return SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable,
+                $"'{git}' was found but could not be executed; verify git is working correctly");
+        }
+
         if (probe.Os == OsKind.Windows)
         {
             string? gitDir = Path.GetDirectoryName(git);

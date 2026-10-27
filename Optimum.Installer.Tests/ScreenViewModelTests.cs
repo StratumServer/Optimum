@@ -612,6 +612,8 @@ public class InstallerLogFilterTests
     [InlineData("VSEssentials requires a patch refresh for foo.patch: error", true)]
     [InlineData("Download failed: https://cdn.vintagestory.at/gamefiles/stable/vs_install_win-x64_1.22.7.exe", true)]
     [InlineData("ilspycmd failed for VSEssentials", true)]
+    [InlineData(@"C:\repo\scripts\bootstrap.ps1 : The term 'curl.exe' is not recognized as a name of a cmdlet", true)]
+    [InlineData("The term 'ilspycmd' is not recognized as a name of a cmdlet", true)]
     public void KeepsFailuresAdvisoriesAndProgressOnly(string line, bool kept)
     {
         Assert.Equal(kept, InstallerLogFilter.IsInteresting(line));
@@ -641,6 +643,8 @@ public class InstallerLogFilterTests
     [InlineData("ilspycmd failed for VSEssentials", "error")]
     [InlineData("Runtime donor build failed: VSEssentials", "error")]
     [InlineData("Incompatible .NET SDK candidate: C:\\dotnet\\dotnet.exe", "error")]
+    [InlineData(@"C:\repo\scripts\bootstrap.ps1 : The term 'curl.exe' is not recognized as a name of a cmdlet", "error")]
+    [InlineData("The term 'ilspycmd' is not recognized as a name of a cmdlet", "error")]
     public void ClassifyPicksSeverityFromContentNotStream(string line, string expected)
     {
         Assert.Equal(expected, InstallerLogFilter.Classify(line, fromStdErr: true));

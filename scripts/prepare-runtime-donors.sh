@@ -4,6 +4,8 @@ if (set -o pipefail 2>/dev/null); then
     set -o pipefail
 fi
 
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 vanilla_dir="${VANILLA_DIR:-$repo_root/.vanilla/win-x64/vintagestory}"
@@ -237,15 +239,19 @@ decompile_mod() {
 
     local project_file
     local attempt
+    local err_file
+    err_file="$(mktemp)"
     for attempt in 1 2 3; do
         rm -rf -- "$output"
-        ilspycmd \
+        if ! ilspycmd \
             --project \
             --disable-updatecheck \
             --nested-directories \
             "${reference_args[@]}" \
             --outputdir "$output" \
-            "$assembly" >/dev/null 2>&1 || true
+            "$assembly" >/dev/null 2>"$err_file"; then
+            :
+        fi
         project_file="$(find "$output" -maxdepth 1 -name '*.csproj' -size +0c -print 2>/dev/null | head -n 1)"
         if [[ -n "$project_file" ]]; then
             break
@@ -253,9 +259,14 @@ decompile_mod() {
         echo "ilspycmd produced an incomplete $project project, retrying ($attempt/3)..." >&2
     done
     if [[ -z "${project_file:-}" ]]; then
+        if [[ -s "$err_file" ]]; then
+            grep -viE "not using the latest version" "$err_file" >&2 || true
+        fi
+        rm -f "$err_file"
         echo "ilspycmd did not create a usable project for $project." >&2
         exit 1
     fi
+    rm -f "$err_file"
 
     # ILSpy writes a repository-relative placeholder path and currently emits
     # the next language-version number. Runtime donors are ignored build
@@ -357,9 +368,10 @@ exclude_compile_items "$survival_project" \
 resolve_references() {
     local project_file="$1"
     local native_donor_dir="$(native_path "$runtime_donor_dir")"
-    RUNTIME_DONOR_DIR="$runtime_donor_dir" NATIVE_DONOR_DIR="$native_donor_dir" perl -0pi -e '
+    PROJECT_DIR="$(dirname "$project_file")" RUNTIME_DONOR_DIR="$runtime_donor_dir" NATIVE_DONOR_DIR="$native_donor_dir" perl -0pi -e '
         my @dirs = ("$ENV{RUNTIME_DONOR_DIR}/Lib", $ENV{RUNTIME_DONOR_DIR}, "$ENV{RUNTIME_DONOR_DIR}/Mods");
         my @native_dirs = ("$ENV{NATIVE_DONOR_DIR}/Lib", $ENV{NATIVE_DONOR_DIR}, "$ENV{NATIVE_DONOR_DIR}/Mods");
+        my $project_dir = $ENV{PROJECT_DIR};
         # On Windows the native dir uses backslash; normalise to forward for joining
         for my $nd (@native_dirs) { $nd =~ s#\\#/#g; }
         sub xml_escape {
@@ -395,7 +407,7 @@ resolve_references() {
             if ($found) {
                 my $hint = native_hint($found);
                 qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($hint) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
-            } elsif ($name =~ m{^(?:System\.|Microsoft\.|mscorlib$|netstandard$|WindowsBase$)}) {
+            } elsif ($name =~ m{^(?:System\.|Microsoft\.|mscorlib(?:,|$)|netstandard(?:,|$)|WindowsBase(?:,|$))}) {
                 "";
             } else {
                 qq{<Reference Include="$name" />};
@@ -416,12 +428,17 @@ resolve_references() {
             if ($found) {
                 my $native = native_hint($found);
                 qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($native) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
-            } elsif (-f $hint && $hint !~ m{Microsoft\.NET[\\/]Framework}i) {
-                qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
-            } elsif ($name =~ m{^(?:System\.|Microsoft\.|mscorlib$|netstandard$|WindowsBase$)}) {
-                "";
             } else {
-                qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
+                my $norm_hint = $hint;
+                $norm_hint =~ s#\\#/#g;
+                my $full_hint = ($norm_hint =~ m{^/}) ? $norm_hint : "$project_dir/$norm_hint";
+                if (-f $full_hint && $hint !~ m{Microsoft\.NET[\\/]Framework}i) {
+                    qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
+                } elsif ($name =~ m{^(?:System\.|Microsoft\.|mscorlib(?:,|$)|netstandard(?:,|$)|WindowsBase(?:,|$))}) {
+                    "";
+                } else {
+                    qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
+                }
             }
         }ge;
     ' "$project_file"

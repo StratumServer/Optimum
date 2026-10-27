@@ -361,7 +361,7 @@ download_client_archive() {
   local partial="$archive_path.partial"
   rm -f "$partial"
 
-  if ! curl -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - --output "$partial" "$url"; then
+  if ! curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - --output "$partial" "$url"; then
     rm -f "$partial"
     echo "Download failed: $url" >&2
     return 1
@@ -847,7 +847,7 @@ if [[ -f "$vs_entry_csproj" ]]; then
     <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <PlatformTarget>x64</PlatformTarget>
+    <PlatformTarget>AnyCPU</PlatformTarget>
   </PropertyGroup>
   <PropertyGroup>
     <LangVersion>preview</LangVersion>
