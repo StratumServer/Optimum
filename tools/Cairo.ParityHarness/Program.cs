@@ -707,15 +707,58 @@ internal static class Program
     {
         var name = member.Name;
         var declaringType = member.DeclaringType?.Name ?? "";
-        if (name.Contains("Data", StringComparison.OrdinalIgnoreCase) || name is "Handle" or "GetTarget" or "SetTarget" or "GetSource" or "CopyPath" or "AppendPath")
+        var declaringNamespace = member.DeclaringType?.Namespace ?? "";
+        var isValueType = member.DeclaringType?.IsValueType == true;
+        var isEnum = member.DeclaringType?.IsEnum == true;
+
+        // 1. Materialization boundary: direct pixel/buffer export, handles, native pointers, platform windowing surfaces, P/Invokes
+        if (name.Contains("Data", StringComparison.OrdinalIgnoreCase) ||
+            name is "Handle" or "Pointer" or "GetTarget" or "SetTarget" or "GetSource" or "CopyPath" or "AppendPath" or "Lookup" or "FromBitmap" or "WriteToPng" or "CheckpointManagedPixels" or "EnsureNativeHandle" ||
+            name.StartsWith("get_Handle", StringComparison.Ordinal) || name.StartsWith("set_Handle", StringComparison.Ordinal) ||
+            name.StartsWith("get_Pointer", StringComparison.Ordinal) || name.StartsWith("set_Pointer", StringComparison.Ordinal))
             return "materialization-boundary";
-        if (name.Contains("Extents", StringComparison.OrdinalIgnoreCase) || name.Contains("Measure", StringComparison.OrdinalIgnoreCase) || name.StartsWith("In", StringComparison.Ordinal))
+
+        if (declaringType is "DirectFBSurface" or "GlitzSurface" or "Win32Surface" or "SvgNativeMethods")
+            return "materialization-boundary";
+
+        if (declaringType is "XlibSurface" or "XcbSurface" &&
+            (member is ConstructorInfo || name is "SetDrawable" or "Depth" or "Display" or "Drawable" or "Visual" or "Screen" || name.StartsWith("get_", StringComparison.Ordinal)))
+            return "materialization-boundary";
+
+        if (declaringNamespace == "Cairo.Freetype" && declaringType is "Face" or "Library" or "Glyph" or "FreeTypeHelper")
+            return "materialization-boundary";
+
+        if (member is ConstructorInfo ctor && ctor.GetParameters().Any(p => p.ParameterType == typeof(IntPtr)) &&
+            declaringType is "Surface" or "Context" or "FontFace" or "ScaledFont" or "Gradient")
+            return "materialization-boundary";
+
+        // 2. Measurement: extents, metrics, hits, point-in-geometry checks
+        if (name.Contains("Extents", StringComparison.OrdinalIgnoreCase) || name.Contains("Measure", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("In", StringComparison.Ordinal) || name is "ContainsPoint" or "ContainsRectangle")
             return "measurement";
-        if (member is FieldInfo || member.DeclaringType?.IsEnum == true || member is PropertyInfo && declaringType is not "Context")
+
+        if (declaringType is "FontExtents" or "TextExtents" && !name.StartsWith("op_", StringComparison.Ordinal) && name is not "Equals" and not "GetHashCode")
+            return "measurement";
+
+        // 3. Metadata: fields, enums, value structs, options, info, and property accessors
+        if (member is FieldInfo || isEnum || isValueType)
             return "metadata";
-        if (declaringType is "Context" or "Path" or "Matrix" or "Pattern" || member is MethodInfo method && method.Name.StartsWith("set_", StringComparison.Ordinal))
-            return "recordable-candidate";
-        return "native-only-pending";
+
+        if (declaringType is "FontOptions" or "Device" or "CairoAPI" or "CairoDebug")
+            return "metadata";
+
+        if (declaringNamespace == "Cairo.Freetype" && declaringType is "BBox" or "Bitmap" or "BitmapGlyph" or "Generic" or "GlyphClass" or "GlyphRec" or "ListRec" or "Vector")
+            return "metadata";
+
+        if (member is PropertyInfo && declaringType is not "Context")
+            return "metadata";
+
+        if (name.StartsWith("get_", StringComparison.Ordinal) &&
+            name is "get_Format" or "get_Width" or "get_Height" or "get_Stride" or "get_Status" or "get_SurfaceType" or "get_Content" or "get_DeviceOffset" or "get_ReferenceCount" or "get_Family" or "get_Slant" or "get_Weight" or "get_FontType" or "get_FontMatrix" or "get_Type" or "get_Filter" or "get_Extend" or "get_Matrix" or "get_ColorStops" or "get_Antialias" or "get_HintStyle" or "get_HintMetrics" or "get_SubpixelOrder")
+            return "metadata";
+
+        // 4. Recordable candidate: all managed recording, paths, surfaces, patterns, filters, drawing operations
+        return "recordable-candidate";
     }
 
     private static string NativeCairoVersion()

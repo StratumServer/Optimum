@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedUtc": "2026-10-26T14:36:20.2252762+00:00",
+  "generatedUtc": "2026-10-27T10:35:14.6015214+00:00",
   "assemblyIdentity": "cairo-sharp, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
   "targetFramework": ".NETCoreApp,Version=v10.0",
   "exportedTypeCount": 82,
@@ -1225,7 +1225,7 @@
     {
       "declaringType": "Cairo.CairoAPI",
       "signature": "System.Int32 get_Version()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1237,19 +1237,19 @@
     {
       "declaringType": "Cairo.CairoAPI",
       "signature": "System.String get_VersionString()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.CairoDebug",
       "signature": "System.Void OnAllocated(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.CairoDebug",
       "signature": "System.Void OnDisposed\u00601(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1261,13 +1261,13 @@
     {
       "declaringType": "Cairo.Color",
       "signature": "Cairo.Color(System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "Cairo.Color(System.Double, System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1297,49 +1297,49 @@
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Double get_A()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Double get_B()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Double get_G()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Double get_R()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Void set_A(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Void set_B(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Void set_G(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Color",
       "signature": "System.Void set_R(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1375,7 +1375,7 @@
     {
       "declaringType": "Cairo.Context",
       "signature": "Cairo.Antialias get_Antialias()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1399,13 +1399,13 @@
     {
       "declaringType": "Cairo.Context",
       "signature": "Cairo.Context(System.IntPtr)",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Context",
       "signature": "Cairo.Context(System.IntPtr, System.Boolean)",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -1489,13 +1489,13 @@
     {
       "declaringType": "Cairo.Context",
       "signature": "Cairo.Matrix get_FontMatrix()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Context",
       "signature": "Cairo.Matrix get_Matrix()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1585,7 +1585,7 @@
     {
       "declaringType": "Cairo.Context",
       "signature": "Cairo.Status get_Status()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -1723,7 +1723,7 @@
     {
       "declaringType": "Cairo.Context",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -1735,7 +1735,7 @@
     {
       "declaringType": "Cairo.Context",
       "signature": "System.UInt32 get_ReferenceCount()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2311,7 +2311,7 @@
     {
       "declaringType": "Cairo.ContextUtils",
       "signature": "System.Void Clear(Cairo.Context)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -2323,13 +2323,13 @@
     {
       "declaringType": "Cairo.Device",
       "signature": "Cairo.DeviceType get_Type()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Device",
       "signature": "Cairo.Status Acquire()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2341,31 +2341,31 @@
     {
       "declaringType": "Cairo.Device",
       "signature": "Cairo.Status get_Status()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Device",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Device",
       "signature": "System.Void Finish()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Device",
       "signature": "System.Void Flush()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Device",
       "signature": "System.Void Release()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2413,13 +2413,13 @@
     {
       "declaringType": "Cairo.DirectFBSurface",
       "signature": "Cairo.DirectFBSurface(System.IntPtr, System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Distance",
       "signature": "Cairo.Distance(System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2437,25 +2437,25 @@
     {
       "declaringType": "Cairo.Distance",
       "signature": "System.Double get_Dx()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Distance",
       "signature": "System.Double get_Dy()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Distance",
       "signature": "System.Void set_Dx(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Distance",
       "signature": "System.Void set_Dy(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2551,133 +2551,133 @@
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "Cairo.FontExtents(System.Double, System.Double, System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Boolean Equals(System.Object)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Boolean op_Equality(Cairo.FontExtents, Cairo.FontExtents)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Boolean op_Inequality(Cairo.FontExtents, Cairo.FontExtents)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double Ascent [get_Ascent,set_Ascent]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double Descent [get_Descent,set_Descent]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double Height [get_Height,set_Height]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double MaxXAdvance [get_MaxXAdvance,set_MaxXAdvance]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double MaxYAdvance [get_MaxYAdvance,set_MaxYAdvance]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double get_Ascent()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double get_Descent()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double get_Height()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double get_MaxXAdvance()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Double get_MaxYAdvance()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Int32 GetHashCode()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Void set_Ascent(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Void set_Descent(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Void set_Height(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Void set_MaxXAdvance(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontExtents",
       "signature": "System.Void set_MaxYAdvance(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontFace(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontFace(System.String, Cairo.FontSlant, Cairo.FontWeight)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -2689,7 +2689,7 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontSlant get_Slant()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2701,7 +2701,7 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontType get_FontType()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2713,7 +2713,7 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.FontWeight get_Weight()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2725,7 +2725,7 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "Cairo.Status get_Status()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2737,7 +2737,7 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -2749,7 +2749,7 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.String get_Family()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2761,25 +2761,25 @@
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.UInt32 get_ReferenceCount()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontFace",
       "signature": "System.Void Finalize()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -2791,19 +2791,19 @@
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.Antialias get_Antialias()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.FontOptions Copy()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.FontOptions()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2815,7 +2815,7 @@
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.HintMetrics get_HintMetrics()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2827,7 +2827,7 @@
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.HintStyle get_HintStyle()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2839,7 +2839,7 @@
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.Status get_Status()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2851,31 +2851,31 @@
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "Cairo.SubpixelOrder get_SubpixelOrder()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Boolean Equals(System.Object)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Boolean op_Equality(Cairo.FontOptions, Cairo.FontOptions)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Boolean op_Inequality(Cairo.FontOptions, Cairo.FontOptions)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Int32 GetHashCode()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -2887,61 +2887,61 @@
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void Destroy()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void Finalize()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void Merge(Cairo.FontOptions)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void set_Antialias(Cairo.Antialias)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void set_HintMetrics(Cairo.HintMetrics)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void set_HintStyle(Cairo.HintStyle)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.FontOptions",
       "signature": "System.Void set_SubpixelOrder(Cairo.SubpixelOrder)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3067,7 +3067,7 @@
     {
       "declaringType": "Cairo.Freetype.BBox",
       "signature": "Cairo.Freetype.BBox()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3097,7 +3097,7 @@
     {
       "declaringType": "Cairo.Freetype.Bitmap",
       "signature": "Cairo.Freetype.Bitmap()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3151,7 +3151,7 @@
     {
       "declaringType": "Cairo.Freetype.BitmapGlyph",
       "signature": "Cairo.Freetype.BitmapGlyph()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3217,247 +3217,247 @@
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "Cairo.Freetype.Face()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "System.Int32 FT_Get_Char_Index(System.IntPtr, System.Char)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "System.Int32 FT_Load_Glyph(System.IntPtr, System.Int32, Cairo.Freetype.FT_LOAD_TYPES)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "System.Int32 FT_New_Face(System.IntPtr, System.String, System.Int32, out System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "System.Void FT_Done_Face(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "System.Void FT_Set_Char_Size(System.IntPtr, System.Int32, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "System.Void FT_Set_Pixel_Sizes(System.IntPtr, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field Cairo.Freetype.BBox box",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field Cairo.Freetype.Generic autohint",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field Cairo.Freetype.Generic generic",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field Cairo.Freetype.ListRec sizes_list",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 ascender",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 descender",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 height",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 max_advance_height",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 max_advance_width",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 underline_position",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int16 underline_tickness",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 face_flags",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 face_index",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 num_charmaps",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 num_faces",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 num_fixed_sizes",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 num_glyphs",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.Int32 style_flags",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr available_sizes",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr charmap",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr charmaps",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr driver",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr extensions",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr glyphrec",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr internal_face",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr memory",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr size",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.IntPtr stream",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.String family_name",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.String style_name",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Face",
       "signature": "field System.UInt16 units_per_EM",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.FreeTypeHelper",
       "signature": "Cairo.Freetype.FreeTypeHelper()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.FreeTypeHelper",
       "signature": "System.IntPtr loadFreeTypeFont(System.String)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Generic",
       "signature": "Cairo.Freetype.Generic()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3475,25 +3475,25 @@
     {
       "declaringType": "Cairo.Freetype.Glyph",
       "signature": "Cairo.Freetype.Glyph()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Glyph",
       "signature": "System.Int32 FT_Get_Glyph(System.IntPtr, out System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Glyph",
       "signature": "System.Void FT_Glyph_To_Bitmap(out System.IntPtr, Cairo.Freetype.FT_RENDER_MODES, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.GlyphClass",
       "signature": "Cairo.Freetype.GlyphClass()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3547,7 +3547,7 @@
     {
       "declaringType": "Cairo.Freetype.GlyphRec",
       "signature": "Cairo.Freetype.GlyphRec()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3577,307 +3577,307 @@
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "Cairo.Freetype.Library()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "System.Int32 FT_Init_FreeType(out System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "System.Void FT_Done_FreeType(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field Cairo.Freetype.Generic generic",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field Cairo.Freetype.ListRec renderers",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.Int32 major",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.Int32 minor",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.Int32 patch",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.Int64 raster_pool_size",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr auto_hinter",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr debug0",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr debug1",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr debug2",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr debug3",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr memory",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module0",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module1",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module10",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module11",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module12",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module13",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module14",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module15",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module16",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module17",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module18",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module19",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module2",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module20",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module21",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module22",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module23",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module24",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module25",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module26",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module27",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module28",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module29",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module3",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module30",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module31",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module4",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module5",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module6",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module7",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module8",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr module9",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr raster_pool",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.IntPtr renderer",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.Library",
       "signature": "field System.UInt32 modules",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Freetype.ListRec",
       "signature": "Cairo.Freetype.ListRec()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3895,7 +3895,7 @@
     {
       "declaringType": "Cairo.Freetype.Vector",
       "signature": "Cairo.Freetype.Vector()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3913,61 +3913,61 @@
     {
       "declaringType": "Cairo.GaussianBlur",
       "signature": "Cairo.GaussianBlur(System.Int32*, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.GaussianBlur",
       "signature": "Cairo.GaussianBlur(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.GaussianBlur",
       "signature": "System.Void LoadImage(System.Int32*)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.GaussianBlur",
       "signature": "System.Void ProcessFull(System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.GaussianBlur",
       "signature": "System.Void ProcessPartial(System.Double, System.Int32, System.Int32, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.GlitzSurface",
       "signature": "Cairo.GlitzSurface(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "Cairo.Glyph(System.Int64, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Boolean Equals(System.Object)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Boolean op_Equality(Cairo.Glyph, Cairo.Glyph)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Boolean op_Inequality(Cairo.Glyph, Cairo.Glyph)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -3985,19 +3985,19 @@
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Double get_X()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Double get_Y()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Int32 GetHashCode()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -4009,55 +4009,55 @@
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Int64 get_Index()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Void set_Index(System.Int64)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Void set_X(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Glyph",
       "signature": "System.Void set_Y(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Gradient",
       "signature": "Cairo.Gradient()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Gradient",
       "signature": "Cairo.Gradient(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Gradient",
       "signature": "Cairo.Gradient(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Gradient",
       "signature": "Cairo.Status AddColorStop(System.Double, Cairo.Color)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Gradient",
       "signature": "Cairo.Status AddColorStopRgb(System.Double, Cairo.Color)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4069,19 +4069,19 @@
     {
       "declaringType": "Cairo.Gradient",
       "signature": "System.Int32 get_ColorStopCount()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Graphics",
       "signature": "Cairo.Graphics(Cairo.Surface)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Graphics",
       "signature": "Cairo.Graphics(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4153,43 +4153,43 @@
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.Format get_Format()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.ImageSurface CreateForRecordedGui(Cairo.Format, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.ImageSurface(Cairo.Format, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.ImageSurface(System.Byte[], Cairo.Format, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.ImageSurface(System.IntPtr, Cairo.Format, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.ImageSurface(System.String)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "Cairo.Surface CreateForImage(System.Byte[], Cairo.Format, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4225,19 +4225,19 @@
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "System.Int32 get_Height()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "System.Int32 get_Stride()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "System.Int32 get_Width()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -4255,7 +4255,7 @@
     {
       "declaringType": "Cairo.ImageSurface",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4309,7 +4309,7 @@
     {
       "declaringType": "Cairo.LinearGradient",
       "signature": "Cairo.LinearGradient(System.Double, System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4321,7 +4321,7 @@
     {
       "declaringType": "Cairo.LinearGradient",
       "signature": "Cairo.PointD[] get_LinearPoints()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4687,37 +4687,37 @@
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "Cairo.PSSurface(System.String, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "System.Void BeginPageSetup()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "System.Void BeginSetup()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "System.Void DscComment(System.String)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PSSurface",
       "signature": "System.Void SetSize(System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -4729,7 +4729,7 @@
     {
       "declaringType": "Cairo.Path",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -4759,7 +4759,7 @@
     {
       "declaringType": "Cairo.Pattern",
       "signature": "Cairo.Extend get_Extend()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -4771,13 +4771,13 @@
     {
       "declaringType": "Cairo.Pattern",
       "signature": "Cairo.Matrix get_Matrix()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Pattern",
       "signature": "Cairo.Pattern Lookup(System.IntPtr, System.Boolean)",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -4813,7 +4813,7 @@
     {
       "declaringType": "Cairo.Pattern",
       "signature": "Cairo.Status get_Status()",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -4825,7 +4825,7 @@
     {
       "declaringType": "Cairo.Pattern",
       "signature": "System.Boolean get_HandleValid()",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -4837,19 +4837,19 @@
     {
       "declaringType": "Cairo.Pattern",
       "signature": "System.IntPtr Pointer [get_Pointer]",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Pattern",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Pattern",
       "signature": "System.IntPtr get_Pointer()",
-      "classification": "recordable-candidate",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -4933,25 +4933,25 @@
     {
       "declaringType": "Cairo.PdfSurface",
       "signature": "Cairo.PdfSurface(System.String, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PdfSurface",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PdfSurface",
       "signature": "System.Void SetSize(System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Point",
       "signature": "Cairo.Point(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -4969,31 +4969,31 @@
     {
       "declaringType": "Cairo.Point",
       "signature": "System.Int32 get_X()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Point",
       "signature": "System.Int32 get_Y()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Point",
       "signature": "System.Void set_X(System.Int32)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Point",
       "signature": "System.Void set_Y(System.Int32)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PointD",
       "signature": "Cairo.PointD(System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5011,61 +5011,61 @@
     {
       "declaringType": "Cairo.PointD",
       "signature": "System.Double get_X()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PointD",
       "signature": "System.Double get_Y()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PointD",
       "signature": "System.Void set_X(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.PointD",
       "signature": "System.Void set_Y(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.RadialGradient",
       "signature": "Cairo.RadialGradient(System.Double, System.Double, System.Double, System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "Cairo.Rectangle(Cairo.Point, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "Cairo.Rectangle(System.Double, System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Boolean Equals(System.Object)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Boolean op_Equality(Cairo.Rectangle, Cairo.Rectangle)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Boolean op_Inequality(Cairo.Rectangle, Cairo.Rectangle)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5095,37 +5095,37 @@
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Double get_Height()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Double get_Width()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Double get_X()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Double get_Y()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.Int32 GetHashCode()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Rectangle",
       "signature": "System.String ToString()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5161,7 +5161,7 @@
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.RectangleInt GetRectangle(System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5173,43 +5173,43 @@
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Region Copy()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Region()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Region(Cairo.RectangleInt)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Region(Cairo.RectangleInt[])",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Region(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Region(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.RegionOverlap ContainsPoint(Cairo.RectangleInt)",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
@@ -5233,55 +5233,55 @@
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status Subtract(Cairo.Region)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status SubtractRectangle(Cairo.RectangleInt)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status Union(Cairo.Region)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status UnionRectangle(Cairo.RectangleInt)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status Xor(Cairo.Region)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status XorRectangle(Cairo.RectangleInt)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "Cairo.Status get_Status()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Boolean ContainsPoint(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Boolean Equals(System.Object)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5293,13 +5293,13 @@
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Boolean get_IsEmpty()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Int32 GetHashCode()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5311,7 +5311,7 @@
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Int32 get_NumRectangles()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5323,31 +5323,31 @@
     {
       "declaringType": "Cairo.Region",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Void Finalize()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Region",
       "signature": "System.Void Translate(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5395,7 +5395,7 @@
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "Cairo.FontType get_FontType()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5407,13 +5407,13 @@
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "Cairo.Matrix get_FontMatrix()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "Cairo.ScaledFont(Cairo.FontFace, Cairo.Matrix, Cairo.Matrix, Cairo.FontOptions)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5425,7 +5425,7 @@
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "Cairo.Status get_Status()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5443,31 +5443,31 @@
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "System.Void Finalize()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.ScaledFont",
       "signature": "System.Void Reference()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5485,31 +5485,31 @@
     {
       "declaringType": "Cairo.SolidPattern",
       "signature": "Cairo.Color get_Color()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SolidPattern",
       "signature": "Cairo.SolidPattern(Cairo.Color)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SolidPattern",
       "signature": "Cairo.SolidPattern(Cairo.Color, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SolidPattern",
       "signature": "Cairo.SolidPattern(System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SolidPattern",
       "signature": "Cairo.SolidPattern(System.Double, System.Double, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5833,7 +5833,7 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Content get_Content()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
@@ -5845,13 +5845,13 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.PointD get_DeviceOffset()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Status Finish()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5863,37 +5863,37 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Status get_Status()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Surface CreateSimilar(Cairo.Content, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Surface Lookup(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Surface(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Surface(System.IntPtr, System.Boolean, System.Boolean, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.Surface(System.IntPtr, System.Boolean, System.Boolean, System.Boolean, Cairo.Status = optional)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -5905,13 +5905,13 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "Cairo.SurfaceType get_SurfaceType()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Int32 StrideForWidth(Cairo.Format, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5923,7 +5923,7 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.IntPtr get_Handle()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -5935,37 +5935,37 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.UInt32 get_ReferenceCount()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void CheckDisposed()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void Finalize()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void Flush()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -5977,37 +5977,37 @@
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void MarkDirty()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void MarkDirty(Cairo.Rectangle)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void ResizeManagedSurface(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void SetFallbackResolution(System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void Show(Cairo.Context, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Surface",
       "signature": "System.Void WriteToPng(System.String)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -6019,19 +6019,19 @@
     {
       "declaringType": "Cairo.SurfaceDrawImage",
       "signature": "SkiaSharp.SKBitmap ResizeImage(SkiaSharp.SKBitmap, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceDrawImage",
       "signature": "System.UInt32 ColorOverlay(System.UInt32, System.UInt32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceDrawImage",
       "signature": "System.Void Image(Cairo.ImageSurface, SkiaSharp.SKBitmap, System.Int32, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -6043,19 +6043,19 @@
     {
       "declaringType": "Cairo.SurfacePattern",
       "signature": "Cairo.Filter get_Filter()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfacePattern",
       "signature": "Cairo.SurfacePattern(Cairo.ImageSurface)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfacePattern",
       "signature": "Cairo.SurfacePattern(Cairo.Surface)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -6079,43 +6079,43 @@
     {
       "declaringType": "Cairo.SurfaceTransformBlur",
       "signature": "System.Void Blur(Cairo.ImageSurface, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceTransformBlur",
       "signature": "System.Void Blur(Cairo.ImageSurface, System.Double, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceTransformBlur",
       "signature": "System.Void Blur(Cairo.ImageSurface, System.Double, System.Int32, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceTransformBlur",
       "signature": "System.Void BlurFull(Cairo.ImageSurface, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceTransformBlur",
       "signature": "System.Void BlurPartial(Cairo.ImageSurface, System.Double, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceTransformBlur",
       "signature": "System.Void BlurPartial(Cairo.ImageSurface, System.Double, System.Int32, System.Int32, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SurfaceTransformDemulAlpha",
       "signature": "System.Void DemulAlpha(Cairo.ImageSurface)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -6193,19 +6193,19 @@
     {
       "declaringType": "Cairo.SvgSurface",
       "signature": "Cairo.SvgSurface(System.String, System.Double, System.Double)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SvgSurface",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.SvgSurface",
       "signature": "System.Void RestrictToVersion(Cairo.SvgVersion)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -6229,211 +6229,211 @@
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Boolean Equals(System.Object)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Boolean op_Equality(Cairo.TextExtents, Cairo.TextExtents)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Boolean op_Inequality(Cairo.TextExtents, Cairo.TextExtents)",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double Height [get_Height,set_Height]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double Width [get_Width,set_Width]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double XAdvance [get_XAdvance,set_XAdvance]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double XBearing [get_XBearing,set_XBearing]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double YAdvance [get_YAdvance,set_YAdvance]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double YBearing [get_YBearing,set_YBearing]",
-      "classification": "metadata",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double get_Height()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double get_Width()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double get_XAdvance()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double get_XBearing()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double get_YAdvance()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Double get_YBearing()",
-      "classification": "native-only-pending",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Int32 GetHashCode()",
-      "classification": "native-only-pending",
+      "classification": "metadata",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Void set_Height(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Void set_Width(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Void set_XAdvance(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Void set_XBearing(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Void set_YAdvance(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.TextExtents",
       "signature": "System.Void set_YBearing(System.Double)",
-      "classification": "recordable-candidate",
+      "classification": "measurement",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Util.FreeTypeFontFace",
       "signature": "Cairo.Util.FreeTypeFontFace Create(System.String, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Util.FreeTypeFontFace",
       "signature": "System.Int32 FT_Init_FreeType(out System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Util.FreeTypeFontFace",
       "signature": "System.Int32 FT_New_Face(System.IntPtr, System.String, System.Int32, out System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Util.FreeTypeFontFace",
       "signature": "System.Void Dispose(System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Util.FreeTypeFontFace",
       "signature": "System.Void FT_Done_Face(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.Win32Surface",
       "signature": "Cairo.Win32Surface(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XcbSurface",
       "signature": "Cairo.XcbSurface FromBitmap(System.IntPtr, System.UInt32, System.IntPtr, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XcbSurface",
       "signature": "Cairo.XcbSurface(System.IntPtr, System.UInt32, System.IntPtr, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XcbSurface",
       "signature": "System.Void SetSize(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "Cairo.XlibSurface FromBitmap(System.IntPtr, System.IntPtr, System.IntPtr, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "Cairo.XlibSurface(System.IntPtr, System.Boolean)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "Cairo.XlibSurface(System.IntPtr, System.IntPtr, System.IntPtr, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.Int32 Depth [get_Depth]",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
@@ -6451,79 +6451,79 @@
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.Int32 get_Depth()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.Int32 get_Height()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.Int32 get_Width()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr Display [get_Display]",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr Drawable [get_Drawable]",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr Screen [get_Screen]",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr Visual [get_Visual]",
-      "classification": "metadata",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr get_Display()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr get_Drawable()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr get_Screen()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.IntPtr get_Visual()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.Void SetDrawable(System.IntPtr, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "Cairo.XlibSurface",
       "signature": "System.Void SetSize(System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
@@ -6565,67 +6565,67 @@
     {
       "declaringType": "NanoSvg.Rasterizer",
       "signature": "NanoSvg.Rasterizer()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.Rasterizer",
       "signature": "System.Void Dispose()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.Rasterizer",
       "signature": "System.Void Finalize()",
-      "classification": "native-only-pending",
+      "classification": "recordable-candidate",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.IntPtr nsvgCreateRasterizer()",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.IntPtr nsvgImageGetSize(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.IntPtr nsvgImageGetViewbox(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.IntPtr nsvgParse(System.String, System.String, System.Single)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.IntPtr nsvgParseFromFile(System.String, System.String, System.Single)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.Void nsvgDelete(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.Void nsvgDeleteRasterizer(System.IntPtr)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     },
     {
       "declaringType": "NanoSvg.SvgNativeMethods",
       "signature": "System.Void nsvgRasterize(System.IntPtr, System.IntPtr, System.Single, System.Single, System.Single, System.IntPtr, System.Int32, System.Int32, System.Int32)",
-      "classification": "native-only-pending",
+      "classification": "materialization-boundary",
       "classificationReview": "required"
     }
   ]
