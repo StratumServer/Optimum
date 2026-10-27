@@ -265,6 +265,7 @@ cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/"
+cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/CairoSharp.dll"
 
 # 5aa. Overlay drop-in native Cairo shim (libcairo.so.2) if available
 if [[ -f "$REPO_ROOT/tools/cairo-native-shim/Makefile" ]]; then

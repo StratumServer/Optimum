@@ -114,6 +114,7 @@ try {
     Copy-Item -Force (Join-Path $modOut 'VSSurvivalMod.dll') (Join-Path $stageDir 'Mods')
     Copy-Item -Force (Join-Path $modOut 'VSCreativeMod.dll') (Join-Path $stageDir 'Mods')
     Copy-Item -Force (Join-Path $modOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib')
+    Copy-Item -Force (Join-Path $modOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib/CairoSharp.dll')
     $nativeShim = Join-Path $repoRoot 'tools/cairo-native-shim/libcairo.so.2'
     if (Test-Path $nativeShim) {
         Copy-Item -Force $nativeShim (Join-Path $stageDir 'Lib')
