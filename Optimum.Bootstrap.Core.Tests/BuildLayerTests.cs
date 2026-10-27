@@ -239,4 +239,19 @@ public class ScriptBuildDriverWindowsCommandTests
         Assert.True(Path.IsPathFullyQualified(command.Args[4]));
         Assert.Equal(output, command.Args[6]);
     }
+
+    [Fact]
+    public void PackageCommandPassesVersionWhenProvidedOnWindows()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        string repo = Path.Combine(Path.GetTempPath(), "optimum-source");
+        string output = Path.Combine(Path.GetTempPath(), "optimum-output");
+        BuildRequest request = new(repo, output, ClientArchive: null, Version: "1.22.7");
+
+        var command = new ScriptBuildDriver(probe).PackageCommand(request);
+
+        Assert.Contains("-Version", command.Args);
+        int versionIndex = command.Args.ToList().IndexOf("-Version");
+        Assert.Equal("1.22.7", command.Args[versionIndex + 1]);
+    }
 }

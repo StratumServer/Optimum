@@ -361,7 +361,7 @@ download_client_archive() {
   local partial="$archive_path.partial"
   rm -f "$partial"
 
-  if ! curl -L --fail --output "$partial" "$url"; then
+  if ! curl -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - --output "$partial" "$url"; then
     rm -f "$partial"
     echo "Download failed: $url" >&2
     return 1
@@ -837,9 +837,31 @@ python3 "$script_dir/fix-base-ctor-calls.py" "$repo_root/build/VintagestoryLib" 
 
 # 6g-extra: Vintagestory.csproj - needs ProjectReference to VintagestoryLib (not vanilla DLL).
 # The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
+# Rewrite cleanly to eliminate any decompiler artifacts (e.g. spurious System.Runtime.InteropServices GAC references).
 vs_entry_csproj="$repo_root/build/Vintagestory/Vintagestory.csproj"
 if [[ -f "$vs_entry_csproj" ]]; then
-  perl -0pi -e 's{<Reference Include="VintagestoryLib">.*?</Reference>}{<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj" />}s' "$vs_entry_csproj"
+  cat > "$vs_entry_csproj" << 'EOF'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Vintagestory</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />
+  </ItemGroup>
+</Project>
+EOF
   python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$vs_entry_csproj"
 fi
 

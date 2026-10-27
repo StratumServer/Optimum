@@ -241,10 +241,11 @@ decompile_mod() {
         rm -rf -- "$output"
         ilspycmd \
             --project \
+            --disable-updatecheck \
             --nested-directories \
             "${reference_args[@]}" \
             --outputdir "$output" \
-            "$assembly" >/dev/null
+            "$assembly" >/dev/null 2>&1 || true
         project_file="$(find "$output" -maxdepth 1 -name '*.csproj' -size +0c -print 2>/dev/null | head -n 1)"
         if [[ -n "$project_file" ]]; then
             break
@@ -394,37 +395,43 @@ resolve_references() {
             if ($found) {
                 my $hint = native_hint($found);
                 qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($hint) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
+            } elsif ($name =~ m{^(?:System\.|Microsoft\.|mscorlib$|netstandard$|WindowsBase$)}) {
+                "";
             } else {
                 qq{<Reference Include="$name" />};
             }
         }ge;
         # Pass 2: References with HintPath that does not exist on disk
-        s{<Reference Include="([^"]+)">\s*<HintPath>([^<]+)</HintPath>\s*</Reference>}{
+        s{<Reference Include="([^"]+)">\s*<HintPath>([^<]+)</HintPath>\s*(?:<Private>[^<]+</Private>\s*)?</Reference>}{
             my $name = $1;
             my $hint = $2;
-            if (-f $hint) {
+            my $found = "";
+            for my $dir (@dirs) {
+                my $probe = "$dir/$name.dll";
+                if (-f $probe) {
+                    $found = $probe;
+                    last;
+                }
+            }
+            if ($found) {
+                my $native = native_hint($found);
+                qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($native) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
+            } elsif (-f $hint && $hint !~ m{Microsoft\.NET[\\/]Framework}i) {
                 qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
+            } elsif ($name =~ m{^(?:System\.|Microsoft\.|mscorlib$|netstandard$|WindowsBase$)}) {
+                "";
             } else {
-                my $found = "";
-                for my $dir (@dirs) {
-                    my $probe = "$dir/$name.dll";
-                    if (-f $probe) {
-                        $found = $probe;
-                        last;
-                    }
-                }
-                if ($found) {
-                    my $hint = native_hint($found);
-                    qq{<Reference Include="$name">\n      <HintPath>} . xml_escape($hint) . qq{</HintPath>\n      <Private>false</Private>\n    </Reference>};
-                } else {
-                    qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
-                }
+                qq{<Reference Include="$name">\n      <HintPath>$hint</HintPath>\n    </Reference>};
             }
         }ge;
     ' "$project_file"
 }
 resolve_references "$essentials_project"
 resolve_references "$survival_project"
+
+if command -v perl >/dev/null 2>&1; then
+    find "$runtime_root" -type f \( -name '*.cs' -o -name '*.csproj' \) -exec perl -pi -e 's/\r\n/\n/g' {} +
+fi
 
 "$repo_root/scripts/runtime-donor-patch-gate.sh" "$repo_root" ".build/runtime-donors"
 eligible_projects=(VSEssentials VSSurvivalMod)

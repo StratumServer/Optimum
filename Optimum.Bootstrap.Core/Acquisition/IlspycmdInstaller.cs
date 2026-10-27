@@ -54,6 +54,10 @@ public sealed class IlspycmdInstaller(ISystemProbe probe) : IIlspycmdAcquisition
                 "the ilspycmd install reported success but the tool was not found");
         }
 
+        string? toolDir = Path.GetDirectoryName(installed);
+        if (!string.IsNullOrEmpty(toolDir))
+            ProcessPath.Prepend(toolDir);
+
         observer.Log(LogLevel.Info, $"Installed ilspycmd at {installed}");
         return ToolAcquisitionResult.Success(installed);
     }

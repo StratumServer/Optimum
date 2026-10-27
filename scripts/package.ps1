@@ -51,6 +51,33 @@ if (-not $Version) {
 . "$PSScriptRoot/_hostcaps.ps1"
 . "$PSScriptRoot/_exec.ps1"
 
+# Ensure DOTNET_ROOT and PATH point to the SDK candidate so dotnet build and
+# prepare-runtime-donors can run even when dotnet was installed without adding it to PATH.
+$profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+$dotnetCandidates = @()
+$onPathDotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+if ($onPathDotnet) { $dotnetCandidates += $onPathDotnet.Source }
+$dotnetCandidates += (Join-Path $profileRoot '.dotnet/dotnet.exe')
+$dotnetCandidates += (Join-Path $profileRoot '.dotnet/dotnet')
+if ($env:ProgramFiles) { $dotnetCandidates += (Join-Path $env:ProgramFiles 'dotnet/dotnet.exe') }
+if ($env:LOCALAPPDATA) {
+    $dotnetCandidates += (Join-Path $env:LOCALAPPDATA 'Microsoft/dotnet/dotnet.exe')
+    $dotnetCandidates += (Join-Path $env:LOCALAPPDATA 'Programs/dotnet/dotnet.exe')
+}
+$resolvedDotnetExe = $null
+foreach ($cand in $dotnetCandidates) {
+    if (Test-Path $cand) {
+        $resolvedDotnetExe = $cand
+        break
+    }
+}
+if ($resolvedDotnetExe) {
+    $resolvedDotnetDir = Split-Path -Parent $resolvedDotnetExe
+    $env:DOTNET_ROOT = $resolvedDotnetDir
+    $toolsDir = Join-Path $profileRoot '.dotnet/tools'
+    $env:PATH = "$resolvedDotnetDir;$toolsDir;$env:PATH"
+}
+
 function Test-WindowsHost {
     ($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)
 }
@@ -120,7 +147,7 @@ function Resolve-WindowsVanilla {
         Write-Host "Downloading $url (~570MB)"
         $partial = "$InstallerPath.$([Guid]::NewGuid().ToString('N')).partial"
         Remove-Item -Force -ErrorAction SilentlyContinue $partial
-        Invoke-NativeStep { curl -L --fail --progress-bar -o $partial $url }
+        Invoke-NativeStep { curl -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - --progress-bar -o $partial $url }
         if ($LASTEXITCODE -ne 0) {
             Remove-Item -Force -ErrorAction SilentlyContinue $partial
             throw "Download failed: $url"
@@ -223,7 +250,8 @@ try {
         if (-not (Test-Path $launcherExe)) {
             Write-Host 'Building the win-x64 Optimum launcher...'
             $launcherProject = Join-Path $repoRoot 'Optimum.Launcher/Optimum.Launcher.csproj'
-            Invoke-NativeStep { dotnet build $launcherProject -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo }
+            $dotnetBuildCmd = if ($resolvedDotnetExe) { $resolvedDotnetExe } else { 'dotnet' }
+            Invoke-NativeStep { & $dotnetBuildCmd build $launcherProject -c Release -r win-x64 --self-contained false -p:UseAppHost=true --nologo }
             if ($LASTEXITCODE -ne 0) { throw 'Could not build the win-x64 Optimum launcher.' }
         }
     }

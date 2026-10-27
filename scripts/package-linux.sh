@@ -165,7 +165,7 @@ fi
 if [[ ! -f "$CLIENT_ARCHIVE" ]]; then
     URL="https://cdn.vintagestory.at/gamefiles/stable/vs_client_linux-x64_${VERSION}.tar.gz"
     echo "Downloading $URL"
-    curl -L --fail -o "$CLIENT_ARCHIVE" "$URL"
+    curl -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - -o "$CLIENT_ARCHIVE" "$URL"
 else
     echo "Using cached $CLIENT_ARCHIVE"
 fi

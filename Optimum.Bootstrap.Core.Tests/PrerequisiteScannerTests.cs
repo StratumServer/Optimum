@@ -81,6 +81,26 @@ public class PrerequisiteScannerTests
     }
 
     [Fact]
+    public void IlspycmdOnWindowsDetectsExeUnderUserDotnetToolsWhenNotOnPath()
+    {
+        string expectedPath = Path.Combine(@"C:\Users\tester", ".dotnet", "tools", "ilspycmd.exe");
+        var probe = new FakeSystemProbe
+        {
+            Os = OsKind.Windows,
+            HomeDirectory = @"C:\Users\tester",
+        };
+        probe.AddFile(expectedPath);
+        probe.OnCommand(expectedPath, "--version", "ilspycmd: 11.0.0.9375\n");
+
+        PrerequisiteResult ilspy = new PrerequisiteScanner(probe, @"C:\repo").Scan()
+            .Single(r => r.Definition.Id == PrerequisiteId.Ilspycmd);
+
+        Assert.Equal(PrerequisiteState.Ok, ilspy.State);
+        Assert.Equal(expectedPath, ilspy.DetectedPath);
+        Assert.Equal("11.0.0.9375", ilspy.DetectedVersion);
+    }
+
+    [Fact]
     public void AnOutOfRangeDecompilerIsReportedOutdatedWithTheUpdateCommand()
     {
         FakeSystemProbe probe = LinuxWithCoreTools();

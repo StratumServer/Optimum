@@ -573,7 +573,7 @@ try {
             $partial = "$ClientArchive.partial"
             Remove-Item -Force -ErrorAction SilentlyContinue $partial
 
-            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $partial $url }
+            Invoke-NativeStep { curl.exe -L --fail --retry 5 --retry-delay 2 --retry-all-errors -C - --progress-bar -o $partial $url }
             if ($LASTEXITCODE -ne 0) {
                 Remove-Item -Force -ErrorAction SilentlyContinue $partial
                 throw "Download failed: $url"
@@ -785,7 +785,7 @@ try {
             Write-Host "Decompiling $dllBase.dll with $verLine"
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
-            Invoke-NativeStep { ilspycmd $dllPath.FullName --project -o $out 2>$null | Out-Null }
+            Invoke-NativeStep { ilspycmd $dllPath.FullName --project --disable-updatecheck -o $out 2>$null | Out-Null }
             # ILSpy can report a spurious version warning after successful output;
             # validate both the project and source before stamping this cache.
             $producedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
@@ -1101,12 +1101,31 @@ try {
 
     # Vintagestory.csproj - needs ProjectReference to VintagestoryLib (not vanilla DLL).
     # The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
+    # Rewrite cleanly to eliminate any decompiler artifacts (e.g. spurious System.Runtime.InteropServices GAC references).
     $vsEntryCsproj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
-    Update-FileInPlace $vsEntryCsproj {
-        param($t)
-        $t = [regex]::Replace($t, '<Reference Include="VintagestoryLib">(?s:.*?)</Reference>', '<ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />')
-        $t
-    }
+    $vsEntryContent = @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Vintagestory</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />
+  </ItemGroup>
+</Project>
+'@
+    Write-TextFile $vsEntryCsproj ($vsEntryContent + "`n")
     $null = [xml](Get-Content -LiteralPath $vsEntryCsproj -Raw)
 
     # 6g-extra: AssemblyInfo.cs - ensure Guid/ComVisible attributes resolve without relying on ilspycmd using emission.
