@@ -12,6 +12,66 @@
 /* Memory Structures                                                          */
 /* -------------------------------------------------------------------------- */
 
+typedef struct _cairo_user_data_slot {
+    const cairo_user_data_key_t *key;
+    void *user_data;
+    cairo_destroy_func_t destroy;
+    struct _cairo_user_data_slot *next;
+} cairo_user_data_slot_t;
+
+static cairo_status_t user_data_set(cairo_user_data_slot_t **head, const cairo_user_data_key_t *key, void *user_data, cairo_destroy_func_t destroy) {
+    if (!head || !key) return CAIRO_STATUS_NULL_POINTER;
+    cairo_user_data_slot_t **curr = head;
+    while (*curr) {
+        if ((*curr)->key == key) {
+            cairo_user_data_slot_t *old = *curr;
+            void *old_data = old->user_data;
+            cairo_destroy_func_t old_destroy = old->destroy;
+            if (user_data == NULL) {
+                *curr = old->next;
+                free(old);
+                if (old_destroy && old_data) old_destroy(old_data);
+                return CAIRO_STATUS_SUCCESS;
+            } else {
+                old->user_data = user_data;
+                old->destroy = destroy;
+                if (old_destroy && old_data) old_destroy(old_data);
+                return CAIRO_STATUS_SUCCESS;
+            }
+        }
+        curr = &(*curr)->next;
+    }
+    if (user_data == NULL) return CAIRO_STATUS_SUCCESS;
+    cairo_user_data_slot_t *slot = (cairo_user_data_slot_t *)malloc(sizeof(cairo_user_data_slot_t));
+    if (!slot) return CAIRO_STATUS_NO_MEMORY;
+    slot->key = key;
+    slot->user_data = user_data;
+    slot->destroy = destroy;
+    slot->next = *head;
+    *head = slot;
+    return CAIRO_STATUS_SUCCESS;
+}
+
+static void *user_data_get(cairo_user_data_slot_t *head, const cairo_user_data_key_t *key) {
+    if (!key) return NULL;
+    for (cairo_user_data_slot_t *s = head; s != NULL; s = s->next) {
+        if (s->key == key) return s->user_data;
+    }
+    return NULL;
+}
+
+static void user_data_destroy_all(cairo_user_data_slot_t *head) {
+    cairo_user_data_slot_t *curr = head;
+    while (curr) {
+        cairo_user_data_slot_t *next = curr->next;
+        if (curr->destroy && curr->user_data) {
+            curr->destroy(curr->user_data);
+        }
+        free(curr);
+        curr = next;
+    }
+}
+
 struct _cairo_surface {
     int ref_count;
     cairo_status_t status;
@@ -24,6 +84,7 @@ struct _cairo_surface {
     int owns_data;
     double device_offset_x;
     double device_offset_y;
+    cairo_user_data_slot_t *user_data;
 };
 
 typedef struct _cairo_color_stop {
@@ -45,6 +106,7 @@ struct _cairo_pattern {
     cairo_color_stop_t *stops;
     int num_stops;
     int stops_capacity;
+    cairo_user_data_slot_t *user_data;
 };
 
 struct _cairo_font_options {
@@ -61,6 +123,7 @@ struct _cairo_font_face {
     char *family;
     cairo_font_slant_t slant;
     cairo_font_weight_t weight;
+    cairo_user_data_slot_t *user_data;
 };
 
 struct _cairo_scaled_font {
@@ -70,6 +133,7 @@ struct _cairo_scaled_font {
     cairo_matrix_t font_matrix;
     cairo_matrix_t ctm;
     cairo_font_options_t options;
+    cairo_user_data_slot_t *user_data;
 };
 
 typedef struct _rect_cmd {
@@ -100,6 +164,7 @@ struct _cairo {
     rect_cmd_t *rects;
     int num_rects;
     int rects_capacity;
+    cairo_user_data_slot_t *user_data;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -238,6 +303,7 @@ CAIRO_SHIM_EXPORT cairo_surface_t *cairo_surface_reference(cairo_surface_t *surf
 CAIRO_SHIM_EXPORT void cairo_surface_destroy(cairo_surface_t *surface) {
     if (!surface) return;
     if (--surface->ref_count <= 0) {
+        user_data_destroy_all(surface->user_data);
         if (surface->owns_data && surface->data) free(surface->data);
         free(surface);
     }
@@ -352,6 +418,7 @@ CAIRO_SHIM_EXPORT cairo_pattern_t *cairo_pattern_reference(cairo_pattern_t *patt
 CAIRO_SHIM_EXPORT void cairo_pattern_destroy(cairo_pattern_t *pattern) {
     if (!pattern) return;
     if (--pattern->ref_count <= 0) {
+        user_data_destroy_all(pattern->user_data);
         if (pattern->surface) cairo_surface_destroy(pattern->surface);
         if (pattern->stops) free(pattern->stops);
         free(pattern);
@@ -505,6 +572,7 @@ CAIRO_SHIM_EXPORT cairo_t *cairo_reference(cairo_t *cr) {
 CAIRO_SHIM_EXPORT void cairo_destroy(cairo_t *cr) {
     if (!cr) return;
     if (--cr->ref_count <= 0) {
+        user_data_destroy_all(cr->user_data);
         cairo_state_t *st = cr->state.prev;
         while (st) {
             cairo_state_t *prev = st->prev;
@@ -974,6 +1042,7 @@ CAIRO_SHIM_EXPORT cairo_font_face_t *cairo_font_face_reference(cairo_font_face_t
 CAIRO_SHIM_EXPORT void cairo_font_face_destroy(cairo_font_face_t *font_face) {
     if (!font_face) return;
     if (--font_face->ref_count <= 0) {
+        user_data_destroy_all(font_face->user_data);
         if (font_face->family) free(font_face->family);
         free(font_face);
     }
@@ -1180,5 +1249,64 @@ CAIRO_SHIM_EXPORT const char *cairo_status_to_string(cairo_status_t status) {
         case CAIRO_STATUS_NO_MEMORY: return "out of memory";
         case CAIRO_STATUS_INVALID_RESTORE: return "invalid restore";
         default: return "cairo error";
+    }
+}
+
+CAIRO_SHIM_EXPORT cairo_status_t cairo_surface_set_user_data(cairo_surface_t *surface, const cairo_user_data_key_t *key, void *user_data, cairo_destroy_func_t destroy) {
+    if (!surface) return CAIRO_STATUS_NULL_POINTER;
+    return user_data_set(&surface->user_data, key, user_data, destroy);
+}
+
+CAIRO_SHIM_EXPORT void *cairo_surface_get_user_data(cairo_surface_t *surface, const cairo_user_data_key_t *key) {
+    if (!surface) return NULL;
+    return user_data_get(surface->user_data, key);
+}
+
+CAIRO_SHIM_EXPORT cairo_status_t cairo_set_user_data(cairo_t *cr, const cairo_user_data_key_t *key, void *user_data, cairo_destroy_func_t destroy) {
+    if (!cr) return CAIRO_STATUS_NULL_POINTER;
+    return user_data_set(&cr->user_data, key, user_data, destroy);
+}
+
+CAIRO_SHIM_EXPORT void *cairo_get_user_data(cairo_t *cr, const cairo_user_data_key_t *key) {
+    if (!cr) return NULL;
+    return user_data_get(cr->user_data, key);
+}
+
+CAIRO_SHIM_EXPORT cairo_status_t cairo_pattern_set_user_data(cairo_pattern_t *pattern, const cairo_user_data_key_t *key, void *user_data, cairo_destroy_func_t destroy) {
+    if (!pattern) return CAIRO_STATUS_NULL_POINTER;
+    return user_data_set(&pattern->user_data, key, user_data, destroy);
+}
+
+CAIRO_SHIM_EXPORT void *cairo_pattern_get_user_data(cairo_pattern_t *pattern, const cairo_user_data_key_t *key) {
+    if (!pattern) return NULL;
+    return user_data_get(pattern->user_data, key);
+}
+
+CAIRO_SHIM_EXPORT cairo_status_t cairo_font_face_set_user_data(cairo_font_face_t *font_face, const cairo_user_data_key_t *key, void *user_data, cairo_destroy_func_t destroy) {
+    if (!font_face) return CAIRO_STATUS_NULL_POINTER;
+    return user_data_set(&font_face->user_data, key, user_data, destroy);
+}
+
+CAIRO_SHIM_EXPORT void *cairo_font_face_get_user_data(cairo_font_face_t *font_face, const cairo_user_data_key_t *key) {
+    if (!font_face) return NULL;
+    return user_data_get(font_face->user_data, key);
+}
+
+CAIRO_SHIM_EXPORT cairo_status_t cairo_scaled_font_set_user_data(cairo_scaled_font_t *scaled_font, const cairo_user_data_key_t *key, void *user_data, cairo_destroy_func_t destroy) {
+    if (!scaled_font) return CAIRO_STATUS_NULL_POINTER;
+    return user_data_set(&scaled_font->user_data, key, user_data, destroy);
+}
+
+CAIRO_SHIM_EXPORT void *cairo_scaled_font_get_user_data(cairo_scaled_font_t *scaled_font, const cairo_user_data_key_t *key) {
+    if (!scaled_font) return NULL;
+    return user_data_get(scaled_font->user_data, key);
+}
+
+CAIRO_SHIM_EXPORT void cairo_scaled_font_destroy(cairo_scaled_font_t *scaled_font) {
+    if (!scaled_font) return;
+    if (--scaled_font->ref_count <= 0) {
+        user_data_destroy_all(scaled_font->user_data);
+        if (scaled_font->font_face) cairo_font_face_destroy(scaled_font->font_face);
+        free(scaled_font);
     }
 }

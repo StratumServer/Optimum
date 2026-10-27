@@ -3,6 +3,19 @@
 #include <stdlib.h>
 #include <assert.h>
 
+static int destroyed1 = 0;
+static int destroyed2 = 0;
+
+static void destroy_cb1(void *data) {
+    assert(data == (void *)&destroyed1);
+    destroyed1 = 1;
+}
+
+static void destroy_cb2(void *data) {
+    assert(data == (void *)&destroyed2);
+    destroyed2 = 1;
+}
+
 int main(void) {
     printf("Testing Cairo Native Shim ABI...\n");
     printf("Cairo version: %d, string: %s\n", cairo_version(), cairo_version_string());
@@ -73,8 +86,21 @@ int main(void) {
     assert(write_status == CAIRO_STATUS_SUCCESS);
     printf("PASS: Surface write passed.\n");
 
+    /* 5. User data test */
+    static cairo_user_data_key_t key1;
+    static cairo_user_data_key_t key2;
+
+    assert(cairo_surface_set_user_data(surf, &key1, &destroyed1, destroy_cb1) == CAIRO_STATUS_SUCCESS);
+    assert(cairo_surface_get_user_data(surf, &key1) == &destroyed1);
+    assert(cairo_set_user_data(cr, &key2, &destroyed2, destroy_cb2) == CAIRO_STATUS_SUCCESS);
+    assert(cairo_get_user_data(cr, &key2) == &destroyed2);
+
     cairo_destroy(cr);
+    assert(destroyed2 == 1);
     cairo_surface_destroy(surf);
+    assert(destroyed1 == 1);
+    printf("PASS: User data and destroy callbacks passed.\n");
+
     printf("ALL TESTS PASSED SUCCESSFULLY!\n");
     return 0;
 }

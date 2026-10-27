@@ -195,7 +195,7 @@ namespace Cairo
 		internal void ReleaseContextFontOwnership (Context context)
 		{
 			lock (sync) {
-				if (contextStates.TryGetValue (context, out ContextState contextState)) contextState.Graphics.ReleaseFontOwnership ();
+				if (contextStates != null && context != null && contextStates.TryGetValue (context, out ContextState contextState)) contextState?.Graphics?.ReleaseFontOwnership ();
 			}
 		}
 

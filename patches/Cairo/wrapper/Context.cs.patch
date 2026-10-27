@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Context.cs b/Cairo/wrapper/Context.cs
-index 03f9c76..286b8f6 100644
+index 03f9c76..bb0cfce 100644
 --- a/Cairo/wrapper/Context.cs
 +++ b/Cairo/wrapper/Context.cs
 @@ -33,10 +33,11 @@
@@ -75,7 +75,7 @@ index 03f9c76..286b8f6 100644
  
  			this.handle = handle;
  			if (!owner)
-@@ -115,71 +148,201 @@ namespace Cairo
+@@ -115,71 +148,212 @@ namespace Cairo
  			GC.SuppressFinalize (this);
  		}
  
@@ -83,25 +83,38 @@ index 03f9c76..286b8f6 100644
  		{
 -			if (!disposing || CairoDebug.Enabled)
 -				CairoDebug.OnDisposed<Context> (handle, disposing);
-+			disposedSurfaceRecording?.Dispose(); disposedSurfaceRecording = null; disposedRecordingOwner = null;
-+            if (disposed) return;
-+            recordingTarget?.ReleaseRecordingContextFontOwnership (this);
-+            foreach (ManagedGroupFrame frame in managedGroups) {
-+                frame.Target.ReleaseRecordingContextFontOwnership (this);
-+                frame.Parent.ReleaseRecordingContextFontOwnership (this);
-+            }
-+            if (!disposing) {
-+                // A finalizer cannot activate a recorder owned by another thread.
-+                Surface abandoned = recordingTarget;
-+                abandoned?.DetachRecordingContext (this);
-+                recordingTarget = null;
-+                managedGroups.Clear ();
-+                abandoned?.ReleaseUnusedManagedBackend ();
-+            }
-+            DiscardManagedGroups ();
-+			recordingTarget?.ReleaseRecordingContextFontOwnership (this);
+-
+-			if (handle == IntPtr.Zero)
++			if (disposing) {
++				disposedSurfaceRecording?.Dispose();
++				disposedSurfaceRecording = null;
++				disposedRecordingOwner = null;
++			}
++			if (disposed) return;
++			if (disposing) {
++				recordingTarget?.ReleaseRecordingContextFontOwnership (this);
++				foreach (ManagedGroupFrame frame in managedGroups) {
++					frame.Target.ReleaseRecordingContextFontOwnership (this);
++					frame.Parent.ReleaseRecordingContextFontOwnership (this);
++				}
++				DiscardManagedGroups ();
++				recordingTarget?.ReleaseRecordingContextFontOwnership (this);
++			} else {
++				// A finalizer cannot activate a recorder owned by another thread.
++				Surface abandoned = recordingTarget;
++				abandoned?.DetachRecordingContext (this);
++				recordingTarget = null;
++				managedGroups.Clear ();
++				abandoned?.ReleaseUnusedManagedBackend ();
++			}
 +			disposed = true;
-+			if (handle == IntPtr.Zero) { recordingSurface?.DetachRecordingContext (this); recordingSurface = null; return; }
++			if (handle == IntPtr.Zero) {
++				if (disposing) {
++					recordingSurface?.DetachRecordingContext (this);
++				}
++				recordingSurface = null;
+ 				return;
++			}
 +			IntPtr disposedHandle = handle;
 +			Surface oldSurface = recordingSurface;
 +			ExceptionDispatchInfo cleanupFailure = null;
@@ -130,9 +143,6 @@ index 03f9c76..286b8f6 100644
 +			if (cleanupFailure != null) cleanupFailure.Throw ();
 +		}
  
--			if (handle == IntPtr.Zero)
--				return;
--
 -			NativeMethods.cairo_destroy (handle);
 -			handle = IntPtr.Zero;
 +		void DiscardManagedGroups ()
@@ -291,7 +301,7 @@ index 03f9c76..286b8f6 100644
  
  		[Obsolete ("Use SetSourceColor method")]
  		public Color Color {
-@@ -195,70 +358,76 @@ namespace Cairo
+@@ -195,70 +369,76 @@ namespace Cairo
  			}
  		}
  
@@ -378,7 +388,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		private Pattern Pattern {
-@@ -279,46 +448,72 @@ namespace Cairo
+@@ -279,46 +459,72 @@ namespace Cairo
  			}
  		}
  
@@ -458,7 +468,7 @@ index 03f9c76..286b8f6 100644
  
  		[Obsolete ("Use GetTarget/SetTarget")]
  		public Cairo.Surface Target {
-@@ -331,20 +526,64 @@ namespace Cairo
+@@ -331,20 +537,64 @@ namespace Cairo
  			}
  		}
  
@@ -528,7 +538,7 @@ index 03f9c76..286b8f6 100644
  		[Obsolete("Use GetScaledFont/SetScaledFont")]
  		public ScaledFont ScaledFont {
  			set {
-@@ -356,88 +595,141 @@ namespace Cairo
+@@ -356,88 +606,141 @@ namespace Cairo
  			}
  		}
  
@@ -680,7 +690,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		public void MoveTo (PointD p)
-@@ -445,10 +737,11 @@ namespace Cairo
+@@ -445,10 +748,11 @@ namespace Cairo
  			MoveTo (p.X, p.Y);
  		}
  
@@ -692,7 +702,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		public void LineTo (PointD p)
-@@ -456,10 +749,11 @@ namespace Cairo
+@@ -456,10 +760,11 @@ namespace Cairo
  			LineTo (p.X, p.Y);
  		}
  
@@ -704,7 +714,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		public void CurveTo (PointD p1, PointD p2, PointD p3)
-@@ -467,10 +761,11 @@ namespace Cairo
+@@ -467,10 +772,11 @@ namespace Cairo
  			CurveTo (p1.X, p1.Y, p2.X, p2.Y, p3.X, p3.Y);
  		}
  
@@ -716,7 +726,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		public void RelMoveTo (Distance d)
-@@ -478,10 +773,11 @@ namespace Cairo
+@@ -478,10 +784,11 @@ namespace Cairo
  			RelMoveTo (d.Dx, d.Dy);
  		}
  
@@ -728,7 +738,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		public void RelLineTo (Distance d)
-@@ -489,10 +785,11 @@ namespace Cairo
+@@ -489,10 +796,11 @@ namespace Cairo
  			RelLineTo (d.Dx, d.Dy);
  		}
  
@@ -740,7 +750,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		public void RelCurveTo (Distance d1, Distance d2, Distance d3)
-@@ -500,24 +797,43 @@ namespace Cairo
+@@ -500,24 +808,43 @@ namespace Cairo
  			RelCurveTo (d1.Dx, d1.Dy, d2.Dx, d2.Dy, d3.Dx, d3.Dy);
  		}
  
@@ -786,7 +796,7 @@ index 03f9c76..286b8f6 100644
  		public void Rectangle (Rectangle rectangle)
  		{
  			Rectangle (rectangle.X, rectangle.Y, rectangle.Width, rectangle.Height);
-@@ -528,34 +844,46 @@ namespace Cairo
+@@ -528,34 +855,46 @@ namespace Cairo
  			Rectangle (p.X, p.Y, width, height);
  		}
  
@@ -837,7 +847,7 @@ index 03f9c76..286b8f6 100644
  		}
  
          #endregion
-@@ -565,134 +893,201 @@ namespace Cairo
+@@ -565,134 +904,201 @@ namespace Cairo
          /// <summary>
          /// Paint the whole surface ignoring any paths
          /// </summary>
@@ -1051,7 +1061,7 @@ index 03f9c76..286b8f6 100644
  
  		[Obsolete ("Use GetGroupTarget()")]
  		public Surface GroupTarget {
-@@ -701,35 +1096,100 @@ namespace Cairo
+@@ -701,35 +1107,100 @@ namespace Cairo
  			}
  		}
  
@@ -1153,7 +1163,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		[Obsolete("Use UserToDevice instead")]
-@@ -756,54 +1216,60 @@ namespace Cairo
+@@ -756,54 +1227,60 @@ namespace Cairo
  			DeviceToUserDistance (ref dx, ref dy);
  		}
  
@@ -1223,7 +1233,7 @@ index 03f9c76..286b8f6 100644
  		}
  
  		[Obsolete ("Use SetFontSize() instead.")]
-@@ -817,29 +1283,36 @@ namespace Cairo
+@@ -817,29 +1294,36 @@ namespace Cairo
  			set { SetFontSize (value); }
  		}
  
@@ -1264,7 +1274,7 @@ index 03f9c76..286b8f6 100644
  			}
  		}
  
-@@ -879,16 +1352,20 @@ namespace Cairo
+@@ -879,16 +1363,20 @@ namespace Cairo
  			return dest;
  		}
  
@@ -1285,7 +1295,7 @@ index 03f9c76..286b8f6 100644
  			Marshal.FreeHGlobal (ptr);
  		}
  
-@@ -904,10 +1381,12 @@ namespace Cairo
+@@ -904,10 +1392,12 @@ namespace Cairo
  			GlyphPath (glyphs);
  		}
  
@@ -1298,7 +1308,7 @@ index 03f9c76..286b8f6 100644
  			IntPtr ptr;
  
  			ptr = FromGlyphToUnManagedMemory (glyphs);
-@@ -917,49 +1396,104 @@ namespace Cairo
+@@ -917,49 +1407,104 @@ namespace Cairo
  			Marshal.FreeHGlobal (ptr);
  		}
  
@@ -1404,7 +1414,7 @@ index 03f9c76..286b8f6 100644
  			if (utf8.Length > 0 && utf8[utf8.Length - 1] == 0)
  				return utf8;
  			var termedArray = new byte[utf8.Length + 1];
-@@ -977,51 +1511,65 @@ namespace Cairo
+@@ -977,51 +1522,65 @@ namespace Cairo
  			return bytes;
  		}
  
