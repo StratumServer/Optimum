@@ -39,7 +39,7 @@ public static partial class InstallerLogFilter
     // non-zero failure count, an exception, a fatal git message. Deliberately
     // does not fire on "0 Error(s)" or a stray "error" inside advisory prose.
     [GeneratedRegex(
-        @":\s*error\s+[A-Z]{1,6}\d|^\s*error:\s|\bpatch failed\b|hunk\s+#?\d+\s+FAILED\b|Saved rejects in|does not apply\b|did not survive|\.patch\.rej\b|\bBuild FAILED\b|(?-i:Exception)|^fatal:\s|[1-9]\d*\s+[Ee]rror(?:\(s\)|s)?\b",
+        @":\s*error\s+[A-Z]{1,6}\d|^\s*error:\s|\bpatch failed\b|hunk\s+#?\d+\s+FAILED\b|Saved rejects in|does not apply\b|did not survive|\.patch\.rej\b|\bBuild FAILED\b|(?-i:Exception)|^fatal:\s|[1-9]\d*\s+[Ee]rror(?:\(s\)|s)?\b|\bRuntime donor (?:compatibility gate failed|build failed)\b|\bcompatibility gate failed\b|\brequires a patch refresh\b|\bIncompatible \.NET SDK candidate\b|\bDownload failed\b|\bilspycmd (?:failed|produced an incomplete source tree|did not create)\b|\bCould not apply runtime patch\b|\bCategoryInfo\b|\bFullyQualifiedErrorId\b|\bOperationStopped\b|\.ps1:\s+|\bThe term\s+['""][^'""]+['""]\s+is not recognized\b",
         RegexOptions.IgnoreCase)]
     private static partial Regex Failure();
 

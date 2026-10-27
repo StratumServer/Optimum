@@ -1,6 +1,7 @@
 using System.Text;
 using CliWrap;
 using CliWrap.EventStream;
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
@@ -139,6 +140,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
             case OsKind.Windows:
                 List<string> win = ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ScriptPath(request.RepoRoot, "package.ps1"), "-OutputDir", output];
                 if (request.ClientArchive is not null) win.AddRange(["-ClientArchive", request.ClientArchive]);
+                if (request.Version is not null) win.AddRange(["-Version", request.Version]);
                 return (PwshExecutable(), win);
             case OsKind.MacOs:
                 string arch = probe.Arch == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64";
@@ -209,9 +211,50 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         Command cmd = Cli.Wrap(command.Exe)
             .WithArguments(command.Args)
             .WithWorkingDirectory(workingDirectory)
-            .WithValidation(CommandResultValidation.None);
-        if (clearPlatformEnv)
-            cmd = cmd.WithEnvironmentVariables(env => env.Set("Platform", null).Set("PLATFORM", null));
+            .WithValidation(CommandResultValidation.None)
+            .WithEnvironmentVariables(env =>
+            {
+                if (clearPlatformEnv)
+                {
+                    env.Set("Platform", null).Set("PLATFORM", null);
+                }
+
+                char sep = probe.Os == OsKind.Windows ? ';' : ':';
+                List<string> prependParts = [];
+
+                string? dotnet = DotnetSdkProbe.Find(probe);
+                if (dotnet is not null)
+                {
+                    string? dotnetDir = Path.GetDirectoryName(dotnet);
+                    if (!string.IsNullOrEmpty(dotnetDir))
+                    {
+                        env.Set("DOTNET_ROOT", dotnetDir);
+                        prependParts.Add(dotnetDir);
+                        prependParts.Add(Path.Combine(probe.HomeDirectory, ".dotnet", "tools"));
+                    }
+                }
+
+                if (probe.Os == OsKind.Windows)
+                {
+                    string? git = GitForWindows.FindExecutable(probe);
+                    if (git is not null)
+                    {
+                        string? gitDir = Path.GetDirectoryName(git);
+                        if (!string.IsNullOrEmpty(gitDir) && !prependParts.Contains(gitDir))
+                            prependParts.Add(gitDir);
+                    }
+                }
+
+                if (prependParts.Count > 0)
+                {
+                    string? currentPath = probe.GetEnvironmentVariable("PATH");
+                    string prepended = string.Join(sep, prependParts);
+                    string newPath = string.IsNullOrWhiteSpace(currentPath)
+                        ? prepended
+                        : prepended + sep + currentPath.Trim(sep);
+                    env.Set("PATH", newPath);
+                }
+            });
 
         try
         {

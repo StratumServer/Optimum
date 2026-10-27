@@ -11,6 +11,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 . "$scriptDir/_exec.ps1"
 
+foreach ($gitEnv in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX') {
+    Remove-Item -Path "Env:$gitEnv" -ErrorAction SilentlyContinue
+}
+
 # Resolve dotnet the same way ilspycmd is resolved below: prefer one on PATH,
 # then fall back to the user-profile install at ~/.dotnet. The installer and
 # bootstrap can place the SDK under %USERPROFILE%\.dotnet without adding it to
@@ -68,18 +72,27 @@ function script:Test-DotNetHasSdk([string]$DotnetExe, [string]$Repo = $repoRoot)
 }
 
 $profileRoot = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+$dotnetCandidates = @()
 $dotnetCmd = Get-Command dotnet -ErrorAction SilentlyContinue
-$profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet.exe'
-if (-not (Test-Path $profileDotnetExe)) {
-    $profileDotnetExe = Join-Path $profileRoot '.dotnet/dotnet'
+if ($dotnetCmd) { $dotnetCandidates += $dotnetCmd.Source }
+$dotnetCandidates += (Join-Path $profileRoot '.dotnet/dotnet.exe')
+$dotnetCandidates += (Join-Path $profileRoot '.dotnet/dotnet')
+if ($env:ProgramFiles) { $dotnetCandidates += (Join-Path $env:ProgramFiles 'dotnet/dotnet.exe') }
+if ($env:LOCALAPPDATA) {
+    $dotnetCandidates += (Join-Path $env:LOCALAPPDATA 'Microsoft/dotnet/dotnet.exe')
+    $dotnetCandidates += (Join-Path $env:LOCALAPPDATA 'Programs/dotnet/dotnet.exe')
 }
 
-if ($dotnetCmd -and (Test-DotNetResolvesGlobalJson $dotnetCmd.Source $repoRoot)) {
-    $dotnetPath = $dotnetCmd.Source
-} elseif ((Test-Path $profileDotnetExe) -and (Test-DotNetResolvesGlobalJson $profileDotnetExe $repoRoot)) {
-    $dotnetPath = $profileDotnetExe
-} else {
-    # Neither candidate could resolve the repository's global.json.
+$dotnetPath = $null
+foreach ($cand in $dotnetCandidates) {
+    if ((Test-Path $cand) -and (Test-DotNetResolvesGlobalJson $cand $repoRoot)) {
+        $dotnetPath = $cand
+        break
+    }
+}
+
+if (-not $dotnetPath) {
+    # No candidate could resolve the repository's global.json.
     $requiredSdk = '10.0.100'
     $globalJsonPath = Join-Path $repoRoot 'global.json'
     if (Test-Path $globalJsonPath) {
@@ -93,19 +106,20 @@ if ($dotnetCmd -and (Test-DotNetResolvesGlobalJson $dotnetCmd.Source $repoRoot))
         $sdks = & $dotnetCmd.Source --list-sdks 2>$null
         $sdkList = if ($sdks) { ($sdks -join '; ') } else { 'none' }
         throw "Incompatible .NET SDK candidate: $($dotnetCmd.Source) (installed: $sdkList). Required SDK: $requiredSdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.ps1."
-    } elseif (Test-Path $profileDotnetExe) {
-        $sdks = & $profileDotnetExe --list-sdks 2>$null
+    } elseif (Test-Path (Join-Path $profileRoot '.dotnet/dotnet.exe')) {
+        $pExe = Join-Path $profileRoot '.dotnet/dotnet.exe'
+        $sdks = & $pExe --list-sdks 2>$null
         $sdkList = if ($sdks) { ($sdks -join '; ') } else { 'none' }
-        throw "Incompatible .NET SDK candidate: $profileDotnetExe (installed: $sdkList). Required SDK: $requiredSdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.ps1."
+        throw "Incompatible .NET SDK candidate: $pExe (installed: $sdkList). Required SDK: $requiredSdk (from global.json). Install the required .NET SDK or run scripts/bootstrap.ps1."
     } else {
         throw "dotnet is required. Install .NET SDK $requiredSdk or run scripts/bootstrap.ps1 first."
     }
 }
 $dotnetDir = Split-Path -Parent $dotnetPath
-$profileDotnet = [IO.Path]::GetFullPath((Join-Path $profileRoot '.dotnet'))
-if ($dotnetDir -ieq $profileDotnet) {
-    $env:DOTNET_ROOT = $dotnetDir
-}
+$env:DOTNET_ROOT = $dotnetDir
+$toolsDir = Join-Path $profileRoot '.dotnet/tools'
+$sep = [System.IO.Path]::PathSeparator
+$env:PATH = "$dotnetDir$sep$toolsDir$sep$env:PATH"
 
 if (-not $VanillaDir) {
     $VanillaDir = Join-Path $repoRoot '.vanilla/win-x64/vintagestory'
@@ -127,7 +141,7 @@ $apiDll = Join-Path $outputRoot 'VintagestoryAPI.dll'
 
 function Convert-ToLf([string]$Root) {
     if (-not (Test-Path $Root)) { return }
-    Get-ChildItem -Path $Root -Recurse -File -Filter '*.patch' | ForEach-Object {
+    Get-ChildItem -Path (Join-Path $Root '*') -Recurse -File -Include '*.patch','*.cs','*.csproj' | ForEach-Object {
         $bytes = [IO.File]::ReadAllBytes($_.FullName)
         if ($bytes -contains 13) {
             $text = [Text.Encoding]::UTF8.GetString($bytes) -creplace ([char]13 + [char]10), [char]10 -creplace [char]13, [char]10
@@ -244,19 +258,40 @@ function Decompile-Mod {
             Write-Warning "Vanilla reference directory not found: $referenceDir"
         }
     }
-    Invoke-Checked {
-        & $ilspyPath `
-            --project `
-            --nested-directories `
-            $referenceArgs `
-            --outputdir $output `
-            $Assembly | Out-Null
-    } "ilspycmd failed for $Project"
-
-    $projectFile = Get-ChildItem -Path $output -Filter '*.csproj' -File |
-        Select-Object -First 1 -ExpandProperty FullName
-    if (-not $projectFile) {
-        throw "ilspycmd did not create a project for $Project."
+    $attempts = 3
+    $projectFile = $null
+    $stderrFile = [IO.Path]::GetTempFileName()
+    try {
+        for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+            if (Test-Path $output) { Remove-Item -Recurse -Force $output }
+            New-Item -ItemType Directory -Force -Path $output | Out-Null
+            Invoke-NativeStep {
+                & $ilspyPath `
+                    --project `
+                    --disable-updatecheck `
+                    --nested-directories `
+                    $referenceArgs `
+                    --outputdir $output `
+                    $Assembly 2>$stderrFile | Out-Null
+            }
+            $projectFile = Get-ChildItem -Path $output -Filter '*.csproj' -File |
+                Select-Object -First 1 -ExpandProperty FullName
+            $sourceFiles = @(Get-ChildItem -Path $output -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+            if ($projectFile -and $sourceFiles.Count -gt 0) {
+                break
+            }
+            if ($attempt -lt $attempts) {
+                Write-Warning "ilspycmd produced an incomplete $Project project, retrying ($attempt/$attempts)..."
+            }
+        }
+        if (-not $projectFile -or $sourceFiles.Count -eq 0) {
+            if (Test-Path $stderrFile) {
+                Get-Content $stderrFile | Where-Object { $_ -notmatch 'not using the latest version' } | ForEach-Object { Write-Error $_ }
+            }
+            throw "ilspycmd did not create a project for $Project."
+        }
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $stderrFile
     }
 
     $text = [IO.File]::ReadAllText($projectFile)
@@ -342,10 +377,12 @@ function Exclude-CompileItems {
 function Resolve-ProjectReferences {
     param([string]$ProjectFile)
     $text = [IO.File]::ReadAllText($ProjectFile)
+    $projectDir = Split-Path -Parent $ProjectFile
     $searchPaths = @(
         (Join-Path $runtimeDonorDir 'Lib'),
         $runtimeDonorDir,
-        (Join-Path $runtimeDonorDir 'Mods')
+        (Join-Path $runtimeDonorDir 'Mods'),
+        $outputRoot
     )
     # Pass 1: Self-closing references without HintPath
     $text = [regex]::Replace($text, '<Reference Include="([^"]+)"\s*/>', {
@@ -357,21 +394,41 @@ function Resolve-ProjectReferences {
                 return ('<Reference Include="{0}"><HintPath>{1}</HintPath><Private>false</Private></Reference>' -f $assemblyName, (ConvertTo-XmlText $probe))
             }
         }
+        # If it is a framework assembly that does not exist in donor paths, strip it so Microsoft.NETCore.App handles it
+        if ($assemblyName -match '^(?:System\.|Microsoft\.|mscorlib(?:,|$)|netstandard(?:,|$)|WindowsBase(?:,|$))') {
+            return ''
+        }
         return $m.Value
     })
-    # Pass 2: References with HintPath that does not exist on disk
-    $text = [regex]::Replace($text, '<Reference Include="([^"]+)">\s*<HintPath>([^<]+)</HintPath>\s*</Reference>', {
+    # Pass 2: References with HintPath
+    $text = [regex]::Replace($text, '<Reference Include="([^"]+)">\s*<HintPath>([^<]+)</HintPath>\s*(?:<Private>[^<]+</Private>\s*)?</Reference>', {
         param($m)
         $assemblyName = $m.Groups[1].Value
-        $hintPath = $m.Groups[2].Value
-        if (Test-Path $hintPath) {
-            return $m.Value
-        }
+        $hintPath = $m.Groups[2].Value.Trim()
+
+        # Check donor search paths first
         foreach ($dir in $searchPaths) {
             $probe = Join-Path $dir "$assemblyName.dll"
             if (Test-Path $probe) {
                 return ('<Reference Include="{0}"><HintPath>{1}</HintPath><Private>false</Private></Reference>' -f $assemblyName, (ConvertTo-XmlText $probe))
             }
+        }
+
+        # Check if the HintPath resolved relative to the project file exists on disk
+        $resolvedHintPath = try {
+            if ([IO.Path]::IsPathRooted($hintPath)) {
+                $hintPath
+            } else {
+                [IO.Path]::GetFullPath((Join-Path $projectDir $hintPath))
+            }
+        } catch { $null }
+        if ($resolvedHintPath -and (Test-Path $resolvedHintPath) -and ($hintPath -notmatch '(?i)[\\/]Microsoft\.NET[\\/]Framework')) {
+            return $m.Value
+        }
+
+        # Framework assemblies should not have explicit broken or GAC references
+        if ($assemblyName -match '^(?:System\.|Microsoft\.|mscorlib(?:,|$)|netstandard(?:,|$)|WindowsBase(?:,|$))') {
+            return ''
         }
         return $m.Value
     })
@@ -401,6 +458,7 @@ Exclude-CompileItems $survivalProject @(
 )
 Resolve-ProjectReferences $essentialsProject
 Resolve-ProjectReferences $survivalProject
+Convert-ToLf $runtimeRoot
 
 $runtimeProjects = @('VSEssentials', 'VSSurvivalMod')
 $runtimePatchFailures = @()

@@ -70,7 +70,13 @@ fi
 if [[ ! -f "$CLIENT_ARCHIVE" ]]; then
     URL="https://cdn.vintagestory.at/gamefiles/stable/vs_client_osx-${ARCH}_${VERSION}.tar.gz"
     echo "Downloading $URL"
-    curl -L --fail -o "$CLIENT_ARCHIVE" "$URL"
+    PARTIAL="$CLIENT_ARCHIVE.partial"
+    if curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - -o "$PARTIAL" "$URL"; then
+        mv -f "$PARTIAL" "$CLIENT_ARCHIVE"
+    else
+        echo "Download failed: $URL" >&2
+        exit 1
+    fi
 else
     echo "Using cached $CLIENT_ARCHIVE"
 fi

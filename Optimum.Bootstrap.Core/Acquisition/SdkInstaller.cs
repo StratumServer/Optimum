@@ -86,6 +86,13 @@ public sealed class SdkInstaller : ISdkAcquisition
                     $"the .NET SDK installer reported success but no SDK 10 was found under {plan.InstallDirectory}");
             }
 
+            string? dotnetDir = Path.GetDirectoryName(found);
+            if (!string.IsNullOrEmpty(dotnetDir))
+            {
+                ProcessPath.Prepend(dotnetDir);
+                Environment.SetEnvironmentVariable("DOTNET_ROOT", dotnetDir, EnvironmentVariableTarget.Process);
+            }
+
             observer.Log(LogLevel.Info, $"Installed the .NET SDK at {found}");
             return ToolAcquisitionResult.Success(found);
         }

@@ -65,8 +65,13 @@ try {
     if (-not (Test-Path $ClientArchive)) {
         $url = "https://cdn.vintagestory.at/gamefiles/stable/vs_client_linux-x64_$Version.tar.gz"
         Write-Host "Downloading $url"
-        Invoke-NativeStep { curl -L --fail -o $ClientArchive $url }
-        if ($LASTEXITCODE -ne 0) { throw "Download failed: $url" }
+        $partial = "$ClientArchive.partial"
+        Invoke-NativeStep { curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - -o $partial $url }
+        if ($LASTEXITCODE -ne 0) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $partial
+            throw "Download failed: $url"
+        }
+        Move-Item -Force $partial $ClientArchive
     } else {
         Write-Host "Using cached $ClientArchive"
     }

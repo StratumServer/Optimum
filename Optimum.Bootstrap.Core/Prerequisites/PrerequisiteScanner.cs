@@ -158,8 +158,9 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
     private PrerequisiteResult DetectIlspycmd(PrerequisiteDefinition def)
     {
         IlspycmdCompatibility compat = ConfigFiles.ReadIlspycmdCompatibility(probe, repoRoot);
+        string toolBinary = probe.Os == OsKind.Windows ? "ilspycmd.exe" : "ilspycmd";
         string? path = CommandSearch.Which(probe, "ilspycmd")
-            ?? ExistingOrNull(Path.Combine(probe.HomeDirectory, ".dotnet", "tools", "ilspycmd"));
+            ?? ExistingOrNull(Path.Combine(probe.HomeDirectory, ".dotnet", "tools", toolBinary));
 
         if (path is null)
         {
