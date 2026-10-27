@@ -890,7 +890,7 @@ index 03f9c76..286b8f6 100644
 +			CheckDisposedOnly ();
 +			if (surface == null) throw new ArgumentNullException (nameof (surface));
 +			if (recordingSurface != null && surface is ImageSurface image && image.Status == Status.Success &&
-+				recordingSurface.RecordDrawing (c => c.MaskSurface (surface, surface_x, surface_y), maskSurface: image, maskX: surface_x, maskY: surface_y)) return;
++				recordingSurface.RecordDrawing (c => c.MaskSurface (surface, surface_x, surface_y), paintAll: true, maskSurface: image, maskX: surface_x, maskY: surface_y)) return;
  			CheckDisposed ();
 +			SurfaceRecordingDiagnostics.Rasterize();
  			NativeMethods.cairo_mask_surface (handle, surface.Handle, surface_x, surface_y);
