@@ -11,13 +11,16 @@ namespace Cairo
 			string family = state.FontFamily;
 			if (family == null)
 				throw new InvalidOperationException("The selected font face has no managed family metadata; Cairo materialization is disabled for recorded text.");
-			return Create(family, state.FontSlant, state.FontWeight, state.EffectiveFontSize, options, state.FontFileSource);
+			return Create(family, state.FontSlant, state.FontWeight, state.EffectiveFontSize, state.EffectiveScaleX, options, state.FontFileSource);
 		}
 
 		internal static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, FontOptions options)
-			=> Create(family, fontSlant, fontWeight, size, options, null);
+			=> Create(family, fontSlant, fontWeight, size, 1f, options, null);
 
-		static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, FontOptions options, ManagedFileFontSource fileSource)
+		internal static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, float scaleX, FontOptions options)
+			=> Create(family, fontSlant, fontWeight, size, scaleX, options, null);
+
+		static SKFont Create(string family, FontSlant fontSlant, FontWeight fontWeight, double size, float scaleX, FontOptions options, ManagedFileFontSource fileSource)
 		{
 			using var fontSelection = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.FontSelection);
             if (string.IsNullOrWhiteSpace (family)) family = "Sans";
@@ -29,6 +32,7 @@ namespace Cairo
 				?? throw new InvalidOperationException("Skia could not resolve GUI font family '" + family + "'; Cairo materialization is disabled for recorded text.");
 			try {
 			var font = new SKFont(typeface, (float)size) {
+				ScaleX = scaleX,
 				Edging = options.Antialias == Antialias.Subpixel ? SKFontEdging.SubpixelAntialias :
 					options.Antialias == Antialias.None ? SKFontEdging.Alias : SKFontEdging.Antialias,
 				Hinting = options.HintStyle switch {

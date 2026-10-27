@@ -354,10 +354,32 @@ namespace Cairo
 		{
 			get {
 				Matrix matrix = View.FontMatrix;
-				if (double.IsFinite (matrix.Xx) && matrix.Xx > 0 && matrix.Xx == matrix.Yy &&
-					matrix.Yx == 0 && matrix.Xy == 0 && matrix.X0 == 0 && matrix.Y0 == 0)
-					return matrix.Xx;
+				if (double.IsFinite (matrix.Yy) && matrix.Yy > 0 && matrix.Yx == 0 && matrix.Xy == 0)
+					return matrix.Yy;
 				return View.FontSize;
+			}
+		}
+		internal float EffectiveScaleX
+		{
+			get {
+				Matrix matrix = View.FontMatrix;
+				if (double.IsFinite (matrix.Xx) && double.IsFinite (matrix.Yy) && matrix.Yy > 0 && matrix.Xx != 0 && matrix.Yx == 0 && matrix.Xy == 0)
+					return (float)(matrix.Xx / matrix.Yy);
+				return 1f;
+			}
+		}
+		internal bool IsZeroFontMatrix
+		{
+			get {
+				Matrix matrix = View.FontMatrix;
+				return matrix.Xx == 0d && matrix.Yx == 0d && matrix.Xy == 0d && matrix.Yy == 0d;
+			}
+		}
+		internal PointD FontTranslation
+		{
+			get {
+				Matrix matrix = View.FontMatrix;
+				return new PointD (double.IsFinite (matrix.X0) ? matrix.X0 : 0d, double.IsFinite (matrix.Y0) ? matrix.Y0 : 0d);
 			}
 		}
 		internal ManagedFontFaceResource FontResource

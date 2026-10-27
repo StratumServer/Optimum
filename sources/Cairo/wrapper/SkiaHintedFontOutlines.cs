@@ -49,7 +49,7 @@ namespace Cairo
 				}
 				Check(FT_Init_FreeType(out library), "initialize");
 				Check(FT_New_Memory_Face(library, bytes, stream.Length, faceIndex, out face), "open font");
-				Check(FT_Set_Char_Size(face, (nint)Math.Round(font.Size * scaleX * 64),
+				Check(FT_Set_Char_Size(face, (nint)Math.Round(font.Size * font.ScaleX * scaleX * 64),
 					(nint)Math.Round(font.Size * scaleY * 64), 72, 72), "size font");
 			} catch { Dispose(); throw; }
 		}

@@ -14,6 +14,7 @@ namespace Cairo
 			=> OperatingSystem.IsLinux() && options.HintMetrics != HintMetrics.Off && font.Hinting == SKFontHinting.Slight && text.Length > 0 && !ContainsSurrogate(text);
 
 		internal static SKFont CreateAdvanceFont(SKFont font) => new SKFont(font.Typeface, font.Size) {
+			ScaleX = font.ScaleX,
 			Edging = font.Edging,
 			Hinting = SKFontHinting.Normal,
 			LinearMetrics = false,
@@ -34,13 +35,22 @@ namespace Cairo
 			if (state.Status != Status.Success) return default;
 			state.EnsureScaledFontOwner ();
 			if (state.Status != Status.Success) return default;
+			if (state.IsZeroFontMatrix) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
+			TextExtents result;
 			if (state.FontFileSource != null) {
 				using var outlined = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource.LoadOptions);
-				if (outlined != null) return OutlineTextExtents(font, options, text, outlined);
+				result = outlined != null ? OutlineTextExtents(font, options, text, outlined) : TextExtents(font, options, text);
+			} else {
+				result = TextExtents(font, options, text);
 			}
-			return TextExtents(font, options, text);
+			PointD trans = state.FontTranslation;
+			if ((trans.X != 0 || trans.Y != 0) && (result.Width > 0 || result.Height > 0)) {
+				result.XBearing += trans.X;
+				result.YBearing += trans.Y;
+			}
+			return result;
 		}
 
 		internal static TextExtents OutlineTextExtents(SKFont font, FontOptions options, string text, SkiaHintedFontOutlines outlined)
@@ -105,6 +115,7 @@ namespace Cairo
 			if (glyphs == null || glyphs.Length == 0) return result;
 			state.EnsureScaledFontOwner ();
 			if (state.Status != Status.Success) return default;
+			if (state.IsZeroFontMatrix) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			var indices = new ushort[glyphs.Length];
@@ -136,6 +147,11 @@ namespace Cairo
 			}
 			result.XAdvance = glyphs[glyphs.Length - 1].X + widths[widths.Length - 1] - glyphs[0].X;
 			result.YAdvance = 0;
+			PointD trans = state.FontTranslation;
+			if ((trans.X != 0 || trans.Y != 0) && (result.Width > 0 || result.Height > 0)) {
+				result.XBearing += trans.X;
+				result.YBearing += trans.Y;
+			}
 			return result;
 		}
 
@@ -149,6 +165,7 @@ namespace Cairo
 			if (state.Status != Status.Success) return default;
 			state.EnsureScaledFontOwner ();
 			if (state.Status != Status.Success) return default;
+			if (state.IsZeroFontMatrix) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			return FontExtents(font, options);
@@ -174,9 +191,9 @@ namespace Cairo
 			SKTypeface typeface = font.Typeface;
 			byte[] hhea = typeface.GetTableData(0x68686561u);
 			if (hhea != null && hhea.Length >= 12 && typeface.UnitsPerEm > 0)
-				return ((hhea[10] << 8) | hhea[11]) * (double)font.Size / typeface.UnitsPerEm;
+				return ((hhea[10] << 8) | hhea[11]) * (double)(font.Size * font.ScaleX) / typeface.UnitsPerEm;
 			SKFontMetrics metrics = font.Metrics;
-			return metrics.XMax - metrics.XMin;
+			return (metrics.XMax - metrics.XMin) * font.ScaleX;
 		}
 	}
 }

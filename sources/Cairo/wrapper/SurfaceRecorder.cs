@@ -306,8 +306,10 @@ namespace Cairo
                 graphicsState.MoveTo (x + metrics.XAdvance, y + metrics.YAdvance);
                 return true;
             }
+			if (graphicsState.IsZeroFontMatrix) return true;
 			graphicsState.TryGetCurrentPoint(out double pointX, out double pointY);
 			PointD point = new PointD(pointX, pointY);
+			PointD trans = graphicsState.FontTranslation;
 			using FontOptions options = graphicsState.GetFontOptions();
 			SKFont font = SkiaGuiFont.Create(graphicsState, options);
 			SKRect? textInkClip = options.Antialias == Antialias.Subpixel
@@ -355,7 +357,7 @@ namespace Cairo
 					blobBuilder.AddPositionedRun(glyphs, font, positions);
 					blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to build a Fontconfig-hinted text run.");
 					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
-						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)point.X, textY: (float)point.Y,
+						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
 						textInkClip: textInkClip);
 					blob = null;
 				} finally { blob?.Dispose(); font.Dispose(); }
@@ -363,7 +365,7 @@ namespace Cairo
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
 					advance = font.MeasureText(decoded);
 				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
-						sourceSnapshot: currentSource?.Capture(), text: decoded, textFont: font, textX: (float)point.X, textY: (float)point.Y,
+						sourceSnapshot: currentSource?.Capture(), text: decoded, textFont: font, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
 						textInkClip: textInkClip);
 			}
 			if (graphicsState.Operator == Operator.Screen && drawing.TextFont != null) {
@@ -413,6 +415,7 @@ namespace Cairo
             if (glyphs.Length == 0) return true;
 			graphicsState.EnsureScaledFontOwner ();
 			if (graphicsState.Status != Status.Success) return true;
+			if (graphicsState.IsZeroFontMatrix) return true;
             if (!pathOnly && surface.ManagedFinished) {
                 if (graphicsState.Operator != Operator.Dest && !HasEmptyFinishedClip ())
                     surface.LatchManagedStatus (Status.SurfaceFinished);
@@ -434,13 +437,14 @@ namespace Cairo
 				return true;
 			}
 			using SKFont font = SkiaGuiFont.Create(graphicsState, options);
+			PointD trans = graphicsState.FontTranslation;
 			var glyphIndices = new ushort[copy.Length];
 			var positions = new SKPoint[copy.Length];
 			for (int i = 0; i < copy.Length; i++) {
 				if (copy[i].Index < 0 || copy[i].Index > ushort.MaxValue)
 					throw new InvalidOperationException("Skia glyph indices are 16-bit; Cairo materialization is disabled for glyph " + copy[i].Index + ".");
 				glyphIndices[i] = (ushort)copy[i].Index;
-				positions[i] = new SKPoint((float)copy[i].X, (float)copy[i].Y);
+				positions[i] = new SKPoint((float)(copy[i].X + trans.X), (float)(copy[i].Y + trans.Y));
 			}
 			using var blobBuilder = new SKTextBlobBuilder();
 			blobBuilder.AddPositionedRun(glyphIndices, font, positions);
