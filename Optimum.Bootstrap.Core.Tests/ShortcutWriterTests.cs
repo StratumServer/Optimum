@@ -57,7 +57,6 @@ public sealed class ShortcutWriterTests : IDisposable
         string home = _home.Replace('\\', '/');
         string installDir = $"{home}/My Games/Optimum \"Special\" $1 100%";
         string launcher = $"{installDir}/optimum-launch.sh";
-        Directory.CreateDirectory(installDir);
 
         var writer = new ShortcutWriter(probe);
         IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.Menu);
