@@ -21,7 +21,7 @@ libcairo.so.2.11804.4: $(TARGET)
 cairo-shim.o: cairo-shim.c cairo.h
 	$(CC) $(CFLAGS) -c cairo-shim.c -o $@
 
-test-shim: test-shim.c $(TARGET)
+test-shim: test-shim.c libcairo.so
 	$(CC) $(CFLAGS) test-shim.c -L. -lcairo -Wl,-rpath,. -lm -o $@
 
 test: test-shim
