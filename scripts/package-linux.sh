@@ -266,6 +266,15 @@ cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/"
 
+# 5aa. Overlay drop-in native Cairo shim (libcairo.so.2) if available
+if [[ -f "$REPO_ROOT/tools/cairo-native-shim/Makefile" ]]; then
+    make -C "$REPO_ROOT/tools/cairo-native-shim" all
+    if [[ -f "$REPO_ROOT/tools/cairo-native-shim/libcairo.so.2" ]]; then
+        cp -f "$REPO_ROOT/tools/cairo-native-shim/libcairo.so.2" "$STAGE_DIR/Lib/"
+        (cd "$STAGE_DIR/Lib" && ln -sf libcairo.so.2 libcairo.so && ln -sf libcairo.so.2 libcairo.so.2.11804.4)
+    fi
+fi
+
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
 # It also needs the vanilla mod DLLs in .optimum/vanilla/Mods/ as baselines.

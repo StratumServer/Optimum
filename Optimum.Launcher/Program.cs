@@ -875,6 +875,49 @@ public static class Program
             }
         }
 
+        if (string.Equals(libraryName, "libcairo-2", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libcairo-2.dll", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libcairo.so.2", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libcairo.so", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libcairo.2.dylib", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libcairo.dylib", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "cairo", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "cairo.dll", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(libraryName, "libcairo", StringComparison.OrdinalIgnoreCase))
+        {
+            var candidatePaths = new[]
+            {
+                Path.Combine(gameDir, "Lib", "libcairo.so.2"),
+                Path.Combine(gameDir, "Lib", "libcairo.so"),
+                Path.Combine(gameDir, "Lib", "libcairo-2.dll"),
+                Path.Combine(gameDir, "Lib", "cairo.dll"),
+                Path.Combine(gameDir, "Lib", "libcairo.2.dylib"),
+                Path.Combine(gameDir, "Lib", "libcairo.dylib"),
+                Path.Combine(gameDir, "libcairo.so.2"),
+                Path.Combine(gameDir, "libcairo.so"),
+                Path.Combine(gameDir, "libcairo-2.dll"),
+                Path.Combine(gameDir, "cairo.dll"),
+                Path.Combine(gameDir, "libcairo.2.dylib"),
+                Path.Combine(gameDir, "libcairo.dylib"),
+                Path.Combine(AppContext.BaseDirectory, "Lib", "libcairo.so.2"),
+                Path.Combine(AppContext.BaseDirectory, "Lib", "libcairo.so"),
+                Path.Combine(AppContext.BaseDirectory, "Lib", "libcairo-2.dll"),
+                Path.Combine(AppContext.BaseDirectory, "Lib", "cairo.dll"),
+                Path.Combine(AppContext.BaseDirectory, "libcairo.so.2"),
+                Path.Combine(AppContext.BaseDirectory, "libcairo.so"),
+                Path.Combine(AppContext.BaseDirectory, "libcairo-2.dll"),
+                Path.Combine(AppContext.BaseDirectory, "cairo.dll"),
+            };
+
+            foreach (var candidate in candidatePaths)
+            {
+                if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
+                {
+                    return handle;
+                }
+            }
+        }
+
         return IntPtr.Zero;
     }
 

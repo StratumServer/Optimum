@@ -61,6 +61,10 @@ research/benchmark-artifacts/
 .playwright-mcp/
 graphify-out/
 __pycache__/
+tools/cairo-native-shim/*.o
+tools/cairo-native-shim/libcairo*
+tools/cairo-native-shim/test-shim
+tools/cairo-native-shim/output.ppm
 
 # Private development artifacts
 docs/
