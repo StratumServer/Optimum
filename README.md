@@ -93,6 +93,14 @@ cd Optimum
 
 The installer shows a ✓/✗ checklist of required tools, offers to install anything missing, asks where to install (default: `~/.local/share/optimum`), and creates a menu entry. Run the game from the menu or with `~/.local/share/optimum/optimum-launch.sh`.
 
+**ModDB 1-click mod installation (`vintagestorymodinstall://`):**
+
+On Linux, Optimum's `.desktop` entry registers `MimeType=x-scheme-handler/vintagestorymodinstall;` and passes `%u` to `optimum-launch.sh`, which validates the URI and forwards `-i <uri>` to the client. Existing default-handler associations are preserved unless you opt in explicitly (via the installer Options screen, `optimum install --shortcuts menu,uri`, or `./scripts/install-linux.sh --set-default-uri-handler`).
+
+Vintage Story and Optimum share the user-session named pipe `SingleInstanceVintageStoryWithUriScheme` for URI forwarding:
+- When a client instance is already running (whether Optimum, vanilla Vintage Story, or one of multiple Optimum installs), the first instance that started owns the pipe listener and receives the `-i` install request inside its own window and active data path (returning to the main menu first if a world is loaded).
+- When no client is running, the default XDG handler launches that installation with its configured `--dataPath` and opens the ModDB download prompt on startup.
+
 **AppImage** (single portable executable, no install):
 
 ```bash

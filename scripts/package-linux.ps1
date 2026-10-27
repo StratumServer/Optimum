@@ -185,11 +185,121 @@ try {
     } else {
         Write-Warning "Launcher 'Vintagestory' not found in archive."
     }
-    # run.sh launches ./Vintagestory; point it at ./Optimum.
+    # Rewrite run.sh to launch ./Optimum with URI validation and -i translation.
     $runsh = Join-Path $stageDir 'run.sh'
     if (Test-Path $runsh) {
-        (Get-Content $runsh -Raw).Replace('./Vintagestory ', './Optimum ') |
-            Set-Content -Path $runsh -NoNewline
+        $runshContent = @'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+export FONTCONFIG_FILE="$SCRIPT_DIR"/fonts.conf
+cd "$SCRIPT_DIR"
+
+# try to use the more powerful/dedicated GPU if available - set this if by default it uses your integrated graphics card
+# export DRI_PRIME=1
+
+NORMALIZED_MOD_ARG=""
+
+validate_mod_uri() {
+    local raw="$1"
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+        echo "Optimum: rejecting mod install URI containing a newline." >&2
+        return 1
+    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]://*)
+            ;;
+        *)
+            echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+            return 1
+            ;;
+    esac
+    local spec="${raw#*:}"
+    spec="${spec#//}"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
+    spec="${spec//%40/@}"
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
+        echo "Optimum: malformed mod install URI." >&2
+        return 1
+    fi
+    NORMALIZED_MOD_ARG="vintagestorymodinstall://${spec}"
+}
+
+validate_mod_arg() {
+    local raw="$1"
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+        echo "Optimum: rejecting mod install argument containing a newline." >&2
+        return 1
+    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+            validate_mod_uri "$raw"
+            return $?
+            ;;
+    esac
+    local spec="$raw"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
+    spec="${spec//%40/@}"
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
+        echo "Optimum: malformed mod install argument." >&2
+        return 1
+    fi
+    NORMALIZED_MOD_ARG="$spec"
+}
+
+LAUNCH_ARGS=()
+if [[ $# -gt 0 && "$1" != -* ]]; then
+    if [[ $# -ne 1 ]]; then
+        echo "Optimum: URI launch expects a single vintagestorymodinstall:// argument." >&2
+        exit 2
+    fi
+    validate_mod_uri "$1" || exit 2
+    LAUNCH_ARGS=(-i "$NORMALIZED_MOD_ARG")
+else
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--installmod)
+                if [[ $# -lt 2 ]]; then
+                    echo "Optimum: $1 requires a mod identifier or vintagestorymodinstall:// URI." >&2
+                    exit 2
+                fi
+                validate_mod_arg "$2" || exit 2
+                LAUNCH_ARGS+=("$1" "$NORMALIZED_MOD_ARG")
+                shift 2
+                ;;
+            -i=*|--installmod=*)
+                validate_mod_arg "${1#*=}" || exit 2
+                LAUNCH_ARGS+=("${1%%=*}" "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+                validate_mod_uri "$1" || exit 2
+                LAUNCH_ARGS+=(-i "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            *)
+                LAUNCH_ARGS+=("$1")
+                shift
+                ;;
+        esac
+    done
+fi
+
+exec ./Optimum ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
+'@ -replace "`r`n", "`n"
+        [System.IO.File]::WriteAllText($runsh, $runshContent + "`n")
+        if (Get-Command chmod -ErrorAction SilentlyContinue) {
+            chmod +x $runsh
+        }
     }
     # The .desktop entry and the window both read assets/gameicon.png.
     $gameicon = Join-Path $stageDir 'assets/gameicon.png'
@@ -197,9 +307,33 @@ try {
     # Brand the .desktop launcher entry.
     $desktop = Join-Path $stageDir 'Vintagestory.desktop'
     if (Test-Path $desktop) {
-        (Get-Content $desktop -Raw) -replace 'Name(\[[a-z]+\])?=Vintage Story [0-9.]+', 'Name$1=Optimum' |
-            Set-Content -Path (Join-Path $stageDir 'Optimum.desktop') -NoNewline
+        $desktopContent = @'
+#!/usr/bin/xdg-open
+[Desktop Entry]
+Name=Optimum
+Name[de]=Optimum
+GenericName=Vintage Story optimized client
+Comment=High-performance client for Vintage Story
+Exec=bash run.sh %u
+Terminal=false
+Type=Application
+StartupNotify=false
+Categories=Game;
+MimeType=x-scheme-handler/vintagestorymodinstall;
+StartupWMClass=Optimum
+Path=${INST_DIR}
+Icon=${INST_DIR}/assets/gameicon.png
+'@ -replace "`r`n", "`n"
+        $optimumDesktop = Join-Path $stageDir 'Optimum.desktop'
+        [System.IO.File]::WriteAllText($optimumDesktop, $desktopContent + "`n")
+        if (Get-Command chmod -ErrorAction SilentlyContinue) {
+            chmod +x $optimumDesktop
+        }
         Remove-Item -Force $desktop
+    }
+    foreach ($urlDesktop in @('Vintagestory_url_mod.desktop', 'Vintagestory_url_connect.desktop')) {
+        $urlPath = Join-Path $stageDir $urlDesktop
+        if (Test-Path $urlPath) { Remove-Item -Force $urlPath }
     }
 
     Write-Host "Folder ready: $stageDir" -ForegroundColor Green

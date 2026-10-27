@@ -39,6 +39,14 @@ public sealed record InstallManifest
     [JsonPropertyName("uninstallRegistryKey")]
     public string? UninstallRegistryKey { get; init; }
 
+    /// <summary>True when the install registered Optimum as the default ModDB URI scheme handler.</summary>
+    [JsonPropertyName("registeredUriHandler")]
+    public bool RegisteredUriHandler { get; init; }
+
+    /// <summary>The previous default ModDB URI scheme handler before Optimum took over, if any.</summary>
+    [JsonPropertyName("previousUriHandler")]
+    public string? PreviousUriHandler { get; init; }
+
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,

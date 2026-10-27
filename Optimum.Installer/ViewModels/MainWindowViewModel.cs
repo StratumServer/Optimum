@@ -260,7 +260,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             Options.ResolvedDataPath,
             Options.SelectedVersion,
             Options.CreateMenuEntry,
-            Options.CreateDesktopShortcut);
+            Options.CreateDesktopShortcut,
+            Options.IsLinux && Options.RegisterUriHandler);
         Eula.Reset();
         CurrentScreen = WizardScreen.Review;
     }
@@ -277,7 +278,8 @@ public sealed partial class MainWindowViewModel : ViewModelBase
             Options.ResolvedDataPath,
             Options.SelectedVersion,
             (Options.CreateMenuEntry ? ShortcutKinds.Menu : ShortcutKinds.None)
-                | (Options.CreateDesktopShortcut ? ShortcutKinds.Desktop : ShortcutKinds.None),
+                | (Options.CreateDesktopShortcut ? ShortcutKinds.Desktop : ShortcutKinds.None)
+                | (Options.IsLinux && Options.RegisterUriHandler ? ShortcutKinds.UriHandler : ShortcutKinds.None),
             Options.CleanInstallDirectory);
 
         var progress = new ProgressViewModel(_services, session, _services.UiPost);

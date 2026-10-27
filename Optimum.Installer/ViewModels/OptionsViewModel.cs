@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.DataPath;
+using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Paths;
 using Optimum.Bootstrap.Core.Platform;
 
@@ -18,6 +19,19 @@ public sealed partial class OptionsViewModel : ViewModelBase
         RepoRoot = repoRoot;
 
         InstallDirectory = DefaultInstallDirectory(probe);
+
+        if (probe.Os == OsKind.Linux)
+        {
+            string? currentHandler = new ShortcutWriter(probe).QueryDefaultUriHandler(allowExternalProcess: false);
+            if (string.Equals(currentHandler, ShortcutWriter.LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                RegisterUriHandler = true;
+            }
+            else if (!string.IsNullOrWhiteSpace(currentHandler))
+            {
+                ExistingUriHandler = currentHandler;
+            }
+        }
 
         DataPathDetection detected = DataPathProbe.Detect(probe);
         if (detected.Path is not null)
@@ -69,6 +83,17 @@ public sealed partial class OptionsViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _createDesktopShortcut;
+
+    [ObservableProperty]
+    private bool _registerUriHandler;
+
+    public bool IsLinux => _probe.Os == OsKind.Linux;
+
+    public string? ExistingUriHandler { get; }
+
+    public string UriHandlerHint => ExistingUriHandler is not null
+        ? $"Current default handler: {ExistingUriHandler} (leave off to keep your existing handler)."
+        : "Lets ModDB 1-click install links (vintagestorymodinstall://) open in Optimum.";
 
     [ObservableProperty]
     private bool _cleanInstallDirectory = true;

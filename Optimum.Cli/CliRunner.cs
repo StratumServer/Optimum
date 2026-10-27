@@ -362,6 +362,11 @@ public static class CliRunner
         {
             if (part.Equals("menu", StringComparison.OrdinalIgnoreCase)) result |= ShortcutKinds.Menu;
             if (part.Equals("desktop", StringComparison.OrdinalIgnoreCase)) result |= ShortcutKinds.Desktop;
+            if (part.Equals("uri", StringComparison.OrdinalIgnoreCase)
+                || part.Equals("uri-handler", StringComparison.OrdinalIgnoreCase))
+            {
+                result |= ShortcutKinds.UriHandler;
+            }
         }
         return result;
     }
@@ -382,7 +387,7 @@ public static class CliRunner
         stderr.WriteLine("verbs:");
         stderr.WriteLine("  preflight     [--repo-root <dir>]");
         stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>] [--acquire-source [--source-cache <abs>]]");
-        stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop]");
+        stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop,uri]");
         stderr.WriteLine("  patch         --game-dir <abs> [--overlay <abs>] [--backup|--no-backup] [--rollback]");
         stderr.WriteLine("  validate      --package <abs>");
         stderr.WriteLine("  uninstall     --install-dir <abs>");
