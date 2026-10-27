@@ -922,6 +922,19 @@ namespace Cairo
 				canvas.DrawBitmap (bitmap, 0, 0, alphaPaint);
 				return;
 			}
+			if ((int)pixelFormat == 6) {
+				for (int y = 0; y < height; y++) {
+					int sourceRow = checked (y * pixelStride);
+					IntPtr targetRow = IntPtr.Add (output, checked (y * bitmap.RowBytes));
+					for (int x = 0; x < width; x++) {
+						Marshal.Copy (pixels, sourceRow + x * 12, IntPtr.Add (targetRow, x * 16), 12);
+						Marshal.WriteInt32 (IntPtr.Add (targetRow, x * 16 + 12), 0x3F800000);
+					}
+				}
+				using var rgbPaint = new SKPaint { BlendMode = SKBlendMode.Src };
+				canvas.DrawBitmap (bitmap, 0, 0, rgbPaint);
+				return;
+			}
 			int rowBytes = ManagedImageSurfaceStorage.MinimumRowBytes (pixelFormat, width);
 			for (int y = 0; y < height; y++)
 				Marshal.Copy(pixels, checked(y * pixelStride), IntPtr.Add(output, checked(y * bitmap.RowBytes)), rowBytes);

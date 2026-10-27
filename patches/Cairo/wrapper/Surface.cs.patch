@@ -1,5 +1,5 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..d5e4777 100644
+index 6f7730e..627ec2b 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
 @@ -32,37 +32,607 @@
@@ -904,9 +904,9 @@ index 6f7730e..d5e4777 100644
  			get {
  				CheckDisposed ();
 +				if (managedOnly && handle == IntPtr.Zero && this is ImageSurface image)
-+					return image.Format switch {
-+						Format.Argb32 => Content.ColorAlpha,
-+						Format.A8 or Format.A1 => Content.Alpha,
++					return (int)image.Format switch {
++						(int)Format.Argb32 or 7 => Content.ColorAlpha,
++						(int)Format.A8 or (int)Format.A1 => Content.Alpha,
 +						_ => Content.Color
 +					};
 +				if (managedOnly && handle == IntPtr.Zero) return Content.ColorAlpha;

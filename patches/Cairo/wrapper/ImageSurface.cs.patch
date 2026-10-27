@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..c811940 100644
+index 8014c9e..6ddfa20 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,328 @@
+@@ -31,40 +31,371 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -114,14 +114,25 @@ index 8014c9e..c811940 100644
 +			using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
 +			if (snapshot == null) return false;
 +			snapshot.DrawTo (skSurface);
-+			using SKImage image = skSurface.Snapshot ();
-+			using SKData png = image.Encode (SKEncodedImageFormat.Png, 100);
++			using SKData png = (int)Format == 5
++				? EncodeRgb30Png (skSurface, Width, Height)
++				: skSurface.Snapshot ().Encode (SKEncodedImageFormat.Png, 100);
 +			if (png == null) return false;
 +			try {
 +				using FileStream output = File.Create (filename);
 +				png.SaveTo (output);
 +			} catch (Exception exception) when (exception is IOException || exception is UnauthorizedAccessException || exception is ArgumentException) { }
 +			return true;
++		}
++
++		static SKData EncodeRgb30Png (SKSurface sourceSurface, int width, int height)
++		{
++			var bgraInfo = new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Opaque);
++			using var bgraSurface = SKSurface.Create (bgraInfo);
++			if (bgraSurface == null) return null;
++			sourceSurface.Draw (bgraSurface.Canvas, 0, 0, null);
++			using var image = bgraSurface.Snapshot ();
++			return image.Encode (SKEncodedImageFormat.Png, 100);
 +		}
 +
 +		internal byte[] RenderManagedSnapshot (SurfaceRecorderSnapshot snapshot)
@@ -149,7 +160,25 @@ index 8014c9e..c811940 100644
 +						if (alpha[sourceRow + x] >= 128) packed[targetRow + (x >> 3)] |= (byte)(1 << (x & 7));
 +						else packed[targetRow + (x >> 3)] &= (byte)~(1 << (x & 7));
 +				}
-+			return packed;
++				return packed;
++			}
++			if ((int)Format == 6) {
++				int f32Stride = checked (Width * 16);
++				var f32 = new byte[checked (f32Stride * Height)];
++				var f32Pin = GCHandle.Alloc (f32, GCHandleType.Pinned);
++				try {
++					if (!target.ReadPixels (info, f32Pin.AddrOfPinnedObject (), f32Stride, 0, 0))
++						throw new InvalidOperationException ("Skia could not read the managed RGB96F image snapshot.");
++				} finally { f32Pin.Free (); }
++				var packed = managedStorage.CopyPixels ();
++				for (int y = 0; y < Height; y++) {
++					int sourceOffset = checked (y * f32Stride);
++					int targetOffset = checked (y * ManagedPixelStride);
++					for (int x = 0; x < Width; x++) {
++						Buffer.BlockCopy (f32, sourceOffset + x * 16, packed, targetOffset + x * 12, 12);
++					}
++				}
++				return packed;
 +			}
 +			byte[] pixels = managedStorage.CopyPixels ();
 +			var pin = GCHandle.Alloc (pixels, GCHandleType.Pinned);
@@ -157,6 +186,20 @@ index 8014c9e..c811940 100644
 +				if (!target.ReadPixels (info, pin.AddrOfPinnedObject (), ManagedPixelStride, 0, 0))
 +					throw new InvalidOperationException ("Skia could not read the managed image snapshot.");
 +			} finally { pin.Free (); }
++			if ((int)Format == 5) {
++				for (int y = 0; y < Height; y++) {
++					int rowOffset = checked (y * ManagedPixelStride);
++					for (int x = 0; x < Width; x++) {
++						int pixelOffset = rowOffset + x * 4;
++						uint raw = BitConverter.ToUInt32 (pixels, pixelOffset);
++						uint masked = raw & 0x3FFFFFFF;
++						pixels[pixelOffset] = (byte)masked;
++						pixels[pixelOffset + 1] = (byte)(masked >> 8);
++						pixels[pixelOffset + 2] = (byte)(masked >> 16);
++						pixels[pixelOffset + 3] = (byte)(masked >> 24);
++					}
++				}
++			}
 +			return pixels;
 +		}
 +
@@ -227,7 +270,7 @@ index 8014c9e..c811940 100644
 +				if ((int)format < 0 || (int)format > 7)
 +					return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.InvalidFormat);
 +				if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
-+					throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, and RGB565 surfaces.");
++					throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, RGB565, RGB30, RGB96F, and RGBA128F surfaces.");
 +				if (width < 0 || height < 0 || width > 32767 || height > 32767)
 +					return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), Status.InvalidSize);
 +				long byteCount = (long)Surface.StrideForWidth (format, width) * height;
@@ -243,7 +286,7 @@ index 8014c9e..c811940 100644
 +		{
 +			if ((int)format < 0 || (int)format > 7) return Status.InvalidFormat;
 +			if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
-+				throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, and RGB565 surfaces.");
++				throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, RGB565, RGB30, RGB96F, and RGBA128F surfaces.");
 +			if (width < 0 || height < 0 || width > 32767 || height > 32767) return Status.InvalidSize;
 +			long rowBytes = Math.Abs ((long)stride);
 +			if ((stride & 3) != 0 || rowBytes < Surface.StrideForWidth (format, width)) return Status.InvalidStride;
@@ -337,7 +380,7 @@ index 8014c9e..c811940 100644
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +363,36 @@ namespace Cairo {
+@@ -75,23 +406,36 @@ namespace Cairo {
  
  
          public int Width {
@@ -377,7 +420,7 @@ index 8014c9e..c811940 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +400,264 @@ namespace Cairo {
+@@ -99,24 +443,271 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
@@ -506,36 +549,43 @@ index 8014c9e..c811940 100644
 +	}
 +
 +	internal static bool CanRecordFormat (Format format) => BitConverter.IsLittleEndian &&
-+		(format == Format.Argb32 || format == Format.Rgb24 || format == Format.A8 || format == Format.A1 || format == Format.Rgb16565);
++		(format == Format.Argb32 || format == Format.Rgb24 || format == Format.A8 || format == Format.A1 || format == Format.Rgb16565 || (int)format == 5 || (int)format == 6 || (int)format == 7);
 +
-+	internal static int MinimumRowBytes (Format format, int width) => format switch {
-+		Format.Argb32 or Format.Rgb24 => checked (width * 4),
-+		Format.A1 => checked ((width + 7) / 8),
-+		Format.Rgb16565 => checked (width * 2),
-+		Format.A8 => width,
++	internal static int MinimumRowBytes (Format format, int width) => (int)format switch {
++		(int)Format.Argb32 or (int)Format.Rgb24 or 5 => checked (width * 4),
++		(int)Format.A1 => checked ((width + 7) / 8),
++		(int)Format.Rgb16565 => checked (width * 2),
++		(int)Format.A8 => width,
++		6 => checked (width * 12),
++		7 => checked (width * 16),
 +		_ => throw new NotSupportedException ("This managed image format is not supported.")
 +	};
 +
-+	internal static int BytesPerPixel (Format format) => format switch {
-+		Format.Argb32 or Format.Rgb24 => 4,
-+		Format.A1 => 0,
-+		Format.Rgb16565 => 2,
-+		Format.A8 => 1,
++	internal static int BytesPerPixel (Format format) => (int)format switch {
++		(int)Format.Argb32 or (int)Format.Rgb24 or 5 => 4,
++		(int)Format.A1 => 0,
++		(int)Format.Rgb16565 => 2,
++		(int)Format.A8 => 1,
++		6 => 12,
++		7 => 16,
 +		_ => throw new NotSupportedException ("This managed image format is not supported.")
 +	};
 +
-+	internal static SKImageInfo SkiaInfo (Format format, int width, int height) => format switch {
-+		Format.Argb32 => new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul),
-+		Format.Rgb24 => new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Opaque),
-+		Format.A8 or Format.A1 => new SKImageInfo (width, height, SKColorType.Alpha8, SKAlphaType.Unpremul),
-+		Format.Rgb16565 => new SKImageInfo (width, height, SKColorType.Rgb565, SKAlphaType.Opaque),
++	internal static SKImageInfo SkiaInfo (Format format, int width, int height) => (int)format switch {
++		(int)Format.Argb32 => new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul),
++		(int)Format.Rgb24 => new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Opaque),
++		(int)Format.A8 or (int)Format.A1 => new SKImageInfo (width, height, SKColorType.Alpha8, SKAlphaType.Unpremul),
++		(int)Format.Rgb16565 => new SKImageInfo (width, height, SKColorType.Rgb565, SKAlphaType.Opaque),
++		5 => new SKImageInfo (width, height, SKColorType.Bgr101010x, SKAlphaType.Opaque),
++		6 => new SKImageInfo (width, height, SKColorType.RgbaF32, SKAlphaType.Opaque),
++		7 => new SKImageInfo (width, height, SKColorType.RgbaF32, SKAlphaType.Premul),
 +		_ => throw new NotSupportedException ("This managed image format is not supported.")
 +	};
 +
 +	internal static ManagedImageSurfaceStorage CreateManaged (Format format, int width, int height, int stride, byte[] pixels)
 +	{
 +		if (!CanWrapManagedArray (pixels, format, width, height, stride))
-+			throw new ArgumentException ("The managed image buffer does not match the requested ARGB32 or little-endian RGB24 dimensions and stride.", nameof (pixels));
++			throw new ArgumentException ("The managed image buffer does not match the requested dimensions and stride.", nameof (pixels));
 +		var storage = new ManagedImageSurfaceStorage (format, width, height, stride, pixels);
 +		storage.WasDataPointerExposed = true;
 +		return storage;
