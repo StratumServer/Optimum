@@ -62,7 +62,11 @@ internal static class Program
             Console.Error.WriteLine("This first-slice harness currently supports Linux only; native library names must be verified before adding other platforms.");
             return 1;
         }
-        NativeLibrary.SetDllImportResolver(typeof(Context).Assembly, ResolveCairo);
+        try {
+            NativeLibrary.SetDllImportResolver(typeof(Context).Assembly, ResolveCairo);
+        } catch (InvalidOperationException) {
+            // The Optimum cairo-sharp wrapper installs its own deny/allow resolver in a module initializer.
+        }
         Directory.CreateDirectory(output);
 
         try
