@@ -354,9 +354,117 @@ else
     echo "Warning: launcher 'Vintagestory' not found in archive." >&2
 fi
 
-# run.sh launches ./Vintagestory; point it at ./Optimum.
+# Rewrite run.sh to launch ./Optimum with URI validation and -i translation.
 if [[ -f "$STAGE_DIR/run.sh" ]]; then
-    perl -pi -e 's|\./Vintagestory |./Optimum |g' "$STAGE_DIR/run.sh"
+    cat > "$STAGE_DIR/run.sh" <<'RUNSH'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+export FONTCONFIG_FILE="$SCRIPT_DIR"/fonts.conf
+cd "$SCRIPT_DIR"
+
+# try to use the more powerful/dedicated GPU if available - set this if by default it uses your integrated graphics card
+# export DRI_PRIME=1
+
+NORMALIZED_MOD_ARG=""
+
+validate_mod_uri() {
+    local raw="$1"
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+        echo "Optimum: rejecting mod install URI containing a newline." >&2
+        return 1
+    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]://*)
+            ;;
+        *)
+            echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+            return 1
+            ;;
+    esac
+    local spec="${raw#*:}"
+    spec="${spec#//}"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
+    spec="${spec//%40/@}"
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
+        echo "Optimum: malformed mod install URI." >&2
+        return 1
+    fi
+    NORMALIZED_MOD_ARG="vintagestorymodinstall://${spec}"
+}
+
+validate_mod_arg() {
+    local raw="$1"
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+        echo "Optimum: rejecting mod install argument containing a newline." >&2
+        return 1
+    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+            validate_mod_uri "$raw"
+            return $?
+            ;;
+    esac
+    local spec="$raw"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
+    spec="${spec//%40/@}"
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
+        echo "Optimum: malformed mod install argument." >&2
+        return 1
+    fi
+    NORMALIZED_MOD_ARG="$spec"
+}
+
+LAUNCH_ARGS=()
+if [[ $# -gt 0 && "$1" != -* ]]; then
+    if [[ $# -ne 1 ]]; then
+        echo "Optimum: URI launch expects a single vintagestorymodinstall:// argument." >&2
+        exit 2
+    fi
+    validate_mod_uri "$1" || exit 2
+    LAUNCH_ARGS=(-i "$NORMALIZED_MOD_ARG")
+else
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--installmod)
+                if [[ $# -lt 2 ]]; then
+                    echo "Optimum: $1 requires a mod identifier or vintagestorymodinstall:// URI." >&2
+                    exit 2
+                fi
+                validate_mod_arg "$2" || exit 2
+                LAUNCH_ARGS+=("$1" "$NORMALIZED_MOD_ARG")
+                shift 2
+                ;;
+            -i=*|--installmod=*)
+                validate_mod_arg "${1#*=}" || exit 2
+                LAUNCH_ARGS+=("${1%%=*}" "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+                validate_mod_uri "$1" || exit 2
+                LAUNCH_ARGS+=(-i "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            *)
+                LAUNCH_ARGS+=("$1")
+                shift
+                ;;
+        esac
+    done
+fi
+
+exec ./Optimum ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
+RUNSH
+    chmod +x "$STAGE_DIR/run.sh"
 fi
 
 # The .desktop entry and the window both read assets/gameicon.png.
@@ -366,12 +474,24 @@ fi
 
 # Brand the .desktop launcher entry.
 if [[ -f "$STAGE_DIR/Vintagestory.desktop" ]]; then
-    sed -E \
-        -e 's/Name(\[[a-z]+\])?=Vintage Story [0-9.]+/Name\1=Optimum/g' \
-        -e 's|^Exec="\$\{INST_DIR\}"/Vintagestory$|Exec="${INST_DIR}/Optimum" %u|' \
-        -e 's|^Icon=vintagestory$|Icon=optimum|' \
-        -e 's|^StartupWMClass=.*|MimeType=x-scheme-handler/vintagestorymodinstall;\nStartupWMClass=Optimum|' \
-        "$STAGE_DIR/Vintagestory.desktop" > "$STAGE_DIR/Optimum.desktop"
+    cat > "$STAGE_DIR/Optimum.desktop" <<'DESKTOP'
+#!/usr/bin/xdg-open
+[Desktop Entry]
+Name=Optimum
+Name[de]=Optimum
+GenericName=Vintage Story optimized client
+Comment=High-performance client for Vintage Story
+Exec=bash run.sh %u
+Terminal=false
+Type=Application
+StartupNotify=false
+Categories=Game;
+MimeType=x-scheme-handler/vintagestorymodinstall;
+StartupWMClass=Optimum
+Path=${INST_DIR}
+Icon=${INST_DIR}/assets/gameicon.png
+DESKTOP
+    chmod +x "$STAGE_DIR/Optimum.desktop"
     rm -f "$STAGE_DIR/Vintagestory.desktop"
 fi
 rm -f "$STAGE_DIR/Vintagestory_url_mod.desktop" "$STAGE_DIR/Vintagestory_url_connect.desktop"
@@ -409,22 +529,53 @@ validate_mod_uri() {
         echo "Optimum: rejecting mod install URI containing a newline." >&2
         return 1
     fi
-    local lower="${raw,,}"
-    if [[ "$lower" != vintagestorymodinstall://* ]]; then
-        echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
-        return 1
-    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]://*)
+            ;;
+        *)
+            echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+            return 1
+            ;;
+    esac
     local spec="${raw#*:}"
     spec="${spec#//}"
-    spec="${spec%/}"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
     spec="${spec//%40/@}"
     spec="${spec//%2b/+}"
     spec="${spec//%2B/+}"
-    if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
         echo "Optimum: malformed mod install URI." >&2
         return 1
     fi
     NORMALIZED_MOD_ARG="vintagestorymodinstall://${spec}"
+}
+
+validate_mod_arg() {
+    local raw="$1"
+    if [[ "$raw" == *$'\n'* || "$raw" == *$'\r'* ]]; then
+        echo "Optimum: rejecting mod install argument containing a newline." >&2
+        return 1
+    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+            validate_mod_uri "$raw"
+            return $?
+            ;;
+    esac
+    local spec="$raw"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
+    spec="${spec//%40/@}"
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
+        echo "Optimum: malformed mod install argument." >&2
+        return 1
+    fi
+    NORMALIZED_MOD_ARG="$spec"
 }
 
 LAUNCH_ARGS=()
@@ -436,10 +587,36 @@ if [[ $# -gt 0 && "$1" != -* ]]; then
     validate_mod_uri "$1" || exit 2
     LAUNCH_ARGS=(-i "$NORMALIZED_MOD_ARG")
 else
-    LAUNCH_ARGS=("$@")
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--installmod)
+                if [[ $# -lt 2 ]]; then
+                    echo "Optimum: $1 requires a mod identifier or vintagestorymodinstall:// URI." >&2
+                    exit 2
+                fi
+                validate_mod_arg "$2" || exit 2
+                LAUNCH_ARGS+=("$1" "$NORMALIZED_MOD_ARG")
+                shift 2
+                ;;
+            -i=*|--installmod=*)
+                validate_mod_arg "${1#*=}" || exit 2
+                LAUNCH_ARGS+=("${1%%=*}" "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+                validate_mod_uri "$1" || exit 2
+                LAUNCH_ARGS+=(-i "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            *)
+                LAUNCH_ARGS+=("$1")
+                shift
+                ;;
+        esac
+    done
 fi
 
-exec ./Optimum "${LAUNCH_ARGS[@]}"
+exec ./run.sh ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
 APPRUN
     chmod +x "$appdir/AppRun"
 

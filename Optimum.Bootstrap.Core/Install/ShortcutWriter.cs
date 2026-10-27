@@ -31,8 +31,8 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         bool removedLinuxDesktop = false;
         foreach (string path in shortcutPaths)
         {
-            if (path.EndsWith("/" + LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
-                || path.EndsWith("\\" + LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+            if (path.EndsWith("/applications/" + LinuxDesktopFileName, StringComparison.Ordinal)
+                || path.EndsWith("\\applications\\" + LinuxDesktopFileName, StringComparison.Ordinal))
             {
                 removedLinuxDesktop = true;
             }
@@ -58,8 +58,8 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             else
             {
                 string applicationsDir = Posix(DataHome(), "applications");
-                RemoveDesktopFromMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName);
                 RefreshDesktopDatabase(applicationsDir);
+                RemoveDesktopFromMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName);
             }
         }
     }
@@ -68,7 +68,7 @@ public sealed class ShortcutWriter(ISystemProbe probe)
     /// Queries the current default desktop handler for <c>x-scheme-handler/vintagestorymodinstall</c>
     /// on Linux, or returns <c>null</c> when none is configured or on non-Linux hosts.
     /// </summary>
-    public string? QueryDefaultUriHandler()
+    public string? QueryDefaultUriHandler(bool allowExternalProcess = true)
     {
         if (probe.Os != OsKind.Linux)
             return null;
@@ -88,16 +88,25 @@ public sealed class ShortcutWriter(ISystemProbe probe)
                 return handler;
         }
 
-        ProcessOutcome query = probe.Run("xdg-mime", ["query", "default", ModInstallMimeType], TimeSpan.FromSeconds(5));
-        if (query.Started && query.ExitCode == 0)
+        if (allowExternalProcess)
         {
-            string trimmed = query.StandardOutput.Trim();
-            if (trimmed.Length > 0)
-                return trimmed.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+            ProcessOutcome query = probe.Run("xdg-mime", ["query", "default", ModInstallMimeType], TimeSpan.FromSeconds(5));
+            if (query.Started && query.ExitCode == 0)
+            {
+                string trimmed = query.StandardOutput.Trim();
+                if (trimmed.Length > 0)
+                {
+                    string? externalHandler = trimmed
+                        .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .FirstOrDefault(e => !string.Equals(e, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrEmpty(externalHandler))
+                        return externalHandler;
+                }
+            }
         }
 
         string mimeCache = Posix(dataHome, "applications", "mimeinfo.cache");
-        return TryReadIniAssociation(ReadFileText(mimeCache), "MIME Cache", ModInstallMimeType);
+        return TryReadIniAssociation(ReadFileText(mimeCache), "MIME Cache", ModInstallMimeType, excludeDesktopId: LinuxDesktopFileName);
     }
 
     /// <summary>
@@ -112,6 +121,7 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         string configHome = ConfigHome();
         string dataHome = DataHome();
         string applicationsDir = Posix(dataHome, "applications");
+        string? currentExplicit = QueryDefaultUriHandler(allowExternalProcess: false);
         string? restoreTarget = !string.IsNullOrWhiteSpace(previousUriHandler)
             && !string.Equals(previousUriHandler, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
             && DesktopEntryExists(previousUriHandler)
@@ -125,25 +135,34 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             Posix(applicationsDir, "defaults.list"),
         ];
 
+        bool removedDefault = false;
         foreach (string file in mimeAppsFiles)
         {
-            RemoveOrRestoreMimeAppsEntry(file, LinuxDesktopFileName, restoreTarget);
+            if (RemoveOrRestoreMimeAppsEntry(file, LinuxDesktopFileName, restoreTarget))
+                removedDefault = true;
         }
 
-        if (restoreTarget is not null)
+        if (restoreTarget is not null
+            && (removedDefault
+                || string.IsNullOrWhiteSpace(currentExplicit)
+                || string.Equals(currentExplicit, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)))
         {
             SetDefaultUriHandler(restoreTarget);
         }
 
         RefreshDesktopDatabase(applicationsDir);
         string menuDesktopPath = Posix(applicationsDir, LinuxDesktopFileName);
-        if (probe.FileExists(menuDesktopPath))
+        if ((File.Exists(menuDesktopPath) || probe.FileExists(menuDesktopPath)) && restoreTarget is not null)
         {
             UpdateMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName, restoreTarget);
         }
-        else
+        else if (!File.Exists(menuDesktopPath) && !probe.FileExists(menuDesktopPath))
         {
             RemoveDesktopFromMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName);
+        }
+        else
+        {
+            UpdateMimeCache(Posix(applicationsDir, "mimeinfo.cache"), LinuxDesktopFileName, preferredFirst: null);
         }
     }
 
@@ -182,7 +201,8 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         {
             SetDefaultUriHandler(LinuxDesktopFileName);
         }
-        else if (!string.IsNullOrWhiteSpace(priorDefault)
+        else if (kinds.HasFlag(ShortcutKinds.Menu)
+            && !string.IsNullOrWhiteSpace(priorDefault)
             && !string.Equals(priorDefault, LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
         {
             // Keep the user's prior choice pinned in mimeapps.list so rebuilding
@@ -218,16 +238,26 @@ public sealed class ShortcutWriter(ISystemProbe probe)
 
     private bool DesktopEntryExists(string desktopFileId)
     {
-        string[] candidateDirs =
-        [
-            Posix(DataHome(), "applications"),
-            "/usr/local/share/applications",
-            "/usr/share/applications",
-        ];
-        foreach (string dir in candidateDirs)
+        if (string.IsNullOrWhiteSpace(desktopFileId)
+            || desktopFileId.Contains('/')
+            || desktopFileId.Contains('\\'))
         {
-            string candidate = Posix(dir, desktopFileId);
-            if (probe.FileExists(candidate) || File.Exists(candidate))
+            return false;
+        }
+
+        string trimmedId = desktopFileId.Trim();
+        string userCandidate = Posix(DataHome(), "applications", trimmedId);
+        if (probe.FileExists(userCandidate) || File.Exists(userCandidate))
+            return true;
+
+        string xdgDataDirs = probe.GetEnvironmentVariable("XDG_DATA_DIRS") is { Length: > 0 } dirs
+            ? dirs
+            : "/usr/local/share:/usr/share";
+
+        foreach (string dir in xdgDataDirs.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            string candidate = Posix(dir, "applications", trimmedId);
+            if (probe.FileExists(candidate))
                 return true;
         }
         return false;
@@ -235,17 +265,18 @@ public sealed class ShortcutWriter(ISystemProbe probe)
 
     private string? ReadFileText(string path)
     {
-        if (probe.ReadText(path) is { } fromProbe)
-            return fromProbe;
         try
         {
-            return File.Exists(path) ? File.ReadAllText(path) : null;
+            if (File.Exists(path))
+                return File.ReadAllText(path);
         }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
+        catch (IOException) { /* fall through to probe */ }
+        catch (UnauthorizedAccessException) { /* fall through to probe */ }
+
+        return probe.ReadText(path);
     }
 
-    private static string? TryReadIniAssociation(string? content, string sectionName, string mimeType)
+    private static string? TryReadIniAssociation(string? content, string sectionName, string mimeType, string? excludeDesktopId = null)
     {
         if (string.IsNullOrEmpty(content))
             return null;
@@ -270,7 +301,8 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             string rhs = line[prefix.Length..].Trim();
             string? first = rhs
                 .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .FirstOrDefault();
+                .FirstOrDefault(e => excludeDesktopId is null
+                    || !string.Equals(e, excludeDesktopId, StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrEmpty(first))
                 return first;
         }
@@ -338,16 +370,17 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         _ = WriteText(path, string.Join('\n', lines) + "\n", executable: false);
     }
 
-    private void RemoveOrRestoreMimeAppsEntry(string path, string desktopToRemove, string? restoreDesktop)
+    private bool RemoveOrRestoreMimeAppsEntry(string path, string desktopToRemove, string? restoreDesktop)
     {
         string? existing = ReadFileText(path);
         if (existing is null)
-            return;
+            return false;
 
         string keyPrefix = ModInstallMimeType + "=";
         var lines = existing.Replace("\r\n", "\n").Split('\n').ToList();
         string currentSection = string.Empty;
         bool modified = false;
+        bool removedFromDefaults = false;
         var updated = new List<string>(lines.Count);
 
         foreach (string line in lines)
@@ -374,8 +407,11 @@ public sealed class ShortcutWriter(ISystemProbe probe)
                 if (removedCount > 0)
                 {
                     modified = true;
+                    bool isDefaultsSection = string.Equals(currentSection, "[Default Applications]", StringComparison.OrdinalIgnoreCase);
+                    if (isDefaultsSection)
+                        removedFromDefaults = true;
                     if (restoreDesktop is not null
-                        && string.Equals(currentSection, "[Default Applications]", StringComparison.OrdinalIgnoreCase)
+                        && isDefaultsSection
                         && !entries.Any(e => string.Equals(e, restoreDesktop, StringComparison.OrdinalIgnoreCase)))
                     {
                         entries.Insert(0, restoreDesktop);
@@ -399,6 +435,8 @@ public sealed class ShortcutWriter(ISystemProbe probe)
                 updated.RemoveAt(updated.Count - 1);
             _ = WriteText(path, updated.Count == 0 ? string.Empty : string.Join('\n', updated) + "\n", executable: false);
         }
+
+        return removedFromDefaults;
     }
 
     private void UpdateMimeCache(string mimeCachePath, string desktopFileId, string? preferredFirst = null)
@@ -560,13 +598,19 @@ public sealed class ShortcutWriter(ISystemProbe probe)
 
     /// <summary>
     /// Escapes a value for a quoted <c>Exec</c> per the Desktop Entry spec:
-    /// backslash, double quote, backtick, and dollar are backslash-escaped.
+    /// backslash, double quote, backtick, and dollar are backslash-escaped,
+    /// and literal percent signs are doubled so they are not parsed as field codes.
     /// </summary>
     private static string EscapeExec(string value)
     {
         var sb = new System.Text.StringBuilder(value.Length + 8);
         foreach (char c in value)
         {
+            if (c == '%')
+            {
+                sb.Append("%%");
+                continue;
+            }
             if (c is '\\' or '"' or '`' or '$')
                 sb.Append('\\');
             sb.Append(c);

@@ -665,11 +665,11 @@ prompt_data_path() {
 query_ini_mime_handler() {
     local file="$1"
     local section="$2"
+    local exclude_id="${3:-}"
     [[ -f "$file" ]] || return 1
-    python3 - "$file" "$section" "$MOD_INSTALL_MIME" <<'PY' 2>/dev/null
+    python3 - "$file" "$section" "$MOD_INSTALL_MIME" "$exclude_id" <<'PY' 2>/dev/null
 import sys
-path, target_section, mime = sys.argv[1], f"[{sys.argv[2]}].lower()", sys.argv[3].lower() + "="
-target_header = f"[{sys.argv[2]}]".lower()
+path, target_header, mime, exclude_id = sys.argv[1], f"[{sys.argv[2]}]".lower(), sys.argv[3].lower() + "=", sys.argv[4].lower()
 in_sec = False
 with open(path, "r", encoding="utf-8", errors="replace") as fp:
     for raw in fp:
@@ -683,7 +683,7 @@ with open(path, "r", encoding="utf-8", errors="replace") as fp:
             rhs = line[len(mime):].strip()
             for part in rhs.split(";"):
                 part = part.strip()
-                if part:
+                if part and (not exclude_id or part.lower() != exclude_id):
                     print(part)
                     sys.exit(0)
 sys.exit(1)
@@ -701,12 +701,13 @@ query_default_uri_handler() {
     done
     if check_cmd xdg-mime; then
         handler="$(xdg-mime query default "$MOD_INSTALL_MIME" 2>/dev/null | tr -d '\r\n' || true)"
-        if [[ -n "$handler" ]]; then
-            printf '%s' "${handler%%;*}"
+        handler="${handler%%;*}"
+        if [[ -n "$handler" && "${handler,,}" != "optimum.desktop" ]]; then
+            printf '%s' "$handler"
             return 0
         fi
     fi
-    if handler="$(query_ini_mime_handler "$XDG_DATA_HOME/applications/mimeinfo.cache" "MIME Cache")" && [[ -n "$handler" ]]; then
+    if handler="$(query_ini_mime_handler "$XDG_DATA_HOME/applications/mimeinfo.cache" "MIME Cache" "optimum.desktop")" && [[ -n "$handler" ]]; then
         printf '%s' "$handler"
         return 0
     fi
@@ -871,18 +872,18 @@ write_launcher() {
         printf '%s' "$DATA_PATH" > "$INSTALL_DIR/datapath.cfg"
         local quoted_data_path="'${DATA_PATH//\'/\'\\\'\'}'"
         exec_block="HAS_CUSTOM_DATA_PATH=0
-for arg in \"\${LAUNCH_ARGS[@]}\"; do
+for arg in \${LAUNCH_ARGS[@]+\"\${LAUNCH_ARGS[@]}\"}; do
     case \"\$arg\" in
         -d|--dataPath|-d=*|--dataPath=*) HAS_CUSTOM_DATA_PATH=1; break ;;
     esac
 done
 if [[ \"\$HAS_CUSTOM_DATA_PATH\" -eq 0 ]]; then
-    exec ./run.sh --dataPath ${quoted_data_path} \"\${LAUNCH_ARGS[@]}\"
+    exec ./run.sh --dataPath ${quoted_data_path} \${LAUNCH_ARGS[@]+\"\${LAUNCH_ARGS[@]}\"}
 fi
-exec ./run.sh \"\${LAUNCH_ARGS[@]}\""
+exec ./run.sh \${LAUNCH_ARGS[@]+\"\${LAUNCH_ARGS[@]}\"}"
     else
         rm -f "$INSTALL_DIR/datapath.cfg"
-        exec_block='exec ./run.sh "${LAUNCH_ARGS[@]}"'
+        exec_block='exec ./run.sh ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}'
     fi
 
     cat > "$launcher" <<'EOF'
@@ -898,18 +899,23 @@ validate_mod_uri() {
         echo "Optimum: rejecting mod install URI containing a newline." >&2
         return 1
     fi
-    local lower="${raw,,}"
-    if [[ "$lower" != vintagestorymodinstall://* ]]; then
-        echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
-        return 1
-    fi
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]://*)
+            ;;
+        *)
+            echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+            return 1
+            ;;
+    esac
     local spec="${raw#*:}"
     spec="${spec#//}"
-    spec="${spec%/}"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
     spec="${spec//%40/@}"
     spec="${spec//%2b/+}"
     spec="${spec//%2B/+}"
-    if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
         echo "Optimum: malformed mod install URI." >&2
         return 1
     fi
@@ -922,14 +928,20 @@ validate_mod_arg() {
         echo "Optimum: rejecting mod install argument containing a newline." >&2
         return 1
     fi
-    local lower="${raw,,}"
-    if [[ "$lower" == vintagestorymodinstall:* || "$raw" == *://* ]]; then
-        validate_mod_uri "$raw"
-        return $?
-    fi
-    local spec="${raw%/}"
+    case "$raw" in
+        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+            validate_mod_uri "$raw"
+            return $?
+            ;;
+    esac
+    local spec="$raw"
+    while [[ "$spec" == */ ]]; do
+        spec="${spec%/}"
+    done
     spec="${spec//%40/@}"
-    if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+    spec="${spec//%2b/+}"
+    spec="${spec//%2B/+}"
+    if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
         echo "Optimum: malformed mod install argument." >&2
         return 1
     fi
@@ -958,7 +970,12 @@ else
                 ;;
             -i=*|--installmod=*)
                 validate_mod_arg "${1#*=}" || exit 2
-                LAUNCH_ARGS+=("${1%%=*}=$NORMALIZED_MOD_ARG")
+                LAUNCH_ARGS+=("${1%%=*}" "$NORMALIZED_MOD_ARG")
+                shift
+                ;;
+            [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+                validate_mod_uri "$1" || exit 2
+                LAUNCH_ARGS+=(-i "$NORMALIZED_MOD_ARG")
                 shift
                 ;;
             *)
@@ -980,7 +997,25 @@ escape_desktop_exec() {
     val="${val//\"/\\\"}"
     val="${val//\`/\\\`}"
     val="${val//\$/\\\$}"
+    val="${val//%/%%}"
     printf '%s' "$val"
+}
+
+desktop_entry_exists() {
+    local desktop_id="${1:-}"
+    if [[ -z "$desktop_id" || "$desktop_id" == */* || "$desktop_id" == *\\* ]]; then
+        return 1
+    fi
+    if [[ -f "$XDG_DATA_HOME/applications/$desktop_id" ]]; then
+        return 0
+    fi
+    local data_dirs="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+    local IFS=':'
+    local dir
+    for dir in $data_dirs; do
+        [[ -n "$dir" && -f "${dir%/}/applications/$desktop_id" ]] && return 0
+    done
+    return 1
 }
 
 write_desktop_entry() {
@@ -1060,18 +1095,28 @@ PY
 remove_or_restore_uri_handler() {
     local restore_target="${1:-}"
     local apps_dir="$XDG_DATA_HOME/applications"
-    if [[ -n "$restore_target" && "$restore_target" != "optimum.desktop" ]]; then
-        if [[ ! -f "$apps_dir/$restore_target" && ! -f "/usr/local/share/applications/$restore_target" && ! -f "/usr/share/applications/$restore_target" ]]; then
+    if [[ -n "$restore_target" && "${restore_target,,}" != "optimum.desktop" ]]; then
+        if ! desktop_entry_exists "$restore_target"; then
             restore_target=""
         fi
     else
         restore_target=""
     fi
 
+    local current_explicit=""
+    local f
+    for f in "$XDG_CONFIG_HOME/mimeapps.list" "$apps_dir/mimeapps.list" "$apps_dir/defaults.list"; do
+        if current_explicit="$(query_ini_mime_handler "$f" "Default Applications")" && [[ -n "$current_explicit" ]]; then
+            break
+        fi
+    done
+
+    local removed_from_defaults=0
     local file
     for file in "$XDG_CONFIG_HOME/mimeapps.list" "$apps_dir/mimeapps.list" "$apps_dir/defaults.list"; do
         [[ -f "$file" ]] || continue
-        python3 - "$file" "$MOD_INSTALL_MIME" "optimum.desktop" "$restore_target" <<'PY'
+        local status_out
+        status_out="$(python3 - "$file" "$MOD_INSTALL_MIME" "optimum.desktop" "$restore_target" <<'PY'
 import sys
 path, mime, target_remove, restore = sys.argv[1], sys.argv[2], sys.argv[3].lower(), sys.argv[4]
 prefix = mime.lower() + "="
@@ -1079,6 +1124,7 @@ with open(path, "r", encoding="utf-8", errors="replace") as fp:
     lines = fp.read().replace("\r\n", "\n").split("\n")
 section = ""
 changed = False
+removed_default = False
 out = []
 for line in lines:
     s = line.strip()
@@ -1093,6 +1139,8 @@ for line in lines:
         filtered = [x for x in items if x.lower() != target_remove]
         if len(filtered) != len(items):
             changed = True
+            if section == "[default applications]":
+                removed_default = True
             if restore and section == "[default applications]" and all(x.lower() != restore.lower() for x in filtered):
                 filtered.insert(0, restore)
             if filtered:
@@ -1105,10 +1153,16 @@ if changed:
         out.pop()
     with open(path, "w", encoding="utf-8") as fp:
         fp.write(("\n".join(out) + "\n") if out else "")
+if removed_default:
+    print("removed_default")
 PY
+)"
+        if [[ "$status_out" == *"removed_default"* ]]; then
+            removed_from_defaults=1
+        fi
     done
 
-    if [[ -n "$restore_target" ]]; then
+    if [[ -n "$restore_target" ]] && [[ "$removed_from_defaults" -eq 1 || -z "$current_explicit" || "${current_explicit,,}" == "optimum.desktop" ]]; then
         upsert_mimeapps_default "$restore_target"
     fi
 }
@@ -1294,10 +1348,10 @@ main() {
     local prior_uri_handler
     prior_uri_handler="$(query_default_uri_handler)"
     local baseline_previous=""
-    if [[ "$PREVIOUS_REGISTERED_URI" -eq 1 ]]; then
-        baseline_previous="$PREVIOUS_URI_HANDLER"
-    elif [[ -n "$prior_uri_handler" && "$prior_uri_handler" != "optimum.desktop" ]]; then
+    if [[ -n "$prior_uri_handler" && "${prior_uri_handler,,}" != "optimum.desktop" ]]; then
         baseline_previous="$prior_uri_handler"
+    elif [[ "$PREVIOUS_REGISTERED_URI" -eq 1 ]]; then
+        baseline_previous="$PREVIOUS_URI_HANDLER"
     fi
 
     local created_shortcuts=()
@@ -1334,12 +1388,18 @@ main() {
     if [[ "$SET_DEFAULT_URI_HANDLER" -eq 1 ]]; then
         upsert_mimeapps_default "optimum.desktop"
         preferred_cache_first="optimum.desktop"
-    elif [[ "$PREVIOUS_REGISTERED_URI" -eq 1 ]]; then
-        remove_or_restore_uri_handler "$PREVIOUS_URI_HANDLER"
-        preferred_cache_first="$PREVIOUS_URI_HANDLER"
-    elif [[ -n "$prior_uri_handler" && "$prior_uri_handler" != "optimum.desktop" ]]; then
-        upsert_mimeapps_default "$prior_uri_handler"
-        preferred_cache_first="$prior_uri_handler"
+    elif [[ "$PREVIOUS_REGISTERED_URI" -eq 1 || "${prior_uri_handler,,}" == "optimum.desktop" ]]; then
+        remove_or_restore_uri_handler "$baseline_previous"
+        if desktop_entry_exists "$baseline_previous"; then
+            preferred_cache_first="$baseline_previous"
+        fi
+    elif [[ -n "$prior_uri_handler" && "${prior_uri_handler,,}" != "optimum.desktop" ]]; then
+        if [[ "$wrote_menu_desktop" -eq 1 ]]; then
+            upsert_mimeapps_default "$prior_uri_handler"
+        fi
+        if desktop_entry_exists "$prior_uri_handler"; then
+            preferred_cache_first="$prior_uri_handler"
+        fi
     fi
 
     if [[ "$wrote_menu_desktop" -eq 1 ]]; then

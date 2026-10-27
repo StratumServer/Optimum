@@ -124,6 +124,15 @@ public class OptionsViewModelTests
         Assert.False(vm.RegisterUriHandler);
         Assert.Equal("Vintagestory_url_mod.desktop", vm.ExistingUriHandler);
         Assert.Contains("Vintagestory_url_mod.desktop", vm.UriHandlerHint);
+
+        // When Optimum is already the configured default handler, upgrading preserves the opt-in.
+        var upgradeProbe = RepoProbe();
+        upgradeProbe.AddFile(
+            "/home/tester/.config/mimeapps.list",
+            "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=optimum.desktop\n");
+        var upgradeVm = new OptionsViewModel(upgradeProbe, "/repo");
+        Assert.True(upgradeVm.RegisterUriHandler);
+        Assert.Null(upgradeVm.ExistingUriHandler);
     }
 }
 

@@ -283,14 +283,14 @@ public sealed class DeployRoundTripTests : IDisposable
             $"<--dataPath><{dataPath}><-i><vintagestorymodinstall://carrycapacity@1.8.0>",
             validUri.StandardOutput.Trim());
 
-        // 2. Uppercase scheme and trailing slash are normalized cleanly.
+        // 2. Uppercase scheme, multiple trailing slashes, %40, and %2B are normalized cleanly.
         ProcessOutcome trailingSlash = probe.Run(
             launcher,
-            ["VINTAGESTORYMODINSTALL://primitivesurvival@3.7.5/"],
+            ["VINTAGESTORYMODINSTALL://primitivesurvival%403.7.5%2Bbuild1///"],
             TimeSpan.FromSeconds(5));
         Assert.Equal(0, trailingSlash.ExitCode);
         Assert.Equal(
-            $"<--dataPath><{dataPath}><-i><vintagestorymodinstall://primitivesurvival@3.7.5>",
+            $"<--dataPath><{dataPath}><-i><vintagestorymodinstall://primitivesurvival@3.7.5+build1>",
             trailingSlash.StandardOutput.Trim());
 
         // 3. Ordinary launch arguments are preserved alongside configured --dataPath.
@@ -311,12 +311,18 @@ public sealed class DeployRoundTripTests : IDisposable
             ["vintagestorymodinstall://"],
             ["vintagestorymodinstall:///"],
             ["vintagestorymodinstall://-c"],
+            ["vintagestorymodinstall://carrycapacity*"],
+            ["vintagestorymodinstall://@1.8.0"],
+            ["vintagestorymodinstall://carrycapacity@"],
+            ["vintagestorymodinstall://carrycapacity@1.8.0@2.0.0"],
+            ["vintagestorymodinstall://carrycapacity%201.8.0"],
             ["vintagestorymodinstall://carrycapacity@1.8.0\n-c evil"],
             ["vintagestorymodinstall://carrycapacity@1.8.0\r-c evil"],
             ["vintagestorymodinstall://carrycapacity@1.8.0 --connect evil"],
             ["vintagestorymodinstall://carrycapacity@1.8.0", "--connect"],
             [$"vintagestorymodinstall://$(touch '{sentinel}')"],
             ["-i", "carrycapacity@1.8.0\n-c evil"],
+            ["-i", "carrycapacity*"],
         ];
 
         foreach (string[] badArgs in malformedInputs)

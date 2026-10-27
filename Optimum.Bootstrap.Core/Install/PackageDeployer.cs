@@ -172,11 +172,11 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         bool registerUriHandler = probe.Os == OsKind.Linux && request.Shortcuts.HasFlag(ShortcutKinds.UriHandler);
 
         string? currentUriHandler = probe.Os == OsKind.Linux ? shortcutWriter.QueryDefaultUriHandler() : null;
-        string? baselinePreviousHandler = previousManifest is { RegisteredUriHandler: true }
-            ? previousManifest.PreviousUriHandler
-            : !string.IsNullOrWhiteSpace(currentUriHandler)
-                && !string.Equals(currentUriHandler, ShortcutWriter.LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
-                ? currentUriHandler
+        string? baselinePreviousHandler = !string.IsNullOrWhiteSpace(currentUriHandler)
+            && !string.Equals(currentUriHandler, ShortcutWriter.LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase)
+            ? currentUriHandler
+            : previousManifest is { RegisteredUriHandler: true }
+                ? previousManifest.PreviousUriHandler
                 : null;
 
         IReadOnlyList<string> shortcuts = launcher is not null && request.Shortcuts != ShortcutKinds.None
@@ -185,18 +185,26 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         if (shortcuts.Count > 0)
             observer?.Log(LogLevel.Info, $"created {shortcuts.Count} shortcut(s)");
 
+        bool shouldRemoveUriAssociation = previousManifest is { RegisteredUriHandler: true } && !registerUriHandler;
+        bool removedStaleShortcuts = false;
         if (previousManifest is not null)
         {
             string[] staleShortcuts = previousManifest.Shortcuts
                 .Except(shortcuts, StringComparer.Ordinal)
                 .ToArray();
             if (staleShortcuts.Length > 0)
-                shortcutWriter.Remove(staleShortcuts);
+            {
+                shortcutWriter.Remove(
+                    staleShortcuts,
+                    removeUriAssociation: shouldRemoveUriAssociation,
+                    previousUriHandler: baselinePreviousHandler);
+                removedStaleShortcuts = true;
+            }
         }
 
-        if (previousManifest is { RegisteredUriHandler: true } && !registerUriHandler)
+        if (shouldRemoveUriAssociation && !removedStaleShortcuts)
         {
-            shortcutWriter.RemoveUriHandlerAssociation(previousManifest.PreviousUriHandler);
+            shortcutWriter.RemoveUriHandlerAssociation(baselinePreviousHandler);
         }
 
         string? registryKey = UninstallRegistration.Register(installDir, manifest.OptimumVersion);
@@ -332,18 +340,18 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         string execBlock = dataPath is not null
             ? $$"""
             HAS_CUSTOM_DATA_PATH=0
-            for arg in "${LAUNCH_ARGS[@]}"; do
+            for arg in ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}; do
                 case "$arg" in
                     -d|--dataPath|-d=*|--dataPath=*) HAS_CUSTOM_DATA_PATH=1; break ;;
                 esac
             done
             if [[ "$HAS_CUSTOM_DATA_PATH" -eq 0 ]]; then
-                exec ./run.sh --dataPath {{ShellQuote(dataPath)}} "${LAUNCH_ARGS[@]}"
+                exec ./run.sh --dataPath {{ShellQuote(dataPath)}} ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
             fi
-            exec ./run.sh "${LAUNCH_ARGS[@]}"
+            exec ./run.sh ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
             """
             : """
-            exec ./run.sh "${LAUNCH_ARGS[@]}"
+            exec ./run.sh ${LAUNCH_ARGS[@]+"${LAUNCH_ARGS[@]}"}
             """;
 
         return
@@ -360,18 +368,23 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                     echo "Optimum: rejecting mod install URI containing a newline." >&2
                     return 1
                 fi
-                local lower="${raw,,}"
-                if [[ "$lower" != vintagestorymodinstall://* ]]; then
-                    echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
-                    return 1
-                fi
+                case "$raw" in
+                    [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]://*)
+                        ;;
+                    *)
+                        echo "Optimum: unsupported URI scheme (expected vintagestorymodinstall://)." >&2
+                        return 1
+                        ;;
+                esac
                 local spec="${raw#*:}"
                 spec="${spec#//}"
-                spec="${spec%/}"
+                while [[ "$spec" == */ ]]; do
+                    spec="${spec%/}"
+                done
                 spec="${spec//%40/@}"
                 spec="${spec//%2b/+}"
                 spec="${spec//%2B/+}"
-                if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+                if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
                     echo "Optimum: malformed mod install URI." >&2
                     return 1
                 fi
@@ -384,14 +397,20 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                     echo "Optimum: rejecting mod install argument containing a newline." >&2
                     return 1
                 fi
-                local lower="${raw,,}"
-                if [[ "$lower" == vintagestorymodinstall:* || "$raw" == *://* ]]; then
-                    validate_mod_uri "$raw"
-                    return $?
-                fi
-                local spec="${raw%/}"
+                case "$raw" in
+                    [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+                        validate_mod_uri "$raw"
+                        return $?
+                        ;;
+                esac
+                local spec="$raw"
+                while [[ "$spec" == */ ]]; do
+                    spec="${spec%/}"
+                done
                 spec="${spec//%40/@}"
-                if [[ -z "$spec" || "$spec" == -* || "$spec" == */* || ! "$spec" =~ ^[A-Za-z0-9._+@%*-]+$ ]]; then
+                spec="${spec//%2b/+}"
+                spec="${spec//%2B/+}"
+                if [[ -z "$spec" || ! "$spec" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(@([A-Za-z0-9][A-Za-z0-9._+-]*|\*))?$ ]]; then
                     echo "Optimum: malformed mod install argument." >&2
                     return 1
                 fi
@@ -420,7 +439,12 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                             ;;
                         -i=*|--installmod=*)
                             validate_mod_arg "${1#*=}" || exit 2
-                            LAUNCH_ARGS+=("${1%%=*}=$NORMALIZED_MOD_ARG")
+                            LAUNCH_ARGS+=("${1%%=*}" "$NORMALIZED_MOD_ARG")
+                            shift
+                            ;;
+                        [Vv][Ii][Nn][Tt][Aa][Gg][Ee][Ss][Tt][Oo][Rr][Yy][Mm][Oo][Dd][Ii][Nn][Ss][Tt][Aa][Ll][Ll]:*|*://*)
+                            validate_mod_uri "$1" || exit 2
+                            LAUNCH_ARGS+=(-i "$NORMALIZED_MOD_ARG")
                             shift
                             ;;
                         *)

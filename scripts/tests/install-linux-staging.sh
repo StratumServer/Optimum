@@ -126,8 +126,11 @@ EOF
 
     # 3. Verify optimum-launch.sh argument construction and URI validation.
     LAUNCHER="$INSTALL_SPACES/optimum-launch.sh"
+    [[ "$("$LAUNCHER")" == "<--dataPath><$DATA_SPACES>" ]]
     [[ "$("$LAUNCHER" "vintagestorymodinstall://carrycapacity@1.8.0")" == "<--dataPath><$DATA_SPACES><-i><vintagestorymodinstall://carrycapacity@1.8.0>" ]]
-    [[ "$("$LAUNCHER" "VINTAGESTORYMODINSTALL://primitivesurvival@3.7.5/")" == "<--dataPath><$DATA_SPACES><-i><vintagestorymodinstall://primitivesurvival@3.7.5>" ]]
+    [[ "$("$LAUNCHER" "VINTAGESTORYMODINSTALL://primitivesurvival%403.7.5%2Bbuild1///")" == "<--dataPath><$DATA_SPACES><-i><vintagestorymodinstall://primitivesurvival@3.7.5+build1>" ]]
+    [[ "$("$LAUNCHER" "vintagestorymodinstall://carrycapacity@*")" == "<--dataPath><$DATA_SPACES><-i><vintagestorymodinstall://carrycapacity@*>" ]]
+    [[ "$("$LAUNCHER" -i=carrycapacity@1.8.0)" == "<--dataPath><$DATA_SPACES><-i><carrycapacity@1.8.0>" ]]
     [[ "$("$LAUNCHER" --openWorld "My World" -p creativebuilding)" == "<--dataPath><$DATA_SPACES><--openWorld><My World><-p><creativebuilding>" ]]
 
     for bad_uri in \
@@ -135,6 +138,11 @@ EOF
         "vintagestorymodinstall://" \
         "vintagestorymodinstall:///" \
         "vintagestorymodinstall://-c" \
+        "vintagestorymodinstall://carrycapacity*" \
+        "vintagestorymodinstall://@1.8.0" \
+        "vintagestorymodinstall://carrycapacity@" \
+        "vintagestorymodinstall://carrycapacity@1.8.0@2.0.0" \
+        "vintagestorymodinstall://carrycapacity%201.8.0" \
         $'vintagestorymodinstall://carrycapacity@1.8.0\n-c evil' \
         $'vintagestorymodinstall://carrycapacity@1.8.0\r-c evil' \
         "vintagestorymodinstall://carrycapacity@1.8.0 --connect evil" \

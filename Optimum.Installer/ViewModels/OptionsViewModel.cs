@@ -22,9 +22,12 @@ public sealed partial class OptionsViewModel : ViewModelBase
 
         if (probe.Os == OsKind.Linux)
         {
-            string? currentHandler = new ShortcutWriter(probe).QueryDefaultUriHandler();
-            if (!string.IsNullOrWhiteSpace(currentHandler)
-                && !string.Equals(currentHandler, ShortcutWriter.LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+            string? currentHandler = new ShortcutWriter(probe).QueryDefaultUriHandler(allowExternalProcess: false);
+            if (string.Equals(currentHandler, ShortcutWriter.LinuxDesktopFileName, StringComparison.OrdinalIgnoreCase))
+            {
+                RegisterUriHandler = true;
+            }
+            else if (!string.IsNullOrWhiteSpace(currentHandler))
             {
                 ExistingUriHandler = currentHandler;
             }

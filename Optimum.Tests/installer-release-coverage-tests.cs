@@ -675,8 +675,10 @@ public class InstallerReleaseCoverageTests
         {
             string packager = Read(relativePath);
             Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", packager);
-            Assert.DoesNotContain("Vintagestory_url_mod.desktop", packager);
-            Assert.DoesNotContain("Vintagestory_url_connect.desktop", packager);
+            Assert.Contains("Exec=bash run.sh %u", packager);
+            Assert.Contains("validate_mod_uri", packager);
+            Assert.Contains("Vintagestory_url_mod.desktop", packager);
+            Assert.Contains("Vintagestory_url_connect.desktop", packager);
         }
 
         string uninstall = Read("scripts/uninstall.sh");
