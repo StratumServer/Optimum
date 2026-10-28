@@ -14,6 +14,7 @@ namespace Cairo
 		internal SKFont TextFont;
 		internal SKTextBlob TextBlob;
 		internal SKImage TextCoverage;
+		internal PointD TextCoverageOrigin;
 		internal string Text;
 		internal float TextX, TextY;
 		internal SKRect? TextInkClip;
@@ -282,7 +283,7 @@ namespace Cairo
 			if (TextCoverage != null && gpu == null) {
 				using var destination = target.Snapshot();
 				DrawLcdComposite(lcdEffect, TextCoverage, TextCoverage, destination, target.Canvas, false,
-					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode);
+					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode, TextCoverageOrigin, Paint.ColorF);
 			} else if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
 			else DrawLcdTextCpu(target, lcdEffect, width, height, deviceOffset);
 			return true;
@@ -457,8 +458,10 @@ half4 main(float2 p) {
 		}
 
 		internal static void DrawLcdComposite(SKRuntimeEffect effect, SKImage black, SKImage white, SKImage destination,
-			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default, bool screenOperator = false, bool directCoverage = false, SKBlendMode separableMode = SKBlendMode.SrcOver)
+			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default, bool screenOperator = false, bool directCoverage = false, SKBlendMode separableMode = SKBlendMode.SrcOver, PointD coverageOrigin = default, SKColorF directSource = default)
 		{
+			// Pixman receives Cairo's solid source as the high byte of 16-bit premultiplied channels.
+			float Premultiplied(float channel) => MathF.Floor(channel * directSource.Alpha * 255f + .5f);
 			bool invertGamma = Environment.GetEnvironmentVariable("OPTIMUM_GUI_LCD_GAMMA_INVERSE") switch {
 				"0" => false,
 				"1" => true,
@@ -469,13 +472,16 @@ half4 main(float2 p) {
 				["screenOperator"] = screenOperator ? 1 : 0,
 				["separableOperator"] = separableMode == SKBlendMode.Difference ? 1 : separableMode == SKBlendMode.Exclusion ? 2 : 0,
 				["directCoverage"] = directCoverage ? 1 : 0,
+				["textCoverageOrigin"] = new float[] { (float)coverageOrigin.X, (float)coverageOrigin.Y },
 				["sourceAlpha"] = sourceAlpha,
+				["directSource"] = new float[] { Premultiplied(directSource.Red), Premultiplied(directSource.Green), Premultiplied(directSource.Blue), MathF.Floor(directSource.Alpha * 255f + .5f) },
 				["invertGamma"] = invertGamma ? 1 : 0,
 				["sourceColor"] = new float[] { sourceColor.Red / 255f, sourceColor.Green / 255f, sourceColor.Blue / 255f },
 				["colorIndices"] = new int[] { sourceColor.Red >> 5, sourceColor.Green >> 5, sourceColor.Blue >> 5 }
 			};
-			using var blackShader = black.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest));
-			using var whiteShader = white.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest));
+			var coverageTile = directCoverage ? SKShaderTileMode.Decal : SKShaderTileMode.Clamp;
+			using var blackShader = black.ToShader(coverageTile, coverageTile, new SKSamplingOptions(SKFilterMode.Nearest));
+			using var whiteShader = white.ToShader(coverageTile, coverageTile, new SKSamplingOptions(SKFilterMode.Nearest));
 			using var destinationShader = destination.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest));
 			SKImage inverseGammaTable = gammaInverseTable ??= CreateGammaInverseTable();
 			using var inverseGammaShader = inverseGammaTable.ToShader(SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, new SKSamplingOptions(SKFilterMode.Nearest));
@@ -502,25 +508,33 @@ uniform int sourceOperator;
 uniform int screenOperator;
 uniform int separableOperator;
 uniform int directCoverage;
+uniform float2 textCoverageOrigin;
 uniform float sourceAlpha;
+uniform float4 directSource;
 uniform int invertGamma;
 uniform float3 sourceColor;
 uniform int3 colorIndices;
+float3 DivOne(float3 x) { return floor((x + 128.0 + floor((x + 128.0) / 256.0)) / 256.0); }
 half4 main(float2 p) {
-    float4 black = blackImage.eval(p);
-    float4 white = whiteImage.eval(p);
+    float2 coveragePoint = directCoverage != 0 ? p - textCoverageOrigin : p;
+    float4 black = blackImage.eval(coveragePoint);
+    float4 white = whiteImage.eval(coveragePoint);
     float4 destination = destinationImage.eval(p);
     if (directCoverage != 0) {
         float3 source = sourceColor * sourceAlpha * black.rgb;
         float alpha = sourceAlpha * black.g;
-        if (separableOperator != 0) {
-            float3 s = floor(source * 255.0 + 0.5);
+        if (separableOperator != 0 || screenOperator != 0) {
+            // Pixman 0.46 combine_<mode>_ca/_u: byte-rounded source IN mask, one final DIV_ONE_UN8.
+            float3 m = floor(black.rgb * 255.0 + 0.5);
             float4 d = floor(destination * 255.0 + 0.5);
-            float3 a = floor(sourceAlpha * black.rgb * 255.0 + 0.5);
-            float3 product = separableOperator == 2
-                ? floor(s * d.rgb / 255.0 + 0.5)
-                : min(floor(s * d.a / 255.0 + 0.5), floor(d.rgb * a / 255.0 + 0.5));
-            return half4((s + d.rgb - 2.0 * product) / 255.0, alpha + destination.a * (1.0 - alpha));
+            float3 s = DivOne(directSource.rgb * m);
+            float3 a = DivOne(directSource.a * m);
+            float3 blend = separableOperator == 1 ? abs(s * d.a - d.rgb * a)
+                : separableOperator == 2 ? s * d.a + d.rgb * a - 2.0 * d.rgb * s
+                : s * d.a + d.rgb * a - s * d.rgb;
+            float3 rgb = clamp((255.0 - a) * d.rgb + (255.0 - d.a) * s + blend, 0.0, 65025.0);
+            float resultAlpha = clamp(d.a * 255.0 + a.g * 255.0 - a.g * d.a, 0.0, 65025.0);
+            return half4(float4(DivOne(rgb), DivOne(float3(resultAlpha)).x) / 255.0);
         }
         return half4(source + destination.rgb * (screenOperator != 0 ? 1.0 - source : 1.0 - sourceAlpha * black.rgb),
             alpha + destination.a * (1.0 - alpha));

@@ -100,24 +100,17 @@ index 642722c..c95c743 100644
  					{
 -						item2.Chunks[j].DirtyForSaving = false;
 -						list2.Add(new DbChunk
--						{
--							Position = new ChunkPos(item2.chunkX, j, item2.chunkZ, 0),
--							Data = item2.Chunks[j].ToBytes(ms)
--						});
 +						continue;
- 					}
--				}
--				ServerMapChunk mapChunk = item2.MapChunk;
--				if (mapChunk != null)
--				{
--					if (mapChunk.DirtyForSaving)
++					}
 +
 +					item2.generatingLock.AcquireReadLock();
 +					try
- 					{
--						list3.Add(new DbChunk
++					{
 +						for (int j = 0; j < item2.Chunks.Length; j++)
-+						{
+ 						{
+-							Position = new ChunkPos(item2.chunkX, j, item2.chunkZ, 0),
+-							Data = item2.Chunks[j].ToBytes(ms)
+-						});
 +							if (item2.Chunks[j].DirtyForSaving)
 +							{
 +								item2.Chunks[j].DirtyForSaving = false;
@@ -130,10 +123,7 @@ index 642722c..c95c743 100644
 +						}
 +						ServerMapChunk mapChunk = item2.MapChunk;
 +						if (mapChunk != null)
- 						{
--							Position = new ChunkPos(item2.chunkX, 0, item2.chunkZ, 0),
--							Data = mapChunk.ToBytes(ms)
--						});
++						{
 +							if (mapChunk.DirtyForSaving)
 +							{
 +								list3.Add(new DbChunk
@@ -160,11 +150,21 @@ index 642722c..c95c743 100644
 +						leases.Add(lease);
 +						lease = null;
  					}
+ 				}
+-				ServerMapChunk mapChunk = item2.MapChunk;
+-				if (mapChunk != null)
++				finally
+ 				{
+-					if (mapChunk.DirtyForSaving)
+-					{
+-						list3.Add(new DbChunk
+-						{
+-							Position = new ChunkPos(item2.chunkX, 0, item2.chunkZ, 0),
+-							Data = mapChunk.ToBytes(ms)
+-						});
+-					}
 -					mapChunk.DirtyForSaving = false;
 -					server.loadedMapChunks.Remove(item2.mapIndex2d);
-+				}
-+				finally
-+				{
 +					lease?.Dispose();
  				}
  			}
@@ -182,14 +182,14 @@ index 642722c..c95c743 100644
  			}
 -			server.ChunkColumnRequested.Remove(item2.mapIndex2d);
 -			num++;
--		}
--		if (list2.Count > 0)
--		{
--			chunkthread.gameDatabase.SetChunks(list2);
  		}
--		if (list3.Count > 0)
+-		if (list2.Count > 0)
 +		finally
  		{
+-			chunkthread.gameDatabase.SetChunks(list2);
+-		}
+-		if (list3.Count > 0)
+-		{
 -			chunkthread.gameDatabase.SetMapChunks(list3);
 +			for (int i = 0; i < leases.Count; i++)
 +			{

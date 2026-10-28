@@ -56,6 +56,35 @@ namespace Vintagestory.Client.NoObf
 			Volatile.Write(ref simulatedContextResetStatusForTest, 0);
 			Volatile.Write(ref simulatedContextResetSkipChecksForTest, 0);
 		}
+		/// <summary>Reuse immutable CPU preparation without skipping legacy mod callbacks.</summary>
+		public static bool RecordingPreparationReuseEnabled { get => RecordedPreparationCache.Enabled; set => RecordedPreparationCache.Enabled = value; }
+		public static long RecordingPreparationCacheHits => RecordedPreparationCache.Hits;
+		public static long RecordingPreparationCacheMisses => RecordedPreparationCache.Misses;
+		public static long RecordingPreparationCacheEvictions => RecordedPreparationCache.Evictions;
+		public static long RecordingPreparationPathHits => RecordedPreparationCache.PathHits;
+		public static long RecordingPreparationStrokeHits => RecordedPreparationCache.StrokeHits;
+		public static long RecordingPreparationSvgHits => RecordedPreparationCache.PictureHits;
+		public static long RecordingPreparationCacheEntries => RecordedPreparationCache.Count;
+		public static long RecordingPreparationCacheEstimatedBytes => RecordedPreparationCache.Bytes;
+		/// <summary>Reset between measurements with no preparation in flight; retains cached resources.</summary>
+		public static void ResetRecordingPreparationCounters() => RecordedPreparationCache.ResetCounters();
+		public static void ClearRecordingPreparationCache() => RecordedPreparationCache.Clear();
+
+		/// <summary>Opt-in CPU preparation elapsed timings, independent of cache reuse and GPU rendering.</summary>
+		public static bool RecordingProfilingEnabled { get => SurfaceRecordingDiagnostics.ProfilingEnabled; set => SurfaceRecordingDiagnostics.ProfilingEnabled = value; }
+		public static long RecordingProfileTimestampFrequency => System.Diagnostics.Stopwatch.Frequency;
+		public static long RecordingDrawingCaptureCount => SurfaceRecordingDiagnostics.DrawingCaptures;
+		public static long RecordingDrawingCaptureTicks => SurfaceRecordingDiagnostics.DrawingCaptureTicks;
+		public static long RecordingPathCopyCount => SurfaceRecordingDiagnostics.PathCopies;
+		public static long RecordingPathCopyTicks => SurfaceRecordingDiagnostics.PathCopyTicks;
+		public static long RecordingPathConversionCount => SurfaceRecordingDiagnostics.PathConversions;
+		public static long RecordingPathConversionTicks => SurfaceRecordingDiagnostics.PathConversionTicks;
+		public static long RecordingStrokeOutlineCount => SurfaceRecordingDiagnostics.StrokeOutlines;
+		public static long RecordingStrokeOutlineTicks => SurfaceRecordingDiagnostics.StrokeOutlineTicks;
+		public static IReadOnlyDictionary<string, long> GetRecordingStageDiagnostics() => SurfaceRecordingDiagnostics.StageDiagnostics;
+		/// <summary>Reset between measurements with no profiled operation in flight; preserves enabled state.</summary>
+		public static void ResetRecordingProfiling() => SurfaceRecordingDiagnostics.ResetProfiling();
+
 		public static long MaterializationAttemptCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationAttemptCount;
 		public static long MaterializationSuccessCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationSuccessCount;
 		public static long MaterializationFailureCount => Vintagestory.API.Config.OptimumGuiMetrics.MaterializationFailureCount;
@@ -251,25 +280,34 @@ namespace Vintagestory.Client.NoObf
 							using (GRContext context = GRContext.CreateGl(glInterface))
 							{
 								if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
-								context.ResetContext(GRGlBackendState.All);
-								var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-								using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-								using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
-								using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
+								IntPtr operationContext = CurrentContextHandle();
+								try
 								{
-									if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								using (var blur = new RecordedGpuBlur(context))
-								{
-									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-									skSurface.Flush();
-									context.Flush();
-									context.Submit(true);
-									GL.Finish();
-									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
-									rendered = true;
+									context.ResetContext(GRGlBackendState.All);
+									var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
+									using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
+									using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+									using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
+									{
+										if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
+									using (var blur = new RecordedGpuBlur(context))
+									{
+										if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+										skSurface.Flush();
+										context.Flush();
+										context.Submit(true);
+										GL.Finish();
+										OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+										if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+										rendered = true;
+									}
 								}
-							}
+								}
+								finally
+								{
+									// Dispose only abandons Ganesh; release its GL objects while the owning context is usable.
+									context.AbandonContext(operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext && !ContextWasReset(out _));
+								}
 							}
 						}
 					}
@@ -592,26 +630,35 @@ namespace Vintagestory.Client.NoObf
 							{
 								if (context == null)
 									throw new InvalidOperationException("Skia could not create a GPU context for the current OpenGL context.");
-								context.ResetContext(GRGlBackendState.All);
-								var framebufferInfo = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-								using (var target = new GRBackendRenderTarget(Width, Height, 0, 0, framebufferInfo))
-								using (SKSurface surface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
+								IntPtr operationContext = CurrentContextHandle();
+								try
 								{
-									if (surface == null)
-										throw new InvalidOperationException("Skia rejected the 8x8 RGBA8 framebuffer.");
-									DrawProbePattern(surface.Canvas);
-									surface.Flush();
-									context.Flush();
-									context.Submit(true);
-									GL.Finish();
-									GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, framebuffer);
-									GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
-									GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
-									GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
-									GL.PixelStore((PixelStoreParameter)0x0D02, 0); // PACK_ROW_LENGTH
-									GL.PixelStore((PixelStoreParameter)0x0D03, 0); // PACK_SKIP_ROWS
-									GL.PixelStore((PixelStoreParameter)0x0D04, 0); // PACK_SKIP_PIXELS
-									GL.ReadPixels(0, 0, Width, Height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+									context.ResetContext(GRGlBackendState.All);
+									var framebufferInfo = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
+									using (var target = new GRBackendRenderTarget(Width, Height, 0, 0, framebufferInfo))
+									using (SKSurface surface = SKSurface.Create(context, target, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888))
+									{
+										if (surface == null)
+											throw new InvalidOperationException("Skia rejected the 8x8 RGBA8 framebuffer.");
+										DrawProbePattern(surface.Canvas);
+										surface.Flush();
+										context.Flush();
+										context.Submit(true);
+										GL.Finish();
+										GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, framebuffer);
+										GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
+										GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
+										GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
+										GL.PixelStore((PixelStoreParameter)0x0D02, 0); // PACK_ROW_LENGTH
+										GL.PixelStore((PixelStoreParameter)0x0D03, 0); // PACK_SKIP_ROWS
+										GL.PixelStore((PixelStoreParameter)0x0D04, 0); // PACK_SKIP_PIXELS
+										GL.ReadPixels(0, 0, Width, Height, PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+									}
+								}
+								finally
+								{
+									// Dispose only abandons Ganesh; release its GL objects while the owning context is usable.
+									context.AbandonContext(operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext && !ContextWasReset(out _));
 								}
 							}
 						}

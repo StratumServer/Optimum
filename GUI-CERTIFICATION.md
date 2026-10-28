@@ -58,15 +58,13 @@ escapes, and device/context changes cannot be universally certified.
 `--validate-only` continues to validate assemblies without creating an OpenGL
 context, granting GUI approval or starting the client.
 
-Text keeps Cairo's native rasterization. The recording backend does not translate
-font and glyph operations into Skia; unsupported text operations materialize the
-recorded prefix and execute through Cairo with the requested `FontOptions`, including
-`Antialias.Subpixel`. A native materialization revokes the active GPU approval even
-when the GPU request or metrics collection is temporarily disabled. Subsequent GUI
-composition therefore uses the normal Cairo path. The regression test asserts that
-the Subpixel text path materializes natively and produces the same bytes as direct
-vanilla Cairo. A profile that materializes text during its measured workload cannot
-receive a Skia-only certificate.
+Recorded text uses managed font state, Skia geometry and Linux FreeType coverage,
+including supported `Antialias.Subpixel` operations. Native Cairo remains the test
+oracle, not an allowed rendering shortcut in a Skia-only profile. Native escapes
+remain subject to the materialization guard and revoke active GPU approval even
+when metrics collection is temporarily disabled. A profile that attempts native
+materialization during its measured workload cannot receive a Skia-only certificate.
+The Stage A record below describes the older, explicitly native-fallback profile.
 
 Certification also requires the live GL `Antialias.Best` rectangle fixture to read
 back from the candidate GPU texture and match the native Cairo pixels within one
@@ -190,10 +188,10 @@ The bounded probe used a two-GiB managed heap limit, a 120-second timeout per pr
 
 ## Resumed corrections and bounded certification (2026-10-28)
 
-This record supersedes the failed 2026-10-27 attempt above for the current working tree of `feat/issue-130-cairo-to-skiasharp`. It does not certify Windows or AMD, the full Pharos 57-route matrix, or performance.
+This record supersedes the failed 2026-10-27 attempt above for the current working tree of `feat/issue-130-cairo-to-skiasharp`. It does not certify Windows or AMD, all interactive routes in the 57-row Pharos inventory, or performance.
 
 The eight remaining unit failures and the Intel cold-readback failure were corrected in the working tree. Text fixes use hinted outline advances, outline-bound unhinted affine extents, native accumulated-box overlap clipping (Plus for overlapping glyph masks, Screen with preserved fringes for disjoint ones), and FreeType `FT_LOAD_TARGET_MONO | FT_LOAD_MONOCHROME` for Antialias None, matching native Cairo. Screen, Difference and Exclusion text reuses the captured FreeType coverage image with the existing byte-rounded premultiplied separable products instead of the runtime integer blender when the source is solid; shader, snapshot, pattern and null-coverage sources retain the original blender. Eight strict native parity rows were added (Difference/Exclusion across four antialias modes); no assertions or tolerances were removed.
 
 Final evidence: full Optimum.Tests allow run 2,436 passed, 0 failed, 34 skipped (all 2,462 original test names preserved, skip set identical); deny font/matrix/cache/ABI subset 237/0; Launcher 69 (4 skipped), CLI 24, Bootstrap.Core 173, Installer 86. Bootstrap applies 167 patches with zero failures; Release build has zero errors; patch, shader and compatibility gates pass with zero cast divergences. Serialized physical matrices with hash-locked artifacts: Intel UHD 620 (Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core) 81/0 allow and 30/0 deny with no libcairo mapping; NVIDIA MX150 (driver 580.178.04, OpenGL 3.3.0) 81/0 allow and 30/0 deny. Fresh `make -j8 test` in the native shim passes; `make check` and `make test-runtimeconfig` pass with the locally provisioned PowerShell 7.6.9; `package-linux.ps1 -Format none` validates 150/150 required methods.
 
-The real Pharos GUI scenario also passed on both adapters after a harness-only correction: the negative control now builds a genuinely non-recording managed-backed surface through the internal managed-storage constructor (automatic recording previously claimed the publicly constructed surface). Both wrappers exited 0 and each `gui-gpu-evidence.json` reports decision `skia-no-cairo-fallback` with empty decision reasons. Review-evidence diagnostics added 16 extra native separable parity cases (unequal .5/.8 alpha, 50% gray, four AA modes) and four shader/null-coverage fallback assertions, all passing. Windows/AMD, the full Pharos 57-route and performance certification remain unperformed and unclaimed.
+The real Pharos GUI scenario also passed on both adapters after a harness-only correction: the negative control now builds a genuinely non-recording managed-backed surface through the internal managed-storage constructor (automatic recording previously claimed the publicly constructed surface). Both wrappers exited 0 and each `gui-gpu-evidence.json` reports decision `skia-no-cairo-fallback` with empty decision reasons. Review-evidence diagnostics added 16 extra native separable parity cases (unequal .5/.8 alpha, 50% gray, four AA modes) and four shader/null-coverage fallback assertions, all passing. Windows/AMD, all interactive routes in the 57-row Pharos inventory, and performance certification remain unperformed and unclaimed.

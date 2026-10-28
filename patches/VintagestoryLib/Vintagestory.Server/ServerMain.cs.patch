@@ -25,7 +25,8 @@ index 593f5a4..c89888d 100644
 +	private int optimumCachedOnlinePlayersTick;
 +	private IPlayer[] optimumCachedAllPlayers;
 +	private int optimumCachedAllPlayersTick;
-+
+ 
+-	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
 +	public IPlayer[] AllOnlinePlayers
 +	{
 +		get
@@ -52,8 +53,7 @@ index 593f5a4..c89888d 100644
 +			return optimumCachedOnlinePlayers;
 +		}
 +	}
- 
--	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
++
 +	public IPlayer[] AllPlayers
 +	{
 +		get

@@ -39,14 +39,14 @@ index 0615808..7f72be4 100644
                      {
 -                        mesh = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
 +                        meshToUpload = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
-+                    }
-+
-+                    if (entity.meshRef == null)
-+                    {
-+                        entity.meshRef = capi.Render.UploadMultiTextureMesh(meshToUpload);
                      }
  
 -                    dict[cacheKey] = entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh);
++                    if (entity.meshRef == null)
++                    {
++                        entity.meshRef = capi.Render.UploadMultiTextureMesh(meshToUpload);
++                    }
++
 +                    dict[cacheKey] = entity.meshRef;
                  }
              }

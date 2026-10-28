@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 using Cairo;
 using SkiaSharp;
 using Xunit;
+#if !NO_DONOR
+using GpuBackend = Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend;
+#endif
 
 [Collection("GUI metrics")]
 public sealed class CairoPreparationReuseTests : IDisposable
@@ -13,6 +16,67 @@ public sealed class CairoPreparationReuseTests : IDisposable
     readonly bool original = RecordedPreparationCache.Enabled;
     public CairoPreparationReuseTests() { _ = CairoAPI.Version; RecordedPreparationCache.Enabled = true; RecordedPreparationCache.Clear(); RecordedPreparationCache.ResetCounters(); }
     public void Dispose() { RecordedPreparationCache.Clear(); RecordedPreparationCache.ResetCounters(); RecordedPreparationCache.Enabled = original; }
+
+#if !NO_DONOR
+    [Fact]
+    public void ClientBackendControlsTheActualPreparationCache()
+    {
+        GpuBackend.RecordingPreparationReuseEnabled = false;
+        Assert.False(RecordedPreparationCache.Enabled);
+        _ = Draw(1, 0, out _);
+        Assert.Equal(0, GpuBackend.RecordingPreparationCacheEntries);
+        Assert.Equal(0, GpuBackend.RecordingPreparationCacheHits);
+        GpuBackend.RecordingPreparationReuseEnabled = true;
+        Assert.True(RecordedPreparationCache.Enabled);
+        _ = Draw(1, 0, out _);
+        long entries = RecordedPreparationCache.Count;
+        long bytes = RecordedPreparationCache.Bytes;
+        Assert.True(entries > 0);
+        Assert.True(GpuBackend.RecordingPreparationCacheMisses > 0);
+        GpuBackend.ResetRecordingPreparationCounters();
+        Assert.Equal(entries, GpuBackend.RecordingPreparationCacheEntries);
+        Assert.Equal(bytes, GpuBackend.RecordingPreparationCacheEstimatedBytes);
+        Assert.Equal(0, RecordedPreparationCache.Hits);
+        Assert.Equal(0, RecordedPreparationCache.Misses);
+        _ = Draw(1, 0, out _);
+        Assert.True(GpuBackend.RecordingPreparationCacheHits > 0);
+        Assert.Equal(0, GpuBackend.RecordingPreparationCacheMisses);
+        Assert.True(GpuBackend.RecordingPreparationPathHits > 0);
+        Assert.True(GpuBackend.RecordingPreparationStrokeHits > 0);
+        Assert.Equal(0, GpuBackend.RecordingPreparationSvgHits);
+        Assert.NotEqual(RecordedPreparationCache.PathHits, RecordedPreparationCache.StrokeHits);
+        Assert.Equal(RecordedPreparationCache.PathHits, GpuBackend.RecordingPreparationPathHits);
+        Assert.Equal(RecordedPreparationCache.StrokeHits, GpuBackend.RecordingPreparationStrokeHits);
+        Assert.Equal(RecordedPreparationCache.PictureHits, GpuBackend.RecordingPreparationSvgHits);
+        Assert.Equal(0, GpuBackend.RecordingPreparationCacheEvictions);
+        GpuBackend.ClearRecordingPreparationCache();
+        Assert.Equal(0, RecordedPreparationCache.Count);
+        Assert.Equal(0, RecordedPreparationCache.Bytes);
+        Assert.True(RecordedPreparationCache.Enabled);
+
+        bool originalProfile = GpuBackend.RecordingProfilingEnabled;
+        try
+        {
+            GpuBackend.RecordingProfilingEnabled = true;
+            Assert.True(SurfaceRecordingDiagnostics.ProfilingEnabled);
+            GpuBackend.ResetRecordingProfiling();
+            Assert.All(GpuBackend.GetRecordingStageDiagnostics().Values, value => Assert.Equal(0, value));
+            _ = Draw(1, 0, out _);
+            Assert.True(GpuBackend.GetRecordingStageDiagnostics()["CaptureStateCount"] > 0);
+            Assert.True(GpuBackend.RecordingDrawingCaptureCount > 0);
+            Assert.Equal(SurfaceRecordingDiagnostics.StageDiagnostics, GpuBackend.GetRecordingStageDiagnostics());
+            Assert.Equal(System.Diagnostics.Stopwatch.Frequency, GpuBackend.RecordingProfileTimestampFrequency);
+            GpuBackend.ResetRecordingProfiling();
+            Assert.Equal(0, SurfaceRecordingDiagnostics.DrawingCaptures);
+            Assert.True(SurfaceRecordingDiagnostics.ProfilingEnabled);
+        }
+        finally
+        {
+            GpuBackend.RecordingProfilingEnabled = originalProfile;
+            SurfaceRecordingDiagnostics.ResetProfiling();
+        }
+    }
+#endif
 
     [Theory]
     [InlineData(1.0)]

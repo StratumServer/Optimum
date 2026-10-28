@@ -36,14 +36,9 @@ index ec93c87..2a9839d 100644
 -                        EncodeValue(sb, value, 0);
 -                    count = 0;
 -                    value = 0;
--                }
--            }
 +                    value |= ((uint)state[i]) << (24 - (count * 8));
 +                    count++;
- 
--            // encode any remaining bytes (that weren't a multiple of 4)
--            if (count > 0)
--                EncodeValue(sb, value, 4 - count);
++
 +                    if (count == 4)
 +                    {
 +                        if (value == 0)
@@ -57,8 +52,13 @@ index ec93c87..2a9839d 100644
 +                        count = 0;
 +                        value = 0;
 +                    }
-+                }
+                 }
+-            }
  
+-            // encode any remaining bytes (that weren't a multiple of 4)
+-            if (count > 0)
+-                EncodeValue(sb, value, 4 - count);
+-
 -            return sb.ToString();
 +                if (count > 0)
 +                    EncodeValueInline(chars, ref pos, value, 4 - count);
@@ -119,7 +119,11 @@ index ec93c87..2a9839d 100644
 +                        throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
                      }
 -                    else
--                    {
++
++                    count++;
++
++                    if (count == 5)
+                     {
 -                        // build a 32-bit value from the input characters
 -                        try
 -                        {
@@ -129,10 +133,9 @@ index ec93c87..2a9839d 100644
 -                        {
 -                            throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
 -                        }
- 
+-
 -                        count++;
-+                    count++;
- 
+-
 -                        // every five characters, convert the characters into the equivalent byte array
 -                        if (count == 5)
 -                        {
@@ -140,8 +143,6 @@ index ec93c87..2a9839d 100644
 -                            count = 0;
 -                            value = 0;
 -                        }
-+                    if (count == 5)
-+                    {
 +                        result[writePos++] = (byte)(value >> 24);
 +                        result[writePos++] = (byte)((value >> 16) & 0xFF);
 +                        result[writePos++] = (byte)((value >> 8) & 0xFF);
@@ -150,25 +151,16 @@ index ec93c87..2a9839d 100644
 +                        value = 0;
                      }
                  }
-+            }
- 
+-
 -                if (count == 1)
 -                {
 -                    throw new FormatException("The final Ascii85 block must contain more than one character.");
 -                }
 -                else if (count > 1)
-+            if (count == 1)
-+            {
-+                throw new FormatException("The final Ascii85 block must contain more than one character.");
-+            }
-+            else if (count > 1)
-+            {
-+                for (int padding = count; padding < 5; padding++)
-                 {
+-                {
 -                    // decode any remaining characters
 -                    for (int padding = count; padding < 5; padding++)
-+                    try
-                     {
+-                    {
 -                        try
 -                        {
 -                            checked { value += 84 * s_powersOf85[padding]; }
@@ -177,21 +169,35 @@ index ec93c87..2a9839d 100644
 -                        {
 -                            throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
 -                        }
+-                    }
+-                    DecodeValue(stream, value, 5 - count);
+-                }
+-
+-                return stream.ToArray();
+             }
++
++            if (count == 1)
++            {
++                throw new FormatException("The final Ascii85 block must contain more than one character.");
++            }
++            else if (count > 1)
++            {
++                for (int padding = count; padding < 5; padding++)
++                {
++                    try
++                    {
 +                        checked { value += 84 * s_powersOf85[padding]; }
 +                    }
 +                    catch (OverflowException ex)
 +                    {
 +                        throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
-                     }
--                    DecodeValue(stream, value, 5 - count);
-                 }
--
--                return stream.ToArray();
++                    }
++                }
 +                int bytesToWrite = count - 1;
 +                if (bytesToWrite >= 1) result[writePos++] = (byte)(value >> 24);
 +                if (bytesToWrite >= 2) result[writePos++] = (byte)((value >> 16) & 0xFF);
 +                if (bytesToWrite >= 3) result[writePos++] = (byte)((value >> 8) & 0xFF);
-             }
++            }
 +
 +            return result;
          }
@@ -212,16 +218,30 @@ index ec93c87..2a9839d 100644
  
 -            if (paddingBytes != 0)
 -                Array.Resize(ref encoded, 5 - paddingBytes);
+-
+-            sb.Append(encoded);
 +            int charsToWrite = 5 - paddingBytes;
 +            for (int i = 0; i < charsToWrite; i++)
 +            {
 +                chars[pos++] = encoded[i];
 +            }
-+        }
-+
+         }
+ 
+-        // Writes the bytes of a 32-bit value to a stream.
+-        private static void DecodeValue(Stream stream, uint value, int paddingChars)
 +        // Optimum: pre-calculate exact encoded string length
 +        private static int GetEncodedLength(byte[] bytes)
-+        {
+         {
+-            stream.WriteByte((byte)(value >> 24));
+-            if (paddingChars == 3)
+-                return;
+-            stream.WriteByte((byte)((value >> 16) & 0xFF));
+-            if (paddingChars == 2)
+-                return;
+-            stream.WriteByte(((byte)((value >> 8) & 0xFF)));
+-            if (paddingChars == 1)
+-                return;
+-            stream.WriteByte((byte)(value & 0xFF));
 +            int fullGroups = bytes.Length / 4;
 +            int remainder = bytes.Length % 4;
 +
@@ -242,28 +262,15 @@ index ec93c87..2a9839d 100644
 +                    value = 0;
 +                }
 +            }
- 
--            sb.Append(encoded);
++
 +            int length = zCount + normalGroups * 5;
 +            if (remainder > 0) length += remainder + 1;
 +            return length;
-         }
- 
--        // Writes the bytes of a 32-bit value to a stream.
--        private static void DecodeValue(Stream stream, uint value, int paddingChars)
++        }
++
 +        // Optimum: pre-calculate exact decoded byte length
 +        private static int GetDecodedLength(string encoded)
-         {
--            stream.WriteByte((byte)(value >> 24));
--            if (paddingChars == 3)
--                return;
--            stream.WriteByte((byte)((value >> 16) & 0xFF));
--            if (paddingChars == 2)
--                return;
--            stream.WriteByte(((byte)((value >> 8) & 0xFF)));
--            if (paddingChars == 1)
--                return;
--            stream.WriteByte((byte)(value & 0xFF));
++        {
 +            int length = 0;
 +            int count = 0;
 +            for (int i = 0; i < encoded.Length; i++)

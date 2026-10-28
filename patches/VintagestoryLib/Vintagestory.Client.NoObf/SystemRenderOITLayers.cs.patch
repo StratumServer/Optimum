@@ -34,7 +34,8 @@ index bba43f6..6fb26c1 100644
 +			if (SystemRenderOITLayers.optimumOitDisabled) return;
 +			IShaderProgram currentActiveShader = null;
 +			try
-+			{
+ 			{
+-				rebuild();
 +				if (capi == null || capi.Render == null || capi.Shader == null || capi.Render.FrameBuffers == null || capi.Render.FrameBuffers.Count <= 1)
 +				{
 +					SystemRenderOITLayers.DisableOptimumOit(capi, "render resources are unavailable");
@@ -89,8 +90,7 @@ index bba43f6..6fb26c1 100644
 +				GL.ClearBuffer((ClearBuffer)6144, 5, array3);
 +			}
 +			catch (Exception e)
- 			{
--				rebuild();
++			{
 +				SystemRenderOITLayers.DisableOptimumOit(capi, "OIT render callback failed", e);
 +				try { freeResources(); } catch { }
 +				try

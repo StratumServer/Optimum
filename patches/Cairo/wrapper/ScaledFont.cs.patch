@@ -2,7 +2,7 @@ diff --git a/Cairo/wrapper/ScaledFont.cs b/Cairo/wrapper/ScaledFont.cs
 index 42d5e81..803d7f7 100644
 --- a/Cairo/wrapper/ScaledFont.cs
 +++ b/Cairo/wrapper/ScaledFont.cs
-@@ -1,7 +1,7 @@
+@@ -1,111 +1,299 @@
  //
  // Mono.Cairo.ScaledFont.cs
  //
@@ -11,7 +11,8 @@ index 42d5e81..803d7f7 100644
  //
  // Permission is hereby granted, free of charge, to any person obtaining
  // a copy of this software and associated documentation files (the
-@@ -10,18 +10,18 @@
+ // "Software"), to deal in the Software without restriction, including
+ // without limitation the rights to use, copy, modify, merge, publish,
  // distribute, sublicense, and/or sell copies of the Software, and to
  // permit persons to whom the Software is furnished to do so, subject to
  // the following conditions:
@@ -37,7 +38,7 @@ index 42d5e81..803d7f7 100644
  
  using System;
  using System.Runtime.InteropServices;
-@@ -29,13 +29,36 @@ using System.Runtime.InteropServices;
+ 
  #nullable disable
  
  namespace Cairo {
@@ -75,7 +76,10 @@ index 42d5e81..803d7f7 100644
  			if (handle == IntPtr.Zero)
  				throw new ArgumentException ("handle should not be NULL", "handle");
  
-@@ -46,9 +69,90 @@ namespace Cairo {
+ 			this.handle = handle;
+ 			if (!owner)
+ 				NativeMethods.cairo_scaled_font_reference (handle);
+ 			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
  
@@ -168,7 +172,7 @@ index 42d5e81..803d7f7 100644
  		}
  
  		~ScaledFont ()
-@@ -56,54 +160,138 @@ namespace Cairo {
+ 		{
  			Dispose (false);
  		}
  
@@ -327,7 +331,11 @@ index 42d5e81..803d7f7 100644
  			}
  		}
  
-@@ -117,17 +305,18 @@ namespace Cairo {
+ 		public void Dispose ()
+ 		{
+@@ -115,28 +303,28 @@ namespace Cairo {
+ 
+ 		protected virtual void Dispose (bool disposing)
  		{
  			if (!disposing || CairoDebug.Enabled)
  				CairoDebug.OnDisposed<ScaledFont> (handle, disposing);
@@ -352,7 +360,7 @@ index 42d5e81..803d7f7 100644
  				throw new ObjectDisposedException ("Object has already been disposed");
  		}
  
-@@ -135,8 +324,7 @@ namespace Cairo {
+ 		[Obsolete]
  		protected void Reference ()
  		{
  			CheckDisposed ();

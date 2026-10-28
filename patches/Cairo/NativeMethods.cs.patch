@@ -1,5 +1,5 @@
 diff --git a/Cairo/NativeMethods.cs b/Cairo/NativeMethods.cs
-index 7d2fc604..7bff904b 100644
+index 7d2fc60..7bff904 100644
 --- a/Cairo/NativeMethods.cs
 +++ b/Cairo/NativeMethods.cs
 @@ -46,34 +46,19 @@ namespace Cairo

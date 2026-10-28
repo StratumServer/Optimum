@@ -293,7 +293,7 @@ float4 main(float2 p) {
 				if (lcdTextEffect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
 			}
 			RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, drawing.TextCoverage ?? black, drawing.TextCoverage ?? white, destination, target.Canvas,
-				drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, width, height, deviceOffset, drawing.Paint.BlendMode == SKBlendMode.Screen, drawing.TextCoverage != null, drawing.Paint.BlendMode);
+				drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, width, height, deviceOffset, drawing.Paint.BlendMode == SKBlendMode.Screen, drawing.TextCoverage != null, drawing.Paint.BlendMode, drawing.TextCoverageOrigin, drawing.Paint.ColorF);
 		}
 
 		void EnsureLcdSurfaces(SKSurface target, int nextWidth, int nextHeight)

@@ -373,10 +373,10 @@ namespace Cairo
 			}
 			bool captureCoverage = graphicsState.Operator is Operator.Screen or Operator.Difference or Operator.Exclusion;
 			if (captureCoverage && drawing.TextFont != null) {
-				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, drawing.TextFont, options, decoded, drawing.Clips, width, height), graphicsState.Operator);
+				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, drawing.TextFont, options, decoded, drawing.Clips, width, height, out drawing.TextCoverageOrigin), graphicsState.Operator);
 			} else if (captureCoverage && drawing.TextBlob != null) {
 				using var coverageFont = SkiaGuiFont.Create(graphicsState, options);
-				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, coverageFont, options, decoded, drawing.Clips, width, height), graphicsState.Operator);
+				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, coverageFont, options, decoded, drawing.Clips, width, height, out drawing.TextCoverageOrigin), graphicsState.Operator);
 			}
 			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowText(copy)), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));

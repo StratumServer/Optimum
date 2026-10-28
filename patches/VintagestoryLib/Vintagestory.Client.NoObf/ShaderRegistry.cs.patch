@@ -53,12 +53,19 @@ index d3edef9..edaaa34 100644
 +		if (OptimumConfig.EffectiveShaderPreprocessParallel)
  		{
 -			includes[item.Name] = item.ToText();
+-		}
+-		for (int i = 0; i < nextPassId; i++)
+-		{
+-			ShaderProgram shaderProgram = shaderPrograms[i];
+-			if (shaderProgram != null)
 +			bool useSSBOs = ScreenManager.Platform.UseSSBOs;
 +			int programCount = nextPassId;
 +
 +			// Phase 1: run on background thread
 +			Task preprocessTask = Task.Run(() =>
-+			{
+ 			{
+-				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
+-				flag = shaderProgram.Compile() & flag;
 +				List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
 +				many.AddRange(ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaders));
 +				foreach (IAsset item in many)
@@ -99,12 +106,9 @@ index d3edef9..edaaa34 100644
 +					}
 +				}
 +			}
- 		}
--		for (int i = 0; i < nextPassId; i++)
++		}
 +		else
- 		{
--			ShaderProgram shaderProgram = shaderPrograms[i];
--			if (shaderProgram != null)
++		{
 +			// Vanilla path: single-threaded load + compile
 +			_ = ScreenManager.Platform.AssetManager;
 +			List<IAsset> many = ScreenManager.Platform.AssetManager.GetMany(AssetCategory.shaderincludes);
@@ -114,9 +118,7 @@ index d3edef9..edaaa34 100644
 +				includes[item.Name] = item.ToText();
 +			}
 +			for (int i = 0; i < nextPassId; i++)
- 			{
--				LoadShaderProgram(shaderProgram, ScreenManager.Platform.UseSSBOs);
--				flag = shaderProgram.Compile() & flag;
++			{
 +				ShaderProgram shaderProgram = shaderPrograms[i];
 +				if (shaderProgram != null)
 +				{

@@ -1,8 +1,10 @@
 diff --git a/VSEssentials/Systems/Weather/WeatherSystemClient.cs b/VSEssentials/Systems/Weather/WeatherSystemClient.cs
-index 2bde537..893b512 100644
+index 2bde537..3b00c58 100644
 --- a/VSEssentials/Systems/Weather/WeatherSystemClient.cs
 +++ b/VSEssentials/Systems/Weather/WeatherSystemClient.cs
-@@ -127,6 +127,18 @@ namespace Vintagestory.GameContent
+@@ -125,10 +125,22 @@ namespace Vintagestory.GameContent
+         double windRandCounter;
+ 
          Vec3f surfaceWindSpeedSmoothed = new Vec3f();
          double surfaceWindRandCounter;
  
@@ -21,7 +23,11 @@ index 2bde537..893b512 100644
          float wetnessScanAccum2s = 0;
  
          public void OnRenderFrame(float dt, EnumRenderStage stage)
-@@ -143,7 +155,9 @@ namespace Vintagestory.GameContent
+         {
+             try
+@@ -141,38 +153,63 @@ namespace Vintagestory.GameContent
+                 api.Logger.Error(e);
+             }
  
              if (stage == EnumRenderStage.Before)
              {
@@ -32,7 +38,9 @@ index 2bde537..893b512 100644
                  plrPos.Set((int)eplr.Pos.X, (int)eplr.Pos.Y, (int)eplr.Pos.Z);
                  plrPosd.Set(eplr.Pos.X, eplr.Pos.Y, eplr.Pos.Z);
  
-@@ -153,11 +167,27 @@ namespace Vintagestory.GameContent
+                 WeatherDataAtPlayer.LoadAdjacentSimsAndLerpValues(plrPosd, dt);
+                 WeatherDataAtPlayer.UpdateAdjacentAndBlendWeatherData();
+ 
  
                  dt = Math.Min(0.5f, dt);
  
@@ -64,7 +72,9 @@ index 2bde537..893b512 100644
  
                  windRandCounter = (windRandCounter + dt) % (2000 * Math.PI);
                  double rndx = (2 * Math.Sin(windRandCounter / 8) + Math.Sin(windRandCounter / 2) + Math.Sin(0.5 + 2 * windRandCounter)) / 10.0;
-@@ -167,10 +197,17 @@ namespace Vintagestory.GameContent
+                 GlobalConstants.CurrentWindSpeedClient.Set(windSpeedSmoothed.X, windSpeedSmoothed.Y, windSpeedSmoothed.Z + (float)rndx * windSpeedSmoothed.X);
+ 
+                 var rainy = capi.World.BlockAccessor.GetRainMapHeightAt(plrPos.X, plrPos.Z);
                  plrPosd.Y = rainy;
  
  
@@ -86,7 +96,11 @@ index 2bde537..893b512 100644
  
                  surfaceWindRandCounter = (surfaceWindRandCounter + dt) % (2000 * Math.PI);
                  rndx = (2 * Math.Sin(surfaceWindRandCounter / 8) + Math.Sin(surfaceWindRandCounter / 2) + Math.Sin(0.5 + 2 * surfaceWindRandCounter)) / 10.0;
-@@ -197,7 +234,7 @@ namespace Vintagestory.GameContent
+                 GlobalConstants.CurrentSurfaceWindSpeedClient.Set(surfaceWindSpeedSmoothed.X, surfaceWindSpeedSmoothed.Y, surfaceWindSpeedSmoothed.Z + (float)rndx * surfaceWindSpeedSmoothed.X);
+ 
+@@ -195,11 +232,11 @@ namespace Vintagestory.GameContent
+ 
+                     CurrentEnvironmentWetness4h = GameMath.Clamp(rainSum, 0, 1);
                  }
  
                  // Fade out flat fog in deep caves, it breaks stuff
@@ -95,3 +109,5 @@ index 2bde537..893b512 100644
                  var weatherflatfogd = WeatherDataAtPlayer.BlendedWeatherData.Ambient.FlatFogDensity.Weight;
                  targetFlatFogd = Math.Min(weatherflatfogd, GameMath.Clamp(sunlight / 5f, 0, 1));
                  flatFogd += (targetFlatFogd - flatFogd) * dt;
+                 capi.Ambient.CurrentModifiers["weather"].FlatFogDensity.Weight = flatFogd;
+             }

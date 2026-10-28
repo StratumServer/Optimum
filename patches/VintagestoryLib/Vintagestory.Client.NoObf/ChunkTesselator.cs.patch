@@ -161,7 +161,8 @@ index 42fad1f..1aa717c 100644
 +		}
 +		return src.CloneUsingRecycler();
 +	}
-+
+ 
+-	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
 +
 +	private TesselatedChunkPart[] MergeTesselatedChunkParts(TesselatedChunkPart[] first, TesselatedChunkPart[] second)
 +	{
@@ -179,8 +180,7 @@ index 42fad1f..1aa717c 100644
 +		Array.Copy(second, 0, merged, first.Length, second.Length);
 +		return merged;
 +	}
- 
--	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
++
 +	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts, bool optimumUseChiselLodDistance = false)
  	{
  		int num = 0;
