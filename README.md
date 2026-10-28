@@ -58,6 +58,16 @@ The `release-installer.yml` workflow packs the Windows and Linux builds with Vel
 
 When a GitHub release is published, `release-overlay.yml` builds native Linux and Windows overlays and attaches each archive with its matching `optimum-manifest-<rid>.json`. RiftLauncher uses the manifest for that platform to verify the archive and every staged file before patching a game installation.
 
+#### Verifying download integrity and VirusTotal reports
+
+Every release publishes a `## Checksums and scans` table containing SHA-256 digests for all installer assets and Velopack feed metadata. To verify the hash of a downloaded binary locally:
+
+- **Windows (Command Prompt / PowerShell):** `certutil -hashfile <file> SHA256` or `Get-FileHash <file> -Algorithm SHA256`
+- **Linux:** `sha256sum <file>`
+- **macOS:** `shasum -a 256 <file>`
+
+VirusTotal report links in the table reflect automated scans from third-party antimalware engines. These reports are advisory: they indicate engine findings at scan time, not an absolute guarantee of safety or a substitute for platform code signing. Velopack feeds (`assets.*.json`, `*.nupkg`) and update metadata are listed by hash only and not submitted for binary scan analysis.
+
 ```bash
 git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
