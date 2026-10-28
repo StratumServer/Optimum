@@ -53,8 +53,9 @@ layout(location = 3) out vec4 outGPosition;
 
 void main() 
 {
-#if GREEDYMESH > 0
 	vec2 sampledUv = uv;
+#if GREEDYMESH > 0
+	vec4 texColor;
 
 	// Greedy mesh UV tiling (Optimum): when tile counts > 1, the UV
 	// interpolated from vertex data covers one tile stretched over N
@@ -76,7 +77,7 @@ void main()
 		// Derivatives come from the unwrapped uv (smooth across the quad).
 		vec2 dx = dFdx(uv) * tileCount;
 		vec2 dy = dFdy(uv) * tileCount;
-		vec4 texColor = getColorMapped(terrainTexLinear, textureGrad(terrainTex, sampledUv, dx, dy)) * rgba;
+		texColor = getColorMapped(terrainTexLinear, textureGrad(terrainTex, sampledUv, dx, dy)) * rgba;
 #else
 		// A/B path (GreedyMeshTextureGrad false): plain sampler, implicit
 		// derivatives spike at the fract() wrap so distant merged quads can
@@ -84,57 +85,12 @@ void main()
 		// gradient sampler, which runs at reduced rate on some GPUs.
 		vec4 texColor = getColorMapped(terrainTexLinear, texture(terrainTex, sampledUv)) * rgba;
 #endif
-
-		if (psychedelicStrength > Epsilon) texColor = applyPsychedelicEffect(texColor, vertexPosition*2, 0);
-		if (glitchStrength > Epsilon) texColor = applyRustEffect(texColor, normal, vertexPosition, 1);
-
-		float b = getBrightnessFromShadowMap();
-		float murkiness = getUnderwaterMurkiness();
-		outColor = applyFogAndShadowFromBrightness(texColor, clamp(fogAmount - 50*murkiness, 0, 1), min(b, nb), worldPos.xyz);
-
-		float glow = 0;
-		float godrayLevel = 0;
-
-		if (haxyFade > 0) {
-			if (rgba.a < 0.999) {
-				vec4 skyColor = vec4(1);
-				vec4 skyGlow = vec4(1);
-				float sealevelOffsetFactor = 0.25;
-				getSkyColorAt(worldPos.xyz, sunPosition, sealevelOffsetFactor, clamp(dayLight, 0, 1), horizonFog, skyColor, skyGlow);
-				godrayLevel = skyGlow.g;
-				outColor.rgb = mix(skyColor.rgb, outColor.rgb, max(1-dayLight, max(0.0, rgba.a)));
-			}
-		}
-
-		outColor.rgb = applyUnderwaterEffects(outColor.rgb, murkiness);
-
-#if NORMALVIEW == 0
-		float aTest = outColor.a + max(0.0, 1 - rgba.a) * min(1, outColor.a * 10) - lod0Fade;
-		if (aTest < alphaTest || rgba.a < 0.005) discard;
-#endif
-
-#if SHINYEFFECT > 0
-		if ((renderFlags & ReflectiveBitMask) != 0) {
-			outColor = mix(applyReflectiveEffect(outColor, glow, renderFlags, sampledUv, normal, worldPos, camPos, blockLight), outColor, clamp(2 * fogAmount + 2*(1-b), 0, 1));
-		}
-		glow += pow(max(0.0, dot(normal, lightPosition)), 6) * 0.125 * shadowIntensity * (1 - fogAmount - murkiness);
-#endif
-
-#if SSAOLEVEL > 0
-		outGPosition = vec4(camPos.xyz, fogAmount * 2 + glowLevel + murkiness);
-		outGNormal = gnormal;
-#endif
-
-#if NORMALVIEW > 0
-		outColor = vec4((normal.x + 1) / 2, (normal.y + 1)/2, (normal.z+1)/2, 1);
-#endif
-		outGlow = vec4(glowLevel + glow, godrayLevel, 0, min(1, fogAmount + outColor.a));
-		return;
+	} else {
+		texColor = getColorMapped(terrainTexLinear, texture(terrainTex, uv)) * rgba;
 	}
-#endif
-
-	// --- Vanilla path (no tiling) ---
+#else
 	vec4 texColor = getColorMapped(terrainTexLinear, texture(terrainTex, uv)) * rgba;
+#endif
 	
 	if (psychedelicStrength > Epsilon) texColor = applyPsychedelicEffect(texColor, vertexPosition*2, 0);
 	if (glitchStrength > Epsilon) texColor = applyRustEffect(texColor, normal, vertexPosition, 1);
@@ -173,7 +129,7 @@ void main()
 
 #if SHINYEFFECT > 0
 	if ((renderFlags & ReflectiveBitMask) != 0) {
-		outColor = mix(applyReflectiveEffect(outColor, glow, renderFlags, uv, normal, worldPos, camPos, blockLight), outColor, clamp(2 * fogAmount + 2*(1-b), 0, 1));
+		outColor = mix(applyReflectiveEffect(outColor, glow, renderFlags, sampledUv, normal, worldPos, camPos, blockLight), outColor, clamp(2 * fogAmount + 2*(1-b), 0, 1));
 	}
 	glow += pow(max(0.0, dot(normal, lightPosition)), 6) * 0.125 * shadowIntensity * (1 - fogAmount - murkiness);
 #endif
