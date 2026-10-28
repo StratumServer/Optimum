@@ -260,8 +260,19 @@ namespace Cairo
 			DrawCore(canvas, gpu, deviceOffset, outputScale);
 		}
 
+		internal void SetTextCoverage(SKImage coverage, Operator op)
+		{
+			TextCoverage = coverage;
+			if (coverage == null || Paint.Shader != null || sourceSnapshot != null) return;
+			// Composite byte-rounded glyph coverage through the existing image
+			// shader; Ganesh's runtime-blender text path can erase an Intel frame.
+			integerBlender = null;
+			Paint.BlendMode = Blend(op);
+		}
+
 		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null && !saturate && integerBlender == null &&
-			sourceSnapshot == null && (Paint.BlendMode == SKBlendMode.SrcOver || Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Screen);
+			sourceSnapshot == null && (Paint.BlendMode == SKBlendMode.SrcOver || Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Screen ||
+				TextCoverage != null && (Paint.BlendMode == SKBlendMode.Difference || Paint.BlendMode == SKBlendMode.Exclusion));
 
 		internal bool Draw(SKSurface target, RecordedGpuBlur gpu, SKRuntimeEffect lcdEffect, int width, int height, PointD deviceOffset = default)
 		{
@@ -271,7 +282,7 @@ namespace Cairo
 			if (TextCoverage != null && gpu == null) {
 				using var destination = target.Snapshot();
 				DrawLcdComposite(lcdEffect, TextCoverage, TextCoverage, destination, target.Canvas, false,
-					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true);
+					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode);
 			} else if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
 			else DrawLcdTextCpu(target, lcdEffect, width, height, deviceOffset);
 			return true;
@@ -446,7 +457,7 @@ half4 main(float2 p) {
 		}
 
 		internal static void DrawLcdComposite(SKRuntimeEffect effect, SKImage black, SKImage white, SKImage destination,
-			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default, bool screenOperator = false, bool directCoverage = false)
+			SKCanvas canvas, bool sourceOperator, float sourceAlpha, SKColor sourceColor, int width, int height, PointD deviceOffset = default, bool screenOperator = false, bool directCoverage = false, SKBlendMode separableMode = SKBlendMode.SrcOver)
 		{
 			bool invertGamma = Environment.GetEnvironmentVariable("OPTIMUM_GUI_LCD_GAMMA_INVERSE") switch {
 				"0" => false,
@@ -456,6 +467,7 @@ half4 main(float2 p) {
 			var uniforms = new SKRuntimeEffectUniforms(effect) {
 				["sourceOperator"] = sourceOperator ? 1 : 0,
 				["screenOperator"] = screenOperator ? 1 : 0,
+				["separableOperator"] = separableMode == SKBlendMode.Difference ? 1 : separableMode == SKBlendMode.Exclusion ? 2 : 0,
 				["directCoverage"] = directCoverage ? 1 : 0,
 				["sourceAlpha"] = sourceAlpha,
 				["invertGamma"] = invertGamma ? 1 : 0,
@@ -488,6 +500,7 @@ uniform shader destinationImage;
 uniform shader inverseGammaTable;
 uniform int sourceOperator;
 uniform int screenOperator;
+uniform int separableOperator;
 uniform int directCoverage;
 uniform float sourceAlpha;
 uniform int invertGamma;
@@ -500,6 +513,15 @@ half4 main(float2 p) {
     if (directCoverage != 0) {
         float3 source = sourceColor * sourceAlpha * black.rgb;
         float alpha = sourceAlpha * black.g;
+        if (separableOperator != 0) {
+            float3 s = floor(source * 255.0 + 0.5);
+            float4 d = floor(destination * 255.0 + 0.5);
+            float3 a = floor(sourceAlpha * black.rgb * 255.0 + 0.5);
+            float3 product = separableOperator == 2
+                ? floor(s * d.rgb / 255.0 + 0.5)
+                : min(floor(s * d.a / 255.0 + 0.5), floor(d.rgb * a / 255.0 + 0.5));
+            return half4((s + d.rgb - 2.0 * product) / 255.0, alpha + destination.a * (1.0 - alpha));
+        }
         return half4(source + destination.rgb * (screenOperator != 0 ? 1.0 - source : 1.0 - sourceAlpha * black.rgb),
             alpha + destination.a * (1.0 - alpha));
     }

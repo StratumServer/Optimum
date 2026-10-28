@@ -35,7 +35,8 @@ namespace Cairo
 			// LIGHT is Cairo/Fontconfig's slight vertical hinting. GetGlyphPath
 			// deliberately returns unhinted outlines even on a hinted SKFont.
 			loadFlags = (fontLoadOptions & ~(15 << 16)) | 8 /* FT_LOAD_NO_BITMAP */;
-			loadFlags |= font.Hinting == SKFontHinting.Slight ? 1 << 16 :
+			loadFlags |= font.Edging == SKFontEdging.Alias ? (2 << 16) | 4096 /* FT_LOAD_TARGET_MONO | FT_LOAD_MONOCHROME */ :
+					font.Hinting == SKFontHinting.Slight ? 1 << 16 :
 					font.Edging == SKFontEdging.SubpixelAntialias ? 3 << 16 : 0;
 			try {
 				stream = font.Typeface.OpenStream(out int faceIndex)
@@ -101,12 +102,11 @@ namespace Cairo
 		internal double GetGlyphAdvance(ushort glyph, bool round)
 		{
 			Check(FT_Load_Glyph(face, glyph, loadFlags), "load glyph advance");
-			IntPtr slot = Marshal.PtrToStructure<FacePrefix>(face).Glyph;
-			Check(FT_Get_Glyph(slot, out IntPtr image), "copy glyph advance");
-			try {
-				double advance = (double)Marshal.PtrToStructure<OutlineGlyph>(image).Advance.X / (65536 * scaleX);
-				return round ? Math.Floor(advance * scaleX + 0.5) / scaleX : advance;
-			} finally { FT_Done_Glyph(image); }
+			var slot = Marshal.PtrToStructure<RenderedSlot>(Marshal.PtrToStructure<FacePrefix>(face).Glyph);
+			// Cairo uses the linear advance when metric hinting is disabled, even
+			// when the outline itself was loaded with grid fitting enabled.
+			return round ? Math.Floor((double)slot.Advance.X / 64 + 0.5) / scaleX
+				: (double)slot.LinearHorizontalAdvance / (65536 * scaleX);
 		}
 
 		internal SKPath GetGlyphPath(ushort glyph)

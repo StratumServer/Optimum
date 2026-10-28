@@ -52,7 +52,8 @@ namespace Cairo
 					double x = originX;
 					for (int i = 0; i < glyphs.Length; i++) {
 						AppendGlyph(state, font, hinted, glyphs[i], x + trans.X, originY + trans.Y);
-						x += state.FontFileSource != null && hinted != null ? hinted.GetGlyphAdvance(glyphs[i], options.HintMetrics != HintMetrics.Off) : widths[i];
+						// Layout on the same device grid as the hinted outlines, including system faces.
+						x += hinted != null ? hinted.GetGlyphAdvance(glyphs[i], options.HintMetrics != HintMetrics.Off) : widths[i];
 					}
 					state.MoveTo(x, originY);
 				}

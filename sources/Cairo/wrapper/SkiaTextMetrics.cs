@@ -122,6 +122,14 @@ namespace Cairo
 				SKRect[] bounds = new SKRect[glyphs.Length];
 				if (advanceFont != null) font.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
 				else measure.GetGlyphWidths(glyphs, widths, bounds);
+				// Cairo measures unhinted metrics at the face's EM size. Raster
+				// bounds enclose integer pixels and inflate again under a shear.
+				if (options.HintMetrics == HintMetrics.Off) {
+					for (int i = 0; i < glyphs.Length; i++) {
+						using var outline = font.GetGlyphPath(glyphs[i]);
+						bounds[i] = outline?.Bounds ?? SKRect.Empty;
+					}
+				}
 
 				double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
 				double xPos = 0;
@@ -222,6 +230,12 @@ namespace Cairo
 			float[] widths = new float[indices.Length];
 			SKRect[] bounds = new SKRect[indices.Length];
 			font.GetGlyphWidths(indices, widths, bounds);
+			if (options.HintMetrics == HintMetrics.Off) {
+				for (int i = 0; i < indices.Length; i++) {
+					using var outline = font.GetGlyphPath(indices[i]);
+					bounds[i] = outline?.Bounds ?? SKRect.Empty;
+				}
+			}
 
 			double minX = double.MaxValue, minY = double.MaxValue, maxX = double.MinValue, maxY = double.MinValue;
 			bool hasInk = false;

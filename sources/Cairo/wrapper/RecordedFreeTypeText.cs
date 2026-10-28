@@ -25,13 +25,33 @@ namespace Cairo
 			foreach (var clip in clips) mask.Canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
 			state.TryGetCurrentPoint(out double x, out double y);
 			Matrix matrix = state.Matrix;
-			TextExtents ink = SkiaTextMetrics.OutlineTextExtents(font, options, text, outlines);
-			mask.Canvas.ClipRect(new SKRect((float)Math.Floor(matrix.Xx * (x + ink.XBearing) + matrix.X0 + .5),
-				(float)Math.Floor(matrix.Yy * (y + ink.YBearing) + matrix.Y0 + .5),
-				(float)Math.Floor(matrix.Xx * (x + ink.XBearing + ink.Width) + matrix.X0 + .5),
-				(float)Math.Floor(matrix.Yy * (y + ink.YBearing + ink.Height) + matrix.Y0 + .5)), SKClipOperation.Intersect, false);
-			using var paint = new SKPaint { BlendMode = SKBlendMode.Screen, IsAntialias = false };
-			foreach (ushort glyph in font.GetGlyphs(text)) {
+			ushort[] glyphs = font.GetGlyphs(text);
+			double position = x, minX = double.PositiveInfinity, minY = double.PositiveInfinity;
+			double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity;
+			bool overlap = false;
+			// Cairo's image surface rounds each glyph origin before unioning its
+			// device-space metric box, then rounds the union outward (24.8 fixed).
+			foreach (ushort glyph in glyphs) {
+				SKRect ink = outlines.GetGlyphBounds(glyph, options.HintMetrics != HintMetrics.Off);
+				if (ink.Width > 0 && ink.Height > 0) {
+					double px = Math.Floor(matrix.Xx * position + matrix.X0 + .5);
+					double py = Math.Floor(matrix.Yy * y + matrix.Y0 + .5);
+					double left = px + Math.Round(matrix.Xx * ink.Left * 256) / 256;
+					double top = py + Math.Round(matrix.Yy * ink.Top * 256) / 256;
+					double right = px + Math.Round(matrix.Xx * ink.Right * 256) / 256;
+					double bottom = py + Math.Round(matrix.Yy * ink.Bottom * 256) / 256;
+					overlap |= right > minX && left < maxX && bottom > minY && top < maxY;
+					minX = Math.Min(minX, left); minY = Math.Min(minY, top);
+					maxX = Math.Max(maxX, right); maxY = Math.Max(maxY, bottom);
+				}
+				position += outlines.GetGlyphAdvance(glyph, options.HintMetrics != HintMetrics.Off);
+			}
+			// Cairo clips its accumulated mask only for overlapping metrics.
+			// Disjoint glyphs go straight to Pixman, retaining LCD fringe pixels.
+			if (overlap) mask.Canvas.ClipRect(new SKRect((float)Math.Floor(minX), (float)Math.Floor(minY),
+				(float)Math.Ceiling(maxX), (float)Math.Ceiling(maxY)), SKClipOperation.Intersect, false);
+			using var paint = new SKPaint { BlendMode = overlap ? SKBlendMode.Plus : SKBlendMode.Screen, IsAntialias = false };
+			foreach (ushort glyph in glyphs) {
 				double px = x, py = y; matrix.TransformPoint(ref px, ref py);
 				// Cairo caches glyph masks in quarter-pixel phases.
 				using var coverage = outlines.GetGlyphCoverage(glyph, antialias, order, out int left, out int top, Math.Floor((px - Math.Floor(px)) * 4 + .5) / 4, Math.Floor((py - Math.Floor(py)) * 4 + .5) / 4);

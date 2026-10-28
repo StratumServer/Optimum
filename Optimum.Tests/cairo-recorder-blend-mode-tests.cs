@@ -5,6 +5,27 @@ using Xunit;
 [Collection ("Cairo materialization metrics")]
 public sealed class CairoRecorderBlendModeTests
 {
+	[Theory]
+	[InlineData (Operator.Difference, Antialias.None)]
+	[InlineData (Operator.Difference, Antialias.Fast)]
+	[InlineData (Operator.Difference, Antialias.Gray)]
+	[InlineData (Operator.Difference, Antialias.Subpixel)]
+	[InlineData (Operator.Exclusion, Antialias.None)]
+	[InlineData (Operator.Exclusion, Antialias.Fast)]
+	[InlineData (Operator.Exclusion, Antialias.Gray)]
+	[InlineData (Operator.Exclusion, Antialias.Subpixel)]
+	public void SeparableBlendTextKeepsDestination (Operator blend, Antialias antialias)
+	{
+		CairoRecorderParityTests.AssertParity (160, 80, context => {
+			context.SetSourceRGBA (.2, .3, .4, .7); context.Paint ();
+			context.Operator = blend; context.Antialias = antialias;
+			context.SetSourceRGBA (.8, .5, .1, .7);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+			using (var options = new FontOptions { Antialias = antialias }) context.FontOptions = options;
+			context.MoveTo (3.375, 70.625); context.ShowText ("Screen ffi 123");
+		});
+	}
+
 	[Fact]
 	public void ScreenKeepsRecordedFillAndClippedPaint ()
 	{
