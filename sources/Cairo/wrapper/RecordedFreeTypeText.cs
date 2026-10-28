@@ -84,9 +84,17 @@ namespace Cairo
 						mask.Canvas.ClipRegion(region, SKClipOperation.Intersect);
 					} else mask.Canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
 				}
-				// Cairo clips its accumulated mask only for overlapping metrics.
-				// Disjoint glyphs go straight to Pixman, retaining LCD fringe pixels.
-				if (overlap || alphaClip) mask.Canvas.ClipRect(new SKRect((float)Math.Floor(minX), (float)Math.Floor(minY),
+				// Cairo clips its accumulated mask to the glyph metric box when the clip
+				// does not fully contain it (need_bounded_clip: mask vs bounded extents).
+				// Disjoint glyphs otherwise go straight to Pixman, retaining LCD fringe pixels.
+				bool boundedClip = false;
+				foreach (var clip in clips) {
+					var cb = clip.Path.Bounds;
+					if (cb.Left > Math.Floor(minX) || cb.Top > Math.Floor(minY)
+						|| cb.Right < Math.Ceiling(maxX) || cb.Bottom < Math.Ceiling(maxY))
+						boundedClip = true;
+				}
+				if (overlap || alphaClip || boundedClip) mask.Canvas.ClipRect(new SKRect((float)Math.Floor(minX), (float)Math.Floor(minY),
 					(float)Math.Ceiling(maxX), (float)Math.Ceiling(maxY)), SKClipOperation.Intersect, false);
 				// Cairo's complex-clip glyph compositor uses A8: LCD alpha is green.
 				using var alphaFilter = alphaClip ? SKColorFilter.CreateColorMatrix(new float[] {
