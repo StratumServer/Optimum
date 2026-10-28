@@ -250,6 +250,8 @@ jobs:
     needs: pack
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
 
@@ -320,3 +322,28 @@ jobs:
             printf '%s\n' "${files[@]}"
             gh release upload "$tag" "${files[@]}" --clobber --repo "${{ github.repository }}"
           fi
+
+  checksums:
+    name: Checksums and VirusTotal reports
+    if: ${{ github.event_name == 'release' || inputs.publish }}
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Pass the tag via the environment to prevent shell injection.
+      - name: Publish SHA-256 checksums and VirusTotal reports
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
+          RELEASE_TAG: ${{ needs.publish.outputs.tag }}
+        run: node scripts/release-checksums.js "$RELEASE_TAG"
