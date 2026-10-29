@@ -21,7 +21,7 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         return probe.Os switch
         {
             OsKind.Windows => CreateWindows(installDirectory, launcherPath, kinds),
-            OsKind.MacOs => CreateMac(installDirectory, kinds),
+            OsKind.MacOs => CreateMac(installDirectory, launcherPath, kinds),
             _ => CreateLinux(installDirectory, launcherPath, kinds),
         };
     }
@@ -39,7 +39,9 @@ public sealed class ShortcutWriter(ISystemProbe probe)
 
             try
             {
-                if (File.Exists(path))
+                if (GetLinkTarget(path) is not null)
+                    File.Delete(path);
+                else if (File.Exists(path))
                     File.Delete(path);
                 else if (Directory.Exists(path))
                     Directory.Delete(path, recursive: true);
@@ -532,27 +534,206 @@ public sealed class ShortcutWriter(ISystemProbe probe)
     private static string Posix(string root, params string[] parts) =>
         root.TrimEnd('/', '\\') + "/" + string.Join('/', parts);
 
-    private List<string> CreateMac(string installDirectory, ShortcutKinds kinds)
+    private List<string> CreateMac(string installDirectory, string launcherPath, ShortcutKinds kinds)
     {
         var written = new List<string>();
         string home = probe.HomeDirectory;
-
-        // The link target is a real .app bundle: a nested Optimum.app, or the
-        // install directory itself when the bundle contents were laid there.
-        string nested = Path.Combine(installDirectory, "Optimum.app");
-        string target = File.Exists(Path.Combine(nested, "Contents", "Info.plist"))
-            ? nested
-            : installDirectory;
-        bool isBundle = File.Exists(Path.Combine(target, "Contents", "Info.plist"));
-        string linkName = isBundle ? "Optimum.app" : "Optimum";
+        if (!kinds.HasFlag(ShortcutKinds.Menu) && !kinds.HasFlag(ShortcutKinds.Desktop))
+            return written;
 
         if (kinds.HasFlag(ShortcutKinds.Menu))
-            written.AddRange(Symlink(Path.Combine(home, "Applications", linkName), target));
+        {
+            string app = Path.Combine(home, "Applications", "Optimum.app");
+            if (WriteMacAppBundle(app, installDirectory, launcherPath))
+                written.Add(app);
+        }
+
         if (kinds.HasFlag(ShortcutKinds.Desktop))
-            written.AddRange(Symlink(Path.Combine(home, "Desktop", linkName), target));
+        {
+            string app = Path.Combine(home, "Desktop", "Optimum.app");
+            if (WriteMacAppBundle(app, installDirectory, launcherPath))
+                written.Add(app);
+        }
 
         return written;
     }
+
+    private static bool WriteMacAppBundle(string app, string installDirectory, string launcherPath)
+    {
+        string staging = app + ".tmp-" + Guid.NewGuid().ToString("N");
+        string? backup = null;
+        string? previousLinkTarget = null;
+        bool installed = false;
+        try
+        {
+            string contents = Path.Combine(staging, "Contents");
+            string macOs = Path.Combine(contents, "MacOS");
+            string resources = Path.Combine(contents, "Resources");
+            Directory.CreateDirectory(macOs);
+            Directory.CreateDirectory(resources);
+
+            string executable = Path.Combine(macOs, "Optimum");
+            string install = PosixPath(installDirectory);
+            string launcher = PosixPath(launcherPath);
+            File.WriteAllText(executable,
+                "#!/bin/sh\n" +
+                $"cd {ShellQuote(install)} || exit $?\n" +
+                $"exec {ShellQuote(launcher)} \"$@\"\n");
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                    | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+
+            string sourceIcon = Path.Combine(installDirectory, "Icon.icns");
+            string? iconName = null;
+            if (File.Exists(sourceIcon))
+            {
+                iconName = "Optimum.icns";
+                File.Copy(sourceIcon, Path.Combine(resources, iconName), overwrite: true);
+            }
+
+            string iconKeys = iconName is null ? string.Empty
+                : $"    <key>CFBundleIconFile</key><string>{XmlEscape(iconName)}</string>\n";
+            string info = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                <plist version="1.0">
+                <dict>
+                    <key>CFBundleDevelopmentRegion</key><string>en</string>
+                    <key>CFBundleDisplayName</key><string>Optimum</string>
+                    <key>CFBundleExecutable</key><string>Optimum</string>
+                """ + "\n" + iconKeys + """
+                    <key>CFBundleIdentifier</key><string>at.vintagestory.optimum.launcher</string>
+                    <key>CFBundleName</key><string>Optimum</string>
+                    <key>CFBundlePackageType</key><string>APPL</string>
+                    <key>LSMinimumSystemVersion</key><string>12.2</string>
+                </dict>
+                </plist>
+                """;
+            File.WriteAllText(Path.Combine(contents, "Info.plist"), info);
+
+            previousLinkTarget = GetLinkTarget(app);
+            if (previousLinkTarget is not null)
+            {
+                if (!LinkTargetsInstallDirectory(app, previousLinkTarget, installDirectory))
+                    return false;
+                File.Delete(app);
+            }
+            else if (Directory.Exists(app))
+            {
+                if (!IsOptimumAppBundle(app))
+                    return false;
+                backup = app + ".backup-" + Guid.NewGuid().ToString("N");
+                Directory.Move(app, backup);
+            }
+            else if (File.Exists(app))
+            {
+                return false;
+            }
+
+            Directory.Move(staging, app);
+            installed = true;
+            if (backup is not null)
+                TryDeleteMacPath(backup);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            if (!installed)
+            {
+                if (backup is not null && Directory.Exists(backup) && !Directory.Exists(app))
+                {
+                    try { Directory.Move(backup, app); }
+                    catch (Exception restore) when (restore is IOException or UnauthorizedAccessException) { }
+                }
+                else if (previousLinkTarget is not null && !File.Exists(app) && !Directory.Exists(app))
+                {
+                    try { Directory.CreateSymbolicLink(app, previousLinkTarget); }
+                    catch (Exception restore) when (restore is IOException or UnauthorizedAccessException or PlatformNotSupportedException) { }
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            TryDeleteMacPath(staging);
+        }
+    }
+
+    private static string? GetLinkTarget(string path)
+    {
+        try
+        {
+            return new DirectoryInfo(path).LinkTarget ?? new FileInfo(path).LinkTarget;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static bool LinkTargetsInstallDirectory(string app, string linkTarget, string installDirectory)
+    {
+        try
+        {
+            string parent = Path.GetDirectoryName(Path.GetFullPath(app))!;
+            string linkedPath = Path.GetFullPath(linkTarget, parent);
+            return string.Equals(Path.GetFullPath(linkedPath), Path.GetFullPath(installDirectory), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsOptimumAppBundle(string app)
+    {
+        try
+        {
+            string infoPath = Path.Combine(app, "Contents", "Info.plist");
+            if (!File.Exists(infoPath))
+                return false;
+            var plist = System.Xml.Linq.XDocument.Load(infoPath);
+            var entries = plist.Root?.Element("dict")?.Elements().ToArray();
+            if (entries is null)
+                return false;
+            for (int i = 0; i + 1 < entries.Length; i++)
+            {
+                if (entries[i].Name.LocalName != "key" || entries[i].Value != "CFBundleIdentifier")
+                    continue;
+                string identifier = entries[i + 1].Value;
+                return identifier is "at.vintagestory.optimum.launcher" or "at.vintagestory.optimum";
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static void TryDeleteMacPath(string path)
+    {
+        try
+        {
+            if (GetLinkTarget(path) is not null || File.Exists(path))
+                File.Delete(path);
+            else if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static string PosixPath(string path) => path.Replace('\\', '/');
+
+    private static string ShellQuote(string value) => "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
+
+    private static string XmlEscape(string value) => value
+        .Replace("&", "&amp;", StringComparison.Ordinal)
+        .Replace("<", "&lt;", StringComparison.Ordinal)
+        .Replace(">", "&gt;", StringComparison.Ordinal)
+        .Replace("\"", "&quot;", StringComparison.Ordinal)
+        .Replace("'", "&apos;", StringComparison.Ordinal);
 
     private List<string> CreateWindows(string installDirectory, string launcherPath, ShortcutKinds kinds)
     {

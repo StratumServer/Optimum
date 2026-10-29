@@ -81,10 +81,9 @@ public sealed class SystemProbe : ISystemProbe
 
     public string? GetEnvironmentVariable(string name) => Environment.GetEnvironmentVariable(name);
 
-    public IReadOnlyList<string> PathDirectories =>
-        (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToArray();
+    public IReadOnlyList<string> PathDirectories => MacOsPath.Build(
+        Environment.GetEnvironmentVariable("PATH"), HomeDirectory, Os,
+        RuntimeInformation.ProcessArchitecture, Directory.Exists);
 
     public bool FileExists(string path) => File.Exists(path);
 
@@ -191,6 +190,8 @@ public sealed class SystemProbe : ISystemProbe
             UseShellExecute = false,
             CreateNoWindow = true,
         };
+        if (Os == OsKind.MacOs)
+            psi.Environment["PATH"] = string.Join(Path.PathSeparator, PathDirectories);
         foreach (var arg in arguments)
             psi.ArgumentList.Add(arg);
 

@@ -367,10 +367,12 @@ exclude_compile_items "$survival_project" \
 
 resolve_references() {
     local project_file="$1"
+    local output_root="$repo_root/bin/$configuration/net10.0"
+    local native_output_root="$(native_path "$output_root")"
     local native_donor_dir="$(native_path "$runtime_donor_dir")"
-    PROJECT_DIR="$(dirname "$project_file")" RUNTIME_DONOR_DIR="$runtime_donor_dir" NATIVE_DONOR_DIR="$native_donor_dir" perl -0pi -e '
-        my @dirs = ("$ENV{RUNTIME_DONOR_DIR}/Lib", $ENV{RUNTIME_DONOR_DIR}, "$ENV{RUNTIME_DONOR_DIR}/Mods");
-        my @native_dirs = ("$ENV{NATIVE_DONOR_DIR}/Lib", $ENV{NATIVE_DONOR_DIR}, "$ENV{NATIVE_DONOR_DIR}/Mods");
+    PROJECT_DIR="$(dirname "$project_file")" OUTPUT_ROOT="$output_root" NATIVE_OUTPUT_ROOT="$native_output_root" RUNTIME_DONOR_DIR="$runtime_donor_dir" NATIVE_DONOR_DIR="$native_donor_dir" perl -0pi -e '
+        my @dirs = ($ENV{OUTPUT_ROOT}, "$ENV{RUNTIME_DONOR_DIR}/Lib", $ENV{RUNTIME_DONOR_DIR}, "$ENV{RUNTIME_DONOR_DIR}/Mods");
+        my @native_dirs = ($ENV{NATIVE_OUTPUT_ROOT}, "$ENV{NATIVE_DONOR_DIR}/Lib", $ENV{NATIVE_DONOR_DIR}, "$ENV{NATIVE_DONOR_DIR}/Mods");
         my $project_dir = $ENV{PROJECT_DIR};
         # On Windows the native dir uses backslash; normalise to forward for joining
         for my $nd (@native_dirs) { $nd =~ s#\\#/#g; }

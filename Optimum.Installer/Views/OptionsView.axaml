@@ -27,7 +27,8 @@
                         IsChecked="{Binding CleanInstallDirectory}" TabIndex="2" />
               <TextBlock Text="{Binding ValidationError}" FontWeight="SemiBold"
                          Foreground="{DynamicResource SystemFillColorCriticalBrush}"
-                         TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive"
+                         TextWrapping="Wrap"
+                         AutomationProperties.LiveSetting="{OnPlatform Assertive, macOS=Off}"
                          IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
           </StackPanel>

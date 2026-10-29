@@ -53,7 +53,8 @@
                 IsChecked="{Binding Accepted}" x:Name="AcceptBox" TabIndex="1" />
       <TextBlock Text="{Binding ScrollHint}"
                  Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                 TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+                 TextWrapping="Wrap"
+                 AutomationProperties.LiveSetting="{OnPlatform Polite, macOS=Off}" />
       <WrapPanel HorizontalAlignment="Right">
         <Button Content="Back" Margin="0,0,8,0"
                 Command="{Binding DeclineCommand}" TabIndex="2" />

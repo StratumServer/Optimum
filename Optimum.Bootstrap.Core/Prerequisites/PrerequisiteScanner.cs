@@ -48,8 +48,24 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         new(PrerequisiteId.Ilspycmd, "ilspycmd", "ilspycmd (decompiler)", RequirementLevel.Optional, "bootstrap (auto-installs via dotnet tool)"),
     ];
 
+    private static readonly PrerequisiteDefinition[] MacOsDefinitions =
+    [
+        new(PrerequisiteId.Dotnet, "dotnet", ".NET SDK 10", RequirementLevel.Required, "bootstrap, build"),
+        new(PrerequisiteId.Git, "git", "Git", RequirementLevel.Required, "bootstrap, extract-patches"),
+        new(PrerequisiteId.Perl, "perl", "Perl", RequirementLevel.Required, "bootstrap, extract-patches"),
+        new(PrerequisiteId.Python3, "python3", "Python 3", RequirementLevel.Required, "bootstrap"),
+        new(PrerequisiteId.Curl, "curl", "curl", RequirementLevel.Required, "bootstrap, packaging"),
+        new(PrerequisiteId.Tar, "tar", "tar", RequirementLevel.Required, "bootstrap, packaging"),
+        new(PrerequisiteId.Chmod, "chmod", "chmod", RequirementLevel.Required, "packaging"),
+        new(PrerequisiteId.Pwsh, "pwsh", "PowerShell", RequirementLevel.RequiredForPackaging, "package-macos.ps1, package.ps1"),
+        new(PrerequisiteId.Unzip, "unzip", "unzip", RequirementLevel.Optional, "bootstrap (zip archives; a python3 fallback exists)"),
+        new(PrerequisiteId.Ilspycmd, "ilspycmd", "ilspycmd (decompiler)", RequirementLevel.Optional, "bootstrap (auto-installs via dotnet tool)"),
+    ];
+
     private PrerequisiteDefinition[] Definitions =>
-        probe.Os == OsKind.Windows ? WindowsDefinitions : UnixDefinitions;
+        probe.Os == OsKind.Windows ? WindowsDefinitions
+        : probe.Os == OsKind.MacOs ? MacOsDefinitions
+        : UnixDefinitions;
 
     public IReadOnlyList<PrerequisiteResult> Scan() => Definitions.Select(Detect).ToArray();
 
@@ -80,6 +96,12 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         if (path is not null)
             return Ok(def, path, null);
 
+        if (probe.Os == OsKind.MacOs)
+        {
+            (string instructions, string? url) = MacOsPrerequisiteHints.For(def.Command, probe.Arch);
+            return Missing(def, AcquisitionKind.Manual, instructions, url);
+        }
+
         if (NixEnvironment.IsNixOs(probe))
             return NixEnvironment.MissingFromDevelopmentShell(def, repoRoot, probe);
 
@@ -100,6 +122,12 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         if (probe.Os == OsKind.Windows)
             return new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
                 AcquisitionKind.DownloadPage, null, "https://aka.ms/powershell");
+        if (probe.Os == OsKind.MacOs)
+        {
+            (string instructions, string? url) = MacOsPrerequisiteHints.For("pwsh", probe.Arch);
+            return Missing(def, AcquisitionKind.Manual, instructions, url);
+        }
+
         if (NixEnvironment.IsNixOs(probe))
             return NixEnvironment.MissingFromDevelopmentShell(def, repoRoot, probe);
         return Missing(def, AcquisitionKind.DownloadPage, null, PowerShellLinuxInstallUrl);
@@ -140,6 +168,12 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
             ProcessOutcome outcome = probe.Run(sdk, ["--version"], ProbeTimeout);
             string? version = outcome.Started ? outcome.StandardOutput.Trim() : null;
             return Ok(def, sdk, version);
+        }
+
+        if (probe.Os == OsKind.MacOs)
+        {
+            (string instructions, string? url) = MacOsPrerequisiteHints.For("dotnet", probe.Arch);
+            return Missing(def, AcquisitionKind.Manual, instructions, url);
         }
 
         if (NixEnvironment.IsNixOs(probe))

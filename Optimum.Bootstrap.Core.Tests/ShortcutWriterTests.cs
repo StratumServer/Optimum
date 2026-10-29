@@ -194,4 +194,80 @@ public sealed class ShortcutWriterTests : IDisposable
 
         Assert.True(File.Exists(Path.Combine(_home, ".local", "share", "icons", "hicolor", "256x256", "apps", "optimum.png")));
     }
+
+    [Fact]
+    public void WritesLaunchableMacOsApplicationBundlesForMenuAndDesktop()
+    {
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/Optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+        File.WriteAllText(launcher, "#!/bin/sh\nexit 0\n");
+        File.WriteAllText($"{installDir}/Icon.icns", "icon");
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(
+            installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.Desktop);
+
+        string menuApp = $"{home}/Applications/Optimum.app";
+        string desktopApp = $"{home}/Desktop/Optimum.app";
+        Assert.Equal([menuApp, desktopApp], created);
+        foreach (string app in created)
+        {
+            Assert.True(File.Exists($"{app}/Contents/Info.plist"));
+            Assert.True(File.Exists($"{app}/Contents/MacOS/Optimum"));
+            Assert.True(File.Exists($"{app}/Contents/Resources/Optimum.icns"));
+            Assert.Contains("<key>CFBundlePackageType</key><string>APPL</string>",
+                File.ReadAllText($"{app}/Contents/Info.plist"));
+            Assert.Contains($"exec '{launcher}' \"$@\"", File.ReadAllText($"{app}/Contents/MacOS/Optimum"));
+        }
+
+        writer.Remove(created);
+        Assert.False(Directory.Exists(menuApp));
+        Assert.False(Directory.Exists(desktopApp));
+    }
+
+    [Fact]
+    public void DoesNotOverwriteAnUnrelatedMacOsApplicationDirectory()
+    {
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/Optimum";
+        string app = $"{home}/Applications/Optimum.app";
+        Directory.CreateDirectory(installDir);
+        Directory.CreateDirectory(app);
+        string sentinel = Path.Combine(app, "keep.txt");
+        File.WriteAllText(sentinel, "user data");
+
+        IReadOnlyList<string> created = new ShortcutWriter(probe).Create(
+            installDir, $"{installDir}/optimum-launch.sh", ShortcutKinds.Menu);
+
+        Assert.Empty(created);
+        Assert.Equal("user data", File.ReadAllText(sentinel));
+    }
+
+    [Fact]
+    public void ReplacesOnlyTheLegacyMacOsShortcutSymlink()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/Optimum";
+        string app = $"{home}/Applications/Optimum.app";
+        Directory.CreateDirectory(installDir);
+        File.WriteAllText(Path.Combine(installDir, "payload.txt"), "preserve install");
+        Directory.CreateSymbolicLink(app, installDir);
+
+        IReadOnlyList<string> created = new ShortcutWriter(probe).Create(
+            installDir, $"{installDir}/optimum-launch.sh", ShortcutKinds.Menu);
+
+        Assert.Equal([app], created);
+        Assert.Null(new DirectoryInfo(app).LinkTarget);
+        Assert.True(File.Exists(Path.Combine(app, "Contents", "Info.plist")));
+        Assert.Equal("preserve install", File.ReadAllText(Path.Combine(installDir, "payload.txt")));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "Contents")));
+    }
 }
