@@ -543,14 +543,14 @@ public sealed class ShortcutWriter(ISystemProbe probe)
 
         if (kinds.HasFlag(ShortcutKinds.Menu))
         {
-            string app = Path.Combine(home, "Applications", "Optimum.app");
+            string app = Posix(home, "Applications", "Optimum.app");
             if (WriteMacAppBundle(app, installDirectory, launcherPath))
                 written.Add(app);
         }
 
         if (kinds.HasFlag(ShortcutKinds.Desktop))
         {
-            string app = Path.Combine(home, "Desktop", "Optimum.app");
+            string app = Posix(home, "Desktop", "Optimum.app");
             if (WriteMacAppBundle(app, installDirectory, launcherPath))
                 written.Add(app);
         }

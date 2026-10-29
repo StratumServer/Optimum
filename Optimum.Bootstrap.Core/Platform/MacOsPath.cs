@@ -26,8 +26,9 @@ public static class MacOsPath
                 directories.Add(normalized);
         }
 
+        char separator = os == OsKind.MacOs ? ':' : Path.PathSeparator;
         foreach (string directory in (inheritedPath ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Split(separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             Add(directory);
 
         if (os == OsKind.MacOs)
@@ -50,7 +51,7 @@ public static class MacOsPath
             Add("/usr/local/share/dotnet");
             if (architecture == Architecture.Arm64)
                 Add("/usr/local/share/dotnet/x64");
-            Add(Path.Combine(homeDirectory, ".dotnet", "tools"));
+            Add(MacOsPathJoin(homeDirectory, ".dotnet", "tools"));
 
             // Command Line Tools and full Xcode provide additional developer
             // executables even when the app was launched outside a login shell.
@@ -60,4 +61,7 @@ public static class MacOsPath
 
         return directories;
     }
+
+    private static string MacOsPathJoin(string root, params string[] parts) =>
+        root.TrimEnd('/', '\\') + "/" + string.Join('/', parts);
 }

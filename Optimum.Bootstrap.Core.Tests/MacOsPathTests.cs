@@ -30,8 +30,9 @@ public class MacOsPathTests
     [Fact]
     public void LeavesNonMacOsPathUnchanged()
     {
+        string inheritedPath = string.Join(Path.PathSeparator, "/usr/bin", "/opt/tools");
         IReadOnlyList<string> path = MacOsPath.Build(
-            "/usr/bin:/opt/tools", "/Users/tester", OsKind.Linux, Architecture.X64,
+            inheritedPath, "/Users/tester", OsKind.Linux, Architecture.X64,
             _ => true);
 
         Assert.Equal(["/usr/bin", "/opt/tools"], path);
