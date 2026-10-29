@@ -152,17 +152,20 @@ fi
 PATCHED_LIB="$LIB_OUT/VintagestoryLib-patched.dll"
 
 # ============================================================================
-# 1. Acquire the official Linux client archive
+# 1. Resolve the official Linux client archive if extraction needs it
 # ============================================================================
 
 ZIP_CACHE="$REPO_ROOT/.vanilla/archives"
-mkdir -p "$ZIP_CACHE"
-
 if [[ -z "$CLIENT_ARCHIVE" ]]; then
     CLIENT_ARCHIVE="$ZIP_CACHE/vs_client_linux-x64_${VERSION}.tar.gz"
 fi
 
-if [[ ! -f "$CLIENT_ARCHIVE" ]]; then
+ensure_client_archive() {
+    mkdir -p "$ZIP_CACHE"
+    if [[ -f "$CLIENT_ARCHIVE" ]]; then
+        echo "Using cached $CLIENT_ARCHIVE"
+        return
+    fi
     URL="https://cdn.vintagestory.at/gamefiles/stable/vs_client_linux-x64_${VERSION}.tar.gz"
     echo "Downloading $URL"
     PARTIAL="$CLIENT_ARCHIVE.partial"
@@ -172,9 +175,7 @@ if [[ ! -f "$CLIENT_ARCHIVE" ]]; then
         echo "Download failed: $URL" >&2
         exit 1
     fi
-else
-    echo "Using cached $CLIENT_ARCHIVE"
-fi
+}
 
 # ============================================================================
 # 2. Extract the base install (vintagestory/) once
@@ -196,11 +197,13 @@ if [[ -d "$VANILLA_DIR/assets" ]]; then
 fi
 
 if [[ ! -d "$VANILLA_DIR" ]]; then
+    ensure_client_archive
     mkdir -p "$BASE_ROOT"
     echo "Extracting to $BASE_ROOT"
     tar -xzf "$CLIENT_ARCHIVE" -C "$BASE_ROOT"
     EXTRACTED_FRESH=1
 elif [[ -n "$EXTRACTED_VERSION" && "$EXTRACTED_VERSION" != "$VERSION" ]]; then
+    ensure_client_archive
     echo "Cached linux-x64 client is $EXTRACTED_VERSION, requested $VERSION - re-extracting"
     rm -rf "$BASE_ROOT"
     mkdir -p "$BASE_ROOT"

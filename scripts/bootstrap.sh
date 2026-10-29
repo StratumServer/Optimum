@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Builds a clean working tree for Optimum (client fork):
-#   1. Downloads the official VS client archive (this host's platform).
+#   1. Reuses a matching extracted client or downloads the official archive.
 #   2. Decompiles closed-source DLLs (Vintagestory.dll, VintagestoryLib.dll) with ILSpy.
 #   3. Clones open-source Anego forks at pinned refs.
 #   4. Applies patches/ and copies sources/ on top.
@@ -371,6 +371,12 @@ download_client_archive() {
   printf '%s\n' "$archive_path"
 }
 
+ensure_client_archive() {
+  if [[ -z "$client_archive" ]]; then
+    client_archive="$(download_client_archive "$zip_cache_dir")"
+  fi
+}
+
 require_cmd dotnet
 require_cmd git
 require_cmd perl
@@ -413,10 +419,6 @@ fi
 rm -f "$repo_root/.bootstrap-complete"
 
 # 1. Download and extract client.
-if [[ -z "$client_archive" ]]; then
-  client_archive="$(download_client_archive "$zip_cache_dir")"
-fi
-
 # `make deploy` overwrites $vanilla_dir/vintagestory/VintagestoryLib.dll with
 # the Cecil-patched output, since that directory doubles as the client folder
 # used for testing (`make run`). Optimum.Patcher's own vanilla input reads
@@ -466,6 +468,7 @@ if [[ -d "$vanilla_dir/vintagestory/assets" ]]; then
 fi
 
 if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
+  ensure_client_archive
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
@@ -474,6 +477,7 @@ elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
   echo "Extracted client is $extracted_version, requested $version - re-extracting"
   rm -rf "$vanilla_dir" "$snapshot_dir"
   rm -f "$repo_root/.bootstrap-complete"
+  ensure_client_archive
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"

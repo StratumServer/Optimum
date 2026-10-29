@@ -10,6 +10,7 @@ on:
       - 'scripts/install-linux.sh'
       - 'scripts/install-linux-legacy.sh'
       - 'scripts/package-linux.sh'
+      - 'scripts/package-macos.sh'
       - 'scripts/package-linux.ps1'
       - 'scripts/prepare-runtime-donors.sh'
       - 'scripts/prepare-runtime-donors.ps1'

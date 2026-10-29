@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using CliWrap;
 using CliWrap.EventStream;
 using Optimum.Bootstrap.Core.Acquisition;
@@ -20,8 +21,15 @@ file static class Encodings
 /// <c>.github/workflows/ci-platform-bootstrap.yml</c> runs by hand. It never
 /// reimplements those scripts.
 /// </summary>
-public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
+public sealed class ScriptBuildDriver(
+    ISystemProbe probe,
+    IClientArchiveAcquisition? clientArchives = null) : IBuildDriver
 {
+    private const long EstimatedSourceWorkspaceBytes = 3L * 1024 * 1024 * 1024;
+    private const long EstimatedTemporaryWorkspaceBytes = 1024L * 1024 * 1024;
+    private readonly IClientArchiveAcquisition _clientArchives =
+        clientArchives ?? new ClientArchiveAcquisition(probe);
+
     public async Task<BuildResult> RunAsync(
         BuildRequest request,
         IBuildObserver observer,
@@ -42,12 +50,56 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
                 $"The output directory must be empty or absent: {request.OutputDirectory}");
         }
 
-        Directory.CreateDirectory(request.OutputDirectory);
-
         try
         {
+            BuildRequest preparedRequest = request;
+            if (request.ClientArchive is null)
+            {
+                if (HasMatchingExtractionCaches(request))
+                {
+                    var storage = new StorageSpaceProbe();
+                    StorageSpace? source = storage.GetAvailable(Path.Combine(request.RepoRoot, ".vanilla"));
+                    StorageSpace? temporary = storage.GetAvailable(Path.GetTempPath());
+                    string detail =
+                        $"Using the existing Vintage Story {ResolveVersion(request) ?? "client"} extraction cache; no client download is needed. " +
+                        $"Estimated build space: 3 GiB at the source and 1 GiB in temp. " +
+                        $"Free now: {FormatAvailable(source)} at the source and {FormatAvailable(temporary)} in temp.";
+                    observer.Phase(ProgressPhase.Decompile, 2, detail);
+                    observer.Log(LogLevel.Info, detail);
+                    if (HasLowSpace(source, temporary))
+                    {
+                        observer.Log(LogLevel.Warn,
+                            "Available space is below the estimate. You can cancel, free space, and retry.");
+                    }
+                }
+                else
+                {
+                    ClientArchivePlan plan = await _clientArchives.InspectAsync(
+                        request.RepoRoot, request.Version, forceful);
+                    observer.Phase(ProgressPhase.Decompile, 2, plan.Summary);
+                    observer.Log(LogLevel.Info, plan.Summary);
+                    if (plan.SpaceWarning is not null)
+                        observer.Log(LogLevel.Warn, plan.SpaceWarning);
+
+                    var progress = new InlineProgress<ClientArchiveProgress>(download =>
+                    {
+                        double fraction = plan.ExpectedBytes == 0
+                            ? 1
+                            : (double)download.DownloadedBytes / plan.ExpectedBytes;
+                        int percent = 2 + (int)Math.Clamp(fraction * 6, 0, 6);
+                        observer.Phase(ProgressPhase.Decompile, percent,
+                            $"Downloading Vintage Story client: {FormatBytes(download.DownloadedBytes)} of {FormatBytes(download.ExpectedBytes)}");
+                    });
+                    using var downloadCancellation = CancellationTokenSource.CreateLinkedTokenSource(forceful, graceful);
+                    string archive = await _clientArchives.EnsureAsync(plan, progress, downloadCancellation.Token);
+                    preparedRequest = request with { ClientArchive = archive };
+                }
+            }
+
+            Directory.CreateDirectory(request.OutputDirectory);
+
             StepOutcome bootstrap = await RunStep(
-                BootstrapCommand(request), request.RepoRoot, ProgressPhase.Decompile, 2, 48, observer,
+                BootstrapCommand(preparedRequest), request.RepoRoot, ProgressPhase.Decompile, 2, 48, observer,
                 clearPlatformEnv: false, forceful, graceful);
             if (!bootstrap.Ok)
             {
@@ -87,7 +139,7 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
             }
 
             StepOutcome package = await RunStep(
-                PackageCommand(request), request.RepoRoot, ProgressPhase.Assemble, 86, 95, observer,
+                PackageCommand(preparedRequest), request.RepoRoot, ProgressPhase.Assemble, 86, 95, observer,
                 clearPlatformEnv: false, forceful, graceful);
             if (!package.Ok)
                 return BuildResult.Failure(FailureReason.AssembleFailed, $"packaging exited {package.ExitCode}");
@@ -109,6 +161,12 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
         {
             CleanOutput(request.OutputDirectory, outputPreexisted);
             return BuildResult.Failure(FailureReason.Cancelled, "the build was cancelled");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException)
+        {
+            CleanOutput(request.OutputDirectory, outputPreexisted);
+            return BuildResult.Failure(FailureReason.DecompileFailed,
+                $"client download preflight or transfer failed: {ex.Message}");
         }
     }
 
@@ -158,6 +216,72 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
 
     private static string ScriptPath(string repoRoot, string scriptName) =>
         Path.GetFullPath(Path.Combine(repoRoot, "scripts", scriptName));
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1024L * 1024 * 1024
+            ? $"{bytes / (1024d * 1024 * 1024):0.#} GiB"
+            : $"{bytes / (1024d * 1024):0.#} MiB";
+
+    private static string FormatAvailable(StorageSpace? space) =>
+        space is null ? "unknown" : FormatBytes(space.AvailableBytes);
+
+    internal bool HasMatchingExtractionCaches(BuildRequest request)
+    {
+        string? version = ResolveVersion(request);
+        if (version is null)
+            return false;
+
+        string vanilla = Path.Combine(request.RepoRoot, ".vanilla", "win-x64", "vintagestory");
+        bool bootstrapCache = probe.Os == OsKind.Windows
+            ? HasVersionMarker(vanilla, version) && File.Exists(Path.Combine(vanilla, "Vintagestory.exe"))
+            : HasVersionedExtraction(vanilla, version);
+        if (!bootstrapCache)
+            return false;
+
+        if (probe.Os == OsKind.Windows)
+            return true;
+
+        string packageCache = probe.Os == OsKind.MacOs
+            ? Path.Combine(request.RepoRoot, ".vanilla", $"osx-{(probe.Arch == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64")}", "Vintage Story.app")
+            : Path.Combine(request.RepoRoot, ".vanilla", "linux-x64", "vintagestory");
+        return HasVersionedExtraction(packageCache, version);
+    }
+
+    private static bool HasVersionedExtraction(string directory, string version) =>
+        HasVersionMarker(directory, version)
+        && File.Exists(Path.Combine(directory, "VintagestoryLib.vanilla.dll"));
+
+    private static bool HasVersionMarker(string directory, string version) =>
+        File.Exists(Path.Combine(directory, "assets", $"version-{version}.txt"));
+
+    internal static bool HasLowSpace(StorageSpace? source, StorageSpace? temporary)
+    {
+        if (source is not null && temporary is not null
+            && string.Equals(source.VolumeRoot, temporary.VolumeRoot,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+        {
+            return source.AvailableBytes < EstimatedSourceWorkspaceBytes + EstimatedTemporaryWorkspaceBytes;
+        }
+
+        return (source is not null && source.AvailableBytes < EstimatedSourceWorkspaceBytes)
+            || (temporary is not null && temporary.AvailableBytes < EstimatedTemporaryWorkspaceBytes);
+    }
+
+    private static string? ResolveVersion(BuildRequest request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.Version))
+            return request.Version;
+
+        try
+        {
+            using JsonDocument forks = JsonDocument.Parse(File.ReadAllText(Path.Combine(request.RepoRoot, "forks.json")));
+            return forks.RootElement.GetProperty("vintageStoryVersion").GetString();
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
 
     private string DotnetExecutable() => DotnetSdkProbe.Find(probe) ?? "dotnet";
 
@@ -329,4 +453,9 @@ public sealed class ScriptBuildDriver(ISystemProbe probe) : IBuildDriver
     }
 
     private readonly record struct StepOutcome(bool Ok, int ExitCode, string Output);
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
 }
