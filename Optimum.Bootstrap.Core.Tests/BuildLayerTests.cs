@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
@@ -188,7 +190,8 @@ public class ScriptBuildDriverPreconditionTests
         try
         {
             BuildResult result = await new ScriptBuildDriver(probe).RunAsync(
-                new BuildRequest(repo, output), NullBuildObserver.Instance, CancellationToken.None)
+                new BuildRequest(repo, output, ClientArchive: @"C:\cache\vs_install_win-x64_1.22.7.exe"),
+                NullBuildObserver.Instance, CancellationToken.None)
                 .WaitAsync(TimeSpan.FromSeconds(30));
 
             Assert.False(result.Ok);
@@ -199,6 +202,107 @@ public class ScriptBuildDriverPreconditionTests
             if (Directory.Exists(root))
                 Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(OsKind.Windows, Architecture.X64, ".vanilla/win-x64/vintagestory")]
+    [InlineData(OsKind.Linux, Architecture.X64, ".vanilla/linux-x64/vintagestory")]
+    [InlineData(OsKind.MacOs, Architecture.Arm64, ".vanilla/osx-arm64/Vintage Story.app")]
+    public void MatchingBootstrapAndPackageExtractionsAvoidClientDownload(
+        OsKind os,
+        Architecture architecture,
+        string packageCacheRelativePath)
+    {
+        string repo = Path.Combine(Path.GetTempPath(), "optimum-extraction-cache-" + Guid.NewGuid().ToString("N"));
+        var probe = new FakeSystemProbe { Os = os, Arch = architecture };
+        string bootstrapCache = Path.Combine(repo, ".vanilla", "win-x64", "vintagestory");
+        string packageCache = Path.Combine(repo, packageCacheRelativePath);
+        AddValidExtraction(bootstrapCache, "1.22.7");
+        AddValidExtraction(packageCache, "1.22.7");
+        if (os == OsKind.Windows)
+        {
+            File.Delete(Path.Combine(bootstrapCache, "VintagestoryLib.vanilla.dll"));
+            File.WriteAllBytes(Path.Combine(bootstrapCache, "Vintagestory.exe"), [1]);
+        }
+
+        try
+        {
+            var driver = new ScriptBuildDriver(probe);
+
+            Assert.True(driver.HasMatchingExtractionCaches(new BuildRequest(repo, Path.Combine(repo, "out"), Version: "1.22.7")));
+            Assert.False(driver.HasMatchingExtractionCaches(new BuildRequest(repo, Path.Combine(repo, "out"), Version: "1.22.6")));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    private static void AddValidExtraction(string root, string version)
+    {
+        Directory.CreateDirectory(Path.Combine(root, "assets"));
+        File.WriteAllText(Path.Combine(root, "assets", $"version-{version}.txt"), string.Empty);
+        File.WriteAllBytes(Path.Combine(root, "VintagestoryLib.vanilla.dll"), [1]);
+    }
+
+    [Fact]
+    public void CacheSpaceWarningCombinesRequirementsOnSharedVolume()
+    {
+        Assert.True(ScriptBuildDriver.HasLowSpace(new StorageSpace("/", 3584L * 1024 * 1024),
+            new StorageSpace("/", 3584L * 1024 * 1024)));
+        Assert.False(ScriptBuildDriver.HasLowSpace(new StorageSpace("/", 4096L * 1024 * 1024),
+            new StorageSpace("/", 4096L * 1024 * 1024)));
+    }
+
+    [Fact]
+    public async Task MatchingExtractionCacheSkipsArchiveAcquisition()
+    {
+        string repo = Path.Combine(Path.GetTempPath(), "optimum-cache-reuse-" + Guid.NewGuid().ToString("N"));
+        string bootstrapCache = Path.Combine(repo, ".vanilla", "win-x64", "vintagestory");
+        string packageCache = Path.Combine(repo, ".vanilla", "linux-x64", "vintagestory");
+        Directory.CreateDirectory(Path.Combine(repo, "scripts"));
+        File.WriteAllText(Path.Combine(repo, "scripts", "bootstrap.sh"), "exit 1\n");
+        File.WriteAllText(Path.Combine(repo, "forks.json"), "{\"vintageStoryVersion\":\"1.22.7\"}");
+        AddValidExtraction(bootstrapCache, "1.22.7");
+        AddValidExtraction(packageCache, "1.22.7");
+        var probe = ReadyProbe();
+        var observer = new RecordingBuildObserver();
+
+        try
+        {
+            BuildResult result = await new ScriptBuildDriver(probe, new UnexpectedArchiveAcquisition()).RunAsync(
+                new BuildRequest(repo, Path.Combine(repo, "out"), Version: "1.22.7"),
+                observer, CancellationToken.None);
+
+            Assert.False(result.Ok);
+            Assert.Contains(observer.Phases, detail => detail.Contains("no client download is needed", StringComparison.Ordinal));
+            Assert.DoesNotContain(observer.Logs, message => message.Contains("unexpected archive acquisition", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    private sealed class UnexpectedArchiveAcquisition : IClientArchiveAcquisition
+    {
+        public Task<ClientArchivePlan> InspectAsync(string repoRoot, string? version, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("unexpected archive acquisition");
+
+        public Task<string> EnsureAsync(
+            ClientArchivePlan plan,
+            IProgress<ClientArchiveProgress>? progress,
+            CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("unexpected archive acquisition");
+    }
+
+    private sealed class RecordingBuildObserver : IBuildObserver
+    {
+        public List<string> Phases { get; } = [];
+        public List<string> Logs { get; } = [];
+        public void Phase(ProgressPhase phase, int percent, string detail) => Phases.Add(detail);
+        public void Log(LogLevel level, string message) => Logs.Add(message);
+        public void RawOutput(bool isError, string line) { }
     }
 }
 

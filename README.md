@@ -48,7 +48,7 @@ Some optimizations in this repository do not yet reach the shipped game. The per
 
 ## Getting Started
 
-Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
+Optimum compiles from source because Vintage Story is proprietary. The installer checks the official client download size and available workspace space before building. It validates the cached archive and keeps a partial download so a retry can resume when the server supports byte ranges. Subsequent builds reuse the cache.
 
 ### Graphical installer
 
