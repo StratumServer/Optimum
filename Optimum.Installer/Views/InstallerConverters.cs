@@ -2,7 +2,6 @@ using Avalonia;
 using Avalonia.Controls.Notifications;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
-using Avalonia.Styling;
 
 namespace Optimum.Installer.Views;
 
@@ -38,18 +37,6 @@ public static class InstallerConverters
     /// <summary>A pending step's circle has a 1.5px outline; a reached one has none.</summary>
     public static readonly IValueConverter StepCircleBorder =
         new FuncValueConverter<bool, Thickness>(reached => new Thickness(reached ? 0 : 1.5));
-
-    /// <summary>Reached step labels are full strength; pending ones are muted.
-    /// Explicit theme-aware colours so they always render (the WinUI text brushes
-    /// are not resolvable through Application.TryGetResource).</summary>
-    public static readonly IValueConverter StepLabelBrush =
-        new FuncValueConverter<bool, IBrush?>(reached =>
-        {
-            bool dark = Application.Current?.ActualThemeVariant == ThemeVariant.Dark;
-            if (reached)
-                return new SolidColorBrush(dark ? Color.FromRgb(0xFF, 0xFF, 0xFF) : Color.FromRgb(0x1A, 0x1A, 0x1A));
-            return new SolidColorBrush(dark ? Color.FromArgb(0x9E, 0xFF, 0xFF, 0xFF) : Color.FromArgb(0x9E, 0x00, 0x00, 0x00));
-        });
 
     /// <summary>The current step's label is emphasised; others are regular weight.</summary>
     public static readonly IValueConverter StepWeight =
