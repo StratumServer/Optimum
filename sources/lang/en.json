@@ -51,5 +51,17 @@
 	"optimum-renderscale-balanced": "Balanced (0.77x)",
 	"optimum-renderscale-performance": "Performance (0.67x)",
 	"optimum-godrayscap": "Cap God-Rays Samples",
-	"optimum-godrayscap-tooltip": "Limits the god-rays post-process to 100 texture samples. Off keeps the vanilla 180-sample path."
+	"optimum-godrayscap-tooltip": "Limits the god-rays post-process to 100 texture samples. Off keeps the vanilla 180-sample path.",
+	"optimum-compatibility-blocked-header": "Compatibility checks",
+	"optimum-compatibility-feature": "{0} is unavailable. Reason: {1}",
+	"optimum-compatibility-clear": "No compatibility conflicts found.",
+	"optimum-compatibility-report-missing": "No compatibility report was found. Features are adjustable but unverified. Start Optimum from the launcher to scan mods.",
+	"optimum-compatibility-feature-name-GreedyMesh": "Greedy Mesh",
+	"optimum-compatibility-feature-name-RenderScale": "Render Scale",
+	"optimum-compatibility-feature-name-GodRaysSampleCap": "God-Rays Sample Cap",
+	"optimum-compatibility-feature-name-EntityLightBatch": "Entity Light Batching",
+	"optimum-compatibility-feature-name-EntityShaderStateCache": "Entity Shader State Cache",
+	"optimum-compatibility-feature-name-Oit": "Order-Independent Transparency",
+	"optimum-compatibility-feature-name-MapPageCache": "Map Page Cache",
+	"optimum-compatibility-feature-name-ShaderPreprocessParallel": "Parallel Shader Preprocessing"
 }

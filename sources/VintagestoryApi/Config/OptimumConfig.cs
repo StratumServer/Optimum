@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Text;
@@ -544,7 +545,11 @@ public static class OptimumConfig
     // outside OptimumConfigData so a mod cannot make a runtime fallback
     // persistent by changing its shader files.
     private static readonly HashSet<string> _shaderCompatibilityDisabledFeatures = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, List<string>> _shaderCompatibilityFeatureReasons = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, List<string>> _shaderCompatibilityFeatureSources = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<string> _shaderCompatibilityScanErrors = [];
     private static bool _shaderCompatibilityScanFailed;
+    private static bool _shaderCompatibilityReportMissing;
     private static bool _greedyMeshVertexShaderReady;
     private static bool _greedyMeshFragmentShaderReady;
     private static string? _shaderCompatibilityFingerprint;
@@ -573,6 +578,30 @@ public static class OptimumConfig
     public static bool IsShaderFeatureDisabled(string feature) =>
         _shaderCompatibilityScanFailed || _shaderCompatibilityDisabledFeatures.Contains(feature);
 
+    public static bool IsShaderCompatibilityReportMissing => _shaderCompatibilityReportMissing;
+
+    public static string GetShaderFeatureBlockReason(string feature)
+    {
+        if (!IsShaderFeatureDisabled(feature)) return string.Empty;
+        var reasons = _shaderCompatibilityFeatureReasons.TryGetValue(feature, out List<string>? values)
+            ? values
+            : [];
+        var sources = _shaderCompatibilityFeatureSources.TryGetValue(feature, out List<string>? owners)
+            ? owners
+            : [];
+        var details = new List<string>();
+        if (_shaderCompatibilityScanFailed)
+        {
+            details.Add(_shaderCompatibilityScanErrors.Count > 0
+                ? $"Compatibility scan failed: {string.Join("; ", _shaderCompatibilityScanErrors)}"
+                : "Compatibility scan failed; this feature is disabled for safety.");
+        }
+        details.AddRange(reasons);
+        if (sources.Count > 0) details.Add($"Source: {string.Join(", ", sources)}.");
+        if (details.Count == 0) details.Add("Disabled by the shader compatibility scan.");
+        return string.Join(" ", details);
+    }
+
     public static void SetGreedyMeshShaderAbi(bool vertexShaderReady, bool fragmentShaderReady)
     {
         _greedyMeshVertexShaderReady = vertexShaderReady;
@@ -588,7 +617,11 @@ public static class OptimumConfig
     public static void ResetShaderCompatibilityForTests()
     {
         _shaderCompatibilityDisabledFeatures.Clear();
+        _shaderCompatibilityFeatureReasons.Clear();
+        _shaderCompatibilityFeatureSources.Clear();
+        _shaderCompatibilityScanErrors.Clear();
         _shaderCompatibilityScanFailed = false;
+        _shaderCompatibilityReportMissing = false;
         _shaderCompatibilityFingerprint = null;
         ResetShaderCompatibilityAfterReload();
     }
@@ -596,16 +629,28 @@ public static class OptimumConfig
     private static void LoadShaderCompatibilityReport()
     {
         _shaderCompatibilityDisabledFeatures.Clear();
+        _shaderCompatibilityFeatureReasons.Clear();
+        _shaderCompatibilityFeatureSources.Clear();
+        _shaderCompatibilityScanErrors.Clear();
         _shaderCompatibilityScanFailed = false;
+        _shaderCompatibilityReportMissing = false;
         _shaderCompatibilityFingerprint = null;
         ResetShaderCompatibilityAfterReload();
 
-        if (_dataPath == null) return;
+        if (_dataPath == null)
+        {
+            _shaderCompatibilityReportMissing = true;
+            return;
+        }
 
         string reportPath = Path.Combine(_dataPath, ".optimum", "shader-compatibility.json");
         try
         {
-            if (!File.Exists(reportPath)) return;
+            if (!File.Exists(reportPath))
+            {
+                _shaderCompatibilityReportMissing = true;
+                return;
+            }
 
             string json = File.ReadAllText(reportPath);
             var report = JsonSerializer.Deserialize<ShaderCompatibilityState>(json, new JsonSerializerOptions
@@ -615,6 +660,7 @@ public static class OptimumConfig
             if (report == null)
             {
                 _shaderCompatibilityScanFailed = true;
+                _shaderCompatibilityScanErrors.Add("The compatibility report is empty.");
                 return;
             }
 
@@ -628,11 +674,22 @@ public static class OptimumConfig
 
             _shaderCompatibilityScanFailed = report.ScanFailed;
             _shaderCompatibilityFingerprint = report.Fingerprint;
+            if (report.FeatureReasons != null)
+                foreach (var (feature, reasons) in report.FeatureReasons)
+                    if (reasons != null) _shaderCompatibilityFeatureReasons[feature] = reasons.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            if (report.FeatureSources != null)
+                foreach (var (feature, sources) in report.FeatureSources)
+                    if (sources != null) _shaderCompatibilityFeatureSources[feature] = sources.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            if (report.ScanErrors != null) _shaderCompatibilityScanErrors.AddRange(report.ScanErrors.Where(x => !string.IsNullOrWhiteSpace(x)));
         }
         catch (Exception)
         {
             _shaderCompatibilityDisabledFeatures.Clear();
+            _shaderCompatibilityFeatureReasons.Clear();
+            _shaderCompatibilityFeatureSources.Clear();
+            _shaderCompatibilityScanErrors.Clear();
             _shaderCompatibilityScanFailed = true;
+            _shaderCompatibilityScanErrors.Add("The compatibility report could not be read.");
             _shaderCompatibilityFingerprint = null;
         }
     }
@@ -1001,6 +1058,9 @@ public static class OptimumConfig
         public bool ScanFailed { get; set; }
         public string? Fingerprint { get; set; }
         public List<string>? DisabledFeatures { get; set; }
+        public Dictionary<string, List<string>>? FeatureReasons { get; set; }
+        public Dictionary<string, List<string>>? FeatureSources { get; set; }
+        public List<string>? ScanErrors { get; set; }
     }
 }
 
