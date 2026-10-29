@@ -66,6 +66,9 @@ jobs:
       - name: Runtime donor candidate resolution test
         run: bash scripts/tests/runtime-donor-dotnet-selection.sh
 
+      - name: Runtime donor API compatibility test
+        run: bash scripts/tests/runtime-donor-api-compatibility.sh
+
   windows-runtimeconfig:
     name: Windows PowerShell 5.1 runtimeconfig merge
     runs-on: windows-latest
