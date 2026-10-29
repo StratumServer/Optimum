@@ -137,13 +137,26 @@ Requires .NET 10 SDK, bash, python3, git, curl, perl.
 
 **NixOS** (non-FHS distribution):
 
-The interactive installer detects NixOS and routes the .NET 10 SDK prerequisite
-through nixpkgs, since the SDK from dot.net is a glibc build that cannot run
-there:
+The source installer uses the repository's locked Nix development shell for the
+.NET SDK and bootstrap commands. From the Prerequisites screen, copy its command
+and run it in a terminal. If flakes are already enabled in your Nix settings,
+the shorter `nix develop` command works from the repository root. Otherwise the
+installer's command enables flakes only for that invocation. Restart the
+installer from the resulting shell so it inherits the SDK and tools. This does
+not change a Nix profile or system configuration.
+
+For a manual source build, enable flakes for that command and enter the shell:
 
 ```sh
-nix profile install nixpkgs#dotnet-sdk_10
+nix --extra-experimental-features 'nix-command flakes' develop --no-update-lock-file
 ```
+
+The committed `flake.lock` pins nixpkgs. The shell supplies the .NET SDK 10
+compatible with `global.json`, Git, Perl, Python 3, curl, tar, coreutils, and
+PowerShell. Run `scripts/tests/nixos-dev-shell-smoke.sh` inside the shell to
+record the OS release, selected SDK, and prerequisite check. If Nix cannot
+provide a package for your architecture, use Nix package search for that tool
+and add an available package to a user development shell.
 
 The packaged launcher and game are glibc binaries as well, so run the AppImage
 through `appimage-run` with the runtime dependencies exposed. In the NixOS

@@ -80,6 +80,9 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         if (path is not null)
             return Ok(def, path, null);
 
+        if (NixEnvironment.IsNixOs(probe))
+            return NixEnvironment.MissingFromDevelopmentShell(def, repoRoot, probe);
+
         return Missing(def, DistroAcquisition(def.Command));
     }
 
@@ -94,10 +97,12 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         if (path is not null)
             return Ok(def, path, null);
 
-        return probe.Os == OsKind.Windows
-            ? new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
-                AcquisitionKind.DownloadPage, null, "https://aka.ms/powershell")
-            : Missing(def, AcquisitionKind.DownloadPage, null, PowerShellLinuxInstallUrl);
+        if (probe.Os == OsKind.Windows)
+            return new PrerequisiteResult(def, PrerequisiteState.Missing, def.DisplayName, null, null,
+                AcquisitionKind.DownloadPage, null, "https://aka.ms/powershell");
+        if (NixEnvironment.IsNixOs(probe))
+            return NixEnvironment.MissingFromDevelopmentShell(def, repoRoot, probe);
+        return Missing(def, AcquisitionKind.DownloadPage, null, PowerShellLinuxInstallUrl);
     }
 
     /// <summary>Accept a working system, user-scope or cached Git for Windows executable.</summary>
@@ -138,11 +143,7 @@ public sealed class PrerequisiteScanner(ISystemProbe probe, string repoRoot)
         }
 
         if (NixEnvironment.IsNixOs(probe))
-        {
-            return new PrerequisiteResult(def, PrerequisiteState.Missing,
-                $"{def.DisplayName} (install through nixpkgs)", null, null,
-                AcquisitionKind.Manual, NixEnvironment.DotnetSdkInstallCommand, null);
-        }
+            return NixEnvironment.MissingFromDevelopmentShell(def, repoRoot, probe);
 
         if (!NixEnvironment.DownloadedSdkRunnable(probe))
         {
