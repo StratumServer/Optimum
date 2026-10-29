@@ -6,11 +6,10 @@
              x:DataType="vm:PrerequisitesViewModel">
   <Grid RowDefinitions="Auto,*,Auto">
 
-    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,12">
-      <TextBlock Grid.Column="0" Text="{Binding Summary}"
-                 TextWrapping="Wrap" VerticalAlignment="Center" />
-      <Button Grid.Column="1" Content="Check again" Margin="16,0,0,0"
-              VerticalAlignment="Center" Command="{Binding RescanCommand}"
+    <Grid Grid.Row="0" RowDefinitions="Auto,Auto" Margin="0,0,0,12">
+      <TextBlock Grid.Row="0" Text="{Binding Summary}" TextWrapping="Wrap" />
+      <Button Grid.Row="1" Content="Check again" Margin="0,8,0,0"
+              HorizontalAlignment="Right" Command="{Binding RescanCommand}"
               AutomationProperties.Name="Check system requirements again" />
     </Grid>
 
@@ -22,18 +21,18 @@
             <TextBlock Text="Optimum source" FontSize="17" FontWeight="SemiBold" />
             <TextBlock Text="The matching public Optimum source is downloaded into your user cache. Vintage Story files are fetched later on this computer and are never bundled with the installer."
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-            <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <WrapPanel>
               <Button Content="Download source" Classes="accent"
                       IsVisible="{Binding CanAcquireSource}"
                       IsEnabled="{Binding !AcquiringSource}"
-                      Command="{Binding AcquireSourceCommand}" />
+                      Command="{Binding AcquireSourceCommand}" Margin="0,0,12,8" />
               <ProgressBar IsIndeterminate="True" Width="130" Height="4"
                            IsVisible="{Binding AcquiringSource}"
-                           AutomationProperties.Name="Downloading Optimum source" />
+                           AutomationProperties.Name="Downloading Optimum source" Margin="0,8,12,8" />
               <TextBlock Text="{Binding SourceStatus}"
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                          VerticalAlignment="Center" TextWrapping="Wrap" />
-            </StackPanel>
+            </WrapPanel>
           </StackPanel>
         </Border>
 
@@ -44,8 +43,8 @@
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:PrerequisiteRowViewModel">
               <Border Classes="Card">
-                <Grid ColumnDefinitions="*,Auto">
-                  <StackPanel Grid.Column="0" Spacing="4">
+                <StackPanel Spacing="8">
+                  <StackPanel Spacing="4">
                     <StackPanel Orientation="Horizontal" Spacing="10">
                       <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
                       <TextBlock Text="{Binding StatusLabel}" FontWeight="SemiBold"
@@ -60,25 +59,25 @@
                     <TextBlock Text="{Binding ConfirmationDetail}" IsVisible="{Binding AwaitingConfirmation}"
                                TextWrapping="Wrap" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                   </StackPanel>
-                  <StackPanel Grid.Column="1" Spacing="6" Margin="16,0,0,0"
-                              VerticalAlignment="Center">
+                  <WrapPanel>
                     <Button Content="{Binding ActionLabel}" Classes="accent"
                             IsVisible="{Binding ActionLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                             IsEnabled="{Binding CanRequestInstall}"
                             Command="{Binding ActionCommand}"
-                            ToolTip.Tip="{Binding ActionDetail}" />
+                            ToolTip.Tip="{Binding ActionDetail}" Margin="0,0,8,8" />
                     <Button Content="Confirm and install" Classes="accent"
                             IsVisible="{Binding AwaitingConfirmation}"
-                            Command="{Binding ConfirmInstallCommand}" />
+                            Command="{Binding ConfirmInstallCommand}" Margin="0,0,8,8" />
                     <Button Content="Not now" IsVisible="{Binding AwaitingConfirmation}"
+                            Margin="0,0,8,8"
                             Command="{Binding CancelConfirmationCommand}" />
                     <Button Content="Cancel installation" IsVisible="{Binding CanCancelInstall}"
-                            Command="{Binding CancelInstallCommand}" />
+                            Command="{Binding CancelInstallCommand}" Margin="0,0,8,8" />
                     <Button Content="{Binding ManualFallbackLabel}"
                             IsVisible="{Binding ManualFallbackLabel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                            Command="{Binding ManualDownloadCommand}" />
-                  </StackPanel>
-                </Grid>
+                            Command="{Binding ManualDownloadCommand}" Margin="0,0,8,8" />
+                  </WrapPanel>
+                </StackPanel>
               </Border>
             </DataTemplate>
           </ItemsControl.ItemTemplate>

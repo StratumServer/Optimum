@@ -55,22 +55,19 @@
         </Border>
 
         <Border Classes="Card">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Grid.Column="0" Spacing="8">
-              <TextBlock Text="Shortcuts" FontSize="17" FontWeight="SemiBold" />
-              <CheckBox Content="Add an application menu entry"
-                        IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
-              <CheckBox Content="Create a desktop shortcut"
-                        IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
-              <StackPanel Spacing="4" IsVisible="{Binding IsLinux}">
-                <CheckBox Content="Set Optimum as default handler for ModDB 1-click install links"
-                          IsChecked="{Binding RegisterUriHandler}" TabIndex="6" />
-                <TextBlock Text="{Binding UriHandlerHint}"
-                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-              </StackPanel>
+          <StackPanel Spacing="8">
+            <TextBlock Text="Shortcuts" FontSize="17" FontWeight="SemiBold" />
+            <CheckBox Content="Add an application menu entry"
+                      IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
+            <CheckBox Content="Create a desktop shortcut"
+                      IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
+            <StackPanel Spacing="4" IsVisible="{Binding IsLinux}">
+              <CheckBox Content="Set Optimum as default handler for ModDB 1-click install links"
+                        IsChecked="{Binding RegisterUriHandler}" TabIndex="6" />
+              <TextBlock Text="{Binding UriHandlerHint}"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="7" Width="250" Margin="20,0,0,0"
-                        IsVisible="{Binding ShowVersionChoice}">
+            <StackPanel Spacing="7" IsVisible="{Binding ShowVersionChoice}">
               <TextBlock Text="Vintage Story version" FontSize="17" FontWeight="SemiBold" />
               <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
                         HorizontalAlignment="Stretch"
@@ -78,7 +75,7 @@
               <TextBlock Text="Use the recommended version unless you need a compatibility bridge."
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
             </StackPanel>
-          </Grid>
+          </StackPanel>
         </Border>
 
       </StackPanel>
