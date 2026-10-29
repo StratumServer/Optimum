@@ -1,3 +1,4 @@
+using System.IO;
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
@@ -73,6 +74,39 @@ public class OptionsViewModelTests
         Assert.NotEqual(string.Empty, vm.InstallDirectory);
         Assert.Null(vm.ValidationError);
         Assert.True(vm.CanContinue);
+    }
+
+    [Fact]
+    public void WindowsDefaultInstallDirectoryIsUserScopedAndExplainsPathEntry()
+    {
+        var probe = RepoProbe();
+        probe.Os = Optimum.Bootstrap.Core.Platform.OsKind.Windows;
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+
+        var vm = new OptionsViewModel(probe, "/repo");
+
+        Assert.Equal(Path.Combine(probe.Environment["LOCALAPPDATA"]!, "Programs", "Optimum"), vm.InstallDirectory);
+        Assert.Contains("administrator", vm.InstallDirectoryHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AppData", vm.InstallDirectoryHint);
+    }
+
+    [Fact]
+    public void ContinueRejectsAnUnwritableDestinationWithAUserScopedAlternative()
+    {
+        var probe = RepoProbe();
+        probe.CanWrite = false;
+        var vm = new OptionsViewModel(probe, "/repo")
+        {
+            InstallDirectory = "/home/tester/optimum-install",
+        };
+        bool continued = false;
+        vm.ContinueRequested += () => continued = true;
+
+        vm.ContinueCommand.Execute(null);
+
+        Assert.False(continued);
+        Assert.Contains("writable location", vm.ValidationError);
+        Assert.Contains("administrator access", vm.ValidationError);
     }
 
     [Fact]

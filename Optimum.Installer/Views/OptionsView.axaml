@@ -14,11 +14,13 @@
               <TextBlock Text="Install folder path"
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontWeight="SemiBold" />
               <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
+                <TextBox Grid.Column="0" Text="{Binding InstallDirectory, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Install directory"
                          AutomationProperties.Name="Install directory" TabIndex="1" />
                 <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseInstallDirectory"
                         AutomationProperties.Name="Browse for an install directory" />
               </Grid>
+              <TextBlock Text="{Binding InstallDirectoryHint}"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
               <TextBlock Text="Optimum is built in a temporary workspace and moved here only after build and verification succeed."
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
               <CheckBox Content="Clean install folder if not empty"
@@ -42,7 +44,7 @@
               <TextBlock Text="Data folder path"
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontWeight="SemiBold" />
               <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
+                <TextBox Grid.Column="0" Text="{Binding DataPath, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Vintage Story data folder"
                          AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
                 <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseDataPath"
                         AutomationProperties.Name="Browse for a Vintage Story data folder" />

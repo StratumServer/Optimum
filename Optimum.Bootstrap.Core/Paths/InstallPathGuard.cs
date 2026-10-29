@@ -55,6 +55,9 @@ public static partial class InstallPathGuard
         if (probe.PathExists(install) && probe.IsSymbolicLink(install))
             return InstallPathVerdict.Reject($"The install directory is a symbolic link: {install}. Choose a real directory.");
 
+        if (probe.FileExists(install))
+            return InstallPathVerdict.Reject($"A file already exists at the install directory path: {install}. Choose a folder.");
+
         foreach (string vsDir in KnownVintageStoryDirectories(probe))
         {
             if (IsWithinOrEqual(probe, install, Canonical(probe, vsDir)))

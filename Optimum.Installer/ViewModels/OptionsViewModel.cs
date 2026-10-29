@@ -91,6 +91,10 @@ public sealed partial class OptionsViewModel : ViewModelBase
 
     public string? ExistingUriHandler { get; }
 
+    public string InstallDirectoryHint => _probe.Os == OsKind.Windows
+        ? "The default is in your user profile and normally needs no administrator access. Type or paste a path, including a hidden AppData path, or browse. The installer builds the selected Vintage Story version without changing existing game installs."
+        : "The default is in your user data folder. Type or paste a path, or browse. The installer builds the selected Vintage Story version without changing existing game installs.";
+
     public string UriHandlerHint => ExistingUriHandler is not null
         ? $"Current default handler: {ExistingUriHandler} (leave off to keep your existing handler)."
         : "Lets ModDB 1-click install links (vintagestorymodinstall://) open in Optimum.";
@@ -111,8 +115,16 @@ public sealed partial class OptionsViewModel : ViewModelBase
     private void Continue()
     {
         Validate();
-        if (CanContinue)
-            ContinueRequested?.Invoke();
+        if (!CanContinue)
+            return;
+
+        if (!_probe.CanWriteToDirectory(InstallDirectory))
+        {
+            ValidationError = $"Cannot write to {InstallDirectory}. Choose a folder under your user profile or another writable location. The installer does not request administrator access.";
+            return;
+        }
+
+        ContinueRequested?.Invoke();
     }
 
     [RelayCommand]
