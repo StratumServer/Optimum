@@ -21,19 +21,7 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 # script only ever talks to repositories it names explicitly.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
-# macOS ships Bash 3.2 (2007) and BSD coreutils; this script needs features
-# present only in Bash 4+ (associative arrays are unused, but `read -d ''`
-# edge-case behavior and `[[ =~ ]]` quoting rules differ) and GNU-style
-# null-delimited sort. The CI installs Bash 5 via Homebrew on macOS runners;
-# warn local users who forgot that step so the error points at the real cause
-# instead of at cryptic patch-application failures dozens of minutes later.
-if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
-  echo "WARNING: Bash ${BASH_VERSION} detected. This script is tested with" >&2
-  echo "  Bash 4+. On macOS, install a modern Bash and ensure it comes first" >&2
-  echo "  in PATH:  brew install bash" >&2
-  echo "  Then re-run:  \$(brew --prefix)/bin/bash scripts/bootstrap.sh ..." >&2
-fi
-
+# Keep bootstrap compatible with macOS's system Bash 3.2 and BSD coreutils.
 # Portable null-delimited sort. GNU sort supports -z; BSD sort (macOS default)
 # does not. Detect once at startup and define a function the patch loops use.
 if printf '\0' | sort -z >/dev/null 2>&1; then

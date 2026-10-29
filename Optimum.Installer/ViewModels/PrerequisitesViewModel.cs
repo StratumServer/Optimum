@@ -490,7 +490,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
             _ => null,
         };
 
-        Action? openPage = result.Acquisition == AcquisitionKind.DownloadPage
+        Action? openPage = result.Acquisition is AcquisitionKind.DownloadPage or AcquisitionKind.Manual
             && result.DownloadUrl is { Length: > 0 } url
             ? () => OpenUrl(url)
             : null;

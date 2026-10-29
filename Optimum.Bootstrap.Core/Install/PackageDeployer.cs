@@ -327,12 +327,39 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         }
 
         string sh = Path.Combine(stageDir, "optimum-launch.sh");
-        File.WriteAllText(sh, BuildLinuxLauncherScript(dataPath));
+        File.WriteAllText(sh, probe.Os == OsKind.MacOs
+            ? BuildMacOsLauncherScript(dataPath)
+            : BuildLinuxLauncherScript(dataPath));
         MakeExecutable(sh);
         if (dataPath is not null)
             File.WriteAllText(Path.Combine(stageDir, "datapath.cfg"), dataPath);
         _ = finalInstallDir;
         return sh;
+    }
+
+    internal static string BuildMacOsLauncherScript(string? dataPath)
+    {
+        string dataPathArgs = dataPath is null
+            ? "exec ./Optimum \"$@\""
+            : $$"""
+              HAS_CUSTOM_DATA_PATH=0
+              for arg in "$@"; do
+                  case "$arg" in
+                      -d|--dataPath|-d=*|--dataPath=*) HAS_CUSTOM_DATA_PATH=1; break ;;
+                  esac
+              done
+              if [ "$HAS_CUSTOM_DATA_PATH" -eq 0 ]; then
+                  exec ./Optimum --dataPath {{ShellQuote(dataPath)}} "$@"
+              fi
+              exec ./Optimum "$@"
+              """;
+
+        return $$"""
+            #!/bin/sh
+            set -eu
+            cd "$(dirname "$0")"
+            {{dataPathArgs}}
+            """;
     }
 
     internal static string BuildLinuxLauncherScript(string? dataPath)
