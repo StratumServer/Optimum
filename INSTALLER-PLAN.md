@@ -631,9 +631,12 @@ written against.
 `scripts/install-linux.sh:95-124` detects a missing standard glibc dynamic linker
 and refuses to run the `dot.net` installer, because the SDK it downloads hardcodes
 an interpreter path that does not exist on NixOS. Core keeps that refusal and
-keeps the substitute instruction `nix profile install nixpkgs#dotnet-sdk_10`. The
-completion screen keeps the warning at `scripts/install-linux.sh:913-914` that the
-resulting binaries need an FHS environment such as `steam-run`.
+uses the project-local `nix develop` shell. `flake.lock` pins nixpkgs and the
+shell provides the SDK selected by `global.json` plus bootstrap commands. The
+Prerequisites screen shows a copyable command with flakes enabled for that
+invocation and explains that the installer must be restarted from the shell.
+The completion screen keeps the warning at `scripts/install-linux.sh:913-914`
+that the resulting binaries need an FHS environment such as `steam-run`.
 
 ### The SDK bootstrapping paradox
 

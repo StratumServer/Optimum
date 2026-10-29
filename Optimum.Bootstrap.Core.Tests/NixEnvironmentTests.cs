@@ -72,10 +72,14 @@ public class NixEnvironmentTests
     }
 
     [Fact]
-    public void NixInstallCommandNamesNixpkgsAndTheSdk()
+    public void DevelopmentShellCommandIsRepositoryScopedAndEnablesFlakesForThatInvocation()
     {
-        Assert.Contains("nixpkgs", NixEnvironment.DotnetSdkInstallCommand);
-        Assert.Contains("dotnet-sdk_10", NixEnvironment.DotnetSdkInstallCommand);
+        Assert.Equal(
+            "nix --extra-experimental-features 'nix-command flakes' develop --no-update-lock-file '/repo path'",
+            NixEnvironment.DevelopmentShellCommand("/repo path"));
+        Assert.Equal(
+            "nix --extra-experimental-features 'nix-command flakes' develop --no-update-lock-file '/repo/it'\\''s'",
+            NixEnvironment.DevelopmentShellCommand("/repo/it's"));
     }
 
     [Fact]
@@ -104,7 +108,7 @@ public class NixEnvironmentTests
     }
 
     [Fact]
-    public void PrerequisiteScannerRoutesTheSdkRowThroughNixpkgsOnNixOs()
+    public void PrerequisiteScannerRoutesTheSdkRowThroughTheProjectDevelopmentShellOnNixOs()
     {
         var probe = new FakeSystemProbe();
         probe.Environment["NIX_STORE"] = "/nix/store";
@@ -114,8 +118,46 @@ public class NixEnvironmentTests
             .Single(r => r.Definition.Id == PrerequisiteId.Dotnet);
 
         Assert.Equal(PrerequisiteState.Missing, dotnet.State);
-        Assert.Contains("nixpkgs", dotnet.Label);
-        Assert.Equal(NixEnvironment.DotnetSdkInstallCommand, dotnet.AcquisitionCommand);
+        Assert.Contains("project Nix shell", dotnet.Label);
+        Assert.Equal(NixEnvironment.DevelopmentShellCommand("/repo"), dotnet.AcquisitionCommand);
+        Assert.Contains("restart the installer", dotnet.Guidance);
+    }
+
+    [Fact]
+    public void PrerequisiteScannerShowsProjectShellForMissingBootstrapCommandsOnNixOs()
+    {
+        var probe = new FakeSystemProbe();
+        probe.Environment["NIX_STORE"] = "/nix/store";
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "/absent/dotnet";
+
+        PrerequisiteResult[] missing = new PrerequisiteScanner(probe, "/repo").Scan()
+            .Where(result => result.State == PrerequisiteState.Missing
+                && result.Definition.Level == RequirementLevel.Required)
+            .ToArray();
+
+        Assert.NotEmpty(missing);
+        Assert.All(missing, result =>
+        {
+            Assert.Equal(AcquisitionKind.Manual, result.Acquisition);
+            Assert.Equal(NixEnvironment.DevelopmentShellCommand("/repo"), result.AcquisitionCommand);
+            Assert.Contains("global.json", result.Guidance);
+        });
+    }
+
+    [Fact]
+    public void PrerequisiteScannerExplainsUnsupportedNixArchitectureAndFallback()
+    {
+        var probe = new FakeSystemProbe { Arch = Architecture.X86 };
+        probe.Environment["NIX_STORE"] = "/nix/store";
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "/absent/dotnet";
+
+        PrerequisiteResult dotnet = new PrerequisiteScanner(probe, "/repo").Scan()
+            .Single(result => result.Definition.Id == PrerequisiteId.Dotnet);
+
+        Assert.Equal(AcquisitionKind.Manual, dotnet.Acquisition);
+        Assert.Equal("nix search nixpkgs 'dotnet-sdk_10'", dotnet.AcquisitionCommand);
+        Assert.Contains("X86", dotnet.Guidance);
+        Assert.Contains("user development shell", dotnet.Guidance);
     }
 
     [Fact]
