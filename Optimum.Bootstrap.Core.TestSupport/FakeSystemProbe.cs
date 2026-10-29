@@ -15,6 +15,7 @@ public sealed class FakeSystemProbe : ISystemProbe
     public HashSet<string> Files { get; } = new();
     public HashSet<string> Directories { get; } = new();
     public HashSet<string> Symlinks { get; } = new();
+    public bool CanWrite { get; set; } = true;
 
     /// <summary>Files that exist but lack an execute bit. Everything else in <see cref="Files"/> is executable.</summary>
     public HashSet<string> NonExecutable { get; } = new();
@@ -71,6 +72,8 @@ public sealed class FakeSystemProbe : ISystemProbe
         Files.Contains(Norm(path)) || Directories.Contains(Norm(path)) || Symlinks.Contains(Norm(path));
 
     bool ISystemProbe.IsSymbolicLink(string path) => Symlinks.Contains(Norm(path));
+
+    bool ISystemProbe.CanWriteToDirectory(string path) => CanWrite;
 
     string? ISystemProbe.ReadText(string path) =>
         FileContents.TryGetValue(Norm(path), out string? content) ? content : null;

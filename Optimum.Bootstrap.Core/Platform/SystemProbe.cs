@@ -48,6 +48,9 @@ public interface ISystemProbe
     /// <summary>True when the leaf at <paramref name="path"/> is a symbolic link.</summary>
     bool IsSymbolicLink(string path);
 
+    /// <summary>Checks whether a small temporary file can be created in this directory or its nearest existing parent.</summary>
+    bool CanWriteToDirectory(string path);
+
     string? ReadText(string path);
 
     IEnumerable<string> EnumerateFiles(string directory, string searchPattern);
@@ -116,6 +119,42 @@ public sealed class SystemProbe : ISystemProbe
         }
         catch (IOException) { return false; }
         catch (UnauthorizedAccessException) { return false; }
+    }
+
+    public bool CanWriteToDirectory(string path)
+    {
+        DirectoryInfo? directory;
+        try
+        {
+            directory = new DirectoryInfo(Path.GetFullPath(path));
+            while (directory is not null && !directory.Exists)
+            {
+                if (File.Exists(directory.FullName))
+                    return false;
+                directory = directory.Parent;
+            }
+        }
+        catch (ArgumentException) { return false; }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+
+        if (directory is null)
+            return false;
+
+        string probePath = Path.Combine(directory.FullName, $".optimum-write-check-{Guid.NewGuid():N}");
+        try
+        {
+            using (new FileStream(probePath, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { }
+            return true;
+        }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        finally
+        {
+            try { File.Delete(probePath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 
     public string? ReadText(string path)

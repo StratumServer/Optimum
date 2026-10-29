@@ -64,6 +64,14 @@ public class InstallPathGuardTests
     }
 
     [Fact]
+    public void RejectsAFileAtTheInstallDirectoryPath()
+    {
+        FakeSystemProbe probe = Linux();
+        probe.AddFile("/home/tester/games/optimum");
+        AssertRejected(InstallPathGuard.Check(probe, new InstallPathRequest("/home/tester/games/optimum")), "file already exists");
+    }
+
+    [Fact]
     public void RejectsAnInstallDirectoryThatIsItselfASymlink()
     {
         FakeSystemProbe probe = Linux();
