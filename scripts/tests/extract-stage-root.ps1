@@ -200,11 +200,130 @@ try {
     # 18. bootstrap.ps1 uses the helper for the Windows extraction.
     $bootstrap = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\bootstrap.ps1') -Raw
     Assert-True ($bootstrap -match 'extract-stage-root\.ps1') 'bootstrap.ps1 does not load extract-stage-root.ps1'
-    Assert-True ($bootstrap -match 'New-ExtractStageRoot') 'bootstrap.ps1 does not call New-ExtractStageRoot'
+    Assert-True ($bootstrap -match 'Invoke-ExtractWithStageFallback') 'bootstrap.ps1 does not extract through Invoke-ExtractWithStageFallback'
     Assert-True ($bootstrap -match 'Assert-ExtractPreflight') 'bootstrap.ps1 does not run the preflight before the download'
     Assert-True ($bootstrap -match 'Get-ExtractFailureHint') 'bootstrap.ps1 does not report the extraction directory on failure'
+
+    # 19. Controlled Folder Access: a staging directory inside a protected folder is skipped when the feature blocks, and kept when it does not.
+    $protectedDir = Join-Path $tempBase 'Protected Docs'
+    New-Item -ItemType Directory -Path $protectedDir | Out-Null
+    $cfaOn = [pscustomobject]@{ Enabled = 1; ProtectedFolders = @($protectedDir) }
+    $cfaAudit = [pscustomobject]@{ Enabled = 2; ProtectedFolders = @($protectedDir) }
+    $cfaOff = [pscustomobject]@{ Enabled = 0; ProtectedFolders = @($protectedDir) }
+    $cfaUnknown = [pscustomobject]@{ Enabled = $null; ProtectedFolders = @($protectedDir) }
+    $inside = Join-Path $protectedDir 'sub'
+    New-Item -ItemType Directory -Path $inside | Out-Null
+    Assert-True ((Get-ProtectedFolderFor -Path $inside -Info $cfaOn) -eq $protectedDir) 'a path inside a protected folder was not recognised'
+    Assert-True ((Get-ProtectedFolderFor -Path ($protectedDir + '\') -Info $cfaOn) -eq $protectedDir) 'the protected folder itself, with a trailing separator, was not recognised'
+    Assert-True ($null -eq (Get-ProtectedFolderFor -Path ($protectedDir + ' other') -Info $cfaOn)) 'a sibling that shares a name prefix was treated as protected'
+    Assert-True ($null -eq (Get-ProtectedFolderFor -Path $short -Info $cfaOn)) 'an unrelated path was treated as protected'
+    $root = New-ExtractStageRoot -Fallback $fallback -Candidates @($inside, $short) -ControlledFolderAccess $cfaOn
+    $created.Add($root)
+    Assert-True ($root.StartsWith($short)) 'a protected folder was used while Controlled Folder Access blocks'
+    $threw = $false
+    try { New-ExtractStageRoot -Fallback $inside -Candidates @($inside) -ControlledFolderAccess $cfaOn | Out-Null } catch {
+        $threw = $true
+        Assert-True ($_.Exception.Message -like '*Controlled Folder Access protects*') 'the error does not explain the protected folder'
+    }
+    Assert-True $threw 'a fallback inside a protected folder was used while Controlled Folder Access blocks'
+    foreach ($info in @($cfaAudit, $cfaOff, $cfaUnknown)) {
+        $root = New-ExtractStageRoot -Fallback $fallback -Candidates @($inside, $short) -ControlledFolderAccess $info
+        $created.Add($root)
+        Assert-True ($root.StartsWith($inside)) "a protected folder was skipped with Controlled Folder Access at $($info.Enabled)"
+    }
+    # The real reader returns the documented shape and never throws.
+    $real = Get-ControlledFolderAccessInfo
+    Assert-True ($null -eq $real.Enabled -or $real.Enabled -in 0, 1, 2) "Controlled Folder Access state $($real.Enabled) is not 0, 1, 2 or unknown"
+    Assert-True ($real.ProtectedFolders -is [array] -or $null -eq $real.ProtectedFolders -or $real.ProtectedFolders.Count -eq 0) 'protected folders are not a list'
+    if ($env:OS -eq 'Windows_NT') {
+        $docs = [Environment]::GetFolderPath('MyDocuments')
+        if ($docs) { Assert-True (@($real.ProtectedFolders | Where-Object { $_ -ieq $docs }).Count -eq 1) 'the Documents folder is missing from the protected defaults' }
+    }
+    # The hint names the app to allow and the Windows Security page.
+    $cfaHint = Get-ExtractFailureHint -StageRoot $inside -ExtractorPath 'C:\tools\innoextract.exe' -ControlledFolderAccess $cfaOn
+    Assert-True ($cfaHint -like '*Allow an app through Controlled folder access*') 'the hint does not point to the Windows Security setting'
+    Assert-True ($cfaHint -like '*C:\tools\innoextract.exe*') 'the hint does not name the extractor to allow'
+    Assert-True ($cfaHint -like '*which Controlled Folder Access protects*') 'the hint does not say the directory is protected'
+    Assert-True ((Get-ExtractFailureHint -StageRoot $short -ControlledFolderAccess $cfaOff) -notlike '*Controlled*') 'the hint mentions Controlled Folder Access while it is off'
+
+    # 20. An extraction that fails in one location is retried in the next one.
+    $locA = Join-Path $tempBase 'locA'; $locB = Join-Path $tempBase 'locB'; $locC = Join-Path $tempBase 'locC'
+    New-Item -ItemType Directory -Path $locA, $locB, $locC | Out-Null
+    $log = New-Object System.Collections.Generic.List[string]
+    $failOnA = { param($stage) $log.Add($stage); if ($stage.StartsWith($locA)) { return 2 }; return 0 }
+    $got = Invoke-ExtractWithStageFallback -Fallback $fallback -Candidates @($locA, $locB) -Extract $failOnA -ControlledFolderAccess $cfaOff 3>$null
+    $created.Add($got)
+    Assert-True ($got.StartsWith($locB)) "the retry did not move to the next location: $got"
+    Assert-True ($log.Count -eq 2) "expected two extraction attempts, saw $($log.Count)"
+    Assert-True (-not (Test-Path -LiteralPath $log[0])) 'the failed attempt left its staging directory behind'
+    Assert-True (Test-Path -LiteralPath $got) 'the successful staging directory is missing'
+    # A thrown error counts as a failure too, and extractor output before the exit code does not break the code.
+    $log.Clear()
+    $noisy = { param($stage) $log.Add($stage); 'stray output'; if ($stage.StartsWith($locA)) { throw 'access denied' }; 0 }
+    $got = Invoke-ExtractWithStageFallback -Fallback $fallback -Candidates @($locA, $locB) -Extract $noisy -ControlledFolderAccess $cfaOff 3>$null
+    $created.Add($got)
+    Assert-True ($got.StartsWith($locB) -and $log.Count -eq 2) 'a thrown extraction error was not retried, or stray output hid the exit code'
+    # First attempt succeeds: no retry.
+    $log.Clear()
+    $got = Invoke-ExtractWithStageFallback -Fallback $fallback -Candidates @($locA, $locB) -Extract { param($stage) $log.Add($stage); 0 } -ControlledFolderAccess $cfaOff
+    $created.Add($got)
+    Assert-True ($got.StartsWith($locA) -and $log.Count -eq 1) 'a successful first attempt was retried'
+    # Every location fails: bounded attempts, nothing left behind, and the error names each location and the Controlled Folder Access fix.
+    $log.Clear()
+    $threw = $false
+    try {
+        Invoke-ExtractWithStageFallback -Fallback $fallback -Candidates @($locA, $locB, $locC) -Extract { param($stage) $log.Add($stage); 2 } -ExtractorPath 'C:\tools\innoextract.exe' -ControlledFolderAccess $cfaOn 3>$null | Out-Null
+    } catch {
+        $threw = $true
+        foreach ($loc in @($locA, $locB, $locC)) { Assert-True ($_.Exception.Message.Contains($loc)) "the error does not name $loc" }
+        Assert-True ($_.Exception.Message -like '*exit 2*') 'the error does not report the exit code'
+        Assert-True ($_.Exception.Message -like '*Allow an app through Controlled folder access*') 'the error does not carry the Controlled Folder Access fix'
+    }
+    Assert-True $threw 'extraction that failed everywhere was reported as a success'
+    Assert-True ($log.Count -eq 3) "expected three attempts, saw $($log.Count)"
+    foreach ($attempt in $log) { Assert-True (-not (Test-Path -LiteralPath $attempt)) "failed attempt $attempt was not cleaned up" }
+    # The attempt limit holds.
+    $log.Clear()
+    try { Invoke-ExtractWithStageFallback -Fallback $fallback -Candidates @($locA, $locB, $locC) -Extract { param($stage) $log.Add($stage); 2 } -MaxAttempts 2 -ControlledFolderAccess $cfaOff 3>$null | Out-Null } catch { }
+    Assert-True ($log.Count -eq 2) "MaxAttempts 2 allowed $($log.Count) attempts"
+    # No usable location at the first attempt keeps the original explanation.
+    $threw = $false
+    try { Invoke-ExtractWithStageFallback -Fallback $tooLong -Candidates @($tooLong) -Extract { param($stage) 0 } -ControlledFolderAccess $cfaOff | Out-Null } catch {
+        $threw = $true
+        Assert-True ($_.Exception.Message -like '*-VanillaDir*') 'the first-attempt error lost its -VanillaDir advice'
+    }
+    Assert-True $threw 'no usable location was reported as a success'
+    # Retries also skip a location whose staging directory is protected.
+    $log.Clear()
+    $got = Invoke-ExtractWithStageFallback -Fallback $fallback -Candidates @($locA, $inside, $locB) -Extract { param($stage) $log.Add($stage); if ($stage.StartsWith($locA)) { 2 } else { 0 } } -ControlledFolderAccess $cfaOn 3>$null
+    $created.Add($got)
+    Assert-True ($got.StartsWith($locB) -and $log.Count -eq 2) 'a retry used a protected folder'
+
+    # 21. Candidates that differ only by a trailing separator are one candidate.
+    $dups = @(Get-ExtractStageCandidates -Destination $fallback)
+    $keys = @($dups | ForEach-Object { $_.TrimEnd('\', '/').ToLowerInvariant() })
+    Assert-True (($keys | Select-Object -Unique).Count -eq $keys.Count) 'candidates that differ only by a trailing separator were both listed'
+
+    # 22. Windows only: the 8.3 short form of a long path is shorter, is the same folder, and is accepted by the staging search.
+    if ($env:OS -eq 'Windows_NT') {
+        $longNamed = Join-Path $tempBase ('long-directory-name-' * 4)
+        New-Item -ItemType Directory -Path $longNamed | Out-Null
+        $shortForm = $null
+        try { $shortForm = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($longNamed).ShortPath } catch { }
+        if ($shortForm -and $shortForm.Length -lt $longNamed.Length) {
+            Assert-True (Test-Path -LiteralPath $shortForm) 'the 8.3 form does not resolve'
+            $root = New-ExtractStageRoot -Fallback $fallback -Candidates @($shortForm)
+            $created.Add($root)
+            Assert-True ($root.StartsWith($shortForm)) 'the 8.3 form was not usable as a staging parent'
+            Assert-True ((Test-Path -LiteralPath (Join-Path $longNamed (Split-Path -Leaf $root)))) 'the 8.3 staging directory is not inside the long-named folder'
+        } else {
+            Write-Host 'extract-stage-root: 8.3 names are not available on this volume; the 8.3 check was skipped'
+        }
+    }
 }
 finally {
+    # The default search in check 11 creates its directory outside $tempBase.
+    foreach ($dir in $created) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $tempBase -Recurse -Force -ErrorAction SilentlyContinue
 }
 
