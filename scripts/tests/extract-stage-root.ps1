@@ -52,10 +52,49 @@ try {
     Assert-True ($longHint -like '*260 characters*') 'hint does not name the path limit for a long path'
     Assert-True ($longHint -like '*-VanillaDir*') 'hint does not offer -VanillaDir'
 
-    # 6. bootstrap.ps1 uses the helper for the Windows extraction.
+    # 6. The probe creates and removes the deepest entry.
+    Assert-True ($null -eq (Test-ExtractStageWritable -Root $short)) 'the probe failed in a writable directory'
+    Assert-True (@(Get-ChildItem -LiteralPath $short -Force).Count -eq 0 -or -not (Test-Path (Join-Path $short 'app'))) 'the probe left files behind'
+    $blocked = Join-Path $tempBase 'blocked'
+    Set-Content -LiteralPath $blocked -Value 'not a directory'
+    Assert-True ($null -ne (Test-ExtractStageWritable -Root $blocked)) 'the probe passed under a path that is a file'
+
+    # 7. A candidate that cannot be written is skipped. A plain file blocks directory creation.
+    $root = New-ExtractStageRoot -Fallback $fallback -Candidates @($blocked, $short)
+    $created.Add($root)
+    Assert-True ($root.StartsWith($short)) 'a candidate that is a file was not skipped'
+
+    # 8. Too little free space rejects every candidate and the error lists why.
+    $threw = $false
+    try {
+        New-ExtractStageRoot -Fallback $fallback -Candidates @($short) -RequiredFreeBytes ([long]::MaxValue) | Out-Null
+    } catch {
+        $threw = $true
+        Assert-True ($_.Exception.Message -like '*MB free*') "the error does not report free space: $($_.Exception.Message)"
+        Assert-True ($_.Exception.Message -like "*$short*") 'the error does not name the rejected candidate'
+    }
+    Assert-True $threw 'a volume without room was accepted'
+    Assert-True (@(Get-ChildItem -LiteralPath $short -Directory -Filter 'optimum-ix-*' | Where-Object { $created -notcontains $_.FullName }).Count -eq 0) 'a rejected candidate left its directory behind'
+
+    # 9. The preflight removes its staging directory and checks the destination.
+    $before = @(Get-ChildItem -LiteralPath $short -Directory).Count
+    Assert-ExtractPreflight -Fallback $fallback -Destination (Join-Path $tempBase 'client') -Candidates @($short)
+    Assert-True (@(Get-ChildItem -LiteralPath $short -Directory).Count -eq $before) 'the preflight left its staging directory behind'
+    $threw = $false
+    try {
+        Assert-ExtractPreflight -Fallback $fallback -Destination (Join-Path $tempBase 'client') -Candidates @($short) -RequiredFreeBytes ([long]::MaxValue)
+    } catch { $threw = $true }
+    Assert-True $threw 'the preflight passed without enough free space'
+
+    # 10. The hint reports the long path switch.
+    Assert-True ((Get-ExtractFailureHint -StageRoot $short) -match 'LongPathsEnabled: (enabled|disabled|unknown)') 'hint does not report LongPathsEnabled'
+
+    # 11. bootstrap.ps1 uses the helper for the Windows extraction.
     $bootstrap = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\bootstrap.ps1') -Raw
     Assert-True ($bootstrap -match 'extract-stage-root\.ps1') 'bootstrap.ps1 does not load extract-stage-root.ps1'
     Assert-True ($bootstrap -match 'New-ExtractStageRoot') 'bootstrap.ps1 does not call New-ExtractStageRoot'
+    Assert-True ($bootstrap -match 'Assert-ExtractPreflight') 'bootstrap.ps1 does not run the preflight before the download'
+    Assert-True ($bootstrap.IndexOf('Assert-ExtractPreflight') -lt $bootstrap.IndexOf('curl.exe')) 'the preflight runs after the download starts'
     Assert-True ($bootstrap -match 'Get-ExtractFailureHint') 'bootstrap.ps1 does not report the extraction directory on failure'
 }
 finally {
