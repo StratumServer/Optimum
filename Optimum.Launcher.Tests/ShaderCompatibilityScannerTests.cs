@@ -103,6 +103,7 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
             "test");
 
         Assert.Contains(report.FeatureSources["EntityLightBatch"], source => source.Contains("RenderHookMod", StringComparison.Ordinal));
+        Assert.Equal(["RenderHookMod"], report.FeatureMods["EntityLightBatch"]);
         Assert.DoesNotContain(report.FeatureSources["EntityLightBatch"], source => source.Contains("UnrelatedShaders", StringComparison.Ordinal));
         Assert.Contains(report.FeatureSources["MapPageCache"], source => source.Contains("UnrelatedShaders", StringComparison.Ordinal));
     }

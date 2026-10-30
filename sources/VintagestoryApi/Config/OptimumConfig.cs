@@ -547,7 +547,9 @@ public static class OptimumConfig
     private static readonly HashSet<string> _shaderCompatibilityDisabledFeatures = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, List<string>> _shaderCompatibilityFeatureReasons = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, List<string>> _shaderCompatibilityFeatureSources = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, List<string>> _shaderCompatibilityFeatureMods = new(StringComparer.OrdinalIgnoreCase);
     private static readonly List<string> _shaderCompatibilityScanErrors = [];
+    private static bool _shaderCompatibilityReportStale;
     private static bool _shaderCompatibilityScanFailed;
     private static bool _shaderCompatibilityReportMissing;
     private static bool _greedyMeshVertexShaderReady;
@@ -579,6 +581,17 @@ public static class OptimumConfig
         _shaderCompatibilityScanFailed || _shaderCompatibilityDisabledFeatures.Contains(feature);
 
     public static bool IsShaderCompatibilityReportMissing => _shaderCompatibilityReportMissing;
+    public static bool IsShaderCompatibilityScanFailed => _shaderCompatibilityScanFailed;
+
+    // The report was written by an older Optimum, so mod names may be missing
+    // or approximate until the launcher rescans.
+    public static bool IsShaderCompatibilityReportStale => _shaderCompatibilityReportStale;
+
+    // Display names of the mods that blocked the feature, without file paths
+    // (those stay in GetShaderFeatureBlockReason for diagnostics).
+    public static string GetShaderFeatureBlockMods(string feature) =>
+        _shaderCompatibilityFeatureMods.TryGetValue(feature, out List<string>? mods) ? string.Join(", ", mods) : string.Empty;
+
 
     public static string GetShaderFeatureBlockReason(string feature)
     {
@@ -619,9 +632,11 @@ public static class OptimumConfig
         _shaderCompatibilityDisabledFeatures.Clear();
         _shaderCompatibilityFeatureReasons.Clear();
         _shaderCompatibilityFeatureSources.Clear();
+        _shaderCompatibilityFeatureMods.Clear();
         _shaderCompatibilityScanErrors.Clear();
         _shaderCompatibilityScanFailed = false;
         _shaderCompatibilityReportMissing = false;
+        _shaderCompatibilityReportStale = false;
         _shaderCompatibilityFingerprint = null;
         ResetShaderCompatibilityAfterReload();
     }
@@ -631,9 +646,11 @@ public static class OptimumConfig
         _shaderCompatibilityDisabledFeatures.Clear();
         _shaderCompatibilityFeatureReasons.Clear();
         _shaderCompatibilityFeatureSources.Clear();
+        _shaderCompatibilityFeatureMods.Clear();
         _shaderCompatibilityScanErrors.Clear();
         _shaderCompatibilityScanFailed = false;
         _shaderCompatibilityReportMissing = false;
+        _shaderCompatibilityReportStale = false;
         _shaderCompatibilityFingerprint = null;
         ResetShaderCompatibilityAfterReload();
 
@@ -681,12 +698,33 @@ public static class OptimumConfig
                 foreach (var (feature, sources) in report.FeatureSources)
                     if (sources != null) _shaderCompatibilityFeatureSources[feature] = sources.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
             if (report.ScanErrors != null) _shaderCompatibilityScanErrors.AddRange(report.ScanErrors.Where(x => !string.IsNullOrWhiteSpace(x)));
+            if (report.FeatureMods != null)
+                foreach (var (feature, mods) in report.FeatureMods)
+                    if (mods != null) _shaderCompatibilityFeatureMods[feature] = mods.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+            if (report.SchemaVersion < CurrentShaderReportSchemaVersion)
+            {
+                // Older reports carry no per-feature mod names. List every mod
+                // that ships shaders or render hooks, which is a superset of the
+                // real cause, and tell the player to refresh the scan.
+                _shaderCompatibilityReportStale = true;
+                if (!_shaderCompatibilityScanFailed && report.Sources != null)
+                {
+                    var approximate = report.Sources
+                        .Where(x => !string.IsNullOrWhiteSpace(x.Name) && ((x.ShaderFiles?.Count ?? 0) > 0 || (x.Indicators?.Any(IsShaderHookIndicator) ?? false)))
+                        .Select(x => x.Name!)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    foreach (string feature in _shaderCompatibilityDisabledFeatures)
+                        if (!_shaderCompatibilityFeatureMods.ContainsKey(feature)) _shaderCompatibilityFeatureMods[feature] = approximate;
+                }
+            }
         }
         catch (Exception)
         {
             _shaderCompatibilityDisabledFeatures.Clear();
             _shaderCompatibilityFeatureReasons.Clear();
             _shaderCompatibilityFeatureSources.Clear();
+            _shaderCompatibilityFeatureMods.Clear();
             _shaderCompatibilityScanErrors.Clear();
             _shaderCompatibilityScanFailed = true;
             _shaderCompatibilityScanErrors.Add("The compatibility report could not be read.");
@@ -1053,6 +1091,19 @@ public static class OptimumConfig
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
+    // Keep in step with ShaderCompatibilityScanner.CurrentSchemaVersion.
+    private const int CurrentShaderReportSchemaVersion = 2;
+
+    private static bool IsShaderHookIndicator(string indicator) =>
+        indicator is "ShaderRegistry" or "LoadShader" or "ShaderProgram" or "Harmony" or "RenderHook";
+
+    private sealed class ShaderCompatibilitySourceState
+    {
+        public string? Name { get; set; }
+        public List<string>? ShaderFiles { get; set; }
+        public List<string>? Indicators { get; set; }
+    }
+
     private sealed class ShaderCompatibilityState
     {
         public bool ScanFailed { get; set; }
@@ -1060,7 +1111,10 @@ public static class OptimumConfig
         public List<string>? DisabledFeatures { get; set; }
         public Dictionary<string, List<string>>? FeatureReasons { get; set; }
         public Dictionary<string, List<string>>? FeatureSources { get; set; }
+        public Dictionary<string, List<string>>? FeatureMods { get; set; }
         public List<string>? ScanErrors { get; set; }
+        public int SchemaVersion { get; set; }
+        public List<ShaderCompatibilitySourceState>? Sources { get; set; }
     }
 }
 

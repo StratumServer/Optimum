@@ -16,7 +16,7 @@ namespace Optimum.Launcher;
 /// </summary>
 public static class ShaderCompatibilityScanner
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     public const string ReportFileName = "shader-compatibility.json";
 
     private static readonly string[] ShaderFeatures =
@@ -292,24 +292,25 @@ public static class ShaderCompatibilityScanner
 
         AddFeatureDecision(report, "GreedyMesh", HasExternalShader(report, "chunkopaque.fsh") || HasExternalShader(report, "chunkopaque.vsh"),
             "greedy ABI requires both chunkopaque vertex and fragment shader contracts",
-            GetShaderSources(report, "chunkopaque.fsh", "chunkopaque.vsh"));
+            GetShaderSources(report, "chunkopaque.fsh", "chunkopaque.vsh"), GetShaderMods(report, "chunkopaque.fsh", "chunkopaque.vsh"));
         AddFeatureDecision(report, "RenderScale", HasExternalShader(report, "final.fsh"),
-            "external final shader owns the post-process contract", GetShaderSources(report, "final.fsh"));
+            "external final shader owns the post-process contract", GetShaderSources(report, "final.fsh"), GetShaderMods(report, "final.fsh"));
         AddFeatureDecision(report, "GodRaysSampleCap", HasExternalShader(report, "godrays.fsh"),
-            "external godrays shader owns the sample-count contract", GetShaderSources(report, "godrays.fsh"));
+            "external godrays shader owns the sample-count contract", GetShaderSources(report, "godrays.fsh"), GetShaderMods(report, "godrays.fsh"));
         bool externalShaderHooks = report.Sources.Any(x => x.Indicators.Any(IsShaderHookIndicator));
         bool externalShaderAssets = report.Sources.Any(x => x.ShaderFiles.Count > 0);
         AddFeatureDecision(report, "ShaderPreprocessParallel", externalShaderAssets || externalShaderHooks,
-            "external shader assets or shader hooks can depend on load order", GetSources(report, source => source.ShaderFiles.Count > 0 || HasShaderHooks(source)));
+            "external shader assets or shader hooks can depend on load order", GetSources(report, HasShaderAssetsOrHooks), GetMods(report, HasShaderAssetsOrHooks));
         AddFeatureDecision(report, "EntityLightBatch", externalShaderHooks,
-            "external render hooks can observe entity-light update ordering", GetSources(report, HasShaderHooks));
+            "external render hooks can observe entity-light update ordering", GetSources(report, HasShaderHooks), GetMods(report, HasShaderHooks));
         AddFeatureDecision(report, "EntityShaderStateCache", externalShaderHooks,
-            "external render hooks can observe entity shader state", GetSources(report, HasShaderHooks));
+            "external render hooks can observe entity shader state", GetSources(report, HasShaderHooks), GetMods(report, HasShaderHooks));
         AddFeatureDecision(report, "Oit", externalShaderHooks || HasExternalShader(report, "cloudvolumetric.fsh"),
             "external render or cloud shader owns the OIT integration point",
-            GetSources(report, HasShaderHooks).Concat(GetShaderSources(report, "cloudvolumetric.fsh")));
+            GetSources(report, HasShaderHooks).Concat(GetShaderSources(report, "cloudvolumetric.fsh")),
+            GetMods(report, HasShaderHooks).Concat(GetShaderMods(report, "cloudvolumetric.fsh")));
         AddFeatureDecision(report, "MapPageCache", externalShaderAssets || externalShaderHooks,
-            "external shader assets or shader hooks can dispose registered programs during reload", GetSources(report, source => source.ShaderFiles.Count > 0 || HasShaderHooks(source)));
+            "external shader assets or shader hooks can dispose registered programs during reload", GetSources(report, HasShaderAssetsOrHooks), GetMods(report, HasShaderAssetsOrHooks));
 
         if (report.ScanFailed)
         {
@@ -320,7 +321,7 @@ public static class ShaderCompatibilityScanner
         report.Fingerprint = ComputeFingerprint(report);
     }
 
-    private static void AddFeatureDecision(ShaderCompatibilityReport report, string feature, bool disabled, string reason, IEnumerable<string>? sources = null)
+    private static void AddFeatureDecision(ShaderCompatibilityReport report, string feature, bool disabled, string reason, IEnumerable<string>? sources = null, IEnumerable<string>? mods = null)
     {
         if (!disabled) return;
         if (!report.DisabledFeatures.Contains(feature, StringComparer.OrdinalIgnoreCase)) report.DisabledFeatures.Add(feature);
@@ -330,6 +331,16 @@ public static class ShaderCompatibilityScanner
             report.FeatureReasons[feature] = reasons;
         }
         if (!reasons.Contains(reason, StringComparer.Ordinal)) reasons.Add(reason);
+        if (mods != null)
+        {
+            if (!report.FeatureMods.TryGetValue(feature, out List<string>? featureMods))
+            {
+                featureMods = [];
+                report.FeatureMods[feature] = featureMods;
+            }
+            foreach (string mod in mods)
+                if (!string.IsNullOrWhiteSpace(mod) && !featureMods.Contains(mod, StringComparer.OrdinalIgnoreCase)) featureMods.Add(mod);
+        }
         if (sources == null) return;
         if (!report.FeatureSources.TryGetValue(feature, out List<string>? featureSources))
         {
@@ -353,6 +364,17 @@ public static class ShaderCompatibilityScanner
             string detail = source.ShaderFiles.Count > 0 ? string.Join(", ", source.ShaderFiles) : indicators;
             return $"{source.Name} ({source.SourcePath}{(detail.Length > 0 ? "; " + detail : string.Empty)})";
         });
+
+    // Display names only (no paths), for the in-game settings page.
+    private static IEnumerable<string> GetShaderMods(ShaderCompatibilityReport report, params string[] fileNames) =>
+        report.Sources
+            .Where(source => source.ShaderFiles.Any(path => fileNames.Contains(Path.GetFileName(path), StringComparer.OrdinalIgnoreCase)))
+            .Select(source => source.Name);
+
+    private static IEnumerable<string> GetMods(ShaderCompatibilityReport report, Func<ShaderModSource, bool> matches) =>
+        report.Sources.Where(matches).Select(source => source.Name);
+
+    private static bool HasShaderAssetsOrHooks(ShaderModSource source) => source.ShaderFiles.Count > 0 || HasShaderHooks(source);
 
     private static bool HasShaderHooks(ShaderModSource source) => source.Indicators.Any(IsShaderHookIndicator);
 
@@ -514,6 +536,7 @@ public sealed class ShaderCompatibilityReport
     public List<string> DisabledFeatures { get; set; } = [];
     public Dictionary<string, List<string>> FeatureReasons { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, List<string>> FeatureSources { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, List<string>> FeatureMods { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<string> ScanErrors { get; set; } = [];
 }
 
