@@ -5,6 +5,7 @@ on:
     paths: &script_paths
       - 'scripts/bootstrap.sh'
       - 'scripts/bootstrap.ps1'
+      - 'scripts/extract-stage-root.ps1'
       - 'scripts/git-repository.sh'
       - 'scripts/git-repository.ps1'
       - 'scripts/install-linux.sh'
@@ -80,6 +81,17 @@ jobs:
       - name: Run runtimeconfig sync under Windows PowerShell 5.1
         shell: powershell
         run: ./scripts/tests/sync-runtimeconfig-frameworks.ps1
+
+  windows-extract-stage:
+    name: Windows extraction staging path stays short
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run extraction staging test under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/extract-stage-root.ps1
 
   release-checksums:
     name: Release checksums and VirusTotal formatting
