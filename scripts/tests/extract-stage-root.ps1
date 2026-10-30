@@ -54,7 +54,7 @@ try {
 
     # 6. The probe creates and removes the deepest entry.
     Assert-True ($null -eq (Test-ExtractStageWritable -Root $short)) 'the probe failed in a writable directory'
-    Assert-True (@(Get-ChildItem -LiteralPath $short -Force).Count -eq 0 -or -not (Test-Path (Join-Path $short 'app'))) 'the probe left files behind'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $short 'app'))) 'the probe left files behind'
     $blocked = Join-Path $tempBase 'blocked'
     Set-Content -LiteralPath $blocked -Value 'not a directory'
     Assert-True ($null -ne (Test-ExtractStageWritable -Root $blocked)) 'the probe passed under a path that is a file'
@@ -105,12 +105,63 @@ try {
     $created.Add($root)
     Assert-True ($root.StartsWith($short)) 'the search stopped before reaching a usable candidate'
 
-    # 12. bootstrap.ps1 uses the helper for the Windows extraction.
+    # 12. The fallback is exempt from the safety margin only, never from the real limit.
+    $longFallback = Join-Path $tempBase ('b' * 150)
+    $threw = $false
+    try { New-ExtractStageRoot -Fallback $longFallback -Candidates @($tooLong) | Out-Null } catch {
+        $threw = $true
+        Assert-True ($_.Exception.Message -like '*-VanillaDir*') 'the error does not offer -VanillaDir'
+        Assert-True ($_.Exception.Message -like '*limit 247*') 'the error does not name the directory limit'
+    }
+    Assert-True $threw 'a fallback past the directory limit was accepted'
+    Assert-True (-not (Test-Path -LiteralPath $longFallback)) 'the over-long fallback was created'
+    $midFallback = Join-Path $tempBase ('c' * 60)
+    New-Item -ItemType Directory -Path $midFallback | Out-Null
+    $root = New-ExtractStageRoot -Fallback $midFallback -Candidates @($tooLong)
+    $created.Add($root)
+    Assert-True ($root.StartsWith($midFallback)) 'a fallback inside the real limit but past the margin was rejected'
+
+    # 13. A stage directory is created exclusively, and old leftovers are swept.
+    $existing = Join-Path $short 'exists'
+    New-Item -ItemType Directory -Path $existing | Out-Null
+    $threw = $false
+    try { New-PrivateExtractDirectory -Path $existing } catch { $threw = $true }
+    Assert-True $threw 'an existing directory was reused'
+    $stale = Join-Path $short 'optimum-ix-stale000000000'
+    $fresh = Join-Path $short 'optimum-ix-fresh000000000'
+    New-Item -ItemType Directory -Path $stale, $fresh | Out-Null
+    (Get-Item -LiteralPath $stale).LastWriteTime = (Get-Date).AddDays(-3)
+    $root = New-ExtractStageRoot -Fallback $fallback -Candidates @($short)
+    $created.Add($root)
+    Assert-True (-not (Test-Path -LiteralPath $stale)) 'a stale staging directory was not swept'
+    Assert-True (Test-Path -LiteralPath $fresh) 'a recent staging directory was swept'
+
+    # 14. Staging and destination on one volume need room for both.
+    $free = Get-ExtractFreeBytes -Path $short
+    if ($null -ne $free) {
+        $required = [long]($free * 0.6)
+        Assert-ExtractPreflight -Fallback $fallback -Destination (Join-Path $short 'client') -Candidates @($short) -RequiredFreeBytes ([long]($free * 0.3))
+        $threw = $false
+        try { Assert-ExtractPreflight -Fallback $fallback -Destination (Join-Path $short 'client') -Candidates @($short) -RequiredFreeBytes $required } catch { $threw = $true }
+        Assert-True $threw 'staging and destination on one volume were not added together'
+    }
+
+    # 15. bootstrap.ps1 runs the preflight as a command before the download command, not in a comment.
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\bootstrap.ps1'), [ref]$null, [ref]$null)
+    $commands = $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true)
+    $preflight = @($commands | Where-Object { $_.GetCommandName() -eq 'Assert-ExtractPreflight' })
+    $download = @($commands | Where-Object { $_.GetCommandName() -eq 'curl.exe' })
+    Assert-True ($preflight.Count -eq 1) "expected one Assert-ExtractPreflight call, found $($preflight.Count)"
+    Assert-True ($download.Count -ge 1) 'no curl.exe download command found'
+    if ($preflight.Count -eq 1 -and $download.Count -ge 1) {
+        Assert-True ($preflight[0].Extent.StartOffset -lt $download[0].Extent.StartOffset) 'the preflight does not run before the download'
+    }
+
+    # 16. bootstrap.ps1 uses the helper for the Windows extraction.
     $bootstrap = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\bootstrap.ps1') -Raw
     Assert-True ($bootstrap -match 'extract-stage-root\.ps1') 'bootstrap.ps1 does not load extract-stage-root.ps1'
     Assert-True ($bootstrap -match 'New-ExtractStageRoot') 'bootstrap.ps1 does not call New-ExtractStageRoot'
     Assert-True ($bootstrap -match 'Assert-ExtractPreflight') 'bootstrap.ps1 does not run the preflight before the download'
-    Assert-True ($bootstrap.IndexOf('Assert-ExtractPreflight') -lt $bootstrap.IndexOf('curl.exe')) 'the preflight runs after the download starts'
     Assert-True ($bootstrap -match 'Get-ExtractFailureHint') 'bootstrap.ps1 does not report the extraction directory on failure'
 }
 finally {

@@ -561,7 +561,7 @@ try {
         New-Item -ItemType Directory -Force -Path $zipCacheDir | Out-Null
         # Check before the ~570 MB download that the extraction can work here.
         if (($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)) {
-            Assert-ExtractPreflight -Fallback (Split-Path -Parent $winVanillaDir) -Destination $winVanillaDir
+            Assert-ExtractPreflight -Fallback (Split-Path -Parent $winVanillaDir) -Destination $winVanillaDir -ArchiveMissing:(-not ($ClientArchive -and (Test-Path -LiteralPath $ClientArchive)) -and -not (Test-Path -LiteralPath (Join-Path $zipCacheDir "vs_install_win-x64_$Version.exe")))
         }
         $exeName = "vs_install_win-x64_$Version.exe"
         if (-not $ClientArchive) {
@@ -729,7 +729,8 @@ try {
                 }
             }
         } finally {
-            if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }
+            if ($isWin) { Remove-ExtractStageDirectory -Path $extractRoot }
+            elseif (Test-Path -LiteralPath $extractRoot) { Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue }
         }
 
         $freshExtract = $true
