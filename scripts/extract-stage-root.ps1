@@ -124,6 +124,50 @@ function Test-ExtractStageWritable {
     return $failure
 }
 
+# Controlled Folder Access (Windows Security, ransomware protection) blocks
+# programs it does not trust from writing to protected folders: Documents,
+# Pictures, Videos, Music, Desktop and Favorites for the user and for Public,
+# plus any folder the user added. It judges the writing program, so this script
+# (PowerShell) can create the probe file where innoextract.exe cannot extract.
+# What can be known up front is whether the feature is on and which folders it
+# protects; a staging directory inside one is rejected. Anything else is caught
+# by retrying with another location when the extraction itself fails.
+# Enabled is 1 (blocking), 2 (audit only), 0 (off) or $null (not readable).
+function Get-ControlledFolderAccessInfo {
+    if ($env:OS -ne 'Windows_NT') { return [pscustomobject]@{ Enabled = $null; ProtectedFolders = @() } }
+    $folders = New-Object System.Collections.Generic.List[string]
+    $enabled = $null
+    $base = 'HKLM:\SOFTWARE\{0}\Windows Defender\Windows Defender Exploit Guard\Controlled Folder Access'
+    foreach ($key in @(($base -f 'Policies\Microsoft'), ($base -f 'Microsoft'))) {
+        try {
+            $value = (Get-ItemProperty -LiteralPath $key -Name EnableControlledFolderAccess -ErrorAction Stop).EnableControlledFolderAccess
+            if ($null -ne $value) { $enabled = [int]$value; break }
+        } catch { }
+    }
+    foreach ($key in @((($base -f 'Microsoft') + '\ProtectedFolders'), (($base -f 'Policies\Microsoft') + '\ProtectedFolders'))) {
+        try {
+            $item = Get-Item -LiteralPath $key -ErrorAction Stop
+            foreach ($name in $item.GetValueNames()) { if ($name) { $folders.Add($name) } }
+        } catch { }
+    }
+    foreach ($special in 'MyDocuments', 'MyPictures', 'MyVideos', 'MyMusic', 'Desktop', 'Favorites') {
+        try { $folders.Add([Environment]::GetFolderPath($special)) } catch { }
+    }
+    if ($env:PUBLIC) { foreach ($leaf in 'Documents', 'Pictures', 'Videos', 'Music', 'Desktop') { $folders.Add((Join-Path $env:PUBLIC $leaf)) } }
+    return [pscustomobject]@{ Enabled = $enabled; ProtectedFolders = @($folders | Where-Object { $_ } | Select-Object -Unique) }
+}
+
+# The protected folder that contains $Path, or $null.
+function Get-ProtectedFolderFor {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Info)
+    try { $full = [IO.Path]::GetFullPath($Path).TrimEnd('\', '/') } catch { return $null }
+    foreach ($folder in $Info.ProtectedFolders) {
+        $f = $folder.TrimEnd('\', '/')
+        if ($full -ieq $f -or $full.StartsWith($f + '\', [StringComparison]::OrdinalIgnoreCase) -or $full.StartsWith($f + '/', [StringComparison]::OrdinalIgnoreCase)) { return $folder }
+    }
+    return $null
+}
+
 # Parent directories to try for the staging folder, shortest and most likely
 # to be writable first: the temp folder (and its 8.3 short form, which survives
 # a long user name or a redirected temp), the system drive root, the root of
@@ -135,7 +179,10 @@ function Get-ExtractStageCandidates {
     $list = New-Object System.Collections.Generic.List[string]
     function Add-Candidate([string]$Path) {
         if (-not $Path) { return }
-        if (-not ($list | Where-Object { $_ -ieq $Path })) { $list.Add($Path) }
+        # A trailing separator does not make a different directory: the 8.3 form
+        # of a short temp path is the same folder with the slash dropped.
+        $key = $Path.TrimEnd('\', '/')
+        if (-not ($list | Where-Object { $_.TrimEnd('\', '/') -ieq $key })) { $list.Add($Path) }
     }
     function Get-ShortForm([string]$Path) {
         # 8.3 form through the scripting runtime; Windows only, and only when
@@ -178,13 +225,18 @@ function New-ExtractStageRoot {
     param(
         [Parameter(Mandatory)][string]$Fallback,
         [string[]]$Candidates,
-        [long]$RequiredFreeBytes = $script:ExtractStageRequiredFreeBytes
+        [long]$RequiredFreeBytes = $script:ExtractStageRequiredFreeBytes,
+        [string[]]$Exclude = @(),
+        $ControlledFolderAccess
     )
     if (-not $Candidates) { $Candidates = @(Get-ExtractStageCandidates -Destination $Fallback) }
+    if (-not $ControlledFolderAccess) { $ControlledFolderAccess = Get-ControlledFolderAccessInfo }
     $name = "optimum-ix-$([Guid]::NewGuid().ToString('N').Substring(0, 16))"
     $rejected = New-Object System.Collections.Generic.List[string]
     foreach ($parent in $Candidates + @($Fallback)) {
         if (-not $parent) { continue }
+        $parentKey = $parent.TrimEnd('\', '/')
+        if ($Exclude | Where-Object { $_.TrimEnd('\', '/') -ieq $parentKey }) { continue }
         $root = Join-Path $parent $name
         # The fallback is exempt from the safety margin only, never from the
         # real directory limit: a path over it cannot work for innoextract.
@@ -194,6 +246,13 @@ function New-ExtractStageRoot {
         if ($needed -gt $limit) {
             $rejected.Add("$parent (path would reach $needed characters, limit $limit)")
             continue
+        }
+        if ($ControlledFolderAccess.Enabled -eq 1) {
+            $protectedBy = Get-ProtectedFolderFor -Path $parent -Info $ControlledFolderAccess
+            if ($protectedBy) {
+                $rejected.Add("$parent (inside $protectedBy, which Controlled Folder Access protects)")
+                continue
+            }
         }
         if (Test-Path -LiteralPath $parent) { Remove-StaleExtractStageDirectories -Parent $parent }
         try {
@@ -262,6 +321,51 @@ function Assert-ExtractPreflight {
     }
 }
 
+# Creates a staging directory and runs $Extract with it. $Extract receives the
+# directory and returns the extractor's exit code (or throws). On a failure the
+# directory is removed and the next location is tried, up to $MaxAttempts, so a
+# location that only the extractor cannot write to (Controlled Folder Access,
+# a security product, a filter driver) does not end the install while another
+# location would work. Returns the staging directory of the attempt that
+# succeeded; the caller moves the files out and removes it. Throws, naming each
+# failed location, when every attempt fails.
+function Invoke-ExtractWithStageFallback {
+    param(
+        [Parameter(Mandatory)][string]$Fallback,
+        [Parameter(Mandatory)][scriptblock]$Extract,
+        [string[]]$Candidates,
+        [int]$MaxAttempts = 3,
+        [string]$ExtractorPath,
+        $ControlledFolderAccess
+    )
+    if (-not $ControlledFolderAccess) { $ControlledFolderAccess = Get-ControlledFolderAccessInfo }
+    $tried = New-Object System.Collections.Generic.List[string]
+    $failures = New-Object System.Collections.Generic.List[string]
+    $parameters = @{ Fallback = $Fallback; ControlledFolderAccess = $ControlledFolderAccess }
+    if ($Candidates) { $parameters.Candidates = $Candidates }
+    $lastStage = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $stage = New-ExtractStageRoot @parameters -Exclude $tried.ToArray()
+        } catch {
+            if ($failures.Count -eq 0) { throw }
+            $failures.Add("no other location qualifies ($($_.Exception.Message))")
+            break
+        }
+        $code = $null
+        $detail = $null
+        try { $code = @(& $Extract $stage)[-1] } catch { $detail = $_.Exception.Message }
+        if (-not $detail -and ($null -eq $code -or $code -eq 0)) { return $stage }
+        if (-not $detail) { $detail = "exit $code" }
+        $lastStage = $stage
+        $tried.Add((Split-Path -Parent $stage))
+        $failures.Add("$($tried[-1]) ($detail)")
+        Remove-ExtractStageDirectory -Path $stage
+        if ($attempt -lt $MaxAttempts) { Write-Warning "Extraction failed in $($tried[-1]) ($detail). Trying another location." }
+    }
+    throw "Extraction failed in every location tried: $($failures -join '; '). $(Get-ExtractFailureHint -StageRoot $lastStage -ExtractorPath $ExtractorPath -ControlledFolderAccess $ControlledFolderAccess)"
+}
+
 # Reads the Win32 long path switch for the failure hint. Windows applications
 # also need a longPathAware manifest, which innoextract lacks, so the value is
 # reported but never relied on.
@@ -278,12 +382,21 @@ function Get-LongPathsEnabledState {
 # long enough for it to be the cause.
 function Get-ExtractFailureHint {
     param(
-        [Parameter(Mandatory)][string]$StageRoot
+        [Parameter(Mandatory)][string]$StageRoot,
+        [string]$ExtractorPath,
+        $ControlledFolderAccess
     )
+    if (-not $ControlledFolderAccess) { $ControlledFolderAccess = Get-ControlledFolderAccessInfo }
     $total = $StageRoot.Length + $script:ExtractStageDeepestEntry
     $hint = "Extraction directory: $StageRoot ($($StageRoot.Length) characters; the deepest installer entry brings it to about $total). LongPathsEnabled: $(Get-LongPathsEnabledState)."
     if ($total -gt $script:ExtractStageMaxPath) {
         $hint += " Windows rejects paths over 260 characters for programs that have not opted in to long paths, and innoextract has not. Move the Optimum folder closer to the drive root, or install Vintage Story and pass -VanillaDir."
+    }
+    if ($ControlledFolderAccess.Enabled -eq 1) {
+        $protectedBy = Get-ProtectedFolderFor -Path $StageRoot -Info $ControlledFolderAccess
+        if ($protectedBy) { $hint += " The directory is inside $protectedBy, which Controlled Folder Access protects." }
+        $app = $(if ($ExtractorPath) { $ExtractorPath } else { 'innoextract.exe' })
+        $hint += " Controlled Folder Access is on and blocks programs it does not trust from writing to protected folders. In Windows Security, open Virus & threat protection > Ransomware protection > Allow an app through Controlled folder access and add $app, or install Vintage Story and pass -VanillaDir."
     }
     return $hint
 }

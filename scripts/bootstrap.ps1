@@ -694,17 +694,27 @@ try {
         $stageParent = Split-Path -Parent $winVanillaDir
         New-Item -ItemType Directory -Force -Path $stageParent | Out-Null
         if ($isWin) {
-            $extractRoot = New-ExtractStageRoot -Fallback $stageParent
+            # The extraction runs inside the helper so that a location innoextract
+            # cannot write to (Controlled Folder Access, a security product) makes
+            # it try the next one instead of ending the install.
+            Write-Host "Extracting with innoextract to $winVanillaDir"
+            $extractRoot = Invoke-ExtractWithStageFallback -Fallback $stageParent -ExtractorPath $innoextract -Extract {
+                param($stage)
+                Invoke-NativeStep { & $innoextract --silent --extract --output-dir $stage $ClientArchive } | Out-Host
+                return $LASTEXITCODE
+            }
         } else {
             $extractRoot = Join-Path $stageParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
             New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
         }
 
         try {
-            Write-Host "Extracting with innoextract to $winVanillaDir"
-            Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $ClientArchive }
-            if ($LASTEXITCODE -ne 0) {
-                throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive. $(Get-ExtractFailureHint -StageRoot $extractRoot)"
+            if (-not $isWin) {
+                Write-Host "Extracting with innoextract to $winVanillaDir"
+                Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $ClientArchive }
+                if ($LASTEXITCODE -ne 0) {
+                    throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive. $(Get-ExtractFailureHint -StageRoot $extractRoot)"
+                }
             }
 
             $sourceRoot = Join-Path $extractRoot 'app'
