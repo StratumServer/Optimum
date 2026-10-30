@@ -49,6 +49,8 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/_exec.ps1"
 # Explicit repository-path helper for cloned working trees (mirrors bootstrap.sh).
 . "$PSScriptRoot/git-repository.ps1"
+# Short staging directory for innoextract (Windows path length limit).
+. "$PSScriptRoot/extract-stage-root.ps1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 # A GIT_DIR inherited from the calling environment (some tools and shell rc
@@ -681,17 +683,24 @@ try {
             throw "innoextract could not inspect the installer '$ClientArchive'. The installer uses an unsupported Inno Setup format."
         }
 
-        # Extract into a clean staging folder beside the target
+        # Extract into a clean, short staging folder. On Windows the folder
+        # sits under the temp directory because innoextract is limited to 260
+        # character paths; elsewhere it stays beside the target so the final
+        # move is a rename.
         $stageParent = Split-Path -Parent $winVanillaDir
         New-Item -ItemType Directory -Force -Path $stageParent | Out-Null
-        $extractRoot = Join-Path $stageParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
-        New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        if ($isWin) {
+            $extractRoot = New-ExtractStageRoot -Fallback $stageParent
+        } else {
+            $extractRoot = Join-Path $stageParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        }
 
         try {
             Write-Host "Extracting with innoextract to $winVanillaDir"
             Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $ClientArchive }
             if ($LASTEXITCODE -ne 0) {
-                throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive"
+                throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive. $(Get-ExtractFailureHint -StageRoot $extractRoot)"
             }
 
             $sourceRoot = Join-Path $extractRoot 'app'
