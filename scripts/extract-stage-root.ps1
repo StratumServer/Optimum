@@ -60,6 +60,50 @@ function Test-ExtractStageWritable {
     return $failure
 }
 
+# Parent directories to try for the staging folder, shortest and most likely
+# to be writable first: the temp folder (and its 8.3 short form, which survives
+# a long user name or a redirected temp), the system drive root, the root of
+# every other fixed drive, the destination's own drive root, then shared and
+# profile folders. Duplicates and empty entries are dropped. The caller still
+# checks each one, so a root that is read-only or full is simply skipped.
+function Get-ExtractStageCandidates {
+    param([string]$Destination)
+    $list = New-Object System.Collections.Generic.List[string]
+    function Add-Candidate([string]$Path) {
+        if (-not $Path) { return }
+        if (-not ($list | Where-Object { $_ -ieq $Path })) { $list.Add($Path) }
+    }
+    function Get-ShortForm([string]$Path) {
+        # 8.3 form through the scripting runtime; Windows only, and only when
+        # 8.3 names are enabled on the volume.
+        try {
+            if (-not (Test-Path -LiteralPath $Path)) { return $null }
+            $short = (New-Object -ComObject Scripting.FileSystemObject).GetFolder($Path).ShortPath
+            if ($short -and $short.Length -lt $Path.Length) { return $short }
+        } catch { }
+        return $null
+    }
+
+    $temp = [IO.Path]::GetTempPath()
+    Add-Candidate $temp
+    Add-Candidate (Get-ShortForm $temp)
+    if ($env:SystemDrive) { Add-Candidate "$($env:SystemDrive)\" }
+    # Other drives only matter on Windows; elsewhere the mounts are not drives.
+    if ($env:OS -eq 'Windows_NT') { try {
+        foreach ($drive in [IO.DriveInfo]::GetDrives()) {
+            if ($drive.DriveType -eq 'Fixed' -and $drive.IsReady) { Add-Candidate $drive.RootDirectory.FullName }
+        }
+    } catch { } }
+    if ($Destination) {
+        try { Add-Candidate ([IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Destination))) } catch { }
+    }
+    foreach ($shared in @($env:ProgramData, $env:PUBLIC, $env:USERPROFILE)) {
+        Add-Candidate $shared
+        if ($shared) { Add-Candidate (Get-ShortForm $shared) }
+    }
+    return $list.ToArray()
+}
+
 # Returns a new, empty staging directory that passed three checks: its path
 # leaves room for the deepest installer entry, the volume has room for the
 # extraction, and the deepest entry can be created and written there. Prefers
@@ -72,10 +116,7 @@ function New-ExtractStageRoot {
         [string[]]$Candidates,
         [long]$RequiredFreeBytes = $script:ExtractStageRequiredFreeBytes
     )
-    if (-not $Candidates) {
-        $Candidates = @([IO.Path]::GetTempPath())
-        if ($env:SystemDrive) { $Candidates += "$($env:SystemDrive)\" }
-    }
+    if (-not $Candidates) { $Candidates = @(Get-ExtractStageCandidates -Destination $Fallback) }
     $name = "optimum-ix-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
     $rejected = New-Object System.Collections.Generic.List[string]
     foreach ($parent in $Candidates + @($Fallback)) {

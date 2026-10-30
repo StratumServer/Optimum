@@ -89,7 +89,23 @@ try {
     # 10. The hint reports the long path switch.
     Assert-True ((Get-ExtractFailureHint -StageRoot $short) -match 'LongPathsEnabled: (enabled|disabled|unknown)') 'hint does not report LongPathsEnabled'
 
-    # 11. bootstrap.ps1 uses the helper for the Windows extraction.
+    # 11. The default candidate list starts with the temp folder, has no empty or duplicate entries, and every entry is tried until one qualifies.
+    $defaults = @(Get-ExtractStageCandidates -Destination $fallback)
+    Assert-True ($defaults.Count -ge 1) 'no default candidates'
+    Assert-True ($defaults[0] -eq [IO.Path]::GetTempPath()) 'the temp folder is not the first candidate'
+    Assert-True (@($defaults | Where-Object { -not $_ }).Count -eq 0) 'a default candidate is empty'
+    Assert-True ((@($defaults | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)).Count -eq $defaults.Count) 'default candidates contain duplicates'
+    $root = New-ExtractStageRoot -Fallback $fallback
+    $created.Add($root)
+    Assert-True (Test-Path -LiteralPath $root -PathType Container) 'the default search found no usable directory'
+    # Several bad candidates in a row do not stop the search.
+    $bad1 = Join-Path $tempBase 'bad1'; Set-Content -LiteralPath $bad1 -Value 'x'
+    $bad2 = Join-Path $tempBase 'bad2'; Set-Content -LiteralPath $bad2 -Value 'x'
+    $root = New-ExtractStageRoot -Fallback $fallback -Candidates @($bad1, $tooLong, $bad2, $short)
+    $created.Add($root)
+    Assert-True ($root.StartsWith($short)) 'the search stopped before reaching a usable candidate'
+
+    # 12. bootstrap.ps1 uses the helper for the Windows extraction.
     $bootstrap = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\bootstrap.ps1') -Raw
     Assert-True ($bootstrap -match 'extract-stage-root\.ps1') 'bootstrap.ps1 does not load extract-stage-root.ps1'
     Assert-True ($bootstrap -match 'New-ExtractStageRoot') 'bootstrap.ps1 does not call New-ExtractStageRoot'
