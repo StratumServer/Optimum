@@ -34,8 +34,8 @@ jobs:
           # from the RID (win / linux / osx).
           - { os: windows-latest, rid: win-x64, exe: Optimum.Installer.exe, label: win }
           - { os: ubuntu-latest, rid: linux-x64, exe: Optimum.Installer, label: linux }
-          - { os: macos-14, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
-          - { os: macos-14, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
+          - { os: macos-15, rid: osx-arm64, exe: Optimum.Installer, label: osx-arm64 }
+          - { os: macos-15, rid: osx-x64, exe: Optimum.Installer, label: osx-x64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
