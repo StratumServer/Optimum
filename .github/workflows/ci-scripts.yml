@@ -83,7 +83,7 @@ jobs:
         run: ./scripts/tests/sync-runtimeconfig-frameworks.ps1
 
   windows-extract-stage:
-    name: Windows extraction staging path stays short
+    name: Windows extraction staging in PowerShell 5.1 and 7
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
@@ -91,6 +91,10 @@ jobs:
 
       - name: Run extraction staging test under Windows PowerShell 5.1
         shell: powershell
+        run: ./scripts/tests/extract-stage-root.ps1
+
+      - name: Run extraction staging test under PowerShell 7
+        shell: pwsh
         run: ./scripts/tests/extract-stage-root.ps1
 
   release-checksums:
