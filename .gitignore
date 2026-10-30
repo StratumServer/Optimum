@@ -54,6 +54,7 @@ research/benchmark-artifacts/
 # Build staging artifacts
 /lang/
 /shaders/
+/assets/
 
 # Misc
 .build/
