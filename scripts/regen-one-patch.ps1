@@ -37,7 +37,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($tmpBase, $baseText, $utf8)
 [System.IO.File]::WriteAllText($tmpWork, $workText, $utf8)
 
-$raw = & git --no-pager -c core.safecrlf=false diff --no-color --no-index -U5 -- $tmpBase $tmpWork 2>$null
+$raw = & git --no-pager -c core.safecrlf=false -c diff.algorithm=myers -c diff.noprefix=false diff --no-color --no-index -U5 -- $tmpBase $tmpWork 2>$null
 
 Remove-Item $tmpBase, $tmpWork -ErrorAction SilentlyContinue
 

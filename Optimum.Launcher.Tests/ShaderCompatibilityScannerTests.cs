@@ -81,6 +81,31 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
         Assert.Contains("MapPageCache", report.DisabledFeatures);
         Assert.Contains("GreedyMesh", report.DisabledFeatures);
         Assert.Contains("ShaderPreprocessParallel", report.DisabledFeatures);
+        Assert.Contains(report.FeatureSources["MapPageCache"], source => source.Contains("AncestralBliss", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FeatureSourcesOnlyNameModsThatTriggeredThatFeature()
+    {
+        string modsPath = Path.Combine(_root, "data", "Mods");
+        Directory.CreateDirectory(modsPath);
+        WriteHookAssembly(Path.Combine(modsPath, "RenderHookMod.dll"));
+        string unrelatedArchive = Path.Combine(modsPath, "UnrelatedShaders.zip");
+        using (ZipArchive archive = ZipFile.Open(unrelatedArchive, ZipArchiveMode.Create))
+        {
+            using StreamWriter writer = new(archive.CreateEntry("assets/custom/shaders/custom.fsh").Open());
+            writer.Write("void main() { }");
+        }
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            Path.Combine(_root, "data"),
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.Contains(report.FeatureSources["EntityLightBatch"], source => source.Contains("RenderHookMod", StringComparison.Ordinal));
+        Assert.Equal(["RenderHookMod"], report.FeatureMods["EntityLightBatch"]);
+        Assert.DoesNotContain(report.FeatureSources["EntityLightBatch"], source => source.Contains("UnrelatedShaders", StringComparison.Ordinal));
+        Assert.Contains(report.FeatureSources["MapPageCache"], source => source.Contains("UnrelatedShaders", StringComparison.Ordinal));
     }
 
     [Fact]
