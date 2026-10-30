@@ -323,7 +323,7 @@ namespace Vintagestory.Client.NoObf
 							try { state.Restore(); }
 							catch (Exception exception) { rendered = false; failureReason = "gl-state-restore-exception:" + exception.GetType().Name + ":" + exception.Message; }
 						}
-						try { if (framebuffer != 0) GL.DeleteFramebuffers(1, ref framebuffer); }
+						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
 						catch (Exception exception) { rendered = false; failureReason = "framebuffer-cleanup-exception:" + exception.GetType().Name + ":" + exception.Message; }
 						try
 						{
@@ -674,7 +674,7 @@ namespace Vintagestory.Client.NoObf
 							try { state.Restore(); }
 							catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "GL state restore: " + exception.Message); }
 						}
-						try { if (framebuffer != 0) GL.DeleteFramebuffers(1, ref framebuffer); }
+						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
 						catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "framebuffer cleanup: " + exception.Message); }
 						try { if (texture != 0) GL.DeleteTextures(1, ref texture); }
 						catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "texture cleanup: " + exception.Message); }
