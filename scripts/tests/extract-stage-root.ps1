@@ -11,9 +11,26 @@ $tempBase = Join-Path ([IO.Path]::GetTempPath()) ('ost-' + [guid]::NewGuid().ToS
 New-Item -ItemType Directory -Path $tempBase | Out-Null
 $created = New-Object System.Collections.Generic.List[string]
 
+# The real budget, captured before the test widens it for its own directories.
+$realMaxPath = $script:ExtractStageMaxPath
+$realMargin = $script:ExtractStageDeepestEntry
+# A Windows temp folder (C:\Users\<name>\AppData\Local\Temp) is longer than a
+# Linux one, so the directories this test creates under it would fall outside
+# the budget it is not testing. Widen the budget for them; the tests that
+# exercise the budget use paths far beyond it.
+$script:ExtractStageMaxPath = [Math]::Max($script:ExtractStageMaxPath, $tempBase.Length + 120 + $script:ExtractStageDeepestEntry)
+
 try {
     # The deepest installer entry that failed in the field report.
     $deepest = '\app\assets\survival\worldgen\dungeontiles\refinerynew\simple\blastfurnace\big66\trampledcobble\paths\entrance\epstd-lr-ene1.json'
+
+    # 0. The real budget: a default temp folder fits for user names up to 24 characters, and a drive root fits whatever the user name is.
+    $stageName = 'optimum-ix-' + ('0' * 16)
+    $tempFor24 = 'C:\Users\' + ('u' * 24) + '\AppData\Local\Temp\' + $stageName
+    $tempFor40 = 'C:\Users\' + ('u' * 40) + '\AppData\Local\Temp\' + $stageName
+    Assert-True (($tempFor24.Length + $realMargin) -le $realMaxPath) "temp for a 24 character user name needs $($tempFor24.Length + $realMargin) of $realMaxPath"
+    Assert-True (($tempFor40.Length + $realMargin) -gt $realMaxPath) 'a 40 character user name unexpectedly fits the temp folder; the test no longer covers the drive root path'
+    Assert-True ((('C:\' + $stageName).Length + $realMargin) -le $realMaxPath) 'a drive root does not fit the budget'
 
     # 1. The first usable candidate wins and leaves room for the deepest entry.
     $fallback = Join-Path $tempBase 'fallback'
@@ -115,7 +132,11 @@ try {
     }
     Assert-True $threw 'a fallback past the directory limit was accepted'
     Assert-True (-not (Test-Path -LiteralPath $longFallback)) 'the over-long fallback was created'
-    $midFallback = Join-Path $tempBase ('c' * 60)
+    # A fallback whose root plus the known deepest entry lands at 244 characters:
+    # past the 240 margin, inside the 247 directory limit. The root is
+    # <fallback>\optimum-ix-<16 hex>, which is 28 characters after the fallback.
+    $midLength = 244 - 129 - 28 - ($tempBase.Length + 1) - 1
+    $midFallback = Join-Path $tempBase ('c' * $midLength)
     New-Item -ItemType Directory -Path $midFallback | Out-Null
     $root = New-ExtractStageRoot -Fallback $midFallback -Candidates @($tooLong)
     $created.Add($root)
