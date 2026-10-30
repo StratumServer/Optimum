@@ -200,6 +200,67 @@ public sealed class ShaderCompatibilityReportTests : IDisposable
     }
 
     [Fact]
+    public void BlockModsListsModNamesFromCurrentReport()
+    {
+        WriteReport("""
+            {
+                "schemaVersion": 2,
+                "scanFailed": false,
+                "disabledFeatures": ["RenderScale", "Oit"],
+                "featureMods": { "RenderScale": ["Foo (beta)", "ModB"] }
+            }
+            """);
+
+        Assert.Equal("Foo (beta), ModB", OptimumConfig.GetShaderFeatureBlockMods("RenderScale"));
+        Assert.Equal(string.Empty, OptimumConfig.GetShaderFeatureBlockMods("Oit"));
+        Assert.False(OptimumConfig.IsShaderCompatibilityReportStale);
+        Assert.False(OptimumConfig.IsShaderCompatibilityScanFailed);
+    }
+
+    [Fact]
+    public void OldReportIsStaleAndFallsBackToModsWithShadersOrHooks()
+    {
+        WriteReport("""
+            {
+                "schemaVersion": 1,
+                "scanFailed": false,
+                "disabledFeatures": ["EntityLightBatch"],
+                "sources": [
+                    { "name": "ShaderMod", "shaderFiles": ["assets/game/shaders/blur.fsh"], "indicators": [] },
+                    { "name": "HookMod", "shaderFiles": [], "indicators": ["Harmony", "RenderHook"] },
+                    { "name": "PlainMod", "shaderFiles": [], "indicators": ["Other"] }
+                ]
+            }
+            """);
+
+        Assert.True(OptimumConfig.IsShaderCompatibilityReportStale);
+        Assert.Equal("ShaderMod, HookMod", OptimumConfig.GetShaderFeatureBlockMods("EntityLightBatch"));
+    }
+
+    [Fact]
+    public void StaleReportWithScanFailureDoesNotInventModNames()
+    {
+        WriteReport("""
+            {
+                "schemaVersion": 1,
+                "scanFailed": true,
+                "sources": [ { "name": "ShaderMod", "shaderFiles": ["assets/game/shaders/blur.fsh"] } ]
+            }
+            """);
+
+        Assert.True(OptimumConfig.IsShaderCompatibilityReportStale);
+        Assert.Equal(string.Empty, OptimumConfig.GetShaderFeatureBlockMods("RenderScale"));
+    }
+
+    private void WriteReport(string json)
+    {
+        string optimumDir = Path.Combine(_tempDataDir, ".optimum");
+        Directory.CreateDirectory(optimumDir);
+        File.WriteAllText(Path.Combine(optimumDir, "shader-compatibility.json"), json);
+        OptimumConfig.SetDataPath(_tempDataDir);
+    }
+
+    [Fact]
     public void SettingsPatchListsCompatibilityFeaturesAndShowsAvailabilityStatus()
     {
         string patch = File.ReadAllText(FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch"));
@@ -208,15 +269,26 @@ public sealed class ShaderCompatibilityReportTests : IDisposable
         Assert.Contains("AddOptimumCompatibilityStatus();", patch);
         Assert.Contains("IsShaderFeatureDisabled(feature)", patch);
         Assert.Contains("GetShaderFeatureBlockReason(feature)", patch);
+        Assert.Contains("GetShaderFeatureBlockMods(feature)", patch);
         Assert.Contains(".Enabled = false", patch);
         Assert.Contains("OptimumConfig.RenderScale >= 1.0f", patch);
-        Assert.Contains("optimum-compatibility-feature", patch);
+        Assert.Contains("optimum-compatibility-unavailable-suffix", patch);
+        Assert.Contains("optimum-compatibility-caused-by", patch);
         Assert.Contains("optimum-compatibility-blocked-header", language);
         Assert.Contains("optimum-compatibility-report-missing", language);
+        Assert.Contains("optimum-compatibility-report-stale", language);
+        Assert.Contains("IsShaderCompatibilityReportStale", patch);
         Assert.Contains("CurParentBounds.WithChild(optimumContentBounds)", patch);
-        Assert.Contains("WithParent(optimumContentBounds)", patch);
         Assert.DoesNotContain("BeginChildElements(optimumContentBounds)", patch);
         Assert.DoesNotContain('—', language);
+
+        // Every feature the settings page can block needs a plain-language
+        // explanation and a display name.
+        foreach (string feature in new[] { "GreedyMesh", "RenderScale", "GodRaysSampleCap", "EntityLightBatch", "EntityShaderStateCache", "Oit", "MapPageCache", "ShaderPreprocessParallel" })
+        {
+            Assert.Contains($"\"optimum-compatibility-why-{feature}\"", language);
+            Assert.Contains($"\"optimum-compatibility-feature-name-{feature}\"", language);
+        }
     }
 
     private static string FindRepositoryFile(string relativePath)

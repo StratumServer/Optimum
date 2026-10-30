@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..0000000 100644
+index 4d08f84..252075c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-@@ -48,6 +48,10 @@
+@@ -46,10 +46,14 @@ public class GuiCompositeSettings : GuiComposite
+ 
+ 	private ElementBounds iButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private ElementBounds dButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
@@ -13,7 +15,11 @@ index 4d08f84..0000000 100644
  	private ElementBounds backButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private List<ConfigItem> mousecontrolItems = new List<ConfigItem>();
-@@ -144,6 +148,7 @@
+ 
+ 	private bool mousecontrolsTabActive;
+@@ -142,19 +146,21 @@ public class GuiCompositeSettings : GuiComposite
+ 			mButtonBounds.ParentBounds = elementBounds;
+ 			cButtonBounds.ParentBounds = elementBounds;
  			sButtonBounds.ParentBounds = elementBounds;
  			iButtonBounds.ParentBounds = elementBounds;
  			dButtonBounds.ParentBounds = elementBounds;
@@ -21,7 +27,8 @@ index 4d08f84..0000000 100644
  			result = handler.dialogBase(dialogName + "main", elementBounds.fixedWidth, elementBounds.fixedHeight).BeginChildElements(elementBounds).AddToggleButton(Lang.Get("setting-graphics-header"), font, OnGraphicsOptions, gButtonBounds, "graphics")
  				.AddToggleButton(Lang.Get("setting-mouse-header"), font, OnMouseOptions, mButtonBounds, "mouse")
  				.AddToggleButton(Lang.Get("setting-controls-header"), font, OnControlOptions, cButtonBounds, "controls")
-@@ -152,7 +157,8 @@
+ 				.AddToggleButton(Lang.Get("setting-accessibility-header"), font, OnAccessibilityOptions, aButtonBounds, "accessibility")
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
  				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
@@ -31,7 +38,11 @@ index 4d08f84..0000000 100644
  		}
  		else
  		{
-@@ -170,6 +176,7 @@
+ 			ElementBounds elementBounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed).WithFixedPosition(0.0, 75.0);
+ 			double num = backButtonBounds.fixedX + backButtonBounds.fixedWidth + 35.0;
+@@ -168,10 +174,11 @@ public class GuiCompositeSettings : GuiComposite
+ 			mButtonBounds.ParentBounds = elementBounds3;
+ 			cButtonBounds.ParentBounds = elementBounds3;
  			sButtonBounds.ParentBounds = elementBounds3;
  			iButtonBounds.ParentBounds = elementBounds3;
  			dButtonBounds.ParentBounds = elementBounds3;
@@ -39,7 +50,11 @@ index 4d08f84..0000000 100644
  			backButtonBounds.ParentBounds = elementBounds3;
  			result = handler.GuiComposers.Create(dialogName + "ingame", elementBounds2).AddShadedDialogBG(elementBounds3, withTitleBar: false).AddStaticCustomDraw(elementBounds3, delegate(Context ctx, ImageSurface surface, ElementBounds bounds)
  			{
-@@ -187,6 +194,7 @@
+ 				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
+ 				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
+@@ -185,10 +192,11 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
+ 				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
  				.EndIf()
@@ -47,7 +62,11 @@ index 4d08f84..0000000 100644
  				.AddButton(Lang.Get("general-back"), delegate
  				{
  					clickedItemIndex = null;
-@@ -201,6 +209,7 @@
+ 					hotkeyCapturer?.EndCapture(wasCancelled: true);
+ 					return handler.OnBackPressed();
+@@ -199,10 +207,11 @@ public class GuiCompositeSettings : GuiComposite
+ 		result.GetToggleButton("controls").SetValue(currentTab == "controls");
+ 		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
  		result.GetToggleButton("interface").SetValue(currentTab == "interface");
  		result.GetToggleButton("developer")?.SetValue(currentTab == "developer");
@@ -55,7 +74,11 @@ index 4d08f84..0000000 100644
  		return result;
  	}
  
-@@ -237,6 +246,8 @@
+ 	private void updateButtonBounds()
+ 	{
+@@ -235,20 +244,23 @@ public class GuiCompositeSettings : GuiComposite
+ 		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
+ 		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-dev-header"));
  		double width7 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -64,7 +87,9 @@ index 4d08f84..0000000 100644
  		textExtents = cairoFont.GetTextExtents(Lang.Get("general-back"));
  		double width8 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		gButtonBounds.WithFixedWidth(width);
-@@ -246,7 +257,8 @@
+ 		mButtonBounds.WithFixedWidth(width2).FixedRightOf(gButtonBounds, 15.0);
+ 		cButtonBounds.WithFixedWidth(width3).FixedRightOf(mButtonBounds, 15.0);
+ 		aButtonBounds.WithFixedWidth(width4).FixedRightOf(cButtonBounds, 15.0);
  		sButtonBounds.WithFixedWidth(width5).FixedRightOf(aButtonBounds, 15.0);
  		iButtonBounds.WithFixedWidth(width6).FixedRightOf(sButtonBounds, 15.0);
  		dButtonBounds.WithFixedWidth(width7).FixedRightOf(iButtonBounds, 15.0);
@@ -74,16 +99,11 @@ index 4d08f84..0000000 100644
  	}
  
  	internal bool OpenSettingsMenu()
-@@ -420,7 +432,7 @@
- 			composer.AddRichtext(Lang.Get("help-moresettingsavailable", text), CairoFont.WhiteDetailText(), elementBounds = elementBounds.BelowCopy(0.0, 225.0, 440.0)).AddRichtext(Lang.Get("help-framerateissues"), CairoFont.WhiteDetailText(), elementBounds = elementBounds.BelowCopy(0.0, 125.0));
- 		}
- 		composer.GetDropDown("graphicsPreset").listMenu.MaxHeight = 330;
--		composer.EndChildElements().Compose();
-+		composer.Compose();
- 		handler.LoadComposer(composer);
- 		SetGfxValues();
- 	}
-@@ -1742,11 +1754,252 @@
+ 	{
+ 		OnGraphicsOptions(on: true);
+@@ -1740,10 +1752,309 @@ public class GuiCompositeSettings : GuiComposite
+ 		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
+ 		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
  	}
  
@@ -94,10 +114,12 @@ index 4d08f84..0000000 100644
 +		ElementBounds scrollbarBounds = ElementStdBounds.VerticalScrollbar(panelBounds);
 +		optimumContentBounds = ElementBounds.Fixed(0, 0, panelBounds.fixedWidth, 0).WithParent(clippingBounds);
 +		optimumRowY = 0;
++		optimumControls = new Dictionary<string, GuiElement>();
 +		composer = ComposerHeader("gamesettings-optimumoptions", "optimum")
 +			.AddInset(panelBounds)
 +			.BeginClip(clippingBounds);
 +		composer.CurParentBounds.WithChild(optimumContentBounds);
++		optimumContainer = new GuiElementContainer(composer.Api, optimumContentBounds);
 +		AddOptimumSwitchRow("optimum-bgfps", "optimum-bgfps-tooltip", onOptimumBackgroundFpsChanged, "optBgFps");
 +		AddOptimumSwitchRow("optimum-framepacing", "optimum-framepacing-tooltip", onOptimumFramePacingChanged, "optFramePacing");
 +		AddOptimumSwitchRow("optimum-shadowcull", "optimum-shadowcull-tooltip", onOptimumShadowCullChanged, "optShadowCull");
@@ -124,7 +146,8 @@ index 4d08f84..0000000 100644
 +		AddOptimumSliderRow("optimum-greedyfardist", onOptimumGreedyFarDistChanged, "optGreedyFarDist");
 +#endif
 +		AddOptimumCompatibilityStatus();
-+		optimumContentBounds.fixedHeight = optimumRowY + 2;
++		optimumContainer.CalcTotalHeight();
++		composer.AddInteractiveElement(optimumContainer, "optimumList");
 +		bool needsScrollbar = optimumContentBounds.fixedHeight > panelBounds.fixedHeight;
 +		if (!needsScrollbar)
 +		{
@@ -144,120 +167,174 @@ index 4d08f84..0000000 100644
 +		}
 +		handler.LoadComposer(composer);
 +		composer.GetToggleButton("optimum")?.SetValue(true);
-+		composer.GetSwitch("optBgFps").SetValue(ClientSettings.OptimumBackgroundFpsLimit);
-+		composer.GetSwitch("optFramePacing").SetValue(ClientSettings.OptimumPreciseFramePacing);
-+		composer.GetSwitch("optShadowCull").SetValue(ClientSettings.OptimumEntityShadowCull);
-+		composer.GetSlider("optShadowDist").SetValues(ClientSettings.OptimumShadowCullDistance, 20, 200, 10, " blocks");
-+		composer.GetSwitch("optRepulsion").SetValue(ClientSettings.OptimumRepulsionGate);
-+		composer.GetSlider("optRepulsionDist").SetValues(ClientSettings.OptimumRepulsionDistance, 16, 128, 8, " blocks");
-+		composer.GetSwitch("optDynLight").SetValue(ClientSettings.OptimumDynamicLightScale);
-+		composer.GetSwitch("optAnimBlockLod").SetValue(ClientSettings.OptimumAnimBlockLod);
-+		composer.GetSwitch("optShadowFarVeg").SetValue(ClientSettings.OptimumShadowFarVegetation);
-+		composer.GetSwitch("optWeatherWind").SetValue(ClientSettings.OptimumWeatherWindThrottle);
-+		composer.GetSwitch("optParticleDist").SetValue(ClientSettings.OptimumParticleDistanceGate);
-+		composer.GetSwitch("optChiselLod").SetValue(ClientSettings.OptimumChiselLod);
-+		composer.GetSlider("optChiselLodDist").SetValues(ClientSettings.OptimumChiselLodDistance, 32, 256, 16, " blocks");
-+		composer.GetSwitch("optOcclusionScale").SetValue(Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled);
-+		composer.GetSwitch("optDynLightCache").SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
-+		composer.GetSwitch("optEntityLightBatch").SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
-+		composer.GetSwitch("optEntityShaderCache").SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
++		((GuiElementSwitch)optimumControls["optBgFps"]).SetValue(ClientSettings.OptimumBackgroundFpsLimit);
++		((GuiElementSwitch)optimumControls["optFramePacing"]).SetValue(ClientSettings.OptimumPreciseFramePacing);
++		((GuiElementSwitch)optimumControls["optShadowCull"]).SetValue(ClientSettings.OptimumEntityShadowCull);
++		((GuiElementSlider)optimumControls["optShadowDist"]).SetValues(ClientSettings.OptimumShadowCullDistance, 20, 200, 10, " blocks");
++		((GuiElementSwitch)optimumControls["optRepulsion"]).SetValue(ClientSettings.OptimumRepulsionGate);
++		((GuiElementSlider)optimumControls["optRepulsionDist"]).SetValues(ClientSettings.OptimumRepulsionDistance, 16, 128, 8, " blocks");
++		((GuiElementSwitch)optimumControls["optDynLight"]).SetValue(ClientSettings.OptimumDynamicLightScale);
++		((GuiElementSwitch)optimumControls["optAnimBlockLod"]).SetValue(ClientSettings.OptimumAnimBlockLod);
++		((GuiElementSwitch)optimumControls["optShadowFarVeg"]).SetValue(ClientSettings.OptimumShadowFarVegetation);
++		((GuiElementSwitch)optimumControls["optWeatherWind"]).SetValue(ClientSettings.OptimumWeatherWindThrottle);
++		((GuiElementSwitch)optimumControls["optParticleDist"]).SetValue(ClientSettings.OptimumParticleDistanceGate);
++		((GuiElementSwitch)optimumControls["optChiselLod"]).SetValue(ClientSettings.OptimumChiselLod);
++		((GuiElementSlider)optimumControls["optChiselLodDist"]).SetValues(ClientSettings.OptimumChiselLodDistance, 32, 256, 16, " blocks");
++		((GuiElementSwitch)optimumControls["optOcclusionScale"]).SetValue(Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled);
++		((GuiElementSwitch)optimumControls["optDynLightCache"]).SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
++		((GuiElementSwitch)optimumControls["optEntityLightBatch"]).SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
++		((GuiElementSwitch)optimumControls["optEntityShaderCache"]).SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
 +		int renderScaleIdx = Vintagestory.API.Config.OptimumConfig.RenderScale >= 1.0f ? 0 : Vintagestory.API.Config.OptimumConfig.RenderScale >= 0.85f ? 1 : Vintagestory.API.Config.OptimumConfig.RenderScale >= 0.77f ? 2 : 3;
-+		composer.GetDropDown("optRenderScale").SetSelectedIndex(renderScaleIdx);
-+		composer.GetSwitch("optGodRaysCap").SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
++		((GuiElementDropDown)optimumControls["optRenderScale"]).SetSelectedIndex(renderScaleIdx);
++		((GuiElementSwitch)optimumControls["optGodRaysCap"]).SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
 +#if OPTIMUM_GREEDY_MESH
-+		composer.GetSwitch("optGreedyMesh").SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
-+		composer.GetSlider("optGreedySpan").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
-+		composer.GetSlider("optGreedyLightTol").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance, 0, 4, 1);
-+		composer.GetSlider("optGreedyFarDist").SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance, 0, 256, 16, " blocks");
++		((GuiElementSwitch)optimumControls["optGreedyMesh"]).SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
++		((GuiElementSlider)optimumControls["optGreedySpan"]).SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
++		((GuiElementSlider)optimumControls["optGreedyLightTol"]).SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance, 0, 4, 1);
++		((GuiElementSlider)optimumControls["optGreedyFarDist"]).SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance, 0, 256, 16, " blocks");
 +#endif
 +	}
 +
++	private GuiElementContainer optimumContainer;
++	// Assigned in OnOptimumOptions: the IL patcher injects members without field initializers.
++	private Dictionary<string, GuiElement> optimumControls;
++
++	// The rows live in a GuiElementContainer: it re-renders its children with its own
++	// bounds each frame, so moving the container moves labels, controls and tooltips
++	// together. Composer-level switches, sliders and dropdowns bake their frames into
++	// the dialog's static texture and cannot follow a scroll offset.
 +	private void OnOptimumScrollChanged(float value)
 +	{
-+		optimumContentBounds.fixedY = -value;
-+		optimumContentBounds.MarkDirtyRecursive();
-+		optimumContentBounds.CalcWorldBounds();
++		if (optimumContainer == null) return;
++		optimumContainer.Bounds.fixedY = 0f - value;
++		optimumContainer.Bounds.CalcWorldBounds();
++		foreach (GuiElement element in optimumContainer.Elements)
++		{
++			if (element is GuiElementDropDown dropDown && dropDown.listMenu.IsOpened)
++			{
++				dropDown.listMenu.Close();
++			}
++		}
++	}
++
++	private static string GetOptimumLabelFeature(string labelKey)
++	{
++		switch (labelKey)
++		{
++			case "optimum-greedymesh": return "GreedyMesh";
++			case "optimum-renderscale": return "RenderScale";
++			case "optimum-godrayscap": return "GodRaysSampleCap";
++			case "optimum-entitylightbatch": return "EntityLightBatch";
++			case "optimum-entityshadercache": return "EntityShaderStateCache";
++			default: return null;
++		}
 +	}
 +
 +	private void AddOptimumLabelRow(string labelKey, string tooltipKey)
 +	{
-+		ElementBounds labelBounds = ElementBounds.Fixed(0, optimumRowY, 400, 30).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(labelBounds);
-+		composer.AddDynamicText(Lang.Get(labelKey), CairoFont.WhiteSmallishText(), labelBounds);
-+		if (tooltipKey != null)
++		string feature = GetOptimumLabelFeature(labelKey);
++		bool blocked = feature != null && Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled(feature);
++		string label = Lang.Get(labelKey);
++		string tooltip = tooltipKey != null ? Lang.Get(tooltipKey) : null;
++		if (blocked)
 +		{
-+			ElementBounds hoverBounds = labelBounds.FlatCopy().WithFixedHeight(25).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(hoverBounds);
-+			composer.AddHoverText(Lang.Get(tooltipKey), CairoFont.WhiteSmallText(), 250, hoverBounds);
++			label += " " + Lang.Get("optimum-compatibility-unavailable-suffix");
++			tooltip = Lang.Get("optimum-compatibility-why-" + feature);
++		}
++		ElementBounds labelBounds = ElementBounds.Fixed(0, optimumRowY, 400, 30);
++		optimumContainer.Add(new GuiElementStaticText(composer.Api, label, EnumTextOrientation.Left, labelBounds, CairoFont.WhiteSmallishText()));
++		if (tooltip != null)
++		{
++			ElementBounds hoverBounds = labelBounds.FlatCopy().WithFixedHeight(25);
++			optimumContainer.Add(new GuiElementHoverText(composer.Api, tooltip, CairoFont.WhiteSmallText(), 250, hoverBounds));
 +		}
 +	}
 +
 +	private void AddOptimumSwitchRow(string labelKey, string tooltipKey, Action<bool> onChanged, string key)
 +	{
 +		AddOptimumLabelRow(labelKey, tooltipKey);
-+		ElementBounds switchBounds = ElementBounds.Fixed(450, optimumRowY - 3, 200, 20).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(switchBounds);
-+		composer.AddSwitch(onChanged, switchBounds, key);
++		GuiElementSwitch toggle = new GuiElementSwitch(composer.Api, onChanged, ElementBounds.Fixed(450, optimumRowY - 3, 200, 20));
++		optimumControls[key] = toggle;
++		optimumContainer.Add(toggle);
 +		optimumRowY += 28;
 +	}
 +
 +	private void AddOptimumSliderRow(string labelKey, ActionConsumable<int> onChanged, string key)
 +	{
 +		AddOptimumLabelRow(labelKey, null);
-+		ElementBounds sliderBounds = ElementBounds.Fixed(450, optimumRowY + 2, 200, 20).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(sliderBounds);
-+		composer.AddSlider(onChanged, sliderBounds, key);
++		GuiElementSlider slider = new GuiElementSlider(composer.Api, onChanged, ElementBounds.Fixed(450, optimumRowY + 2, 200, 20));
++		optimumControls[key] = slider;
++		optimumContainer.Add(slider);
 +		optimumRowY += 28;
 +	}
 +
 +	private void AddOptimumDropdownRow(string labelKey, string tooltipKey, string[] values, string[] names, int selectedIndex, SelectionChangedDelegate onChanged, string key)
 +	{
 +		AddOptimumLabelRow(labelKey, tooltipKey);
-+		ElementBounds dropdownBounds = ElementBounds.Fixed(450, optimumRowY + 2, 200, 25).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(dropdownBounds);
-+		composer.AddDropDown(values, names, selectedIndex, onChanged, dropdownBounds, key);
++		GuiElementDropDown dropDown = new GuiElementDropDown(composer.Api, values, names, selectedIndex, onChanged, ElementBounds.Fixed(450, optimumRowY + 2, 200, 25), CairoFont.WhiteSmallText(), false);
++		optimumControls[key] = dropDown;
++		optimumContainer.Add(dropDown);
 +		optimumRowY += 28;
++	}
++
++	private void AddOptimumCompatibilityText(string text, CairoFont font, double indent, double gapAfter)
++	{
++		double width = 650 - indent;
++		double height = new TextDrawUtil().GetMultilineTextHeight(font, text, width * ClientSettings.GUIScale) / ClientSettings.GUIScale;
++		optimumContainer.Add(new GuiElementStaticText(composer.Api, text, EnumTextOrientation.Left, ElementBounds.Fixed(indent, optimumRowY, width, height), font));
++		optimumRowY += height + gapAfter;
 +	}
 +
 +	private void AddOptimumCompatibilityStatus()
 +	{
 +		string[] features = { "GreedyMesh", "RenderScale", "GodRaysSampleCap", "EntityLightBatch", "EntityShaderStateCache", "Oit", "MapPageCache", "ShaderPreprocessParallel" };
-+		int blockedCount = 0;
++		List<string> groupOrder = new List<string>();
++		Dictionary<string, List<string>> groups = new Dictionary<string, List<string>>();
 +		foreach (string feature in features)
 +		{
 +			if (!Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled(feature)) continue;
 +			DisableOptimumFeatureControl(feature);
-+			if (blockedCount == 0)
++			string owners = Vintagestory.API.Config.OptimumConfig.GetShaderFeatureBlockMods(feature);
++			if (!groups.TryGetValue(owners, out List<string> members))
 +			{
-+				ElementBounds heading = ElementBounds.Fixed(0, optimumRowY, 650, 32).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(heading);
-+				composer.AddDynamicText(Lang.Get("optimum-compatibility-blocked-header"), CairoFont.WhiteSmallishText(), heading);
-+				optimumRowY += 30;
++				members = new List<string>();
++				groups[owners] = members;
++				groupOrder.Add(owners);
 +			}
-+			string reason = Vintagestory.API.Config.OptimumConfig.GetShaderFeatureBlockReason(feature);
-+			string featureName = Lang.Get("optimum-compatibility-feature-name-" + feature);
-+			string text = Lang.Get("optimum-compatibility-feature", featureName, reason);
-+			string key = "optimumCompatibility-" + feature;
-+			ElementBounds row = ElementBounds.Fixed(0, optimumRowY, 650, 0).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(row);
-+			composer.AddDynamicText(text, CairoFont.WhiteSmallText(), row, key);
-+			composer.GetDynamicText(key).AutoHeight();
-+			optimumRowY += row.fixedHeight + 8;
-+			blockedCount++;
++			members.Add(feature);
++		}
++		optimumRowY += 12;
++		if (groupOrder.Count > 0)
++		{
++			AddOptimumCompatibilityText(Lang.Get("optimum-compatibility-blocked-header"), CairoFont.WhiteSmallishText(), 0, 4);
++			AddOptimumCompatibilityText(Lang.Get("optimum-compatibility-blocked-intro"), CairoFont.WhiteDetailText(), 0, 10);
++			foreach (string owners in groupOrder)
++			{
++				bool scanFailed = Vintagestory.API.Config.OptimumConfig.IsShaderCompatibilityScanFailed;
++				string heading = owners.Length > 0 ? Lang.Get("optimum-compatibility-caused-by", owners) : Lang.Get(scanFailed ? "optimum-compatibility-caused-by-scan" : "optimum-compatibility-caused-by-unknown");
++				AddOptimumCompatibilityText(heading, CairoFont.WhiteSmallText(), 0, 2);
++				foreach (string feature in groups[owners])
++				{
++					string row = Lang.Get("optimum-compatibility-feature", Lang.Get("optimum-compatibility-feature-name-" + feature), Lang.Get("optimum-compatibility-why-" + feature));
++					double rowTop = optimumRowY;
++					AddOptimumCompatibilityText(row, CairoFont.WhiteDetailText(), 16, 2);
++					ElementBounds hoverBounds = ElementBounds.Fixed(16, rowTop, 634, optimumRowY - rowTop);
++					optimumContainer.Add(new GuiElementHoverText(composer.Api, Vintagestory.API.Config.OptimumConfig.GetShaderFeatureBlockReason(feature), CairoFont.WhiteSmallText(), 400, hoverBounds));
++				}
++				optimumRowY += 8;
++			}
++		}
++		if (Vintagestory.API.Config.OptimumConfig.IsShaderCompatibilityReportStale)
++		{
++			AddOptimumCompatibilityText(Lang.Get("optimum-compatibility-report-stale"), CairoFont.WhiteDetailText(), 0, 8);
 +		}
 +		if (Vintagestory.API.Config.OptimumConfig.IsShaderCompatibilityReportMissing)
 +		{
-+			ElementBounds row = ElementBounds.Fixed(0, optimumRowY, 650, 30).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(row);
-+			composer.AddDynamicText(Lang.Get("optimum-compatibility-report-missing"), CairoFont.WhiteSmallText(), row);
-+			optimumRowY += 30;
++			AddOptimumCompatibilityText(Lang.Get("optimum-compatibility-report-missing"), CairoFont.WhiteDetailText(), 0, 8);
 +		}
-+		if (blockedCount == 0 && !Vintagestory.API.Config.OptimumConfig.IsShaderCompatibilityReportMissing)
++		else if (groupOrder.Count == 0)
 +		{
-+			ElementBounds row = ElementBounds.Fixed(0, optimumRowY, 650, 30).WithParent(optimumContentBounds);
-+		optimumContentBounds.WithChild(row);
-+			composer.AddDynamicText(Lang.Get("optimum-compatibility-clear"), CairoFont.WhiteSmallText(), row);
-+			optimumRowY += 30;
++			AddOptimumCompatibilityText(Lang.Get("optimum-compatibility-clear"), CairoFont.WhiteDetailText(), 0, 8);
 +		}
 +	}
 +
@@ -266,12 +343,12 @@ index 4d08f84..0000000 100644
 +		switch (feature)
 +		{
 +#if OPTIMUM_GREEDY_MESH
-+			case "GreedyMesh": composer.GetSwitch("optGreedyMesh").Enabled = false; break;
++			case "GreedyMesh": ((GuiElementSwitch)optimumControls["optGreedyMesh"]).Enabled = false; break;
 +#endif
-+			case "RenderScale": composer.GetDropDown("optRenderScale").Enabled = false; break;
-+			case "GodRaysSampleCap": composer.GetSwitch("optGodRaysCap").Enabled = false; break;
-+			case "EntityLightBatch": composer.GetSwitch("optEntityLightBatch").Enabled = false; break;
-+			case "EntityShaderStateCache": composer.GetSwitch("optEntityShaderCache").Enabled = false; break;
++			case "RenderScale": ((GuiElementDropDown)optimumControls["optRenderScale"]).Enabled = false; break;
++			case "GodRaysSampleCap": ((GuiElementSwitch)optimumControls["optGodRaysCap"]).Enabled = false; break;
++			case "EntityLightBatch": ((GuiElementSwitch)optimumControls["optEntityLightBatch"]).Enabled = false; break;
++			case "EntityShaderStateCache": ((GuiElementSwitch)optimumControls["optEntityShaderCache"]).Enabled = false; break;
 +		}
 +	}
 +
@@ -333,11 +410,10 @@ index 4d08f84..0000000 100644
  	{
  		ClientSettings.StartupErrorDialog = on;
  	}
--
  
- 	private void onDebugSoundDisposeChanged(bool on)
+@@ -1818,6 +2129,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
-@@ -1821,4 +2074,72 @@
+ 		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
  		return true;
  	}
