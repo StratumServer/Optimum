@@ -203,6 +203,9 @@ function New-ExtractStageRoot {
             continue
         }
         $free = Get-ExtractFreeBytes -Path $root
+        if ($null -eq $free) {
+            Write-Warning "Could not read the free space under $parent; trying it without that check."
+        }
         if ($null -ne $free -and $free -lt $RequiredFreeBytes) {
             $rejected.Add("$parent (only $([math]::Round($free / 1MB)) MB free, need $([math]::Round($RequiredFreeBytes / 1MB)) MB)")
             Remove-ExtractStageDirectory -Path $root
@@ -244,6 +247,9 @@ function Assert-ExtractPreflight {
         # while the move runs.
         if ($destinationRoot -and $stageRoot -and ($destinationRoot -ieq $stageRoot)) { $needed += $RequiredFreeBytes }
         $free = Get-ExtractFreeBytes -Path $Destination
+        if ($null -eq $free) {
+            Write-Warning "Could not read the free space at $Destination (a network share or an unusual volume); continuing without that check."
+        }
         if ($null -ne $free -and $free -lt $needed) {
             throw "Not enough free space for the Vintage Story client at ${Destination}: $([math]::Round($free / 1MB)) MB free, $([math]::Round($needed / 1MB)) MB needed."
         }

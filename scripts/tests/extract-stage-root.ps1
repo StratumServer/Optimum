@@ -71,7 +71,7 @@ try {
     } catch {
         $threw = $true
         Assert-True ($_.Exception.Message -like '*MB free*') "the error does not report free space: $($_.Exception.Message)"
-        Assert-True ($_.Exception.Message -like "*$short*") 'the error does not name the rejected candidate'
+        Assert-True ($_.Exception.Message.Contains($short)) 'the error does not name the rejected candidate'
     }
     Assert-True $threw 'a volume without room was accepted'
     Assert-True (@(Get-ChildItem -LiteralPath $short -Directory -Filter 'optimum-ix-*' | Where-Object { $created -notcontains $_.FullName }).Count -eq 0) 'a rejected candidate left its directory behind'
@@ -157,7 +157,26 @@ try {
         Assert-True ($preflight[0].Extent.StartOffset -lt $download[0].Extent.StartOffset) 'the preflight does not run before the download'
     }
 
-    # 16. bootstrap.ps1 uses the helper for the Windows extraction.
+    # 16. Free space at an unreadable location is reported as unknown instead of throwing, and a share path does not break the search.
+    $probeDrive = Get-ExtractFreeBytes -Path (Join-Path $tempBase 'does\not\exist')
+    Assert-True ($null -eq $probeDrive -or $probeDrive -gt 0) 'free space for a missing path is neither unknown nor a size'
+    if ($env:OS -eq 'Windows_NT') {
+        $unc = Get-ExtractFreeBytes -Path "\\localhost\$($env:SystemDrive.TrimEnd(':'))$\Windows"
+        Assert-True ($null -eq $unc -or $unc -gt 0) 'free space for a share path threw or returned a bad value'
+        # Every default candidate on Windows exists, including the 8.3 forms.
+        foreach ($candidate in (Get-ExtractStageCandidates -Destination $fallback)) {
+            Assert-True (Test-Path -LiteralPath $candidate) "default candidate $candidate does not exist"
+        }
+    }
+
+    # 17. All three scripts parse in the host that runs this test (Windows PowerShell 5.1 and PowerShell 7 parse differently).
+    foreach ($file in @('..\bootstrap.ps1', '..\extract-stage-root.ps1', 'extract-stage-root.ps1')) {
+        $parseErrors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file), [ref]$null, [ref]$parseErrors)
+        Assert-True ($parseErrors.Count -eq 0) "$file has $($parseErrors.Count) parse error(s) in PowerShell $($PSVersionTable.PSVersion)"
+    }
+
+    # 18. bootstrap.ps1 uses the helper for the Windows extraction.
     $bootstrap = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\bootstrap.ps1') -Raw
     Assert-True ($bootstrap -match 'extract-stage-root\.ps1') 'bootstrap.ps1 does not load extract-stage-root.ps1'
     Assert-True ($bootstrap -match 'New-ExtractStageRoot') 'bootstrap.ps1 does not call New-ExtractStageRoot'
