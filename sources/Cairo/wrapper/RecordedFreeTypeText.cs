@@ -19,7 +19,6 @@ namespace Cairo
 				if (antialias == Antialias.Default) antialias = configuredAntialias;
 				if (order == SubpixelOrder.Default) order = configuredOrder;
 			}
-			bool alphaClip = RequiresAlphaClip(clips);
 			using var outlines = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
 			if (outlines == null) return null;
 			state.TryGetCurrentPoint(out double x, out double y);
@@ -48,6 +47,11 @@ namespace Cairo
 				}
 				position += outlines.GetGlyphAdvance(glyph, options.HintMetrics != HintMetrics.Off);
 			}
+			bool pathClip = RequiresAlphaClip(clips);
+			using var boxRegion = pathClip || !(minX < maxX && minY < maxY) ? null : FractionalBoxRegion(clips, SKRectI.Intersect(
+				new SKRectI((int)Math.Floor(minX), (int)Math.Floor(minY), (int)Math.Ceiling(maxX), (int)Math.Ceiling(maxY)),
+				new SKRectI(0, 0, width, height)), width, height);
+			bool alphaClip = pathClip || boxRegion != null;
 			var coverages = new (SKBitmap Bitmap, float X, float Y)[glyphs.Length];
 			int leftBound = width, topBound = height, rightBound = 0, bottomBound = 0;
 			try {
@@ -75,7 +79,10 @@ namespace Cairo
 				using var mask = SKSurface.Create(new SKImageInfo(rightBound - leftBound, bottomBound - topBound, SKColorType.Rgba8888, SKAlphaType.Opaque));
 				mask.Canvas.Clear(SKColors.Black);
 				mask.Canvas.Translate(-leftBound, -topBound);
-				foreach (var clip in clips) {
+				if (boxRegion != null) {
+					boxRegion.Translate(-leftBound, -topBound);
+					mask.Canvas.ClipRegion(boxRegion, SKClipOperation.Intersect);
+				} else foreach (var clip in clips) {
 					if (alphaClip && !clip.Antialias) {
 						// BW scan conversion uses the original device bounds, not the ink crop.
 						using var ownerBounds = new SKRegion(new SKRectI(0, 0, width, height));
@@ -134,6 +141,61 @@ namespace Cairo
 				if (open && Diagonal(cursor, start)) return true;
 			}
 			return false;
+		}
+
+		// Rectilinear clips become Cairo boxes. Reduced to the glyph extents, a box edge
+		// off the pixel grid makes the clip a non-region (need_bounded_clip sets
+		// NEED_CLIP_SURFACE): glyphs composite through an A8 mask, limited to the boxes
+		// rounded outward (_cairo_clip_extract_region) without partial edge coverage.
+		// Returns null when the reduced boxes are pixel aligned.
+		static SKRegion FractionalBoxRegion(RecordedGuiClip[] clips, SKRectI bounded, int width, int height)
+		{
+			// Fine coordinates stay exact in float (2^24).
+			if (clips.Length == 0 || bounded.IsEmpty || bounded.Right > 1 << 16 || bounded.Bottom > 1 << 16) return null;
+			var reduced = new SKPath();
+			reduced.AddRect(bounded);
+			try {
+				foreach (var clip in clips) {
+					SKPath next;
+					if (clip.Antialias) next = reduced.Op(clip.Path, SKPathOp.Intersect);
+					else {
+						// Aliased boxes are rounded to whole pixels.
+						using var ownerBounds = new SKRegion(new SKRectI(0, 0, width, height));
+						using var region = new SKRegion();
+						region.SetPath(clip.Path, ownerBounds);
+						using var aliased = region.GetBoundaryPath();
+						next = reduced.Op(aliased, SKPathOp.Intersect);
+					}
+					reduced.Dispose();
+					reduced = next;
+					if (reduced == null || reduced.IsEmpty) return null;
+				}
+				// Snap to Cairo's 24.8 fixed point and scan at 1/256 px, where box edges are exact.
+				using var snapped = new SKPath { FillType = reduced.FillType };
+				using var iterator = reduced.CreateRawIterator();
+				var points = new SKPoint[4];
+				bool fractional = false;
+				SKPathVerb verb;
+				while ((verb = iterator.Next(points)) != SKPathVerb.Done) {
+					if (verb == SKPathVerb.Close) { snapped.Close(); continue; }
+					if (verb != SKPathVerb.Move && verb != SKPathVerb.Line) return null;
+					SKPoint point = points[verb == SKPathVerb.Move ? 0 : 1];
+					float fx = (float)Math.Round(point.X * 256d), fy = (float)Math.Round(point.Y * 256d);
+					fractional |= fx % 256 != 0 || fy % 256 != 0;
+					if (verb == SKPathVerb.Move) snapped.MoveTo(fx, fy); else snapped.LineTo(fx, fy);
+				}
+				if (!fractional) return null;
+				using var fineBounds = new SKRegion(new SKRectI(bounded.Left * 256, bounded.Top * 256, bounded.Right * 256, bounded.Bottom * 256));
+				using var fine = new SKRegion();
+				if (!fine.SetPath(snapped, fineBounds)) return null;
+				var pixels = new SKRegion();
+				using var rects = fine.CreateRectIterator();
+				while (rects.Next(out SKRectI box))
+					pixels.Op(new SKRectI((int)Math.Floor(box.Left / 256d), (int)Math.Floor(box.Top / 256d), (int)Math.Ceiling(box.Right / 256d), (int)Math.Ceiling(box.Bottom / 256d)), SKRegionOperation.Union);
+				return pixels;
+			} finally {
+				reduced?.Dispose();
+			}
 		}
 	}
 }

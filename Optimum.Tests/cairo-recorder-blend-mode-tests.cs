@@ -69,6 +69,16 @@ public sealed class CairoRecorderBlendModeTests
 	[InlineData (0, true)]
 	[InlineData (1, true)]
 	[InlineData (2, true)]
+	[InlineData (3, false)]
+	[InlineData (3, true)]
+	[InlineData (4, false)]
+	[InlineData (4, true)]
+	[InlineData (5, false)]
+	[InlineData (5, true)]
+	[InlineData (6, false)]
+	[InlineData (6, true)]
+	[InlineData (7, false)]
+	[InlineData (7, true)]
 	public void CompoundClipTextKeepsNativeCoverage (int shape, bool scaled)
 	{
 		CairoRecorderParityTests.AssertParity (160, 80, context => {
@@ -80,14 +90,135 @@ public sealed class CairoRecorderBlendModeTests
 			} else if (shape == 1) {
 				context.MoveTo (20, 20); context.LineTo (60, 20); context.LineTo (60, 40);
 				context.LineTo (35, 40); context.LineTo (35, 55); context.LineTo (20, 55); context.ClosePath ();
-			} else {
+			} else if (shape == 2) {
 				context.Rectangle (20, 20, 40, 40); context.Rectangle (30, 30, 10, 10); context.FillRule = FillRule.EvenOdd;
+			} else if (shape == 3) {
+				context.Rectangle (20.25, 19.5, 30, 20);
+			} else if (shape == 4) {
+				context.Rectangle (20.25, 19.5, 30, 18); context.Rectangle (25.75, 39.5, 20, 15);
+			} else if (shape == 5) {
+				// Within 1/512 px of the grid: Cairo's 24.8 boxes are aligned.
+				context.Rectangle (20.001, 19.0005, 30, 20); context.Rectangle (25, 39.999, 21, 15);
+			} else if (shape == 6) {
+				// Both boxes round outward onto pixel column 30.
+				context.Rectangle (20.25, 19.5, 10.05, 35); context.Rectangle (30.6, 19.5, 20, 35);
+			} else {
+				// Fractional edges outside the glyph extents leave the reduced clip aligned.
+				context.Rectangle (10.5, 20.5, 100, 40);
 			}
 			context.Clip (); context.Translate (.375, .125); if (scaled) context.Scale (1.25, .75);
 			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
 			using var options = new FontOptions { Antialias = Antialias.Subpixel, HintMetrics = HintMetrics.On };
 			context.FontOptions = options; context.MoveTo (20.25, 45.5); context.ShowText ("jÁ ll ffi");
 		});
+	}
+
+	[Theory]
+	[InlineData (3, Operator.Screen, Antialias.Subpixel, false)]
+	[InlineData (6, Operator.Screen, Antialias.Subpixel, false)]
+	[InlineData (3, Operator.Difference, Antialias.Subpixel, true)]
+	[InlineData (6, Operator.Exclusion, Antialias.Subpixel, true)]
+	[InlineData (3, Operator.Screen, Antialias.Gray, true)]
+	[InlineData (6, Operator.Difference, Antialias.Gray, false)]
+	[InlineData (8, Operator.Screen, Antialias.Subpixel, false)]
+	[InlineData (8, Operator.Exclusion, Antialias.Gray, true)]
+	public void DistantFractionalBoxClipTextKeepsNativeCoverage (int shape, Operator op, Antialias antialias, bool translucent)
+	{
+		// Far from the origin, so 1/256 px box scans span thousands of rows and columns.
+		CairoRecorderParityTests.AssertParity (480, 240, context => {
+			context.SetSourceRGB (.1, .3, .6); context.Paint ();
+			context.Operator = op;
+			if (translucent) context.SetSourceRGBA (.8, .5, .1, .7); else context.SetSourceRGB (1, 1, 1);
+			context.Translate (310.5, 150.25);
+			if (shape == 3) {
+				context.Rectangle (20.25, 19.5, 30, 20);
+			} else if (shape == 6) {
+				context.Rectangle (20.25, 19.5, 10.05, 35); context.Rectangle (30.6, 19.5, 20, 35);
+			} else {
+				// Aliased half-pixel box beside an antialiased fractional one.
+				context.Antialias = Antialias.None;
+				context.Rectangle (20.5, 19.5, 30, 30); context.Clip ();
+				context.Antialias = Antialias.Default;
+				context.Rectangle (18.25, 30.75, 40, 30);
+			}
+			context.Clip ();
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+			using var options = new FontOptions { Antialias = antialias, HintMetrics = HintMetrics.On };
+			context.FontOptions = options; context.MoveTo (20.25, 45.5); context.ShowText ("jÁ ll ffi");
+		});
+	}
+
+	[Theory]
+	[InlineData (3, 1, Antialias.Subpixel)]
+	[InlineData (6, 2, Antialias.Subpixel)]
+	[InlineData (4, 1, Antialias.Subpixel)]
+	[InlineData (3, 2, Antialias.Gray)]
+	[InlineData (9, 0, Antialias.Subpixel)]
+	[InlineData (9, 1, Antialias.Subpixel)]
+	[InlineData (3, 0, Antialias.None)]
+	[InlineData (6, 1, Antialias.None)]
+	public void TransformedFractionalBoxClipTextKeepsNativeCoverage (int shape, int transform, Antialias antialias)
+	{
+		CairoRecorderParityTests.AssertParity (480, 240, context => {
+			context.SetSourceRGB (.1, .3, .6); context.Paint ();
+			context.Operator = Operator.Screen; context.SetSourceRGB (1, 1, 1);
+			// Clip boxes are set under the transform, so device edges land on .5 and other fractions.
+			if (transform == 0) context.Translate (310, 150);
+			else if (transform == 1) { context.Translate (300, 100); context.Scale (1.5, 1.5); }
+			else { context.Translate (250, 60); context.Scale (2, 2); }
+			if (shape == 3) {
+				context.Rectangle (20.25, 19.5, 30, 20);
+			} else if (shape == 4) {
+				context.Rectangle (20.25, 19.5, 30, 18); context.Rectangle (25.75, 39.5, 20, 15);
+			} else if (shape == 6) {
+				context.Rectangle (20.25, 19.5, 10.05, 35); context.Rectangle (30.6, 19.5, 20, 35);
+			} else {
+				context.Antialias = Antialias.None;
+				context.Rectangle (20.5, 19.5, 30, 30.5);
+			}
+			context.Clip (); context.Antialias = Antialias.Default;
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+			using var options = new FontOptions { Antialias = antialias, HintMetrics = HintMetrics.On };
+			context.FontOptions = options; context.MoveTo (20.25, 45.5); context.ShowText ("jÁ ll ffi");
+		});
+	}
+
+	[Fact]
+	public void WideSurfaceFractionalBoxClipTextKeepsNativeCoverage ()
+	{
+		// Box edges near x = 3000 put the 1/256 px scan far beyond 16.16 limits.
+		CairoRecorderParityTests.AssertParity (3200, 120, context => {
+			context.SetSourceRGB (0, 0, 0); context.Paint ();
+			context.Operator = Operator.Screen; context.SetSourceRGB (1, 1, 1);
+			context.Translate (2950.5, 30.25);
+			context.Rectangle (20.25, 19.5, 30, 20); context.Rectangle (25.75, 39.5, 20, 15); context.Clip ();
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+			using var options = new FontOptions { Antialias = Antialias.Subpixel, HintMetrics = HintMetrics.On };
+			context.FontOptions = options; context.MoveTo (20.25, 45.5); context.ShowText ("jÁ ll ffi");
+		});
+	}
+
+	[Theory]
+	[InlineData (0)]
+	[InlineData (1)]
+	[InlineData (2)]
+	[InlineData (3)]
+	public void FractionalClipEdgeSweepsAcrossGlyphExtents (int side)
+	{
+		// One fractional edge walks across the glyph ink box; the others stay far outside.
+		for (double edge = side < 2 ? 26.25 : side == 2 ? 14.25 : 56.25; edge <= (side < 2 ? 54.25 : side == 2 ? 30.25 : 90.25); edge += .5)
+			CairoRecorderParityTests.AssertParity (160, 80, context => {
+				context.SetSourceRGB (0, 0, 0); context.Paint ();
+				context.Operator = Operator.Screen; context.SetSourceRGB (1, 1, 1);
+				if (side == 0) context.Rectangle (4, edge, 150, 70 - edge);
+				else if (side == 1) context.Rectangle (4, 4, 150, edge - 4);
+				else if (side == 2) context.Rectangle (edge, 4, 150 - edge, 70);
+				else context.Rectangle (4, 4, edge - 4, 70);
+				context.Clip ();
+				context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (14);
+				using var options = new FontOptions { Antialias = Antialias.Subpixel, HintMetrics = HintMetrics.On };
+				context.FontOptions = options; context.MoveTo (20.25, 45.5); context.ShowText ("jÁ ll ffi");
+			});
 	}
 
 	[Fact]
