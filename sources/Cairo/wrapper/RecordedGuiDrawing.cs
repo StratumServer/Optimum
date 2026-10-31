@@ -73,7 +73,7 @@ namespace Cairo
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState)) {
 					if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
 					result.Paint = new SKPaint {
-						IsAntialias = context.Antialias != Antialias.None,
+						IsAntialias = context.Antialias != Cairo.Antialias.None,
 						Style = stroke ? SKPaintStyle.Stroke : SKPaintStyle.Fill,
 						StrokeWidth = (float)context.LineWidth,
 						StrokeMiter = (float)context.MiterLimit,
@@ -226,7 +226,7 @@ namespace Cairo
 			if (type == PatternType.Linear || type == PatternType.Radial) {
 				var bindingInverse = (Matrix)(sourceMatrix ?? context.Matrix).Clone();
 				bindingInverse.Invert();
-				var patternFromDevice = Matrix.Multiply(bindingInverse, pattern.Matrix);
+				var patternFromDevice = Cairo.Matrix.Multiply(bindingInverse, pattern.Matrix);
 				shader = RecordedCairoGradient.Create(handle, type, pattern.Extend, SKMatrix.Identity, patternFromDevice,
 				targetWidth, targetHeight, out image, managedGradient);
 				// Gradient parameters are evaluated in device coordinates, preserving double source binding.
@@ -771,7 +771,7 @@ half4 main(float2 p) {
 	{
 		internal readonly SKPath Path;
 		internal readonly bool Antialias;
-		internal RecordedGuiClip(ManagedGraphicsState context) { Path = RecordedGuiDrawing.CopyPath(context); Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding; Path.Transform(RecordedGuiDrawing.ToSkia(context.Matrix)); Antialias = context.Antialias != Antialias.None;
+		internal RecordedGuiClip(ManagedGraphicsState context) { Path = RecordedGuiDrawing.CopyPath(context); Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding; Path.Transform(RecordedGuiDrawing.ToSkia(context.Matrix)); Antialias = context.Antialias != Cairo.Antialias.None;
 			// Aliased clips follow the same pixel-centre tie ownership as aliased fills (see RecordedGuiDrawing.DrawCore).
 			if (!Antialias) Path.Transform(SKMatrix.CreateTranslation(-1f / 1024f, -1f / 1024f)); }
 		internal RecordedGuiClip Clone() => new RecordedGuiClip (new SKPath (Path), Antialias);
