@@ -325,6 +325,7 @@ namespace Vintagestory.Client.NoObf
 						}
 						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
 						catch (Exception exception) { rendered = false; failureReason = "framebuffer-cleanup-exception:" + exception.GetType().Name + ":" + exception.Message; }
+
 						try
 						{
 							if (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { rendered = false; failureReason = "gl-error-after-candidate"; }
@@ -883,10 +884,9 @@ namespace Vintagestory.Client.NoObf
 						GL.UseProgram(currentProgram);
 						GL.BindVertexArray(vertexArray);
 						GL.BindBuffer(BufferTarget.ArrayBuffer, arrayBuffer);
-						// Compatibility contexts can expose an element-array binding on VAO 0.
-						// In core contexts VAO 0 has no element binding and this remains zero, so
-						// skip only that invalid-to-bind case.
-						if (vertexArray != 0 || elementArrayBuffer != 0)
+						// VAO 0 has no element-array binding in core profiles, so never restore
+						// an element-array binding while no VAO is bound.
+						if (vertexArray != 0)
 							GL.BindBuffer(BufferTarget.ElementArrayBuffer, elementArrayBuffer);
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, pixelPackBuffer);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, pixelUnpackBuffer);
