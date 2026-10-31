@@ -213,6 +213,30 @@ make build
 
 Open the .dmg and drag Optimum.app to Applications. Requires .NET 10 SDK, bash, python3, git, curl, perl.
 
+## Updating in place
+
+When a newer release exists, the main menu shows `Update to v<version>` under the Optimum line. The button appears
+only for a game folder patched in place (by RiftLauncher or `optimum patch`); an install made by the Optimum installer
+keeps the link to the release page.
+
+1. The game downloads `optimum-manifest-<rid>.json`, its detached signature (`.sig`) and the overlay archive from the
+   release, and stages them under `.optimum/pending/<version>-<rid>/`. Nothing the game has loaded is touched.
+2. The manifest is accepted only if its ECDSA P-256 signature verifies against the public key compiled into the game
+   (`OptimumUpdateTrust.ManifestPublicKey`). The archive and every extracted file must then match the hashes in the
+   manifest, and the archive may carry no file the manifest does not list.
+3. "Restart to finish updating" closes the game and runs the staged `optimum.exe apply-update`, which waits for the
+   game to exit, takes a copy of every file the patch can write (`.optimum/rollback/`), patches, checks what it wrote
+   and starts the game again. If any step fails it puts the copy back, so the previous version stays installed, and the
+   next start says so.
+
+The update stays off, and the menu keeps the plain link, when the release carries no signature, when the game folder is
+not patched in place, or when the environment variable `OPTIMUM_MANAGED_BY` is set. A launcher that updates installs
+itself should set that variable when it starts the game, so two updaters never work on one folder.
+
+Maintainers: create the signing key once with `scripts/generate-release-signing-key.sh <dir>`, paste the printed public
+key into `OptimumUpdateTrust.ManifestPublicKey` and store the private key as the `OPTIMUM_RELEASE_SIGNING_KEY`
+repository secret. The overlay release workflow signs each manifest with it.
+
 ## Settings
 
 Optimum persists its runtime settings to `ModConfig/optimum.json` inside your

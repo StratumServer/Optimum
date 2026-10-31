@@ -39,5 +39,6 @@
     <Project Path="Optimum.Cli.Tests/Optimum.Cli.Tests.csproj" />
     <Project Path="Optimum.Installer/Optimum.Installer.csproj" />
     <Project Path="Optimum.Installer.Tests/Optimum.Installer.Tests.csproj" />
+    <Project Path="Optimum.Update.Tests/Optimum.Update.Tests.csproj" />
   </Folder>
 </Solution>

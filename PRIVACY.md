@@ -1,6 +1,6 @@
 # Optimum Privacy Policy
 
-Last updated: 2026-08-26
+Last updated: 2026-10-31
 
 This policy explains what information Optimum handles when you build, install, or run it. Optimum is an independent, client-side performance project for Vintage Story. The source code is available at [github.com/StratumServer/Optimum](https://github.com/StratumServer/Optimum).
 
@@ -23,6 +23,7 @@ Optimum's build and packaging workflows can make network requests when you run t
 - The NuGet service at [api.nuget.org](https://api.nuget.org/v3/index.json) may receive package restore requests. The build also may install .NET tools from the configured package source.
 - GitHub may receive requests for the Optimum repository, upstream source repositories, and optional packaging tools or prerequisite downloads selected by the user.
 - The installer may open download pages for .NET, Git, PowerShell, innoextract, or other prerequisites when the user selects or follows those options.
+- The game checks the Optimum release list on GitHub once at startup. When the main-menu update button is used, it also downloads the release manifest, its signature and the overlay archive from GitHub. Nothing is sent beyond the request itself.
 
 These services can receive normal connection metadata such as an IP address, request time, and protocol or user-agent information. Optimum does not control their logging or retention. The official Vintage Story client is a separate process and may contact Anego Studios, authentication services, game servers, or other services using the account and installation configured by the user. That activity is governed by the [Vintage Story Privacy Policy](https://www.vintagestory.at/privacy/) and the relevant service policies.
 
