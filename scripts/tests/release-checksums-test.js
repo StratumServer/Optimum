@@ -36,6 +36,7 @@ test("isMetadata classifies feed and metadata files vs installer binaries", () =
   // Feed metadata
   assert.equal(isMetadata("assets.win.json"), true)
   assert.equal(isMetadata("assets.linux.json"), true)
+  assert.equal(isMetadata("optimum-manifest-win-x64.json.sig"), true)
   assert.equal(isMetadata("assets.osx.json"), true)
   assert.equal(isMetadata("Optimum.Installer-0.1.0-full.nupkg"), true)
   assert.equal(isMetadata("Optimum.Installer-0.1.0-delta.nupkg"), true)

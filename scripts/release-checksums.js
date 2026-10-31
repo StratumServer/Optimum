@@ -41,6 +41,7 @@ const METADATA_PATTERNS = [
   /\.nupkg$/i,
   /\.blockmap$/i,
   /\.ya?ml$/i,
+  /\.sig$/i,
   /^RELEASES$/i
 ]
 

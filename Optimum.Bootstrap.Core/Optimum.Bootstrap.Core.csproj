@@ -17,6 +17,10 @@
     <EmbeddedResource Include="Licensing/consent-notice.md" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The one-click update runs inside the game as plain source and in the CLI as this library, so both compile the same files. -->
+    <Compile Include="..\sources\VintagestoryLib\Optimum\Update\*.cs" Link="Update\Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="Optimum.Bootstrap.Core.Tests" />
   </ItemGroup>
 </Project>

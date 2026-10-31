@@ -8,6 +8,7 @@ using Optimum.Bootstrap.Core.Licensing;
 using Optimum.Bootstrap.Core.Patch;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
+using Optimum.Bootstrap.Core.Update;
 
 namespace Optimum.Cli;
 
@@ -70,6 +71,7 @@ public static class CliRunner
             "build" => await Build(rest, probe, buildDriver, sourceProvider ?? new GitSourceProvider(probe), output, cancellation.Token),
             "install" => Install(rest, probe, output),
             "patch" => await Patch(rest, probe, gamePatcher ?? new GamePatcher(probe), output, cancellation.Token),
+            "apply-update" => await ApplyUpdate(rest, gamePatcher ?? new GamePatcher(probe), output, cancellation.Token),
             "validate" => Validate(rest, probe, output),
             "uninstall" => Uninstall(rest, probe, output),
             _ => Unknown(verb, stderr),
@@ -302,6 +304,90 @@ public static class CliRunner
             : output.Failure(result.Reason ?? FailureReason.EngineInternal, result.Message ?? "patch failed");
     }
 
+    /// <summary>
+    /// Applies an update the game staged under .optimum/pending, after the game has exited, and brings the
+    /// previous version back if it fails. See <see cref="UpdateApplier"/>. When <c>--restart</c> is given the
+    /// game is started again whatever the outcome, so a failed update does not leave the player without a game.
+    /// </summary>
+    private static async Task<int> ApplyUpdate(
+        IReadOnlyList<string> args,
+        IGamePatcher patcher,
+        EngineOutput output,
+        CancellationToken cancellationToken)
+    {
+        var parsed = new CliArgs(args, new HashSet<string> { "--game-dir", "--overlay", "--wait-pid", "--wait-seconds", "--trusted-key", "--restart", "--restart-args" });
+        if (parsed.Errors.Count > 0)
+            return output.Failure(FailureReason.BadInput, string.Join("; ", parsed.Errors));
+
+        // The game runs this before it closes, so a release whose CLI cannot apply an update is found out while
+        // the player still has a window to read the explanation in. A CLI without the verb answers "unknown verb".
+        if (parsed.Has("--probe"))
+            return output.Success("apply-update");
+
+        string? gameDir = RequireAbsolute(parsed.Get("--game-dir"), "--game-dir", output, out int gameDirError);
+        if (gameDir is null)
+            return gameDirError;
+        string? overlayDir = RequireAbsolute(parsed.Get("--overlay"), "--overlay", output, out int overlayError);
+        if (overlayDir is null)
+            return overlayError;
+
+        int? waitPid = null;
+        if (parsed.Get("--wait-pid") is string rawPid)
+        {
+            if (!int.TryParse(rawPid, out int pid) || pid <= 0)
+                return output.Failure(FailureReason.BadInput, "--wait-pid must be a process id");
+            waitPid = pid;
+        }
+        TimeSpan? wait = null;
+        if (parsed.Get("--wait-seconds") is string rawWait)
+        {
+            if (!int.TryParse(rawWait, out int seconds) || seconds <= 0 || seconds > 3600)
+                return output.Failure(FailureReason.BadInput, "--wait-seconds must be between 1 and 3600");
+            wait = TimeSpan.FromSeconds(seconds);
+        }
+        string? restart = parsed.Get("--restart");
+        if (restart is not null && !Path.IsPathRooted(restart))
+            return output.Failure(FailureReason.BadInput, "--restart must be an absolute path");
+
+        ApplyOutcome outcome;
+        try
+        {
+            outcome = await new UpdateApplier(patcher).ApplyAsync(
+                new ApplyRequest(gameDir, overlayDir, waitPid, wait, parsed.Get("--trusted-key")), output, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = new ApplyOutcome(false, "unknown", "the update was cancelled", false);
+        }
+
+        // Only start the game again when the old one is really gone; a game that never exited is still running.
+        bool gameStillRunning = outcome.Reason.StartsWith("the game did not close", StringComparison.Ordinal);
+        if (restart is not null && !gameStillRunning)
+            TryStart(restart, parsed.Get("--restart-args"), output);
+
+        return outcome.Ok
+            ? output.Success(gameDir)
+            : output.Failure(outcome.RolledBack ? FailureReason.PatchConflict : FailureReason.VerificationFailed, outcome.Reason);
+    }
+
+    private static void TryStart(string executable, string? arguments, EngineOutput output)
+    {
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(executable)
+            {
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(executable) ?? Environment.CurrentDirectory,
+            };
+            if (!string.IsNullOrEmpty(arguments)) start.Arguments = arguments;
+            System.Diagnostics.Process.Start(start)?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            output.Log(LogLevel.Warn, $"could not start {executable}: {ex.Message}");
+        }
+    }
+
     private static int Validate(IReadOnlyList<string> args, ISystemProbe probe, EngineOutput output)
     {
         var parsed = new CliArgs(args, new HashSet<string> { "--package" });
@@ -389,6 +475,7 @@ public static class CliRunner
         stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>] [--acquire-source [--source-cache <abs>]]");
         stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop,uri]");
         stderr.WriteLine("  patch         --game-dir <abs> [--overlay <abs>] [--backup|--no-backup] [--rollback]");
+        stderr.WriteLine("  apply-update  --game-dir <abs> --overlay <abs> [--wait-pid <id>] [--wait-seconds <n>] [--trusted-key <base64>] [--restart <abs> [--restart-args <text>]]");
         stderr.WriteLine("  validate      --package <abs>");
         stderr.WriteLine("  uninstall     --install-dir <abs>");
         stderr.WriteLine("  capabilities  [--repo-root <dir>]");

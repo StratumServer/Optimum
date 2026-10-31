@@ -8,7 +8,8 @@
       "Optimum.Cli/Optimum.Cli.csproj",
       "Optimum.Cli.Tests/Optimum.Cli.Tests.csproj",
       "Optimum.Installer/Optimum.Installer.csproj",
-      "Optimum.Installer.Tests/Optimum.Installer.Tests.csproj"
+      "Optimum.Installer.Tests/Optimum.Installer.Tests.csproj",
+      "Optimum.Update.Tests/Optimum.Update.Tests.csproj"
     ]
   }
 }

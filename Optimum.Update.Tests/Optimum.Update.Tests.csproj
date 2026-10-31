@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.*" />
+    <PackageReference Include="xunit" Version="2.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.*" />
+    <PackageReference Include="coverlet.collector" Version="6.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The update engine is compiled into the game as plain source, so the tests compile the same files
+         instead of referencing a game assembly that only exists after a bootstrap. -->
+    <Compile Include="..\sources\VintagestoryLib\Optimum\Update\*.cs" Link="Update\%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Fixtures\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

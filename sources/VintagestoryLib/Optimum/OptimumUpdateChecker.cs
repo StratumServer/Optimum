@@ -56,6 +56,7 @@ public static class OptimumUpdateChecker
             if (CompareVersions(LatestVersion, OptimumInfo.Version) > 0)
             {
                 UpdateAvailable = true;
+                OptimumUpdateUi.OnReleaseFound(LatestVersion);
             }
         }
         catch
