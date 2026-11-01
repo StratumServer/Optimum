@@ -210,7 +210,7 @@ public sealed class UpdaterTests
     }
 
     [Fact]
-    public async Task ARunnableHelperIsStartedAndTheStateMovesToApplying()
+    public async Task HelperCommandUsesTheStagedCliAndWaitsForTheGameToExit()
     {
         using var release = new ReleaseFixture().Build();
         using var dir = new TempDir();
@@ -220,10 +220,10 @@ public sealed class UpdaterTests
         updater.BeginStaging();
         await WaitFor(() => updater.Phase == UpdatePhase.Staged);
 
-        // The fixture's "CLI" is not executable, so the start fails and says so instead of hanging the menu.
-        bool started = updater.StartHelper(1, "", "");
-        Assert.False(started);
-        Assert.Equal(UpdatePhase.Failed, updater.Phase);
-        Assert.NotEmpty(updater.Detail);
+        var command = updater.BuildHelperCommand(1234, "", "", windows: true);
+        Assert.NotNull(command);
+        Assert.Equal(Path.Combine(updater.StagedDirectory!, "optimum.exe"), command!.FileName);
+        Assert.Equal(new[] { "apply-update", "--game-dir", game, "--overlay", updater.StagedDirectory,
+            "--wait-pid", "1234", "--trusted-key", release.PublicKey }, command.ArgumentList);
     }
 }
