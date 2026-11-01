@@ -30,9 +30,9 @@ public sealed class ApiPatcherGameLibResolverTests : IDisposable
         string backupApi = WriteAssembly(Path.Combine(_gameDir, ".optimum", "vanilla", "VintagestoryAPI.dll"), "VintagestoryAPI");
         string contracts = WriteAssembly(Path.Combine(_gameDir, "overlay", "Optimum.Api.Contracts.dll"), "Optimum.Api.Contracts");
 
-        var resolver = ApiPatcher.CreateResolver(backupApi, contracts);
+        using var resolver = ApiPatcher.CreateResolver(backupApi, contracts);
 
-        AssemblyDefinition resolved = resolver.Resolve(new AssemblyNameReference(GameLibAssembly, new Version(1, 0, 0, 0)));
+        using AssemblyDefinition resolved = resolver.Resolve(new AssemblyNameReference(GameLibAssembly, new Version(1, 0, 0, 0)));
         Assert.Equal(GameLibAssembly, resolved.Name.Name);
     }
 
@@ -43,9 +43,9 @@ public sealed class ApiPatcherGameLibResolverTests : IDisposable
         string api = WriteAssembly(Path.Combine(_gameDir, "VintagestoryAPI.dll"), "VintagestoryAPI");
         string contracts = WriteAssembly(Path.Combine(_gameDir, "overlay", "Optimum.Api.Contracts.dll"), "Optimum.Api.Contracts");
 
-        var resolver = ApiPatcher.CreateResolver(api, contracts);
+        using var resolver = ApiPatcher.CreateResolver(api, contracts);
 
-        AssemblyDefinition resolved = resolver.Resolve(new AssemblyNameReference(GameLibAssembly, new Version(1, 0, 0, 0)));
+        using AssemblyDefinition resolved = resolver.Resolve(new AssemblyNameReference(GameLibAssembly, new Version(1, 0, 0, 0)));
         Assert.Equal(GameLibAssembly, resolved.Name.Name);
     }
 

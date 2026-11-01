@@ -104,7 +104,7 @@ public sealed class OptimumUpdater
             return;
         }
         // A copy staged by an earlier run needs no download: offer the restart straight away.
-        string staged = OverlayStager.FindStaged(_gameDir, version, _rid, _publicKey);
+        string? staged = OverlayStager.FindStaged(_gameDir, version, _rid, _publicKey);
         lock (_gate)
         {
             if (Phase == UpdatePhase.Staging || Phase == UpdatePhase.Staged || Phase == UpdatePhase.Applying) return;
@@ -216,59 +216,9 @@ public sealed class OptimumUpdater
         return start;
     }
 
-    /// <summary>
-    /// Asks the staged CLI whether it can apply an update. A release built before this feature has a CLI that does not
-    /// know the verb, and closing the game for it would leave the player with nothing applied.
-    /// </summary>
-    internal bool ProbeHelper(bool windows, out string reason)
-    {
-        reason = "";
-        if (StagedDirectory is null) { reason = "the staged update is not ready"; return false; }
-        string cli = Path.Combine(StagedDirectory, windows ? "optimum.exe" : "optimum");
-        if (!File.Exists(cli)) { reason = "the staged update has no helper"; return false; }
-        try
-        {
-            var probe = new ProcessStartInfo(cli)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                WorkingDirectory = StagedDirectory,
-            };
-            probe.ArgumentList.Add("apply-update");
-            probe.ArgumentList.Add("--probe");
-            using Process process = Process.Start(probe);
-            if (process is null) { reason = "the helper did not start"; return false; }
-            process.StandardOutput.ReadToEnd();
-            process.StandardError.ReadToEnd();
-            if (!process.WaitForExit(20000))
-            {
-                try { process.Kill(); } catch (Exception) { }
-                reason = "the helper did not answer";
-                return false;
-            }
-            if (process.ExitCode != 0) { reason = "this release cannot be applied in place"; return false; }
-            return true;
-        }
-        catch (Exception ex)
-        {
-            reason = ex.Message;
-            return false;
-        }
-    }
-
-    /// <summary>Starts the helper. The caller closes the game right after this returns true.</summary>
+    /// <summary>Starts the staged helper without blocking the game menu. The caller closes the game after it starts.</summary>
     public bool StartHelper(int gameProcessId, string restartExecutable, string restartArguments)
     {
-        if (Phase == UpdatePhase.Staged && !ProbeHelper(OperatingSystem.IsWindows(), out string probeReason))
-        {
-            lock (_gate) { Phase = UpdatePhase.Failed; Detail = probeReason; }
-            if (_log is not null) _log("One-click update: " + probeReason);
-            Notify(force: true);
-            return false;
-        }
-
         ProcessStartInfo? command = BuildHelperCommand(gameProcessId, restartExecutable, restartArguments, OperatingSystem.IsWindows());
         if (command is null)
         {
@@ -278,7 +228,8 @@ public sealed class OptimumUpdater
         }
         try
         {
-            Process.Start(command)?.Dispose();
+            using Process? process = Process.Start(command);
+            if (process is null) throw new InvalidOperationException("the staged update helper did not start");
             lock (_gate) { Phase = UpdatePhase.Applying; Detail = ""; }
             Notify(force: true);
             return true;

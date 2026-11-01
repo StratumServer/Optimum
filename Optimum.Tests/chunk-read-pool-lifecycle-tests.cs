@@ -203,7 +203,7 @@ public sealed class ChunkReadPoolLifecycleTests
 
     private static bool InitializeSqliteProvider()
     {
-        string[] providerDirectories = OperatingSystem.IsWindows()
+        string[] repositoryProviderDirectories = OperatingSystem.IsWindows()
             ? [
                 ".vanilla/win-x64/vintagestory/Lib",
                 ".vanilla/win-x64/package-client/Lib",
@@ -213,6 +213,10 @@ public sealed class ChunkReadPoolLifecycleTests
                 ".vanilla/win-x64/vintagestory/Lib",
                 ".vanilla/win-x64/package-client/Lib",
             ];
+        string configuredProviderDirectory = Environment.GetEnvironmentVariable("OPTIMUM_TEST_SQLITE_PROVIDER_DIR") ?? "";
+        string[] providerDirectories = string.IsNullOrWhiteSpace(configuredProviderDirectory)
+            ? repositoryProviderDirectories
+            : [configuredProviderDirectory, .. repositoryProviderDirectories];
         string[] nativeNames = OperatingSystem.IsWindows()
             ? ["e_sqlite3.dll"]
             : OperatingSystem.IsMacOS()
