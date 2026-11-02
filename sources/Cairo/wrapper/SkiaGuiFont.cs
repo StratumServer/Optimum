@@ -44,7 +44,8 @@ namespace Cairo
 					_ => SKFontHinting.Normal
 				},
 				LinearMetrics = options.HintMetrics == HintMetrics.Off,
-				Subpixel = false
+				// Preserve fractional glyph origins when Cairo requests LCD edging.
+				Subpixel = options.Antialias == Antialias.Subpixel
 			};
 			fileSource?.ApplyLoadOptions(font, options);
 			return font;

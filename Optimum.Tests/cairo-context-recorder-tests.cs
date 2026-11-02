@@ -700,9 +700,27 @@ public sealed class CairoContextRecorderTests
 		DrawSubpixelText (grayscale, Antialias.Best);
 		byte[] antialias = RenderRecorded (grayscale, 144, 36);
 
+		using var integerOrigin = new ImageSurface (Format.Argb32, 144, 36);
+		integerOrigin.BeginRecording ();
+		DrawSubpixelText (integerOrigin, Antialias.Subpixel, 3);
+		byte[] integerPosition = RenderRecorded (integerOrigin, 144, 36);
+
 		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
 		Assert.Null (actual.FirstMaterializationTrigger);
 		Assert.NotEqual (antialias, subpixel);
+		Assert.NotEqual (integerPosition, subpixel);
+		Assert.True (HasChromaticTextEdge (subpixel), "LCD edging should preserve independent RGB edge coverage.");
+		Assert.False (HasChromaticTextEdge (antialias), "Grayscale antialiasing should not introduce colored text fringes.");
+	}
+
+	[Fact]
+	public void SkiaGuiFontEnablesFractionalPositioningForLcdText()
+	{
+		using var options = new FontOptions { Antialias = Antialias.Subpixel };
+		using var font = SkiaGuiFont.Create ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal, 15, options);
+
+		Assert.Equal (SKFontEdging.SubpixelAntialias, font.Edging);
+		Assert.True (font.Subpixel);
 	}
 
 	[Fact]
@@ -739,20 +757,29 @@ public sealed class CairoContextRecorderTests
 		Assert.NotEqual (antialias, subpixel);
 	}
 
-	static void DrawSubpixelText (ImageSurface surface, Antialias antialias)
+	static void DrawSubpixelText (ImageSurface surface, Antialias antialias, double textX = 3.375)
 	{
 		using var context = new Context (surface);
 		context.Antialias = Antialias.Best;
-		context.SetSourceRGBA (.12, .18, .24, 1);
+		context.SetSourceRGBA (.12, .12, .12, 1);
 		context.Rectangle (0, 0, surface.Width, surface.Height);
 		context.Fill ();
-		context.SetSourceColor (new Color (.94, .93, .89, 1));
+		context.SetSourceColor (new Color (.94, .94, .94, 1));
 		context.SelectFontFace ("DejaVu Sans", FontSlant.Normal, FontWeight.Normal);
 		context.SetFontSize (15);
 		using var options = new FontOptions { Antialias = antialias };
 		context.FontOptions = options;
-		context.MoveTo (3.375, 23.625);
+		context.MoveTo (textX, 23.625);
 		context.ShowText ("Subpixel: ffi 0123");
+	}
+
+	static bool HasChromaticTextEdge (byte[] pixels)
+	{
+		for (int i = 0; i < pixels.Length; i += 4) {
+			int blue = pixels[i], green = pixels[i + 1], red = pixels[i + 2];
+			if (Math.Max (red, Math.Max (green, blue)) - Math.Min (red, Math.Min (green, blue)) >= 8) return true;
+		}
+		return false;
 	}
 
 	static byte[] RenderRecorded (ImageSurface surface, int width, int height)

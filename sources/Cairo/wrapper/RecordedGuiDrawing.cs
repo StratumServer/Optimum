@@ -446,7 +446,10 @@ half4 main(float2 p) {
 			if (effect == null) throw new ArgumentNullException(nameof(effect));
 			if (!TryGetLcdTextBounds(width, height, deviceOffset, out SKRectI bounds)) return;
 			int rasterWidth = bounds.Width, rasterHeight = bounds.Height;
-			var info = new SKImageInfo(rasterWidth, rasterHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
+			// LCD masks need Skia's native N32 format and an opaque surface. These
+			// black/white rasters are coverage inputs only; the final GUI surface
+			// keeps its own alpha type and is composited below.
+			var info = new SKImageInfo(rasterWidth, rasterHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
 			using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
 			using var black = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD black surface.");
 			using var white = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD white surface.");
