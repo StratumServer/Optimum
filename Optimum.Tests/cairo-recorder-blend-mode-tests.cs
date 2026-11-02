@@ -537,6 +537,30 @@ public sealed class CairoRecorderBlendModeTests
 		});
 	}
 
+	[Fact]
+	public void CroppedLcdTextMatchesCairoWithTransformClipAndSurfaceEdges ()
+	{
+		static void Draw (Context context)
+		{
+			context.SetSourceRGBA (.19, .31, .44, .65); context.Paint ();
+			context.Rectangle (8.25, 7.5, 180, 110); context.Clip ();
+			context.Translate (17.375, 6.625); context.Rotate (.06); context.Scale (1.25, .8);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (17);
+			using var options = new FontOptions { Antialias = Antialias.Subpixel };
+			context.FontOptions = options;
+			context.SetSourceRGBA (.78, .33, .16, .75);
+			context.MoveTo (-22.5, 33.25); context.ShowText ("LCD crop ffi Ág through a clipped edge");
+		}
+
+		const int width = 200, height = 128;
+		byte[] expected = CairoRecorderParityTests.RenderNative (width, height, Draw);
+		using var actual = new ImageSurface (Format.Argb32, width, height);
+		actual.BeginRecording ();
+		using (var context = new Context (actual)) Draw (context);
+		byte[] skia = CairoRecorderParityTests.RenderSkia (actual, width, height);
+		CairoRecorderParityTests.AssertWithinTolerance (expected, skia, width, height, edgeAllowance: true);
+	}
+
 	[Theory]
 	[InlineData (SubpixelOrder.Rgb)]
 	[InlineData (SubpixelOrder.Bgr)]

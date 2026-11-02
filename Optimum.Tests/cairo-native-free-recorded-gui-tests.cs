@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using Cairo;
@@ -84,6 +85,44 @@ public sealed class CairoNativeFreeRecordedGuiTests
 			Assert.True (visible > 50, "The hinted outline must draw visible glyphs.");
 			AssertNoCairoNativeLoad (deniedBefore);
 		} finally { Vintagestory.API.Config.RuntimeEnv.GUIScale = previous; }
+	}
+
+	[Fact]
+	public void ManySubpixelTextRunsOnTallSurfaceRenderWithinInkBounds ()
+	{
+		const int width = 1024, height = 8192, textRuns = 100;
+		using var surface = ImageSurface.CreateForRecordedGui (Format.Argb32, width, height);
+		using (var context = new Context (surface)) {
+			context.SetSourceRGB (.08, .1, .13);
+			context.Paint ();
+			context.SetSourceRGB (.94, .93, .89);
+			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal);
+			context.SetFontSize (18);
+			using var options = new FontOptions { Antialias = Antialias.Subpixel };
+			context.FontOptions = options;
+			for (int i = 0; i < textRuns; i++) {
+				context.MoveTo (24, 32 + i * 80);
+				context.ShowText ($"Contributor {i:D3}: Vintage Story credits rendering regression");
+			}
+		}
+
+		using var target = SKSurface.Create (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		var timer = Stopwatch.StartNew ();
+		Assert.True (surface.TryDrawRecordedCommands (target));
+		timer.Stop ();
+
+		Assert.True (timer.Elapsed < TimeSpan.FromSeconds (30),
+			$"{textRuns} LCD text runs on a {width}x{height} surface took {timer.Elapsed}; work should scale with text ink bounds.");
+
+		var sampleInfo = new SKImageInfo (600, 64, SKColorType.Bgra8888, SKAlphaType.Premul);
+		byte[] sample = new byte[sampleInfo.Width * sampleInfo.Height * 4];
+		GCHandle samplePin = GCHandle.Alloc (sample, GCHandleType.Pinned);
+		try { Assert.True (target.ReadPixels (sampleInfo, samplePin.AddrOfPinnedObject (), sampleInfo.Width * 4, 0, 0)); }
+		finally { samplePin.Free (); }
+		bool visibleInk = false;
+		for (int i = 0; i < sample.Length; i += 4)
+			if (sample[i] > 128 && sample[i + 1] > 128 && sample[i + 2] > 128) { visibleInk = true; break; }
+		Assert.True (visibleInk, "The cropped LCD text runs must remain visible after rendering.");
 	}
 
 	static void AssertNoCairoNativeLoad (int deniedBefore)

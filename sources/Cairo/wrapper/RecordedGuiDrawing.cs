@@ -444,17 +444,68 @@ half4 main(float2 p) {
 		internal void DrawLcdTextCpu(SKSurface target, SKRuntimeEffect effect, int width, int height, PointD deviceOffset = default)
 		{
 			if (effect == null) throw new ArgumentNullException(nameof(effect));
-			var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+			if (!TryGetLcdTextBounds(width, height, deviceOffset, out SKRectI bounds)) return;
+			int rasterWidth = bounds.Width, rasterHeight = bounds.Height;
+			var info = new SKImageInfo(rasterWidth, rasterHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
 			using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
 			using var black = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD black surface.");
 			using var white = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD white surface.");
 			black.Canvas.Clear(SKColors.Black); white.Canvas.Clear(SKColors.White);
-			DrawTextMask(black.Canvas, deviceOffset); DrawTextMask(white.Canvas, deviceOffset);
+			var rasterOffset = new PointD(deviceOffset.X - bounds.Left, deviceOffset.Y - bounds.Top);
+			DrawTextMask(black.Canvas, rasterOffset); DrawTextMask(white.Canvas, rasterOffset);
 			using SKImage blackImage = black.Snapshot();
 			using SKImage whiteImage = white.Snapshot();
-			using SKImage destination = target.Snapshot();
+			using SKImage destination = target.Snapshot(bounds)
+				?? throw new InvalidOperationException("Skia could not snapshot the destination under LCD text.");
 			DrawLcdComposite(effect, blackImage, whiteImage, destination, target.Canvas, Paint.BlendMode == SKBlendMode.Src,
-				Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen);
+				Paint.ColorF.Alpha, Paint.Color, rasterWidth, rasterHeight,
+				new PointD(bounds.Left, bounds.Top), Paint.BlendMode == SKBlendMode.Screen);
+		}
+
+		bool TryGetLcdTextBounds(int width, int height, PointD deviceOffset, out SKRectI bounds)
+		{
+			bounds = default;
+			if (width <= 0 || height <= 0) return false;
+
+			SKRect textBounds;
+			if (TextBlob != null) {
+				textBounds = TextBlob.Bounds;
+				textBounds = new SKRect(textBounds.Left + TextX, textBounds.Top + TextY,
+					textBounds.Right + TextX, textBounds.Bottom + TextY);
+			} else if (TextFont != null && !string.IsNullOrEmpty(Text)) {
+				TextFont.MeasureText(Text, out textBounds, Paint);
+				textBounds = new SKRect(textBounds.Left + TextX, textBounds.Top + TextY,
+					textBounds.Right + TextX, textBounds.Bottom + TextY);
+			} else {
+				return false;
+			}
+
+			if (textBounds.Right <= textBounds.Left || textBounds.Bottom <= textBounds.Top) return false;
+			textBounds = Matrix.MapRect(textBounds);
+			textBounds = new SKRect(
+				textBounds.Left + (float)deviceOffset.X,
+				textBounds.Top + (float)deviceOffset.Y,
+				textBounds.Right + (float)deviceOffset.X,
+				textBounds.Bottom + (float)deviceOffset.Y);
+
+			if (!float.IsFinite(textBounds.Left) || !float.IsFinite(textBounds.Top) ||
+				!float.IsFinite(textBounds.Right) || !float.IsFinite(textBounds.Bottom)) {
+				bounds = new SKRectI(0, 0, width, height);
+				return true;
+			}
+
+			// Keep a small device-space fringe for LCD coverage after the recorded
+			// transform, while avoiding full-surface clears and composites for long
+			// rich-text images such as the credits screen.
+			const double lcdFringe = 2;
+			int left = (int)Math.Clamp(Math.Floor(textBounds.Left) - lcdFringe, 0, width);
+			int top = (int)Math.Clamp(Math.Floor(textBounds.Top) - lcdFringe, 0, height);
+			int right = (int)Math.Clamp(Math.Ceiling(textBounds.Right) + lcdFringe, 0, width);
+			int bottom = (int)Math.Clamp(Math.Ceiling(textBounds.Bottom) + lcdFringe, 0, height);
+			if (right <= left || bottom <= top) return false;
+
+			bounds = new SKRectI(left, top, right, bottom);
+			return true;
 		}
 
 		internal static void DrawLcdComposite(SKRuntimeEffect effect, SKImage black, SKImage white, SKImage destination,
