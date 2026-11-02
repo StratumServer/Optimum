@@ -230,11 +230,14 @@ namespace Vintagestory.Client.NoObf
 					}
 
 					GlStateSnapshot state = null;
-					int texture = 0, framebuffer = 0;
+					int texture = 0, framebuffer = 0, isolatedVertexArray = 0;
 					bool rendered = false;
+					// A reset seen while releasing Ganesh latches the context; keep its reason for the post-render check.
+					string renderResetReason = null;
 					try
 					{
 						state = GlStateSnapshot.Capture();
+						isolatedVertexArray = state.CreateIsolatedVertexArray();
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
 						GL.ActiveTexture(TextureUnit.Texture0);
@@ -273,8 +276,8 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
 						GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
 
-						var getProc = new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress);
-						using (GRGlInterface glInterface = GRGlInterface.Create(getProc))
+						using (var bindings = new SkiaGlBindings(isolatedVertexArray))
+						using (GRGlInterface glInterface = GRGlInterface.Create(bindings.GetProcedureAddress))
 						{
 							if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
 							using (GRContext context = GRContext.CreateGl(glInterface))
@@ -306,7 +309,9 @@ namespace Vintagestory.Client.NoObf
 								finally
 								{
 									// Dispose only abandons Ganesh; release its GL objects while the owning context is usable.
-									context.AbandonContext(operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext && !ContextWasReset(out _));
+									bool releaseResources = operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext;
+									if (releaseResources && ContextWasReset(out renderResetReason)) releaseResources = false;
+								context.AbandonContext(releaseResources);
 								}
 							}
 						}
@@ -320,7 +325,7 @@ namespace Vintagestory.Client.NoObf
 					{
 						if (state != null)
 						{
-							try { state.Restore(); }
+							try { state.Restore(ref isolatedVertexArray); }
 							catch (Exception exception) { rendered = false; failureReason = "gl-state-restore-exception:" + exception.GetType().Name + ":" + exception.Message; }
 						}
 						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
@@ -335,7 +340,7 @@ namespace Vintagestory.Client.NoObf
 					}
 
 					// A reset during the render leaves undefined pixels: never commit them.
-					if (ContextWasReset(out string renderResetReason))
+					if (renderResetReason != null || ContextWasReset(out renderResetReason))
 					{
 						rendered = false;
 						failureReason = renderResetReason;
@@ -425,6 +430,7 @@ namespace Vintagestory.Client.NoObf
 						if (!rasterSurface.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0))
 							throw new InvalidOperationException("Skia CPU could not copy the LCD raster into the GUI upload bitmap.");
 						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
+						int isolatedVertexArray = 0;
 						try
 						{
 							GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
@@ -442,7 +448,7 @@ namespace Vintagestory.Client.NoObf
 							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
 								throw new InvalidOperationException("OpenGL Skia CPU texture upload failed: " + error + ".");
 						}
-						finally { uploadState.Restore(); }
+						finally { uploadState.Restore(ref isolatedVertexArray); }
 					}
 				}
 
@@ -560,6 +566,39 @@ namespace Vintagestory.Client.NoObf
 			}
 		}
 
+		private sealed class SkiaGlBindings : IDisposable
+		{
+			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
+			private delegate void BindVertexArrayDelegate(uint array);
+
+			private readonly uint isolatedVertexArray;
+			private readonly BindVertexArrayDelegate nativeBindVertexArray;
+			private readonly BindVertexArrayDelegate bindVertexArray;
+
+			internal SkiaGlBindings(int isolatedVertexArray)
+			{
+				this.isolatedVertexArray = (uint)isolatedVertexArray;
+				nativeBindVertexArray = Marshal.GetDelegateForFunctionPointer<BindVertexArrayDelegate>(GetGlProcedureAddress("glBindVertexArray"));
+				bindVertexArray = BindVertexArray;
+			}
+
+			internal IntPtr GetProcedureAddress(string name) => name == "glBindVertexArray"
+				? Marshal.GetFunctionPointerForDelegate(bindVertexArray)
+				: GetGlProcedureAddress(name);
+
+			private void BindVertexArray(uint array)
+			{
+				// Ganesh binds VAO 0 when allocating index buffers, even in a core context.
+				// Give this interface a private default VAO so it cannot replace a caller's
+				// retained (possibly already deleted) element buffer. Nonzero Skia VAOs pass through.
+				nativeBindVertexArray(array == 0 ? isolatedVertexArray : array);
+			}
+
+			// Native function pointers do not root delegates. This scope outlives both
+			// GRContext and GRGlInterface, including their native resource disposal.
+			public void Dispose() { GC.KeepAlive(bindVertexArray); }
+		}
+
 		private static IntPtr GetGlProcedureAddress(string name)
 		{
 			// GLFW returns platform EGL entry points too, even when its current context is GLX.
@@ -575,11 +614,13 @@ namespace Vintagestory.Client.NoObf
 					GlStateSnapshot state = null;
 					int texture = 0;
 					int framebuffer = 0;
+					int isolatedVertexArray = 0;
 					byte[] pixels = new byte[Width * Height * 4];
 					string probeFailure = null;
 					try
 					{
 						state = GlStateSnapshot.Capture();
+						isolatedVertexArray = state.CreateIsolatedVertexArray();
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
 						GL.PixelStore(PixelStoreParameter.PackAlignment, 1);
@@ -622,8 +663,8 @@ namespace Vintagestory.Client.NoObf
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
 
-						var getProc = new GRGlGetProcedureAddressDelegate(GetGlProcedureAddress);
-						using (GRGlInterface glInterface = GRGlInterface.Create(getProc))
+						using (var bindings = new SkiaGlBindings(isolatedVertexArray))
+						using (GRGlInterface glInterface = GRGlInterface.Create(bindings.GetProcedureAddress))
 						{
 							if (glInterface == null)
 								throw new InvalidOperationException("Skia could not assemble an OpenGL interface using GLFW.GetProcAddress.");
@@ -672,7 +713,7 @@ namespace Vintagestory.Client.NoObf
 					{
 						if (state != null)
 						{
-							try { state.Restore(); }
+							try { state.Restore(ref isolatedVertexArray); }
 							catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "GL state restore: " + exception.Message); }
 						}
 						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
@@ -746,7 +787,6 @@ namespace Vintagestory.Client.NoObf
 					private readonly int currentProgram;
 					private readonly int vertexArray;
 					private readonly int arrayBuffer;
-					private readonly int elementArrayBuffer;
 					private readonly int pixelPackBuffer;
 					private readonly int pixelUnpackBuffer;
 					private readonly int packAlignment;
@@ -825,7 +865,6 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x8B8D, out currentProgram);
 						GL.GetInteger((GetPName)0x85B5, out vertexArray);
 						GL.GetInteger((GetPName)0x8894, out arrayBuffer);
-						GL.GetInteger((GetPName)0x8895, out elementArrayBuffer);
 						GL.GetInteger((GetPName)0x88ED, out pixelPackBuffer);
 						GL.GetInteger((GetPName)0x88EF, out pixelUnpackBuffer);
 						GL.GetInteger((GetPName)0x0D05, out packAlignment);
@@ -876,7 +915,45 @@ namespace Vintagestory.Client.NoObf
 					internal static GlStateSnapshot Capture() => new GlStateSnapshot();
 					internal bool SupportsRasterizerDiscard => supportsRasterizerDiscard;
 
-					internal void Restore()
+					internal int CreateIsolatedVertexArray()
+					{
+						GL.GenVertexArrays(1, out int isolated);
+						OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+						if (isolated == 0 || error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+						{
+							if (isolated != 0) try { GL.DeleteVertexArrays(1, ref isolated); } catch { }
+							throw new InvalidOperationException("Could not isolate vertex array state for Skia GUI rendering: " + error + ".");
+						}
+						try
+						{
+							GL.BindVertexArray(isolated);
+							error = GL.GetError();
+							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+								throw new InvalidOperationException("Could not bind an isolated VAO for Skia GUI rendering: " + error + ".");
+							return isolated;
+						}
+						catch
+						{
+							try { GL.DeleteVertexArrays(1, ref isolated); } catch { }
+							throw;
+						}
+					}
+
+					internal void Restore(ref int isolatedVertexArray)
+					{
+						try { RestoreCapturedState(); }
+						finally
+						{
+							if (isolatedVertexArray != 0)
+							{
+								int isolated = isolatedVertexArray;
+								isolatedVertexArray = 0;
+								GL.DeleteVertexArrays(1, ref isolated);
+							}
+						}
+					}
+
+					private void RestoreCapturedState()
 					{
 						GL.BindFramebuffer((FramebufferTarget)0x8CA8, readFramebuffer);
 						GL.BindFramebuffer((FramebufferTarget)0x8CA9, drawFramebuffer);
@@ -884,10 +961,8 @@ namespace Vintagestory.Client.NoObf
 						GL.UseProgram(currentProgram);
 						GL.BindVertexArray(vertexArray);
 						GL.BindBuffer(BufferTarget.ArrayBuffer, arrayBuffer);
-						// VAO 0 has no element-array binding in core profiles, so never restore
-						// an element-array binding while no VAO is bound.
-						if (vertexArray != 0)
-							GL.BindBuffer(BufferTarget.ElementArrayBuffer, elementArrayBuffer);
+						// Binding the untouched caller VAO also restores its element buffer. Do not
+						// rebind its buffer name: a deleted buffer may still be attached to that VAO.
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, pixelPackBuffer);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, pixelUnpackBuffer);
 						GL.PixelStore(PixelStoreParameter.PackAlignment, packAlignment);

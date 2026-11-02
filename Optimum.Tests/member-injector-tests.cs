@@ -7,6 +7,9 @@ using Xunit;
 
 namespace Optimum.Tests;
 
+[System.Runtime.InteropServices.UnmanagedFunctionPointer(System.Runtime.InteropServices.CallingConvention.Winapi)]
+public delegate uint InjectedGlCallback(uint value);
+
 public sealed class MemberInjectorTests
 {
     [Fact]
@@ -166,6 +169,42 @@ public sealed class MemberInjectorTests
         CustomAttribute attr = Assert.Single(injected.CustomAttributes);
         Assert.Equal("System.ThreadStaticAttribute", attr.Constructor.DeclaringType.FullName);
     }
+
+    [Fact]
+    public void InjectedDelegatePreservesRuntimeMethodsAndCallingConvention()
+    {
+        using AssemblyDefinition compiled = AssemblyDefinition.ReadAssembly(typeof(InjectedGlCallback).Assembly.Location);
+        using AssemblyDefinition vanilla = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("DelegateRoundtrip" + Guid.NewGuid().ToString("N"), new Version(1, 0)),
+            "DelegateRoundtrip", ModuleKind.Dll);
+        string name = typeof(InjectedGlCallback).FullName!;
+        Assert.Equal(1, MemberInjector.InjectTypes(vanilla, compiled, new List<string> { name }));
+        TypeDefinition injected = vanilla.MainModule.GetType(name);
+        Assert.All(injected.Methods, method => Assert.True(method.IsRuntime, method.Name));
+        CustomAttribute attribute = Assert.Single(injected.CustomAttributes,
+            attr => attr.AttributeType.FullName == typeof(System.Runtime.InteropServices.UnmanagedFunctionPointerAttribute).FullName);
+        Assert.Equal((int)System.Runtime.InteropServices.CallingConvention.Winapi, attribute.ConstructorArguments[0].Value);
+
+        using var stream = new System.IO.MemoryStream();
+        vanilla.Write(stream);
+        Type runtimeType = System.Reflection.Assembly.Load(stream.ToArray()).GetType(name, throwOnError: true)!;
+        Delegate callback = Delegate.CreateDelegate(runtimeType,
+            typeof(MemberInjectorTests).GetMethod(nameof(IncrementCallback))!);
+        Assert.Equal(42u, callback.DynamicInvoke(41u));
+        IntPtr pointer = System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(callback);
+        Assert.NotEqual(IntPtr.Zero, pointer);
+        var nativeCall = new System.Reflection.Emit.DynamicMethod("CallDelegate", typeof(uint), new[] { typeof(uint), typeof(IntPtr) });
+        System.Reflection.Emit.ILGenerator il = nativeCall.GetILGenerator();
+        il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+        il.Emit(System.Reflection.Emit.OpCodes.Ldarg_1);
+        il.EmitCalli(System.Reflection.Emit.OpCodes.Calli, System.Runtime.InteropServices.CallingConvention.Winapi,
+            typeof(uint), new[] { typeof(uint) });
+        il.Emit(System.Reflection.Emit.OpCodes.Ret);
+        Assert.Equal(42u, nativeCall.CreateDelegate<Func<uint, IntPtr, uint>>()(41u, pointer));
+        GC.KeepAlive(callback);
+    }
+
+    public static uint IncrementCallback(uint value) => value + 1;
 
     private static TypeDefinition AddGearRenderer(ModuleDefinition module, bool includeOptimumMembers)
     {

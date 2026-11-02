@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,21 +17,29 @@ public sealed class OptimumWorldgenFootprintLeaseTests
         using var entered = new ManualResetEventSlim();
         using var release = new ManualResetEventSlim();
 
-        Task<bool> owner = Task.Run(() =>
+        // The owner blocks until released; do not borrow a shared test-pool worker.
+        Task<bool> owner = Task.Factory.StartNew(() =>
         {
             if (!registry.TryAcquire(keys, out OptimumWorldgenFootprintLease? lease)) return false;
             entered.Set();
             release.Wait();
             lease!.Dispose();
             return true;
-        });
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
-        Assert.True(entered.Wait(5000));
-        Assert.False(registry.TryAcquire(keys, out OptimumWorldgenFootprintLease? blocked));
-        Assert.Null(blocked);
-
-        release.Set();
-        Assert.True(await owner);
+        bool acquired;
+        try
+        {
+            Assert.True(entered.Wait(5000));
+            Assert.False(registry.TryAcquire(keys, out OptimumWorldgenFootprintLease? blocked));
+            Assert.Null(blocked);
+        }
+        finally
+        {
+            release.Set();
+            acquired = await owner.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.True(acquired);
         Assert.True(registry.TryAcquire(keys, out OptimumWorldgenFootprintLease? available));
         available!.Dispose();
     }

@@ -325,7 +325,7 @@ public static class MemberInjector
     /// signal it either at patch time or at runtime.
     /// </summary>
     private static void CopyCustomAttributes(
-        Mono.Collections.Generic.Collection<CustomAttribute> source,
+        IEnumerable<CustomAttribute> source,
         Mono.Collections.Generic.Collection<CustomAttribute> target,
         ModuleDefinition targetModule)
     {
@@ -361,6 +361,12 @@ public static class MemberInjector
             src.Attributes,
             src.BaseType != null ? targetModule.ImportReference(src.BaseType) : null);
 
+        if (src.BaseType?.FullName == "System.MulticastDelegate")
+        {
+            CopyCustomAttributes(src.CustomAttributes.Where(attribute => attribute.AttributeType.FullName ==
+                "System.Runtime.InteropServices.UnmanagedFunctionPointerAttribute"), newType.CustomAttributes, targetModule);
+        }
+
         foreach (var implementedInterface in src.Interfaces)
         {
             newType.Interfaces.Add(new InterfaceImplementation(
@@ -388,7 +394,11 @@ public static class MemberInjector
             var newMethod = new MethodDefinition(
                 method.Name,
                 method.Attributes,
-                targetModule.ImportReference(method.ReturnType));
+                targetModule.ImportReference(method.ReturnType))
+            {
+                // Delegate methods are runtime-implemented, not empty IL methods.
+                ImplAttributes = method.ImplAttributes
+            };
 
             foreach (var param in method.Parameters)
             {
