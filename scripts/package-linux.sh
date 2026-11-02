@@ -294,6 +294,7 @@ mkdir -p "$DONOR_DIR" "$VANILLA_MOD_DIR"
 
 cp -f "$LIB_OUT/VintagestoryLib.dll" "$DONOR_DIR/VintagestoryLib.Donor.dll"
 cp -f "$MOD_OUT/Optimum.Api.Contracts.dll" "$DONOR_DIR/VintagestoryAPI.Contracts.dll"
+cp -f "$MOD_OUT/cairo-sharp.dll" "$DONOR_DIR/cairo-sharp.dll"
 cp -f "$MOD_OUT/VSEssentials.dll" "$DONOR_DIR/VSEssentials.Donor.dll"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$DONOR_DIR/VSSurvivalMod.Donor.dll"
 # Vanilla mods as baseline for mod patching.

@@ -342,6 +342,7 @@ public static class ILPatcher
                         // field with its donor type. Preserve that initializer;
                         // the object-to-Lock rewrite is only needed for vanilla
                         // builds that still construct System.Object here.
+                        retargetedMethodKeys.Add(MethodSignature.GetKey(method));
                         continue;
                     }
                     bool isPlainObjectCtorCall =
@@ -523,29 +524,38 @@ public static class ILPatcher
     {
         if (!compiledMethod.HasBody) return;
 
-        var missingNames = new HashSet<string>(StringComparer.Ordinal);
+        var missingNamesByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (var instruction in compiledMethod.Body.Instructions)
         {
             if (instruction.Operand is not MethodReference methodRef) continue;
-            if (methodRef.DeclaringType.FullName != compiledMethod.DeclaringType.FullName) continue;
 
             var targetType = vanillaAsm.MainModule.GetType(methodRef.DeclaringType.FullName);
             if (targetType == null) continue;
+            var sourceType = compiledAsm.MainModule.GetType(methodRef.DeclaringType.FullName);
+            if (sourceType == null) continue;
+
             bool exists = targetType.Methods.Any(method =>
                 MethodSignature.Matches(method, methodRef));
-            if (!exists)
+            if (exists) continue;
+
+            if (!missingNamesByType.TryGetValue(methodRef.DeclaringType.FullName, out var names))
             {
-                missingNames.Add(methodRef.Name);
+                names = new HashSet<string>(StringComparer.Ordinal);
+                missingNamesByType[methodRef.DeclaringType.FullName] = names;
             }
+            names.Add(methodRef.Name);
         }
 
-        foreach (string name in missingNames)
+        foreach (var pair in missingNamesByType)
         {
-            MemberInjector.InjectStaticMembers(
-                vanillaAsm,
-                compiledAsm,
-                compiledMethod.DeclaringType.FullName,
-                new List<string> { name });
+            foreach (string name in pair.Value)
+            {
+                MemberInjector.InjectStaticMembers(
+                    vanillaAsm,
+                    compiledAsm,
+                    pair.Key,
+                    new List<string> { name });
+            }
         }
     }
 

@@ -126,26 +126,59 @@ public sealed class StrayRootAssemblyCleanupTests
     public void ResolveUnmanagedLibraryResolvesNativeOpenAlFromLib()
     {
         var repoRoot = FindRepositoryRoot();
-        string vanillaLinuxOpenAl = Path.Combine(repoRoot.FullName, ".vanilla", "linux-x64", "vintagestory", "Lib", "libopenal.so.1");
-        if (!File.Exists(vanillaLinuxOpenAl))
+        if (!TryGetHostOpenAlAsset(out string runtimeIdentifier, out string assetName, out string libraryName))
             return;
 
-        string root = Path.Combine(Path.GetTempPath(), "optimum-stray-tests", Guid.NewGuid().ToString("N"));
-        string libDir = Path.Combine(root, "Lib");
-        Directory.CreateDirectory(libDir);
-        File.Copy(vanillaLinuxOpenAl, Path.Combine(libDir, "libopenal.so.1"));
+        string vanillaGameDir = Path.Combine(repoRoot.FullName, ".vanilla", runtimeIdentifier, "vintagestory");
+        string vanillaOpenAl = Path.Combine(vanillaGameDir, "Lib", assetName);
+        if (!File.Exists(vanillaOpenAl)) return;
 
-        try
+        IntPtr handle = Program.ResolveUnmanagedLibrary(vanillaGameDir, libraryName);
+        Assert.NotEqual(IntPtr.Zero, handle);
+        NativeLibrary.Free(handle);
+    }
+
+    private static bool TryGetHostOpenAlAsset(out string runtimeIdentifier, out string assetName, out string libraryName)
+    {
+        string architecture = RuntimeInformation.ProcessArchitecture switch
         {
-            IntPtr handle = Program.ResolveUnmanagedLibrary(root, "openal32");
-            Assert.NotEqual(IntPtr.Zero, handle);
-            NativeLibrary.Free(handle);
-        }
-        finally
+            Architecture.X64 => "x64",
+            Architecture.X86 => "x86",
+            Architecture.Arm64 => "arm64",
+            Architecture.Arm => "arm",
+            _ => string.Empty
+        };
+
+        if (architecture.Length == 0)
         {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
+            runtimeIdentifier = assetName = libraryName = string.Empty;
+            return false;
         }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            runtimeIdentifier = $"win-{architecture}";
+            assetName = "OpenAL32.dll";
+            libraryName = "openal32";
+            return true;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            runtimeIdentifier = $"linux-{architecture}";
+            assetName = libraryName = "libopenal.so.1";
+            return true;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            runtimeIdentifier = $"osx-{architecture}";
+            assetName = libraryName = "libopenal.1.dylib";
+            return true;
+        }
+
+        runtimeIdentifier = assetName = libraryName = string.Empty;
+        return false;
     }
 
     private static DirectoryInfo FindRepositoryRoot()

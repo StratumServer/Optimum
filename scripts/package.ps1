@@ -392,6 +392,7 @@ try {
     $donorFiles = @(
         @($compiledLib, 'VintagestoryLib.Donor.dll'),
         @((Join-Path $apiOut 'Optimum.Api.Contracts.dll'), 'VintagestoryAPI.Contracts.dll'),
+        @((Join-Path $apiOut 'cairo-sharp.dll'), 'cairo-sharp.dll'),
         @($essentialsDonor, 'VSEssentials.Donor.dll'),
         @($survivalDonor, 'VSSurvivalMod.Donor.dll')
     )
@@ -484,6 +485,7 @@ try {
         'Vintagestory.exe',
         '.optimum/donors/VintagestoryLib.Donor.dll',
         '.optimum/donors/VintagestoryAPI.Contracts.dll',
+        '.optimum/donors/cairo-sharp.dll',
         '.optimum/donors/VSEssentials.Donor.dll',
         '.optimum/donors/VSSurvivalMod.Donor.dll',
         '.optimum/vanilla/Mods/VSEssentials.dll',

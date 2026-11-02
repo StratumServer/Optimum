@@ -159,8 +159,14 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, bool linearMin = false)
+		[ThreadStatic] private static bool threadLinearMinOverride;
+
+		/// <summary>Opt-in per-thread linear-min filter for the next candidate texture candidate.</summary>
+		internal static bool LinearMinOverride { get => threadLinearMinOverride; set => threadLinearMinOverride = value; }
+
+		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason)
 				{
+					bool linearMin = threadLinearMinOverride;
 					candidateTexture = 0;
 					failureReason = null;
 					if (!OptimumGuiGpuProbe.RenderingRequested)
