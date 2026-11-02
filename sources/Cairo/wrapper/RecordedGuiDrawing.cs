@@ -374,7 +374,10 @@ namespace Cairo
 						canvas.DrawImage(geometryCoverage.Image, geometryCoverage.Bounds.Left, geometryCoverage.Bounds.Top, coveragePaint);
 					} finally { canvas.RestoreToCount(coverageSave); }
 				} else if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
-				else if (TextFont != null) canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
+				else if (TextFont != null) {
+					if (IntPtr.Size == 4) DrawRecordedText(canvas, Text, TextX, TextY, TextFont, Paint);
+					else canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
+				}
 				else if (PaintAll) canvas.DrawPaint(Paint);
 				else canvas.DrawPath(Path, Paint);
 				if (!sourceOnly && (maskImage != null || maskPatternDrawing != null)) {
@@ -398,6 +401,15 @@ namespace Cairo
 				if (ownsDependencyImage) dependencyImage?.Dispose();
 				if (ownsMaskDependencyImage) maskDependencyImage?.Dispose();
 			}
+		}
+
+		// Keep text submission outside the large replay method. On Windows x86,
+		// calling DrawText here lost fractional positioning despite the font's
+		// Subpixel flag; a non-inlined helper preserved the recorded origin.
+		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+		static void DrawRecordedText(SKCanvas canvas, string text, float x, float y, SKFont font, SKPaint paint)
+		{
+			canvas.DrawText(text, x, y, font, paint);
 		}
 
 		static readonly Lazy<SKRuntimeEffect> geometrySourceEffect = new Lazy<SKRuntimeEffect>(() => {
