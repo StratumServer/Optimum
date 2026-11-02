@@ -81,4 +81,37 @@ public class MainWindowRenderTests
         Assert.True(browse.Bounds.Width > 0);
         Assert.True(pathRight.X <= browseLeft.X);
     }
+
+    [AvaloniaFact]
+    public void BuildNoticeScrollsWithinTheReviewViewWhenTheWindowIsResized()
+    {
+        var vm = new MainWindowViewModel(TestServices.Build());
+        var window = new MainWindow { DataContext = vm, WindowState = WindowState.Normal, Width = 960, Height = 800 };
+        try
+        {
+            window.Show();
+            vm.CurrentScreen = WizardScreen.Review;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            window.Width = 720;
+            window.Height = 620;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            ScrollViewer notice = window.GetVisualDescendants().OfType<ScrollViewer>()
+                .Single(control => AutomationProperties.GetName(control) == "Optimum build notice");
+            CheckBox accept = window.GetVisualDescendants().OfType<CheckBox>()
+                .Single(control => control.Content as string == "I have read and accept this notice");
+            Point acceptBottom = accept.TranslatePoint(new Point(0, accept.Bounds.Height), window)!.Value;
+
+            Assert.True(notice.Bounds.Height > 0);
+            Assert.True(notice.Extent.Height > notice.Viewport.Height,
+                $"Notice extent {notice.Extent.Height} should scroll within viewport {notice.Viewport.Height}.");
+            Assert.True(acceptBottom.Y <= window.Bounds.Height,
+                $"Acceptance checkbox bottom at {acceptBottom.Y}, window height {window.Bounds.Height}");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
 }
