@@ -8,7 +8,7 @@ using Optimum.Update;
 
 namespace Optimum.Update.Tests;
 
-/// <summary>A fake GitHub release: a signed manifest, its signature and a real tar.gz overlay, served from memory.</summary>
+/// <summary>A fake GitHub release: API asset digests and a real tar.gz overlay, served from memory.</summary>
 public sealed class ReleaseFixture : IDisposable
 {
     public const string Base = "https://releases.test/";
@@ -16,9 +16,6 @@ public sealed class ReleaseFixture : IDisposable
     public string Version { get; init; } = "0.3.22";
     public string Rid { get; init; } = "win-x64";
     public string[] GameVersions { get; init; } = { "1.22.7" };
-
-    public ECDsa Key { get; } = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-    public string PublicKey => Convert.ToBase64String(Key.ExportSubjectPublicKeyInfo());
 
     /// <summary>Relative path inside the overlay folder to the file bytes. Built by the constructor, edited by tests before <see cref="Build"/>.</summary>
     public Dictionary<string, byte[]> Files { get; } = new()
@@ -37,7 +34,6 @@ public sealed class ReleaseFixture : IDisposable
     public Dictionary<string, byte[]>? ArchiveFiles { get; set; }
 
     public Func<string, string, string>? ManifestEdit { get; set; }
-    public bool SignManifest { get; set; } = true;
     public byte[]? ArchiveOverride { get; set; }
     public Dictionary<string, byte[]> Served { get; } = new();
 
@@ -46,6 +42,21 @@ public sealed class ReleaseFixture : IDisposable
 
     public byte[] ManifestBytes { get; private set; } = Array.Empty<byte>();
     public byte[] ArchiveBytes { get; private set; } = Array.Empty<byte>();
+    public string ManifestSha256 => Hex(ManifestBytes);
+    public long ManifestSize => ManifestBytes.LongLength;
+    public string ArchiveSha256 => Hex(ArchiveBytes);
+    public long ArchiveSize => ArchiveBytes.LongLength;
+    public string ReleaseJson => JsonSerializer.Serialize(new
+    {
+        tag_name = "v" + Version,
+        draft = false,
+        prerelease = false,
+        assets = new[]
+        {
+            new { name = $"optimum-manifest-{Rid}.json", state = "uploaded", size = ManifestSize, digest = "sha256:" + ManifestSha256 },
+            new { name = ArchiveName, state = "uploaded", size = ArchiveSize, digest = "sha256:" + ArchiveSha256 },
+        },
+    });
 
     public ReleaseFixture Build()
     {
@@ -67,8 +78,6 @@ public sealed class ReleaseFixture : IDisposable
 
         string tag = "v" + Version;
         Served[$"{tag}/optimum-manifest-{Rid}.json"] = ManifestBytes;
-        if (SignManifest)
-            Served[$"{tag}/optimum-manifest-{Rid}.json.sig"] = Key.SignData(ManifestBytes, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
         Served[$"{tag}/{ArchiveName}"] = ArchiveBytes;
         return this;
     }
@@ -104,7 +113,7 @@ public sealed class ReleaseFixture : IDisposable
 
     public static string Hex(byte[] data) => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
 
-    public void Dispose() => Key.Dispose();
+    public void Dispose() { }
 
     private sealed class FakeHandler : HttpMessageHandler
     {

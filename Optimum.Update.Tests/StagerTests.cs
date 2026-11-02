@@ -9,9 +9,66 @@ namespace Optimum.Update.Tests;
 public sealed class StagerTests
 {
     private static Task<StageResult> Stage(ReleaseFixture release, string gameDir, HttpClient? client = null, string installed = "0.3.21", string game = "1.22.7",
-        string target = "0.3.22", string? key = null, CancellationToken token = default, Action<StageProgress>? progress = null)
-        => Task.FromResult(new OverlayStager(client ?? release.Client(), ReleaseFixture.Base, key ?? release.PublicKey)
-            .Stage(gameDir, installed, game, release.Rid, target, progress, token));
+        string target = "0.3.22", string? manifestSha256 = null, string? archiveSha256 = null,
+        long? manifestSize = null, long? archiveSize = null, CancellationToken token = default, Action<StageProgress>? progress = null)
+        => Task.FromResult(new OverlayStager(client ?? release.Client(), ReleaseFixture.Base)
+            .Stage(gameDir, installed, game, release.Rid, target,
+                manifestSha256 ?? release.ManifestSha256, manifestSize ?? release.ManifestSize,
+                archiveSha256 ?? release.ArchiveSha256, archiveSize ?? release.ArchiveSize, progress, token));
+
+    [Fact]
+    public void ReadsDigestsOnlyFromTheExactPublishedTagAndExpectedAssets()
+    {
+        using var release = new ReleaseFixture().Build();
+
+        bool ok = OverlayStager.TryGetReleaseAssetDigests(release.ReleaseJson, "v0.3.22", release.Rid,
+            out string manifestHash, out long manifestSize, out string archiveHash, out long archiveSize, out string error);
+
+        Assert.True(ok, error);
+        Assert.Equal(release.ManifestSha256, manifestHash);
+        Assert.Equal(release.ManifestSize, manifestSize);
+        Assert.Equal(release.ArchiveSha256, archiveHash);
+        Assert.Equal(release.ArchiveSize, archiveSize);
+    }
+
+    [Theory]
+    [InlineData("v0.3.23", "tag")]
+    [InlineData("v0.3.22", "draft")]
+    [InlineData("v0.3.22", "prerelease")]
+    [InlineData("v0.3.22", "missing-manifest-digest")]
+    [InlineData("v0.3.22", "invalid-archive-digest")]
+    [InlineData("v0.3.22", "duplicate-archive")]
+    public void RejectsIncompleteOrUnexpectedReleaseMetadata(string requestedTag, string mutation)
+    {
+        using var release = new ReleaseFixture().Build();
+        string json = release.ReleaseJson;
+        switch (mutation)
+        {
+            case "draft": json = json.Replace("\"draft\":false", "\"draft\":true", StringComparison.Ordinal); break;
+            case "prerelease": json = json.Replace("\"prerelease\":false", "\"prerelease\":true", StringComparison.Ordinal); break;
+            case "missing-manifest-digest": json = json.Replace("\"sha256:" + release.ManifestSha256 + "\"", "null", StringComparison.Ordinal); break;
+            case "invalid-archive-digest": json = json.Replace("sha256:" + release.ArchiveSha256, "sha512:" + release.ArchiveSha256, StringComparison.Ordinal); break;
+            case "duplicate-archive": json = json.Replace("\"assets\":[", "\"assets\":[{" + "\"name\":\"" + release.ArchiveName + "\",\"state\":\"uploaded\",\"size\":" + release.ArchiveSize + ",\"digest\":\"sha256:" + release.ArchiveSha256 + "\"},", StringComparison.Ordinal); break;
+        }
+
+        bool ok = OverlayStager.TryGetReleaseAssetDigests(json, requestedTag, release.Rid,
+            out string _, out long _, out string _, out long _, out string _);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public void RejectsAnAssetWithAnUnusableSize()
+    {
+        using var release = new ReleaseFixture().Build();
+        string json = release.ReleaseJson.Replace("\"size\":" + release.ArchiveSize,
+            "\"size\":" + (OverlayManifest.MaxArchiveBytes + 1), StringComparison.Ordinal);
+
+        bool ok = OverlayStager.TryGetReleaseAssetDigests(json, "v0.3.22", release.Rid,
+            out string _, out long _, out string _, out long _, out string _);
+
+        Assert.False(ok);
+    }
 
     [Fact]
     public async Task StagesAVerifiedOverlayInOneFolder()
@@ -27,6 +84,7 @@ public sealed class StagerTests
         foreach ((string path, byte[] data) in release.Files)
             Assert.Equal(data, File.ReadAllBytes(Path.Combine(result.StagedDirectory!, path.Replace('/', Path.DirectorySeparatorChar))));
         Assert.True(File.Exists(Path.Combine(result.StagedDirectory!, "staged.json")));
+        Assert.False(File.Exists(Path.Combine(result.StagedDirectory!, "staged-manifest.json.sig")));
         Assert.Equal(new[] { "0.3.22-win-x64" }, Directory.GetDirectories(Path.Combine(game, ".optimum", "pending")).Select(Path.GetFileName).ToArray());
     }
 
@@ -79,45 +137,47 @@ public sealed class StagerTests
     }
 
     [Fact]
-    public async Task RefusesAManifestWithoutASignature()
-    {
-        using var release = new ReleaseFixture { SignManifest = false }.Build();
-        using var dir = new TempDir();
-        StageResult result = await Stage(release, dir.PatchedInstall());
-        Assert.False(result.Ok);
-    }
-
-    [Fact]
-    public async Task RefusesAManifestSignedWithAnotherKey()
-    {
-        using var release = new ReleaseFixture().Build();
-        using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        using var dir = new TempDir();
-        StageResult result = await Stage(release, dir.PatchedInstall(), key: Convert.ToBase64String(other.ExportSubjectPublicKeyInfo()));
-        Assert.Equal(UpdateFailure.BadSignature, result.Failure);
-        Assert.False(Directory.Exists(Path.Combine(dir.Path, ".optimum", "pending", "0.3.22-win-x64")));
-    }
-
-    [Fact]
-    public async Task RefusesAManifestChangedAfterItWasSigned()
-    {
-        using var release = new ReleaseFixture().Build();
-        byte[] tampered = (byte[])release.ManifestBytes.Clone();
-        tampered[^3] ^= 1;
-        release.Served["v0.3.22/optimum-manifest-win-x64.json"] = tampered;
-        using var dir = new TempDir();
-        StageResult result = await Stage(release, dir.PatchedInstall());
-        Assert.Equal(UpdateFailure.BadSignature, result.Failure);
-    }
-
-    [Fact]
-    public async Task DoesNothingWithoutAConfiguredKey()
+    public async Task RefusesAManifestWithoutAGitHubAssetDigest()
     {
         using var release = new ReleaseFixture().Build();
         using var dir = new TempDir();
         int requests = 0;
-        StageResult result = await Stage(release, dir.PatchedInstall(), release.Client(_ => { requests++; return null; }), key: "");
-        Assert.Equal(UpdateFailure.NotConfigured, result.Failure);
+        StageResult result = await Stage(release, dir.PatchedInstall(), release.Client(_ => { requests++; return null; }), manifestSha256: "");
+        Assert.Equal(UpdateFailure.BadManifest, result.Failure);
+        Assert.Equal(0, requests);
+    }
+
+    [Fact]
+    public async Task RefusesAManifestThatDoesNotMatchTheGitHubAssetDigest()
+    {
+        using var release = new ReleaseFixture().Build();
+        byte[] otherManifest = (byte[])release.ManifestBytes.Clone();
+        otherManifest[otherManifest.Length / 2] ^= 1;
+        release.Served["v0.3.22/optimum-manifest-win-x64.json"] = otherManifest;
+        using var dir = new TempDir();
+        StageResult result = await Stage(release, dir.PatchedInstall());
+        Assert.Equal(UpdateFailure.BadManifest, result.Failure);
+        Assert.False(Directory.Exists(Path.Combine(dir.Path, ".optimum", "pending", "0.3.22-win-x64")));
+    }
+
+    [Fact]
+    public async Task RefusesAReleaseWhenTheArchiveDigestDiffersFromItsManifest()
+    {
+        using var release = new ReleaseFixture().Build();
+        string wrongDigest = new string('0', 64);
+        using var dir = new TempDir();
+        StageResult result = await Stage(release, dir.PatchedInstall(), archiveSha256: wrongDigest);
+        Assert.Equal(UpdateFailure.BadManifest, result.Failure);
+    }
+
+    [Fact]
+    public async Task DoesNothingWithoutAUsableGitHubDigest()
+    {
+        using var release = new ReleaseFixture().Build();
+        using var dir = new TempDir();
+        int requests = 0;
+        StageResult result = await Stage(release, dir.PatchedInstall(), release.Client(_ => { requests++; return null; }), manifestSha256: "not-a-digest");
+        Assert.Equal(UpdateFailure.BadManifest, result.Failure);
         Assert.Equal(0, requests);
     }
 
@@ -159,7 +219,6 @@ public sealed class StagerTests
     {
         using var release = new ReleaseFixture { Version = "0.3.23" }.Build();
         release.Served["v0.3.22/optimum-manifest-win-x64.json"] = release.ManifestBytes;
-        release.Served["v0.3.22/optimum-manifest-win-x64.json.sig"] = release.Served["v0.3.23/optimum-manifest-win-x64.json.sig"];
         using var dir = new TempDir();
         StageResult result = await Stage(release, dir.PatchedInstall());
         Assert.Equal(UpdateFailure.BadManifest, result.Failure);

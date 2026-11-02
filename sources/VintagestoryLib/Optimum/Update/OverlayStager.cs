@@ -17,11 +17,10 @@ namespace Optimum.Update;
 public static class UpdateFailure
 {
     public const int None = 0;
-    public const int NotConfigured = 1;
+    public const int Reserved = 1;
     public const int UnsupportedInstall = 2;
     public const int Network = 3;
     public const int BadManifest = 4;
-    public const int BadSignature = 5;
     public const int NotNewer = 6;
     public const int UnsupportedGameVersion = 7;
     public const int BadArchive = 8;
@@ -46,13 +45,14 @@ public sealed class StageProgress
 
 public sealed class StageResult
 {
-    public StageResult(bool ok, int failure, string message, string? stagedDirectory = null, OverlayManifest? manifest = null)
+    public StageResult(bool ok, int failure, string message, string? stagedDirectory = null, OverlayManifest? manifest = null, string? manifestSha256 = null)
     {
         Ok = ok;
         Failure = failure;
         Message = message;
         StagedDirectory = stagedDirectory;
         Manifest = manifest;
+        ManifestSha256 = manifestSha256;
     }
 
     public bool Ok { get; }
@@ -60,6 +60,7 @@ public sealed class StageResult
     public string Message { get; }
     public string? StagedDirectory { get; }
     public OverlayManifest? Manifest { get; }
+    public string? ManifestSha256 { get; }
 
     public static StageResult Fail(int failure, string message) => new(false, failure, message);
 }
@@ -67,11 +68,11 @@ public sealed class StageResult
 /// <summary>
 /// Downloads a release overlay and stages it beside the install, touching nothing the game has loaded.
 ///
-/// Order matters and is the point of this class: the signed manifest is trusted first, the archive is
-/// trusted only because the manifest names its hash, and each extracted file is trusted only because
-/// the manifest names its hash. Nothing the manifest does not list is written. The staged folder
-/// appears in one rename, so a partial download or a killed game never leaves a half-staged update
-/// that the apply step could mistake for a whole one.
+/// The checker gets asset digests from the GitHub Releases API over HTTPS. This class checks the exact
+/// manifest bytes against GitHub's digest, then checks the archive and each extracted file against the
+/// manifest. Nothing the manifest does not list is written. The staged folder appears in one rename,
+/// so a partial download or a killed game never leaves a half-staged update that apply could mistake
+/// for a whole one.
 ///
 /// Everything here is synchronous and runs on a thread the caller owns. The code is transplanted into the game
 /// assembly by the patcher, which handles plain methods reliably and async state machines and lambdas poorly.
@@ -81,19 +82,17 @@ public sealed class OverlayStager
     public const string DefaultReleaseBase = "https://github.com/StratumServer/Optimum/releases/download/";
     public const string PendingFolder = ".optimum/pending";
     public const string StagedMarker = "staged.json";
-    /// <summary>The exact signed manifest bytes and signature, kept beside the files so the apply step can verify them again.</summary>
+    public const int MaxReleaseMetadataBytes = 512 * 1024;
+    /// <summary>The exact manifest bytes, checked against the digest from the Releases API.</summary>
     public const string StagedManifest = "staged-manifest.json";
-    public const string StagedManifestSignature = "staged-manifest.json.sig";
 
     private readonly HttpClient http;
     private readonly Uri releaseBase;
-    private readonly string publicKey;
 
-    public OverlayStager(HttpClient http, string? releaseBase = null, string? publicKeySpkiBase64 = null)
+    public OverlayStager(HttpClient http, string? releaseBase = null)
     {
         this.http = http;
         this.releaseBase = new Uri(releaseBase ?? DefaultReleaseBase, UriKind.Absolute);
-        publicKey = publicKeySpkiBase64 ?? OptimumUpdateTrust.ManifestPublicKey;
     }
 
     public StageResult Stage(
@@ -102,32 +101,37 @@ public sealed class OverlayStager
         string gameVersion,
         string rid,
         string targetVersion,
+        string manifestSha256,
+        long manifestSize,
+        string archiveSha256,
+        long archiveSize,
         Action<StageProgress>? progress,
         CancellationToken cancellationToken)
     {
         string? tempRoot = null;
         try
         {
-            if (publicKey.Length == 0)
-                return StageResult.Fail(UpdateFailure.NotConfigured, "this build has no release signing key");
             if (!InstallLayout.IsPatchedInPlace(gameDir))
                 return StageResult.Fail(UpdateFailure.UnsupportedInstall, "this install is not patched in place");
             if (Array.IndexOf(OverlayManifest.SupportedRids, rid) < 0 || !OverlayManifest.IsValidVersion(targetVersion))
                 return StageResult.Fail(UpdateFailure.BadManifest, "the platform or version is not valid");
             if (OverlayManifest.CompareVersions(targetVersion, installedVersion) <= 0)
                 return StageResult.Fail(UpdateFailure.NotNewer, "the release is not newer than the installed version");
+            if (!IsValidSha256Digest(manifestSha256) || manifestSize <= 0 || manifestSize > OverlayManifest.MaxManifestBytes ||
+                !IsValidSha256Digest(archiveSha256) || archiveSize <= 0 || archiveSize > OverlayManifest.MaxArchiveBytes)
+                return StageResult.Fail(UpdateFailure.BadManifest, "the release has no usable GitHub asset digests");
 
             string tag = "v" + targetVersion;
             Report(progress, "manifest", 0, 0);
             byte[] manifestBytes = GetBytes(new Uri(releaseBase, tag + "/optimum-manifest-" + rid + ".json"), OverlayManifest.MaxManifestBytes, cancellationToken);
-            byte[] signature = GetBytes(new Uri(releaseBase, tag + "/optimum-manifest-" + rid + ".json.sig"), OptimumUpdateTrust.MaxSignatureBytes, cancellationToken);
-
-            if (!ManifestSignature.Verify(manifestBytes, signature, publicKey))
-                return StageResult.Fail(UpdateFailure.BadSignature, "the manifest signature does not verify");
+            if (manifestBytes.LongLength != manifestSize || !MatchesSha256(manifestBytes, manifestSha256))
+                return StageResult.Fail(UpdateFailure.BadManifest, "the manifest does not match the GitHub release asset digest");
             if (!OverlayManifest.TryParse(manifestBytes, out OverlayManifest? manifest, out string parseError) || manifest is null)
                 return StageResult.Fail(UpdateFailure.BadManifest, parseError);
             if (manifest.OptimumVersion != targetVersion || manifest.Rid != rid)
                 return StageResult.Fail(UpdateFailure.BadManifest, "the manifest is for a different version or platform");
+            if (manifest.ArchiveSize != archiveSize || !string.Equals(manifest.ArchiveSha256, archiveSha256, StringComparison.OrdinalIgnoreCase))
+                return StageResult.Fail(UpdateFailure.BadManifest, "the archive details do not match the GitHub release asset");
             if (!manifest.SupportsGameVersion(gameVersion))
                 return StageResult.Fail(UpdateFailure.UnsupportedGameVersion, "this release does not support game version " + gameVersion);
 
@@ -136,8 +140,8 @@ public sealed class OverlayStager
             Directory.CreateDirectory(pending);
             SweepTemporaryFolders(pending);
 
-            if (IsStaged(finalDir, manifest, publicKey))
-                return new StageResult(true, UpdateFailure.None, "already staged", finalDir, manifest);
+            if (TryValidateStaged(finalDir, manifestSha256, out OverlayManifest? stagedManifest, out _) && stagedManifest is not null)
+                return new StageResult(true, UpdateFailure.None, "already staged", finalDir, stagedManifest, manifestSha256);
 
             tempRoot = Path.Combine(pending, ".tmp-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempRoot);
@@ -150,11 +154,10 @@ public sealed class OverlayStager
             ExtractAndVerify(archivePath, extractTo, manifest, progress, cancellationToken);
 
             File.WriteAllBytes(Path.Combine(extractTo, StagedManifest), manifestBytes);
-            File.WriteAllBytes(Path.Combine(extractTo, StagedManifestSignature), signature);
-            File.WriteAllText(Path.Combine(extractTo, StagedMarker), JsonSerializer.Serialize(new StagedMarkerData(manifest.OptimumVersion, manifest.Rid, manifest.ArchiveSha256, DateTimeOffset.UtcNow)));
+            File.WriteAllText(Path.Combine(extractTo, StagedMarker), JsonSerializer.Serialize(new StagedMarkerData(manifest.OptimumVersion, manifest.Rid, manifest.ArchiveSha256, manifestSha256, DateTimeOffset.UtcNow)));
             if (Directory.Exists(finalDir)) Directory.Delete(finalDir, recursive: true);
             Directory.Move(extractTo, finalDir);
-            return new StageResult(true, UpdateFailure.None, "staged", finalDir, manifest);
+            return new StageResult(true, UpdateFailure.None, "staged", finalDir, manifest, manifestSha256);
         }
         catch (OperationCanceledException)
         {
@@ -181,6 +184,123 @@ public sealed class OverlayStager
             if (tempRoot is not null) TryDelete(tempRoot);
         }
     }
+
+    /// <summary>
+    /// Reads the two assets needed by the updater from one GitHub Releases API response. The response arrives over
+    /// HTTPS, so its digests authenticate the bytes the release API says are attached to this exact published tag.
+    /// </summary>
+    public static bool TryGetReleaseAssetDigests(
+        string releaseJson,
+        string expectedTag,
+        string rid,
+        out string manifestSha256,
+        out long manifestSize,
+        out string archiveSha256,
+        out long archiveSize,
+        out string error)
+    {
+        manifestSha256 = "";
+        manifestSize = 0;
+        archiveSha256 = "";
+        archiveSize = 0;
+        error = "the release metadata is not valid";
+        if (string.IsNullOrEmpty(releaseJson) || string.IsNullOrEmpty(expectedTag) || releaseJson.Length > MaxReleaseMetadataBytes ||
+            !OverlayManifest.IsValidVersion(expectedTag.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? expectedTag.Substring(1) : expectedTag) ||
+            Array.IndexOf(OverlayManifest.SupportedRids, rid) < 0)
+            return false;
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(releaseJson, new JsonDocumentOptions { MaxDepth = 16 });
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object ||
+                !root.TryGetProperty("tag_name", out JsonElement tag) || tag.ValueKind != JsonValueKind.String || tag.GetString() != expectedTag ||
+                !root.TryGetProperty("draft", out JsonElement draft) || draft.ValueKind != JsonValueKind.False ||
+                !root.TryGetProperty("prerelease", out JsonElement prerelease) || prerelease.ValueKind != JsonValueKind.False ||
+                !root.TryGetProperty("assets", out JsonElement assets) || assets.ValueKind != JsonValueKind.Array)
+            {
+                error = "the release metadata does not describe the expected published release";
+                return false;
+            }
+
+            string version = expectedTag[0] is 'v' or 'V' ? expectedTag.Substring(1) : expectedTag;
+            if (!TryReadAsset(assets, "optimum-manifest-" + rid + ".json", OverlayManifest.MaxManifestBytes,
+                    out manifestSha256, out manifestSize, out error) ||
+                !TryReadAsset(assets, OverlayManifest.ExpectedArchiveName(version, rid), OverlayManifest.MaxArchiveBytes,
+                    out archiveSha256, out archiveSize, out error))
+            {
+                manifestSha256 = "";
+                manifestSize = 0;
+                archiveSha256 = "";
+                archiveSize = 0;
+                return false;
+            }
+
+            error = "";
+            return true;
+        }
+        catch (JsonException)
+        {
+            error = "the GitHub release metadata is not valid JSON";
+            return false;
+        }
+    }
+
+    /// <summary>Validates the GitHub API's asset digest format and returns the digest without its algorithm prefix.</summary>
+    private static bool TryReadAsset(JsonElement assets, string expectedName, long maximumSize, out string sha256, out long size, out string error)
+    {
+        sha256 = "";
+        size = 0;
+        error = "the GitHub release is missing " + expectedName;
+        int matches = 0;
+        foreach (JsonElement asset in assets.EnumerateArray())
+        {
+            if (asset.ValueKind != JsonValueKind.Object || !asset.TryGetProperty("name", out JsonElement name) ||
+                name.ValueKind != JsonValueKind.String || name.GetString() != expectedName)
+                continue;
+
+            matches++;
+            if (matches > 1)
+            {
+                error = "the GitHub release contains duplicate " + expectedName + " assets";
+                return false;
+            }
+            if (!asset.TryGetProperty("state", out JsonElement state) || state.ValueKind != JsonValueKind.String || state.GetString() != "uploaded" ||
+                !asset.TryGetProperty("size", out JsonElement assetSize) || assetSize.ValueKind != JsonValueKind.Number ||
+                !assetSize.TryGetInt64(out size) || size <= 0 || size > maximumSize ||
+                !asset.TryGetProperty("digest", out JsonElement digest) || digest.ValueKind != JsonValueKind.String)
+            {
+                error = "the GitHub release asset " + expectedName + " is incomplete or too large";
+                return false;
+            }
+
+            string value = digest.GetString() ?? "";
+            if (!value.StartsWith("sha256:", StringComparison.Ordinal) || !IsValidSha256Digest(value.Substring(7)))
+            {
+                error = "the GitHub release asset " + expectedName + " has no usable SHA-256 digest";
+                return false;
+            }
+            sha256 = value.Substring(7);
+        }
+
+        if (matches == 1)
+        {
+            error = "";
+            return true;
+        }
+        return false;
+    }
+
+    public static bool IsValidSha256Digest(string value)
+    {
+        if (value is null || value.Length != 64) return false;
+        foreach (char c in value)
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+        return true;
+    }
+
+    public static bool MatchesSha256(byte[] bytes, string digest)
+        => IsValidSha256Digest(digest) && string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), digest, StringComparison.OrdinalIgnoreCase);
 
     private static void Report(Action<StageProgress>? progress, string phase, long done, long total)
     {
@@ -349,48 +469,111 @@ public sealed class OverlayStager
     }
 
     /// <summary>
-    /// The folder of a copy of <paramref name="version"/> staged earlier, or null. The copy is trusted only if the signed
-    /// manifest kept beside it still verifies and every file in it still hashes to what that manifest says.
+    /// The folder of a copy of <paramref name="version"/> staged earlier, or null. The current release metadata must
+    /// supply the manifest digest again; a digest stored beside the manifest is not a trust anchor.
     /// </summary>
-    public static string? FindStaged(string gameDir, string version, string rid, string publicKey)
+    public static string? FindStaged(string gameDir, string version, string rid, string manifestSha256, out OverlayManifest? manifest)
     {
+        manifest = null;
         try
         {
             string directory = Path.Combine(gameDir, PendingFolder.Replace('/', Path.DirectorySeparatorChar), version + "-" + rid);
-            string manifestPath = Path.Combine(directory, StagedManifest);
-            if (!File.Exists(manifestPath) || publicKey.Length == 0) return null;
-            if (!OverlayManifest.TryParse(File.ReadAllBytes(manifestPath), out OverlayManifest? manifest, out string _) || manifest is null) return null;
-            if (manifest.OptimumVersion != version || manifest.Rid != rid) return null;
-            return IsStaged(directory, manifest, publicKey) ? directory : null;
+            if (!TryValidateStaged(directory, manifestSha256, out manifest, out string _ ) || manifest is null) return null;
+            if (manifest.OptimumVersion != version || manifest.Rid != rid) { manifest = null; return null; }
+            return directory;
         }
         catch (Exception)
         {
+            manifest = null;
             return null;
         }
     }
 
-    /// <summary>True when <paramref name="directory"/> holds a staged copy of this exact release whose files still hash correctly.</summary>
-    private static bool IsStaged(string directory, OverlayManifest manifest, string publicKey)
+    /// <summary>Validates a staged manifest against the digest obtained over HTTPS and all files against that manifest.</summary>
+    public static bool TryValidateStaged(string directory, string manifestSha256, out OverlayManifest? manifest, out string error)
     {
+        manifest = null;
         try
         {
+            if (!IsValidSha256Digest(manifestSha256))
+            {
+                error = "the release has no usable manifest digest";
+                return false;
+            }
             string manifestPath = Path.Combine(directory, StagedManifest);
-            string signaturePath = Path.Combine(directory, StagedManifestSignature);
-            if (!File.Exists(manifestPath) || !File.Exists(signaturePath)) return false;
-            if (!ManifestSignature.Verify(File.ReadAllBytes(manifestPath), File.ReadAllBytes(signaturePath), publicKey)) return false;
+            if (!File.Exists(manifestPath))
+            {
+                error = "the staged update has no manifest";
+                return false;
+            }
+            byte[] manifestBytes = File.ReadAllBytes(manifestPath);
+            if (!MatchesSha256(manifestBytes, manifestSha256))
+            {
+                error = "the staged manifest does not match the GitHub release asset digest";
+                return false;
+            }
+            if (!OverlayManifest.TryParse(manifestBytes, out manifest, out error) || manifest is null) return false;
             string markerPath = Path.Combine(directory, StagedMarker);
-            if (!File.Exists(markerPath)) return false;
+            if (!File.Exists(markerPath))
+            {
+                error = "the staged update has no marker";
+                manifest = null;
+                return false;
+            }
             StagedMarkerData? marker = JsonSerializer.Deserialize<StagedMarkerData>(File.ReadAllText(markerPath));
-            if (marker is null || marker.Version != manifest.OptimumVersion || marker.Rid != manifest.Rid || marker.ArchiveSha256 != manifest.ArchiveSha256) return false;
+            if (marker is null || marker.Version != manifest.OptimumVersion || marker.Rid != manifest.Rid ||
+                marker.ArchiveSha256 != manifest.ArchiveSha256 || marker.ManifestSha256 != manifestSha256)
+            {
+                error = "the staged marker does not match the verified manifest";
+                manifest = null;
+                return false;
+            }
             foreach (OverlayFile file in manifest.Files)
             {
                 string path = Path.Combine(directory, file.Path.Replace('/', Path.DirectorySeparatorChar));
                 var info = new FileInfo(path);
-                if (!info.Exists || info.Length != file.Size) return false;
+                if (!info.Exists || info.Length != file.Size)
+                {
+                    error = "the staged file " + file.Path + " is missing or changed";
+                    manifest = null;
+                    return false;
+                }
                 using FileStream stream = File.OpenRead(path);
-                if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), file.Sha256, StringComparison.OrdinalIgnoreCase)) return false;
+                if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), file.Sha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    error = "the staged file " + file.Path + " does not match the manifest";
+                    manifest = null;
+                    return false;
+                }
             }
+            error = "";
             return true;
+        }
+        catch (Exception)
+        {
+            manifest = null;
+            error = "the staged update could not be verified";
+            return false;
+        }
+    }
+
+    /// <summary>Checks the manifest and the helper executable before the game starts that helper.</summary>
+    public static bool IsLaunchHelperValid(string directory, string manifestSha256, OverlayManifest manifest, bool windows)
+    {
+        try
+        {
+            byte[] manifestBytes = File.ReadAllBytes(Path.Combine(directory, StagedManifest));
+            if (!MatchesSha256(manifestBytes, manifestSha256)) return false;
+            string relativePath = windows ? "optimum.exe" : "optimum";
+            OverlayFile? helper = null;
+            foreach (OverlayFile file in manifest.Files)
+                if (string.Equals(file.Path, relativePath, StringComparison.Ordinal)) { helper = file; break; }
+            if (helper is null) return false;
+            string helperPath = Path.Combine(directory, relativePath);
+            var info = new FileInfo(helperPath);
+            if (!info.Exists || info.Length != helper.Size) return false;
+            using FileStream stream = File.OpenRead(helperPath);
+            return string.Equals(Convert.ToHexString(SHA256.HashData(stream)), helper.Sha256, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception)
         {
@@ -464,17 +647,19 @@ public sealed class OverlayStager
 
     private sealed class StagedMarkerData
     {
-        public StagedMarkerData(string version, string rid, string archiveSha256, DateTimeOffset stagedAtUtc)
+        public StagedMarkerData(string version, string rid, string archiveSha256, string manifestSha256, DateTimeOffset stagedAtUtc)
         {
             Version = version;
             Rid = rid;
             ArchiveSha256 = archiveSha256;
+            ManifestSha256 = manifestSha256;
             StagedAtUtc = stagedAtUtc;
         }
 
         public string Version { get; }
         public string Rid { get; }
         public string ArchiveSha256 { get; }
+        public string ManifestSha256 { get; }
         public DateTimeOffset StagedAtUtc { get; }
     }
 

@@ -9,6 +9,7 @@ using Optimum.Bootstrap.Core.Patch;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
 using Optimum.Bootstrap.Core.Update;
+using Optimum.Update;
 
 namespace Optimum.Cli;
 
@@ -315,7 +316,7 @@ public static class CliRunner
         EngineOutput output,
         CancellationToken cancellationToken)
     {
-        var parsed = new CliArgs(args, new HashSet<string> { "--game-dir", "--overlay", "--wait-pid", "--wait-seconds", "--trusted-key", "--restart", "--restart-args" });
+        var parsed = new CliArgs(args, new HashSet<string> { "--game-dir", "--overlay", "--wait-pid", "--wait-seconds", "--manifest-sha256", "--restart", "--restart-args" });
         if (parsed.Errors.Count > 0)
             return output.Failure(FailureReason.BadInput, string.Join("; ", parsed.Errors));
 
@@ -330,6 +331,10 @@ public static class CliRunner
         string? overlayDir = RequireAbsolute(parsed.Get("--overlay"), "--overlay", output, out int overlayError);
         if (overlayDir is null)
             return overlayError;
+
+        string? manifestSha256 = parsed.Get("--manifest-sha256");
+        if (!OverlayStager.IsValidSha256Digest(manifestSha256 ?? ""))
+            return output.Failure(FailureReason.BadInput, "--manifest-sha256 must be a 64-character SHA-256 digest");
 
         int? waitPid = null;
         if (parsed.Get("--wait-pid") is string rawPid)
@@ -353,7 +358,7 @@ public static class CliRunner
         try
         {
             outcome = await new UpdateApplier(patcher).ApplyAsync(
-                new ApplyRequest(gameDir, overlayDir, waitPid, wait, parsed.Get("--trusted-key")), output, cancellationToken);
+                new ApplyRequest(gameDir, overlayDir, waitPid, wait, manifestSha256), output, cancellationToken);
         }
         catch (OperationCanceledException)
         {
@@ -475,7 +480,7 @@ public static class CliRunner
         stderr.WriteLine($"  build         {ConsentNotice.AcknowledgeFlag} --output <abs> [--client-archive <abs>] [--version <v>] [--acquire-source [--source-cache <abs>]]");
         stderr.WriteLine("  install       --package <abs> --install-dir <abs> [--data-path <abs>] [--shortcuts menu,desktop,uri]");
         stderr.WriteLine("  patch         --game-dir <abs> [--overlay <abs>] [--backup|--no-backup] [--rollback]");
-        stderr.WriteLine("  apply-update  --game-dir <abs> --overlay <abs> [--wait-pid <id>] [--wait-seconds <n>] [--trusted-key <base64>] [--restart <abs> [--restart-args <text>]]");
+        stderr.WriteLine("  apply-update  --game-dir <abs> --overlay <abs> --manifest-sha256 <hex> [--wait-pid <id>] [--wait-seconds <n>] [--restart <abs> [--restart-args <text>]]");
         stderr.WriteLine("  validate      --package <abs>");
         stderr.WriteLine("  uninstall     --install-dir <abs>");
         stderr.WriteLine("  capabilities  [--repo-root <dir>]");

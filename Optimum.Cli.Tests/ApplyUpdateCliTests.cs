@@ -10,6 +10,8 @@ public class ApplyUpdateCliTests
 {
     private static async Task<(int Code, string Stdout, string Stderr)> Run(params string[] args)
     {
+        if (args.Contains("apply-update") && !args.Contains("--manifest-sha256"))
+            args = args.Concat(new[] { "--manifest-sha256", new string('0', 64) }).ToArray();
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         int code = await CliRunner.RunAsync(args, stdout, stderr, new FakeSystemProbe(), new FakeBuildDriver(), default, null, new NeverPatcher());
@@ -57,7 +59,8 @@ public class ApplyUpdateCliTests
         Directory.CreateDirectory(game);
         try
         {
-            (int code, _, string stderr) = await Run("apply-update", "--game-dir", game, "--overlay", Path.Combine(game, ".optimum", "pending", "0.3.22-win-x64"));
+            (int code, _, string stderr) = await Run("apply-update", "--game-dir", game, "--overlay", Path.Combine(game, ".optimum", "pending", "0.3.22-win-x64"),
+                "--manifest-sha256", new string('0', 64));
 
             Assert.Equal(CliRunner.ExitError, code);
             Assert.Contains("not patched in place", stderr);
@@ -69,6 +72,17 @@ public class ApplyUpdateCliTests
         {
             Directory.Delete(game, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("bad-digest")]
+    public async Task RequiresAValidManifestDigest(string digest)
+    {
+        (int code, _, string stderr) = await Run("apply-update", "--game-dir", Abs("g"), "--overlay", Abs("o"), "--manifest-sha256", digest);
+
+        Assert.Equal(CliRunner.ExitUsage, code);
+        Assert.Contains("--manifest-sha256", stderr);
     }
 
     [Fact]

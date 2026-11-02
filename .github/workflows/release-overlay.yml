@@ -169,28 +169,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # The in-game update trusts a manifest only when its detached signature verifies against the public key
-      # compiled into the game. Without the secret no signature is produced and the update button stays off.
-      - name: Sign the manifests
-        env:
-          SIGNING_KEY: ${{ secrets.OPTIMUM_RELEASE_SIGNING_KEY }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -z "${SIGNING_KEY:-}" ]; then
-            echo "::warning::OPTIMUM_RELEASE_SIGNING_KEY is not set. The manifests are not signed, so the in-game update stays off."
-            exit 0
-          fi
-          key="$(mktemp)"
-          pub="$(mktemp)"
-          trap 'rm -f "$key" "$pub"' EXIT
-          printf '%s\n' "$SIGNING_KEY" > "$key"
-          openssl ec -in "$key" -pubout -out "$pub" 2>/dev/null
-          for manifest in dist/optimum-manifest-*.json; do
-            openssl dgst -sha256 -sign "$key" -out "$manifest.sig" "$manifest"
-            openssl dgst -sha256 -verify "$pub" -signature "$manifest.sig" "$manifest"
-          done
-
       - name: Validate and upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -204,6 +182,5 @@ jobs:
           test -f dist/optimum-manifest-win-x64.json
           test "$(find dist -maxdepth 1 -name 'Optimum-v*-linux-x64-overlay.tar.gz' | wc -l)" -eq 1
           test "$(find dist -maxdepth 1 -name 'Optimum-v*-win-x64-overlay.tar.gz' | wc -l)" -eq 1
-          signatures=(dist/optimum-manifest-*.json.sig)
-          gh release upload "$tag" dist/Optimum-v*-overlay.tar.gz dist/optimum-manifest-*.json "${signatures[@]}" \
+          gh release upload "$tag" dist/Optimum-v*-overlay.tar.gz dist/optimum-manifest-*.json \
             --clobber --repo "$GITHUB_REPOSITORY"

@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Threading;
+using Optimum.Update;
 
 namespace Optimum;
 
@@ -44,6 +45,7 @@ public static class OptimumUpdateChecker
         {
             using var client = new HttpClient();
             client.Timeout = TimeSpan.FromSeconds(5);
+            client.MaxResponseContentBufferSize = OverlayStager.MaxReleaseMetadataBytes;
             client.DefaultRequestHeaders.Add("User-Agent", "Optimum/" + OptimumInfo.Version);
             var json = client.GetStringAsync(ReleasesUrl).GetAwaiter().GetResult();
 
@@ -56,7 +58,18 @@ public static class OptimumUpdateChecker
             if (CompareVersions(LatestVersion, OptimumInfo.Version) > 0)
             {
                 UpdateAvailable = true;
-                OptimumUpdateUi.OnReleaseFound(LatestVersion);
+                string rid = OperatingSystem.IsWindows() ? "win-x64" : "linux-x64";
+                if (OverlayStager.TryGetReleaseAssetDigests(json, tagName, rid,
+                        out string manifestSha256, out long manifestSize,
+                        out string archiveSha256, out long archiveSize, out _))
+                {
+                    OptimumUpdateUi.OnReleaseFound(LatestVersion, manifestSha256, manifestSize, archiveSha256, archiveSize);
+                }
+                else
+                {
+                    // Keep the release link visible, but never offer an update without GitHub's asset digests.
+                    OptimumUpdateUi.OnReleaseFound(LatestVersion, "", 0, "", 0);
+                }
             }
         }
         catch
