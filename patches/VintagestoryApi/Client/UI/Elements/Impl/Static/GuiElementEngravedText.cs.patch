@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementEngravedText.cs b/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementEngravedText.cs
+index 783fc5b..c23e3ff 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementEngravedText.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementEngravedText.cs
+@@ -86,11 +86,11 @@ namespace Vintagestory.API.Client
+ 
+         internal void TextWithSpacing(Context ctx, string text, double x, double y, float spacing)
+         {
+             foreach (char c in text)
+             {
+-                TextExtents extents = ctx.TextExtents("" + c);
++                TextExtents extents = Font.GetTextExtents("" + c);
+                 ctx.MoveTo(x - extents.XBearing, x - extents.YBearing);
+                 ctx.ShowText("" + c);
+                 
+                 x += extents.Width + spacing * RuntimeEnv.GUIScale;
+             }

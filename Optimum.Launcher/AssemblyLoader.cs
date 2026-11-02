@@ -89,9 +89,31 @@ public sealed class AssemblyLoader : IDisposable
         if (asmName is null)
             return null;
 
+        return ResolveAssembly(asmName);
+    }
+
+    internal Assembly? ResolveAssembly(string asmName)
+    {
         // Already loaded?
         if (_loaded.TryGetValue(asmName, out var cached))
             return cached;
+
+        // Transparent mod compatibility: alias legacy/GtkSharp CairoSharp to cairo-sharp
+        if (string.Equals(asmName, "CairoSharp", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_loaded.TryGetValue("cairo-sharp", out var loadedCairo))
+            {
+                _loaded[asmName] = loadedCairo;
+                return loadedCairo;
+            }
+
+            var resolved = ResolveAssembly("cairo-sharp");
+            if (resolved is not null)
+            {
+                _loaded[asmName] = resolved;
+                return resolved;
+            }
+        }
 
         // Try cache dir first (patched assemblies)
         var cachedPath = Path.Combine(_cacheDir, asmName + ".dll");

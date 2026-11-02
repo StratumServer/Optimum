@@ -21,6 +21,9 @@ namespace Vintagestory.API.Config;
 /// </summary>
 public static class OptimumConfig
 {
+    private static int guiGpuBackendProbePassed;
+    private static int guiGpuCertificationPassed;
+    private static readonly bool environmentGuiGpuRender = string.Equals(Environment.GetEnvironmentVariable("OPTIMUM_GUI_GPU_RENDERING"), "1", StringComparison.Ordinal);
     /// <summary>
     /// Supplies the version to every managed assembly. Packaging scripts read
     /// the root VERSION file. Keep both values equal for each release.
@@ -57,6 +60,9 @@ public static class OptimumConfig
     /// for a repeat run confirming the pattern (V2.2 in docs/todo.md).
     /// </summary>
     public static bool GreedyMeshEnabled = false;
+
+    /// <summary>Requests the experimental static GUI GPU renderer; the effective value also requires a successful current-context probe.</summary>
+    public static bool GuiGpuRenderEnabled = false;
 
     /// <summary>
     /// Caps the greedy merge span. Merged quads tile the texture via a
@@ -557,6 +563,48 @@ public static class OptimumConfig
     private static string? _shaderCompatibilityFingerprint;
     private static string? _dataPath;
 
+    public static bool GuiGpuRenderRequested => GuiGpuRenderEnabled || environmentGuiGpuRender;
+
+    internal static bool GuiGpuCertificationPassed => System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0;
+
+    public static bool GuiGpuRecordingEligible => GuiGpuRenderRequested && System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0;
+
+    private static string? guiGpuVendor;
+    private static string? guiGpuRenderer;
+    private static string? guiGpuVersion;
+    private static int guiGpuMajor;
+    private static int guiGpuMinor;
+    private static int guiGpuProfileMask;
+    private static int guiGpuContextFlags;
+
+    internal static void SetGuiGpuCertificationPassed(bool passed, string? vendor, string? renderer, string? version,
+        int major, int minor, int profileMask, int contextFlags)
+    {
+        guiGpuVendor = passed ? vendor : null;
+        guiGpuRenderer = passed ? renderer : null;
+        guiGpuVersion = passed ? version : null;
+        guiGpuMajor = passed ? major : 0;
+        guiGpuMinor = passed ? minor : 0;
+        guiGpuProfileMask = passed ? profileMask : 0;
+        guiGpuContextFlags = passed ? contextFlags : 0;
+        System.Threading.Volatile.Write(ref guiGpuCertificationPassed, passed ? 1 : 0);
+    }
+
+    internal static bool GuiGpuDeviceMatches(string vendor, string renderer, string version,
+        int major, int minor, int profileMask, int contextFlags) =>
+        GuiGpuRecordingEligible &&
+        string.Equals(guiGpuVendor, vendor, StringComparison.Ordinal) &&
+        string.Equals(guiGpuRenderer, renderer, StringComparison.Ordinal) &&
+        string.Equals(guiGpuVersion, version, StringComparison.Ordinal) &&
+        guiGpuMajor == major && guiGpuMinor == minor &&
+        guiGpuProfileMask == profileMask && guiGpuContextFlags == contextFlags;
+
+    internal static void RevokeGuiGpuCertification() => SetGuiGpuCertificationPassed(false, null, null, null, 0, 0, 0, 0);
+
+    public static bool EffectiveGuiGpuRender => GuiGpuRecordingEligible && System.Threading.Volatile.Read(ref guiGpuBackendProbePassed) != 0;
+
+    internal static void SetGuiGpuBackendProbePassed(bool passed) => System.Threading.Volatile.Write(ref guiGpuBackendProbePassed, passed ? 1 : 0);
+
     public static bool EffectiveGreedyMesh => GreedyMeshEnabled &&
         !IsShaderFeatureDisabled("GreedyMesh") &&
         _greedyMeshVertexShaderReady && _greedyMeshFragmentShaderReady;
@@ -867,6 +915,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.EntityOutfitAnimatorCache), EntityOutfitAnimatorCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityOutfitTexturePrewarm), EntityOutfitTexturePrewarmEnabled.ToString()),
         (nameof(OptimumConfigData.GreedyMeshEnabled), GreedyMeshEnabled.ToString()),
+        (nameof(OptimumConfigData.GuiGpuRenderEnabled), GuiGpuRenderEnabled.ToString()),
         (nameof(OptimumConfigData.GreedyMeshMaxMergeWidth), GreedyMeshMaxMergeWidth.ToString()),
         (nameof(OptimumConfigData.GreedyMeshMaxMergeHeight), GreedyMeshMaxMergeHeight.ToString()),
         (nameof(OptimumConfigData.GreedyMeshLightTolerance), GreedyMeshLightTolerance.ToString()),
@@ -967,6 +1016,7 @@ public static class OptimumConfig
             EntityOutfitAnimatorCacheEnabled = data.EntityOutfitAnimatorCache;
             EntityOutfitTexturePrewarmEnabled = data.EntityOutfitTexturePrewarm;
             GreedyMeshEnabled = data.GreedyMeshEnabled;
+            GuiGpuRenderEnabled = data.GuiGpuRenderEnabled;
             // Clamped to the tile-count encoding's ceiling (3 bits, max 8)
             // so a hand-edited optimum.json can't request a merge wider
             // than the shader can tile.
@@ -1045,6 +1095,7 @@ public static class OptimumConfig
             EntityOutfitAnimatorCache = EntityOutfitAnimatorCacheEnabled,
             EntityOutfitTexturePrewarm = EntityOutfitTexturePrewarmEnabled,
             GreedyMeshEnabled = GreedyMeshEnabled,
+            GuiGpuRenderEnabled = GuiGpuRenderEnabled,
             GreedyMeshMaxMergeWidth = GreedyMeshMaxMergeWidth,
             GreedyMeshMaxMergeHeight = GreedyMeshMaxMergeHeight,
             GreedyMeshLightTolerance = GreedyMeshLightTolerance,
@@ -1146,6 +1197,7 @@ internal sealed class OptimumConfigData
     public bool EntityOutfitAnimatorCache { get; set; } = false;
     public bool EntityOutfitTexturePrewarm { get; set; } = false;
     public bool GreedyMeshEnabled { get; set; } = false;
+    public bool GuiGpuRenderEnabled { get; set; } = false;
     public int GreedyMeshMaxMergeWidth { get; set; } = 8;
     public int GreedyMeshMaxMergeHeight { get; set; } = 8;
     public int GreedyMeshLightTolerance { get; set; } = 0;

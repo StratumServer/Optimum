@@ -1,0 +1,26 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/BlockEntitySignPostRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/BlockEntitySignPostRenderer.cs
+index c2a7d4f..21fea4d 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/BlockEntitySignPostRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/BlockEntitySignPostRenderer.cs
+@@ -184,19 +184,20 @@ namespace Vintagestory.GameContent
+             }
+ 
+             ImageSurface surface = new ImageSurface(Format.Argb32, TextWidth, TextHeight * lines);
+             Context ctx = new Context(surface);
+             font.SetupContext(ctx);
++            double fontAscent = font.GetFontExtents().Ascent;
+ 
+             int line = 0;
+             for (int i = 0; i < textByCardinal.Length; i++)
+             {
+                 if (textByCardinal[i].Length > 0)
+                 {
+                     double linewidth = font.GetTextExtents(textByCardinal[i]).Width;
+ 
+-                    ctx.MoveTo((TextWidth - linewidth)/2, line * TextHeight + ctx.FontExtents.Ascent);
++                    ctx.MoveTo((TextWidth - linewidth)/2, line * TextHeight + fontAscent);
+                     ctx.ShowText(textByCardinal[i]);
+                     line++;
+                 }
+             }
+ 

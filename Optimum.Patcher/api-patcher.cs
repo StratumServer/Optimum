@@ -68,6 +68,12 @@ public static class ApiPatcher
 
         using var vanilla = AssemblyReader.Read(vanillaPath, vanillaReaderParameters, out preserveSymbols);
         using var contracts = AssemblyDefinition.ReadAssembly(contractsPath, contractsReaderParameters);
+        string cairoPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(contractsPath))!, "cairo-sharp.dll");
+        if (!File.Exists(cairoPath))
+        {
+            throw new FileNotFoundException("The Cairo assembly required for GUI materialization diagnostics was not found.", cairoPath);
+        }
+        using var cairo = AssemblyDefinition.ReadAssembly(cairoPath, contractsReaderParameters);
 
         var bridge = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumApiBridge")
             ?? throw new InvalidOperationException("OptimumApiBridge is missing from the contracts assembly.");
@@ -100,7 +106,14 @@ public static class ApiPatcher
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
-        int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule);
+        int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
+        int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
+        int textLayoutMetrics = PatchTextDrawUtilFontOverloads(vanilla.MainModule);
+        int materializationObserver = PatchMaterializationObserver(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
+        int queuedGuiContexts = PatchQueuedGuiContexts(vanilla.MainModule, contracts.MainModule);
+        if (queuedGuiContexts != 4) throw new InvalidOperationException($"Expected 4 queued GUI context handoffs, applied {queuedGuiContexts}.");
+        if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
+        if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
         if (inventoryHooks != 2)
         {
@@ -157,6 +170,10 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 CairoFont measurement metrics patches, applied {fontMeasurementMetrics}.");
         }
+        if (CountMaterializationObserverHooks(vanilla.MainModule) != 1 || CountMaterializationObserverCallbacks(vanilla.MainModule) != 1)
+        {
+            throw new InvalidOperationException("Expected exactly one module-initializer subscription for Cairo materialization diagnostics.");
+        }
 
         int typeForwards = InjectTypeForwards(vanilla, contracts);
 
@@ -178,6 +195,13 @@ public static class ApiPatcher
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
         AssemblyWriter.Write(vanilla, outputPath, preserveSymbols);
+        using (var written = AssemblyDefinition.ReadAssembly(outputPath, new ReaderParameters { AssemblyResolver = resolver }))
+        {
+            if (CountMaterializationObserverHooks(written.MainModule) != 1 || CountMaterializationObserverCallbacks(written.MainModule) != 1)
+            {
+                throw new InvalidOperationException("The patched API output is missing its unique Cairo materialization observer module-initializer hook.");
+            }
+        }
         if (preserveSymbols)
         {
             Console.WriteLine($"  Wrote matching symbols: {Path.ChangeExtension(outputPath, ".pdb")}");
@@ -191,8 +215,161 @@ public static class ApiPatcher
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
+                $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
+    }
+
+    internal static int PatchMaterializationObserver(ModuleDefinition module, ModuleDefinition contracts, ModuleDefinition cairo)
+    {
+        const string metricsTypeName = "Vintagestory.API.Config.OptimumGuiMetrics";
+        const string recorderTypeName = "Cairo.SurfaceRecorder";
+        const string callbackName = "RecordMaterialization";
+        const string eventAdderName = "add_MaterializationCompleted";
+
+        var metrics = contracts.GetType(metricsTypeName)
+            ?? throw new InvalidOperationException($"{metricsTypeName} is missing from the contracts assembly.");
+        var callback = metrics.Methods.SingleOrDefault(method =>
+            method.Name == callbackName && method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.Parameters[1].ParameterType.MetadataType == MetadataType.Boolean)
+            ?? throw new InvalidOperationException("OptimumGuiMetrics.RecordMaterialization(string, bool) is missing from contracts.");
+        var recorder = cairo.GetType(recorderTypeName)
+            ?? throw new InvalidOperationException($"{recorderTypeName} is missing from cairo-sharp.");
+        var eventAdder = recorder.Methods.SingleOrDefault(method =>
+            method.Name == eventAdderName && method.IsStatic && method.Parameters.Count == 1)
+            ?? throw new InvalidOperationException("SurfaceRecorder.MaterializationCompleted event accessor is missing from cairo-sharp.");
+
+        var moduleType = module.Types.SingleOrDefault(type => type.Name == "<Module>")
+            ?? throw new InvalidOperationException("The target API module type is missing.");
+        var initializer = moduleType.Methods.SingleOrDefault(method => method.Name == ".cctor");
+        if (initializer == null)
+        {
+            initializer = new MethodDefinition(".cctor",
+                MethodAttributes.Private | MethodAttributes.Static | MethodAttributes.HideBySig |
+                MethodAttributes.SpecialName | MethodAttributes.RTSpecialName,
+                module.TypeSystem.Void);
+            initializer.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+            moduleType.Methods.Add(initializer);
+        }
+
+        int existingHooks = CountMaterializationObserverHooks(module);
+        int existingCallbacks = CountMaterializationObserverCallbacks(module);
+        if (existingHooks == 1 && existingCallbacks == 1) return 0;
+        if (existingHooks != 0)
+            throw new InvalidOperationException($"Expected no or one existing Cairo materialization observer hook, found {existingHooks}.");
+        if (existingCallbacks != 0)
+            throw new InvalidOperationException($"Expected no or one existing materialization observer callback, found {existingCallbacks}.");
+
+        var adderReference = module.ImportReference(eventAdder);
+        var callbackReference = module.ImportReference(callback);
+        var delegateType = module.ImportReference(eventAdder.Parameters[0].ParameterType);
+        var delegateConstructor = new MethodReference(".ctor", module.TypeSystem.Void, delegateType)
+        {
+            HasThis = true,
+            CallingConvention = MethodCallingConvention.Default
+        };
+        delegateConstructor.Parameters.Add(new ParameterDefinition(module.TypeSystem.Object));
+        delegateConstructor.Parameters.Add(new ParameterDefinition(module.TypeSystem.IntPtr));
+
+        var instructions = initializer.Body.Instructions;
+        int insertionIndex = 0;
+        instructions.Insert(insertionIndex++, Instruction.Create(OpCodes.Ldnull));
+        instructions.Insert(insertionIndex++, Instruction.Create(OpCodes.Ldftn, callbackReference));
+        instructions.Insert(insertionIndex++, Instruction.Create(OpCodes.Newobj, delegateConstructor));
+        instructions.Insert(insertionIndex, Instruction.Create(OpCodes.Call, adderReference));
+        return 1;
+    }
+
+    internal static int CountMaterializationObserverHooks(ModuleDefinition module)
+    {
+        var initializer = module.Types.SingleOrDefault(type => type.Name == "<Module>")?.Methods
+            .SingleOrDefault(method => method.Name == ".cctor");
+        if (initializer?.HasBody != true) return 0;
+        return initializer.Body.Instructions.Count(instruction =>
+            instruction.OpCode == OpCodes.Call && instruction.Operand is MethodReference method &&
+            method.Name == "add_MaterializationCompleted" && method.DeclaringType.FullName == "Cairo.SurfaceRecorder");
+    }
+
+    internal static int CountMaterializationObserverCallbacks(ModuleDefinition module)
+    {
+        var initializer = module.Types.SingleOrDefault(type => type.Name == "<Module>")?.Methods
+            .SingleOrDefault(method => method.Name == ".cctor");
+        if (initializer?.HasBody != true) return 0;
+        return initializer.Body.Instructions.Count(instruction =>
+            instruction.OpCode == OpCodes.Ldftn && instruction.Operand is MethodReference method &&
+            method.Name == "RecordMaterialization" && method.DeclaringType.FullName == "Vintagestory.API.Config.OptimumGuiMetrics");
+    }
+
+    internal static int PatchSvgIconTarget(ModuleDefinition module)
+    {
+        var icon = module.GetType("Vintagestory.API.Client.IconUtil") ?? throw new InvalidOperationException("IconUtil is missing from the vanilla API.");
+        IEnumerable<TypeDefinition> Descendants(TypeDefinition type) => new[] { type }.Concat(type.NestedTypes.SelectMany(Descendants));
+        int count = 0;
+        foreach (var method in Descendants(icon).SelectMany(type => type.Methods).Where(method => method.HasBody))
+        foreach (var instruction in method.Body.Instructions)
+        {
+            if (instruction.Operand is not MethodReference called || called.Name != "GetTarget" || called.DeclaringType.FullName != "Cairo.Context") continue;
+            instruction.Operand = new MethodReference("GetTargetForRecordedDrawing", called.ReturnType, called.DeclaringType) { HasThis = true };
+            ClearDebugInformation(method);
+            count++;
+        }
+        Console.WriteLine($"  API PATCHED: IconUtil recorded SVG target ({count} call site)");
+        return count;
+    }
+
+    internal static int PatchQueuedGuiContexts(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        var requested = contracts.GetType("Vintagestory.API.Client.OptimumGuiGpuProbe").Methods
+            .Single(method => method.Name == "get_RenderingRequested");
+        int patched = 0;
+        IEnumerable<TypeDefinition> Descendants(TypeDefinition type) => new[] { type }.Concat(type.NestedTypes.SelectMany(Descendants));
+        var types = new[] { "GuiElementStatbar", "GuiElementDynamicText", "GuiElementItemstackInfo" }
+            .SelectMany(name => Descendants(module.GetType("Vintagestory.API.Client." + name)
+                ?? throw new InvalidOperationException(name + " is missing from the vanilla API.")));
+        foreach (var method in types.SelectMany(type => type.Methods).Where(method => method.HasBody))
+        {
+            var enqueue = method.Body.Instructions.SingleOrDefault(instruction => instruction.Operand is MethodReference called && called.Name == "EnqueueMainThreadTask");
+            if (enqueue == null) continue;
+            var delegateTarget = enqueue.Previous;
+            while (delegateTarget != null && delegateTarget.OpCode != OpCodes.Ldftn) delegateTarget = delegateTarget.Previous;
+            if (delegateTarget == null) throw new InvalidOperationException($"Missing queued callback in {method.FullName}.");
+            var callback = ((MethodReference)delegateTarget.Operand).Resolve();
+            var fields = callback.DeclaringType.Fields.Where(field => field.FieldType.FullName == "Cairo.Context").ToArray();
+            if (fields.Length is < 1 or > 2)
+                throw new InvalidOperationException($"Unexpected Cairo context captures in {method.FullName}.");
+            ClearDebugInformation(method);
+            foreach (var instruction in method.Body.Instructions)
+                instruction.OpCode = instruction.OpCode.Code switch {
+                    Code.Br_S => OpCodes.Br, Code.Brfalse_S => OpCodes.Brfalse, Code.Brtrue_S => OpCodes.Brtrue,
+                    Code.Beq_S => OpCodes.Beq, Code.Bne_Un_S => OpCodes.Bne_Un,
+                    Code.Bge_S => OpCodes.Bge, Code.Bge_Un_S => OpCodes.Bge_Un,
+                    Code.Bgt_S => OpCodes.Bgt, Code.Bgt_Un_S => OpCodes.Bgt_Un,
+                    Code.Ble_S => OpCodes.Ble, Code.Ble_Un_S => OpCodes.Ble_Un,
+                    Code.Blt_S => OpCodes.Blt, Code.Blt_Un_S => OpCodes.Blt_Un,
+                    Code.Leave_S => OpCodes.Leave, _ => instruction.OpCode
+                };
+            var processor = method.Body.GetILProcessor();
+            processor.InsertBefore(delegateTarget, Instruction.Create(OpCodes.Call, module.ImportReference(requested)));
+            processor.InsertBefore(delegateTarget, Instruction.Create(OpCodes.Brfalse, delegateTarget));
+            // The delegate target object is already on the stack. Release its completed
+            // writer contexts before enqueueing; the retained surfaces cross threads.
+            foreach (var field in fields)
+            {
+                var dispose = new MethodReference("Dispose", module.TypeSystem.Void, module.ImportReference(field.FieldType)) { HasThis = true };
+                var nullContext = Instruction.Create(OpCodes.Pop);
+                var done = Instruction.Create(OpCodes.Nop);
+                foreach (var instruction in new[] {
+                    Instruction.Create(OpCodes.Dup), Instruction.Create(OpCodes.Ldfld, module.ImportReference(field)),
+                    Instruction.Create(OpCodes.Dup), Instruction.Create(OpCodes.Brfalse, nullContext),
+                    Instruction.Create(OpCodes.Callvirt, dispose), Instruction.Create(OpCodes.Br, done), nullContext, done
+                }) processor.InsertBefore(delegateTarget, instruction);
+            }
+            method.Body.MaxStackSize += 2;
+            patched++;
+            Console.WriteLine($"  API PATCHED: {method.FullName} queued GPU context handoff");
+        }
+        return patched;
     }
 
     internal static int PatchClientApiThreadContract(ModuleDefinition module)
@@ -247,9 +424,13 @@ public static class ApiPatcher
 
         var metrics = contracts.GetType("Vintagestory.API.Config.OptimumGuiMetrics")
             ?? throw new InvalidOperationException("OptimumGuiMetrics is missing from the contracts assembly.");
+        var guiGpuProbe = contracts.GetType("Vintagestory.API.Client.OptimumGuiGpuProbe")
+            ?? throw new InvalidOperationException("OptimumGuiGpuProbe is missing from the contracts assembly.");
         var enabledGetter = metrics.Methods.Single(method => method.Name == "get_Enabled" && method.Parameters.Count == 0);
         var startTimestamp = metrics.Methods.Single(method => method.Name == "StartTimestamp" && method.Parameters.Count == 0);
         var recordComposition = metrics.Methods.Single(method => method.Name == "RecordComposition" && method.Parameters.Count == 5);
+        var recordGpuRecordingStart = metrics.Methods.Single(method => method.Name == "RecordGpuRecordingSurfaceStart" && method.Parameters.Count == 0);
+        var renderingRequestedGetter = guiGpuProbe.Methods.Single(method => method.Name == "get_RenderingRequested" && method.Parameters.Count == 0);
 
         var pendingField = new FieldDefinition(pendingFieldName, FieldAttributes.Private, module.TypeSystem.Boolean);
         composer.Fields.Add(pendingField);
@@ -269,11 +450,61 @@ public static class ApiPatcher
         var surfaceLocal = compose.Body.Variables.SingleOrDefault(variable =>
             variable.VariableType.FullName == "Cairo.ImageSurface")
             ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface local.");
+        if (compose.Body.Instructions.Any(instruction => instruction.Operand is MethodReference called && called.Name == "BeginRecording"))
+            throw new InvalidOperationException($"{compose.FullName} already has a GPU recording hook.");
         compose.Body.Variables.Add(enabledLocal);
         compose.Body.Variables.Add(timestampLocal);
         compose.Body.Variables.Add(recomposeLocal);
 
         var composeProcessor = compose.Body.GetILProcessor();
+
+        var imageSurfaceConstructor = compose.Body.Instructions.SingleOrDefault(instruction =>
+            (instruction.OpCode == OpCodes.Newobj || instruction.OpCode == OpCodes.Call) &&
+            instruction.Operand is MethodReference called &&
+            called.Name == ".ctor" && called.DeclaringType.FullName == "Cairo.ImageSurface" &&
+            instruction.Next != null && StoresVariable(instruction.Next, surfaceLocal))
+            ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.ImageSurface construction stored in its surface local.");
+        var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
+        var cairoSurfaceType = new TypeReference("Cairo", "Surface", module, cairoReference);
+        var cairoRecorderType = new TypeReference("Cairo", "SurfaceRecorder", module, cairoReference);
+        var automaticRecordingMethod = new MethodReference("ConfigureAutomaticRecording", module.TypeSystem.Void, cairoSurfaceType)
+        {
+            HasThis = false,
+            CallingConvention = MethodCallingConvention.Default
+        };
+        automaticRecordingMethod.Parameters.Add(new ParameterDefinition(module.TypeSystem.Boolean));
+        var beginRecording = new MethodReference("BeginRecording", cairoRecorderType, cairoSurfaceType)
+        {
+            HasThis = true,
+            CallingConvention = MethodCallingConvention.Default,
+        };
+        Instruction afterRecordingHook = Instruction.Create(OpCodes.Nop);
+        Instruction anchor = imageSurfaceConstructor.Next!;
+        foreach (Instruction recordingConfigurationInstruction in new[]
+        {
+            Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)),
+            Instruction.Create(OpCodes.Call, module.ImportReference(automaticRecordingMethod))
+        })
+        {
+            composeProcessor.InsertBefore(imageSurfaceConstructor, recordingConfigurationInstruction);
+        }
+        foreach (Instruction hookInstruction in new[]
+        {
+            Instruction.Create(OpCodes.Call, module.ImportReference(renderingRequestedGetter)),
+            Instruction.Create(OpCodes.Brfalse, afterRecordingHook),
+            Instruction.Create(OpCodes.Ldloc, surfaceLocal),
+            Instruction.Create(OpCodes.Callvirt, module.ImportReference(beginRecording)),
+            Instruction.Create(OpCodes.Pop),
+            Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)),
+            Instruction.Create(OpCodes.Brfalse, afterRecordingHook),
+            Instruction.Create(OpCodes.Call, module.ImportReference(recordGpuRecordingStart)),
+            afterRecordingHook
+        })
+        {
+            composeProcessor.InsertAfter(anchor, hookInstruction);
+            anchor = hookInstruction;
+        }
+
         Instruction firstComposeInstruction = compose.Body.Instructions[0];
         Instruction skipTimestamp = Instruction.Create(OpCodes.Nop);
         composeProcessor.InsertBefore(firstComposeInstruction, Instruction.Create(OpCodes.Call, module.ImportReference(enabledGetter)));
@@ -311,11 +542,98 @@ public static class ApiPatcher
         composeProcessor.InsertBefore(textureUpload, Instruction.Create(OpCodes.Call, module.ImportReference(recordComposition)));
         composeProcessor.InsertBefore(textureUpload, skipRecord);
 
-        Console.WriteLine($"  API PATCHED: {composerTypeName}.Compose GUI composition metrics");
+        Console.WriteLine($"  API PATCHED: {composerTypeName}.Compose GUI metrics and opt-in GPU recording");
+        var listMenu = module.GetType("Vintagestory.API.Client.GuiElementListMenu")
+            ?? throw new InvalidOperationException("GuiElementListMenu is missing.");
+        var composeMenu = listMenu.Methods.Single(method => method.Name == "ComposeDynamicElements" && method.Parameters.Count == 0);
+        var menuSurfaces = composeMenu.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Newobj &&
+            instruction.Operand is MethodReference called && called.DeclaringType.FullName == "Cairo.ImageSurface" && called.Parameters.Count == 3).ToArray();
+        if (menuSurfaces.Length != 3) throw new InvalidOperationException($"Expected three list-menu surfaces, found {menuSurfaces.Length}.");
+        foreach (var instruction in menuSurfaces)
+        {
+            var constructor = (MethodReference)instruction.Operand;
+            var factory = new MethodReference("CreateForRecordedGui", constructor.DeclaringType, constructor.DeclaringType);
+            foreach (var parameter in constructor.Parameters) factory.Parameters.Add(new ParameterDefinition(parameter.ParameterType));
+            instruction.OpCode = OpCodes.Call;
+            instruction.Operand = module.ImportReference(factory);
+        }
+        ClearDebugInformation(composeMenu);
+        Console.WriteLine("  API PATCHED: list-menu empty GPU surface normalization (3 call sites)");
         return 1;
     }
 
-    internal static int PatchFontMeasurementMetrics(ModuleDefinition module, ModuleDefinition contracts)
+    internal static int PatchLinkTextGpuUploads(ModuleDefinition module)
+    {
+        const string typeName = "Vintagestory.API.Client.LinkTextComponent";
+        var type = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+        var compose = type.Methods.Single(method => method.Name == "ComposeElements" &&
+            method.Parameters.Count == 2 && method.Parameters[0].ParameterType.FullName == "Cairo.Context" &&
+            method.Parameters[1].ParameterType.FullName == "Cairo.ImageSurface");
+        var uploadCalls = compose.Body.Instructions.Where(instruction =>
+            instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt)
+            .Where(instruction => instruction.Operand is MethodReference called && called.Name == "LoadOrUpdateCairoTexture")
+            .ToArray();
+        if (uploadCalls.Length != 2)
+            throw new InvalidOperationException($"Expected two link-text texture uploads, found {uploadCalls.Length}.");
+        var contextLocal = compose.Body.Variables.SingleOrDefault(variable => variable.VariableType.FullName == "Cairo.Context")
+            ?? throw new InvalidOperationException($"{compose.FullName} has no Cairo.Context local.");
+        var leftMostX = type.Fields.Single(field => field.Name == "leftMostX");
+        var topMostY = type.Fields.Single(field => field.Name == "topMostY");
+        var cairoReference = module.AssemblyReferences.Single(reference => reference.Name == "cairo-sharp");
+        var contextType = new TypeReference("Cairo", "Context", module, cairoReference);
+        var save = new MethodReference("Save", module.TypeSystem.Void, contextType) { HasThis = true };
+        var restore = new MethodReference("Restore", module.TypeSystem.Void, contextType) { HasThis = true };
+        var translate = new MethodReference("Translate", module.TypeSystem.Void, contextType) { HasThis = true };
+        translate.Parameters.Add(new ParameterDefinition(module.TypeSystem.Double));
+        translate.Parameters.Add(new ParameterDefinition(module.TypeSystem.Double));
+
+        var processor = compose.Body.GetILProcessor();
+        var firstUploadSetup = uploadCalls[0];
+        while (firstUploadSetup.Previous != null)
+        {
+            if (firstUploadSetup.Previous.Operand is MethodReference called && called.Name == "get_Gui")
+            {
+                firstUploadSetup = firstUploadSetup.Previous;
+                break;
+            }
+            firstUploadSetup = firstUploadSetup.Previous;
+        }
+        if (!(firstUploadSetup.Operand is MethodReference guiGetter) || guiGetter.Name != "get_Gui")
+            throw new InvalidOperationException("Could not locate the first link-text GUI texture upload setup.");
+
+        processor.InsertBefore(firstUploadSetup, Instruction.Create(OpCodes.Ldloc, contextLocal));
+        processor.InsertBefore(firstUploadSetup, Instruction.Create(OpCodes.Callvirt, module.ImportReference(restore)));
+
+        Instruction anchor = uploadCalls[0];
+        foreach (Instruction instruction in new[]
+        {
+            Instruction.Create(OpCodes.Ldloc, contextLocal),
+            Instruction.Create(OpCodes.Callvirt, module.ImportReference(save)),
+            Instruction.Create(OpCodes.Ldloc, contextLocal),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, leftMostX),
+            Instruction.Create(OpCodes.Conv_I4),
+            Instruction.Create(OpCodes.Neg),
+            Instruction.Create(OpCodes.Conv_R8),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, topMostY),
+            Instruction.Create(OpCodes.Conv_I4),
+            Instruction.Create(OpCodes.Neg),
+            Instruction.Create(OpCodes.Conv_R8),
+            Instruction.Create(OpCodes.Callvirt, module.ImportReference(translate))
+        })
+        {
+            processor.InsertAfter(anchor, instruction);
+            anchor = instruction;
+        }
+
+        ClearDebugInformation(compose);
+        Console.WriteLine($"  API PATCHED: {typeName}.ComposeElements balances the normal-text upload before hover composition");
+        return 1;
+    }
+
+    internal static int PatchFontMeasurementMetrics(ModuleDefinition module, ModuleDefinition contracts, ModuleDefinition cairo)
     {
         const string fontTypeName = "Vintagestory.API.Client.CairoFont";
         var font = module.GetType(fontTypeName)
@@ -330,10 +648,140 @@ public static class ApiPatcher
         var textExtents = font.Methods.Single(method => method.Name == "GetTextExtents" && method.Parameters.Count == 1 &&
             method.Parameters[0].ParameterType.MetadataType == MetadataType.String);
         var fontExtents = font.Methods.Single(method => method.Name == "GetFontExtents" && method.Parameters.Count == 0);
+        RewriteFontMeasurementsWithSkia(module, cairo, font, textExtents, fontExtents);
         PatchFontMeasurementMethod(module, textExtents, enabledGetter, startTimestamp, recordTextExtents);
         PatchFontMeasurementMethod(module, fontExtents, enabledGetter, startTimestamp, recordFontExtents);
-        Console.WriteLine($"  API PATCHED: {fontTypeName}.GetTextExtents/GetFontExtents metrics");
+        DisableNativeFontMeasuringContextInitializer(module, font);
+        Console.WriteLine($"  API PATCHED: {fontTypeName}.GetTextExtents/GetFontExtents Skia metrics and null-safe disposal");
         return 2;
+    }
+
+    private static void DisableNativeFontMeasuringContextInitializer(ModuleDefinition module, TypeDefinition font)
+    {
+        var initializer = font.Methods.SingleOrDefault(method => method.Name == ".cctor" && method.IsStatic && method.Parameters.Count == 0);
+        if (initializer == null) return;
+        if (!initializer.HasBody)
+            throw new InvalidOperationException("CairoFont's static measuring-context initializer has no body.");
+
+        var surface = font.Fields.SingleOrDefault(field => field.Name == "surface" && field.IsStatic && field.FieldType.FullName == "Cairo.ImageSurface")
+            ?? throw new InvalidOperationException("CairoFont's native measuring surface field is missing.");
+        var measuringContext = font.Fields.SingleOrDefault(field => field.Name == "FontMeasuringContext" && field.IsStatic && field.FieldType.FullName == "Cairo.Context")
+            ?? throw new InvalidOperationException("CairoFont.FontMeasuringContext is missing.");
+        Instruction[] instructions = initializer.Body.Instructions.Where(instruction => instruction.OpCode != OpCodes.Nop).ToArray();
+        bool matchesVanillaInitializer = instructions.Length == 9 &&
+            instructions[0].OpCode == OpCodes.Ldc_I4_0 &&
+            instructions[1].OpCode == OpCodes.Ldc_I4_1 &&
+            instructions[2].OpCode == OpCodes.Ldc_I4_1 &&
+            IsConstructor(instructions[3], "Cairo.ImageSurface", "Cairo.Format", "System.Int32", "System.Int32") &&
+            IsField(instructions[4], OpCodes.Stsfld, surface) &&
+            IsField(instructions[5], OpCodes.Ldsfld, surface) &&
+            IsConstructor(instructions[6], "Cairo.Context", "Cairo.Surface") &&
+            IsField(instructions[7], OpCodes.Stsfld, measuringContext) &&
+            instructions[8].OpCode == OpCodes.Ret;
+        if (!matchesVanillaInitializer)
+            throw new InvalidOperationException("CairoFont's static initializer no longer matches the known native measuring-context construction.");
+
+        initializer.Body = new MethodBody(initializer);
+        initializer.Body.Instructions.Add(Instruction.Create(OpCodes.Ret));
+        initializer.DebugInformation.SequencePoints.Clear();
+        initializer.DebugInformation.Scope = null;
+        Console.WriteLine("  API PATCHED: CairoFont static initialization no longer creates a Cairo surface/context");
+
+        static bool IsConstructor(Instruction instruction, string declaringType, params string[] parameters) =>
+            instruction.OpCode == OpCodes.Newobj && instruction.Operand is MethodReference method &&
+            method.Name == ".ctor" && method.DeclaringType.FullName == declaringType &&
+            method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters);
+
+        static bool IsField(Instruction instruction, OpCode opcode, FieldDefinition field) =>
+            instruction.OpCode == opcode && instruction.Operand is FieldReference reference && reference.FullName == field.FullName;
+    }
+
+    private static void RewriteFontMeasurementsWithSkia(ModuleDefinition module, ModuleDefinition cairo,
+        TypeDefinition font, MethodDefinition textExtents, MethodDefinition fontExtents)
+    {
+        var helper = cairo.GetType("Cairo.OptimumSkiaTextMetrics")
+            ?? throw new InvalidOperationException("Cairo.OptimumSkiaTextMetrics is missing from the candidate Cairo assembly.");
+        if (!helper.IsPublic)
+            throw new InvalidOperationException("Cairo.OptimumSkiaTextMetrics must be public for calls from the API assembly.");
+        if (textExtents.IsStatic || fontExtents.IsStatic || textExtents.ReturnType.FullName != "Cairo.TextExtents" ||
+            fontExtents.ReturnType.FullName != "Cairo.FontExtents")
+            throw new InvalidOperationException("CairoFont measurement signatures do not match the supported vanilla API.");
+        var options = font.Fields.SingleOrDefault(field => field.Name == "CairoFontOptions" && !field.IsStatic && field.FieldType.FullName == "Cairo.FontOptions")
+            ?? throw new InvalidOperationException("CairoFont.CairoFontOptions is missing from the vanilla API.");
+        var dispose = font.Methods.SingleOrDefault(method => method.Name == "Dispose" && !method.IsStatic && method.Parameters.Count == 0 && method.ReturnType.FullName == "System.Void")
+            ?? throw new InvalidOperationException("CairoFont.Dispose() is missing from the vanilla API.");
+        var disposeInstructions = dispose.HasBody ? dispose.Body.Instructions.Where(instruction => instruction.OpCode != OpCodes.Nop).ToArray() : Array.Empty<Instruction>();
+        if (disposeInstructions.Length != 4 || disposeInstructions[0].OpCode != OpCodes.Ldarg_0 ||
+            disposeInstructions[1].OpCode != OpCodes.Ldfld || disposeInstructions[1].Operand is not FieldReference disposeField || disposeField.FullName != options.FullName ||
+            disposeInstructions[2].OpCode != OpCodes.Callvirt || disposeInstructions[2].Operand is not MethodReference disposeCall ||
+            disposeCall.Name != "Dispose" || disposeCall.DeclaringType.FullName != "Cairo.FontOptions" || disposeInstructions[3].OpCode != OpCodes.Ret)
+            throw new InvalidOperationException("CairoFont.Dispose() does not match the supported vanilla font-options disposal body.");
+        var measureText = FindHelper("GetTextExtents", "Cairo.TextExtents", true);
+        var measureFont = FindHelper("GetFontExtents", "Cairo.FontExtents", false);
+        var family = FindField("Fontname", "System.String");
+        var weight = FindField("FontWeight", "Cairo.FontWeight");
+        var slant = FindField("Slant", "Cairo.FontSlant");
+        var size = FindField("UnscaledFontsize", "System.Double");
+        var scaled = module.GetType("Vintagestory.API.Client.GuiElement")?.Methods.SingleOrDefault(method =>
+            method.Name == "scaled" && method.IsStatic && method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.FullName == "System.Double" && method.ReturnType.FullName == "System.Double")
+            ?? throw new InvalidOperationException("GuiElement.scaled(double) is missing from the vanilla API.");
+
+        // Validate both methods before changing either body. Do not silently reapply
+        // on top of an API that already carries the GUI measurement hooks.
+        foreach (var method in new[] { textExtents, fontExtents })
+        {
+            if (!method.HasBody || method.Body.Instructions.Any(instruction =>
+                instruction.Operand is MethodReference called && called.DeclaringType.FullName == "Vintagestory.API.Config.OptimumGuiMetrics"))
+                throw new InvalidOperationException($"{method.FullName} is missing its vanilla body or already has GUI measurement hooks.");
+        }
+        Rewrite(textExtents, measureText, true);
+        Rewrite(fontExtents, measureFont, false);
+        // Measuring through Skia no longer calls SetupContext, so font options
+        // can remain null throughout a font's lifetime.
+        var disposeProcessor = dispose.Body.GetILProcessor();
+        Instruction originalDispose = dispose.Body.Instructions[0];
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Ldarg_0));
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Ldfld, module.ImportReference(options)));
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Brtrue, originalDispose));
+        disposeProcessor.InsertBefore(originalDispose, Instruction.Create(OpCodes.Ret));
+
+        MethodDefinition FindHelper(string name, string result, bool hasText)
+        {
+            string[] parameters = hasText
+                ? new[] { "System.String", "Cairo.FontWeight", "Cairo.FontSlant", "System.Double", "System.String" }
+                : new[] { "System.String", "Cairo.FontWeight", "Cairo.FontSlant", "System.Double" };
+            return helper.Methods.SingleOrDefault(method => method.Name == name && method.IsPublic && method.IsStatic &&
+                method.ReturnType.FullName == result && method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters))
+                ?? throw new InvalidOperationException($"The candidate Cairo assembly lacks the expected {name} Skia helper signature.");
+        }
+
+        FieldDefinition FindField(string name, string type)
+        {
+            for (TypeDefinition? current = font; current != null; current = current.BaseType?.Resolve())
+            {
+                var field = current.Fields.SingleOrDefault(candidate => candidate.Name == name && !candidate.IsStatic && candidate.FieldType.FullName == type);
+                if (field != null) return field;
+            }
+            throw new InvalidOperationException($"{font.FullName} is missing its {type} {name} field.");
+        }
+
+        void Rewrite(MethodDefinition method, MethodDefinition helperMethod, bool hasText)
+        {
+            method.Body = new MethodBody(method);
+            method.DebugInformation.SequencePoints.Clear();
+            method.DebugInformation.Scope = null;
+            var processor = method.Body.GetILProcessor();
+            foreach (var field in new[] { family, weight, slant, size })
+            {
+                processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+                processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(field)));
+            }
+            processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(scaled)));
+            if (hasText) processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+            processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(helperMethod)));
+            processor.Append(Instruction.Create(OpCodes.Ret));
+        }
     }
 
     private static void PatchFontMeasurementMethod(ModuleDefinition module, MethodDefinition method,
@@ -384,6 +832,225 @@ public static class ApiPatcher
                 for (int i = 0; i < targets.Length; i++)
                     if (targets[i] == returnInstruction) targets[i] = recordStart;
         }
+    }
+
+    internal static int PatchTextDrawUtilFontOverloads(ModuleDefinition module)
+    {
+        const string utilTypeName = "Vintagestory.API.Client.TextDrawUtil";
+        const string fontTypeName = "Vintagestory.API.Client.CairoFont";
+        var util = module.GetType(utilTypeName)
+            ?? throw new InvalidOperationException($"{utilTypeName} is missing from the vanilla API.");
+        var font = module.GetType(fontTypeName)
+            ?? throw new InvalidOperationException($"{fontTypeName} is missing from the vanilla API.");
+        var flowPath = module.GetType("Vintagestory.API.Client.TextFlowPath")
+            ?? throw new InvalidOperationException("TextFlowPath is missing from the vanilla API.");
+        var lineType = module.GetType("Vintagestory.API.Client.TextLine")
+            ?? throw new InvalidOperationException("TextLine is missing from the vanilla API.");
+        var behavior = module.GetType("Vintagestory.API.Client.EnumLinebreakBehavior")
+            ?? throw new InvalidOperationException("EnumLinebreakBehavior is missing from the vanilla API.");
+
+        MethodDefinition Find(string name, string result, params string[] parameters) =>
+            util.Methods.SingleOrDefault(method => method.Name == name && method.ReturnType.FullName == result &&
+                method.Parameters.Select(parameter => parameter.ParameterType.FullName).SequenceEqual(parameters))
+            ?? throw new InvalidOperationException($"{utilTypeName}.{name}({string.Join(", ", parameters)}) is missing from the vanilla API.");
+
+        var contextLineize = Find("Lineize", $"{lineType.FullName}[]", "Cairo.Context", "System.String", behavior.FullName,
+            $"{flowPath.FullName}[]", "System.Double", "System.Double", "System.Double", "System.Boolean");
+        var context = contextLineize.Parameters[0].ParameterType.Resolve()
+            ?? throw new InvalidOperationException("Cairo.Context is missing from the vanilla API references.");
+        var fontLineize = Find("Lineize", $"{lineType.FullName}[]", font.FullName, "System.String", behavior.FullName,
+            $"{flowPath.FullName}[]", "System.Double", "System.Double", "System.Boolean");
+        var fontQuantity = Find("GetQuantityTextLines", "System.Int32", font.FullName, "System.String", behavior.FullName,
+            $"{flowPath.FullName}[]", "System.Double");
+
+        if (!contextLineize.HasBody || !fontLineize.HasBody || !fontQuantity.HasBody)
+            throw new InvalidOperationException("TextDrawUtil font-layout entrypoints must have managed method bodies.");
+        if (util.Methods.Any(method => method.Name == "LineizeWithSkiaMetrics"))
+            throw new InvalidOperationException("TextDrawUtil already contains the Skia metrics layout helper.");
+
+        var fontTextExtents = font.Methods.SingleOrDefault(method => method.Name == "GetTextExtents" &&
+            method.Parameters.Count == 1 && method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType.FullName == "Cairo.TextExtents")
+            ?? throw new InvalidOperationException("CairoFont.GetTextExtents(string) is missing from the vanilla API.");
+        var fontExtents = font.Methods.SingleOrDefault(method => method.Name == "GetFontExtents" &&
+            method.Parameters.Count == 0 && method.ReturnType.FullName == "Cairo.FontExtents")
+            ?? throw new InvalidOperationException("CairoFont.GetFontExtents() is missing from the vanilla API.");
+        var lineHeight = FindField(font, "LineHeightMultiplier", "System.Double");
+        var textExtents = context.Methods.SingleOrDefault(method => method.Name == "TextExtents" &&
+            method.Parameters.Count == 1 && method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType.FullName == "Cairo.TextExtents")
+            ?? throw new InvalidOperationException("Cairo.Context.TextExtents(string) is missing from the vanilla API.");
+        var contextFontExtents = context.Methods.SingleOrDefault(method => method.Name == "get_FontExtents" &&
+            method.Parameters.Count == 0 && method.ReturnType.FullName == "Cairo.FontExtents")
+            ?? throw new InvalidOperationException("Cairo.Context.FontExtents is missing from the vanilla API.");
+
+        MethodDefinition helper = CloneLineizeWithSkiaMetrics(module, util, contextLineize, font, textExtents,
+            contextFontExtents, fontTextExtents, fontExtents);
+        RewriteFontLineize(module, fontLineize, helper, lineHeight);
+        RewriteFontQuantity(module, fontQuantity, helper, lineHeight);
+
+        Console.WriteLine($"  API PATCHED: {utilTypeName}.Lineize/GetQuantityTextLines(CairoFont) Skia metrics, no temporary Cairo context");
+        return 2;
+
+        static FieldDefinition FindField(TypeDefinition type, string name, string fieldType)
+        {
+            for (TypeDefinition? current = type; current != null; current = current.BaseType?.Resolve())
+            {
+                var field = current.Fields.SingleOrDefault(candidate => candidate.Name == name && !candidate.IsStatic &&
+                    candidate.FieldType.FullName == fieldType);
+                if (field != null) return field;
+            }
+            throw new InvalidOperationException($"{type.FullName} is missing its {fieldType} {name} field.");
+        }
+    }
+
+    private static MethodDefinition CloneLineizeWithSkiaMetrics(ModuleDefinition module, TypeDefinition util,
+        MethodDefinition source, TypeDefinition font, MethodDefinition contextTextExtents,
+        MethodDefinition contextFontExtents, MethodDefinition fontTextExtents, MethodDefinition fontExtents)
+    {
+        var helper = new MethodDefinition("LineizeWithSkiaMetrics",
+            MethodAttributes.Private | MethodAttributes.HideBySig, module.ImportReference(source.ReturnType));
+        foreach (var parameter in source.Parameters)
+        {
+            TypeReference parameterType = parameter.Index == 0
+                ? module.ImportReference(font)
+                : module.ImportReference(parameter.ParameterType);
+            helper.Parameters.Add(new ParameterDefinition(parameter.Name, parameter.Attributes, parameterType));
+        }
+
+        helper.Body.InitLocals = source.Body.InitLocals;
+        helper.Body.MaxStackSize = source.Body.MaxStackSize;
+        var variables = new Dictionary<VariableDefinition, VariableDefinition>();
+        foreach (var variable in source.Body.Variables)
+        {
+            var cloned = new VariableDefinition(module.ImportReference(variable.VariableType));
+            helper.Body.Variables.Add(cloned);
+            variables.Add(variable, cloned);
+        }
+
+        var instructions = new Dictionary<Instruction, Instruction>();
+        ILProcessor processor = helper.Body.GetILProcessor();
+        int replacedTextMetrics = 0;
+        int replacedFontMetrics = 0;
+        foreach (Instruction original in source.Body.Instructions)
+        {
+            Instruction instruction;
+            if (original.Operand is MethodReference method && method.DeclaringType.FullName == "Cairo.Context")
+            {
+                if (method.Name == contextTextExtents.Name && method.Parameters.Count == 1 &&
+                    method.Parameters[0].ParameterType.MetadataType == MetadataType.String && method.ReturnType.FullName == contextTextExtents.ReturnType.FullName)
+                {
+                    instruction = CloneCall(original, fontTextExtents);
+                    replacedTextMetrics++;
+                }
+                else if (method.Name == contextFontExtents.Name && method.Parameters.Count == 0 &&
+                    method.ReturnType.FullName == contextFontExtents.ReturnType.FullName)
+                {
+                    instruction = CloneCall(original, fontExtents);
+                    replacedFontMetrics++;
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unexpected Cairo.Context call in {source.FullName}: {method.FullName}.");
+                }
+            }
+            else
+            {
+                instruction = CloneInstruction(original);
+            }
+            instructions.Add(original, instruction);
+            processor.Append(instruction);
+        }
+
+        foreach (Instruction instruction in helper.Body.Instructions)
+        {
+            if (instruction.Operand is Instruction branch && instructions.TryGetValue(branch, out Instruction? mapped))
+                instruction.Operand = mapped;
+            else if (instruction.Operand is Instruction[] branches)
+                instruction.Operand = branches.Select(branch => instructions.TryGetValue(branch, out Instruction? mappedBranch) ? mappedBranch : branch).ToArray();
+            else if (instruction.Operand is VariableDefinition variable && variables.TryGetValue(variable, out VariableDefinition? mappedVariable))
+                instruction.Operand = mappedVariable;
+            else if (instruction.Operand is ParameterDefinition parameter && parameter.Index >= 0 && parameter.Index < helper.Parameters.Count)
+                instruction.Operand = helper.Parameters[parameter.Index];
+        }
+
+        foreach (ExceptionHandler handler in source.Body.ExceptionHandlers)
+        {
+            helper.Body.ExceptionHandlers.Add(new ExceptionHandler(handler.HandlerType)
+            {
+                TryStart = handler.TryStart != null ? instructions.GetValueOrDefault(handler.TryStart) : null,
+                TryEnd = handler.TryEnd != null ? instructions.GetValueOrDefault(handler.TryEnd) : null,
+                HandlerStart = handler.HandlerStart != null ? instructions.GetValueOrDefault(handler.HandlerStart) : null,
+                HandlerEnd = handler.HandlerEnd != null ? instructions.GetValueOrDefault(handler.HandlerEnd) : null,
+                CatchType = handler.CatchType != null ? module.ImportReference(handler.CatchType) : null,
+            });
+        }
+
+        if (replacedTextMetrics == 0 || replacedFontMetrics == 0)
+            throw new InvalidOperationException($"{source.FullName} did not contain both expected Cairo text measurement calls.");
+        util.Methods.Add(helper);
+        return helper;
+
+        static Instruction CloneCall(Instruction sourceInstruction, MethodDefinition target)
+        {
+            OpCode opcode = sourceInstruction.OpCode == OpCodes.Ldvirtftn ? OpCodes.Ldftn : sourceInstruction.OpCode;
+            return Instruction.Create(opcode, target);
+        }
+
+        Instruction CloneInstruction(Instruction instruction)
+        {
+            object? operand = instruction.Operand;
+            if (operand == null) return Instruction.Create(instruction.OpCode);
+            if (operand is MethodReference method) return Instruction.Create(instruction.OpCode, module.ImportReference(method));
+            if (operand is TypeReference type) return Instruction.Create(instruction.OpCode, module.ImportReference(type));
+            if (operand is FieldReference field) return Instruction.Create(instruction.OpCode, module.ImportReference(field));
+            if (operand is string text) return Instruction.Create(instruction.OpCode, text);
+            if (operand is int i) return Instruction.Create(instruction.OpCode, i);
+            if (operand is long l) return Instruction.Create(instruction.OpCode, l);
+            if (operand is float f) return Instruction.Create(instruction.OpCode, f);
+            if (operand is double d) return Instruction.Create(instruction.OpCode, d);
+            if (operand is byte b) return Instruction.Create(instruction.OpCode, b);
+            if (operand is sbyte sb) return Instruction.Create(instruction.OpCode, sb);
+            if (operand is Instruction targetInstruction) return Instruction.Create(instruction.OpCode, targetInstruction);
+            if (operand is Instruction[] targets) return Instruction.Create(instruction.OpCode, targets);
+            if (operand is VariableDefinition variable) return Instruction.Create(instruction.OpCode, variables[variable]);
+            if (operand is ParameterDefinition parameter) return Instruction.Create(instruction.OpCode, helper.Parameters[parameter.Index]);
+            throw new InvalidOperationException($"Unsupported IL operand {operand.GetType().FullName} in {source.FullName}.");
+        }
+    }
+
+    private static void RewriteFontLineize(ModuleDefinition module, MethodDefinition method, MethodDefinition helper, FieldDefinition lineHeight)
+    {
+        ClearDebugInformation(method);
+        method.Body = new MethodBody(method);
+        ILProcessor processor = method.Body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        foreach (int argument in new[] { 0, 1, 2, 3, 4, 5 })
+            processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[argument]));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(lineHeight)));
+        processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[6]));
+        processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(helper)));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+    }
+
+    private static void RewriteFontQuantity(ModuleDefinition module, MethodDefinition method, MethodDefinition helper, FieldDefinition lineHeight)
+    {
+        ClearDebugInformation(method);
+        method.Body = new MethodBody(method);
+        ILProcessor processor = method.Body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        foreach (int argument in new[] { 0, 1, 2, 3 })
+            processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[argument]));
+        processor.Append(Instruction.Create(OpCodes.Ldc_R8, 0d));
+        processor.Append(Instruction.Create(OpCodes.Ldarg, method.Parameters[4]));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldfld, module.ImportReference(lineHeight)));
+        processor.Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        processor.Append(Instruction.Create(OpCodes.Call, module.ImportReference(helper)));
+        processor.Append(Instruction.Create(OpCodes.Ldlen));
+        processor.Append(Instruction.Create(OpCodes.Conv_I4));
+        processor.Append(Instruction.Create(OpCodes.Ret));
     }
 
     internal static int PatchGameVersionLabel(ModuleDefinition module, string optimumVersion)
@@ -945,6 +1612,14 @@ public static class ApiPatcher
         method.DebugInformation.SequencePoints.Clear();
         method.DebugInformation.Scope = null;
     }
+
+    private static bool StoresVariable(Instruction instruction, VariableDefinition variable) =>
+        instruction.OpCode == OpCodes.Stloc_0 && variable.Index == 0 ||
+        instruction.OpCode == OpCodes.Stloc_1 && variable.Index == 1 ||
+        instruction.OpCode == OpCodes.Stloc_2 && variable.Index == 2 ||
+        instruction.OpCode == OpCodes.Stloc_3 && variable.Index == 3 ||
+        (instruction.OpCode == OpCodes.Stloc || instruction.OpCode == OpCodes.Stloc_S) &&
+        instruction.Operand is VariableDefinition storedVariable && storedVariable == variable;
 
     /// <summary>
     /// Injects type-forwarding entries (ExportedType rows) into the vanilla API assembly

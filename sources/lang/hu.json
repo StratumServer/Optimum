@@ -1,5 +1,7 @@
 {
 	"optimum-tab-header": "Extra",
+	"optimum-guigpu": "Experimental GPU GUI rendering",
+	"optimum-guigpu-tooltip": "Records static dialog drawing and renders supported operations through Skia on the current OpenGL context. The runtime probe must pass; unsupported or failed recordings fall back to Cairo. Requires restart. Experimental; disabled by default.",
 	"optimum-bgfps": "Háttér FPS korlátozása",
 	"optimum-bgfps-tooltip": "30 FPS-re korlátoz, amikor a játékablak elveszíti a fókuszt.",
 	"optimum-framepacing": "Egyenletes képkocka-ütemezés",

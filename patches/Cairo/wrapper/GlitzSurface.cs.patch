@@ -1,0 +1,22 @@
+diff --git a/Cairo/wrapper/GlitzSurface.cs b/Cairo/wrapper/GlitzSurface.cs
+index 4d7644c..dfe630c 100644
+--- a/Cairo/wrapper/GlitzSurface.cs
++++ b/Cairo/wrapper/GlitzSurface.cs
+@@ -36,10 +36,16 @@ namespace Cairo {
+ 		internal GlitzSurface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 
+ 		public GlitzSurface (IntPtr glitz_surface)
+-			: base (NativeMethods.cairo_glitz_surface_create (glitz_surface), true)
++			: base (CreateNativeSurface (glitz_surface), true)
+ 		{
+ 		}
++
++		static IntPtr CreateNativeSurface (IntPtr glitzSurface)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (GlitzSurface));
++			return NativeMethods.cairo_glitz_surface_create (glitzSurface);
++		}
+ 	}
+ }

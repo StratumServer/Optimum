@@ -76,7 +76,8 @@ index 2eca300..938b3b3 100644
 +
 +		Entity[] array;
 +		if (needsRefresh)
-+		{
+ 		{
+-			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
 +			OptimumDiagnostics.DynamicLightCache.Hit();
 +			// B3: alloc-free K-nearest. GetEntitiesAround still allocates
 +			// internally (GameMain owns that code), but we avoid the sort
@@ -133,18 +134,17 @@ index 2eca300..938b3b3 100644
 +				_lastLightScanPos = (_lastLightScanPos ?? new Vec3d()).Set(plrPos);
 +				_lightScanFramesSinceRefresh = 0;
 +			}
-+		}
-+		else
- 		{
--			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
-+			OptimumDiagnostics.DynamicLightCache.Skip();
-+			array = _cachedLightEntities;
  		}
 -		foreach (Entity entity in array)
++		else
+ 		{
++			OptimumDiagnostics.DynamicLightCache.Skip();
++			array = _cachedLightEntities;
++		}
 +		// Consumer loop: read live .Pos and .LightHsv once per entity.
 +		int limit = (array == _lightScratch) ? _lightScratchCount : array.Length;
 +		for (int i = 0; i < limit; i++)
- 		{
++		{
 +			Entity entity = array[i];
 +			if (entity == null) continue;
  			byte[] lightHsv = entity.LightHsv;

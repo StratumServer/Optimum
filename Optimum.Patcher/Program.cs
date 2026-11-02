@@ -55,6 +55,8 @@ var typesToInject = new List<string>
     "Optimum.OptimumOptiTimeGuard",
     "Optimum.PhysicsListReuseGuard",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
+    "Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend",
+    "Vintagestory.Client.NoObf.OptimumGuiSvgRecorder",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
@@ -513,6 +515,8 @@ var targets = new List<MethodTarget>
         new[] { "System.Int32[]", "System.Int32", "System.Int32", "Vintagestory.Client.NoObf.VAO", "System.Boolean" }),
     // ClientPlatformWindows: frame pacing + background FPS (inline in window_RenderFrame, no lambdas)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_RenderFrame", 1),
+    // Release the shared Skia context before GLFW destroys the window.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "window_Closing", 1),
     // GUI composition profiling: upload paths must ship in the patched game assembly.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadCairoTexture", 2),
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "LoadOrUpdateCairoTexture", 3),
@@ -642,10 +646,15 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Common.Compression", "CompressAndCombine", 3),
     new("Vintagestory.Common.Compression", "DecompressCombined", 4),
     new("Vintagestory.Common.LoadBalancer", "CreateDedicatedWorkerThread", 3),
-    // SvgLoader: reload SVG asset data when a mod holds a stale IAsset ref
-    // after the textures category is unloaded (waypoint icon packs, etc.).
-    // Vanilla throws; this reloads from Origin, keeping icons drawing.
+    // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset
+    // data when a mod holds a stale IAsset ref after texture unload.
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 8),
+    new("Vintagestory.Client.NoObf.SvgLoader", "LoadSvg", 6),
     new("Vintagestory.Client.NoObf.SvgLoader", "rasterizeSvg", 6),
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
+    new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 8),
+    new("Vintagestory.Client.NoObf.SvgLoader", "LoadSvg", 6),
 
     // --- Server-side worldgen scheduler + chunk read pool ---
     // See docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md

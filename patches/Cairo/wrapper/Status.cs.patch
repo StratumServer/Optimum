@@ -1,0 +1,34 @@
+diff --git a/Cairo/wrapper/Status.cs b/Cairo/wrapper/Status.cs
+index c42c865..358e154 100644
+--- a/Cairo/wrapper/Status.cs
++++ b/Cairo/wrapper/Status.cs
+@@ -60,7 +60,29 @@ namespace Cairo
+ 		FileNotFound,
+ 		InvalidDash,
+ 		InvalidDscComment,
+ 		InvalidIndex,
+ 		ClipNotRepresentable,
++		TempFileError,
++		InvalidStride,
++		FontTypeMismatch,
++		UserFontImmutable,
++		UserFontError,
++		NegativeCount,
++		InvalidClusters,
++		InvalidSlant,
++		InvalidWeight,
++		InvalidSize,
++		UserFontNotImplemented,
++		DeviceTypeMismatch,
++		DeviceError,
++		InvalidMeshConstruction,
++		DeviceFinished,
++		Jbig2GlobalMissing,
++		PngError,
++		FreetypeError,
++		Win32GdiError,
++		TagError,
++		DwriteError,
++		SvgFontError,
+ 	}
+ }

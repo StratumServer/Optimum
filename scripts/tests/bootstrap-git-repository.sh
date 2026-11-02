@@ -35,6 +35,7 @@ BASH_BOOTSTRAP="$REPO_ROOT/scripts/bootstrap.sh"
 require_line 'source "$script_dir/git-repository.sh"' "$BASH_BOOTSTRAP"
 require_line 'optimum_git_in_clone "$base" checkout' "$BASH_BOOTSTRAP"
 require_line 'optimum_git_in_clone "$dest" checkout' "$BASH_BOOTSTRAP"
+require_line 'if ! git -C "$repo_root" rev-parse --is-inside-work-tree' "$BASH_BOOTSTRAP"
 forbid_pattern 'git -C "\$(base|dest)"' "$BASH_BOOTSTRAP"
 
 PS_BOOTSTRAP="$REPO_ROOT/scripts/bootstrap.ps1"
@@ -79,6 +80,16 @@ optimum_git_in_clone "$clone" checkout --quiet main
 [[ "$(optimum_git_in_clone "$clone" config --get core.autocrlf)" == false ]]
 [[ "$(optimum_git_in_clone "$clone" config --get core.eol)" == lf ]]
 [[ "$(<"$clone/README")" == 'bootstrap git repository test' ]]
+
+# A linked worktree has a .git file, not a .git directory. Bootstrap must
+# recognize it as an existing repository and never initialize a temporary one.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+worktree="$TEST_ROOT/worktree"
+git -C "$seed" worktree add --quiet --detach "$worktree" main
+[[ -f "$worktree/.git" ]]
+[[ "$(git -C "$worktree" rev-parse --is-inside-work-tree)" == true ]]
+[[ "$(git -C "$worktree" rev-parse --git-dir)" != "$worktree/.git" ]]
+[[ ! -e "$worktree/.git/optimum-bootstrap-tmp" ]]
 
 # Exercise the PowerShell helper the same way when a shell is available.
 if command -v pwsh >/dev/null 2>&1; then

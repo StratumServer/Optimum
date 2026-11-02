@@ -1,0 +1,78 @@
+diff --git a/Cairo/util/FreeTypeFontFace.cs b/Cairo/util/FreeTypeFontFace.cs
+index 8351e1e..60bbe55 100644
+--- a/Cairo/util/FreeTypeFontFace.cs
++++ b/Cairo/util/FreeTypeFontFace.cs
+@@ -5,14 +5,10 @@ using System.Runtime.InteropServices;
+ 
+ namespace Cairo.Util
+ {
+     public class FreeTypeFontFace : FontFace
+     {
+-        private static bool initialized = false;
+-        private static IntPtr freetypeLipPtr;
+-        private IntPtr freetypeFace;
+-
+         const string freetype = "freetype6";
+ 
+         [DllImport(freetype)]
+         public static extern int FT_Init_FreeType(out System.IntPtr lib);
+ 
+@@ -21,53 +17,17 @@ namespace Cairo.Util
+ 
+         [DllImport(freetype)]
+         public static extern int FT_New_Face(System.IntPtr lib, string fname, int index, out System.IntPtr face);
+ 
+ 
+-        private FreeTypeFontFace(IntPtr cairoFace, IntPtr freetypeFace) : base(cairoFace, true)
+-        {
+-            this.freetypeFace = freetypeFace;
+-        }
++        static FreeTypeFontFace() { _ = CairoNativeGuard.NativeAllowed; }
+ 
+-        protected override void Dispose(bool disposing)
+-        {
+-            NativeMethods.cairo_font_face_destroy(Handle);
+-            FT_Done_Face(freetypeFace);
+-        }
++        private FreeTypeFontFace(ManagedFileFontSource source) : base(source.Family, source.Slant, source.Weight, source) { }
++
++        protected override void Dispose(bool disposing) { base.Dispose(disposing); }
+ 
+         public static FreeTypeFontFace Create(string filename, int loadoptions)
+         {
+-            if (!initialized)
+-            {
+-                initialize();
+-            }
+-                
+-
+-
+-            IntPtr freetypeFace;
+-
+-            if (FT_New_Face(freetypeLipPtr, filename, 0, out freetypeFace) != 0)
+-            {
+-                throw new Exception(filename);
+-            }
+-            
+-            IntPtr cairoFace = NativeMethods.cairo_ft_font_face_create_for_ft_face(freetypeFace, loadoptions);
+-            
+-            FreeTypeFontFace fontFace = new FreeTypeFontFace(cairoFace, freetypeFace);
+-
+-            if (fontFace.Status != Status.Success)
+-            {
+-                throw new Exception("Failed loading font " + filename + " error: " + fontFace.Status);
+-            }
+-
+-            return fontFace;
+-        }
+-
+-        private static void initialize()
+-        {
+-            if (FT_Init_FreeType(out freetypeLipPtr) != 0)
+-                throw new Exception("Couldn't init freetype");
+-
+-            initialized = true;
++            return new FreeTypeFontFace(new ManagedFileFontSource(filename, loadoptions));
+         }
+     }
+ }

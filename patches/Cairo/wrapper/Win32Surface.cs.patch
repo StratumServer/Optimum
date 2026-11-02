@@ -1,0 +1,22 @@
+diff --git a/Cairo/wrapper/Win32Surface.cs b/Cairo/wrapper/Win32Surface.cs
+index bd4515b..f95365f 100644
+--- a/Cairo/wrapper/Win32Surface.cs
++++ b/Cairo/wrapper/Win32Surface.cs
+@@ -37,10 +37,16 @@ namespace Cairo {
+ 		internal Win32Surface (IntPtr handle, bool owns) : base (handle, owns)
+ 		{
+ 		}
+ 		
+ 		public Win32Surface (IntPtr hdc)
+-			: base (NativeMethods.cairo_win32_surface_create (hdc), true)
++			: base (CreateNativeSurface (hdc), true)
+ 		{
+ 		}
++
++		static IntPtr CreateNativeSurface (IntPtr hdc)
++		{
++			CairoNativeGuard.RequireNativeAllowed (nameof (Win32Surface));
++			return NativeMethods.cairo_win32_surface_create (hdc);
++		}
+ 	}
+ }

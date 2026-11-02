@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 
@@ -10,6 +11,17 @@ namespace Vintagestory.API.Config
     /// </summary>
     public static class OptimumGuiMetrics
     {
+        private const int MaxMaterializationTriggerKinds = 32;
+        private const string OtherMaterializationTriggerKinds = "other-trigger-kinds";
+        private static readonly object materializationDiagnosticsSync = new object();
+        private static readonly Dictionary<string, long> materializationTriggerCounts = new Dictionary<string, long>();
+        private static readonly object gpuCandidateFallbackDiagnosticsSync = new object();
+        private static readonly Dictionary<string, long> gpuCandidateFallbackReasonCounts = new Dictionary<string, long>(StringComparer.Ordinal);
+        private static long untrackedMaterializationTriggerCount;
+        private static long materializationAttemptCount;
+        private static long materializationSuccessCount;
+        private static long materializationFailureCount;
+
         /// <summary>Ticks per second for the duration fields in <see cref="OptimumGuiMetricsSnapshot"/>.</summary>
         public static long TimestampFrequency => Stopwatch.Frequency;
 
@@ -27,12 +39,24 @@ namespace Vintagestory.API.Config
         private static long uploadBytes;
         private static long textureAllocationCount;
         private static long textureUpdateCount;
+        private static long gpuCandidateAttemptCount;
+        private static long gpuCandidateSuccessCount;
+        private static long gpuCandidateFallbackCount;
+        private static long gpuRecordingSurfaceStartCount;
+        private static string lastGpuCandidateFallbackReason;
         private static long lastCompositionThreadId;
         private static long textExtentMeasurementCount;
         private static long textExtentMeasurementTicks;
         private static long fontExtentMeasurementCount;
         private static long fontExtentMeasurementTicks;
         private static long lastTextMeasurementThreadId;
+
+        /// <summary>Actual first replay attempts observed while metrics are enabled.</summary>
+        public static long MaterializationAttemptCount => Interlocked.Read(ref materializationAttemptCount);
+        /// <summary>Actual first replay attempts that completed successfully.</summary>
+        public static long MaterializationSuccessCount => Interlocked.Read(ref materializationSuccessCount);
+        /// <summary>Actual first replay attempts that failed.</summary>
+        public static long MaterializationFailureCount => Interlocked.Read(ref materializationFailureCount);
 
         /// <summary>Enables or disables measurements. Disabled is the default.</summary>
         public static bool Enabled
@@ -58,12 +82,20 @@ namespace Vintagestory.API.Config
                 Interlocked.Read(ref uploadBytes),
                 Interlocked.Read(ref textureAllocationCount),
                 Interlocked.Read(ref textureUpdateCount),
+                Interlocked.Read(ref gpuCandidateAttemptCount),
+                Interlocked.Read(ref gpuCandidateSuccessCount),
+                Interlocked.Read(ref gpuCandidateFallbackCount),
+                Interlocked.Read(ref gpuRecordingSurfaceStartCount),
+                Volatile.Read(ref lastGpuCandidateFallbackReason),
                 Interlocked.Read(ref lastCompositionThreadId),
                 Interlocked.Read(ref textExtentMeasurementCount),
                 Interlocked.Read(ref textExtentMeasurementTicks),
                 Interlocked.Read(ref fontExtentMeasurementCount),
                 Interlocked.Read(ref fontExtentMeasurementTicks),
-                Interlocked.Read(ref lastTextMeasurementThreadId));
+                Interlocked.Read(ref lastTextMeasurementThreadId),
+                Interlocked.Read(ref materializationAttemptCount),
+                Interlocked.Read(ref materializationSuccessCount),
+                Interlocked.Read(ref materializationFailureCount));
         }
 
         /// <summary>Resets all measurements without changing the enabled state.</summary>
@@ -82,12 +114,71 @@ namespace Vintagestory.API.Config
             Interlocked.Exchange(ref uploadBytes, 0);
             Interlocked.Exchange(ref textureAllocationCount, 0);
             Interlocked.Exchange(ref textureUpdateCount, 0);
+            Interlocked.Exchange(ref gpuCandidateAttemptCount, 0);
+            Interlocked.Exchange(ref gpuCandidateSuccessCount, 0);
+            Interlocked.Exchange(ref gpuCandidateFallbackCount, 0);
+            Interlocked.Exchange(ref gpuRecordingSurfaceStartCount, 0);
+            Volatile.Write(ref lastGpuCandidateFallbackReason, null);
+            lock (gpuCandidateFallbackDiagnosticsSync) gpuCandidateFallbackReasonCounts.Clear();
             Interlocked.Exchange(ref lastCompositionThreadId, 0);
             Interlocked.Exchange(ref textExtentMeasurementCount, 0);
             Interlocked.Exchange(ref textExtentMeasurementTicks, 0);
             Interlocked.Exchange(ref fontExtentMeasurementCount, 0);
             Interlocked.Exchange(ref fontExtentMeasurementTicks, 0);
             Interlocked.Exchange(ref lastTextMeasurementThreadId, 0);
+            ResetMaterializationDiagnostics();
+        }
+
+        /// <summary>Returns one bounded bucket per replay trigger observed since the last reset.</summary>
+        public static Dictionary<string, long> GetMaterializationDiagnostics()
+        {
+            lock (materializationDiagnosticsSync)
+            {
+                var snapshot = new Dictionary<string, long>(materializationTriggerCounts);
+                long otherCount = Interlocked.Read(ref untrackedMaterializationTriggerCount);
+                if (otherCount != 0) snapshot[OtherMaterializationTriggerKinds] = otherCount;
+                return snapshot;
+            }
+        }
+
+        internal static void ResetMaterializationDiagnostics()
+        {
+            lock (materializationDiagnosticsSync)
+            {
+                materializationTriggerCounts.Clear();
+                Interlocked.Exchange(ref untrackedMaterializationTriggerCount, 0);
+            }
+            Interlocked.Exchange(ref materializationAttemptCount, 0);
+            Interlocked.Exchange(ref materializationSuccessCount, 0);
+            Interlocked.Exchange(ref materializationFailureCount, 0);
+        }
+
+        internal static void RecordMaterialization(string trigger, bool succeeded)
+        {
+            // Any native materialization invalidates zero-Cairo-fallback
+            // certification, including Subpixel and font-parity paths.
+            if (OptimumConfig.GuiGpuCertificationPassed)
+                OptimumConfig.RevokeGuiGpuCertification();
+            if (!Enabled) return;
+            Interlocked.Increment(ref materializationAttemptCount);
+            if (succeeded) Interlocked.Increment(ref materializationSuccessCount);
+            else Interlocked.Increment(ref materializationFailureCount);
+
+            string key = string.IsNullOrEmpty(trigger) ? "Unknown" : trigger;
+            lock (materializationDiagnosticsSync)
+            {
+                if (materializationTriggerCounts.TryGetValue(key, out long count))
+                {
+                    materializationTriggerCounts[key] = count + 1;
+                    return;
+                }
+                if (materializationTriggerCounts.Count >= MaxMaterializationTriggerKinds)
+                {
+                    Interlocked.Increment(ref untrackedMaterializationTriggerCount);
+                    return;
+                }
+                materializationTriggerCounts.Add(key, 1);
+            }
         }
 
         internal static long StartTimestamp() => Stopwatch.GetTimestamp();
@@ -122,6 +213,44 @@ namespace Vintagestory.API.Config
             else Interlocked.Increment(ref textureUpdateCount);
         }
 
+        internal static void RecordGpuCandidateTexture(bool succeeded, string fallbackReason)
+        {
+            // Surfaces that never started recording are not GPU candidates; counting them hid the real outcomes.
+            if (!succeeded && fallbackReason == "surface-not-recording:Native") return;
+            Interlocked.Increment(ref gpuCandidateAttemptCount);
+            if (succeeded)
+            {
+                Interlocked.Increment(ref gpuCandidateSuccessCount);
+                if (fallbackReason != null && fallbackReason.StartsWith("skia-cpu-fallback:", StringComparison.Ordinal))
+                {
+                    lock (gpuCandidateFallbackDiagnosticsSync)
+                    {
+                        gpuCandidateFallbackReasonCounts.TryGetValue("skia-cpu-fallback", out long count);
+                        gpuCandidateFallbackReasonCounts["skia-cpu-fallback"] = count + 1;
+                    }
+                }
+            }
+            else
+            {
+                Interlocked.Increment(ref gpuCandidateFallbackCount);
+                string reason = fallbackReason ?? "unspecified";
+                Volatile.Write(ref lastGpuCandidateFallbackReason, reason);
+                lock (gpuCandidateFallbackDiagnosticsSync)
+                {
+                    gpuCandidateFallbackReasonCounts.TryGetValue(reason, out long count);
+                    gpuCandidateFallbackReasonCounts[reason] = count + 1;
+                }
+            }
+        }
+
+        public static Dictionary<string, long> GetGpuCandidateFallbackDiagnostics()
+        {
+            lock (gpuCandidateFallbackDiagnosticsSync)
+                return new Dictionary<string, long>(gpuCandidateFallbackReasonCounts, StringComparer.Ordinal);
+        }
+
+        internal static void RecordGpuRecordingSurfaceStart() => Interlocked.Increment(ref gpuRecordingSurfaceStartCount);
+
         internal static void RecordTextExtentMeasurement(long startTimestamp)
         {
             long elapsedTicks = Stopwatch.GetTimestamp() - startTimestamp;
@@ -154,17 +283,26 @@ namespace Vintagestory.API.Config
         public long UploadBytes { get; }
         public long TextureAllocationCount { get; }
         public long TextureUpdateCount { get; }
+        public long GpuCandidateAttemptCount { get; }
+        public long GpuCandidateSuccessCount { get; }
+        public long GpuCandidateFallbackCount { get; }
+        public long GpuRecordingSurfaceStartCount { get; }
+        public string LastGpuCandidateFallbackReason { get; }
         public long LastCompositionThreadId { get; }
         public long TextExtentMeasurementCount { get; }
         public long TextExtentMeasurementTicks { get; }
         public long FontExtentMeasurementCount { get; }
         public long FontExtentMeasurementTicks { get; }
         public long LastTextMeasurementThreadId { get; }
+        public long MaterializationAttemptCount { get; }
+        public long MaterializationSuccessCount { get; }
+        public long MaterializationFailureCount { get; }
 
         internal OptimumGuiMetricsSnapshot(long compositionCount, long compositionTicks, long maxCompositionTicks,
             long composedSurfaceBytes, long lastSurfaceWidth, long lastSurfaceHeight, long initialCompositionCount, long recompositionCount, long uploadCount,
-            long uploadTicks, long uploadBytes, long textureAllocationCount, long textureUpdateCount, long lastCompositionThreadId,
-            long textExtentMeasurementCount, long textExtentMeasurementTicks, long fontExtentMeasurementCount, long fontExtentMeasurementTicks, long lastTextMeasurementThreadId)
+            long uploadTicks, long uploadBytes, long textureAllocationCount, long textureUpdateCount, long gpuCandidateAttemptCount, long gpuCandidateSuccessCount, long gpuCandidateFallbackCount, long gpuRecordingSurfaceStartCount, string lastGpuCandidateFallbackReason, long lastCompositionThreadId,
+            long textExtentMeasurementCount, long textExtentMeasurementTicks, long fontExtentMeasurementCount, long fontExtentMeasurementTicks, long lastTextMeasurementThreadId,
+            long materializationAttemptCount, long materializationSuccessCount, long materializationFailureCount)
         {
             CompositionCount = compositionCount;
             CompositionTicks = compositionTicks;
@@ -179,12 +317,20 @@ namespace Vintagestory.API.Config
             UploadBytes = uploadBytes;
             TextureAllocationCount = textureAllocationCount;
             TextureUpdateCount = textureUpdateCount;
+            GpuCandidateAttemptCount = gpuCandidateAttemptCount;
+            GpuCandidateSuccessCount = gpuCandidateSuccessCount;
+            GpuCandidateFallbackCount = gpuCandidateFallbackCount;
+            GpuRecordingSurfaceStartCount = gpuRecordingSurfaceStartCount;
+            LastGpuCandidateFallbackReason = lastGpuCandidateFallbackReason;
             LastCompositionThreadId = lastCompositionThreadId;
             TextExtentMeasurementCount = textExtentMeasurementCount;
             TextExtentMeasurementTicks = textExtentMeasurementTicks;
             FontExtentMeasurementCount = fontExtentMeasurementCount;
             FontExtentMeasurementTicks = fontExtentMeasurementTicks;
             LastTextMeasurementThreadId = lastTextMeasurementThreadId;
+            MaterializationAttemptCount = materializationAttemptCount;
+            MaterializationSuccessCount = materializationSuccessCount;
+            MaterializationFailureCount = materializationFailureCount;
         }
     }
 }

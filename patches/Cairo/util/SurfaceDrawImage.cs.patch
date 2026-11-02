@@ -1,0 +1,27 @@
+diff --git a/Cairo/util/SurfaceDrawImage.cs b/Cairo/util/SurfaceDrawImage.cs
+index 5bbf9e4..f7ed6a7 100644
+--- a/Cairo/util/SurfaceDrawImage.cs
++++ b/Cairo/util/SurfaceDrawImage.cs
+@@ -6,10 +6,13 @@ namespace Cairo;
+ 
+ public static class SurfaceDrawImage
+ {
+     public static unsafe void Image(this ImageSurface surface, SKBitmap bmp, int xPos, int yPos, int width, int height)
+     {
++        if (xPos >= 0 && yPos >= 0 && width > 0 && height > 0 &&
++            (long)xPos + width <= surface.Width && (long)yPos + height <= surface.Height &&
++            surface.RecordImage(bmp, xPos, yPos, width, height)) return;
+         SKBitmap resized = ResizeImage(bmp, width, height);
+         var sourcePixels = (uint*)resized.GetPixels().ToPointer();
+         uint* destPixels = (uint*)surface.DataPtr.ToPointer();
+         int surfaceWidth = surface.Width;
+         int bitmapWidth = resized.Width;
+@@ -56,6 +59,6 @@ public static class SurfaceDrawImage
+     {
+         var skImageInfo = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Unpremul);
+         var bitmap = image.Resize(skImageInfo, SKFilterQuality.High);
+         return bitmap;
+     }
+-}
+\ No newline at end of file
++}

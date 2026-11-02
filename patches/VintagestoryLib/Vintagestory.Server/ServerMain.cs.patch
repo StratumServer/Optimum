@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerMain.cs b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
-index 6f69cd3..a61a869 100644
+index 593f5a4..c89888d 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 @@ -413,16 +413,64 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
@@ -25,7 +25,8 @@ index 6f69cd3..a61a869 100644
 +	private int optimumCachedOnlinePlayersTick;
 +	private IPlayer[] optimumCachedAllPlayers;
 +	private int optimumCachedAllPlayersTick;
-+
+ 
+-	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
 +	public IPlayer[] AllOnlinePlayers
 +	{
 +		get
@@ -52,8 +53,7 @@ index 6f69cd3..a61a869 100644
 +			return optimumCachedOnlinePlayers;
 +		}
 +	}
- 
--	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
++
 +	public IPlayer[] AllPlayers
 +	{
 +		get

@@ -60,20 +60,21 @@ index d4a0736..c6d8bc0 100644
  	public static Packet_Server GetBulkEntityDebugAttributesPacket(List<Packet_EntityAttributes> fullPackets)
  	{
 -		Packet_BulkEntityDebugAttributes packet_BulkEntityDebugAttributes = new Packet_BulkEntityDebugAttributes();
+-		packet_BulkEntityDebugAttributes.SetFullUpdates(fullPackets.ToArray());
+-		return new Packet_Server
 +		Packet_BulkEntityDebugAttributes packet_BulkEntityDebugAttributes = t_bulkEntityDebugAttributes;
 +		if (packet_BulkEntityDebugAttributes == null)
-+		{
-+			packet_BulkEntityDebugAttributes = new Packet_BulkEntityDebugAttributes();
-+			t_bulkEntityDebugAttributes = packet_BulkEntityDebugAttributes;
-+		}
- 		packet_BulkEntityDebugAttributes.SetFullUpdates(fullPackets.ToArray());
--		return new Packet_Server
-+		Packet_Server wrapper = t_bulkEntityDebugAttributesWrapper;
-+		if (wrapper == null)
  		{
 -			Id = 62,
 -			BulkEntityDebugAttributes = packet_BulkEntityDebugAttributes
 -		};
++			packet_BulkEntityDebugAttributes = new Packet_BulkEntityDebugAttributes();
++			t_bulkEntityDebugAttributes = packet_BulkEntityDebugAttributes;
++		}
++		packet_BulkEntityDebugAttributes.SetFullUpdates(fullPackets.ToArray());
++		Packet_Server wrapper = t_bulkEntityDebugAttributesWrapper;
++		if (wrapper == null)
++		{
 +			wrapper = new Packet_Server();
 +			t_bulkEntityDebugAttributesWrapper = wrapper;
 +		}

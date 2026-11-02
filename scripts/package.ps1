@@ -337,6 +337,8 @@ try {
     $apiOut = Join-Path $repoRoot (Join-Path 'bin' (Join-Path 'Release' 'net10.0'))
     Copy-Item -Force (Join-Path $apiOut 'Optimum.Api.Contracts.dll') $stageDir
     Copy-Item -Force (Join-Path $apiOut 'Optimum.GameContent.dll') $stageDir
+    Copy-Item -Force (Join-Path $apiOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib')
+    Copy-Item -Force (Join-Path $apiOut 'cairo-sharp.dll') (Join-Path $stageDir 'Lib/CairoSharp.dll')
 
     foreach ($launcherFile in @('Optimum.exe', 'Optimum.dll', 'Optimum.deps.json', 'Optimum.runtimeconfig.json')) {
         Copy-Item -Force (Join-Path $launcherOut $launcherFile) $stageDir

@@ -1,0 +1,38 @@
+diff --git a/Cairo/wrapper/CairoDebug.cs b/Cairo/wrapper/CairoDebug.cs
+index ada59e4..cf4a20e 100644
+--- a/Cairo/wrapper/CairoDebug.cs
++++ b/Cairo/wrapper/CairoDebug.cs
+@@ -37,29 +37,26 @@ namespace Cairo {
+ 	{
+         // ConcurrentDictionary because following line
+         // traces[obj] = Environment.StackTrace;
+         // sometimes crashes with: System.IndexOutOfRangeException: Index was outside the bounds of the array.
+         // according to stack overflow thats apparently a synchronization issue
+-        static ConcurrentDictionary<IntPtr,string> traces;
++        static ConcurrentDictionary<IntPtr,string> traces = new ConcurrentDictionary<IntPtr,string> ();
+ 
+ 		public static bool Enabled;
+ 
+ 
+ 		static CairoDebug ()
+ 		{
+-            // Comment out if not needed. Causes large amount of lag if enabled and when cairo is used for redrawing dialogs.
+-            // According to the performance profiler the call to Environment.StackTrace is very slow.  (in OnAllocated)
+-            Environment.SetEnvironmentVariable("CAIRO_DEBUG_DISPOSE", "0");
+-
++            // Allocation stack traces are opt-in. Preserve the caller's environment
++            // and keep the dictionary available for the publicly mutable Enabled field.
+             var dbg = Environment.GetEnvironmentVariable ("CAIRO_DEBUG_DISPOSE");
+-            if (dbg == null)
++            if (dbg == null || dbg == "0")
+             {
+                 return;
+             }
+ 
+ 			Enabled = true;
+-			traces = new ConcurrentDictionary<IntPtr,string> ();
+ 		}
+ 
+ 		public static void OnAllocated (IntPtr obj)
+ 		{
+ 			if (!Enabled)

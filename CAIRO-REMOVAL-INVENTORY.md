@@ -1,0 +1,1037 @@
+# Cairo removal inventory
+
+> **Historical snapshot.** This inventory was written on the former
+> `feat/issue-130-recorder-stage-a` branch (2026-10-17 to 2026-10-19) and carried
+> over when that work moved to `feat/issue-130-cairo-to-skiasharp`. Its counts,
+> commit IDs and "not rendered" statuses describe that branch, not the current
+> one: the recorder now tracks graphics state in managed code, the native shadow
+> context is gone, and several imports counted below have been removed. Use it for
+> the search method, the dependency map and the removal gates, and re-measure
+> before quoting a number.
+
+Baseline for this pass: branch `feat/issue-130-recorder-stage-a`, parent commit
+`0943cef` (2026-10-17).
+This inventories repository responsibilities and removal gates. It is not a
+claim that native Cairo has been removed or that third-party binaries are
+compatible.
+
+## Current coverage summary (2026-10-19)
+
+These percentages use separate denominators because repository inventory,
+rendered behavior, and dependency removal measure different things. They must
+not be averaged into a single completion score.
+
+| Metric | Coverage | What it proves | Remaining limit |
+|---|---:|---|---|
+| Tracked text files searched | 657/657 (100%) | Every tracked text file was scanned; 125 contain a Cairo reference. | Search coverage does not prove every call's runtime behavior or third-party use. |
+| Exported API inventory | 82/82 types; 872/872 members (100%) | The current assembly's public/protected surface is enumerated. | Per-member semantic classifications remain marked `classificationReview: required`; no cross-platform ABI proof. |
+| Active Cairo imports | 239/239 counted; 0 retired by this fixture update | The current native boundary is measured. | Most imports remain required by current Cairo-backed behavior or public compatibility paths. |
+| Primitive fixtures fully rendered | 28/28 (100%) | The manifest covers geometry, state, paths, clips, sources, operators, text/layout, and escape cases. | Some fixture paths still use native Cairo materialization; GUI caret/hit testing remains in the separate 0/57 GUI fixture ledger. |
+| GUI callsite fixtures rendered | 0/57 (0%) | All 57 source-derived `ComposeElements`/`ComposeTextElements` rows are listed. | Every row remains `not-rendered` and requires runtime state assessment. |
+| Exact Optimum-code AMD GUI certificate | 1/1 passed for fixture commit `ad293b1a8f387e988801649539f1b070906d7291` | The mixed Skia/Cairo inventory scenario passed on Radeon RX 6650 XT. Tested `cairo-sharp.dll` SHA-256: `1f60d7943251ac63b710c70fc9881864bb3f3388660d29b462391976fd784d7f`. | It retained eight successful Subpixel Cairo materializations; it does not prove Cairo-denied operation. |
+| Exact-head Intel/NVIDIA certification | 0/2 | The branch has recorded earlier vendor reports. | Neither vendor has tested the current code head. |
+
+Primitive fixtures are complete for the operations declared in
+`primitive-coverage-manifest.csv`. This does not mean the Cairo migration is
+complete. The full migration remains blocked by unrendered GUI callsites,
+unclassified API-manifest rows, active Cairo imports, missing Cairo-denied,
+package, and ABI gates, and behavior in compiled third-party code that is not
+present in this repository.
+
+## Search coverage
+
+The audit enumerated all Git-tracked paths instead of relying on normal `rg`,
+which skips ignored source overlays. It read 657 tracked text files; 125 contain
+a case-insensitive `cairo` reference. It also searched the locally available
+ignored source trees for `VintagestoryApi`, `VSEssentials`, `VSSurvivalMod`,
+`VSCreativeMod`, and `build/VintagestoryLib`. Donors and generated snapshots are
+evidence of patch inputs, not proof of runtime execution.
+
+`tools/Cairo.ParityHarness/cairo-api-manifest.json` schema 2 lists 82 exported
+types and 872 public/protected members from the current branch assembly. The
+previous schema-1 file was stale: it had 81 types/868 members and omitted
+`Cairo.OptimumSkiaTextMetrics` plus two methods on it and the protected
+`Surface.nativeDataExposed` field. The generator now records member accessibility,
+method flags, parameter/return `MarshalAs`, public `DllImport` details, type
+layout and instance field offsets where reflection supports them. This run used
+.NET 10.0.12, Ubuntu 26.04.1 x64, and 8-byte pointers. It records environment
+because layout may differ by architecture.
+
+The 872 automatic labels are 351 `metadata`, 254 `native-only-pending`, 206
+`recordable-candidate`, 41 `measurement`, and 20 `materialization-boundary`.
+Every row still has `classificationReview: required`; the labels and reflected
+facts are an initial sorting aid, not a completed manual classification or a
+cross-platform ABI proof. All 11 exported value structs have a reported
+marshaled size and instance-field offsets on this host. Compiled native layouts
+and pointer behavior still require per-platform evidence.
+
+## Manual source classification coverage
+
+Three independent source reviews covered the complete exported member set. I
+reconciled them against the regenerated manifest and removed duplicate coverage
+for `Cairo.Graphics` and `Cairo.CairoAPI`:
+
+| Disjoint member set | Types | Members |
+|---|---:|---:|
+| `Context`, `Graphics`, `Path`, `Matrix`, `Glyph`, `TextExtents`, `FontExtents` | 7 | 249 |
+| `Surface`, `ImageSurface`, patterns/gradients, font option/face/scaled font APIs | 11 | 149 |
+| All other exported Cairo, NanoSvg, FreeType, backend, and utility types | 64 | 474 |
+| **Complete exported API** | **82** | **872** |
+
+The reviews classified every member by managed behavior, normal native call,
+materialization/fallback, pointer/ownership, or metadata. They corrected several
+automatic-label errors: Matrix/Glyph/extents methods are managed; enum values
+are metadata; `Surface.nativeDataExposed` is a managed field; `Surface.Handle`
+can materialize while Pattern/FontOptions/FontFace/ScaledFont handles simply
+expose pointers; and `Context.CopyPath`, `AppendPath`, and `GetSource` call
+Cairo without materializing the target. The manifest keeps
+`classificationReview: required` because its generated five-way labels have
+not been replaced with those per-member semantic classifications.
+
+The API review also recorded compatibility behavior that must not be changed by
+surface-level cleanup: obsolete Context transforms with surprising direction,
+`ShowText` current-point advancement versus `ShowGlyphs`, ignored Matrix
+parameters on legacy glyph overloads, aliases/enum values, disposal/refcount
+rules, and platform-dependent Glyph index width. One duplicate text P/Invoke
+uses `[Out] Matrix` while `NativeMethods` declares `out Matrix`; both are
+present in the import inventory as distinct managed signatures. The reflection
+generator preserves that distinction: the former is a by-value `Cairo.Matrix`
+with `isOut: true`; the latter is `out Cairo.Matrix`. Whether the runtime
+marshaler gives both declarations the same native pointer behavior still needs
+targeted verification. Source inspection is not a cross-platform native ABI
+test.
+
+## Runtime and API responsibility inventory
+
+| Area | Current Cairo dependency and concrete consumers | Removal work / gate |
+|---|---|---|
+| Object creation and native loader | `Context(Surface)` calls `cairo_create`; image surfaces allocate Cairo storage. `CairoAPI` resolves `libcairo` and queries native version. | Replace native factories and prove startup and supported drawing work with native Cairo loading denied. |
+| Drawing state, paths and geometry | `Context` owns path, transforms, clips, groups, operators, dashes, extents and hit-testing. Recorder mirrors supported draw styles, dash arrays and source hints, while it still reads native context status, CTM, current path and clips. Stage F removed managed matrix arithmetic. | Managed state/path model, differential tests, current-point/save-restore semantics, and no normal shadow-context calls. |
+| Paint, patterns, masks and sources | `RecordedSource` reads native patterns, matrices, stops, surface pixels, extend/filter and source transforms. Stage G records only supported solid masks for three operators. | Managed source snapshots and parity for solid, gradients, surface sources, masks, operators, mutation/disposal and fallback boundaries. |
+| Text and fonts | `CairoFont.SetupContext` and its static measuring context; `TextDrawUtil`, `TextTextureUtil`, editable caret/layout, rich text, engraved/embossed text, tabs, signs, world text; `RecordedText` glyph selection, metrics and fallbacks. | Replace metrics/layout/shaping and glyph construction while preserving widths, advances, face mapping, baselines, wrapping, caret geometry and Subpixel policy. The current Skia font/size matrix is bounded; untested combinations still fall back to Cairo. |
+| Images and CPU pixel bridges | `ImageSurface.Data/DataPtr`, PNG export, flush/finish, external byte buffers, `SurfaceDrawImage.Image` bridges from `SKBitmap`, resize/overlay, blur and alpha demultiplication. Consumers include text textures, icons, dialogs, item slots and status bars. | Managed/Skia surfaces and lazy CPU readback with stride, format, premultiplication, mutation and invalidation compatibility. |
+| SVG and GL upload | NanoSVG parses geometry; Cairo-backed SVG routes and `DataPtr` upload coexist with Skia recorder paths. `LoadCairoTexture`/`LoadOrUpdateCairoTexture` upload surface bytes. | Preserve SVG viewport/tint/alpha behavior, route all supported assets through Skia, and validate texture lifetime and GL state. NanoSVG is a separate native dependency. |
+| World/runtime consumers | `EntityMapLayer`, `PlayerMapLayer`, `WaypointMapLayer`, `OwnedEntityMapLayer`, `OreMapLayer`; `BlockEntitySignPostRenderer`; server-side `WgenCommands.OnCmdTreemap` creates an RGB24 surface/context and writes PNG. | Cover map/sign GUI and non-GUI export fixtures. Cairo removal cannot be declared complete from menu/inventory tests alone. |
+| Public native API and ABI | `Context`, `Surface`, `ImageSurface`, `Pattern`, `Path`, fonts, `Region`, `Device`, PDF/PS/SVG and platform surfaces expose native pointers, ownership or backend behavior. Assembly identity is `cairo-sharp` 1.0.0.0. | Classify all 872 members and define behavior/limitations for pointer constructors, `Handle`, `DataPtr`, layouts, ownership, encoders and platform backends. Keeping names does not preserve native-pointer interoperability. |
+| Other native libraries | `Cairo/Svg/SvgNativeMethods` exposes NanoSVG P/Invokes; FreeType helpers expose FreeType APIs. `RecordedText` declares Cairo and Fontconfig imports separately. | Track NanoSVG, FreeType and Fontconfig as distinct dependencies; do not count their remaining imports as Cairo or remove assets they still need. |
+| Build, patch, install and rollback | Patcher rewrites APIs and hooks recorder metrics; launcher certification fingerprints `cairo-sharp`; overlay/package scripts stage it; installer backs up/restores the wrapper. Linux/macOS packages copy broad vanilla trees/bundles. | Update donors, IL contracts, artifact fingerprints, package manifests and rollback together. Audit packaged native binaries and dependency chains, not just source references. |
+| Tests and certification | ABI fixtures intentionally load native Cairo; CPU parity tests and the exact-head AMD Pharos certificate cover the current mixed Skia/Cairo runtime. No current gate denies Cairo loads. | Keep native oracle tests separate from runtime proof. Test hardware parity for each exact published head and separately test a packaged client with Cairo loading blocked. |
+
+### Text scratch-surface reduction
+
+`RecordedText.CaptureGlyphs` now creates its 1x1 Cairo surface and context only
+when it needs Cairo outlines for a Gray text run. A run accepted as an Skia
+`SKTextBlob`, including Subpixel, skips the scratch objects. By static call-path
+count this avoids `cairo_image_surface_create`, `cairo_create`,
+`cairo_destroy`, and `cairo_surface_destroy` per accepted text run; the count
+has not been measured with native-call instrumentation. Unsupported Gray text
+still uses Cairo outlines, and unsupported Subpixel text still fails closed to
+the existing Cairo materialization path. This does not remove Cairo glyph
+selection, metrics, font matching, or replay.
+
+### Text slant qualification
+
+The Skia text-blob allowlist now constrains slant as well as the already
+qualified family and weight. Subpixel normal and italic runs are covered for
+`sans-serif`, `Montserrat`, `Lora` normal/bold, and `Almendra` normal by native
+Cairo pixel-oracle tests under the local antialias policy. A five-case italic
+matrix passed with no native materialization. Gray text remains restricted to
+the normal slant matrix; an italic Gray run keeps Cairo-generated outlines,
+and an unqualified Subpixel oblique run keeps the exact native Cairo replay.
+The focused text suite passes 31/31. This closes an allowlist gap where
+previously untested italic or oblique faces could enter Skia based on family
+and weight alone. It does not replace Cairo font selection, glyph shaping,
+positions, or unsupported-run replay, and it is not cross-platform font proof.
+
+### Recorded text antialias state
+
+`RecordingGraphicsState` now mirrors the font antialias option across assignment
+and Save/Restore. `FontOptions` tracks antialias values set through its managed
+API, preserves them through `Copy` and Cairo's non-default `Merge` semantics,
+and reports unknown when it cannot prove the mirrored value. Assigning an
+unknown options object to a recording context reads its antialias value once at
+assignment time. `RecordedText.CheckFont` consumes the snapshot instead of
+creating a temporary `FontOptions` and calling
+`cairo_get_font_options`/`cairo_font_options_get_antialias` for each text run.
+By static call-path count this removes four Cairo calls and one temporary
+native options object per recorded text run. Subpixel remains explicitly
+recognized and routed to the Skia text blob path; unsupported antialias modes
+continue to fail closed to the existing materialization path.
+
+The focused mirror test covers assignment snapshot semantics, Copy, Merge with
+default options, and Save/Restore, and verifies the mirrored value against
+Cairo's native context getter. This host run has no GPU or cross-platform ABI
+evidence. This optimization does not replace Cairo font selection, scaled-font
+creation, glyph lookup, or other text metrics; those remain separate removal
+work. Recorded font-matrix reads are mirrored separately below.
+
+### Recorded font-matrix state
+
+`RecordingGraphicsState` now snapshots the native font matrix once when a
+context attaches to a recorder and clones it through Save/Restore. `FontMatrix`
+assignments update the mirror from a defensive managed copy; `SetFontSize` and
+`SetScaledFont` refresh it after Cairo accepts the change. During recording,
+`Context.FontMatrix` returns the snapshot. Both text-capture checks now share
+that matrix, so `RecordedText` no longer makes either of its two
+`cairo_get_font_matrix` calls for each run and its duplicate direct import is
+removed. This shifts the read to recorder attachment and font-size/scaled-font
+updates; it does not remove Cairo's font matrix API outside recorded contexts.
+
+The NativeMethods binding now takes a preallocated `[Out] Matrix` instead of
+`out Matrix`. Calling the latter with a null managed class reference produced a
+`NullReferenceException` on this .NET/Linux x64 runtime; the corrected binding
+passes the allocated sequential-layout object used by the prior RecordedText
+import. The focused test compares all six matrix fields with Cairo after
+attachment, size change, explicit matrix assignment, scaled-font assignment,
+and Save/Restore. This is Linux x64 evidence only; other runtimes and
+architectures still need ABI verification.
+
+The `CairoRecorderTextTests` suite passes 24/24 on this host, including parity
+fixtures and an assertion that the eligible Subpixel case records two Skia text
+blobs without captured Cairo paths. No physical GPU test was run because this
+change skips unused scratch allocations and leaves the rendered commands
+unchanged.
+
+### Editable-text hit testing
+
+`GuiElementEditableTextBase.SetCaretPos(double,double)` now measures line height
+and text prefixes through `CairoFont.GetFontExtents/GetTextExtents`, which use
+the existing Skia metrics helper. It no longer creates a temporary
+`ImageSurface` and `Context` for each pointer-position update. The character
+index loop, newline trimming, clamps and early return remain in place. This
+aligns pointer hit testing with `SetCaretPos(int,int)`, which already uses the
+same Skia metrics, but changes click positioning from Cairo measurements to
+Skia measurements. The patch applies and compiles with the current source set;
+the related font/API/text tests pass 41/41. There is not yet a direct editable
+text click/drag fixture, so caret hitbox parity remains unverified.
+
+### Remaining GUI font-measurement consumers
+
+The source audit included ignored game-source overlays (`VintagestoryApi`,
+`VSSurvivalMod`, and related client trees), not just tracked files. Direct GUI
+measurements in editable-text sizing, text baselines, tab widths, engraved
+letter spacing, and sign-post layout now use `CairoFont.GetFontExtents` or
+`GetTextExtents`, whose implementation uses Skia. The patches apply and the
+full Optimum test assembly passes 1,074 tests with 34 pre-existing skips.
+
+`TextDrawUtil.Lineize(Context, ...)` remains a public compatibility overload
+that reads `Context.TextExtents` and `Context.FontExtents`; the repository's
+client sources call the `CairoFont` overload instead. It has no `CairoFont`
+argument from which to resolve the exact configured face. The public Context
+measurement APIs also remain for external mods.
+
+The callsite scan across the available API, Essentials, Survival and Creative
+source trees found three `TextPath` calls. `TextDrawUtil.DrawTextLine` and
+`TextTextureUtil` now try `Context.TryShowTextWithStroke` first for ordinary
+outlined text. A qualified face records one grayscale Skia text blob with a
+stroke and fill; this matches Cairo `TextPath` geometry, whose antialiasing
+comes from the context rather than LCD font rendering. The method accepts only
+move-only existing paths, an empty path or `MoveTo` positioning. Unsupported
+faces and contexts return to the existing Cairo sequence. The two retained
+`TextPath` calls are fallback code; the third is the public `textPathMode`
+branch, which external mods may use. The vanilla caller does not request
+`textPathMode: true`. The concrete in-tree outlined-font consumers are item-slot
+counts (`CairoFont.WhiteSmallText` with bold weight), statbar values
+(`WhiteSmallText`, normal weight), and liquid-stack labels (`WhiteSmallText`
+with bold weight). All use `GuiStyle.StandardFontName`, currently
+`sans-serif`, which is in the Gray Skia qualification matrix for normal and bold
+faces. A source scan found no in-tree assignment of `textPathMode = true`; the
+field remains public and can still be set by external mods. This maps the
+tracked built-in outline consumers to qualified family/weight combinations;
+platform-specific Fontconfig/Skia face matching still needs vendor evidence.
+
+`CairoRecorderTextTests.OutlinedTextUsesGraySkiaBlobWithoutMaterializing`
+asserts that the qualified route records a blob without materializing, and
+`OutlinedTextSkiaPathMatchesCairoTextPathWithinLocalAntialiasPolicy` covers
+sans-serif normal at 0.75px and bold at 1, 1.25, 1.5 and 2px; each case compares
+Skia output with Cairo and verifies byte-exact native replay. The prior
+`TextPathAndFontStateDoNotMaterialize` still covers the explicit path route.
+This removes the normal qualified outline route's dependency on Cairo text-to-
+path, but does not remove fallback or public API dependencies.
+
+### AMD runtime check after GUI metric migration
+
+On 2026-10-18, the full Pharos inventory scenario passed on AMD Radeon RX
+6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core, against Optimum commit
+`2e4b11e445a16d01b1586f68c3d053a64aad14ab`. It opened the inventory, captured
+the GUI at scales 1, 1.5 and 2, ran the recomposition benchmark, exercised the
+GPU primitive, five non-subset and three SVG parity fixtures, and validated the
+staged launcher profile certificate. It selected
+`skia-with-subpixel-cairo-fallback` with no decision reasons. Initial
+composition recorded 38/38 Skia candidates; ten recompositions recorded
+360/360. Scale captures recorded 30/30, 159/171, and 161/173 Skia candidates.
+All 8 Subpixel materializations succeeded, with zero failures; the primitive,
+five non-subset fixtures and three SVG comparisons passed, with SVG parity
+within one channel value.
+
+The repeat run after rebuilding the disposable stage also passed
+`TextPathAndFontStateDoNotMaterialize` and
+`SubpixelTextMaterializesToNativeCairoAndMatchesVanillaOutput` (2 focused tests,
+zero failures). The Pharos report records the same exact branch head and
+`cairo-sharp` SHA-256 `704e5a3d9f9779277ddb2eac4de107a9f28245db5f0a4b2d0fc2bd3edaf66116`.
+
+This establishes that the migrated metrics work still runs on this AMD setup
+while preserving the tested Subpixel fallback. It does not establish Cairo
+independence: the runtime report explicitly includes and loads `cairo-sharp`,
+and the accepted result depends on Cairo for unsupported Subpixel runs. The
+Pharos test assembly was built from a dirty private checkout at HEAD
+`5e5b78c3a229295bd1953eb1942492092cefe673`; its artifact hash is in the local
+GPU evidence report, but that HEAD does not identify the uncommitted harness
+changes. Intel and NVIDIA have not run this exact Optimum commit.
+
+### AMD retest after the TextPath audit publication
+
+On 2026-10-18, the full Pharos inventory scenario passed again with public
+Optimum HEAD `1fc9b719730bcad58cb4dcd3543f3feeed8d4d27` on AMD Radeon RX 6650 XT,
+Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core. The staged `cairo-sharp.dll` SHA-256
+matched the public build (`f2f79e7a282055ce1fcf6a7411086d5c54ac1b9a872dfae85d1700cea6568f50`).
+GPU selection was `skia-with-subpixel-cairo-fallback` with no decision reasons;
+initial composition was 38/38, ten recompositions were 360/360, and scales 1,
+1.5 and 2 recorded 30/30, 159/171 and 161/173 Skia candidates. All eight
+Subpixel materializations succeeded with zero failures. The primitive, five
+non-subset fixtures and three SVG comparisons passed, with SVG output within
+one channel value. The launcher validated its local profile certificate.
+
+The Pharos checkout was at base HEAD
+`4966732269f02408df314ae155bb7e6f3817f9d9` with local modifications, so that
+base commit does not identify the exact harness source. This is a retest of
+the existing mixed Cairo/Skia runtime, not Cairo-denied evidence. Intel,
+NVIDIA, package-loader, Cairo-denied and cross-platform ABI checks remain open.
+
+### AMD retest for text slant qualification
+
+On 2026-10-18, the full staged Pharos inventory scenario passed on AMD Radeon
+RX 6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core, against exact Optimum
+commit `14459e739f3bba599d2617a5fa1328ba7dd6a0ea`. The launcher validated the
+local staged profile certificate and selected
+`skia-with-subpixel-cairo-fallback` with no decision reasons. The report had
+38/38 initial composition candidates, 360/360 candidates across ten
+recompositions, and scale results of 30/30, 159/171, and 161/173 at 1x, 1.5x,
+and 2x. All eight allowed Subpixel fallbacks materialized successfully; there
+were zero materialization failures. The primitive, five non-subset fixtures,
+and three SVG comparisons passed; SVG output stayed within one channel value.
+
+The tested `cairo-sharp.dll` SHA-256 was
+`B50A1340943F4E4B712885FEDBC1F9A0463F18A977EDB365F573DDAB2A602114`.
+The Pharos project built with nine existing warnings and zero errors from the
+private workspace's dirty Pharos checkout; the report binds loaded artifacts
+and runtime profile, but the harness source is not identified by its base
+commit alone. This is AMD evidence for the exact staged wrapper, not proof of
+Cairo-free execution or Intel/NVIDIA behavior. The client still loads Cairo
+and uses it for the eight accepted Subpixel fallbacks.
+
+The final public gate on this documentation update passed `make check`,
+`make build` with zero warnings/errors, `make check-patches` (92 source patches,
+53 Cecil patches, 22 runtime donors and zero conflicts), and
+`make check-shaders`. All five test projects passed: Optimum 1,074 with 34
+skips, Launcher 69, CLI 24, Bootstrap.Core 156, and Installer 78. The full
+Optimum suite needs the local NanoSVG library on `LD_LIBRARY_PATH` for its SVG
+tests.
+
+### AMD retest for qualified Skia text outlines
+
+On 2026-10-18, the full staged Pharos inventory scenario passed 1/1 against
+Optimum commit `c23649f7328ae83c2f9e77077d869ddf40e2d9e9` on AMD Radeon RX
+6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core. The launcher validated the
+local profile certificate and selected `skia-with-subpixel-cairo-fallback`
+with no decision reasons. Initial inventory composition recorded 38/38 GPU
+candidates; ten recompositions recorded 360/360. Scale captures recorded
+30/30 at 1x, 159/171 at 1.5x, and 161/173 at 2x. All eight
+`Recorder.ShowText.Unsupported:text-antialias-Subpixel` materializations
+succeeded; there were zero failures. The primitive fixture, five non-subset
+fixtures, and three SVG comparisons passed. SVG output stayed within one
+channel value.
+
+The staged `cairo-sharp.dll` SHA-256 was
+`6D659433DCAD905CF43ED23568249F220ED594DE3638C5B206142D26EB1771EE`;
+this matched the local build artifact SHA-256 exactly. The
+Pharos test assembly SHA-256 was
+`3049A0666EBB94DAEA82F3752D9E275FC7C0463B14BD238C77EE83F7DE4DE5F4`. The
+Pharos source checkout was based on `4966732269f02408df314ae155bb7e6f3817f9d9`
+with local modifications copied into the isolated workspace. The assembly hash
+identifies the executed test binary. Its build reported nine warnings and zero
+errors.
+
+The local `Optimum.Tests` suite passed 1,087 tests with 34 skips when run with
+the installed client's `Lib` directory on `LD_LIBRARY_PATH`; the focused text
+suite passed 37/37 across the normal/bold and stroke-width matrix. `make build`
+passed with zero warnings/errors, patch
+validation passed with 92 source patches, 53 Cecil patches, 22 runtime donors
+and zero conflicts, and shader and vanilla compatibility checks passed. The
+GPU result still loads Cairo and accepts eight successful Subpixel fallbacks.
+It is not Cairo-denied evidence and does not certify Intel or NVIDIA.
+
+### Solid-pattern source capture
+
+`Context.RecordSourceState` now skips `CurrentMatrix()` when the native pattern
+type is solid, clears the tracked source surface, and leaves the mirrored CTM
+unchanged. `RecordedSource.Capture` returns a solid source before reading that
+CTM; subsequent gradient/surface sources replace it, and Save/Restore restores
+the corresponding snapshot. The existing source-space parity test now uses a
+`SolidPattern` inside the saved surface-source sequence. This avoids one
+`cairo_get_matrix` call and one managed `Matrix` allocation per recorded
+`SetSource(SolidPattern)` by static inspection. No timing counter measured the
+reduction. The focused Cairo recorder parity/text suites passed 91/91; patch
+validation passed with 85 source patches, 53 Cecil patches, 22 runtime donors
+and zero conflicts.
+
+### Direct surface-source capture
+
+The three `Context.SetSourceSurface`/`SetSource(Surface, ...)` overloads already
+pass the source surface handle to `cairo_set_source_surface`. During recording,
+they now store that same handle and the current CTM directly instead of calling
+`cairo_get_source`, `cairo_pattern_get_type`, and `cairo_pattern_get_surface`
+to recover information already available at the call site. A successful setter
+also checks context status before trusting the supplied handle; if Cairo rejects
+the source, it keeps the prior pattern-derived state as before. The pattern
+matrix and filter are still read from Cairo when each draw is captured,
+preserving Cairo's source offset and mutation behavior. Context detachment still
+checks the stored surface pointer and materializes a source recorder before
+native use.
+
+The recorder parity, surface-recorder, and recorder-text suites passed 108/108,
+including pixel-aligned surface source offsets, source snapshots, and the
+transition from recording to native drawing. Successful assignments replace
+three metadata calls with one status check, one CTM read and the already-known
+surface pointer. No native-call counter or timing measurement is available.
+
+### Solid source hints
+
+The recorder graphics-state mirror now carries an immutable solid-source hint.
+New contexts start with Cairo's default opaque-black source, `SetSourceRGBA`
+stores the exact input channels, and Save/Restore clones the hint with the rest
+of the mirrored state. `RecordedDrawing.Capture` uses the hint for recorded
+draws and skips `cairo_get_source`, `cairo_pattern_status`,
+`cairo_pattern_get_type`, and `cairo_pattern_get_rgba` in that path. Assigning a
+`Pattern` or surface clears the hint, so mutable pattern data continues through
+the native snapshot path. Cairo still receives `SetSourceRGBA`, and its context
+status remains the first capture check.
+
+`SolidSourceHintTracksCairoDefaultAndSaveRestore` passed against Cairo's native
+image-surface output. The recorder parity, surface-recorder, and recorder-text
+suites passed 109/109, including that state test. This removes four
+source-inspection P/Invokes per supported draw by static call-path inspection.
+No native-call counter, cross-platform run, or timing measurement is available.
+Text, including Subpixel, is unchanged.
+
+### Mirrored drawing style
+
+`RecordingGraphicsState` now mirrors the Cairo defaults and wrapper setters for
+operator, antialias, fill rule, tolerance, line width, cap, join, and miter
+limit. Its Save/Restore snapshot includes these values. `RecordedDrawing.Capture`
+uses that state after the native context status check instead of querying Cairo
+for each draw. Public getters remain native, and raw context-handle access
+materializes recording before callers can make untracked changes. Dash arrays
+and offsets are now normalized into the recording-state mirror when
+`Context.SetDash` succeeds. The mirror preserves Cairo's zero merging for
+interior intervals, odd-length patterns, degenerate all-on patterns, and
+positive modulo normalization of offsets. Save/Restore carries the dash
+snapshot with the other stroke state. Tiny positive dash intervals below
+1/64 user unit fail closed to native Cairo because the Skia path effect differs
+from Cairo there.
+
+`RecorderMirroredDashMatchesCairoNormalization` compares eight dash cases
+against Cairo's native image output, including empty, odd, leading/interior
+zero, degenerate, near-degenerate, and large/negative offset inputs.
+`RecorderMaterializesForSubpixelDashIntervals` checks the exact native fallback
+for a 0.003-unit interval. The recorder parity, surface-recorder, and
+recorder-text suites passed 148/148.
+The new `RecorderMirroredDrawingStateMatchesCairoAfterSaveRestore` case checks
+operator, fill rule, tolerance, antialias, stroke width/cap/join/miter and
+restoration against Cairo image-surface output. Static inspection shows four
+fewer Cairo state queries per eligible draw and ten for strokes, including the
+two removed dash queries. No native-call instrumentation, timing result, or
+cross-platform run is available.
+
+`RecordedClip.Capture` now uses the mirrored fill rule, antialias mode, and
+tolerance instead of querying those three values from Cairo when recording a
+clip. Public context getters still use Cairo. `RecordedClipCapturesMirroredFillRuleAntialiasAndTolerance`
+checks a curved even-odd clip against native Cairo output. The recorder parity,
+surface-recorder, and recorder-text suites now pass 150/150. This saves three
+native getter calls per captured clip by static inspection; no call counter or
+timing measurement was run.
+
+`RecordingGraphicsState` now mirrors the current transformation matrix. The
+wrapper tracks `Translate`, `Rotate`, `Scale`, `Transform`, the `Matrix` setter,
+and `IdentityMatrix`, and copies the matrix during Save/Restore. Recorded draw
+capture, clip capture, and source-surface assignment use that snapshot;
+`Context.Matrix` returns a copy of it while recording. The native matrix getter
+remains for non-recorded contexts. `RecordedText` now uses the same CTM snapshot
+for text eligibility, glyph capture, Skia text-blob placement, and its retained
+drawing record, so text capture no longer re-reads the matrix from Cairo.
+`RecorderMatrixMirrorTracksSettersAndSaveRestore` compares the managed snapshot
+field-for-field with a separate native Cairo context after every operation,
+including mutation of the input matrix. The transformed clip, Subpixel/Gray
+text, and recorder parity suites pass. Static inspection shows one fewer
+`cairo_get_matrix` call per recorded geometry draw, clip, or source-surface
+assignment, and three or four fewer matrix reads per text capture, depending
+on whether Skia text-blob creation is eligible. No call counter, timing result,
+or cross-platform test is available.
+
+## Native import inventory
+
+The schema-2 manifest includes **269 active `DllImport` methods** reflected from
+the current assembly: 239 for `libcairo-2`, 13 for `freetype6`, 9 for
+`libfontconfig.so.1`, and 8 for `nanosvg`. The Cairo imports comprise 233
+methods in `Cairo.NativeMethods` and 6 separate declarations in `RecordedText`.
+Every `nativeImports` row is marked for manual native-header review; reflection
+records declarations but does not verify that their native signatures are
+correct. The manifest records 574 parameters, 53 `IsOut` and 0 `IsIn` flags,
+257 `Cdecl` and 13 `Winapi` imports. A source-to-manifest correspondence check
+must still be paired with native-header review; it does not establish ABI
+correctness.
+
+`Cairo/NativeMethods.cs` has 302 raw `extern`/`DllImport` matches, 69 in
+comments. After stripping comments there are **233 active declarations**, with
+232 unique names because `cairo_image_surface_create_for_data` has two
+overloads. Reflection reports the same 233 active `NativeMethods` imports. The
+previous pass removed 25 declarations without a `NativeMethods.<name>` call in
+the C# wrapper/consumer tree or the generated source tree used by the build.
+Twenty-four removed entrypoints have no C# reference in that tree. The
+remaining one, `cairo_scaled_font_get_font_face`, is still declared and called
+through a separate import in `RecordedText`; the corresponding
+`NativeMethods` declaration was removed because the call uses the direct
+import. All 232 remaining unique `NativeMethods` names have a source caller.
+Six direct Cairo imports remain in `RecordedText`, all distinct from the active
+`NativeMethods` imports. The previous pass removed the duplicate
+`cairo_scaled_font_status` import and reused
+`NativeMethods.cairo_scaled_font_status`; both declarations had the same Cdecl
+ABI signature. This pass removes the separate `cairo_get_font_matrix` import
+and uses `NativeMethods.cairo_get_font_matrix` with a preallocated `[Out]`
+matrix. This is a source call-site
+audit, not proof against every possible runtime reflection or string-based
+invocation. All reachable imports
+and runtime-created calls still need a managed replacement or an explicit
+limitation before native Cairo can be removed. Header/platform review still
+needs to resolve, among other items, Cairo boolean and `unsigned long` widths,
+status values discarded by wrappers, FreeType parameter widths and calling
+convention, string encodings, NanoSVG variant exports, and the fixed 24-byte
+glyph stride. The import table does not include runtime dynamic loading or
+transitive native dependencies.
+
+### Managed image stride calculation
+
+`Surface.StrideForWidth` now calculates the same four-byte-aligned row stride
+without calling `cairo_format_stride_for_width`. It accepts Cairo image formats
+0 through 7, including the floating-point formats present in Cairo 1.18, and
+returns `-1` for negative widths, overflow widths, and invalid formats. The
+unused `NativeMethods` import was removed. This removes one Cairo import while
+preserving the public method signature and `CreateForImage` behavior for the
+formats supported by Cairo 1.18.4.
+
+The 29 focused `CairoSurfaceStrideTests` passed. I compared the managed formula
+against the installed Cairo 1.18.4 native function for 248 format/width pairs,
+including negative values and overflow boundaries, with zero mismatches. The
+native comparison is local Linux evidence; no Windows or macOS execution was
+run for this pure integer calculation.
+
+### Mirrored selected toy-font metadata
+
+`Context.SelectFontFace` now records its family, slant and weight in the
+recorder's graphics-state snapshot. Save/Restore clones the hint. Direct
+`SetContextFontFace` and `SetScaledFont` assignments invalidate it, so those
+paths still query and qualify the actual Cairo face. For a captured text run
+after a known `SelectFontFace`, Skia qualification no longer calls
+`cairo_scaled_font_get_font_face`, `cairo_font_face_get_type`,
+`cairo_toy_font_face_get_family`, `cairo_toy_font_face_get_slant`, or
+`cairo_toy_font_face_get_weight`: five native calls per eligible run are
+skipped by static call-path inspection. The actual glyph IDs, positions,
+advances, scaled font, family-to-file resolution and native fallback are
+unchanged. This removes no import declarations; the public wrapper and unknown
+face path still use those APIs. The focused text and context-state suites pass
+37/37 and 39/39, and the full `Optimum.Tests` project passes 1,088 with 34
+skips. The other four project suites also pass locally. The full staged Pharos
+inventory scenario passed 1/1 on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3,
+OpenGL 4.6 Core, and identifies exact Optimum commit
+`5cd12b655654333b77a3644df76b5d9aa1509264`. The launcher accepted the local
+profile certificate and selected `skia-with-subpixel-cairo-fallback` with no
+decision reasons. Initial composition passed 38/38 GPU candidates; ten
+recompositions passed 360/360. Scales 1x, 1.5x and 2x passed 30/30, 159/171
+and 161/173 candidates. The 24 scale fallbacks were all the supported
+Subpixel Cairo fallback; all eight materializations succeeded with zero
+failures. The primitive fixture, five non-subset fixtures and three SVG
+comparisons passed. The tested staged `cairo-sharp.dll` SHA-256 was
+`3D960EE949B19F32DDD8CDE4BC85B57EF842D89BE2240AB8CC220A4392478579`; report
+SHA-256 was `F96D702304CE4F2507CC11919F07E964C4CD22CE0D3FF3B65D37E4F96A9EAD28`
+and identifies Pharos commit `e37bc0062ca2e78b663096c81c182c309e505875`.
+This proves the tested mixed Cairo/Skia runtime on this Radeon only. Cairo was
+loaded, the 1.5x/2x surfaces retained eight exact Subpixel materializations,
+and Intel/NVIDIA, Cairo-denied startup, packaging and cross-platform ABI gates
+remain open.
+
+### Mirrored Cairo current point for recorded text
+
+The recorder now mirrors the current point in device coordinates for
+wrapper-controlled `MoveTo` and `NewPath` operations. Text capture converts
+that point through the mirrored CTM; a successful `ShowText` updates the mirror
+from Cairo's returned advance, including after a native-query fallback. Other
+path mutations invalidate the mirror, so text capture keeps the native
+`cairo_has_current_point` / `cairo_get_current_point` fallback when the point
+cannot be proven. For a
+captured run whose point is known, this skips both native calls by static
+call-path inspection. It removes no imports: non-recording contexts and
+unknown path states still use Cairo. A focused test checks recorder text
+origins against a separate Cairo context for a known empty path, across CTM
+translations, after a native fallback following `LineTo`, and after mirror
+recovery. The public `CurrentPoint` and `HasCurrentPoint` getters continue to
+query Cairo. Recorder text capture consults the mirror only after Cairo status
+is successful. All 39 `CairoRecorderTextTests` pass locally. The complete test
+projects pass: Optimum 1,090 passed and 34 skipped, Launcher 69, CLI 24,
+Bootstrap.Core 156 and Installer 78. `make build` passed with zero warnings
+and errors; `make check-patches` reported 92 applied and 53 Cecil patches,
+with 22 runtime donors compiled and zero conflicts. `make check`,
+`make check-shaders`, `make check-compat` and `git diff --check` passed. The
+first full Optimum test run lacked `libnanosvg.so` on its loader path and had
+17 `DllNotFoundException` failures; rerunning with the staged runtime's
+`Lib/` in `LD_LIBRARY_PATH` passed all tests.
+
+The exact code commit `2c3208d4139873848d172f66d3fa7e36226d2396` passed the
+Pharos inventory scenario 1/1 on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3,
+OpenGL 4.6 Core. The launcher validated the profile and selected
+`skia-with-subpixel-cairo-fallback` with no decision reasons. Initial
+composition passed 38/38 candidates; ten recompositions passed 360/360.
+Scales 1x, 1.5x and 2x passed 30/30, 159/171 and 161/173. All 24 scale
+fallbacks were the supported Subpixel Cairo fallback; eight materializations
+succeeded with zero failures. The primitive fixture and five non-subset
+fixtures rendered on GPU; three SVG tint cases matched within one channel
+value, and the GL state sentinel passed. Pharos commit:
+`e37bc0062ca2e78b663096c81c182c309e505875`. Evidence SHA-256:
+`7BCA5A30FDE3B932050DFFAF99FEC78BFBD6EAF048260DB38DA9CD161611967A`; staged
+`cairo-sharp.dll` SHA-256:
+`F879E12A15A80C30B483C7B5DAF505C3A76781CE1C0E0FFECC8451FCA200527B`.
+
+The getter experiment in commit `2c3208d` is superseded below. Its Radeon
+scenario did not exercise a path mutation after a sticky Cairo error.
+
+This still tests a mixed Cairo/Skia runtime. It does not reduce the 239 active
+Cairo imports or certify Cairo-denied startup, packaging, cross-platform ABI,
+or Intel/NVIDIA behavior.
+
+The exact code commit `8222c58f04f809896ec7d75a210bb12d3dfada55` passed the
+Pharos inventory scenario 1/1 on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3,
+OpenGL 4.6 Core. The launcher validated its profile and selected
+`skia-with-subpixel-cairo-fallback` with no decision reasons. Initial
+composition passed 38/38 candidates; ten recompositions passed 360/360.
+Scales 1x, 1.5x and 2x passed 30/30, 159/171 and 161/173. All 24 scale
+fallbacks were the supported Subpixel Cairo fallback; eight materializations
+succeeded with zero failures. The primitive fixture and five non-subset
+fixtures rendered on GPU; three SVG tint cases matched within one channel
+value, and the GL state sentinel passed. Pharos commit:
+`e37bc0062ca2e78b663096c81c182c309e505875`. Evidence SHA-256:
+`9AC68B3653E277499A159B6FEA990FF1CE44D1F934980DFB2903262D18948800`; staged
+`cairo-sharp.dll` SHA-256:
+`4667DDF60780E66510FABA69CD9DA3CDD3B7AB8DDA734B7CCD71020F27D5ADCD`.
+
+This validates the mixed Cairo/Skia path on this Radeon. It does not reduce the
+239 active Cairo imports, certify Cairo-denied startup, or cover Intel/NVIDIA,
+packaging or cross-platform ABI behavior.
+
+### Subpixel fallback reason classification (2026-10-18)
+
+`RecordedText` previously discarded the specific reason from
+`TryCreateSkiaTextBlob` and labeled every rejected Subpixel text blob
+`text-antialias-Subpixel`. It now preserves the specific failure. The first
+exact Radeon run exposed that the local GUI certifier and Pharos assertion
+accepted only the older generic reason; both rejected `text-font-parity`.
+I added that exact known font-parity reason to the successful Subpixel fallback
+allowlist in the runtime metrics, launcher certifier, and private Pharos
+scenario. Other materialization reasons remain rejected.
+
+The corrected code at Optimum commit
+`4319b59a26964d4a59c73e2dd96b91332aba4fae` passed Pharos 1/1 on AMD Radeon RX
+6650 XT, Mesa 26.0.8-1ubuntu0.3, OpenGL 4.6 Core. The launcher accepted local
+certification and selected `skia-with-subpixel-cairo-fallback` with no
+decision reasons. Initial composition passed 38/38 candidates; ten
+recompositions passed 360/360. Scales 1x, 1.5x and 2x passed 30/30, 159/171,
+and 161/173 candidates. All 24 scale fallback candidates used the recognized
+font-parity Subpixel fallback. Eight materializations succeeded, with zero
+failures. The primitive and five non-subset fixtures rendered on GPU; three
+SVG tint comparisons passed within one channel value, and the GL state
+sentinel passed.
+
+The tested `cairo-sharp.dll` SHA-256 is
+`7C7D7B3170E76DC6F8B27BD07B39CEA6DFF8A595FF57586B51DBA4CAEACACA19`; the
+API contracts SHA-256 is
+`B54BFE2E93F43DC188C54BD89E4F73EA9CD17A9F0BB94976180E56B263C68C7D`; the
+evidence SHA-256 is
+`F072AD926A7A496F0E535165CA8799A175E7D6345813C9E59E6F50FF9CAFDCBF`.
+Pharos source was based on `4966732269f02408df314ae155bb7e6f3817f9d9`; the
+private checkout has uncommitted changes, limiting harness reproducibility.
+This changes no Cairo import count: 239 active imports remain. It adds
+diagnostic accuracy and a narrowly classified fallback while retaining Cairo
+for those Subpixel runs.
+
+### Retain Cairo for bold sans-serif Subpixel text (2026-10-18)
+
+I tested adding `sans-serif` Bold to the Skia Subpixel font allowlist with the
+existing Cairo pixel oracle. The local test failed: the filtered edge
+difference reached 98.5, above the established limit of 96. I reverted that
+allowlist expansion, keeping this face on exact Cairo materialization. After
+the revert, the focused `CairoRecorderTextTests` suite passed 39/39. This is a
+measured boundary in the current font matrix, not a new runtime change. The
+Radeon certificate remains the exact prior run for unchanged code commit
+`4319b59a26964d4a59c73e2dd96b91332aba4fae`; the failed candidate was not part
+of that build. Cairo imports remain at 239.
+
+### Preserve public current-point error semantics
+
+An experiment made `Context.CurrentPoint` and `HasCurrentPoint` read the
+managed mirror. A differential test found that after `Scale(0, 1)` puts Cairo
+in `InvalidMatrix`, a following `MoveTo` is ignored by Cairo while the mirror
+advanced. I removed the managed getter path and kept both public getters
+native. Text capture still uses the mirror only after its existing Cairo
+status check, preserving the safe two-call reduction for known points. The
+regression test now covers the sticky-error case; all 39 focused text tests
+pass. The final `Context` patch matches the Radeon-tested implementation in
+`8222c58` for text capture, while the public getters retain native behavior.
+The current rebuilt wrapper has SHA-256
+`b4ee5af357c66a13ad8e303e77eccad6f379d93a85d1847928f6ba37113858e9`; the
+earlier Radeon artifact hash does not match this build, so it is not treated
+as exact-head evidence. No additional Cairo imports were removed.
+
+### Corrected current-point mirror Radeon retest (2026-10-18)
+
+After reverting the public getter optimization, the exact wrapper build for
+Optimum commit `7855deb5a0226aa3d0ba1d722775a97524955fa2` passed the full Pharos
+inventory scenario 1/1 on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3,
+OpenGL 4.6 Core. The launcher accepted its local certification. The report
+selects `skia-with-subpixel-cairo-fallback` with no decision reasons. Initial
+composition passed 38/38 GPU candidates; ten recompositions passed 360/360.
+Scales 1x, 1.5x and 2x passed 30/30, 159/171 and 161/173 candidates. The 24
+scale fallbacks were successful Subpixel Cairo materializations; all eight
+materializations succeeded, with zero failures. The primitive fixture and all
+five non-subset fixtures rendered on GPU; all three SVG tint comparisons were
+within one channel value, and the GL state sentinel passed.
+
+The tested `cairo-sharp.dll` SHA-256 is
+`B4EE5AF357C66A13AD8E303E77ECCAD6F379D93A85D1847928F6BA37113858E9`; the
+evidence SHA-256 is
+`4AB23212B0A3E0A49FC8708716FCC968C71AB3BFF64D8A529A7526AE9AD66EDC`.
+Pharos source was based on `4966732269f02408df314ae155bb7e6f3817f9d9`; that
+checkout has uncommitted changes, limiting harness reproducibility. This is
+Radeon evidence for the corrected mixed Cairo/Skia runtime. It does not certify
+Cairo-denied startup, packaging, Intel/NVIDIA, or cross-platform ABI behavior.
+The iteration still removes zero declarations from the 239 active Cairo
+imports; it only skips two current-point native calls for a recorded text run
+when the mirrored point is known.
+
+### Subpixel bold font parity follow-up (2026-10-18)
+
+I retested the previously rejected `sans-serif` Bold Subpixel face using the
+existing local Cairo pixel oracle. The established filtered-difference limit
+is 96.0. The original Slight-hinting/Subpixel-position candidate measured
+98.5. Normal and Full hinting with Subpixel positioning both measured 97.2;
+None measured 108.9. Slight hinting with Skia subpixel glyph positioning
+disabled measured 96.3, still above the limit. Force-auto-hinting and linear
+metrics did not improve that result. A global switch to Normal also regressed
+four already-qualified face cases (filtered differences 96.9, 104.1, 105.1,
+and 97.2), so I reverted it. The production hinting and Subpixel settings and
+font allowlist remain unchanged, and the exact Cairo fallback remains for
+Bold. The restored approved font/layout and recorder text matrix passes 54/54.
+
+This experiment adds no Cairo import reduction. It keeps the recorded
+Subpixel matrix honest instead of weakening the established pixel gate; the
+font-parity fallback observed at 1.5x and 2x remains a measured open item.
+
+### Skia layout hinting and Radeon verification (2026-10-18)
+
+The differential layout test found one wrap mismatch at 1.5x scale: Skia with
+Slight hinting measured `Inventory items` at 176.936px / 177.432px advance,
+while Cairo reported 178px / 179px. A 177.936px box therefore wrapped at
+different words. Using Normal hinting for Skia measurement produces a 179px
+advance with the same Fontconfig-matched face. The code change is restricted
+to `OptimumSkiaTextMetrics`; the recorded text raster path keeps its existing
+Subpixel settings. The regression test compares the line split from the
+`CairoFont` overload with native Cairo across the existing scale and line-break
+matrix.
+
+The exact code commit `15809832fe60c7c194ac18a55dfbd77732a55780` passed the
+Pharos inventory scenario 1/1 on AMD Radeon RX 6650 XT, Mesa 26.0.8-1ubuntu0.3,
+OpenGL 4.6 Core. Initial composition passed 38/38 candidates; ten
+recompositions passed 360/360. Scales 1x, 1.5x and 2x passed 30/30, 159/171,
+and 161/173 candidates. The 24 scale fallbacks were the already classified
+`text-font-parity` Subpixel Cairo fallback; all eight materializations
+succeeded with zero failures. The primitive, five non-subset fixtures, three
+SVG tint comparisons (within one channel value), and GL state sentinel passed.
+The launcher validated the exact local profile certificate.
+
+The tested `cairo-sharp.dll` SHA-256 is
+`8d61eed94f170556d806fcee71342e62a85b7c7cdcb9ca346df790bafa4e5bde`; the API
+contracts SHA-256 is
+`2e856df3972d78c3a142f5afe5ee0b8c2edbbc59cd2f639bc5923204b250fd39`. Evidence
+SHA-256 is
+`3fc05c1ad8f562106388fee63a41a66c20d646efc6d8db9978537ffe44565916`, and the
+certificate SHA-256 is
+`8e1b0da013f2474c3bfd43ad10be4277e8869613a7daedf468c8bf9a075e8d7e`. Pharos
+source was based on `4966732269f02408df314ae155bb7e6f3817f9d9`; that checkout
+contains uncommitted changes, so this is exact Optimum-code evidence but not a
+clean, independently reproducible Pharos source revision.
+
+This iteration fixes the measured line-wrap mismatch and certifies the mixed
+Cairo/Skia GUI path; it removes no Cairo imports. The inventory remains at 239
+active imports, 82 exported types, and 872 public/protected members. The
+1.5x/2x Subpixel text materializations remain explicitly visible in the
+runtime evidence. This result does not close Cairo-denied startup, packaging,
+Intel/NVIDIA, or cross-platform ABI gates.
+
+## Runtime loading, package and rollback boundaries
+
+The wrapper registers a native resolver when `CairoAPI` initializes. Linux
+maps `libcairo-2` to `libcairo.so.2`; macOS tries an explicit dylib path and
+then the system loader; Windows falls through to the default resolver. The
+macOS explicit path currently combines `Assembly.Location` as if it were a
+directory, so its candidate includes `cairo-sharp.dll/Lib/...`; only the
+fallback might load the dylib. No macOS runtime run has established which
+library path succeeds.
+
+The launcher assembly resolver can load managed dependencies from its cache,
+the game root, `Mods`, and `Lib` in priority order. It has no Cairo-specific
+selection rule, and the native resolver handles OpenAL only. A stale
+`cairo-sharp.dll` in an earlier location can therefore precede the candidate
+in `Lib`. Runtime validation checks managed references but does not prove the
+selected wrapper version, helper method binding, native library origin, or
+absence of Cairo loads.
+
+The installer backs up and restores `Lib/cairo-sharp.dll`; it does not manage
+other shadow copies or native Cairo files. Standalone Linux and macOS packages
+copy the vanilla installation before overlaying Optimum assemblies, so those
+packages may still carry Cairo and its dependencies. Local inspection of
+`libSkiaSharp.so` and `libnanosvg.so` found no direct Cairo dependency, but the
+final artifacts for each RID and their transitive dependencies remain
+unverified. The ABI fixture and parity harness explicitly load native Cairo,
+so their successful execution cannot serve as a Cairo-denied runtime test.
+
+The release gate still needs final-package file/import inventories per RID,
+managed assembly resolution tests with stale wrapper copies in cache/root/
+Mods, candidate/helper validation, install/upgrade/rollback/uninstall tests,
+and startup plus GUI/map/sign/export/readback execution while every discovered
+Cairo load path is denied. Compiled third-party mods and plugins remain an
+external compatibility boundary.
+
+## Explicit exclusions and unresolved compatibility
+
+- The tracked source inventory and locally available source trees do not reveal
+  calls made only by compiled third-party mods or native plugins.
+- A caller that passes a real `cairo_t*`/surface pointer, P/Invokes libcairo
+  itself, or expects `Context.Handle` to remain a Cairo pointer cannot use an
+  opaque managed replacement and retain that behavior. Such consumers need a
+  verified bridge or a documented scope decision.
+- The assembly includes NanoSVG and FreeType API surface as well as Cairo API.
+  Removing `libcairo` does not automatically remove those native libraries.
+- A complete API-compatible managed assembly is a broader gate than a
+  Cairo-free supported GUI package. No current test proves all 872 public and
+  protected members or every platform backend.
+
+## Next work
+
+Continue the staged managed-state and text migration with the native oracle in
+tests, then replace image/source/compatibility escapes. Do not claim completion
+until every public API row and every runtime/package path has an implementation
+or an explicit limitation, and the packaged supported client runs with native
+Cairo loading denied. Record GPU certification separately; it does not prove
+Cairo independence.
+
+## Shared managed Cairo wrapper status (2026-10-23)
+
+The compatibility unit is the shipped `cairo-sharp` assembly. This route applies to managed mods distributed with the game, Optimum, or installed separately, provided they resolve the shared wrapper assembly. Each consumer gets the managed Skia-backed behavior through the same public API, so Optimum does not need a source patch for each mod. The ABI fixture is a separate consumer compiled against the game's original `cairo-sharp.dll`; it verifies assembly replacement and exercises managed drawing, nested groups, target switching, and self-source copying with `OPTIMUM_CAIRO_NATIVE=deny`. At commit `6844f1081b87b8bd4e95daffec8888d8ba10ce68`, `CairoNativeFreeRecordedGuiTests` passed 51/51, the full `Optimum.Tests` suite passed 1,951 with 40 skipped, and the fixture passed without a libcairo mapping. This does not prove every exported member or every compiled third-party mod.
+
+Surface-pattern coverage now includes managed A8, A1, and RGB565 sources. The deny-mode GUI suite passes all three without a denied native call, and a Cairo-oracle test compares their rendered pixels exactly while the Skia recorder remains unmaterialized. On the current branch, `CairoNativeFreeRecordedGuiTests` passes 52/52 and `Optimum.Tests` passes 1,953 with 40 skipped. These fixtures prove those source-format paths, not every surface format, filter, or third-party draw sequence.
+
+The recorder now snapshots a surface when a managed context uses that same surface as its source. `Context.SetSourceSurface`, `SetSource(Surface, x, y)`, and `SetSource(Surface)` stay on the Skia recorder for that case. A native `Cairo.Path` returned by `Context.CopyPath` can also be copied into managed path memory and appended to a managed context while preserving the Cairo path command layout. These routes remove specific materialization cases; they do not establish full Cairo semantic parity for all 909 public/protected members.
+
+### Contracts that require a native Cairo boundary
+
+A managed Skia object cannot provide an address that is a real `cairo_t*`, `cairo_surface_t*`, `cairo_pattern_t*`, `cairo_font_face_t*`, or `cairo_scaled_font_t*`. Code that reads or passes those `Handle` values, constructs those wrappers around foreign native handles, or calls Cairo functions directly must use the native compatibility backend or change its interop contract. Managed wrappers keep the `cairo-sharp` assembly identity, but that does not make native pointers interchangeable.
+
+A P/Invoke from a third-party assembly directly to `libcairo` does not pass through the `cairo-sharp` resolver and cannot be redirected by replacing the managed wrapper alone. That mod needs a managed Cairo call path or its own native compatibility layer. Its behavior remains unverified unless its binary and call sequence are available for testing.
+
+Xlib, XCB, Win32, DirectFB, and Glitz surfaces require platform handles or backend integration that Skia's ordinary raster and document surfaces do not supply. These constructors retain the explicit native boundary. PostScript output is raster-backed in the managed implementation, so it preserves page content but not Cairo's vector fidelity; large pages may use a reduced raster resolution to stay within the output memory budget.
+
+These limits are intentional compatibility boundaries, not passing evidence for the full migration. Keep the goal open until supported managed calls are covered by deny-mode tests and every remaining public member has a managed implementation or a documented native contract.
+
+## CairoFont startup on the shared API (2026-10-23)
+
+The vanilla `CairoFont` type eagerly created a Cairo image surface and context in its static initializer even though Optimum routes its text metrics through Skia. The API patcher now removes that known initializer while retaining the public `FontMeasuringContext` field for binary compatibility. Managed mods that resolve the patched shared API can construct `CairoFont` and measure text without loading native Cairo. The patcher fails closed if the donor initializer shape changes.
+
+The real Pharos client/server GUI scenario passed with `OPTIMUM_CAIRO_NATIVE=deny`: 16 scenarios, 48 scaled captures, 168 managed Cairo members observed, no scenario errors, zero denied imports, and no `libcairo` mapping. On the Radeon RX 6650 XT, all 18,414 Skia GUI texture candidates succeeded. The evidence records 16,643 GPU renders and 1,771 successful Skia CPU recoveries, with zero failed candidates. Some later GL context checks logged identity mismatches and used the CPU recovery path. This is real GUI execution evidence for both Cairo denial and the Skia GPU route, but not a visual parity certification. The inventory remains open for the remaining API rows, direct third-party P/Invokes, native-pointer contracts, visual parity, and package-level platform validation.
+
+### Live visual parity measurement (2026-10-23)
+
+The Pharos live GUI run captured 6,196 GPU, forced-Skia-CPU, and native-Cairo image rows across the 16 states and scales 1x, 1.5x, and 2x. All native reference repeats were byte-exact and there were no capture errors. The fixed `linux-gpu-cairo-local-aa-v2` comparator accepted 6,140/6,196 rows for both GPU and CPU output. The 56 rejected rows are limited to text antialias edges: 52 `GuiElementStatbar` rows at 2x and two each for `GuiElementDynamicText` and `GuiElementTextBase` at settings scales 1.5x and 2x. Geometry, flat regions, and alpha-mass checks passed; the remaining failures exceeded the filtered local-edge maximum and/or p99 thresholds. A separate gamma-disabled diagnostic was worse (102 failures over its filtered subset), so the default Linux gamma path was retained. Summary SHA-256: `52467be605af3c010ea0f44a88073cdb974026847c73bb928847df462e9a4b80`; captures SHA-256: `b6d00a004cd7e3f3100b917c22b29475b6b50a4b60a8fa8ddb2b6847c2ce64c9`. Visual parity therefore remains open; the harness thresholds were not relaxed.
+
+
+### Hinted outline correction and passing live comparison (2026-10-24)
+
+Code commit `045465bc03c3f82e5ee8b7e07cab0da0c5537546` corrects the previously rejected statbar and FPS text paths. Skia's `GetGlyphPath` returned unhinted outlines; Cairo's hinted contours differed vertically by up to 1.15 pixels at 2x. The recorder now obtains hinted Linux contours from the selected Skia typeface's font stream through FreeType, then rasterizes the resulting paths with Skia. The existing Skia outline route remains available where the optional platform hinter is unavailable. Explicit Slight hinting also uses the shared hinted advance policy for layout and text runs.
+
+A new Radeon RX 6650 XT live run completed 16 scenarios at scales 1x, 1.5x and 2x and retained 6,200 image rows. The unchanged `linux-gpu-cairo-local-aa-v2` comparator accepted 6,200/6,200 GPU replays and 6,200/6,200 CPU replays. All 56 previously rejected component/state/scale/image keys were present and accepted. Capture errors, unstable Cairo reference repeats and duplicate keys were zero. The worst filtered maximum was 56.639 on GPU and 62.763 on CPU (limit 96); worst filtered p99 was 39.977 and 46.956 (limit 55). Some size-dependent settings texture keys changed between runs; the comparison covers every retained row from the new run without reducing the original failed-key set or changing limits.
+
+The normal GUI phase recorded 18,403 successful texture candidate attempts, zero failed candidates, no scenario errors and no Cairo materialization causes. The separate pixel comparison explicitly allowed native Cairo for its reference replays. Native-free verification passed 55 recorder tests and an independently compiled original-game-ABI mod consumer under `OPTIMUM_CAIRO_NATIVE=deny`, with no libcairo mapping. All five test projects passed: Optimum 1,977 passed and 40 skipped; Launcher 70; CLI 24; Bootstrap.Core 173; Installer 86. Clean bootstrap applied 166 patches, and build, IL/API patching, patch validation and shaders passed.
+
+Live summary SHA-256: `8a7602057c52a4162a1f9c80804b65a4a28303098bae46472288411054acf3f8`. Capture manifest SHA-256: `64f63a8cd62849b1ac212bdc088153f24f61be7b9c73b100a889a561c9327659`. Tested wrapper SHA-256: `05dfd3489cf7fab1598ecfdfc05b51841dfb42d908ed21f6e5bf209fc1e32f70`.
+
+The baseline and new Pharos client logs contain final-composition/blit OpenGL `InvalidOperation` reports (1,328 and 1,324 respectively); this comparison does not resolve that separate renderer issue.
+
+This closes the 56 measured text failures on the tested Linux/Radeon matrix. The complete API migration remains open: file-font creation through `Cairo.Util.FreeTypeFontFace.Create` still needs a managed route, skipped primitive cases need further work, native-pointer contracts retain their documented boundary, and other platforms and adapters require their own evidence.
+
+
+## Managed file-font factory (2026-10-24)
+
+`Cairo.Util.FreeTypeFontFace.Create(filename, loadoptions)` now reads the file into a retained managed descriptor and selects its exact Skia typeface. The recorded context, saved graphics state, retrieved FontFace, and ScaledFont retain that descriptor independently of the original file and face. Managed drawing does not create a Cairo font face. Explicit native-handle interoperability in allow mode creates the Cairo face lazily and attaches the pinned font bytes and FreeType owner to Cairo user data, so disposing the original wrapper does not invalidate a retained native context.
+
+On Linux, file-font text and positioned glyphs use the system FreeType outlines and advances, rasterized by Skia. This avoids the measured differences between Skia's bundled hinter and the system Cairo hinter. TextExtents, GlyphExtents, ShowText, ShowGlyphs, and TextPath share the retained font. The public factory, FreeType exports, and protected Dispose override keep their existing signatures.
+
+The new tests cover load flags 0, 2 (NO_HINTING), 32 (FORCE_AUTOHINT), and 65536 (TARGET_LIGHT), with explicit Gray antialiasing and Full hint style. All four Cairo oracle comparisons pass the existing local antialias policy and exact native replay checks. They also compare text, glyph, scaled-font, and font metrics. The four lifecycle cases and invalid-file case pass with libcairo denied. The original-assembly-compiled mod consumer now exercises file-font creation, deletion of the source file, original face disposal, ScaledFont, text, and text paths against the replacement wrapper under deny mode.
+
+Validation: clean bootstrap applied 167 patches with zero failures; Release build passed with one pre-existing xUnit1026 warning; Optimum.Tests passed 1,986 with 40 existing skips; Launcher 70, CLI 24, Bootstrap.Core 173, Installer 86; the deny subset passed 60/60. Patch validation reports 114 source patches, 53 Cecil patches, 22 exact runtime donors, and zero conflicts. Prerequisite and shader checks passed. The first full test invocation lacked the game's NanoSVG library search path; the corrected invocation passed the complete suite.
+
+This file-font increment has not repeated the full live GUI capture matrix. The previous 6,200-row GPU and CPU result remains the evidence for family-selected GUI text. File-font parity here covers the tested Linux flags and options; arbitrary FreeType flags, transformed font matrices, subpixel file-font rendering, other platforms, skipped primitive cases, and native-pointer contracts still need their own coverage. The API migration remains open.
+
+
+## Closing the skipped Cairo parity cases (2026-10-24)
+
+All eight cases previously represented by six skipped Facts/Theories are enabled: Difference, Exclusion, Gray and Subpixel Screen text, aliased curves, Fast antialiasing, zero-length round-cap dashes and subpixel dash gaps. The existing one-level flat tolerance, 32-level raw edge tolerance and local antialias policy remain unchanged. The Cairo test files contain no explicit skipped test.
+
+Difference and Exclusion use byte-rounded intermediate products in Skia runtime blenders. Linux Screen text uses system FreeType coverage with quarter-pixel phases, the scaled ink bounds, explicit subpixel order and Fontconfig defaults, then composites through a Skia shader. The tests cover Default/Gray/Subpixel text, RGB/BGR/vertical orders, source alpha and scales 1x, 1.5x and 2x.
+
+Aliased curved fills use flattened device geometry, fixed-grid scanlines and Cairo's adjacent-span ownership. Fast fills use a quarter-pixel device grid. Zero-length capped dash endpoints remain in both the recorded outline and InStroke/StrokeExtents queries. Small-gap and capped dash coverage uses tiled Skia supersampling, retaining the backdrop and blend operator, including Source and Clear. InFill now queries the flattened boundary used by Cairo instead of the analytic Skia curve.
+
+A clean bootstrap applied all 167 patches with zero failures. The serial Release build passed with one existing xUnit1026 warning. The final parallel build invocation hit an internal CLR error before compiler diagnostics; the serial rebuild with node reuse and shared compilation disabled passed. Prerequisite, shader, IL/API patching and patch validation passed: 114 source patches, 53 Cecil patches, 22 exact runtime donors and zero conflicts. Optimum.Tests passed 2,041 with 34 unrelated fork-dependent skips; Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. The deny subset passed 68/68.
+
+The Radeon RX 6650 XT executed 60 oracle cases through the actual Skia GL backend with the same test comparators, all accepted. A separate process rendered 24 operator/antialias combinations through the Radeon with native Cairo denied, zero attempted Cairo loads and no libcairo mapping. The independently compiled original-game-ABI consumer passed under deny after adding Fast/Exclusion and fractional Screen text to its previous file-font and surface cases.
+
+The fresh full Radeon RX 6650 XT live run at code checkpoint `5bb3eb6f4a46cfc08b8f325e063e2934b3c55fe2` passed in 18 minutes 53 seconds. The unchanged comparator accepted all 6,201 GPU and all 6,201 CPU samples, including all 56 original failed keys. Rejected rows, capture errors, duplicate keys and unstable native reference repeats were zero. The run completed 16 scenarios and observed 168 Cairo members. All 18,402 texture candidates succeeded, with 1,769 Skia CPU recovery events and no Cairo materialization causes. Summary SHA-256: `2cdcaa42b876346fd507d41a3a87a4aa1e2bd13ec72b7c192d2cbf25a6cba172`. Capture manifest SHA-256: `159d266303dc1da70bf48acd461c15f13d2b6cd623357a5baf15570c5387726d`. Wrapper SHA-256: `91d093f0fd8927794a32c32d073770e40badf4b6b80a358e316c2c9748e1323c`. The diagnostic allowed Cairo only for reference replay; the separate deny checks above verify native-free execution. This live measurement predates the image-constructor changes below. The previously recorded engine final-composition/blit GL errors remain open. These tests close the recorded primitive gaps on the tested Linux configuration; arbitrary file-font load flags, transformed font matrices, other operating systems and genuine native-pointer contracts still require their own evidence. Direct native libcairo calls from a mod bypass the managed assembly facade.
+
+
+## Image construction and PNG lifecycle (2026-10-24)
+
+Managed image construction now returns Cairo-style error surfaces for invalid format values and dimensions. Error metadata has zero dimensions and stride, invalid format, zero reference count and null data; Context retains the original status. Empty owned images preserve their dimensions with null pixel storage and zero stride. CreateSimilar inherits a parent error before checking content and dimensions. The native opt-in wrapper also reads actual error-surface metadata instead of retaining rejected constructor arguments.
+
+PNG export takes an immutable recorded snapshot. Drawing through a new Context after export now works, including when export occurs before the first draw. PNG output errors follow the original void wrapper contract and leave the surface status unchanged. Zero-area output creates an empty file as the tested native writer does. The original-assembly-compiled consumer now exercises invalid image creation and a failed PNG write before creating a Context.
+
+The added regression matrix covers seven invalid constructors, three empty dimensions, four PNG output errors, two export/draw sequences and four CreateSimilar errors. Native-allowed tests compare error metadata directly with Cairo. Deny tests repeat the managed assertions while checking attempted loads and process mappings. Existing pixel assertions remain unchanged.
+
+Clean bootstrap applied 167 patches with zero failures. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,061 with 34 unrelated skips; Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. The expanded deny subset passed 88/88, and the original-game-ABI consumer passed under deny. Prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact runtime donors). The recorder parity collection now disables parallel execution because its process-wide mode changes could interfere with the native state oracle. The initial full invocation exposed that test race; the rerun passed after isolation. The initial extraction also emitted four bootstrap-owned AssemblyInfo patches; removing those untracked artifacts restored the clean bootstrap.
+
+External pixel-buffer allocation and stride contracts still need work, including null buffers and negative strides. Numeric formats outside the shipped Format enum, allocation limits, broader file-font configurations and other operating systems remain outside this tested increment.
+
+
+## External buffers and successive image contexts (2026-10-25)
+
+The shared cairo-sharp facade routes managed consumers to Skia by default, without filtering mod names. The installer copies the replacement to `Lib/cairo-sharp.dll` and retains its backup/rollback contract. The independently compiled original-game consumer now also exercises null-data allocation and bottom-up raw pixel pointers.
+
+Null pointer and null byte-array constructors now follow Cairo's allocation rule, including canonical stride for allocated nonempty images and the supplied signed stride for empty images. Invalid data surfaces preserve format, size and stride error precedence. External pointers retain their address and signed stride; recorder snapshots normalize rows for Skia and copy changed rows back to the caller. Drawing, PNG export and external writes after MarkDirty work with bottom-up buffers. The original public Data getter's negative-length OverflowException remains compatible; callers use DataPtr for bottom-up images. Packed A1 readback preserves inactive bits and stride padding.
+
+A new image Context starts with Cairo's default state after the previous Context is disposed. Prior recorded pixels are checkpointed through Skia before replacing the recorder, so transforms, clips, paths, line settings and unbalanced saves cannot leak into the next Context. Two tests reproduced the old line-width leak before this correction. The existing open-group disposal test also expected that leak; it now expects the native default while retaining its pixel checks. This checkpoint can incur CPU rasterization when a consumer repeatedly creates contexts on the same image.
+
+The 31 new cases cover invalid data surfaces, null allocation across the five declared formats, zero-area metadata, both pointer row orders, caller mutations, padding, A1 active bits, array bounds and successive context state. Native comparisons use explicit allow mode; separate deny tests verify attempted loads and process mappings. Short arrays and negative multi-row byte arrays remain bounds checked because they cannot provide memory before the array start; a pinned bottom-up allocation can expose its first logical row through the pointer overload.
+
+This coverage does not certify every mod or the complete Cairo native ABI. Simultaneous contexts on one managed surface, non-image context lifetimes, numeric formats outside the declared enum, larger native allocation boundaries, broader file-font matrices and other operating systems still need implementation or evidence. Direct libcairo P/Invoke and genuine cairo_t pointers bypass the managed facade.
+
+Clean bootstrap applied 167 patches with zero failures. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,092 with 34 unrelated skips; the expanded deny subset passed 119/119 and the original-game-ABI consumer passed without libcairo. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. Prerequisite, shader and patch checks passed (114 source, 53 Cecil, 22 exact runtime donors). Actual Radeon probes passed 60 oracle cases and 24 deny combinations. The fresh full live GUI capture at `c9b7c151c479e23d80664df0d3c4f1c93315f540` passed in 18 minutes 31 seconds. The unchanged comparator accepted 6,200/6,200 GPU and 6,200/6,200 CPU samples. All 56 original failed keys were present and accepted; rejected rows, capture errors, duplicate keys and unstable references were zero. The 16 scenarios observed 168 members, with 18,402 successful texture candidates, 1,769 Skia CPU recoveries and no Cairo materialization causes. Summary SHA-256: `9a2e2ec89211a0009bee743c02755eccfa4db8bb3e871bd799dde6afecc147f1`. Capture manifest SHA-256: `22a807e59fcd1d33799214a3304d02135c142f821c3261d87c93c5e87b0a1140`. Wrapper SHA-256: `306bc17e60872fd73772de1fdbfdb0c84eb02f2f060df45ee40602faa0e5e513`. This visual diagnostic explicitly allowed Cairo for reference replay.
+
+A separate full live run with native Cairo denied passed in 10 minutes 36 seconds: 16 scenarios, 168 observed managed members, 18,403 successful texture candidates, 1,769 Skia CPU recoveries, zero scenario errors and no Cairo materialization causes. The loader gate verified 0/199 traced imports reached, zero denied attempts and no libcairo mapping in readable process maps. This run used the same pinned wrapper and no native visual references. The existing final-composition/blit GL errors and Pattern finalization notices remain in the logs; they are not reported as resolved.
+
+
+## Independent contexts on shared managed surfaces (2026-10-25)
+
+Multiple contexts can now draw into one managed surface without sharing their drawing state. Weak per-Context sessions retain independent paths, matrices, clips, sources, font state, status and save stacks while all drawings append to one ordered display list. GetTarget/GetGroupTarget aliases share pixels and create independent contexts. Switching contexts keeps earlier drawing recorded instead of checkpointing it to CPU pixels. The current-context fast path avoids a table lookup on repeated operations.
+
+Explicit native diagnostic replay uses one native Cairo context per opaque command identity on the shared target. Managed groups stay managed even when native allow is enabled for reference measurement. Pixel access retains state-owned patterns, fonts, clips and source bindings for every live context. PDF page changes clone every context session. Existing or new contexts can resume after CPU texture replay. Context finalization detaches without activating a recorder owned by another thread.
+
+The 13 new cases cover seven programs compared with native Cairo pixels and exact native replay, interleaved state queries, source lifetimes through pixel access, PDF pages, weak context finalization, and two replay/resume sequences. Programs include groups, transformed/clipped group-target aliases, error isolation and independent operators. Existing alias tests expected shared line width and path; their corrected native expectations retain the original pixel assertions. The original-assembly-compiled consumer now exercises simultaneous contexts and ordered pixel output under native denial.
+
+Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,105 with 34 unrelated skips; the deny subset passed 132/132. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. Prerequisite, shader, IL/API and patch checks passed (114 source, 53 Cecil, 22 exact runtime donors). Actual Radeon probes passed 67 oracle cases and 25 deny cases. The fresh complete Radeon RX 6650 XT capture at `62b2aa35d38b35797c6ffafc15eb200b6939bab4` passed in 18 minutes 48 seconds. The unchanged comparator accepted 6,203/6,203 GPU samples and 6,203/6,203 CPU samples, including all 56 original failed keys. Rejected samples, capture errors, duplicate keys and unstable reference repeats were zero. The 16 scenarios observed 168 members; all 18,406 texture candidates succeeded, with 1,769 Skia CPU recoveries and no Cairo materialization causes. This diagnostic explicitly allowed Cairo for reference replay. Summary SHA-256: `9347d2beebb669161619bf5eebd888902cc6cad921c4e00b6ec31225e5688dd4`. Capture manifest SHA-256: `15fb7f5fa889c7c0b0049ac6a6b30d5146b1ad509c07dcbfa0ca36b0e11cee5f`. Wrapper SHA-256: `67e387d08ab8ff245acf7a86d433a3e70ea4d753f99df3b6585981809a1ea537`.
+
+The shared assembly route continues to apply to managed mods without a mod-name filter. These results do not certify all disposal, numeric format, font, platform or foreign-native-handle contracts. Direct libcairo P/Invoke bypasses the facade. The universal API migration remains open.
+
+A separate complete run with libcairo denied passed in 10 minutes 18 seconds: 16 scenarios, 168 members, 18,420 successful texture candidates, 1,777 Skia CPU recoveries, zero scenario errors, failed candidates or Cairo materialization causes. The loader reports verified 0/199 traced imports reached, zero denied attempts, readable process maps and no libcairo mapping. The same pinned wrapper ran without native visual references. Existing engine final-composition/blit GL errors and Pattern finalization notices remain in the logs.
+
+
+## Surface wrappers and retained drawing lifetimes (2026-10-25)
+
+Disposing a managed Surface wrapper now keeps its backend alive for contexts, aliases and recorded source bindings. Contexts retain independent state and draw into the same pixels after the original wrapper is disposed. Group stacks retain their parent surfaces. The disposed public wrapper still rejects access. Weak active-context references let finalization release the final pixel pin, and explicit native image aliases own separate native references.
+
+PDF, PS and SVG contexts can finish drawing and advance pages after their original wrappers are disposed. The final owner writes the document. Thirteen new cases cover these lifetimes, error surfaces, source-pattern updates and disposed-wrapper guards. The original-game-assembly consumer also draws after disposing its original image wrapper.
+
+Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,118 with 34 unrelated skips; the deny subset passed 145/145. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. Prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact runtime donors). The original-game-ABI consumer passed under native denial. Actual Radeon probes passed 69 oracle cases and 26 deny cases without a libcairo mapping. The full live GUI results for this increment follow below.
+
+The shared assembly replacement applies to managed mods without a mod-name filter. Foreign native pointers, direct libcairo P/Invoke, additional numeric formats and broader font/platform coverage remain outside this evidence. Universal API certification remains open.
+
+
+The fresh complete Radeon RX 6650 XT capture at `c704eeb83db7bcbaac2f9b0b95f0747c9d53279a` passed in 19 minutes 5 seconds. The unchanged comparator accepted 6,568/6,568 GPU and 6,568/6,568 CPU samples, including all 56 original failed keys. Rejected samples, capture errors, duplicate keys and unstable native references were zero. The 16 scenarios observed 168 members; all 18,405 texture candidates succeeded, with 1,767 Skia CPU recoveries and no Cairo materialization causes. The capture contains 372 new image keys and seven previous-only keys relative to the preceding run; the complete key delta is retained with the evidence. This diagnostic explicitly allowed Cairo for reference replay. Summary SHA-256: `e9481d8fc376d0f337e560e5164228e13371141fc485faaa9e6b347d54bdedfc`. Capture manifest SHA-256: `84ae5593a13157c53b9d40e23f72c04b162b6ce14ea49e8837f6754e0ee7be00`. Wrapper SHA-256: `f7fdff7bacf884d536d99ca3564a65c45b1997ca425f69bff28063a6fa3580b2`.
+
+The separate complete deny run passed in 10 minutes 41 seconds: 16 scenarios, 168 members, 18,404 successful texture candidates, 1,771 Skia CPU recoveries and zero scenario errors, failed candidates or Cairo materialization causes. Explicit loader reports verified 0/199 traced imports reached, zero denied attempts, readable process maps and no libcairo mapping. Both runs used the same pinned wrapper. Existing engine final-composition/blit GL errors and Pattern finalization notices remain.
+
+
+## Explicit Finish and error contexts (2026-10-25)
+
+Explicit Finish now preserves live context sessions and their state resources while clearing the rendered display list. Existing contexts can modify state until a drawing operation latches SurfaceFinished. New contexts on a finished target inherit the error instead of throwing a constructor exception. Surface and context errors remain independent. Empty fills, zero-alpha paint, destination-only paint and empty clips follow the native no-op behavior covered by the differential sequences. Page calls and dirty notifications latch the corresponding errors. Failed drawing leaves retained pixels and finalized document bytes unchanged.
+
+Finish accepts a saved state stack, retains source patterns and clips for later state queries, and works before the first context. PDF, PS and SVG finalization is covered. GetTarget and GetGroupTarget on error contexts return a nil surface with the measured native NoMemory status. The old invalid-size-target expectation is corrected to that native result. The previous deny-only test expected Rectangle to throw after Finish; it now verifies successful path construction, Fill latching SurfaceFinished, null Data in the error state and unchanged bytes through a previously retained pointer.
+
+Seventeen new cases cover these contracts, including ten sequences compared with native Cairo. A clean bootstrap applied 167/167 patches. Final Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,135 with 34 unrelated skips; the expanded deny subset passed 162/162. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. The original-game-assembly consumer passed with native Cairo denied and now exercises Finish. Prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact runtime donors). Radeon probes passed 69 oracle cases and 26 deny cases without a libcairo mapping. Wrapper SHA-256: `8d263ae35d81e33ffa9d2d30a18e2dea402029157ad867c7c056c2d39c0a7150`.
+
+The full GUI matrix was not repeated for this increment. The 6,568-sample full GUI result above applies to c704eeb, not this wrapper. This scoped coverage does not certify every finished-surface text, mask or clip case, additional numeric formats, broader fonts or other platforms. Direct libcairo P/Invoke and genuine foreign native handles still bypass the managed facade. The universal migration remains open.
+
+
+## Finished-surface drawing no-ops (2026-10-25)
+
+Finished managed targets now preserve native success for MoveTo-only fills, zero-width strokes, empty clip bounds, disjoint rectangular clips and zero-size image masks. The no-op path leaves graphics state mutable; Restore or ResetClip can expose the finished target again, and subsequent real drawing latches SurfaceFinished. Degenerate line/rectangle fills and nonempty off-surface clips continue to validate the target. Native Cairo also validates diagonal no-area clips and disjoint triangles whose bounds overlap; the regression matrix preserves those measured errors. The new checks run only for an already finished target and avoid copied path arrays.
+
+Nineteen new cases compare managed target/context status with native Cairo and then verify the later state/error transition. The baseline-assembly consumer covers zero-width stroke and an empty clip after Finish, followed by restored real drawing. The initial matrix reproduced five managed failures. Two expanded expectations were corrected from native reference results before the final 36-case focused allow/deny passes.
+
+Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,154 with 34 unrelated skips; the expanded deny subset passed 181/181. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. The original-game-ABI consumer, prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact runtime donors). Radeon probes passed 69 oracle cases and 26 deny cases without a libcairo mapping. Wrapper SHA-256: `cd6dc2935b02ecd07421f4f694af3d040abaa019acdd4954697fe79790f2c416`.
+
+The full GUI matrix was not repeated for this increment; the preceding 6,568-sample result remains pinned to c704eeb. Text/font behavior after Finish, every mask/source optimization, additional formats and broader platform coverage remain open. The shared facade applies to managed mods without a mod-name filter. Genuine foreign native handles and direct libcairo P/Invoke retain their separate native contract.
+
+
+## Finished text, UTF-8 and nil scaled fonts (2026-10-25)
+
+Finished managed targets now latch the native surface error for ShowText, including empty strings, without faulting an otherwise valid context. The pen advances through managed metrics. Nonempty ShowGlyphs preserves the native context/surface distinction and the tested destination/empty-clip no-ops; empty glyph arrays are ignored. TextPath, GlyphPath and font/text/glyph measurements remain available after Finish. Invalid UTF-8 follows the measured native contracts: ShowText and TextExtents latch InvalidString, while TextPath ignores conversion failure. Invalid text measurement no longer attempts Cairo materialization.
+
+Errored contexts return managed nil scaled fonts with their latched status, identity matrix, Toy type and zero tested metrics. Cloning and assigning these fonts preserves the error. Error-state metrics return zero without font loading. The native diagnostic FontMatrix getter also preallocates its output Matrix and uses the matching interop declaration; the previous out-class declaration threw NullReferenceException. Native pointer access for managed error fonts remains outside this metadata/metrics route.
+
+Forty-nine new cases cover cold/warm fonts, valid/empty/terminated/malformed text, glyphs, paths, metrics, nil-font propagation and normal/finished UTF-8 errors. The 85-case focused Finish matrix passed in allow and deny modes. Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,203 with 34 unrelated skips; the expanded deny subset passed 230/230. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. The original-game-assembly consumer now covers finished text and nil fonts under native denial. Prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact donors). Radeon probes passed 69 oracle cases and 26 deny cases without a libcairo mapping. Wrapper SHA-256: `65af8465010d725fe5028fc4e337819a9239a9eca4a118cc3f3899f9fa9d7afb`.
+
+The fresh complete GUI comparison and separate full deny run passed at a93fb37; the measurements follow below. Broader font matrices/platforms, remaining mask/source optimizations, additional formats and foreign native handles keep universal API certification open. The shared assembly facade applies to managed mods without a mod-name filter.
+
+
+### Complete live verification (2026-10-26)
+
+The fresh complete Radeon RX 6650 XT capture at `a93fb374aeec7b0eadf25dc51b7565872611db78` passed in 19 minutes 13 seconds. The unchanged `linux-gpu-cairo-local-aa-v2` comparator accepted 6,200/6,200 GPU samples and 6,200/6,200 CPU samples. All 56 original failed keys were present and accepted. Rejected samples, capture errors, duplicate keys and unstable native references were zero. The 16 scenarios observed 168 members; all 18,403 texture candidates succeeded, with 1,771 Skia CPU recoveries and no Cairo materialization causes. This visual diagnostic explicitly allowed Cairo for reference replay. Summary SHA-256: `4fe166c9dcc3fbf932552f0290bc4cb23dfee7934bfaa984947c21525ab82719`. Capture manifest SHA-256: `64f63a8cd62849b1ac212bdc088153f24f61be7b9c73b100a889a561c9327659`.
+
+The current capture manifest is byte-identical to the earlier accepted 6,200-row manifest from the first completed text correction. Relative to the intervening 6,568-row lifetime run, the key audit records 382 previous-only keys and 14 current-only keys. This result covers the current complete capture and the original 56 failures; the retained delta records the differing intervening coverage. The comparator and summarizer sources are unchanged.
+
+The separate complete deny run passed in 10 minutes 10 seconds: 16 scenarios, 168 members, 18,406 successful texture candidates, 1,775 Skia CPU recoveries and zero scenario errors, failed candidates or Cairo materialization causes. Explicit loader reports verified 0/199 traced imports reached, zero denied attempts, readable process maps and no libcairo mapping. Both complete runs used the unit/probe wrapper SHA-256 `65af8465010d725fe5028fc4e337819a9239a9eca4a118cc3f3899f9fa9d7afb`. Existing engine final-composition/blit GL errors and Pattern finalization notices remain in the logs. Broader font matrices/platforms, remaining mask/source optimizations, additional formats and native handle contracts keep universal certification open.
+
+
+## Nil FontFace contracts (2026-10-26)
+
+GetContextFontFace on an errored managed context now returns a nil Toy face with NoMemory and zero references, matching native Cairo independently of the original context error. Clones retain the nil status after the source context/surface is disposed. Assigning the face latches NoMemory on a healthy destination context while its target surface stays successful. Calls on an already errored context preserve the first error and skip metadata cloning. A ScaledFont constructed from managed nil-face metadata retains NoMemory and the tested zero metrics/identity matrix. Native faces retain the native constructor route for the oracle.
+
+Thirteen new cases cover a healthy control and InvalidRestore, InvalidString, SurfaceFinished and InvalidSize contexts, face/scaled-font assignment, sticky errors and disposal order. The initial run reproduced 12 managed failures; all 62 focused cases (13 new and 49 preceding text cases) now pass with native comparison and with native Cairo denied. The original-game-assembly consumer also checks nil-face status, type, count and scaling under native denial.
+
+Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,216 with 34 unrelated skips; the expanded deny subset passed 243/243. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. Original-game-ABI, prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact donors). Radeon probes passed 69 oracle and 26 deny cases without a libcairo mapping. Wrapper SHA-256: `4cb5d3bde30adbaf4b4ef4abf247562d27af5dc7cde2154d7f30e7a6cac591bb`.
+
+No full GUI rerun is claimed for this increment; the complete 6,200-row GPU/CPU result remains pinned to a93fb37. These cases cover nil-face reference counts; healthy-face cache/reference-count identity, broader font matrices/platforms, additional formats and native pointer contracts remain outside this proof. Managed error faces have no foreign native handle. The shared facade continues to apply to managed mods without filtering mod names.
+
+
+## Toy font selection inputs (2026-10-26)
+
+Managed font selection and toy-face construction now preserve native family/slant/weight validation. Null family latches NullPointer before enum checks. Invalid slant latches InvalidSlant before invalid weight; invalid weight alone latches InvalidWeight. Empty and whitespace family names remain valid and resolve through the Skia default font. Embedded NUL terminates the stored family name. Null metadata still identifies an unsupported foreign face; null selection fails before replacing the current font metadata. Invalid faces expose their native error/default metadata and zero references.
+
+Seventy new selection/metadata cases follow 35 independently probed native combinations. The initial run reproduced 64 failures; the corrected matrix passed with native comparison and under denial. Four additional rendering cases cover empty, whitespace and terminated names through ShowText and TextPath, the unchanged local antialias comparator and exact native replay. The final focused matrix passed 136/136. The original-game-assembly consumer now checks default/terminated names and sticky null-family errors.
+
+Clean bootstrap applied 167/167 patches. Release build passed with zero errors and one existing xUnit1026 warning. Optimum.Tests passed 2,290 with 34 unrelated skips; the expanded deny subset passed 317/317. Launcher 70, CLI 24, Bootstrap.Core 173 and Installer 86 passed. Original-game-ABI, prerequisite, shader, IL/API and patch gates passed (114 source, 53 Cecil, 22 exact donors). Expanded Radeon probes passed 73 oracle cases and 30 deny cases without a libcairo mapping, including the four new drawing programs. Unit/probe wrapper SHA-256: `c133e898b9a5f46d74c6780de4e9579327006ede200695146a44f27f0ddb0219`.
+
+The fresh complete GUI capture and full deny run passed at 28c66dc; the measurements follow below. Healthy-face cache/reference identity, broader font matrices/platforms, additional formats and native pointer contracts remain open. The facade continues to serve managed mods without a mod-name filter.
+
+
+### Complete live verification (2026-10-26)
+
+The fresh complete Radeon RX 6650 XT capture at `28c66dc27d4d7f84a5d8ab3ec5c00d6a924f06de` passed in 19 minutes 3 seconds. The unchanged comparator accepted 6,196/6,196 GPU samples and 6,196/6,196 CPU samples. All 56 original failed keys were present and accepted. Rejections, capture errors, duplicate keys and unstable native references were zero. The 16 scenarios observed 168 members; all 18,404 texture candidates succeeded, with 1,769 Skia CPU recoveries and no Cairo materialization causes. This diagnostic explicitly allowed Cairo for reference replay. Summary SHA-256: `3b2838991c3ada94c15e18b61f7905da99c4d80413b03c85a3b965a3b549d952`. Capture manifest SHA-256: `da931db1127f308443b3495b33ebc0b3af61b6ac11b33212f62751bce8d566ac`.
+
+The key audit records 16 previous-only keys and 12 current-only keys relative to the preceding 6,200-row text capture; all original failure keys remain covered. No comparator threshold changed. The separate complete deny run passed in 10 minutes 25 seconds: 16 scenarios, 168 members, 18,407 successful texture candidates, 1,777 Skia CPU recoveries and zero scenario errors, failed candidates or Cairo materialization causes. Explicit loader reports verified 0/199 traced imports reached, zero denied attempts, readable process maps and no libcairo mapping. Both runs used the unit/probe wrapper SHA-256 `c133e898b9a5f46d74c6780de4e9579327006ede200695146a44f27f0ddb0219`.
+
+Existing engine final-composition/blit GL errors and Pattern finalization notices remain in the logs. This completes the measured font-selection correction loop. Healthy font-cache/reference identity, broader font matrices/platforms, formats and foreign native pointer contracts remain open; universal API coverage requires the separate current-member inventory.

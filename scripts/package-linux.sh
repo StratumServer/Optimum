@@ -273,6 +273,17 @@ cp -f "$MOD_OUT/Optimum.GameContent.dll" "$STAGE_DIR/"
 cp -f "$MOD_OUT/VSEssentials.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSSurvivalMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
+cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/"
+cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/CairoSharp.dll"
+
+# 5aa. Overlay drop-in native Cairo shim (libcairo.so.2) if available
+if [[ -f "$REPO_ROOT/tools/cairo-native-shim/Makefile" ]]; then
+    make -C "$REPO_ROOT/tools/cairo-native-shim" all
+    if [[ -f "$REPO_ROOT/tools/cairo-native-shim/libcairo.so.2" ]]; then
+        cp -f "$REPO_ROOT/tools/cairo-native-shim/libcairo.so.2" "$STAGE_DIR/Lib/"
+        (cd "$STAGE_DIR/Lib" && ln -sf libcairo.so.2 libcairo.so && ln -sf libcairo.so.2 libcairo.so.2.11804.4)
+    fi
+fi
 
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
@@ -288,12 +299,8 @@ cp -f "$MOD_OUT/VSSurvivalMod.dll" "$DONOR_DIR/VSSurvivalMod.Donor.dll"
 # Vanilla mods as baseline for mod patching.
 cp -f "$VANILLA_DIR/Mods/VSEssentials.dll" "$VANILLA_MOD_DIR/"
 cp -f "$VANILLA_DIR/Mods/VSSurvivalMod.dll" "$VANILLA_MOD_DIR/"
-# cairo-sharp.dll is intentionally NOT overlaid: Cairo/wrapper carries no Optimum patches (source
-# is byte-identical to the vanilla decompile), so rebuilding it only introduces a different
-# compiler/SDK's codegen with no behavior change. That recompiled DLL was shipped in 0.2.7 and
-# earlier and caused subtle glyph-hinting differences on Linux (see
-# docs/bugs/linux-font-hinting-review-2026-07-14.md); leave the pristine vanilla copy already
-# staged in step 4 in place so text rendering matches upstream exactly.
+# The Cairo wrapper is rebuilt with Optimum's Skia recorder. Keep the Linux shell package aligned
+# with the PowerShell package and ship the patched assembly required by the recorder.
 
 # 5b. Overlay optimized shaders.
 SHADER_SRC="$REPO_ROOT/sources/shaders"

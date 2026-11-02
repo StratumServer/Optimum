@@ -1,0 +1,81 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/TextLinkComponent.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/TextLinkComponent.cs
+index 546c8b5..9412539 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/TextLinkComponent.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/Richtext/TextLinkComponent.cs
+@@ -78,43 +78,46 @@ namespace Vintagestory.API.Client
+ 
+                 rightMostX = Math.Max(rightMostX, line.Bounds.X + line.Bounds.Width);
+                 bottomMostY = Math.Max(bottomMostY, line.Bounds.Y + line.Bounds.Height);
+             }
+ 
+-            ImageSurface surface = new ImageSurface(Format.Argb32, (int)(rightMostX - leftMostX), (int)(bottomMostY - topMostY));
+-            Context ctx = new Context(surface);
+-            ctx.SetSourceRGBA(0, 0, 0, 0);
+-            ctx.Paint();
+-
+-            ctx.Save();
+-            Matrix m = ctx.Matrix;
+-            m.Translate((int)-leftMostX, (int)-topMostY);
+-            ctx.Matrix = m;
+-            
++            int width = (int)(rightMostX - leftMostX);
++            int height = (int)(bottomMostY - topMostY);
+             CairoFont normalFont = this.Font;
++            CairoFont hoverFont = normalFont.Clone();
++            hoverFont.Color[0] = Math.Min(1, hoverFont.Color[0] * 1.2);
++            hoverFont.Color[1] = Math.Min(1, hoverFont.Color[1] * 1.2);
++            hoverFont.Color[2] = Math.Min(1, hoverFont.Color[2] * 1.2);
+ 
+-            ComposeFor(ctx, surface);
+-            api.Gui.LoadOrUpdateCairoTexture(surface, false, ref normalText);
++            ComposeTexture(normalFont, leftMostX, topMostY, width, height, ref normalText);
++            ComposeTexture(hoverFont, leftMostX, topMostY, width, height, ref hoverText);
++        }
+ 
+-            ctx.Operator = Operator.Clear;
+-            ctx.SetSourceRGBA(0, 0, 0, 0);
+-            ctx.Paint();
+-            ctx.Operator = Operator.Over;
+-
+-            this.Font = this.Font.Clone();
+-            this.Font.Color[0] = Math.Min(1, this.Font.Color[0] * 1.2);
+-            this.Font.Color[1] = Math.Min(1, this.Font.Color[1] * 1.2);
+-            this.Font.Color[2] = Math.Min(1, this.Font.Color[2] * 1.2);
+-            ComposeFor(ctx, surface);
+-            this.Font = normalFont;
+-
+-            ctx.Restore();
+-            
+-            api.Gui.LoadOrUpdateCairoTexture(surface, false, ref hoverText);
+-            
+-            surface.Dispose();
+-            ctx.Dispose();
++        void ComposeTexture(CairoFont font, double left, double top, int width, int height, ref LoadedTexture texture)
++        {
++            ImageSurface surface = new ImageSurface(Format.Argb32, width, height);
++            Context ctx = new Context(surface);
++            CairoFont originalFont = this.Font;
++            try
++            {
++                ctx.SetSourceRGBA(0, 0, 0, 0);
++                ctx.Paint();
++                ctx.Save();
++                Matrix matrix = ctx.Matrix;
++                matrix.Translate((int)-left, (int)-top);
++                ctx.Matrix = matrix;
++                this.Font = font;
++                ComposeFor(ctx, surface);
++                ctx.Restore();
++                api.Gui.LoadOrUpdateCairoTexture(surface, false, ref texture);
++            }
++            finally
++            {
++                this.Font = originalFont;
++                ctx.Dispose();
++                surface.Dispose();
++            }
+         }
+ 
+         void ComposeFor(Context ctx, ImageSurface surface)
+         { 
+             textUtil.DrawMultilineText(ctx, Font, Lines, EnumTextOrientation.Left);

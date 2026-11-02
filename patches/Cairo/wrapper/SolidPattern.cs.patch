@@ -1,0 +1,74 @@
+diff --git a/Cairo/wrapper/SolidPattern.cs b/Cairo/wrapper/SolidPattern.cs
+index ee0010c..ed41229 100644
+--- a/Cairo/wrapper/SolidPattern.cs
++++ b/Cairo/wrapper/SolidPattern.cs
+@@ -38,35 +38,62 @@ namespace Cairo {
+ 		internal SolidPattern (IntPtr handle, bool owned) : base (handle, owned)
+ 		{
+ 		}
+ 
+ 		public SolidPattern (Color color)
+-			: base (NativeMethods.cairo_pattern_create_rgba (color.R, color.G, color.B, color.A), true)
++			: base (true)
+ 		{
++			Initialize(color);
+ 		}
+ 
+ 		public SolidPattern (double r, double g, double b)
+-			: base (NativeMethods.cairo_pattern_create_rgb (r, g, b), true)
++			: base (true)
+ 		{
++			Initialize(new Color(r, g, b, 1), true);
+ 		}
+ 
+ 		public SolidPattern (double r, double g, double b, double a)
+-			: base (NativeMethods.cairo_pattern_create_rgba (r, g, b, a), true)
++			: base (true)
+ 		{
++			Initialize(new Color(r, g, b, a));
+ 		}
+ 
+ 		public SolidPattern (Color color, bool solid)
+-			: base (solid
+-					? NativeMethods.cairo_pattern_create_rgb (color.R, color.G, color.B)
+-					: NativeMethods.cairo_pattern_create_rgba (color.R, color.G, color.B, color.A),
+-				true)
++			: base (true)
+ 		{
++			Initialize(solid ? new Color(color.R, color.G, color.B, 1) : color, solid);
++		}
++
++		internal SolidPattern(Color color, bool forceManaged, bool unused) : base(true)
++		{
++			if (forceManaged) {
++				IsManagedSolidPattern = true;
++				ManagedSolidColor = color;
++				ManagedSolidExtend = Extend.None;
++				ManagedSolidMatrix = new Matrix();
++			} else Initialize(color);
++		}
++
++		void Initialize(Color color, bool rgb = false)
++		{
++			if (Surface.ManagedApiMode) {
++				IsManagedSolidPattern = true;
++				ManagedSolidColor = color;
++				ManagedSolidExtend = Extend.None;
++				ManagedSolidMatrix = new Matrix();
++				return;
++			}
++			NativeHandleForRecorder = rgb
++				? NativeMethods.cairo_pattern_create_rgb(color.R, color.G, color.B)
++				: NativeMethods.cairo_pattern_create_rgba(color.R, color.G, color.B, color.A);
++			if (NativeHandleForRecorder != IntPtr.Zero && CairoDebug.Enabled) CairoDebug.OnAllocated(NativeHandleForRecorder);
+ 		}
+ 
+ 		public Color Color {
+ 			get {
+ 				CheckDisposed ();
++				if (IsManagedSolidPattern) return ManagedSolidColor;
+ 				double red, green, blue, alpha;
+ 				NativeMethods.cairo_pattern_get_rgba  (Handle, out red, out green, out blue, out alpha);
+ 				return new Color (red, green, blue, alpha);
+ 			}
+ 		}

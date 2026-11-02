@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Cairo;
 using SkiaSharp;
@@ -11,10 +12,13 @@ internal static class Program
 {
     private const int LogicalWidth = 96;
     private const int TextLogicalWidth = 160;
+    private const int OperatorLogicalWidth = 120;
     private const int LogicalHeight = 72;
     private static readonly double[] Scales = [1.0, 1.5, 2.0];
     private const string TextSample = "Café Ångström";
     private static string? selectedFontFile;
+    private static string? temporaryFontConfig;
+    private static string? originalFontConfig;
 
     private sealed record RenderResult(PixelImage Image, object? Metrics);
 
@@ -25,17 +29,49 @@ internal static class Program
             WriteApiManifest(System.IO.Path.GetFullPath(args[1]));
             return 0;
         }
+        if (args.Length == 2 && args[0] == "--native-import-manifest")
+        {
+            WriteNativeImportManifest(System.IO.Path.GetFullPath(args[1]));
+            return 0;
+        }
+        if (args.Length >= 3 && args[0] == "--native-import-references")
+        {
+            NativeImportUsageManifest.Write(
+                System.IO.Path.GetFullPath(args[1]),
+                typeof(Context).Assembly.Location,
+                args.Skip(2).Select(System.IO.Path.GetFullPath));
+            return 0;
+        }
+        if (args.Length >= 3 && args[0] == "--cairo-callsite-ledger")
+        {
+            return CairoCallsiteLedger.Run(args.Skip(1).ToArray());
+        }
+        string? bundledFontDirectory = null;
+        string output;
+        if (args.Length == 3 && args[0] == "--font-matrix")
+        {
+            bundledFontDirectory = System.IO.Path.GetFullPath(args[1]);
+            output = System.IO.Path.GetFullPath(args[2]);
+        }
+        else
+        {
+            output = args.Length > 0 ? System.IO.Path.GetFullPath(args[0]) : System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-issue-130-parity");
+        }
         if (!OperatingSystem.IsLinux())
         {
             Console.Error.WriteLine("This first-slice harness currently supports Linux only; native library names must be verified before adding other platforms.");
             return 1;
         }
-        NativeLibrary.SetDllImportResolver(typeof(Context).Assembly, ResolveCairo);
-        var output = args.Length > 0 ? System.IO.Path.GetFullPath(args[0]) : System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-issue-130-parity");
+        try {
+            NativeLibrary.SetDllImportResolver(typeof(Context).Assembly, ResolveCairo);
+        } catch (InvalidOperationException) {
+            // The Optimum cairo-sharp wrapper installs its own deny/allow resolver in a module initializer.
+        }
         Directory.CreateDirectory(output);
 
         try
         {
+            if (bundledFontDirectory is not null) ConfigureFontConfig(bundledFontDirectory);
             var results = new List<object>();
             var cairoReferenceDeterministic = true;
             var fontInfo = ResolveFontInfo();
@@ -51,18 +87,22 @@ internal static class Program
                 var crossPixelExact = PixelComparator.Compare(cairo.Image, skia.Image, threshold: 0);
                 WriteDifference(System.IO.Path.Combine(output, $"{name}-difference.png"), cairo.Image, skia.Image);
                 var operatorResults = scene == "porter-duff"
-                    ? Enumerable.Range(0, 6).Select(i =>
+                    ? Enumerable.Range(0, OperatorFixtures.Length).Select(i =>
                     {
-                        var logicalX = 4 + i * 15;
-                        var cairoCell = CropLogical(cairo.Image, logicalX, 8, 14, 56, scale);
-                        var skiaCell = CropLogical(skia.Image, logicalX, 8, 14, 56, scale);
+                        var fixture = OperatorFixtures[i];
+                        var logicalX = OperatorX(i);
+                        var cairoCell = CropLogical(cairo.Image, logicalX, 8, 12, 56, scale);
+                        var cairoRepeatCell = CropLogical(cairoRepeat.Image, logicalX, 8, 12, 56, scale);
+                        var skiaCell = CropLogical(skia.Image, logicalX, 8, 12, 56, scale);
                         return new
                         {
-                            operation = new[] { "Over", "Source", "In", "Out", "Atop", "Xor" }[i],
+                            operation = fixture.CairoOperator,
+                            skiaBlendMode = fixture.SkiaBlendMode.ToString(),
                             cairoSample = SampleRgba(cairo.Image, (int)((logicalX + 7) * scale), (int)((8 + 30) * scale)),
                             skiaSample = SampleRgba(skia.Image, (int)((logicalX + 7) * scale), (int)((8 + 30) * scale)),
                             cairoBackgroundSample = SampleRgba(cairo.Image, (int)((logicalX + 1) * scale), (int)((8 + 2) * scale)),
                             skiaBackgroundSample = SampleRgba(skia.Image, (int)((logicalX + 1) * scale), (int)((8 + 2) * scale)),
+                            cairoSelfComparison = PixelComparator.Compare(cairoCell, cairoRepeatCell),
                             comparison = PixelComparator.Compare(cairoCell, skiaCell, threshold: 1),
                             pixelExactComparison = PixelComparator.Compare(cairoCell, skiaCell, threshold: 0)
                         };
@@ -91,6 +131,9 @@ internal static class Program
                         Console.WriteLine($"  {item.operation}: max {item.comparison.MaxChannelDelta}, {item.comparison.PixelsOverThreshold}/{item.comparison.PixelsCompared} pixels >1, RMS {item.comparison.RmsChannelError:F4}, alpha RMS {item.comparison.RmsAlphaError:F4}; exact mismatches {item.pixelExactComparison.PixelsOverThreshold}/{item.pixelExactComparison.PixelsCompared}.");
             }
 
+            var bundledFontMatrix = bundledFontDirectory is null
+                ? null
+                : RenderBundledFontMatrix(bundledFontDirectory, output);
             var report = new
             {
                 schemaVersion = 2,
@@ -108,18 +151,162 @@ internal static class Program
                 comparisonPolicy = "Cairo repeat-render equality is required; Cairo/Skia pixel deltas are diagnostic and do not fail the run. Functional behavior requires separate layout and live-GUI validation.",
                 cairoReferenceDeterministic,
                 selectedFont = fontInfo,
+                bundledFontMatrix,
                 results,
                 exitMeaning = "2 = Cairo reference renders differ; 1 = setup/render failure; 0 = artifacts generated and Cairo reference is deterministic (cross-backend deltas are informational)"
             };
             File.WriteAllText(System.IO.Path.Combine(output, "metrics.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
             Console.WriteLine($"Artifacts and metrics: {output}");
+            DeleteTemporaryFontConfig();
             return cairoReferenceDeterministic ? 0 : 2;
         }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Parity harness failed: {ex}");
+            DeleteTemporaryFontConfig();
             return 1;
         }
+    }
+
+    private static void ConfigureFontConfig(string fontDirectory)
+    {
+        if (!Directory.Exists(fontDirectory)) throw new DirectoryNotFoundException($"Bundled font directory does not exist: {fontDirectory}");
+        string escaped = System.Security.SecurityElement.Escape(fontDirectory) ?? throw new InvalidOperationException("Could not encode the font directory for Fontconfig.");
+        temporaryFontConfig = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"optimum-fontconfig-{Guid.NewGuid():N}.conf");
+        File.WriteAllText(temporaryFontConfig, $"<?xml version=\"1.0\"?><fontconfig><include>/etc/fonts/fonts.conf</include><dir>{escaped}</dir></fontconfig>");
+        originalFontConfig = Environment.GetEnvironmentVariable("FONTCONFIG_FILE");
+        Environment.SetEnvironmentVariable("FONTCONFIG_FILE", temporaryFontConfig);
+    }
+
+    private static void DeleteTemporaryFontConfig()
+    {
+        if (temporaryFontConfig is null) return;
+        Environment.SetEnvironmentVariable("FONTCONFIG_FILE", originalFontConfig);
+        try { File.Delete(temporaryFontConfig); } catch { }
+        temporaryFontConfig = null;
+        originalFontConfig = null;
+    }
+
+    private static object RenderBundledFontMatrix(string fontDirectory, string outputDirectory)
+    {
+        string[] files = Directory.GetFiles(fontDirectory, "*.ttf", SearchOption.TopDirectoryOnly)
+            .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (files.Length == 0) throw new InvalidOperationException($"No TTF fonts were found in '{fontDirectory}'.");
+        var entries = new List<object>();
+        foreach (string file in files)
+        {
+            string stem = System.IO.Path.GetFileNameWithoutExtension(file);
+            int separator = stem.LastIndexOf('-');
+            if (separator <= 0 || separator == stem.Length - 1) throw new InvalidOperationException($"Expected bundled font filename Family-Style.ttf, got '{stem}'.");
+            string family = stem[..separator];
+            string style = stem[(separator + 1)..];
+            FontSlant slant = style.Contains("Italic", StringComparison.OrdinalIgnoreCase) ? FontSlant.Italic : FontSlant.Normal;
+            FontWeight weight = style.Contains("Bold", StringComparison.OrdinalIgnoreCase) ? FontWeight.Bold : FontWeight.Normal;
+            string requestedStyle = weight == FontWeight.Bold
+                ? (slant == FontSlant.Italic ? "Bold Italic" : "Bold")
+                : (slant == FontSlant.Italic ? "Italic" : "Regular");
+            string matchedFile = RunTool("fc-match", "-f", "%{file}", $"{family}:style={requestedStyle}");
+            if (!string.Equals(System.IO.Path.GetFullPath(matchedFile), System.IO.Path.GetFullPath(file), StringComparison.Ordinal))
+                throw new InvalidOperationException($"Fontconfig resolved {family} {requestedStyle} to '{matchedFile}', expected '{file}'.");
+
+            foreach (double scale in Scales)
+            {
+                int width = (int)Math.Ceiling(TextLogicalWidth * scale);
+                int height = (int)Math.Ceiling(LogicalHeight * scale);
+                string safeName = $"font-{family}-{style}-scale-{scale:0.0}".Replace('.', '_');
+                string cairoPath = System.IO.Path.Combine(outputDirectory, $"{safeName}-cairo.png");
+                string skiaPath = System.IO.Path.Combine(outputDirectory, $"{safeName}-skia.png");
+                var cairo = RenderBundledCairoText(file, family, slant, weight, scale, width, height, cairoPath);
+                var skia = RenderBundledSkiaText(file, scale, width, height, skiaPath);
+                var comparison = PixelComparator.Compare(cairo.Image, skia.Image, threshold: 1);
+                entries.Add(new
+                {
+                    file = System.IO.Path.GetFileName(file), family, style, scale,
+                    cairoMetrics = cairo.Metrics,
+                    skiaMetrics = skia.Metrics,
+                    cairoVsSkia = comparison
+                });
+                Console.WriteLine($"font {family} {style} @ {scale:0.0}: Cairo/Skia max {comparison.MaxChannelDelta}, {comparison.PixelsOverThreshold}/{comparison.PixelsCompared} pixels >1, RMS {comparison.RmsChannelError:F4}.");
+            }
+        }
+        return new { fontCount = files.Length, fontScaleCases = entries.Count, entries };
+    }
+
+    private static (PixelImage Image, object Metrics) RenderBundledCairoText(string fontFile, string family, FontSlant slant, FontWeight weight, double scale, int width, int height, string path)
+    {
+        using var surface = new ImageSurface(Cairo.Format.Argb32, width, height);
+        var rows = new List<object>();
+        using (var context = new Context(surface))
+        {
+            context.Scale(scale, scale);
+            context.SelectFontFace(family, slant, weight);
+            context.SetFontSize(17);
+            context.SetSourceRGBA(.12, .18, .24, 1);
+            context.Rectangle(0, 0, TextLogicalWidth, LogicalHeight);
+            context.Fill();
+            context.SetSourceRGBA(.08, .16, .36, 1);
+            string[] samples = [TextSample, "e\u0301", "fallback 漢字"];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                TextExtents extents = context.TextExtents(samples[i]);
+                FontExtents fontExtents = context.FontExtents;
+                context.MoveTo(7, 24 + i * 20);
+                context.ShowText(samples[i]);
+                rows.Add(new
+                {
+                    text = samples[i], extents.XBearing, extents.YBearing, extents.Width, extents.Height,
+                    extents.XAdvance, extents.YAdvance, fontAscent = fontExtents.Ascent,
+                    fontDescent = fontExtents.Descent, fontHeight = fontExtents.Height,
+                    codepointAdvances = samples[i].EnumerateRunes().Select(rune => new
+                    {
+                        codepoint = rune.Value,
+                        advance = context.TextExtents(rune.ToString()).XAdvance
+                    }).ToArray()
+                });
+            }
+        }
+        surface.Flush();
+        surface.WriteToPng(path);
+        return (PixelComparator.FromCairoArgb32(width, height, surface.Stride, surface.Data), new { requestedFontFile = fontFile, rows });
+    }
+
+    private static (PixelImage Image, object Metrics) RenderBundledSkiaText(string fontFile, double scale, int width, int height, string path)
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        var rows = new List<object>();
+        using (var canvas = new SKCanvas(bitmap))
+        using (var paint = new SKPaint { IsAntialias = true })
+        using (var typeface = SKTypeface.FromFile(fontFile) ?? throw new InvalidOperationException($"Skia could not load '{fontFile}'."))
+        using (var font = new SKFont(typeface, 17))
+        {
+            canvas.Clear(SKColors.Transparent);
+            canvas.Scale((float)scale);
+            paint.Color = ToColor((.12, .18, .24, 1));
+            canvas.DrawRect(0, 0, TextLogicalWidth, LogicalHeight, paint);
+            paint.Color = ToColor((.08, .16, .36, 1));
+            string[] samples = [TextSample, "e\u0301", "fallback 漢字"];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                rows.Add(new
+                {
+                    text = samples[i], advance = font.MeasureText(samples[i], paint),
+                    metrics = new { font.Metrics.Ascent, font.Metrics.Descent, font.Metrics.Leading },
+                    codepointAdvances = samples[i].EnumerateRunes().Select(rune => new
+                    {
+                        codepoint = rune.Value,
+                        advance = font.MeasureText(rune.ToString(), paint)
+                    }).ToArray()
+                });
+                canvas.DrawText(samples[i], 7, 24 + i * 20, font, paint);
+            }
+            canvas.Flush();
+        }
+        using (var image = SKImage.FromBitmap(bitmap))
+        using (var data = image.Encode(SKEncodedImageFormat.Png, 100)) File.WriteAllBytes(path, data.ToArray());
+        var bytes = new byte[bitmap.RowBytes * bitmap.Height];
+        Marshal.Copy(bitmap.GetPixels(), bytes, 0, bytes.Length);
+        return (PixelComparator.FromSkiaBgraPremultiplied(width, height, bitmap.RowBytes, bytes), new { fontFile, rows });
     }
 
     private static RenderResult RenderCairo(string scene, double scale, string path)
@@ -187,7 +374,7 @@ internal static class Program
                 return null;
             case "porter-duff":
                 DrawCairoOperators(context);
-                return new { operators = new[] { "Over", "Source", "In", "Out", "Atop", "Xor" } };
+                return new { operators = OperatorFixtures.Select(fixture => new { cairo = fixture.CairoOperator, skia = fixture.SkiaBlendMode.ToString() }) };
             case "text":
                 context.SetSourceRGBA(0.12, 0.18, 0.24, 1);
                 context.Rectangle(0, 0, TextLogicalWidth, LogicalHeight);
@@ -242,7 +429,7 @@ internal static class Program
                 return null;
             case "porter-duff":
                 DrawSkiaOperators(canvas, paint, scale, width, height);
-                return new { operators = new[] { "Over", "Source", "In", "Out", "Atop", "Xor" } };
+                return new { operators = OperatorFixtures.Select(fixture => new { cairo = fixture.CairoOperator, skia = fixture.SkiaBlendMode.ToString() }) };
             case "text":
                 paint.Color = ToColor((0.12, 0.18, 0.24, 1));
                 canvas.DrawRect(0, 0, TextLogicalWidth, LogicalHeight, paint);
@@ -270,19 +457,36 @@ internal static class Program
         rect(52, 10, 12, 46, (0.25, 0.4, 0.95, 0.35));
     }
 
+    private sealed record OperatorFixture(string CairoOperator, Operator Operator, SKBlendMode SkiaBlendMode);
+
+    private static readonly OperatorFixture[] OperatorFixtures =
+    [
+        new("Over", Operator.Over, SKBlendMode.SrcOver),
+        new("Source", Operator.Source, SKBlendMode.Src),
+        new("In", Operator.In, SKBlendMode.SrcIn),
+        new("Out", Operator.Out, SKBlendMode.SrcOut),
+        new("Atop", Operator.Atop, SKBlendMode.SrcATop),
+        new("Xor", Operator.Xor, SKBlendMode.Xor),
+        new("Clear", Operator.Clear, SKBlendMode.Clear),
+        new("DestOver", Operator.DestOver, SKBlendMode.DstOver),
+        new("HardLight", Operator.HardLight, SKBlendMode.HardLight)
+    ];
+
+    private static int OperatorX(int index) => 4 + index * 13;
+
     private static void DrawCairoOperators(Context context)
     {
-        var operators = new[] { Operator.Over, Operator.Source, Operator.In, Operator.Out, Operator.Atop, Operator.Xor };
-        for (var i = 0; i < operators.Length; i++)
+        for (var i = 0; i < OperatorFixtures.Length; i++)
         {
-            var x = 4 + i * 15;
+            var fixture = OperatorFixtures[i];
+            var x = OperatorX(i);
             context.Save();
-            context.Rectangle(x, 8, 14, 56);
+            context.Rectangle(x, 8, 12, 56);
             context.Clip();
             context.Operator = Operator.Over;
             context.SetSourceRGBA(0.12, 0.18, 0.24, 1);
             context.Paint();
-            context.Operator = operators[i];
+            context.Operator = fixture.Operator;
             context.SetSourceRGBA(0.9, 0.2, 0.12, 0.65);
             context.Rectangle(x + 2.25, 18, 9.5, 26);
             context.Fill();
@@ -292,11 +496,12 @@ internal static class Program
 
     private static void DrawSkiaOperators(SKCanvas canvas, SKPaint paint, double scale, int width, int height)
     {
-        var blends = new[] { SKBlendMode.SrcOver, SKBlendMode.Src, SKBlendMode.SrcIn, SKBlendMode.SrcOut, SKBlendMode.SrcATop, SKBlendMode.Xor };
-        for (var i = 0; i < blends.Length; i++)
+        for (var i = 0; i < OperatorFixtures.Length; i++)
         {
-            var x = 4 + i * 15;
-            if (blends[i] is SKBlendMode.SrcIn or SKBlendMode.SrcOut)
+            var fixture = OperatorFixtures[i];
+            var blend = fixture.SkiaBlendMode;
+            var x = OperatorX(i);
+            if (blend is SKBlendMode.SrcIn or SKBlendMode.SrcOut)
             {
                 // Cairo's IN and OUT are unbounded by the source mask. Build the transparent
                 // source independently, then apply the clip exactly once during composition.
@@ -311,22 +516,22 @@ internal static class Program
 
                 canvas.Save();
                 canvas.ResetMatrix();
-                canvas.ClipRect(new SKRect((float)(x * scale), (float)(8 * scale), (float)((x + 14) * scale), (float)(64 * scale)), SKClipOperation.Intersect, antialias: true);
+                canvas.ClipRect(new SKRect((float)(x * scale), (float)(8 * scale), (float)((x + 12) * scale), (float)(64 * scale)), SKClipOperation.Intersect, antialias: true);
                 using (var backgroundPaint = new SKPaint { BlendMode = SKBlendMode.SrcOver, Color = ToColor((0.12, 0.18, 0.24, 1)) })
                     canvas.DrawPaint(backgroundPaint);
-                using (var compositePaint = new SKPaint { BlendMode = blends[i] })
+                using (var compositePaint = new SKPaint { BlendMode = blend })
                     canvas.DrawBitmap(sourceBitmap, 0, 0, compositePaint);
                 canvas.Restore();
                 continue;
             }
 
             canvas.Save();
-            canvas.ClipRect(new SKRect(x, 8, x + 14, 64), SKClipOperation.Intersect, antialias: true);
+            canvas.ClipRect(new SKRect(x, 8, x + 12, 64), SKClipOperation.Intersect, antialias: true);
             paint.BlendMode = SKBlendMode.SrcOver;
             paint.Color = ToColor((0.12, 0.18, 0.24, 1));
             canvas.DrawPaint(paint);
             paint.Color = ToColor((0.9, 0.2, 0.12, 0.65));
-            paint.BlendMode = blends[i];
+            paint.BlendMode = blend;
             canvas.DrawRect(x + 2.25f, 18, 9.5f, 26, paint);
             canvas.Restore();
         }
@@ -343,7 +548,12 @@ internal static class Program
             alpha);
     }
 
-    private static int LogicalWidthFor(string scene) => scene == "text" ? TextLogicalWidth : LogicalWidth;
+    private static int LogicalWidthFor(string scene) => scene switch
+    {
+        "text" => TextLogicalWidth,
+        "porter-duff" => OperatorLogicalWidth,
+        _ => LogicalWidth
+    };
 
     private static byte CairoByte(double value) => (byte)(Math.Clamp((int)Math.Floor(Math.Clamp(value, 0, 1) * 65535 + 0.5), 0, 65535) >> 8);
 
@@ -426,6 +636,45 @@ internal static class Program
         Console.WriteLine($"Wrote public/protected ABI inventory: {exportedTypes.Length} types, {members.Count} members, assembly {assembly.GetName().FullName}.");
     }
 
+    private static void WriteNativeImportManifest(string path)
+    {
+        var assembly = typeof(Context).Assembly;
+        var imports = assembly.GetTypes()
+            .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
+            .Where(method => (method.Attributes & MethodAttributes.PinvokeImpl) != 0)
+            .Select(method =>
+            {
+                var import = method.GetCustomAttribute<DllImportAttribute>();
+                return new
+                {
+                    declaringType = method.DeclaringType?.FullName,
+                    signature = MemberSignature(method),
+                    library = import?.Value,
+                    entryPoint = import?.EntryPoint ?? method.Name,
+                    callingConvention = import?.CallingConvention.ToString(),
+                    characterSet = import?.CharSet.ToString(),
+                    exactSpelling = import?.ExactSpelling
+                };
+            })
+            .OrderBy(import => import.library, StringComparer.Ordinal)
+            .ThenBy(import => import.entryPoint, StringComparer.Ordinal)
+            .ThenBy(import => import.declaringType, StringComparer.Ordinal)
+            .ThenBy(import => import.signature, StringComparer.Ordinal)
+            .ToArray();
+
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            generatedUtc = DateTimeOffset.UtcNow,
+            assemblyIdentity = assembly.GetName().FullName,
+            importMethodCount = imports.Length,
+            distinctLibraryEntryPointCount = imports.Select(import => (import.library, import.entryPoint)).Distinct().Count(),
+            imports
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"Wrote native import inventory: {imports.Length} methods, {imports.Select(import => (import.library, import.entryPoint)).Distinct().Count()} distinct library entry points.");
+    }
+
     private static bool IsPublicOrProtected(MemberInfo member) => member switch
     {
         MethodBase method => method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly,
@@ -458,15 +707,58 @@ internal static class Program
     {
         var name = member.Name;
         var declaringType = member.DeclaringType?.Name ?? "";
-        if (name.Contains("Data", StringComparison.OrdinalIgnoreCase) || name is "Handle" or "GetTarget" or "SetTarget" or "GetSource" or "CopyPath" or "AppendPath")
+        var declaringNamespace = member.DeclaringType?.Namespace ?? "";
+        var isValueType = member.DeclaringType?.IsValueType == true;
+        var isEnum = member.DeclaringType?.IsEnum == true;
+
+        // 1. Materialization boundary: direct pixel/buffer export, handles, native pointers, platform windowing surfaces, P/Invokes
+        if (name.Contains("Data", StringComparison.OrdinalIgnoreCase) ||
+            name is "Handle" or "Pointer" or "GetTarget" or "SetTarget" or "GetSource" or "CopyPath" or "AppendPath" or "Lookup" or "FromBitmap" or "WriteToPng" or "CheckpointManagedPixels" or "EnsureNativeHandle" ||
+            name.StartsWith("get_Handle", StringComparison.Ordinal) || name.StartsWith("set_Handle", StringComparison.Ordinal) ||
+            name.StartsWith("get_Pointer", StringComparison.Ordinal) || name.StartsWith("set_Pointer", StringComparison.Ordinal))
             return "materialization-boundary";
-        if (name.Contains("Extents", StringComparison.OrdinalIgnoreCase) || name.Contains("Measure", StringComparison.OrdinalIgnoreCase) || name.StartsWith("In", StringComparison.Ordinal))
+
+        if (declaringType is "DirectFBSurface" or "GlitzSurface" or "Win32Surface" or "SvgNativeMethods")
+            return "materialization-boundary";
+
+        if (declaringType is "XlibSurface" or "XcbSurface" &&
+            (member is ConstructorInfo || name is "SetDrawable" or "Depth" or "Display" or "Drawable" or "Visual" or "Screen" || name.StartsWith("get_", StringComparison.Ordinal)))
+            return "materialization-boundary";
+
+        if (declaringNamespace == "Cairo.Freetype" && declaringType is "Face" or "Library" or "Glyph" or "FreeTypeHelper")
+            return "materialization-boundary";
+
+        if (member is ConstructorInfo ctor && ctor.GetParameters().Any(p => p.ParameterType == typeof(IntPtr)) &&
+            declaringType is "Surface" or "Context" or "FontFace" or "ScaledFont" or "Gradient")
+            return "materialization-boundary";
+
+        // 2. Measurement: extents, metrics, hits, point-in-geometry checks
+        if (name.Contains("Extents", StringComparison.OrdinalIgnoreCase) || name.Contains("Measure", StringComparison.OrdinalIgnoreCase) ||
+            name.StartsWith("In", StringComparison.Ordinal) || name is "ContainsPoint" or "ContainsRectangle")
             return "measurement";
-        if (member is FieldInfo || member.DeclaringType?.IsEnum == true || member is PropertyInfo && declaringType is not "Context")
+
+        if (declaringType is "FontExtents" or "TextExtents" && !name.StartsWith("op_", StringComparison.Ordinal) && name is not "Equals" and not "GetHashCode")
+            return "measurement";
+
+        // 3. Metadata: fields, enums, value structs, options, info, and property accessors
+        if (member is FieldInfo || isEnum || isValueType)
             return "metadata";
-        if (declaringType is "Context" or "Path" or "Matrix" or "Pattern" || member is MethodInfo method && method.Name.StartsWith("set_", StringComparison.Ordinal))
-            return "recordable-candidate";
-        return "native-only-pending";
+
+        if (declaringType is "FontOptions" or "Device" or "CairoAPI" or "CairoDebug")
+            return "metadata";
+
+        if (declaringNamespace == "Cairo.Freetype" && declaringType is "BBox" or "Bitmap" or "BitmapGlyph" or "Generic" or "GlyphClass" or "GlyphRec" or "ListRec" or "Vector")
+            return "metadata";
+
+        if (member is PropertyInfo && declaringType is not "Context")
+            return "metadata";
+
+        if (name.StartsWith("get_", StringComparison.Ordinal) &&
+            name is "get_Format" or "get_Width" or "get_Height" or "get_Stride" or "get_Status" or "get_SurfaceType" or "get_Content" or "get_DeviceOffset" or "get_ReferenceCount" or "get_Family" or "get_Slant" or "get_Weight" or "get_FontType" or "get_FontMatrix" or "get_Type" or "get_Filter" or "get_Extend" or "get_Matrix" or "get_ColorStops" or "get_Antialias" or "get_HintStyle" or "get_HintMetrics" or "get_SubpixelOrder")
+            return "metadata";
+
+        // 4. Recordable candidate: all managed recording, paths, surfaces, patterns, filters, drawing operations
+        return "recordable-candidate";
     }
 
     private static string NativeCairoVersion()

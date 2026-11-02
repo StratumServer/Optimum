@@ -124,10 +124,12 @@ public static class ILHook
         }
 
         int inserted = 0;
+        int alreadyHooked = 0;
         foreach (var call in targetCalls)
         {
             if (AlreadyCallsHook(call.Next, hookMethod))
             {
+                alreadyHooked++;
                 continue;
             }
 
@@ -151,7 +153,12 @@ public static class ILHook
         Console.WriteLine($"  HOOKED: {typeName}::{methodName} after {targetCallName} → {hookMethodName} ({inserted} sites)");
         if (inserted == 0)
         {
-            Console.Error.WriteLine($"  HOOK SKIP: all {targetCalls.Count} call sites already contain {hookMethodName}");
+            if (alreadyHooked == targetCalls.Count)
+            {
+                Console.WriteLine($"  HOOK OK: all {targetCalls.Count} call sites already contain {hookMethodName}");
+                return true;
+            }
+            Console.Error.WriteLine($"  HOOK SKIP: could not insert {hookMethodName} at {targetCalls.Count - alreadyHooked} call site(s)");
             return false;
         }
         return true;

@@ -45,11 +45,11 @@ index 05bb9ff..b3276b7 100644
  
 -            if (preventDefault) return dropStacks.ToArray();
 +            if (preventDefault) { _optimumGetDropsDepth--; return dropStacks.ToArray(); }
-+
-+            if (Drops == null) { _optimumGetDropsDepth--; return null; }
  
 -            if (Drops == null) return null;
 -            List<ItemStack> todrop = new List<ItemStack>();
++            if (Drops == null) { _optimumGetDropsDepth--; return null; }
++
 +            List<ItemStack> todrop = reuseLists ? (_optimumBlockDrops ??= new(8)) : new();
 +            if (reuseLists) todrop.Clear();
  

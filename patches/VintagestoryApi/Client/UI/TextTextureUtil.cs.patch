@@ -1,0 +1,26 @@
+diff --git a/VintagestoryApi/Client/UI/TextTextureUtil.cs b/VintagestoryApi/Client/UI/TextTextureUtil.cs
+index 2438945..4d02196 100644
+--- a/VintagestoryApi/Client/UI/TextTextureUtil.cs
++++ b/VintagestoryApi/Client/UI/TextTextureUtil.cs
+@@ -134,18 +134,19 @@ namespace Vintagestory.API.Client
+ 
+ 
+ 
+             font.SetupContext(ctx);
+ 
+-            double fontHeight = font.GetFontExtents().Height;
++            FontExtents fontExtents = font.GetFontExtents();
++            double fontHeight = fontExtents.Height;
+ 
+             string[] lines = text.Split('\n');
+             for (int i = 0; i < lines.Length; i++)
+             {
+                 lines[i] = lines[i].TrimEnd();
+ 
+-                ctx.MoveTo(background.HorPadding, background.VerPadding + ctx.FontExtents.Ascent + i * fontHeight);
++                ctx.MoveTo(background.HorPadding, background.VerPadding + fontExtents.Ascent + i * fontHeight);
+ 
+                 if (font.StrokeWidth > 0)
+                 {
+                     ctx.TextPath(lines[i]);
+ 

@@ -1,5 +1,7 @@
 {
 	"optimum-tab-header": "Ekstra",
+	"optimum-guigpu": "Experimental GPU GUI rendering",
+	"optimum-guigpu-tooltip": "Records static dialog drawing and renders supported operations through Skia on the current OpenGL context. The runtime probe must pass; unsupported or failed recordings fall back to Cairo. Requires restart. Experimental; disabled by default.",
 	"optimum-bgfps": "Arka plan FPS'yi sınırla",
 	"optimum-bgfps-tooltip": "Oyun penceresi odağı kaybettiğinde 30 FPS'ye sınırlar.",
 	"optimum-framepacing": "Düzgün kare hızı",

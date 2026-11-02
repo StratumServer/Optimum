@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementHorizontalTabs.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementHorizontalTabs.cs
+index b9ec490..5c693ef 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementHorizontalTabs.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Controls/GuiElementHorizontalTabs.cs
+@@ -108,11 +108,11 @@ namespace Vintagestory.API.Client
+ 
+             totalWidth = 0;
+ 
+             for (int i = 0; i < tabs.Length; i++)
+             {
+-                tabWidths[i] = (int)(ctx.TextExtents(tabs[i].Name).Width + 2 * padding + 1);
++                tabWidths[i] = (int)(Font.GetTextExtents(tabs[i].Name).Width + 2 * padding + 1);
+                 totalWidth += spacing + tabWidths[i];
+             }
+ 
+             ctx.Dispose();
+             surface.Dispose();

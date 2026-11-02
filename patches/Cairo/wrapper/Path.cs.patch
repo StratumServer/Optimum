@@ -1,0 +1,117 @@
+diff --git a/Cairo/wrapper/Path.cs b/Cairo/wrapper/Path.cs
+index e77359f..fc59fca 100644
+--- a/Cairo/wrapper/Path.cs
++++ b/Cairo/wrapper/Path.cs
+@@ -27,19 +27,33 @@
+ // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ //
+ 
+ using System;
++using System.Runtime.InteropServices;
+ 
+ #nullable disable
+ 
+ namespace Cairo
+ {
+ 
+     public class Path : IDisposable
+ 	{
++		[StructLayout (LayoutKind.Sequential)]
++		struct NativePathHeader
++		{
++			public Status Status;
++			public IntPtr Data;
++			public int Count;
++		}
++
+ 		IntPtr handle = IntPtr.Zero;
++		// A path built by the managed state lives in memory this object owns instead of in Cairo.
++		bool ownsManagedMemory;
++		static readonly int DataOffset = Marshal.OffsetOf<NativePathHeader> (nameof (NativePathHeader.Data)).ToInt32 ();
++		static readonly int CountOffset = Marshal.OffsetOf<NativePathHeader> (nameof (NativePathHeader.Count)).ToInt32 ();
++		static readonly int HeaderSize = (Marshal.SizeOf<NativePathHeader> () + 15) & ~15;
+ 
+ 		internal Path (IntPtr handle)
+ 		{
+ 			if (handle == IntPtr.Zero)
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
+@@ -47,10 +61,63 @@ namespace Cairo
+ 			this.handle = handle;
+ 			if (CairoDebug.Enabled)
+ 				CairoDebug.OnAllocated (handle);
+ 		}
+ 
++		/// <summary>Builds a cairo_path_t-compatible block (header plus data array) from managed path elements.</summary>
++		internal static unsafe Path FromElements (ManagedGraphicsState.PathElement[] elements)
++		{
++			int dataCount = 0;
++			foreach (var element in elements)
++				dataCount += element.Op == ManagedGraphicsState.PathOp.ClosePath ? 1 : element.Op == ManagedGraphicsState.PathOp.CurveTo ? 4 : 2;
++			IntPtr block = (IntPtr)NativeMemory.AllocZeroed ((nuint)(HeaderSize + dataCount * 16));
++			Marshal.WriteInt32 (block, 0, (int)Status.Success);
++			Marshal.WriteIntPtr (block, DataOffset, IntPtr.Add (block, HeaderSize));
++			Marshal.WriteInt32 (block, CountOffset, dataCount);
++			int index = 0;
++			foreach (var element in elements) {
++				IntPtr slot = IntPtr.Add (block, HeaderSize + index * 16);
++				int length = element.Op == ManagedGraphicsState.PathOp.ClosePath ? 1 : element.Op == ManagedGraphicsState.PathOp.CurveTo ? 4 : 2;
++				Marshal.WriteInt32 (slot, 0, (int)element.Op);
++				Marshal.WriteInt32 (slot, 4, length);
++				if (length >= 2) WritePoint (slot, 1, element.X1, element.Y1);
++				if (length >= 4) { WritePoint (slot, 2, element.X2, element.Y2); WritePoint (slot, 3, element.X3, element.Y3); }
++				index += length;
++			}
++			return new Path (block) { ownsManagedMemory = true };
++		}
++
++		internal unsafe Path CloneForManagedRecording ()
++		{
++			if (handle == IntPtr.Zero) throw new ObjectDisposedException (nameof (Path));
++			Status status = (Status)Marshal.ReadInt32 (handle, 0);
++			IntPtr sourceData = Marshal.ReadIntPtr (handle, DataOffset);
++			int dataCount = Marshal.ReadInt32 (handle, CountOffset);
++			if (dataCount < 0 || dataCount > (int.MaxValue - HeaderSize) / 16 || (dataCount > 0 && sourceData == IntPtr.Zero))
++				throw new InvalidOperationException ("The Cairo Path has an invalid data pointer or count.");
++			int dataBytes = checked (dataCount * 16);
++			int length = checked (HeaderSize + dataBytes);
++			IntPtr copy = (IntPtr)NativeMemory.AllocZeroed ((nuint)length);
++			try {
++				Marshal.WriteInt32 (copy, 0, (int)status);
++				Marshal.WriteIntPtr (copy, DataOffset, IntPtr.Add (copy, HeaderSize));
++				Marshal.WriteInt32 (copy, CountOffset, dataCount);
++				if (dataBytes > 0)
++					Buffer.MemoryCopy ((void*)sourceData, (void*)IntPtr.Add (copy, HeaderSize), dataBytes, dataBytes);
++				return new Path (copy) { ownsManagedMemory = true };
++			} catch {
++				NativeMemory.Free ((void*)copy);
++				throw;
++			}
++		}
++
++		static void WritePoint (IntPtr slot, int number, double x, double y)
++		{
++			Marshal.WriteInt64 (slot, number * 16, BitConverter.DoubleToInt64Bits (x));
++			Marshal.WriteInt64 (slot, number * 16 + 8, BitConverter.DoubleToInt64Bits (y));
++		}
++
+ 		~Path ()
+ 		{
+ 			Dispose (false);
+ 		}
+ 
+@@ -68,10 +135,13 @@ namespace Cairo
+ 				CairoDebug.OnDisposed<Path> (handle, disposing);
+ 
+ 			if (handle == IntPtr.Zero)
+ 				return;
+ 
+-			NativeMethods.cairo_path_destroy (handle);
++			if (ownsManagedMemory) {
++				unsafe { NativeMemory.Free ((void*)handle); }
++			} else
++				NativeMethods.cairo_path_destroy (handle);
+ 			handle = IntPtr.Zero;
+ 		}
+ 	}
+ }

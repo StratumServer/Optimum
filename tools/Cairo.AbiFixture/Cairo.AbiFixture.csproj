@@ -6,9 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="cairo-sharp">
+    <Reference Include="cairo-sharp" Condition="'$(CairoReferencePath)' != ''">
       <HintPath>$(CairoReferencePath)</HintPath>
       <Private>true</Private>
     </Reference>
+    <ProjectReference Include="../../Cairo/Cairo.csproj" Condition="'$(CairoReferencePath)' == ''" />
   </ItemGroup>
 </Project>

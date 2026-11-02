@@ -1,0 +1,95 @@
+diff --git a/Cairo/wrapper/SurfacePattern.cs b/Cairo/wrapper/SurfacePattern.cs
+index 0c6dcd5..e90867e 100644
+--- a/Cairo/wrapper/SurfacePattern.cs
++++ b/Cairo/wrapper/SurfacePattern.cs
+@@ -35,35 +35,82 @@ namespace Cairo {
+ 
+ 	public class SurfacePattern : Pattern
+ 	{
+         public int width;
+         public int height;
+-
+-        
++		Filter managedFilter = Filter.Good;
++		internal bool IsManagedSource => IsManagedSurfacePattern;
+ 
+         internal SurfacePattern (IntPtr handle, bool owned) : base (handle, owned)
+ 		{
+ 		}
+ 
+-		public SurfacePattern (ImageSurface surface) : base (NativeMethods.cairo_pattern_create_for_surface (surface.Handle), true)
++		public SurfacePattern (ImageSurface surface) : this ((Surface)surface)
+ 		{
+-            this.width = surface.Width;
+-            this.height = surface.Height;
+ 		}
+ 
+-        public SurfacePattern(Surface surface) : base(NativeMethods.cairo_pattern_create_for_surface(surface.Handle), true)
++        public SurfacePattern(Surface surface) : base(surface.IsManagedOnly)
+         {
++            if (surface.IsManagedOnly)
++            {
++                IsManagedSurfacePattern = true;
++                ManagedSurfaceExtend = Extend.None;
++                ManagedSurfaceMatrix = new Matrix();
++            }
++            else
++            {
++                NativeHandleForRecorder = NativeMethods.cairo_pattern_create_for_surface(surface.NativeHandleForMetadata);
++                if (NativeHandleForRecorder == IntPtr.Zero) throw new InvalidOperationException("Cairo returned a null surface pattern.");
++                if (CairoDebug.Enabled) CairoDebug.OnAllocated(NativeHandleForRecorder);
++            }
++            RecordedSource = surface.AcquireRecordedSource();
++            if (surface is ImageSurface image) { width = image.Width; height = image.Height; }
++        }
++
++        internal SurfacePattern CloneManagedSource()
++        {
++            var clone = new SurfacePattern(width, height, RecordedSource?.Retain());
++            clone.Filter = Filter;
++            clone.Extend = Extend;
++            clone.Matrix = Matrix;
++            return clone;
++        }
++
++        internal SurfacePattern MaterializeNativeForReplay()
++        {
++            if (!IsManagedSource || RecordedSource == null)
++                throw new InvalidOperationException("Only a managed surface pattern with a recorded source can be materialized for native replay.");
++            CairoNativeGuard.RequireNativeAllowed("Managed surface pattern replay");
++            using (SurfaceRecorderSnapshot snapshot = RecordedSource.Capture()) {
++                if (snapshot == null) throw new InvalidOperationException("The recorded surface pattern source is no longer available.");
++                using (var surface = new ImageSurface(snapshot.PixelFormat, snapshot.Width, snapshot.Height)) {
++                    snapshot.ReplayNative(surface.NativeHandleForMetadata);
++                    return new SurfacePattern(surface) { Filter = Filter, Extend = Extend, Matrix = Matrix };
++                }
++            }
++        }
++
++        SurfacePattern(int width, int height, RecordedSurfaceSource source) : base(true)
++        {
++            this.width = width;
++            this.height = height;
++            RecordedSource = source;
++            IsManagedSurfacePattern = true;
++            ManagedSurfaceExtend = Extend.None;
++            ManagedSurfaceMatrix = new Matrix();
+         }
+ 
+         public Filter Filter {
+ 			set {
+ 				CheckDisposed ();
+-				NativeMethods.cairo_pattern_set_filter (Handle, value);
++				if (IsManagedSource) { managedFilter = value; return; }
++				NativeMethods.cairo_pattern_set_filter (NativeHandleForRecorder, value);
+ 			}
+ 			get {
+ 				CheckDisposed ();
+-				return NativeMethods.cairo_pattern_get_filter (Handle);
++				if (IsManagedSource) return managedFilter;
++				return NativeMethods.cairo_pattern_get_filter (NativeHandleForRecorder);
+ 			}
+ 		}
+ 	}
+ }
+ 

@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Client/UI/IconUtil.cs b/VintagestoryApi/Client/UI/IconUtil.cs
+index 236f135..d891c3f 100644
+--- a/VintagestoryApi/Client/UI/IconUtil.cs
++++ b/VintagestoryApi/Client/UI/IconUtil.cs
+@@ -26,11 +26,11 @@ namespace Vintagestory.API.Client
+         public IconRendererDelegate SvgIconSource(IAsset asset)
+         {
+             return (ctx, x, y, w, h, rgba) =>
+             {
+                 if (asset == null) return;
+-                capi.Gui.DrawSvg(asset, ctx.GetTarget() as ImageSurface, x, y, (int)w, (int)h, ColorUtil.FromRGBADoubles(rgba));
++                capi.Gui.DrawSvg(asset, ctx.GetTargetForRecordedDrawing() as ImageSurface, x, y, (int)w, (int)h, ColorUtil.FromRGBADoubles(rgba));
+             };
+         }
+ 
+         /// <summary>
+         /// Creates a new IconUtil instance.

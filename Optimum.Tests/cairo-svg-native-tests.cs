@@ -1,0 +1,145 @@
+using System;
+using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Text;
+using Cairo;
+using NanoSvg;
+using SkiaSharp;
+using Xunit;
+
+public sealed class CairoSvgNativeTests
+{
+	[Fact]
+	public void SolidPathsAreNotLimitedByTheOldRectangleQualificationBudget()
+	{
+		var svg = new StringBuilder("<svg xmlns='http://www.w3.org/2000/svg' width='257' height='4'>");
+		for (int x = 0; x < 257; x++) svg.Append($"<rect x='{x}' width='1' height='4'/>");
+		svg.Append("</svg>");
+		using var picture = RecordedSvgGeometry.Parse(svg.ToString(), 257, 4, 257, 4);
+		Assert.NotNull(picture);
+	}
+
+	[Theory]
+	[InlineData("<circle cx='4' cy='2' r='1.5'/>")]
+	[InlineData("<rect x='.3' y='.7' width='6' height='2'/>")]
+	[InlineData("<rect width='8' height='4' stroke='red' stroke-width='1'/>")]
+	[InlineData("<rect width='8' height='4' fill-opacity='.35'/><rect x='2' width='6' height='4' fill-opacity='.7'/>")]
+	public void SolidPathAndStrokeShapesAreRecordedBySkia(string shapes)
+	{
+		string svg = $"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'>{shapes}</svg>";
+		using var picture = RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4);
+		Assert.NotNull(picture);
+	}
+
+	[Fact]
+	public void NativeViewportScaleDeterminesPixelAlignment()
+	{
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4'/><rect x='3' width='5' height='4'/></svg>";
+		AssertRecordedSvgMatchesNative(svg, 16, 8, 16, 8, 2, 0, 0);
+		AssertRecordedSvgMatchesNative(svg, 12, 6, 12, 6, 1.5f, 0, 0, maxChannelDelta: 3);
+		AssertRecordedSvgMatchesNative(svg, 16, 12, 16, 12, 2, 0, 2);
+	}
+
+	[Fact]
+	public void AlignedPartialSvgCoverageMatchesNativeRasterization()
+	{
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='1' y='1' width='6' height='2' fill='#3585cd'/></svg>";
+		AssertRecordedSvgMatchesNative(svg, 8, 4, 8, 4, 1, 0, 0);
+	}
+
+	[Theory]
+	[InlineData("linear", "pad")]
+	[InlineData("linear", "repeat")]
+	[InlineData("linear", "reflect")]
+	[InlineData("radial", "pad")]
+	[InlineData("radial", "repeat")]
+	[InlineData("radial", "reflect")]
+	public void NativeGradientTableMustNotBecomeAContinuousSkiaGradient(string kind, string spread)
+	{
+		string svg = $"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><defs><{kind}Gradient id='g' spreadMethod='{spread}'><stop offset='0' stop-color='#3585cd'/><stop offset='1' stop-color='#d7396b'/></{kind}Gradient></defs><rect width='8' height='4' fill='url(#g)'/></svg>";
+		var exception = Assert.Throws<NotSupportedException>(() => RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4));
+		Assert.Contains("does not support SVG gradient fills", exception.Message);
+	}
+
+	[Theory]
+	[InlineData(1)]
+	[InlineData(.8)]
+	[InlineData(.35)]
+	[InlineData(.0039)]
+	public void RecordedSolidPaintUsesNativeOpacityAndPremultipliedBytes(double opacity)
+	{
+		foreach (double fillAlpha in new[] { 1.0, .5, .35 }) {
+			string svg = $"<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='8' height='4' fill='#3585cd' fill-opacity='{fillAlpha.ToString(CultureInfo.InvariantCulture)}' opacity='{opacity.ToString(CultureInfo.InvariantCulture)}'/></svg>";
+			byte[] expected = Native(svg);
+			using var picture = RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4);
+			using var bitmap = new SKBitmap(8, 4, SKColorType.Rgba8888, SKAlphaType.Premul);
+			using (var canvas = new SKCanvas(bitmap)) { canvas.Clear(SKColors.Transparent); canvas.DrawPicture(picture); }
+			var actual = new byte[8 * 4 * 4]; Marshal.Copy(bitmap.GetPixels(), actual, 0, actual.Length);
+			for (int i = 0; i < actual.Length; i += 4) {
+				Assert.Equal(expected[i + 3], actual[i + 3]);
+				for (int c = 0; c < 3; c++) {
+					int straight = actual[i + 3] == 0 ? 0 : actual[i + c] * 255 / actual[i + 3];
+					Assert.Equal(expected[i + c], straight);
+				}
+			}
+		}
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(.35)]
+	public void SvgOverlayReconstructsIntegerColorBytesBeforeLegacyComposition(double backdropAlpha)
+	{
+		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='8' height='4' fill='#3585cd' fill-opacity='.35' opacity='.8'/></svg>";
+		byte[] native = Native(svg);
+		using var picture = RecordedSvgGeometry.Parse(svg, 8, 4, 8, 4);
+		using var source = SKSurface.Create(new SKImageInfo(8, 4, SKColorType.Rgba8888, SKAlphaType.Premul));
+		source.Canvas.DrawPicture(picture);
+		using var image = source.Snapshot();
+		using var cairo = new ImageSurface(Format.Argb32, 8, 4);
+		using (var context = new Context(cairo)) { context.SetSourceRGBA(.2, .4, .6, backdropAlpha); context.Paint(); }
+		byte[] backdrop = cairo.Data;
+		using var bitmap = new SKBitmap(8, 4, SKColorType.Bgra8888, SKAlphaType.Premul);
+		Marshal.Copy(backdrop, 0, bitmap.GetPixels(), backdrop.Length);
+		using var original = SKImage.FromBitmap(bitmap);
+		using var target = SKSurface.Create(new SKImageInfo(8, 4, SKColorType.Rgba8888, SKAlphaType.Premul));
+		using var effect = SKRuntimeEffect.CreateShader(RecordedGpuBlur.ImageOverlayShaderSource, out string errors);
+		Assert.True(effect != null, errors);
+		RecordedGpuBlur.DrawOverlay(effect, image, original, target, 0, 0, 8, 4, 8, 4, new SKSamplingOptions(SKFilterMode.Nearest), null, false, true);
+		using var actual = new SKBitmap(8, 4, SKColorType.Rgba8888, SKAlphaType.Premul);
+		Assert.True(target.ReadPixels(actual.Info, actual.GetPixels(), actual.RowBytes, 0, 0));
+		var pixels = new byte[native.Length]; Marshal.Copy(actual.GetPixels(), pixels, 0, pixels.Length);
+		for (int i = 0; i < pixels.Length; i += 4) {
+			int over = native[i] | native[i + 1] << 8 | native[i + 2] << 16 | native[i + 3] << 24;
+			int under = backdrop[i + 2] | backdrop[i + 1] << 8 | backdrop[i] << 16 | backdrop[i + 3] << 24;
+			int expected = Vintagestory.API.MathTools.ColorUtil.ColorOver(over, under);
+			for (int c = 0; c < 4; c++) Assert.InRange(Math.Abs(pixels[i + c] - ((expected >> (8 * c)) & 255)), 0, 1);
+		}
+	}
+
+	static void AssertRecordedSvgMatchesNative(string svg, int textureWidth, int textureHeight, int width, int height, float scale, float offsetX, float offsetY, int maxChannelDelta = 1)
+	{
+		using var picture = RecordedSvgGeometry.Parse(svg, textureWidth, textureHeight, width, height);
+		using var bitmap = new SKBitmap(textureWidth, textureHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
+		using (var canvas = new SKCanvas(bitmap)) { canvas.Clear(SKColors.Transparent); canvas.DrawPicture(picture); }
+		var actual = new byte[checked(textureWidth * textureHeight * 4)]; Marshal.Copy(bitmap.GetPixels(), actual, 0, actual.Length);
+		var expected = Native(svg, textureWidth, textureHeight, scale, offsetX, offsetY);
+		for (int i = 0; i < actual.Length; i += 4) {
+			Assert.InRange(Math.Abs(actual[i + 3] - expected[i + 3]), 0, maxChannelDelta);
+			if (expected[i + 3] == 0) continue; // NanoSVG may retain hidden RGB beneath transparent pixels.
+			for (int channel = 0; channel < 3; channel++) Assert.InRange(Math.Abs(actual[i + channel] - expected[i + channel]), 0, maxChannelDelta);
+		}
+	}
+
+	static byte[] Native(string svg, int width = 8, int height = 4, float scale = 1, float offsetX = 0, float offsetY = 0)
+	{
+		IntPtr image = SvgNativeMethods.nsvgParse(svg, "px", 96);
+		IntPtr rasterizer = SvgNativeMethods.nsvgCreateRasterizer();
+		IntPtr buffer = Marshal.AllocHGlobal(checked(width * height * 4));
+		try {
+			Assert.NotEqual(IntPtr.Zero, image); Assert.NotEqual(IntPtr.Zero, rasterizer);
+			SvgNativeMethods.nsvgRasterize(rasterizer, image, offsetX, offsetY, scale, buffer, width, height, width * 4);
+			var result = new byte[checked(width * height * 4)]; Marshal.Copy(buffer, result, 0, result.Length); return result;
+		} finally { Marshal.FreeHGlobal(buffer); SvgNativeMethods.nsvgDeleteRasterizer(rasterizer); SvgNativeMethods.nsvgDelete(image); }
+	}
+}

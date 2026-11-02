@@ -247,20 +247,27 @@ index 5714490..745c1ad 100644
 +		if (!uploadHandoff.TryReserve(priority))
  		{
 -			lock (tessChunksQueuePriorityLock)
+-			{
+-				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
+-			}
+-			processPrioQueue = true;
 +			tesselatedChunk.UnusedDispose();
 +			clientChunk.queuedForUpload = false;
 +			clientChunk.lastTesselationMs = 0L;
 +			requeue = true;
 +			OptimumDiagnostics.RecordTessBackpressure();
 +			return 0;
-+		}
+ 		}
+-		else
 +
 +		bool queued = false;
 +		bool slotOwned = true;
 +		try
-+		{
+ 		{
+-			lock (tessChunksQueueLock)
 +			if (priority)
-+			{
+ 			{
+-				tessChunksQueue?.EnqueueOrMerge(tesselatedChunk);
 +				lock (tessChunksQueuePriorityLock)
 +				{
 +					if (tessChunksQueuePriority != null)
@@ -274,10 +281,9 @@ index 5714490..745c1ad 100644
 +				{
 +					processPrioQueue = true;
 +				}
-+			}
+ 			}
 +			else
- 			{
--				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
++			{
 +				lock (tessChunksQueueLock)
 +				{
 +					if (tessChunksQueue != null)
@@ -299,25 +305,21 @@ index 5714490..745c1ad 100644
 +			if (slotOwned)
 +			{
 +				uploadHandoff.Release();
- 			}
--			processPrioQueue = true;
++			}
 +			tesselatedChunk.UnusedDispose();
 +			clientChunk.queuedForUpload = false;
 +			clientChunk.lastTesselationMs = 0L;
 +			requeue = true;
 +			OptimumDiagnostics.RecordTessBackpressure();
 +			return 0;
- 		}
--		else
++		}
 +
 +		if (!queued)
- 		{
--			lock (tessChunksQueueLock)
++		{
 +			if (slotOwned)
- 			{
--				tessChunksQueue?.EnqueueOrMerge(tesselatedChunk);
++			{
 +				uploadHandoff.Release();
- 			}
++			}
 +			tesselatedChunk.UnusedDispose();
 +			clientChunk.queuedForUpload = false;
 +			clientChunk.lastTesselationMs = 0L;

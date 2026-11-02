@@ -15,29 +15,29 @@ index fd9c285..6526183 100644
 +public class PsychedelicPerceptionEffect : DrunkPerceptionEffect
  {
 -    public class PsychedelicPerceptionEffect : DrunkPerceptionEffect
--    {
--        public PsychedelicPerceptionEffect(ICoreClientAPI capi) : base(capi) { }
 +    private float accum;
++
++    private float accum1s;
++
++    private float targetIntensity;
++
++    public PsychedelicPerceptionEffect(ICoreClientAPI capi)
++        : base(capi)
+     {
+-        public PsychedelicPerceptionEffect(ICoreClientAPI capi) : base(capi) { }
++    }
  
 -        float accum;
 -        float accum1s;
 -        float targetIntensity;
-+    private float accum1s;
- 
+-
 -        public override void OnBeforeGameRender(float dt)
--        {
--            if (capi.IsGamePaused || capi.World.Player.Entity.AnimManager.HeadController == null) return;
-+    private float targetIntensity;
- 
-+    public PsychedelicPerceptionEffect(ICoreClientAPI capi)
-+        : base(capi)
-+    {
-+    }
-+
 +    public override void OnBeforeGameRender(float dt)
 +    {
 +        if (!capi.IsGamePaused && capi.World.Player.Entity.AnimManager.HeadController != null)
-+        {
+         {
+-            if (capi.IsGamePaused || capi.World.Player.Entity.AnimManager.HeadController == null) return;
+-
              capi.Render.ShaderUniforms.PerceptionEffectIntensity = Intensity;
              capi.Render.ShaderUniforms.PsychedelicStrength = Intensity * 2f;
 -            capi.World.Player.Entity.HeadBobbingAmplitude = GameMath.Clamp(1 - Intensity * 5, 0, 1);

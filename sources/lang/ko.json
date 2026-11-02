@@ -1,5 +1,7 @@
 {
 	"optimum-tab-header": "추가",
+	"optimum-guigpu": "Experimental GPU GUI rendering",
+	"optimum-guigpu-tooltip": "Records static dialog drawing and renders supported operations through Skia on the current OpenGL context. The runtime probe must pass; unsupported or failed recordings fall back to Cairo. Requires restart. Experimental; disabled by default.",
 	"optimum-bgfps": "백그라운드 FPS 제한",
 	"optimum-bgfps-tooltip": "게임 창이 포커스를 잃으면 30FPS로 제한합니다.",
 	"optimum-framepacing": "부드러운 프레임 페이싱",
