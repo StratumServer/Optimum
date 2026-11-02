@@ -12,7 +12,7 @@ public sealed record ApplyRequest(
     string OverlayDirectory,
     int? WaitForProcessId = null,
     TimeSpan? WaitTimeout = null,
-    string? PublicKey = null);
+    string? ManifestSha256 = null);
 
 public sealed record ApplyOutcome(bool Ok, string Version, string Reason, bool RolledBack);
 
@@ -23,8 +23,8 @@ public sealed record ApplyOutcome(bool Ok, string Version, string Reason, bool R
 /// safe on Windows: the program doing the replacing is not one of the files being replaced, and no game
 /// DLL is loaded while they are swapped.
 ///
-/// Nothing staged is trusted because it sits in a folder. The signed manifest kept beside the files is
-/// verified again here and every file is hashed again, since the update may have been staged days ago.
+/// Nothing staged is trusted because it sits in a folder. The helper receives the manifest digest that the game
+/// obtained from GitHub over HTTPS; this process compares the exact manifest bytes to it and hashes every file again.
 /// </summary>
 public sealed class UpdateApplier
 {
@@ -72,8 +72,7 @@ public sealed class UpdateApplier
                 return Fail(version, "the overlay is not inside this install's pending folder");
 
             observer?.Phase(ProgressPhase.Verify, 5, "checking the staged update");
-            string key = request.PublicKey ?? OptimumUpdateTrust.ManifestPublicKey;
-            if (!TryReadStaged(overlay, key, out OverlayManifest? manifest, out string stagedError) || manifest is null)
+            if (!OverlayStager.TryValidateStaged(overlay, request.ManifestSha256 ?? "", out OverlayManifest? manifest, out string stagedError) || manifest is null)
                 return Fail(version, stagedError);
             version = manifest.OptimumVersion;
 
@@ -134,58 +133,6 @@ public sealed class UpdateApplier
         return failed.Count == 0
             ? new ApplyOutcome(false, version, reason, RolledBack: true)
             : new ApplyOutcome(false, version, $"{reason}; restoring the previous version also failed for {string.Join(", ", failed)}", RolledBack: false);
-    }
-
-    private static bool TryReadStaged(string overlay, string key, out OverlayManifest? manifest, out string error)
-    {
-        manifest = null;
-        try
-        {
-            string manifestPath = Path.Combine(overlay, OverlayStager.StagedManifest);
-            string signaturePath = Path.Combine(overlay, OverlayStager.StagedManifestSignature);
-            if (!File.Exists(manifestPath) || !File.Exists(signaturePath))
-            {
-                error = "the staged update has no signed manifest";
-                return false;
-            }
-            byte[] bytes = File.ReadAllBytes(manifestPath);
-            if (!ManifestSignature.Verify(bytes, File.ReadAllBytes(signaturePath), key))
-            {
-                error = "the staged manifest signature does not verify";
-                return false;
-            }
-            if (!OverlayManifest.TryParse(bytes, out manifest, out string parseError) || manifest is null)
-            {
-                error = parseError;
-                return false;
-            }
-            foreach (OverlayFile file in manifest.Files)
-            {
-                string path = Path.Combine(overlay, file.Path.Replace('/', Path.DirectorySeparatorChar));
-                var info = new FileInfo(path);
-                if (!info.Exists || info.Length != file.Size)
-                {
-                    error = $"the staged file {file.Path} is missing or changed";
-                    manifest = null;
-                    return false;
-                }
-                using FileStream stream = File.OpenRead(path);
-                if (!string.Equals(Convert.ToHexString(SHA256.HashData(stream)), file.Sha256, StringComparison.OrdinalIgnoreCase))
-                {
-                    error = $"the staged file {file.Path} does not match the manifest";
-                    manifest = null;
-                    return false;
-                }
-            }
-            error = "";
-            return true;
-        }
-        catch (Exception ex)
-        {
-            manifest = null;
-            error = $"the staged update could not be read: {ex.Message}";
-            return false;
-        }
     }
 
     private static string? ReadInstalledVersion(string game)

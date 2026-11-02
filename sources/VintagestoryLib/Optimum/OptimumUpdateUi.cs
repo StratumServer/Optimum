@@ -28,11 +28,11 @@ public static class OptimumUpdateUi
     public static string GameDirectory => AppContext.BaseDirectory.TrimEnd('/', '\\');
 
     /// <summary>Called once the update checker found a newer release.</summary>
-    public static void OnReleaseFound(string version)
+    public static void OnReleaseFound(string version, string manifestSha256, long manifestSize, string archiveSha256, long archiveSize)
     {
         try
         {
-            EnsureUpdater().OfferRelease(version);
+            EnsureUpdater().OfferRelease(version, manifestSha256, manifestSize, archiveSha256, archiveSize);
         }
         catch (Exception ex)
         {

@@ -52,8 +52,6 @@ var typesToInject = new List<string>
     "Optimum.OptimumInfo",
     "Optimum.OptimumUpdateChecker",
     "Optimum.OptimumUpdateUi",
-    "Optimum.Update.OptimumUpdateTrust",
-    "Optimum.Update.ManifestSignature",
     "Optimum.Update.OverlayManifest",
     "Optimum.Update.OverlayFile",
     "Optimum.Update.OverlayStager",

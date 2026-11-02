@@ -42,13 +42,17 @@ public sealed class OptimumUpdater
     private readonly string _gameVersion;
     private readonly string _rid;
     private readonly Func<HttpClient>? _http;
-    private readonly string _publicKey;
     private readonly string? _releaseBase;
     private readonly Func<string, string?> _environment;
     private readonly Action<string>? _log;
     private readonly object _gate = new();
     private DateTime _lastNotify = DateTime.MinValue;
     private string _stageTarget = "";
+    private string _manifestSha256 = "";
+    private long _manifestSize;
+    private string _archiveSha256 = "";
+    private long _archiveSize;
+    private OverlayManifest? _stagedManifest;
 
     public OptimumUpdater(
         string gameDir,
@@ -56,7 +60,6 @@ public sealed class OptimumUpdater
         string gameVersion,
         string rid,
         Func<HttpClient>? http = null,
-        string? publicKeySpkiBase64 = null,
         string? releaseBase = null,
         Func<string, string?>? environment = null,
         Action<string>? log = null)
@@ -66,7 +69,6 @@ public sealed class OptimumUpdater
         _gameVersion = gameVersion;
         _rid = rid;
         _http = http;
-        _publicKey = publicKeySpkiBase64 ?? OptimumUpdateTrust.ManifestPublicKey;
         _releaseBase = releaseBase;
         _environment = environment ?? Environment.GetEnvironmentVariable;
         _log = log;
@@ -87,7 +89,9 @@ public sealed class OptimumUpdater
     /// </summary>
     public bool IsSupported(out string reason)
     {
-        if (_publicKey.Length == 0) { reason = "this build has no release signing key"; return false; }
+        if (!OverlayStager.IsValidSha256Digest(_manifestSha256) || _manifestSize <= 0 ||
+            !OverlayStager.IsValidSha256Digest(_archiveSha256) || _archiveSize <= 0)
+        { reason = "the GitHub release asset digests are unavailable"; return false; }
         if (!string.IsNullOrEmpty(_environment(ManagedByEnvironmentVariable))) { reason = "another launcher manages this install"; return false; }
         if (!InstallLayout.IsPatchedInPlace(_gameDir)) { reason = "this install is not patched in place"; return false; }
         reason = "";
@@ -95,22 +99,36 @@ public sealed class OptimumUpdater
     }
 
     /// <summary>Called by the update checker when it learns of a newer release.</summary>
-    public void OfferRelease(string version)
+    public void OfferRelease(string version, string manifestSha256, long manifestSize, string archiveSha256, long archiveSize)
     {
         if (!OverlayManifest.IsValidVersion(version) || OverlayManifest.CompareVersions(version, _installedVersion) <= 0) return;
+        _manifestSha256 = manifestSha256;
+        _manifestSize = manifestSize;
+        _archiveSha256 = archiveSha256;
+        _archiveSize = archiveSize;
         if (!IsSupported(out string reason))
         {
+            lock (_gate)
+            {
+                TargetVersion = version;
+                StagedDirectory = null;
+                _stagedManifest = null;
+                Phase = UpdatePhase.Idle;
+                Detail = "";
+            }
             _log?.Invoke($"One-click update not offered: {reason}.");
+            Notify(force: true);
             return;
         }
         // A copy staged by an earlier run needs no download: offer the restart straight away.
-        string? staged = OverlayStager.FindStaged(_gameDir, version, _rid, _publicKey);
+        string? staged = OverlayStager.FindStaged(_gameDir, version, _rid, manifestSha256, out OverlayManifest? stagedManifest);
         lock (_gate)
         {
             if (Phase == UpdatePhase.Staging || Phase == UpdatePhase.Staged || Phase == UpdatePhase.Applying) return;
             TargetVersion = version;
             Detail = "";
             StagedDirectory = staged;
+            _stagedManifest = stagedManifest;
             Phase = staged is not null ? UpdatePhase.Staged : UpdatePhase.Available;
         }
         Notify(force: true);
@@ -156,13 +174,15 @@ public sealed class OptimumUpdater
         try
         {
             using HttpClient http = CreateHttpClient();
-            var stager = new OverlayStager(http, _releaseBase, _publicKey);
-            StageResult result = stager.Stage(_gameDir, _installedVersion, _gameVersion, _rid, target, OnStageProgress, CancellationToken.None);
+            var stager = new OverlayStager(http, _releaseBase);
+            StageResult result = stager.Stage(_gameDir, _installedVersion, _gameVersion, _rid, target,
+                _manifestSha256, _manifestSize, _archiveSha256, _archiveSize, OnStageProgress, CancellationToken.None);
             lock (_gate)
             {
                 if (result.Ok)
                 {
                     StagedDirectory = result.StagedDirectory;
+                    _stagedManifest = result.Manifest;
                     Phase = UpdatePhase.Staged;
                     Detail = "";
                 }
@@ -195,7 +215,7 @@ public sealed class OptimumUpdater
     {
         if (Phase != UpdatePhase.Staged || StagedDirectory is null) return null;
         string cli = Path.Combine(StagedDirectory, windows ? "optimum.exe" : "optimum");
-        if (!File.Exists(cli) || !File.Exists(Path.Combine(StagedDirectory, OverlayStager.StagedManifest))) return null;
+        if (_stagedManifest is null || !OverlayStager.IsLaunchHelperValid(StagedDirectory, _manifestSha256, _stagedManifest, windows)) return null;
 
         var start = new ProcessStartInfo(cli)
         {
@@ -207,7 +227,7 @@ public sealed class OptimumUpdater
         start.ArgumentList.Add("--game-dir"); start.ArgumentList.Add(_gameDir);
         start.ArgumentList.Add("--overlay"); start.ArgumentList.Add(StagedDirectory);
         start.ArgumentList.Add("--wait-pid"); start.ArgumentList.Add(gameProcessId.ToString());
-        start.ArgumentList.Add("--trusted-key"); start.ArgumentList.Add(_publicKey);
+        start.ArgumentList.Add("--manifest-sha256"); start.ArgumentList.Add(_manifestSha256);
         if (restartExecutable.Length > 0)
         {
             start.ArgumentList.Add("--restart"); start.ArgumentList.Add(restartExecutable);

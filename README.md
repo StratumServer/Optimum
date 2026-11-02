@@ -219,23 +219,22 @@ When a newer release exists, the main menu shows `Update to v<version>` under th
 only for a game folder patched in place (by RiftLauncher or `optimum patch`); an install made by the Optimum installer
 keeps the link to the release page.
 
-1. The game downloads `optimum-manifest-<rid>.json`, its detached signature (`.sig`) and the overlay archive from the
-   release, and stages them under `.optimum/pending/<version>-<rid>/`. Nothing the game has loaded is touched.
-2. The manifest is accepted only if its ECDSA P-256 signature verifies against the public key compiled into the game
-   (`OptimumUpdateTrust.ManifestPublicKey`). The archive and every extracted file must then match the hashes in the
-   manifest, and the archive may carry no file the manifest does not list.
+1. The game reads the manifest and overlay SHA-256 digests from the GitHub Releases API over HTTPS, then downloads the
+   assets and stages them under `.optimum/pending/<version>-<rid>/`. Nothing the game has loaded is touched.
+2. The manifest bytes must match the digest reported for that asset by GitHub. Its archive size and digest must match
+   GitHub's metadata too; the archive and every extracted file are then checked against the manifest, and the archive
+   may carry no file the manifest does not list. A missing or malformed API digest disables one-click updating.
 3. "Restart to finish updating" closes the game and runs the staged `optimum.exe apply-update`, which waits for the
    game to exit, takes a copy of every file the patch can write (`.optimum/rollback/`), patches, checks what it wrote
    and starts the game again. If any step fails it puts the copy back, so the previous version stays installed, and the
    next start says so.
 
-The update stays off, and the menu keeps the plain link, when the release carries no signature, when the game folder is
-not patched in place, or when the environment variable `OPTIMUM_MANAGED_BY` is set. A launcher that updates installs
-itself should set that variable when it starts the game, so two updaters never work on one folder.
-
-Maintainers: create the signing key once with `scripts/generate-release-signing-key.sh <dir>`, paste the printed public
-key into `OptimumUpdateTrust.ManifestPublicKey` and store the private key as the `OPTIMUM_RELEASE_SIGNING_KEY`
-repository secret. The overlay release workflow signs each manifest with it.
+The updater relies on GitHub's HTTPS API response as the trusted source for release asset digests. This protects against
+asset corruption or a download that differs from the published asset, but it does not independently authenticate the
+release publisher: anyone able to change the release and its API metadata can replace both. The update stays off, and
+the menu keeps the plain link, when usable API digests are unavailable, when the game folder is not patched in place,
+or when `OPTIMUM_MANAGED_BY` is set. A launcher that updates installs itself should set that variable when it starts
+the game, so two updaters never work on one folder.
 
 ## Settings
 

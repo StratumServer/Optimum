@@ -12,9 +12,8 @@ namespace Optimum.Bootstrap.Core.Tests;
 public sealed class UpdateApplierTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "optapply-" + Guid.NewGuid().ToString("N").Substring(0, 10));
-    private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private string Game => Path.Combine(_root, "game");
-    private string PublicKey => Convert.ToBase64String(_key.ExportSubjectPublicKeyInfo());
+    private string _trustedManifestSha256 = "";
     private static bool Windows => OperatingSystem.IsWindows();
     private static string Rid => Windows ? "win-x64" : "linux-x64";
 
@@ -33,7 +32,6 @@ public sealed class UpdateApplierTests : IDisposable
 
     public void Dispose()
     {
-        _key.Dispose();
         try { Directory.Delete(_root, recursive: true); } catch (Exception) { }
     }
 
@@ -62,8 +60,8 @@ public sealed class UpdateApplierTests : IDisposable
         Write(".optimum/manifest.json", manifest.Serialize());
     }
 
-    /// <summary>Stages 0.3.22 the way the stager does: files plus the signed manifest kept beside them.</summary>
-    private string Stage(string version = "0.3.22", bool sign = true, Func<string, string>? tamper = null)
+    /// <summary>Stages 0.3.22 the way the stager does: files plus the manifest digest accepted from GitHub.</summary>
+    private string Stage(string version = "0.3.22", Func<string, string>? tamper = null, bool tamperManifest = false)
     {
         string overlay = Path.Combine(Game, ".optimum", "pending", $"{version}-{Rid}");
         var files = new Dictionary<string, string>
@@ -91,16 +89,23 @@ public sealed class UpdateApplierTests : IDisposable
             files = files.Select(f => new { path = f.Key, size = Encoding.UTF8.GetByteCount(f.Value), sha256 = "sha256:" + Sha(f.Value) }).ToArray(),
         });
         byte[] bytes = Encoding.UTF8.GetBytes(json);
+        _trustedManifestSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        if (tamperManifest) bytes[bytes.Length / 2] ^= 1;
         File.WriteAllBytes(Path.Combine(overlay, OverlayStager.StagedManifest), bytes);
-        byte[] signature = _key.SignData(bytes, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
-        if (!sign) signature[5] ^= 1;
-        File.WriteAllBytes(Path.Combine(overlay, OverlayStager.StagedManifestSignature), signature);
+        File.WriteAllText(Path.Combine(overlay, OverlayStager.StagedMarker), JsonSerializer.Serialize(new
+        {
+            Version = version,
+            Rid,
+            ArchiveSha256 = new string('0', 64),
+            ManifestSha256 = tamperManifest ? Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant() : _trustedManifestSha256,
+            StagedAtUtc = DateTimeOffset.UtcNow,
+        }));
         if (tamper is not null) File.WriteAllText(Path.Combine(overlay, "optimum.exe"), tamper("cli-" + version));
         return overlay;
     }
 
     private ApplyRequest Request(string overlay, int? pid = null, TimeSpan? wait = null)
-        => new(Game, overlay, pid, wait, PublicKey);
+        => new(Game, overlay, pid, wait, _trustedManifestSha256);
 
     private UpdateApplier Applier(IGamePatcher patcher, Func<int, bool>? alive = null) => new(patcher, alive, Windows);
 
@@ -226,15 +231,29 @@ public sealed class UpdateApplierTests : IDisposable
     }
 
     [Fact]
-    public async Task AManifestThatIsNotSignedByTheTrustedKeyStopsTheUpdate()
+    public async Task AStagedManifestChangedAfterTrustIsRefused()
     {
-        string overlay = Stage(sign: false);
+        string overlay = Stage(tamperManifest: true);
         var patcher = new FakePatcher(this);
 
         ApplyOutcome outcome = await Applier(patcher).ApplyAsync(Request(overlay), null, default);
 
         Assert.False(outcome.Ok);
-        Assert.Contains("signature", outcome.Reason);
+        Assert.Contains("manifest", outcome.Reason);
+        Assert.False(patcher.Called);
+    }
+
+    [Fact]
+    public async Task RefusesAStagedManifestWhenTheExpectedGitHubDigestDiffers()
+    {
+        string overlay = Stage();
+        _trustedManifestSha256 = new string('0', 64);
+        var patcher = new FakePatcher(this);
+
+        ApplyOutcome outcome = await Applier(patcher).ApplyAsync(Request(overlay), null, default);
+
+        Assert.False(outcome.Ok);
+        Assert.Contains("GitHub release asset digest", outcome.Reason);
         Assert.False(patcher.Called);
     }
 
