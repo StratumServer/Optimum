@@ -1,3 +1,4 @@
+using System.IO;
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
@@ -76,6 +77,39 @@ public class OptionsViewModelTests
     }
 
     [Fact]
+    public void WindowsDefaultInstallDirectoryIsUserScopedAndExplainsPathEntry()
+    {
+        var probe = RepoProbe();
+        probe.Os = Optimum.Bootstrap.Core.Platform.OsKind.Windows;
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+
+        var vm = new OptionsViewModel(probe, "/repo");
+
+        Assert.Equal(Path.Combine(probe.Environment["LOCALAPPDATA"]!, "Programs", "Optimum"), vm.InstallDirectory);
+        Assert.Contains("administrator", vm.InstallDirectoryHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("AppData", vm.InstallDirectoryHint);
+    }
+
+    [Fact]
+    public void ContinueRejectsAnUnwritableDestinationWithAUserScopedAlternative()
+    {
+        var probe = RepoProbe();
+        probe.CanWrite = false;
+        var vm = new OptionsViewModel(probe, "/repo")
+        {
+            InstallDirectory = "/home/tester/optimum-install",
+        };
+        bool continued = false;
+        vm.ContinueRequested += () => continued = true;
+
+        vm.ContinueCommand.Execute(null);
+
+        Assert.False(continued);
+        Assert.Contains("writable location", vm.ValidationError);
+        Assert.Contains("administrator access", vm.ValidationError);
+    }
+
+    [Fact]
     public void AnUnsafeInstallDirectoryProducesAnInlineError()
     {
         var probe = RepoProbe();
@@ -108,6 +142,31 @@ public class OptionsViewModelTests
 
         probe.AddDirectory("/repo/patches-1.22.6-bridge");
         Assert.True(new OptionsViewModel(probe, "/repo").ShowVersionChoice);
+    }
+
+    [Fact]
+    public void LinuxOptionsExposesExplicitModUriHandlerChoiceWithoutOverwritingExistingDefault()
+    {
+        var probe = RepoProbe();
+        probe.AddFile(
+            "/home/tester/.config/mimeapps.list",
+            "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=Vintagestory_url_mod.desktop\n");
+
+        var vm = new OptionsViewModel(probe, "/repo");
+
+        Assert.True(vm.IsLinux);
+        Assert.False(vm.RegisterUriHandler);
+        Assert.Equal("Vintagestory_url_mod.desktop", vm.ExistingUriHandler);
+        Assert.Contains("Vintagestory_url_mod.desktop", vm.UriHandlerHint);
+
+        // When Optimum is already the configured default handler, upgrading preserves the opt-in.
+        var upgradeProbe = RepoProbe();
+        upgradeProbe.AddFile(
+            "/home/tester/.config/mimeapps.list",
+            "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=optimum.desktop\n");
+        var upgradeVm = new OptionsViewModel(upgradeProbe, "/repo");
+        Assert.True(upgradeVm.RegisterUriHandler);
+        Assert.Null(upgradeVm.ExistingUriHandler);
     }
 }
 
@@ -583,6 +642,12 @@ public class InstallerLogFilterTests
     // Routine compiler / SDK warnings are dropped from the visible pane.
     [InlineData("Core.cs(970,68): warning CS0618: \"ItemWearable\" é obsoleto", false)]
     [InlineData("targets(94,5): warning NETSDK1086: uma FrameworkReference foi incluída", false)]
+    [InlineData("Runtime donor compatibility gate failed:", true)]
+    [InlineData("VSEssentials requires a patch refresh for foo.patch: error", true)]
+    [InlineData("Download failed: https://cdn.vintagestory.at/gamefiles/stable/vs_install_win-x64_1.22.7.exe", true)]
+    [InlineData("ilspycmd failed for VSEssentials", true)]
+    [InlineData(@"C:\repo\scripts\bootstrap.ps1 : The term 'curl.exe' is not recognized as a name of a cmdlet", true)]
+    [InlineData("The term 'ilspycmd' is not recognized as a name of a cmdlet", true)]
     public void KeepsFailuresAdvisoriesAndProgressOnly(string line, bool kept)
     {
         Assert.Equal(kept, InstallerLogFilter.IsInteresting(line));
@@ -606,6 +671,14 @@ public class InstallerLogFilterTests
     [InlineData("System.IO.IOException: disk full", "error")]
     [InlineData("Build FAILED.", "error")]
     [InlineData("    2 Error(s)", "error")]
+    [InlineData("Runtime donor compatibility gate failed:", "error")]
+    [InlineData("VSEssentials requires a patch refresh for foo.patch: error", "error")]
+    [InlineData("Download failed: https://cdn.vintagestory.at/gamefiles/stable/vs_install_win-x64_1.22.7.exe", "error")]
+    [InlineData("ilspycmd failed for VSEssentials", "error")]
+    [InlineData("Runtime donor build failed: VSEssentials", "error")]
+    [InlineData("Incompatible .NET SDK candidate: C:\\dotnet\\dotnet.exe", "error")]
+    [InlineData(@"C:\repo\scripts\bootstrap.ps1 : The term 'curl.exe' is not recognized as a name of a cmdlet", "error")]
+    [InlineData("The term 'ilspycmd' is not recognized as a name of a cmdlet", "error")]
     public void ClassifyPicksSeverityFromContentNotStream(string line, string expected)
     {
         Assert.Equal(expected, InstallerLogFilter.Classify(line, fromStdErr: true));

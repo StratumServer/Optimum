@@ -99,6 +99,13 @@ for base_project in "$baseline_dir"/*/; do
       continue
     fi
 
+    # Bootstrap rewrites AssemblyInfo.cs attributes only under build/, so the
+    # fork working trees always differ from their baseline here. That is a
+    # bootstrap artifact, not a source change.
+    if [[ "$rel" == "Properties/AssemblyInfo.cs" ]]; then
+      continue
+    fi
+
     if [[ ! -f "$base_file" ]]; then
       # New file (no baseline equivalent) → goes to sources/.
       dest="$sources_dir/$project/$rel"
@@ -118,7 +125,9 @@ for base_project in "$baseline_dir"/*/; do
       # make line 1 fail to match on apply for any BOM-prefixed source.
       perl -pe 's/\r\n/\n/g; s/\r/\n/g' "$base_file" > "$tmp_base"
       perl -pe 's/\r\n/\n/g; s/\r/\n/g' "$file" > "$tmp_work"
-      git --no-pager -c core.safecrlf=false diff --no-color --no-index -U5 \
+      # Pin the diff algorithm: a user-level diff.algorithm (e.g. histogram)
+      # would otherwise realign every hunk and churn unrelated patches.
+      git --no-pager -c core.safecrlf=false -c diff.algorithm=myers -c diff.noprefix=false diff --no-color --no-index -U5 \
         -- "$tmp_base" "$tmp_work" \
         | sed \
           -e "s#^diff --git .*\$#diff --git a/$project/$rel b/$project/$rel#" \

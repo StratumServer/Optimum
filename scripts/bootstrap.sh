@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Builds a clean working tree for Optimum (client fork):
-#   1. Downloads the official VS client archive (this host's platform).
+#   1. Reuses a matching extracted client or downloads the official archive.
 #   2. Decompiles closed-source DLLs (Vintagestory.dll, VintagestoryLib.dll) with ILSpy.
 #   3. Clones open-source Anego forks at pinned refs.
 #   4. Applies patches/ and copies sources/ on top.
@@ -21,19 +21,7 @@ repo_root="$(cd -- "$script_dir/.." && pwd)"
 # script only ever talks to repositories it names explicitly.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 
-# macOS ships Bash 3.2 (2007) and BSD coreutils; this script needs features
-# present only in Bash 4+ (associative arrays are unused, but `read -d ''`
-# edge-case behavior and `[[ =~ ]]` quoting rules differ) and GNU-style
-# null-delimited sort. The CI installs Bash 5 via Homebrew on macOS runners;
-# warn local users who forgot that step so the error points at the real cause
-# instead of at cryptic patch-application failures dozens of minutes later.
-if [[ "${BASH_VERSINFO[0]}" -lt 4 ]]; then
-  echo "WARNING: Bash ${BASH_VERSION} detected. This script is tested with" >&2
-  echo "  Bash 4+. On macOS, install a modern Bash and ensure it comes first" >&2
-  echo "  in PATH:  brew install bash" >&2
-  echo "  Then re-run:  \$(brew --prefix)/bin/bash scripts/bootstrap.sh ..." >&2
-fi
-
+# Keep bootstrap compatible with macOS's system Bash 3.2 and BSD coreutils.
 # Portable null-delimited sort. GNU sort supports -z; BSD sort (macOS default)
 # does not. Detect once at startup and define a function the patch loops use.
 if printf '\0' | sort -z >/dev/null 2>&1; then
@@ -361,7 +349,7 @@ download_client_archive() {
   local partial="$archive_path.partial"
   rm -f "$partial"
 
-  if ! curl -L --fail --output "$partial" "$url"; then
+  if ! curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - --output "$partial" "$url"; then
     rm -f "$partial"
     echo "Download failed: $url" >&2
     return 1
@@ -369,6 +357,12 @@ download_client_archive() {
 
   mv -f "$partial" "$archive_path"
   printf '%s\n' "$archive_path"
+}
+
+ensure_client_archive() {
+  if [[ -z "$client_archive" ]]; then
+    client_archive="$(download_client_archive "$zip_cache_dir")"
+  fi
 }
 
 require_cmd dotnet
@@ -413,10 +407,6 @@ fi
 rm -f "$repo_root/.bootstrap-complete"
 
 # 1. Download and extract client.
-if [[ -z "$client_archive" ]]; then
-  client_archive="$(download_client_archive "$zip_cache_dir")"
-fi
-
 # `make deploy` overwrites $vanilla_dir/vintagestory/VintagestoryLib.dll with
 # the Cecil-patched output, since that directory doubles as the client folder
 # used for testing (`make run`). Optimum.Patcher's own vanilla input reads
@@ -466,6 +456,7 @@ if [[ -d "$vanilla_dir/vintagestory/assets" ]]; then
 fi
 
 if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
+  ensure_client_archive
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
@@ -474,6 +465,7 @@ elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
   echo "Extracted client is $extracted_version, requested $version - re-extracting"
   rm -rf "$vanilla_dir" "$snapshot_dir"
   rm -f "$repo_root/.bootstrap-complete"
+  ensure_client_archive
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
@@ -859,9 +851,31 @@ python3 "$script_dir/fix-base-ctor-calls.py" "$repo_root/build/VintagestoryLib" 
 
 # 6g-extra: Vintagestory.csproj - needs ProjectReference to VintagestoryLib (not vanilla DLL).
 # The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
+# Rewrite cleanly to eliminate any decompiler artifacts (e.g. spurious System.Runtime.InteropServices GAC references).
 vs_entry_csproj="$repo_root/build/Vintagestory/Vintagestory.csproj"
 if [[ -f "$vs_entry_csproj" ]]; then
-  perl -0pi -e 's{<Reference Include="VintagestoryLib">.*?</Reference>}{<ProjectReference Include="..\\VintagestoryLib\\VintagestoryLib.csproj" />}s' "$vs_entry_csproj"
+  cat > "$vs_entry_csproj" << 'EOF'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Vintagestory</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />
+  </ItemGroup>
+</Project>
+EOF
   python3 -c 'import sys, xml.etree.ElementTree as ET; ET.parse(sys.argv[1])' "$vs_entry_csproj"
 fi
 
@@ -1656,11 +1670,12 @@ if [[ -d "$sources_dir" ]]; then
     rel="${src#$sources_dir/}"
     # For vanilla (decompiled) projects, the working tree is under build/.
     top_proj="$(echo "$rel" | cut -d/ -f1)"
-    # lang/ and shaders/ are deploy-time asset overlays, not project source.
-    # deploy and the package scripts read them from sources/ directly; copying
-    # them here dumped stray lang/ and shaders/ dirs at the repo root.
+    # lang/, shaders/ and assets/ are deploy-time asset overlays, not project
+    # source. deploy and the package scripts read them from sources/ directly;
+    # copying them here dumped stray lang/, shaders/ and assets/ dirs at the
+    # repo root.
     case "$top_proj" in
-      lang|shaders) continue ;;
+      lang|shaders|assets) continue ;;
     esac
     if echo "$vanilla_patch_projects" | grep -qw "$top_proj"; then
       target="$repo_root/build/$rel"

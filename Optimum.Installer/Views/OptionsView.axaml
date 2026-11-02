@@ -14,18 +14,21 @@
               <TextBlock Text="Install folder path"
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontWeight="SemiBold" />
               <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" Text="{Binding InstallDirectory}" PlaceholderText="Install directory"
+                <TextBox Grid.Column="0" Text="{Binding InstallDirectory, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Install directory"
                          AutomationProperties.Name="Install directory" TabIndex="1" />
                 <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseInstallDirectory"
                         AutomationProperties.Name="Browse for an install directory" />
               </Grid>
+              <TextBlock Text="{Binding InstallDirectoryHint}"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
               <TextBlock Text="Optimum is built in a temporary workspace and moved here only after build and verification succeed."
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
               <CheckBox Content="Clean install folder if not empty"
                         IsChecked="{Binding CleanInstallDirectory}" TabIndex="2" />
               <TextBlock Text="{Binding ValidationError}" FontWeight="SemiBold"
                          Foreground="{DynamicResource SystemFillColorCriticalBrush}"
-                         TextWrapping="Wrap" AutomationProperties.LiveSetting="Assertive"
+                         TextWrapping="Wrap"
+                         AutomationProperties.LiveSetting="{OnPlatform Assertive, macOS=Off}"
                          IsVisible="{Binding ValidationError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
           </StackPanel>
@@ -42,7 +45,7 @@
               <TextBlock Text="Data folder path"
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontWeight="SemiBold" />
               <Grid ColumnDefinitions="*,Auto">
-                <TextBox Grid.Column="0" Text="{Binding DataPath}" PlaceholderText="Vintage Story data folder"
+                <TextBox Grid.Column="0" Text="{Binding DataPath, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Vintage Story data folder"
                          AutomationProperties.Name="Vintage Story data folder" TabIndex="3" />
                 <Button Grid.Column="1" Content="Browse" Margin="8,0,0,0" Click="BrowseDataPath"
                         AutomationProperties.Name="Browse for a Vintage Story data folder" />
@@ -55,33 +58,36 @@
         </Border>
 
         <Border Classes="Card">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Grid.Column="0" Spacing="8">
-              <TextBlock Text="Shortcuts" FontSize="17" FontWeight="SemiBold" />
-              <CheckBox Content="Add an application menu entry"
-                        IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
-              <CheckBox Content="Create a desktop shortcut"
-                        IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
+          <StackPanel Spacing="8">
+            <TextBlock Text="Shortcuts" FontSize="17" FontWeight="SemiBold" />
+            <CheckBox Content="Add an application menu entry"
+                      IsChecked="{Binding CreateMenuEntry}" TabIndex="4" />
+            <CheckBox Content="Create a desktop shortcut"
+                      IsChecked="{Binding CreateDesktopShortcut}" TabIndex="5" />
+            <StackPanel Spacing="4" IsVisible="{Binding IsLinux}">
+              <CheckBox Content="Set Optimum as default handler for ModDB 1-click install links"
+                        IsChecked="{Binding RegisterUriHandler}" TabIndex="6" />
+              <TextBlock Text="{Binding UriHandlerHint}"
+                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Spacing="7" Width="250" Margin="20,0,0,0"
-                        IsVisible="{Binding ShowVersionChoice}">
+            <StackPanel Spacing="7" IsVisible="{Binding ShowVersionChoice}">
               <TextBlock Text="Vintage Story version" FontSize="17" FontWeight="SemiBold" />
               <ComboBox ItemsSource="{Binding Versions}" SelectedItem="{Binding SelectedVersion}"
                         HorizontalAlignment="Stretch"
-                        AutomationProperties.Name="Vintage Story version" TabIndex="6" />
+                        AutomationProperties.Name="Vintage Story version" TabIndex="7" />
               <TextBlock Text="Use the recommended version unless you need a compatibility bridge."
                          Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
             </StackPanel>
-          </Grid>
+          </StackPanel>
         </Border>
 
       </StackPanel>
     </ScrollViewer>
 
     <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,16,0,0">
-      <Button Grid.Column="0" Content="Back" Command="{Binding BackCommand}" TabIndex="8" />
+      <Button Grid.Column="0" Content="Back" Command="{Binding BackCommand}" TabIndex="9" />
       <Button Grid.Column="2" Content="Review" Classes="accent"
-              IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="7" />
+              IsEnabled="{Binding CanContinue}" Command="{Binding ContinueCommand}" TabIndex="8" />
     </Grid>
   </Grid>
 </UserControl>

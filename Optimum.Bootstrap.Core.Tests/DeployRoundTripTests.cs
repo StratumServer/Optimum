@@ -224,8 +224,11 @@ public sealed class DeployRoundTripTests : IDisposable
         string package = StagePackage();
         string installDir = Path.Combine(_root, "install", "optimum");
         string dataHome = Path.Combine(_root, "xdg-data");
-        string? previous = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        string configHome = Path.Combine(_root, "xdg-config");
+        string? previousData = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        string? previousConfig = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
         Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", configHome);
         try
         {
             Assert.True(new PackageDeployer(probe).Deploy(
@@ -243,7 +246,298 @@ public sealed class DeployRoundTripTests : IDisposable
         }
         finally
         {
-            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previous);
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previousData);
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", previousConfig);
+        }
+    }
+
+    [Fact]
+    public void LinuxLauncherHandlesModInstallUriPreservesArgsAndRejectsMalformedInputs()
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+
+        var probe = SystemProbe.Default;
+        string package = StagePackage();
+        File.WriteAllText(
+            Path.Combine(package, "run.sh"),
+            "#!/usr/bin/env bash\nset -euo pipefail\nfor a in \"$@\"; do printf '<%s>' \"$a\"; done\nprintf '\\n'\n");
+
+        string installDir = Path.Combine(_root, "Install Dir With Spaces", "Optimum Client");
+        string dataPath = Path.Combine(_root, "Custom Data Path", "VintageStory Data");
+
+        DeployResult deploy = new PackageDeployer(probe).Deploy(
+            new DeployRequest(package, installDir, dataPath));
+        Assert.True(deploy.Ok, deploy.Message);
+
+        string launcher = Path.Combine(installDir, "optimum-launch.sh");
+        Assert.True(File.Exists(launcher));
+
+        // 1. Valid ModDB URI -> passes configured --dataPath and -i <uri> as a single argument.
+        ProcessOutcome validUri = probe.Run(
+            launcher,
+            ["vintagestorymodinstall://carrycapacity@1.8.0"],
+            TimeSpan.FromSeconds(5));
+        Assert.Equal(0, validUri.ExitCode);
+        Assert.Equal(
+            $"<--dataPath><{dataPath}><-i><vintagestorymodinstall://carrycapacity@1.8.0>",
+            validUri.StandardOutput.Trim());
+
+        // 2. Uppercase scheme, multiple trailing slashes, %40, and %2B are normalized cleanly.
+        ProcessOutcome trailingSlash = probe.Run(
+            launcher,
+            ["VINTAGESTORYMODINSTALL://primitivesurvival%403.7.5%2Bbuild1///"],
+            TimeSpan.FromSeconds(5));
+        Assert.Equal(0, trailingSlash.ExitCode);
+        Assert.Equal(
+            $"<--dataPath><{dataPath}><-i><vintagestorymodinstall://primitivesurvival@3.7.5+build1>",
+            trailingSlash.StandardOutput.Trim());
+
+        // 3. Ordinary launch arguments are preserved alongside configured --dataPath.
+        ProcessOutcome ordinaryArgs = probe.Run(
+            launcher,
+            ["--openWorld", "My World", "-p", "creativebuilding"],
+            TimeSpan.FromSeconds(5));
+        Assert.Equal(0, ordinaryArgs.ExitCode);
+        Assert.Equal(
+            $"<--dataPath><{dataPath}><--openWorld><My World><-p><creativebuilding>",
+            ordinaryArgs.StandardOutput.Trim());
+
+        // 4. Malformed URIs and injection attempts are rejected without invoking run.sh.
+        string sentinel = Path.Combine(_root, "pwned");
+        string[][] malformedInputs =
+        [
+            ["http://mods.vintagestory.at/carrycapacity"],
+            ["vintagestorymodinstall://"],
+            ["vintagestorymodinstall:///"],
+            ["vintagestorymodinstall://-c"],
+            ["vintagestorymodinstall://carrycapacity*"],
+            ["vintagestorymodinstall://@1.8.0"],
+            ["vintagestorymodinstall://carrycapacity@"],
+            ["vintagestorymodinstall://carrycapacity@1.8.0@2.0.0"],
+            ["vintagestorymodinstall://carrycapacity%201.8.0"],
+            ["vintagestorymodinstall://carrycapacity@1.8.0\n-c evil"],
+            ["vintagestorymodinstall://carrycapacity@1.8.0\r-c evil"],
+            ["vintagestorymodinstall://carrycapacity@1.8.0 --connect evil"],
+            ["vintagestorymodinstall://carrycapacity@1.8.0", "--connect"],
+            [$"vintagestorymodinstall://$(touch '{sentinel}')"],
+            ["-i", "carrycapacity@1.8.0\n-c evil"],
+            ["-i", "carrycapacity*"],
+        ];
+
+        foreach (string[] badArgs in malformedInputs)
+        {
+            ProcessOutcome rejected = probe.Run(launcher, badArgs, TimeSpan.FromSeconds(5));
+            Assert.NotEqual(0, rejected.ExitCode);
+            Assert.Equal(string.Empty, rejected.StandardOutput.Trim());
+        }
+        Assert.False(File.Exists(sentinel));
+    }
+
+    [Fact]
+    public void ReinstallAndUninstallPreserveAndCleanUpLinuxUriHandlerAssociations()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        var probe = SystemProbe.Default;
+        string dataHome = Path.Combine(_root, "xdg-data-uri");
+        string configHome = Path.Combine(_root, "xdg-config-uri");
+        Directory.CreateDirectory(Path.Combine(dataHome, "applications"));
+        Directory.CreateDirectory(configHome);
+
+        // Pre-populate a vanilla Vintage Story handler choice.
+        File.WriteAllText(Path.Combine(dataHome, "applications", "Vintagestory_url_mod.desktop"), "[Desktop Entry]\nName=VS\n");
+        File.WriteAllText(Path.Combine(configHome, "mimeapps.list"), "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=Vintagestory_url_mod.desktop\n");
+
+        string? previousData = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        string? previousConfig = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", configHome);
+        try
+        {
+            string package = StagePackage();
+            string installDir = Path.Combine(_root, "install", "optimum-uri");
+            var writer = new ShortcutWriter(probe);
+
+            // 1. Install with Menu + UriHandler -> takes over default and records previous handler.
+            Assert.True(new PackageDeployer(probe).Deploy(
+                new DeployRequest(package, installDir, DataPath: null, ShortcutKinds.Menu | ShortcutKinds.UriHandler)).Ok);
+            Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+
+            InstallManifest firstManifest = InstallManifest.Deserialize(
+                File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+            Assert.True(firstManifest.RegisteredUriHandler);
+            Assert.Equal("Vintagestory_url_mod.desktop", firstManifest.PreviousUriHandler);
+
+            // 2. Reinstall with Menu + UriHandler -> preserves original PreviousUriHandler.
+            Assert.True(new PackageDeployer(probe).Deploy(
+                new DeployRequest(package, installDir, DataPath: null, ShortcutKinds.Menu | ShortcutKinds.UriHandler)).Ok);
+            InstallManifest secondManifest = InstallManifest.Deserialize(
+                File.ReadAllText(Path.Combine(installDir, InstallManifest.RelativePath)))!;
+            Assert.True(secondManifest.RegisteredUriHandler);
+            Assert.Equal("Vintagestory_url_mod.desktop", secondManifest.PreviousUriHandler);
+
+            // 3. Uninstall -> restores Vintagestory_url_mod.desktop and removes optimum.desktop.
+            Assert.True(new Uninstaller(probe).Uninstall(installDir).Ok);
+            Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+            Assert.False(File.Exists(Path.Combine(dataHome, "applications", "optimum.desktop")));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", previousData);
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", previousConfig);
+        }
+    }
+
+    [Fact]
+    public async Task LinuxDesktopEndToEndForwardsModInstallUriOverSingleInstanceNamedPipeAndCoexists()
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+
+        var probe = SystemProbe.Default;
+        string dataHome = Path.Combine(_root, "e2e-xdg-data");
+        string configHome = Path.Combine(_root, "e2e-xdg-config");
+        string isolatedTmp = Path.Combine(_root, "e2e-tmp");
+        Directory.CreateDirectory(dataHome);
+        Directory.CreateDirectory(configHome);
+        Directory.CreateDirectory(isolatedTmp);
+
+        // Build a staged package whose ./Optimum script implements the exact
+        // ClientProgram + UriHandler SingleInstanceVintageStoryWithUriScheme
+        // pipe client/server protocol using an isolated Unix socket in TMPDIR.
+        string package = StagePackage();
+        File.WriteAllText(
+            Path.Combine(package, "run.sh"),
+            "#!/usr/bin/env bash\nset -euo pipefail\nexec ./Optimum \"$@\"\n");
+        File.WriteAllText(
+            Path.Combine(package, "Optimum"),
+            """
+            #!/usr/bin/env python3
+            import os, socket, sys
+
+            raw_args = sys.argv[1:]
+            data_path = os.environ.get("DEFAULT_VS_DATA", "/default/data")
+            install_mod = None
+            i = 0
+            while i < len(raw_args):
+                arg = raw_args[i]
+                if arg in ("-d", "--dataPath") and i + 1 < len(raw_args):
+                    data_path = raw_args[i + 1]
+                    i += 2
+                elif arg.startswith("--dataPath="):
+                    data_path = arg.split("=", 1)[1]
+                    i += 1
+                elif arg in ("-i", "--installmod") and i + 1 < len(raw_args):
+                    install_mod = raw_args[i + 1]
+                    i += 2
+                elif arg.startswith("-i=") or arg.startswith("--installmod="):
+                    install_mod = arg.split("=", 1)[1]
+                    i += 1
+                else:
+                    i += 1
+
+            if install_mod is not None:
+                install_mod = install_mod.replace("vintagestorymodinstall://", "")
+
+            sock_path = os.path.join(os.environ["TMPDIR"], "SingleInstanceVintageStoryWithUriScheme.sock")
+            if os.path.exists(sock_path):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.connect(sock_path)
+                    if install_mod is not None:
+                        client.sendall(f"-i {install_mod}\n".encode("utf-8"))
+                        sys.exit(0)
+            # No existing instance listening (or no URI arg): Cold-start instance
+            ColdLog = os.environ["COLD_START_LOG"]
+            with open(ColdLog, "a", encoding="utf-8") as fp:
+                fp.write(f"COLD_START|dataPath={data_path}|installMod={install_mod}\n")
+            """);
+
+        string installDirA = Path.Combine(_root, "Optimum Install A", "Client");
+        string dataPathA = Path.Combine(_root, "Data Path A");
+        string coldLog = Path.Combine(_root, "cold-start.log");
+
+        string? prevData = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+        string? prevConfig = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+        string? prevTmp = Environment.GetEnvironmentVariable("TMPDIR");
+        string? prevCold = Environment.GetEnvironmentVariable("COLD_START_LOG");
+        Environment.SetEnvironmentVariable("XDG_DATA_HOME", dataHome);
+        Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", configHome);
+        Environment.SetEnvironmentVariable("TMPDIR", isolatedTmp);
+        Environment.SetEnvironmentVariable("COLD_START_LOG", coldLog);
+
+        try
+        {
+            Assert.True(new PackageDeployer(probe).Deploy(
+                new DeployRequest(package, installDirA, dataPathA, ShortcutKinds.Menu | ShortcutKinds.UriHandler)).Ok);
+
+            string desktopEntryPath = Path.Combine(dataHome, "applications", "optimum.desktop");
+            Assert.True(File.Exists(desktopEntryPath));
+            string desktopContent = File.ReadAllText(desktopEntryPath);
+            string expectedLauncher = Path.Combine(installDirA, "optimum-launch.sh");
+            Assert.Contains($"Exec=\"{expectedLauncher}\" %u", desktopContent);
+            Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", desktopContent);
+
+            // Scenario 1: No game running -> invoking the desktop handler cold-starts
+            // Optimum with its configured --dataPath and stripped InstallModId.
+            ProcessOutcome coldOutcome = probe.Run(
+                expectedLauncher,
+                ["vintagestorymodinstall://carrycapacity@1.8.0"],
+                TimeSpan.FromSeconds(5));
+            Assert.Equal(0, coldOutcome.ExitCode);
+            Assert.Equal(
+                $"COLD_START|dataPath={dataPathA}|installMod=carrycapacity@1.8.0",
+                File.ReadAllText(coldLog).Trim());
+
+            // Scenario 2: Running instance (simulating a running world or vanilla/other
+            // Optimum coexistence) owns SingleInstanceVintageStoryWithUriScheme.
+            // Repeated requests forward over the pipe without starting a second window.
+            string sockPath = Path.Combine(isolatedTmp, "SingleInstanceVintageStoryWithUriScheme.sock");
+            var receivedLines = new List<string>();
+            using var listener = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.Unix,
+                System.Net.Sockets.SocketType.Stream,
+                System.Net.Sockets.ProtocolType.Unspecified);
+            listener.Bind(new System.Net.Sockets.UnixDomainSocketEndPoint(sockPath));
+            listener.Listen(5);
+
+            Task serverTask = Task.Run(async () =>
+            {
+                for (int req = 0; req < 2; req++)
+                {
+                    using System.Net.Sockets.Socket accepted = await listener.AcceptAsync();
+                    using var stream = new System.Net.Sockets.NetworkStream(accepted);
+                    using var reader = new StreamReader(stream);
+                    string? line = await reader.ReadLineAsync();
+                    if (line is not null)
+                        receivedLines.Add(line);
+                }
+            });
+
+            ProcessOutcome firstForward = probe.Run(
+                expectedLauncher,
+                ["vintagestorymodinstall://carrycapacity@1.8.0"],
+                TimeSpan.FromSeconds(5));
+            ProcessOutcome secondForward = probe.Run(
+                expectedLauncher,
+                ["vintagestorymodinstall://primitivesurvival@3.7.5/"],
+                TimeSpan.FromSeconds(5));
+
+            await serverTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(0, firstForward.ExitCode);
+            Assert.Equal(0, secondForward.ExitCode);
+            Assert.Equal(["-i carrycapacity@1.8.0", "-i primitivesurvival@3.7.5"], receivedLines);
+            // Cold-start log still has only the 1 line from Scenario 1 (no second game window started).
+            Assert.Single(File.ReadAllLines(coldLog));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("XDG_DATA_HOME", prevData);
+            Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", prevConfig);
+            Environment.SetEnvironmentVariable("TMPDIR", prevTmp);
+            Environment.SetEnvironmentVariable("COLD_START_LOG", prevCold);
         }
     }
 

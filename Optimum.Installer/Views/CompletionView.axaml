@@ -4,39 +4,41 @@
              xmlns:conv="using:Optimum.Installer.Views"
              x:Class="Optimum.Installer.Views.CompletionView"
              x:DataType="vm:CompletionViewModel">
-  <StackPanel Spacing="18" VerticalAlignment="Top">
+  <Grid RowDefinitions="*,Auto">
+    <ScrollViewer Grid.Row="0" HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="18" VerticalAlignment="Top">
+        <StackPanel Orientation="Horizontal" Spacing="14">
+          <Border Width="44" Height="44" CornerRadius="22" VerticalAlignment="Center"
+                  Background="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeBrush}}">
+            <TextBlock Text="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeGlyph}}"
+                       FontSize="22" FontWeight="Bold"
+                       Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="{Binding Headline}" FontSize="28" FontWeight="SemiBold" VerticalAlignment="Center" />
+        </StackPanel>
 
-    <StackPanel Orientation="Horizontal" Spacing="14">
-      <Border Width="44" Height="44" CornerRadius="22" VerticalAlignment="Center"
-              Background="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeBrush}}">
-        <TextBlock Text="{Binding Succeeded, Converter={x:Static conv:InstallerConverters.OutcomeGlyph}}"
-                   FontSize="22" FontWeight="Bold"
-                   Foreground="{DynamicResource TextOnAccentFillColorPrimaryBrush}"
-                   HorizontalAlignment="Center" VerticalAlignment="Center" />
-      </Border>
-      <TextBlock Text="{Binding Headline}" FontSize="28" FontWeight="SemiBold" VerticalAlignment="Center" />
-    </StackPanel>
+        <TextBlock Text="{Binding Subtext}" TextWrapping="Wrap" MaxWidth="620" />
 
-    <TextBlock Text="{Binding Subtext}" TextWrapping="Wrap" MaxWidth="620" />
-
-    <Border Classes="Card" IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-      <StackPanel Spacing="4">
-        <TextBlock Text="Installed at" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-        <SelectableTextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap"
-                             FontFamily="Cascadia Code, Consolas, monospace" />
+        <Border Classes="Card" IsVisible="{Binding InstallDirectory, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+          <StackPanel Spacing="4">
+            <TextBlock Text="Installed at" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            <SelectableTextBlock Text="{Binding InstallDirectory}" FontWeight="SemiBold" TextWrapping="Wrap"
+                                 FontFamily="Cascadia Code, Consolas, monospace" />
+          </StackPanel>
+        </Border>
       </StackPanel>
-    </Border>
+    </ScrollViewer>
 
-    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,6,0,0">
-      <Button Content="Finish" Classes="accent"
-              IsVisible="{Binding Succeeded}"
-              Command="{Binding FinishCommand}" />
-      <Button Content="Open install folder"
+    <WrapPanel Grid.Row="1" Orientation="Horizontal" Margin="0,6,0,0">
+      <Button Content="Finish" Classes="accent" Margin="0,0,8,8"
+              IsVisible="{Binding Succeeded}" Command="{Binding FinishCommand}" />
+      <Button Content="Open install folder" Margin="0,0,8,8"
               IsVisible="{Binding CanOpenFolder}" Command="{Binding OpenFolderCommand}" />
-      <Button Content="Try again" Classes="accent"
+      <Button Content="Try again" Classes="accent" Margin="0,0,8,8"
               IsVisible="{Binding CanRetry}" Command="{Binding RetryCommand}" />
-      <Button Content="Open log"
+      <Button Content="Open log" Margin="0,0,8,8"
               IsVisible="{Binding ShowLog}" Command="{Binding ViewLogCommand}" />
-    </StackPanel>
-  </StackPanel>
+    </WrapPanel>
+  </Grid>
 </UserControl>

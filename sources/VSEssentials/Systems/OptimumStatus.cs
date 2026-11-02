@@ -391,7 +391,7 @@ public class OptimumStatusModSystem : ModSystem
         {
             sb.AppendLine($"  {name}: {value}");
         }
-        sb.AppendLine($"  threadpool: setMaxThreads={TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant()} worker={TyronThreadPool.SetMaxThreadsWorkerBefore}-&gt;{TyronThreadPool.SetMaxThreadsWorkerAfter} io={TyronThreadPool.SetMaxThreadsIoBefore}-&gt;{TyronThreadPool.SetMaxThreadsIoAfter}");
+        sb.AppendLine($"  threadpool: {GetThreadPoolMaxThreadsSummary()}");
         sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
         // Issue #119 follow-up: what the interop protocol agreed with a peer this session, so a
         // field log says whether the negotiation ran and who holds what down.
@@ -422,12 +422,7 @@ public class OptimumStatusModSystem : ModSystem
                 enabled++;
         }
         api.Logger.Notification("[Optimum] Features: {0}/{1} enabled", enabled, total);
-        api.Logger.Notification("[Optimum] threadpool: setMaxThreads={0} worker={1}->{2} io={3}->{4}",
-            TyronThreadPool.SetMaxThreadsResult.ToString().ToLowerInvariant(),
-            TyronThreadPool.SetMaxThreadsWorkerBefore,
-            TyronThreadPool.SetMaxThreadsWorkerAfter,
-            TyronThreadPool.SetMaxThreadsIoBefore,
-            TyronThreadPool.SetMaxThreadsIoAfter);
+        api.Logger.Notification("[Optimum] threadpool: {0}", GetThreadPoolMaxThreadsSummary());
 
         if (OptimumConfig.RepulsionGateEnabled)
             api.Logger.Debug("[Optimum] Repulsion gate: ON (distance={0})", OptimumConfig.RepulsionDistance);
@@ -478,5 +473,30 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Notification("[Optimum] Tungsten mod detected: server-side optimizations active.");
         if (OptimumConfig.SynergyDetected)
             api.Logger.Notification("[Optimum] Synergy mod detected: client-server synchronization active.");
+    }
+
+    private static string GetThreadPoolMaxThreadsSummary()
+    {
+        System.Threading.ThreadPool.GetMaxThreads(out int workerThreads, out int completionPortThreads);
+        string summary = $"workerMax={workerThreads} ioMax={completionPortThreads}";
+
+        // The runtime donor may compile against the vanilla API, where these Optimum-only
+        // telemetry properties do not exist. Read them by reflection when the patched API is present.
+        var threadPoolType = typeof(TyronThreadPool);
+        var resultProperty = threadPoolType.GetProperty("SetMaxThreadsResult");
+        var workerBeforeProperty = threadPoolType.GetProperty("SetMaxThreadsWorkerBefore");
+        var workerAfterProperty = threadPoolType.GetProperty("SetMaxThreadsWorkerAfter");
+        var ioBeforeProperty = threadPoolType.GetProperty("SetMaxThreadsIoBefore");
+        var ioAfterProperty = threadPoolType.GetProperty("SetMaxThreadsIoAfter");
+
+        if (resultProperty is not null && workerBeforeProperty is not null && workerAfterProperty is not null
+            && ioBeforeProperty is not null && ioAfterProperty is not null)
+        {
+            summary += $" setMaxThreads={resultProperty.GetValue(null)?.ToString()?.ToLowerInvariant()}"
+                + $" worker={workerBeforeProperty.GetValue(null)}->{workerAfterProperty.GetValue(null)}"
+                + $" io={ioBeforeProperty.GetValue(null)}->{ioAfterProperty.GetValue(null)}";
+        }
+
+        return summary;
     }
 }

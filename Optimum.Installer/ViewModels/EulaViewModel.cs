@@ -57,17 +57,22 @@ public sealed partial class EulaViewModel : ViewModelBase
         string? dataPath,
         string? version,
         bool createMenuEntry,
-        bool createDesktopShortcut)
+        bool createDesktopShortcut,
+        bool registerUriHandler = false)
     {
         InstallDirectory = installDirectory;
         DataPathSummary = dataPath ?? "Use the standard Vintage Story data folder";
         VersionSummary = version ?? "Recommended version";
-        ShortcutSummary = (createMenuEntry, createDesktopShortcut) switch
+        ShortcutSummary = (createMenuEntry, createDesktopShortcut, registerUriHandler) switch
         {
-            (true, true) => "Application menu entry and desktop shortcut",
-            (true, false) => "Application menu entry",
-            (false, true) => "Desktop shortcut",
-            _ => "No shortcuts",
+            (true, true, false) => "Application menu entry and desktop shortcut",
+            (true, false, false) => "Application menu entry",
+            (false, true, false) => "Desktop shortcut",
+            (false, false, false) => "No shortcuts",
+            (true, true, true) => "Application menu entry, desktop shortcut, and ModDB URI handler",
+            (true, false, true) => "Application menu entry and ModDB URI handler",
+            (false, true, true) => "Desktop shortcut and ModDB URI handler",
+            (false, false, true) => "ModDB URI handler",
         };
     }
 

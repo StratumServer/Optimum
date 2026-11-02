@@ -25,7 +25,7 @@ public static class SdkAcquisition
         if (NixEnvironment.IsNixOs(probe))
         {
             return new Decision(false,
-                $"NixOS: install the SDK with `{NixEnvironment.DotnetSdkInstallCommand}` instead.", null);
+                $"NixOS: use the project development shell with `{NixEnvironment.DevelopmentShellCommand(repoRoot)}` instead.", null);
         }
 
         if (!NixEnvironment.DownloadedSdkRunnable(probe))

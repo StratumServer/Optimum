@@ -631,9 +631,12 @@ written against.
 `scripts/install-linux.sh:95-124` detects a missing standard glibc dynamic linker
 and refuses to run the `dot.net` installer, because the SDK it downloads hardcodes
 an interpreter path that does not exist on NixOS. Core keeps that refusal and
-keeps the substitute instruction `nix profile install nixpkgs#dotnet-sdk_10`. The
-completion screen keeps the warning at `scripts/install-linux.sh:913-914` that the
-resulting binaries need an FHS environment such as `steam-run`.
+uses the project-local `nix develop` shell. `flake.lock` pins nixpkgs and the
+shell provides the SDK selected by `global.json` plus bootstrap commands. The
+Prerequisites screen shows a copyable command with flakes enabled for that
+invocation and explains that the installer must be restarted from the shell.
+The completion screen keeps the warning at `scripts/install-linux.sh:913-914`
+that the resulting binaries need an FHS environment such as `steam-run`.
 
 ### The SDK bootstrapping paradox
 
@@ -1094,12 +1097,13 @@ Windows only is exactly the state the repository is in today, which is survivabl
 A half-finished Phase 2 that leaves the NDJSON contract partly implemented is not,
 because RiftLauncher would build against it.
 
-**The build is heavy.** A 570 MB download plus a multi-minute compile. The
-progress screen needs honest estimates rather than a marquee, and the download
-cache in `.vanilla/archives/` (`scripts/bootstrap.sh:321`) needs to survive a
-cancelled install so a retry does not re-download. The Windows bootstrap already
-writes to a `.partial` file and moves it into place on completion
-(`scripts/bootstrap.ps1:559`, `:568`); the same discipline should apply everywhere.
+**The build is heavy.** The installer preflights the official client archive size
+and available space at the source and temporary build locations. It reuses only
+archives with the expected size and valid client contents. Cancelled transfers
+keep a partial plus its entity tag, and retries resume only when the endpoint
+confirms byte-range support; otherwise the transfer restarts from byte zero.
+Space figures are estimates, and a low-space warning leaves the user free to
+cancel, free space and retry.
 
 **Legacy macOS overlay users.** Migration path described in section 6. The risk is
 that a user who installed with the old script and then installs with the new one

@@ -49,17 +49,19 @@ public class OptimumStatusTests
     }
 
     [Fact]
-    public void StatusReportsThreadPoolSetMaxThreadsMeasurement()
+    public void StatusReportsEffectiveThreadPoolLimitsAndOptionalOptimumMeasurement()
     {
         string source = File.ReadAllText(PatchReader.FindRepositoryFile(
             "sources/VSEssentials/Systems/OptimumStatus.cs"));
 
-        Assert.Contains("TyronThreadPool.SetMaxThreadsResult", source);
-        Assert.Contains("TyronThreadPool.SetMaxThreadsWorkerBefore", source);
-        Assert.Contains("TyronThreadPool.SetMaxThreadsWorkerAfter", source);
-        Assert.Contains("TyronThreadPool.SetMaxThreadsIoBefore", source);
-        Assert.Contains("TyronThreadPool.SetMaxThreadsIoAfter", source);
-        Assert.Contains("threadpool: setMaxThreads=", source);
+        Assert.Contains("System.Threading.ThreadPool.GetMaxThreads", source);
+        Assert.Contains("workerMax=", source);
+        Assert.Contains("ioMax=", source);
+        Assert.Contains("GetProperty(\"SetMaxThreadsResult\")", source);
+        Assert.Contains("GetProperty(\"SetMaxThreadsWorkerBefore\")", source);
+        Assert.Contains("GetProperty(\"SetMaxThreadsWorkerAfter\")", source);
+        Assert.Contains("GetProperty(\"SetMaxThreadsIoBefore\")", source);
+        Assert.Contains("GetProperty(\"SetMaxThreadsIoAfter\")", source);
         Assert.Contains("api.Logger.Notification(\"[Optimum] threadpool:", source);
     }
 
@@ -129,8 +131,8 @@ public class OptimumStatusTests
     [Fact]
     public void GameLaunchTaskExecutionRecordsTheExistingSingleTaskBranch()
     {
-        string clientSource = File.ReadAllText(PatchReader.FindRepositoryFile(
-            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs"));
+        string clientSource = PatchReader.ReadPatch(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch");
         string diagnosticsSource = File.ReadAllText(PatchReader.FindRepositoryFile(
             "sources/VintagestoryApi/Config/OptimumConfig.cs"));
 

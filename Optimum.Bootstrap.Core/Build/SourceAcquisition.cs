@@ -1,6 +1,7 @@
 using System.Text;
 using CliWrap;
 using CliWrap.EventStream;
+using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Platform;
 
 namespace Optimum.Bootstrap.Core.Build;
@@ -148,11 +149,27 @@ public sealed class GitSourceProvider(ISystemProbe probe) : ISourceProvider
             return SourceAcquisitionResult.Success(targetDir);
         }
 
-        string? git = CommandSearch.Which(probe, "git");
+        string? git = probe.Os == OsKind.Windows
+            ? GitForWindows.FindExecutable(probe)
+            : CommandSearch.Which(probe, "git");
         if (git is null)
         {
             return SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable,
                 "git was not found on PATH; install git so the installer can download the Optimum source");
+        }
+
+        ProcessOutcome gitCheck = probe.Run(git, ["--version"], TimeSpan.FromSeconds(5));
+        if (!gitCheck.Started || gitCheck.ExitCode != 0)
+        {
+            return SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable,
+                $"'{git}' was found but could not be executed; verify git is working correctly");
+        }
+
+        if (probe.Os == OsKind.Windows)
+        {
+            string? gitDir = Path.GetDirectoryName(git);
+            if (!string.IsNullOrEmpty(gitDir))
+                ProcessPath.Prepend(gitDir);
         }
 
         try

@@ -112,7 +112,7 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     public bool CanRequestInstall => !AwaitingConfirmation && !Installing;
     public string? ConfirmationDetail => _actions?.ConfirmationDetail;
 
-    public string Detail => ActionStatus ?? Result.State switch
+    public string Detail => ActionStatus ?? Result.Guidance ?? (Result.State switch
     {
         PrerequisiteState.Ok when Result.DetectedVersion is { Length: > 0 } version =>
             $"Version {version}. Used for {Result.Definition.UsedBy}.",
@@ -123,7 +123,7 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
             && Result.Acquisition == AcquisitionKind.Automatic
             && Result.AcquisitionCommand is { Length: > 0 } instructions => instructions,
         _ => $"Install this tool, then check again. Used for {Result.Definition.UsedBy}.",
-    };
+    });
 
     /// <summary>The action button label, or null when there is nothing to do.</summary>
     public string? ActionLabel
@@ -490,7 +490,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
             _ => null,
         };
 
-        Action? openPage = result.Acquisition == AcquisitionKind.DownloadPage
+        Action? openPage = result.Acquisition is AcquisitionKind.DownloadPage or AcquisitionKind.Manual
             && result.DownloadUrl is { Length: > 0 } url
             ? () => OpenUrl(url)
             : null;

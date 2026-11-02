@@ -105,6 +105,12 @@ patch_target_paths() {
   ' "$patch" | sort -u
 }
 
+list_contains() {
+  local list="$1"
+  local value="$2"
+  [[ -n "$list" ]] && grep -Fqx -- "$value" <<< "$list"
+}
+
 patch_has_unavailable_target() {
   local patch="$1"
   local dir_arg="$2"
@@ -148,8 +154,8 @@ cecil_type_to_patch() {
 
 check_cecil_cross_reference() {
   local mismatch=0
-  local -A expected=()
-  local type rel
+  local expected=""
+  local type rel owned
 
   if [[ ! -f "$patcher_program" ]]; then
     return 0
@@ -158,22 +164,23 @@ check_cecil_cross_reference() {
   while IFS= read -r type; do
     [[ -z "$type" ]] && continue
     rel="$(cecil_type_to_patch "$type")"
-    expected["$rel"]=1
+    expected+="$rel"$'\n'
     if [[ ! -f "$repo_root/$rel" ]]; then
       continue
     fi
-    if [[ -z "${cecil_owned["$rel"]:-}" ]]; then
+    if ! list_contains "$cecil_owned" "$rel"; then
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
   done < <(grep -oE '"Vintagestory\.(Client(\.[A-Za-z0-9_]+)*|Common|Server)\.[A-Za-z0-9_]+"' "$patcher_program" | tr -d '"' | sort -u)
 
-  for rel in "${!cecil_owned[@]}"; do
-    if [[ -z "${expected["$rel"]:-}" ]]; then
-      echo "cecil-owned.list lists a patch no Program.cs target maps to: $rel" >&2
+  while IFS= read -r owned; do
+    [[ -z "$owned" ]] && continue
+    if ! list_contains "$expected" "$owned"; then
+      echo "cecil-owned.list lists a patch no Program.cs target maps to: $owned" >&2
       mismatch=1
     fi
-  done
+  done <<< "$cecil_owned"
 
   return "$mismatch"
 }
@@ -185,11 +192,11 @@ fi
 
 cd "$repo_root"
 
-declare -A cecil_owned=()
+cecil_owned=""
 if [[ -f "$cecil_list" ]]; then
   while IFS= read -r line; do
     [[ -z "$line" || "$line" == \#* ]] && continue
-    cecil_owned["$line"]=1
+    cecil_owned+="$line"$'\n'
   done < "$cecil_list"
 fi
 
@@ -265,7 +272,7 @@ while IFS= read -r -d '' patch; do
     mode="-"
   fi
 
-  if [[ "$state" == "applied" && -n "${cecil_owned["$rel"]:-}" ]]; then
+  if [[ "$state" == "applied" ]] && list_contains "$cecil_owned" "$rel"; then
     state="cecil"
     applied=$((applied-1))
     cecil=$((cecil+1))
@@ -333,7 +340,7 @@ fi
 orphans=0
 while IFS= read -r -d '' patch; do
   rel="${patch#$repo_root/}"
-  if [[ -z "${cecil_owned["$rel"]:-}" ]]; then
+  if ! list_contains "$cecil_owned" "$rel"; then
     echo "ORPHAN: $rel (not in cecil-owned.list, will not ship)" >&2
     orphans=$((orphans+1))
   fi

@@ -5,14 +5,17 @@ on:
     paths: &script_paths
       - 'scripts/bootstrap.sh'
       - 'scripts/bootstrap.ps1'
+      - 'scripts/extract-stage-root.ps1'
       - 'scripts/git-repository.sh'
       - 'scripts/git-repository.ps1'
       - 'scripts/install-linux.sh'
       - 'scripts/install-linux-legacy.sh'
       - 'scripts/package-linux.sh'
+      - 'scripts/package-macos.sh'
       - 'scripts/package-linux.ps1'
       - 'scripts/prepare-runtime-donors.sh'
       - 'scripts/prepare-runtime-donors.ps1'
+      - 'scripts/release-checksums.js'
       - 'scripts/sync-runtimeconfig-frameworks.ps1'
       - 'scripts/tests/sync-runtimeconfig-frameworks.ps1'
       - 'scripts/tests/**'
@@ -65,6 +68,9 @@ jobs:
       - name: Runtime donor candidate resolution test
         run: bash scripts/tests/runtime-donor-dotnet-selection.sh
 
+      - name: Runtime donor API compatibility test
+        run: bash scripts/tests/runtime-donor-api-compatibility.sh
+
   windows-runtimeconfig:
     name: Windows PowerShell 5.1 runtimeconfig merge
     runs-on: windows-latest
@@ -75,3 +81,33 @@ jobs:
       - name: Run runtimeconfig sync under Windows PowerShell 5.1
         shell: powershell
         run: ./scripts/tests/sync-runtimeconfig-frameworks.ps1
+
+  windows-extract-stage:
+    name: Windows extraction staging in PowerShell 5.1 and 7
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run extraction staging test under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/extract-stage-root.ps1
+
+      - name: Run extraction staging test under PowerShell 7
+        shell: pwsh
+        run: ./scripts/tests/extract-stage-root.ps1
+
+  release-checksums:
+    name: Release checksums and VirusTotal formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Release checksums unit tests
+        run: bash scripts/tests/release-checksums.sh

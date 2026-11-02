@@ -12,8 +12,10 @@ public sealed class ShortcutWriterTests : IDisposable
 
     private FakeSystemProbe LinuxProbe()
     {
-        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = _home.Replace('\\', '/') };
-        probe.Environment["XDG_DATA_HOME"] = _home.Replace('\\', '/') + "/.local/share";
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = home };
+        probe.Environment["XDG_DATA_HOME"] = home + "/.local/share";
+        probe.Environment["XDG_CONFIG_HOME"] = home + "/.config";
         return probe;
     }
 
@@ -38,11 +40,140 @@ public sealed class ShortcutWriterTests : IDisposable
         Assert.Contains(menuEntry, created);
         Assert.Contains(desktopEntry, created);
         Assert.True(File.Exists(menuEntry));
-        Assert.Contains($"Exec=\"{launcher}\"", File.ReadAllText(menuEntry));
+        string content = File.ReadAllText(menuEntry);
+        Assert.Contains($"Exec=\"{launcher}\" %u", content);
+        Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", content);
+        Assert.DoesNotContain("NoDisplay=true", content);
 
         writer.Remove(created);
         Assert.False(File.Exists(menuEntry));
         Assert.False(File.Exists(desktopEntry));
+    }
+
+    [Fact]
+    public void QuotesAndEscapesPathsWithSpacesAndSpecialCharactersInLinuxDesktopEntry()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/My Games/Optimum \"Special\" $1 100%";
+        string launcher = $"{installDir}/optimum-launch.sh";
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.Menu);
+
+        string menuEntry = Assert.Single(created);
+        string content = File.ReadAllText(menuEntry);
+        Assert.Contains($"Exec=\"{home}/My Games/Optimum \\\"Special\\\" \\$1 100%%/optimum-launch.sh\" %u", content);
+        Assert.Contains($"Path={installDir}", content);
+        Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", content);
+    }
+
+    [Fact]
+    public void RemovingDesktopShortcutAloneDoesNotClearActiveUriHandlerAssociation()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(
+            installDir,
+            launcher,
+            ShortcutKinds.Menu | ShortcutKinds.Desktop | ShortcutKinds.UriHandler);
+
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+        string desktopShortcut = created.Single(p => p.EndsWith("/Desktop/Optimum.desktop", StringComparison.Ordinal));
+
+        writer.Remove([desktopShortcut]);
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+    }
+
+    [Fact]
+    public void RemoveUriHandlerAssociationDoesNotOverwriteNewerThirdPartyDefaultHandler()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        string appsDir = $"{home}/.local/share/applications";
+        string mimeApps = $"{home}/.config/mimeapps.list";
+        Directory.CreateDirectory(installDir);
+        Directory.CreateDirectory(appsDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(mimeApps)!);
+
+        File.WriteAllText($"{appsDir}/Vintagestory_url_mod.desktop", "[Desktop Entry]\nName=VS\n");
+        File.WriteAllText($"{appsDir}/custom-mod-manager.desktop", "[Desktop Entry]\nName=Custom\n");
+        File.WriteAllText(mimeApps, "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=Vintagestory_url_mod.desktop\n");
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.UriHandler);
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+
+        // User switches their default handler to custom-mod-manager.desktop after installing Optimum.
+        File.WriteAllText(mimeApps, "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=custom-mod-manager.desktop\n");
+
+        // Uninstalling Optimum must NOT overwrite custom-mod-manager.desktop with Vintagestory_url_mod.desktop.
+        writer.Remove(created, removeUriAssociation: true, previousUriHandler: "Vintagestory_url_mod.desktop");
+        Assert.Equal("custom-mod-manager.desktop", writer.QueryDefaultUriHandler());
+    }
+
+    [Fact]
+    public void ExplicitUriHandlerSelectionRespectsAndRestoresExistingDefaultHandler()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        string appsDir = $"{home}/.local/share/applications";
+        string mimeApps = $"{home}/.config/mimeapps.list";
+        Directory.CreateDirectory(installDir);
+        Directory.CreateDirectory(appsDir);
+        Directory.CreateDirectory(Path.GetDirectoryName(mimeApps)!);
+
+        // Simulate an existing vanilla Vintage Story URI handler choice.
+        File.WriteAllText($"{appsDir}/Vintagestory_url_mod.desktop", "[Desktop Entry]\nName=VS\n");
+        File.WriteAllText(mimeApps, "[Default Applications]\nx-scheme-handler/vintagestorymodinstall=Vintagestory_url_mod.desktop\n");
+
+        var writer = new ShortcutWriter(probe);
+        Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+
+        // Menu shortcut alone must NOT overwrite the existing default handler.
+        IReadOnlyList<string> menuOnly = writer.Create(installDir, launcher, ShortcutKinds.Menu);
+        Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+
+        // Explicit UriHandler selection sets optimum.desktop as default.
+        IReadOnlyList<string> withUri = writer.Create(installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.UriHandler);
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+
+        // Removing with previousUriHandler restores Vintagestory_url_mod.desktop.
+        writer.Remove(withUri, removeUriAssociation: true, previousUriHandler: "Vintagestory_url_mod.desktop");
+        Assert.Equal("Vintagestory_url_mod.desktop", writer.QueryDefaultUriHandler());
+        _ = menuOnly;
+    }
+
+    [Fact]
+    public void UriHandlerWithoutMenuShortcutWritesHiddenDesktopEntryAndCleansUpOnRemove()
+    {
+        FakeSystemProbe probe = LinuxProbe();
+        string home = _home.Replace('\\', '/');
+        string installDir = $"{home}/games/optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(installDir, launcher, ShortcutKinds.UriHandler);
+
+        string menuEntry = Assert.Single(created);
+        string content = File.ReadAllText(menuEntry);
+        Assert.Contains("NoDisplay=true", content);
+        Assert.Contains("MimeType=x-scheme-handler/vintagestorymodinstall;", content);
+        Assert.Equal("optimum.desktop", writer.QueryDefaultUriHandler());
+
+        writer.Remove(created, removeUriAssociation: true, previousUriHandler: null);
+        Assert.False(File.Exists(menuEntry));
+        Assert.Null(writer.QueryDefaultUriHandler());
     }
 
     [Fact]
@@ -62,5 +193,81 @@ public sealed class ShortcutWriterTests : IDisposable
         new ShortcutWriter(probe).Create(installDir, Path.Combine(installDir, "optimum-launch.sh"), ShortcutKinds.Menu);
 
         Assert.True(File.Exists(Path.Combine(_home, ".local", "share", "icons", "hicolor", "256x256", "apps", "optimum.png")));
+    }
+
+    [Fact]
+    public void WritesLaunchableMacOsApplicationBundlesForMenuAndDesktop()
+    {
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/Optimum";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+        File.WriteAllText(launcher, "#!/bin/sh\nexit 0\n");
+        File.WriteAllText($"{installDir}/Icon.icns", "icon");
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(
+            installDir, launcher, ShortcutKinds.Menu | ShortcutKinds.Desktop);
+
+        string menuApp = $"{home}/Applications/Optimum.app";
+        string desktopApp = $"{home}/Desktop/Optimum.app";
+        Assert.Equal([menuApp, desktopApp], created);
+        foreach (string app in created)
+        {
+            Assert.True(File.Exists($"{app}/Contents/Info.plist"));
+            Assert.True(File.Exists($"{app}/Contents/MacOS/Optimum"));
+            Assert.True(File.Exists($"{app}/Contents/Resources/Optimum.icns"));
+            Assert.Contains("<key>CFBundlePackageType</key><string>APPL</string>",
+                File.ReadAllText($"{app}/Contents/Info.plist"));
+            Assert.Contains($"exec '{launcher}' \"$@\"", File.ReadAllText($"{app}/Contents/MacOS/Optimum"));
+        }
+
+        writer.Remove(created);
+        Assert.False(Directory.Exists(menuApp));
+        Assert.False(Directory.Exists(desktopApp));
+    }
+
+    [Fact]
+    public void DoesNotOverwriteAnUnrelatedMacOsApplicationDirectory()
+    {
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/Optimum";
+        string app = $"{home}/Applications/Optimum.app";
+        Directory.CreateDirectory(installDir);
+        Directory.CreateDirectory(app);
+        string sentinel = Path.Combine(app, "keep.txt");
+        File.WriteAllText(sentinel, "user data");
+
+        IReadOnlyList<string> created = new ShortcutWriter(probe).Create(
+            installDir, $"{installDir}/optimum-launch.sh", ShortcutKinds.Menu);
+
+        Assert.Empty(created);
+        Assert.Equal("user data", File.ReadAllText(sentinel));
+    }
+
+    [Fact]
+    public void ReplacesOnlyTheLegacyMacOsShortcutSymlink()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/Optimum";
+        string app = $"{home}/Applications/Optimum.app";
+        Directory.CreateDirectory(installDir);
+        File.WriteAllText(Path.Combine(installDir, "payload.txt"), "preserve install");
+        Directory.CreateSymbolicLink(app, installDir);
+
+        IReadOnlyList<string> created = new ShortcutWriter(probe).Create(
+            installDir, $"{installDir}/optimum-launch.sh", ShortcutKinds.Menu);
+
+        Assert.Equal([app], created);
+        Assert.Null(new DirectoryInfo(app).LinkTarget);
+        Assert.True(File.Exists(Path.Combine(app, "Contents", "Info.plist")));
+        Assert.Equal("preserve install", File.ReadAllText(Path.Combine(installDir, "payload.txt")));
+        Assert.False(Directory.Exists(Path.Combine(installDir, "Contents")));
     }
 }

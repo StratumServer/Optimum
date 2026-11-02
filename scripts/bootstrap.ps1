@@ -49,6 +49,8 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot/_exec.ps1"
 # Explicit repository-path helper for cloned working trees (mirrors bootstrap.sh).
 . "$PSScriptRoot/git-repository.ps1"
+# Short staging directory for innoextract (Windows path length limit).
+. "$PSScriptRoot/extract-stage-root.ps1"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 # A GIT_DIR inherited from the calling environment (some tools and shell rc
@@ -557,6 +559,10 @@ try {
             throw ".vanilla/win-x64/vintagestory not found and download was skipped. Provide a VS install path."
         }
     } else {
+        # Check before the ~570 MB download that the extraction can work here.
+        if (($env:OS -eq 'Windows_NT') -or (($null -ne $IsWindows) -and $IsWindows)) {
+            Assert-ExtractPreflight -Fallback (Split-Path -Parent $winVanillaDir) -Destination $winVanillaDir -ArchiveMissing:(-not ($ClientArchive -and (Test-Path -LiteralPath $ClientArchive)) -and -not (Test-Path -LiteralPath (Join-Path $zipCacheDir "vs_install_win-x64_$Version.exe")))
+        }
         New-Item -ItemType Directory -Force -Path $zipCacheDir | Out-Null
         $exeName = "vs_install_win-x64_$Version.exe"
         if (-not $ClientArchive) {
@@ -574,7 +580,7 @@ try {
             $partial = "$ClientArchive.partial"
             Remove-Item -Force -ErrorAction SilentlyContinue $partial
 
-            Invoke-NativeStep { curl.exe -L --fail --progress-bar -o $partial $url }
+            Invoke-NativeStep { curl.exe -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - --progress-bar -o $partial $url }
             if ($LASTEXITCODE -ne 0) {
                 Remove-Item -Force -ErrorAction SilentlyContinue $partial
                 throw "Download failed: $url"
@@ -682,17 +688,34 @@ try {
             throw "innoextract could not inspect the installer '$ClientArchive'. The installer uses an unsupported Inno Setup format."
         }
 
-        # Extract into a clean staging folder beside the target
+        # Extract into a clean, short staging folder. On Windows the folder
+        # sits under the temp directory because innoextract is limited to 260
+        # character paths; elsewhere it stays beside the target so the final
+        # move is a rename.
         $stageParent = Split-Path -Parent $winVanillaDir
         New-Item -ItemType Directory -Force -Path $stageParent | Out-Null
-        $extractRoot = Join-Path $stageParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
-        New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        if ($isWin) {
+            # The extraction runs inside the helper so that a location innoextract
+            # cannot write to (Controlled Folder Access, a security product) makes
+            # it try the next one instead of ending the install.
+            Write-Host "Extracting with innoextract to $winVanillaDir"
+            $extractRoot = Invoke-ExtractWithStageFallback -Fallback $stageParent -ExtractorPath $innoextract -Extract {
+                param($stage)
+                Invoke-NativeStep { & $innoextract --silent --extract --output-dir $stage $ClientArchive } | Out-Host
+                return $LASTEXITCODE
+            }
+        } else {
+            $extractRoot = Join-Path $stageParent ".innoextract-stage-$([Guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+        }
 
         try {
-            Write-Host "Extracting with innoextract to $winVanillaDir"
-            Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $ClientArchive }
-            if ($LASTEXITCODE -ne 0) {
-                throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive"
+            if (-not $isWin) {
+                Write-Host "Extracting with innoextract to $winVanillaDir"
+                Invoke-NativeStep { & $innoextract --silent --extract --output-dir $extractRoot $ClientArchive }
+                if ($LASTEXITCODE -ne 0) {
+                    throw "innoextract failed (exit $LASTEXITCODE) for $ClientArchive. $(Get-ExtractFailureHint -StageRoot $extractRoot)"
+                }
             }
 
             $sourceRoot = Join-Path $extractRoot 'app'
@@ -717,7 +740,8 @@ try {
                 }
             }
         } finally {
-            if (Test-Path $extractRoot) { Remove-Item -Recurse -Force $extractRoot -ErrorAction SilentlyContinue }
+            if ($isWin) { Remove-ExtractStageDirectory -Path $extractRoot }
+            elseif (Test-Path -LiteralPath $extractRoot) { Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue }
         }
 
         $freshExtract = $true
@@ -797,7 +821,7 @@ try {
             Write-Host "Decompiling $dllBase.dll with $verLine"
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
-            Invoke-NativeStep { ilspycmd $dllPath.FullName --project -o $out 2>$null | Out-Null }
+            Invoke-NativeStep { ilspycmd $dllPath.FullName --project --disable-updatecheck -o $out 2>$null | Out-Null }
             # ILSpy can report a spurious version warning after successful output;
             # validate both the project and source before stamping this cache.
             $producedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
@@ -1129,12 +1153,31 @@ try {
 
     # Vintagestory.csproj - needs ProjectReference to VintagestoryLib (not vanilla DLL).
     # The per-OS entry class (ClientLinux/ClientWindows/ClientMac) uses the Vintagestory.Client namespace which lives in the VintagestoryLib project.
+    # Rewrite cleanly to eliminate any decompiler artifacts (e.g. spurious System.Runtime.InteropServices GAC references).
     $vsEntryCsproj = Join-Path $repoRoot 'build/Vintagestory/Vintagestory.csproj'
-    Update-FileInPlace $vsEntryCsproj {
-        param($t)
-        $t = [regex]::Replace($t, '<Reference Include="VintagestoryLib">(?s:.*?)</Reference>', '<ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />')
-        $t
-    }
+    $vsEntryContent = @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Vintagestory</AssemblyName>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VintagestoryLib\VintagestoryLib.csproj" />
+  </ItemGroup>
+</Project>
+'@
+    Write-TextFile $vsEntryCsproj ($vsEntryContent + "`n")
     $null = [xml](Get-Content -LiteralPath $vsEntryCsproj -Raw)
 
     # 6g-extra: AssemblyInfo.cs - ensure Guid/ComVisible attributes resolve without relying on ilspycmd using emission.

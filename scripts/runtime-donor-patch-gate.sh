@@ -4,6 +4,8 @@ if (set -o pipefail 2>/dev/null); then
     set -o pipefail
 fi
 
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
+
 if [[ "$#" -ne 2 ]]; then
     echo "Usage: $0 <repository-root> <runtime-root-relative-to-repository>" >&2
     exit 2

@@ -48,15 +48,25 @@ Some optimizations in this repository do not yet reach the shipped game. The per
 
 ## Getting Started
 
-Optimum compiles from source because Vintage Story is proprietary. The first build downloads the official client (~570MB) and decompiles it. Subsequent builds reuse the cache.
+Optimum compiles from source because Vintage Story is proprietary. The installer checks the official client download size and available workspace space before building. It validates the cached archive and keeps a partial download so a retry can resume when the server supports byte ranges. Subsequent builds reuse the cache.
 
 ### Graphical installer
 
 `Optimum.Installer` is a cross-platform Avalonia wizard: it checks and acquires the prerequisites, downloads and decompiles the client, builds the patched runtime, and installs it, all with a progress log and a rollback on failure. A published installer does not need an existing checkout. It clones the matching Optimum source into the user's cache before the build.
 
-The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.21-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.21-linux-x64-Installer.AppImage`). The macOS builds are archival only. Nothing is code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first run; on macOS the installer runs from a source build.
+The `release-installer.yml` workflow packs the Windows and Linux builds with Velopack, so an installed copy updates itself. Release assets follow the `Optimum-v<version>-<rid>-Installer.<ext>` pattern (`Optimum-v0.3.22-win-x64-Setup.exe` plus a portable zip, `Optimum-v0.3.22-linux-x64-Installer.AppImage`). The macOS builds are archival only. Nothing is code-signed yet, so Windows SmartScreen and macOS Gatekeeper warn on first run; on macOS the installer runs from a source build.
 
 When a GitHub release is published, `release-overlay.yml` builds native Linux and Windows overlays and attaches each archive with its matching `optimum-manifest-<rid>.json`. RiftLauncher uses the manifest for that platform to verify the archive and every staged file before patching a game installation.
+
+#### Verifying download integrity and VirusTotal reports
+
+Every release publishes a `## Checksums and scans` table containing SHA-256 digests for all installer assets and Velopack feed metadata. To verify the hash of a downloaded binary locally:
+
+- **Windows (Command Prompt / PowerShell):** `certutil -hashfile <file> SHA256` or `Get-FileHash <file> -Algorithm SHA256`
+- **Linux:** `sha256sum <file>`
+- **macOS:** `shasum -a 256 <file>`
+
+VirusTotal report links in the table reflect automated scans from third-party antimalware engines. These reports are advisory: they indicate engine findings at scan time, not an absolute guarantee of safety or a substitute for platform code signing. Velopack feeds (`assets.*.json`, `*.nupkg`) and update metadata are listed by hash only and not submitted for binary scan analysis.
 
 ```bash
 git clone https://github.com/StratumServer/Optimum.git
@@ -93,14 +103,22 @@ cd Optimum
 
 The installer shows a ✓/✗ checklist of required tools, offers to install anything missing, asks where to install (default: `~/.local/share/optimum`), and creates a menu entry. Run the game from the menu or with `~/.local/share/optimum/optimum-launch.sh`.
 
+**ModDB 1-click mod installation (`vintagestorymodinstall://`):**
+
+On Linux, Optimum's `.desktop` entry registers `MimeType=x-scheme-handler/vintagestorymodinstall;` and passes `%u` to `optimum-launch.sh`, which validates the URI and forwards `-i <uri>` to the client. Existing default-handler associations are preserved unless you opt in explicitly (via the installer Options screen, `optimum install --shortcuts menu,uri`, or `./scripts/install-linux.sh --set-default-uri-handler`).
+
+Vintage Story and Optimum share the user-session named pipe `SingleInstanceVintageStoryWithUriScheme` for URI forwarding:
+- When a client instance is already running (whether Optimum, vanilla Vintage Story, or one of multiple Optimum installs), the first instance that started owns the pipe listener and receives the `-i` install request inside its own window and active data path (returning to the main menu first if a world is loaded).
+- When no client is running, the default XDG handler launches that installation with its configured `--dataPath` and opens the ModDB download prompt on startup.
+
 **AppImage** (single portable executable, no install):
 
 ```bash
 git clone https://github.com/StratumServer/Optimum.git
 cd Optimum
 make package-appimage
-chmod +x Optimum-v0.3.21-linux-x64.AppImage
-./Optimum-v0.3.21-linux-x64.AppImage
+chmod +x Optimum-v0.3.22-linux-x64.AppImage
+./Optimum-v0.3.22-linux-x64.AppImage
 ```
 
 If `appimagetool` is missing, the script downloads it (14MB, once) into `.tools/`.
@@ -119,13 +137,26 @@ Requires .NET 10 SDK, bash, python3, git, curl, perl.
 
 **NixOS** (non-FHS distribution):
 
-The interactive installer detects NixOS and routes the .NET 10 SDK prerequisite
-through nixpkgs, since the SDK from dot.net is a glibc build that cannot run
-there:
+The source installer uses the repository's locked Nix development shell for the
+.NET SDK and bootstrap commands. From the Prerequisites screen, copy its command
+and run it in a terminal. If flakes are already enabled in your Nix settings,
+the shorter `nix develop` command works from the repository root. Otherwise the
+installer's command enables flakes only for that invocation. Restart the
+installer from the resulting shell so it inherits the SDK and tools. This does
+not change a Nix profile or system configuration.
+
+For a manual source build, enable flakes for that command and enter the shell:
 
 ```sh
-nix profile install nixpkgs#dotnet-sdk_10
+nix --extra-experimental-features 'nix-command flakes' develop --no-update-lock-file
 ```
+
+The committed `flake.lock` pins nixpkgs. The shell supplies the .NET SDK 10
+compatible with `global.json`, Git, Perl, Python 3, curl, tar, coreutils, and
+PowerShell. Run `scripts/tests/nixos-dev-shell-smoke.sh` inside the shell to
+record the OS release, selected SDK, and prerequisite check. If Nix cannot
+provide a package for your architecture, use Nix package search for that tool
+and add an available package to a user development shell.
 
 The packaged launcher and game are glibc binaries as well, so run the AppImage
 through `appimage-run` with the runtime dependencies exposed. In the NixOS
@@ -164,7 +195,7 @@ The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story inst
 ```powershell
 .\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
 dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
-.\scripts\package.ps1                          # build Optimum-v0.3.21-win-x64/ folder
+.\scripts\package.ps1                          # build Optimum-v0.3.22-win-x64/ folder
 .\scripts\package.ps1 -Zip                     # folder + portable zip
 ```
 
@@ -249,9 +280,9 @@ make package-win          # Windows zip (native Windows or off-platform with inn
 Or call the scripts directly:
 
 ```bash
-./scripts/package-linux.sh                     # Optimum-v0.3.21-linux-x64.tar.gz
+./scripts/package-linux.sh                     # Optimum-v0.3.22-linux-x64.tar.gz
 ./scripts/package-linux.sh --format zip
-./scripts/package-linux.sh --format appimage   # Optimum-v0.3.21-linux-x64.AppImage
+./scripts/package-linux.sh --format appimage   # Optimum-v0.3.22-linux-x64.AppImage
 ./scripts/package-macos.sh --arch arm64        # Apple Silicon .dmg
 ./scripts/package-macos.sh --arch x64          # Intel .dmg
 ./scripts/package-all.sh                       # all capable targets at once

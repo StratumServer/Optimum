@@ -12,6 +12,29 @@ missing_required=0
 missing_optional=0
 
 # name | required(1/0) | used by | hint
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  dotnet_arch="$(uname -m)"
+  if [[ "$dotnet_arch" == "arm64" ]]; then
+    export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+    dotnet_download="https://aka.ms/dotnet/10.0/dotnet-sdk-osx-arm64.pkg"
+  else
+    export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+    dotnet_download="https://aka.ms/dotnet/10.0/dotnet-sdk-osx-x64.pkg"
+  fi
+  export PATH="$PATH:/usr/local/share/dotnet:$HOME/.dotnet/tools"
+  checks=(
+    "dotnet|1|bootstrap, build|.NET SDK 10 for this Mac: $dotnet_download"
+    "git|1|bootstrap, extract-patches.sh, package-macos.ps1|Xcode Command Line Tools: run xcode-select --install (or download from https://developer.apple.com/download/all/)"
+    "perl|1|bootstrap, extract-patches.sh|Xcode Command Line Tools: run xcode-select --install (or download from https://developer.apple.com/download/all/)"
+    "python3|1|bootstrap.sh|macOS installer (universal2): https://www.python.org/downloads/macos/"
+    "curl|1|bootstrap.sh, package-*.ps1|Xcode Command Line Tools: run xcode-select --install (or download from https://developer.apple.com/download/all/)"
+    "tar|1|bootstrap.sh, package-*.ps1|Provided by macOS; if missing, repair/install Xcode Command Line Tools with xcode-select --install"
+    "unzip|0|bootstrap.sh (zip archives; python3 fallback exists)|Optional: Python 3 fallback is available; Xcode Command Line Tools can also provide unzip"
+    "pwsh|1|package-macos.ps1, package.ps1|PowerShell 7 macOS x64/Arm64 .pkg: https://learn.microsoft.com/en-us/powershell/scripting/install/install-powershell-on-macos"
+    "ilspycmd|0|bootstrap.sh (auto-installs via dotnet tool if missing)|dotnet tool install -g ilspycmd"
+    "chmod|1|package-macos.ps1|Provided by macOS at /bin/chmod; if missing, repair the system installation"
+  )
+else
 checks=(
   "dotnet|1|bootstrap.sh, build|.NET SDK 10 - https://dotnet.microsoft.com/download"
   "git|1|bootstrap.sh, extract-patches.sh, package-macos.ps1|apt-get install git"
@@ -28,6 +51,7 @@ checks=(
   "mkisofs|0|package-macos.ps1 (.dmg on Linux; genisoimage also works)|apt-get install cdrtools  (or genisoimage)"
   "innoextract|0|package.ps1 (off-platform Windows package; requires >= 1.11)|use a current release from https://github.com/crazy-max/innoextract/releases (distro 1.9 is too old)"
 )
+fi
 
 printf '%s\n\n' "$(yellow 'Optimum prerequisite check (report only - nothing is installed)')"
 printf '%-14s %-10s %s\n' "TOOL" "STATUS" "USED BY"

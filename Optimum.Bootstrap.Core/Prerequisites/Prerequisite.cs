@@ -80,7 +80,8 @@ public sealed record PrerequisiteResult(
     string? DetectedVersion,
     AcquisitionKind Acquisition,
     string? AcquisitionCommand,
-    string? DownloadUrl)
+    string? DownloadUrl,
+    string? Guidance = null)
 {
     public bool BlocksBuild => State is PrerequisiteState.Missing or PrerequisiteState.Outdated
         && Definition.Level is RequirementLevel.Required;

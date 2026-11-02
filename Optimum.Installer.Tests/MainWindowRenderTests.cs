@@ -1,4 +1,5 @@
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.VisualTree;
@@ -55,5 +56,29 @@ public class MainWindowRenderTests
 
         Assert.Empty(window.GetVisualDescendants().OfType<PrerequisitesView>());
         Assert.NotEmpty(window.GetVisualDescendants().OfType<OptionsView>());
+    }
+
+    [AvaloniaFact]
+    public void PathEntryAndBrowseControlsFitInANarrowOptionsView()
+    {
+        var vm = new MainWindowViewModel(TestServices.Build());
+        var window = new MainWindow { DataContext = vm, WindowState = WindowState.Normal, Width = 720, Height = 800 };
+        window.Show();
+        vm.Prerequisites.ContinueCommand.Execute(null);
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        TextBox installPath = window.GetVisualDescendants().OfType<TextBox>()
+            .Single(control => AutomationProperties.GetName(control) == "Install directory");
+        Button browse = window.GetVisualDescendants().OfType<Button>()
+            .Single(control => AutomationProperties.GetName(control) == "Browse for an install directory");
+        installPath.Text = @"C:\Users\tester\AppData\Local\Optimum";
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+        Point pathRight = installPath.TranslatePoint(new Point(installPath.Bounds.Width, 0), window)!.Value;
+        Point browseLeft = browse.TranslatePoint(new Point(0, 0), window)!.Value;
+
+        Assert.Equal(installPath.Text, vm.Options.InstallDirectory);
+        Assert.True(installPath.Bounds.Width > 0);
+        Assert.True(browse.Bounds.Width > 0);
+        Assert.True(pathRight.X <= browseLeft.X);
     }
 }

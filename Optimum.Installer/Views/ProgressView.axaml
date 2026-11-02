@@ -19,19 +19,19 @@
         <TextBlock Text="{Binding StatusDetail}"
                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"
                    IsVisible="{Binding StatusDetail, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-        <Grid ColumnDefinitions="*,Auto" Margin="0,3,0,0">
-          <TextBlock Grid.Column="0" Text="Runs locally. The first build takes the longest."
-                     Foreground="{DynamicResource TextFillColorSecondaryBrush}"
-                     VerticalAlignment="Center" />
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="14" VerticalAlignment="Center">
+        <StackPanel Spacing="4" Margin="0,3,0,0">
+          <TextBlock Text="Runs locally. The first build takes the longest."
+                     Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+          <WrapPanel>
             <TextBlock Foreground="{DynamicResource TextFillColorSecondaryBrush}">
               <Run Text="Elapsed " /><Run Text="{Binding Elapsed}" FontFamily="Cascadia Code, Consolas, monospace" />
             </TextBlock>
             <TextBlock Text="{Binding EstimatedRemaining}"
                        Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       Margin="14,0,0,0"
                        IsVisible="{Binding EstimatedRemaining, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-          </StackPanel>
-        </Grid>
+          </WrapPanel>
+        </StackPanel>
       </StackPanel>
     </Border>
 
@@ -58,12 +58,14 @@
 
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" Margin="0,14,0,0">
       <Border Classes="Card" Grid.Column="0" Margin="0,0,12,0" IsVisible="{Binding ConfirmCancel}">
-        <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+        <StackPanel Spacing="8">
           <TextBlock Text="Stop the installation?"
                      Foreground="{DynamicResource SystemFillColorCautionBrush}" FontWeight="SemiBold"
                      VerticalAlignment="Center" />
-          <Button Content="Keep going" Command="{Binding KeepInstallingCommand}" />
-          <Button Content="Stop" Classes="accent" Command="{Binding CancelCommand}" />
+          <WrapPanel>
+            <Button Content="Keep going" Command="{Binding KeepInstallingCommand}" Margin="0,0,8,0" />
+            <Button Content="Stop" Classes="accent" Command="{Binding CancelCommand}" />
+          </WrapPanel>
         </StackPanel>
       </Border>
       <Button Grid.Column="1" Content="Cancel"

@@ -56,9 +56,12 @@ public sealed class Uninstaller(ISystemProbe probe)
         }
 
         // The rest runs regardless of a locked entry above.
-        if (manifest.Shortcuts.Count > 0)
+        if (manifest.Shortcuts.Count > 0 || manifest.RegisteredUriHandler)
         {
-            new ShortcutWriter(probe).Remove(manifest.Shortcuts);
+            new ShortcutWriter(probe).Remove(
+                manifest.Shortcuts,
+                removeUriAssociation: manifest.RegisteredUriHandler,
+                previousUriHandler: manifest.PreviousUriHandler);
             removed += manifest.Shortcuts.Count;
         }
 

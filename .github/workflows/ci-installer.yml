@@ -13,6 +13,10 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
       - 'global.json'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'scripts/check-prereqs.sh'
+      - 'scripts/tests/nixos-dev-shell-smoke.sh'
       - 'NuGet.config'
       - '.github/workflows/ci-installer.yml'
   pull_request:
@@ -23,6 +27,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  nixos-dev-shell-smoke:
+    name: Nix development shell smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Enter the locked Nix shell in a container
+        run: |
+          docker run --rm --privileged \
+            --env NIX_CONFIG='experimental-features = nix-command flakes' \
+            --env OPTIMUM_SMOKE_OS_RELEASE='nixpkgs 26.05 OCI userspace; Docker host kernel' \
+            --volume "$GITHUB_WORKSPACE:/workspace" \
+            --workdir /workspace \
+            nixpkgs/nix@sha256:16255acd6ace9e3e8c867a8b8c973a4d3983ed2bb5dcc9e863000f58c2553078 \
+            sh -lc 'git config --global --add safe.directory /workspace && nix --extra-experimental-features "nix-command flakes" develop --no-update-lock-file --command bash scripts/tests/nixos-dev-shell-smoke.sh'
+
   build-test:
     name: Build and test
     runs-on: ubuntu-latest

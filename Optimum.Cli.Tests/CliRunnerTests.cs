@@ -369,6 +369,50 @@ public class CliRunnerTests
         Assert.Equal("patch-conflict", stream.Terminal.GetProperty("reason").GetString());
     }
 
+    [Fact]
+    public async Task InstallWithUriShortcutRegistersLinuxDefaultUriHandler()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        string tempRoot = Directory.CreateTempSubdirectory("optimum-cli-uri-test").FullName;
+        try
+        {
+            string home = Path.Combine(tempRoot, "home").Replace('\\', '/');
+            string package = Path.Combine(tempRoot, "pkg", "Optimum-v0.3.14-linux-x64");
+            string installDir = Path.Combine(tempRoot, "install", "optimum");
+            Directory.CreateDirectory(Path.Combine(package, ".optimum"));
+            Directory.CreateDirectory(Path.Combine(package, "assets"));
+            File.WriteAllText(Path.Combine(package, "run.sh"), "#!/bin/sh\nexec ./Optimum\n");
+            File.WriteAllText(Path.Combine(package, "Optimum"), "binary");
+            File.WriteAllText(Path.Combine(package, "assets", "gameicon.png"), "png");
+            File.WriteAllText(Path.Combine(package, ".optimum", "version"), "0.3.14");
+
+            var probe = new FakeSystemProbe { Os = Optimum.Bootstrap.Core.Platform.OsKind.Linux, HomeDirectory = home };
+            probe.Environment["XDG_DATA_HOME"] = $"{home}/.local/share";
+            probe.Environment["XDG_CONFIG_HOME"] = $"{home}/.config";
+            probe.AddDirectory(package);
+            probe.AddDirectory(Path.Combine(package, ".optimum"));
+            probe.AddDirectory(Path.Combine(package, "assets"));
+            probe.AddFile(Path.Combine(package, "run.sh"), "#!/bin/sh\nexec ./Optimum\n");
+            probe.AddFile(Path.Combine(package, "Optimum"), "binary");
+            probe.AddFile(Path.Combine(package, "assets", "gameicon.png"), "png");
+            probe.AddFile(Path.Combine(package, ".optimum", "version"), "0.3.14");
+
+            var (code, _, stderr) = await Run(
+                ["install", "--package", package, "--install-dir", installDir, "--shortcuts", "menu,uri"],
+                probe: probe);
+
+            Assert.Equal(CliRunner.ExitOk, code);
+            Assert.Contains("created 1 shortcut(s)", stderr);
+            Assert.Equal("optimum.desktop", new Optimum.Bootstrap.Core.Install.ShortcutWriter(probe).QueryDefaultUriHandler());
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
     private static FakeSystemProbe RepoProbe()
     {
         var probe = new FakeSystemProbe();

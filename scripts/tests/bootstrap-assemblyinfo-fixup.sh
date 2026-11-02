@@ -18,6 +18,18 @@ grep -qF 'AssemblyInfo.cs - ensure Guid/ComVisible attributes resolve' "$REPO_RO
   exit 1
 }
 
+# Assert Vintagestory.csproj clean rewrite template contains AnyCPU and ProjectReference
+for script in "$REPO_ROOT/scripts/bootstrap.sh" "$REPO_ROOT/scripts/bootstrap.ps1"; do
+  grep -qF '<PlatformTarget>AnyCPU</PlatformTarget>' "$script" || {
+    echo "Expected <PlatformTarget>AnyCPU</PlatformTarget> in $script" >&2
+    exit 1
+  }
+  grep -qF '<GenerateAssemblyInfo>False</GenerateAssemblyInfo>' "$script" || {
+    echo "Expected <GenerateAssemblyInfo>False</GenerateAssemblyInfo> in $script" >&2
+    exit 1
+  }
+done
+
 # 1. Test Bash snippet on an AssemblyInfo file lacking using System.Runtime.InteropServices
 mkdir -p "$TEST_ROOT/build/Vintagestory/Properties"
 cat > "$TEST_ROOT/build/Vintagestory/Properties/AssemblyInfo.cs" << 'EOF'
