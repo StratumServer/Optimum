@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..6ddfa20 100644
+index 8014c9e..17ce830 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,371 @@
+@@ -31,40 +31,373 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -51,9 +51,9 @@ index 8014c9e..6ddfa20 100644
  		public ImageSurface (Format format, int width, int height)
 -			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
 +			: this (LoadSurface (format, width, height))
- 		{
- 		}
- 
++		{
++		}
++
 +		ImageSurface (Format format, int width, int height, bool managedOnly)
 +			: this (managedOnly
 +				? ManagedImageSurfaceStorage.CreateManaged (format, width, height)
@@ -63,7 +63,7 @@ index 8014c9e..6ddfa20 100644
 +		}
 +
 +		public static ImageSurface CreateForRecordedGui (Format format, int width, int height)
-+		{
+ 		{
 +			// Cairo permits zero-sized image surfaces, but OpenGL textures and the
 +			// Skia recorder require positive dimensions. Empty dynamic GUI lists are
 +			// visually empty, so preserve that result with a transparent 1x1 target.
@@ -207,14 +207,16 @@ index 8014c9e..6ddfa20 100644
 +		internal void MarkManagedPixelsForSnapshots () => managedStorage.MarkPixelsForSnapshots ();
 +		internal void CheckpointManagedPixels ()
 +		{
-+			if (!IsManagedOnly || managedStorage == null || managedStorage.Width == 0 || managedStorage.Height == 0 || !HasPendingRecordedCommands) return;
++			if (!IsManagedOnly || managedStorage == null || managedStorage.Width == 0 || managedStorage.Height == 0) return;
++			EnsureRecordingOwnerThreadForPixelAccess ();
++			if (!HasPendingRecordedCommands) return;
 +			using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
 +			if (snapshot == null) return;
 +			ReplaceManagedPixels (RenderManagedSnapshot (snapshot));
 +			MarkManagedPixelsForSnapshots ();
 +			CheckpointRecordedCommandsForPixelAccess ();
-+		}
-+
+ 		}
+ 
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
 -			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
 +			: this (LoadArray (data, format, width, height, stride))
@@ -224,13 +226,11 @@ index 8014c9e..6ddfa20 100644
  		public ImageSurface (IntPtr data, Format format, int width, int height, int stride)
 -			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
 +			: this (LoadPointer (data, format, width, height, stride))
- 		{
- 		}
- 
--		public ImageSurface (string filename)
--			: base (NativeMethods.cairo_image_surface_create_from_png (filename), true)
++		{
++		}
++
 +		static ImageSurfaceLoadResult LoadPointer (IntPtr data, Format format, int width, int height, int stride)
- 		{
++		{
 +			if (Surface.ManagedApiMode) {
 +				Status status = ValidateDataSurface (format, width, height, stride);
 +				if (status != Status.Success) return new ImageSurfaceLoadResult (ManagedImageSurfaceStorage.CreateManagedError (), status);
@@ -246,13 +246,14 @@ index 8014c9e..6ddfa20 100644
 +		}
 +
 +		static IntPtr CreateNativeDataSurface (IntPtr data, Format format, int width, int height, int stride)
-+		{
+ 		{
 +			if (!CairoNativeGuard.NativeAllowed)
 +				throw new NotSupportedException ("An unmanaged IntPtr image buffer requires the explicit libcairo compatibility backend.");
 +			return NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride);
-+		}
-+
-+		public ImageSurface (string filename)
+ 		}
+ 
+ 		public ImageSurface (string filename)
+-			: base (NativeMethods.cairo_image_surface_create_from_png (filename), true)
 +			: this (LoadPng (filename))
 +		{
 +		}
@@ -364,7 +365,7 @@ index 8014c9e..6ddfa20 100644
 +		}
 +
 +		sealed class ImageSurfaceLoadResult
-+		{
+ 		{
 +			internal readonly ManagedImageSurfaceStorage Storage;
 +			internal readonly IntPtr Handle;
 +			internal readonly bool ManagedOnly;
@@ -380,7 +381,7 @@ index 8014c9e..6ddfa20 100644
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +406,36 @@ namespace Cairo {
+@@ -75,23 +408,36 @@ namespace Cairo {
  
  
          public int Width {
@@ -420,7 +421,7 @@ index 8014c9e..6ddfa20 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +443,271 @@ namespace Cairo {
+@@ -99,24 +445,271 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
@@ -546,7 +547,7 @@ index 8014c9e..6ddfa20 100644
 +		if (data == null || !CanRecordFormat (format) || width < 0 || height < 0 || (stride < 0 && height > 1)) return false;
 +		long rowBytes = Math.Abs ((long)stride);
 +		return (stride & 3) == 0 && rowBytes >= Surface.StrideForWidth (format, width) && rowBytes * height <= data.Length;
-+	}
+ 	}
 +
 +	internal static bool CanRecordFormat (Format format) => BitConverter.IsLittleEndian &&
 +		(format == Format.Argb32 || format == Format.Rgb24 || format == Format.A8 || format == Format.A1 || format == Format.Rgb16565 || (int)format == 5 || (int)format == 6 || (int)format == 7);
@@ -691,7 +692,7 @@ index 8014c9e..6ddfa20 100644
 +		} catch {
 +			// A native destroy callback must not allow a managed exception to cross the ABI.
 +		}
- 	}
- }
-+
++	}
 +}
++
+ }
