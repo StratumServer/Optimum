@@ -39,13 +39,13 @@ namespace Cairo
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
 			TextExtents result;
-			if (state.FontFileSource != null && !state.HasAffineFontMatrix) {
-				using var outlined = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource.LoadOptions);
-				result = outlined != null ? OutlineTextExtents(font, options, text, outlined) : TextExtents(font, options, text);
+			if (!state.HasAffineFontMatrix && (state.FontFileSource != null || OperatingSystem.IsWindows())) {
+				using var outlined = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0, state.FontFileSource != null);
+				result = outlined != null ? OutlineTextExtents(font, options, text, outlined) : TextExtents(font, options, text, state.Matrix);
 			} else if (state.HasAffineFontMatrix) {
 				result = AffineTextExtents(font, options, text, state.FontMatrix, state.EffectiveFontSize);
 			} else {
-				result = TextExtents(font, options, text);
+				result = TextExtents(font, options, text, state.Matrix);
 			}
 			PointD trans = state.FontTranslation;
 			if ((trans.X != 0 || trans.Y != 0) && (result.Width > 0 || result.Height > 0)) {
@@ -60,12 +60,15 @@ namespace Cairo
 			var result = new TextExtents();
 			if (string.IsNullOrEmpty(text)) return result;
 			bool round = options.HintMetrics != HintMetrics.Off;
+			bool ignoreWhitespaceInk = OperatingSystem.IsWindows() && options.HintStyle == HintStyle.Default && string.IsNullOrWhiteSpace(text);
 			double x = 0, left = double.MaxValue, top = double.MaxValue, right = double.MinValue, bottom = double.MinValue;
 			foreach (ushort glyph in font.GetGlyphs(text)) {
-				SKRect bounds = outlined.GetGlyphBounds(glyph, round);
-				if (bounds.Width > 0 && bounds.Height > 0) {
-					left = Math.Min(left, x + bounds.Left); right = Math.Max(right, x + bounds.Right);
-					top = Math.Min(top, bounds.Top); bottom = Math.Max(bottom, bounds.Bottom);
+				if (!ignoreWhitespaceInk) {
+					SKRect bounds = outlined.GetGlyphBounds(glyph, round);
+					if (bounds.Width > 0 && bounds.Height > 0) {
+						left = Math.Min(left, x + bounds.Left); right = Math.Max(right, x + bounds.Right);
+						top = Math.Min(top, bounds.Top); bottom = Math.Max(bottom, bounds.Bottom);
+					}
 				}
 				x += outlined.GetGlyphAdvance(glyph, round);
 			}
@@ -76,23 +79,29 @@ namespace Cairo
 			return result;
 		}
 
-		internal static TextExtents TextExtents(SKFont font, FontOptions options, string text)
+		internal static TextExtents TextExtents(SKFont font, FontOptions options, string text, Matrix? ctm = null)
 		{
 			var result = new TextExtents();
 			if (string.IsNullOrEmpty(text)) return result;
+			if (OperatingSystem.IsWindows()) {
+				using var outlined = SkiaHintedFontOutlines.Create(font, ctm ?? new Matrix(1, 0, 0, 1, 0, 0), 0, false);
+				if (outlined != null)
+					return OutlineTextExtents(font, options, text, outlined);
+			}
 			SKFont advanceFont = UsesNormalHintedAdvances(font, options, text) ? CreateAdvanceFont(font) : null;
 			try {
 				SKFont measure = advanceFont ?? font;
 				ushort[] glyphs = measure.GetGlyphs(text);
 				float[] widths = new float[glyphs.Length];
-				if (advanceFont == null && options.HintMetrics != HintMetrics.Off &&
-					SkiaFontResolver.TryGetWindowsGlyphAdvances(font, glyphs, out float[] windowsAdvances))
-					Array.Copy(windowsAdvances, widths, widths.Length);
-				else
-					measure.GetGlyphWidths(glyphs, widths, null);
+				float[] windowsAdvances = null;
+				bool useWindowsAdvances = advanceFont == null && OperatingSystem.IsWindows() &&
+					SkiaFontResolver.TryGetWindowsGlyphAdvances(font, ctm ?? new Matrix(1, 0, 0, 1, 0, 0), options.HintMetrics != HintMetrics.Off, glyphs, out windowsAdvances);
 				// Advances come from the metrics-hinted twin, but the ink box is the one the drawing font rasterizes.
 				SKRect[] bounds = new SKRect[glyphs.Length];
-				if (advanceFont != null) font.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
+				if (useWindowsAdvances) {
+					measure.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
+					Array.Copy(windowsAdvances, widths, widths.Length);
+				} else if (advanceFont != null) font.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
 				else measure.GetGlyphWidths(glyphs, widths, bounds);
 				float x = 0;
 				float left = float.MaxValue, top = float.MaxValue, right = float.MinValue, bottom = float.MinValue;
@@ -193,7 +202,9 @@ namespace Cairo
 			float[] widths = new float[indices.Length];
 			SKRect[] bounds = new SKRect[indices.Length];
 			font.GetGlyphWidths(indices, widths, bounds);
-			using var outlined = state.FontFileSource == null ? null : SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource.LoadOptions);
+			using var outlined = (state.FontFileSource != null || OperatingSystem.IsWindows())
+				? SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0, state.FontFileSource != null)
+				: null;
 			if (outlined != null) {
 				for (int i = 0; i < indices.Length; i++) {
 					widths[i] = (float)outlined.GetGlyphAdvance(indices[i], options.HintMetrics != HintMetrics.Off);
@@ -293,6 +304,11 @@ namespace Cairo
 			if (state.IsZeroFontMatrix) return default;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
+			if (OperatingSystem.IsWindows() && !state.HasAffineFontMatrix) {
+				using var outlined = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0, state.FontFileSource != null);
+				if (outlined != null && outlined.TryGetFontExtents(out FontExtents winExtents))
+					return winExtents;
+			}
 			FontExtents result = FontExtents(font, options);
 			if (state.HasAffineFontMatrix) {
 				Matrix m = state.FontMatrix;
@@ -309,6 +325,11 @@ namespace Cairo
 
 		internal static FontExtents FontExtents(SKFont font, FontOptions options)
 		{
+			if (OperatingSystem.IsWindows()) {
+				using var outlined = SkiaHintedFontOutlines.Create(font, new Matrix(1, 0, 0, 1, 0, 0), 0, false);
+				if (outlined != null && outlined.TryGetFontExtents(out FontExtents winExtents))
+					return winExtents;
+			}
 			SKFontMetrics metrics = font.Metrics;
 			double ascent = -metrics.Ascent, descent = metrics.Descent, height = ascent + descent + metrics.Leading;
 			double maxAdvance = MaxAdvance(font);

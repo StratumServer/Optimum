@@ -334,12 +334,9 @@ namespace Cairo
 				resources.Add(new RecordedResource(drawing));
 				graphicsState.MoveTo(endX, endY);
 				return true;
-			} else if (options.HintMetrics != HintMetrics.Off && graphicsState.Matrix.Xx == 1 && graphicsState.Matrix.Yy == 1 &&
-				graphicsState.Matrix.Xy == 0 && graphicsState.Matrix.Yx == 0 &&
-				SkiaFontResolver.TryGetWindowsGlyphAdvances(font, font.GetGlyphs(decoded), out float[] windowsAdvances)) {
-				// Windows Cairo lays out this generic Arial face with GDI's integer
-				// glyph advances. Keep Skia's coverage but use those device-pixel
-				// positions for the isolated, integral-size parity path.
+			} else if (OperatingSystem.IsWindows() &&
+				SkiaFontResolver.TryGetWindowsGlyphAdvances(font, graphicsState.Matrix, options.HintMetrics != HintMetrics.Off, font.GetGlyphs(decoded), out float[] windowsAdvances)) {
+				// Windows Cairo lays out system fonts with GDI's glyph advances.
 				SKTextBlob blob = null;
 				try {
 					var glyphs = font.GetGlyphs(decoded);
@@ -397,7 +394,8 @@ namespace Cairo
 			}
 			bool captureCoverage = graphicsState.Operator is Operator.Screen or Operator.Difference or Operator.Exclusion;
 			bool windowsCoverageCaptured = false;
-			if (OperatingSystem.IsWindows() && drawing.TextBlob != null && drawing.Paint.Shader == null && currentSource == null) {
+			if (!captureCoverage && OperatingSystem.IsWindows() && (graphicsState.Operator is Operator.Over or Operator.Source) &&
+				drawing.TextBlob != null && drawing.Paint.Shader == null && currentSource == null) {
 				using var coverageFont = SkiaGuiFont.Create(graphicsState, options);
 				if (WindowsGdiTextCoverage.TryCapture(graphicsState, coverageFont, options, decoded, drawing.Clips,
 					width, height, drawing.TextInkClip, out SKImage coverage, out PointD coverageOrigin)) {

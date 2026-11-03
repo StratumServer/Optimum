@@ -48,8 +48,9 @@ public sealed class CairoRecorderParityTests
 		else AssertWithinTolerance (expected, skia, width, height, edgeAllowance, flatTolerance);
 
 		Assert.True (actual.CommitGpuRenderedCommands ());
-		Assert.Equal (expected, actual.Data); // CPU readback after GPU publication replays natively.
-		Assert.Equal (SurfaceRecordingState.GpuRendered, recorder.State);
+		Assert.True (recorder.State == SurfaceRecordingState.GpuRendered,
+			$"Expected GPU publication, got {recorder.State}. First materialization trigger: {recorder.FirstMaterializationTrigger ?? "<none>"}.");
+		Assert.Equal (expected, actual.Data); // CPU readback after GPU publication may replay natively.
 	}
 
 	internal static Func<ImageSurface, int, int, byte[]> RenderOverride;

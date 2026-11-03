@@ -18,7 +18,7 @@ namespace Cairo
 			PointD trans = state.FontTranslation;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
-			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
+			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0, state.FontFileSource != null);
 			SKFont advanceFont = SkiaTextMetrics.UsesNormalHintedAdvances(font, options, text) ? SkiaTextMetrics.CreateAdvanceFont(font) : null;
 			try {
 				SKFont measure = advanceFont ?? font;
@@ -71,7 +71,7 @@ namespace Cairo
 			PointD trans = state.FontTranslation;
 			using FontOptions options = state.GetFontOptions();
 			using SKFont font = SkiaGuiFont.Create(state, options);
-			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
+			using SkiaHintedFontOutlines hinted = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0, state.FontFileSource != null);
 			if (state.HasAffineFontMatrix) {
 				Matrix m = state.FontMatrix;
 				double S = state.EffectiveFontSize;

@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
+using System.Text;
 using SkiaSharp;
 
 namespace Cairo
@@ -19,6 +21,8 @@ namespace Cairo
 		const int FcHintMedium = 2;
 		const int FcHintFull = 3;
 
+		static readonly ConcurrentDictionary<string, string> windowsFamilyCache = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
 		internal static SKTypeface Resolve(string family, SKFontStyleWeight weight, SKFontStyleSlant slant, out SKFontHinting fontconfigHinting)
 			=> Resolve(family, weight, slant, out fontconfigHinting, out _, out _);
 
@@ -26,19 +30,12 @@ namespace Cairo
 			out SKFontHinting fontconfigHinting, out Antialias fontconfigAntialias, out SubpixelOrder fontconfigOrder)
 		{
 			fontconfigHinting = SKFontHinting.Normal;
-			fontconfigAntialias = Antialias.Gray;
+			fontconfigAntialias = OperatingSystem.IsWindows() ? Antialias.Subpixel : Antialias.Gray;
 			fontconfigOrder = SubpixelOrder.Rgb;
 			if (!OperatingSystem.IsLinux())
 			{
-				// Cairo's Windows toy-font backend resolves its generic aliases through
-				// GDI. On current Windows systems it selects Arial for these aliases,
-				// while Skia maps "sans-serif" to Segoe UI. Keep the recorded renderer
-				// on the same effective face as the Cairo compatibility backend.
-				if (OperatingSystem.IsWindows() && family is not null &&
-					(family.Equals("sans-serif", StringComparison.OrdinalIgnoreCase) ||
-					 family.Equals("serif", StringComparison.OrdinalIgnoreCase) ||
-					 family.Equals("monospace", StringComparison.OrdinalIgnoreCase)))
-					family = "Arial";
+				if (OperatingSystem.IsWindows())
+					family = ResolveWindowsFamilyName(family);
 				return SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant);
 			}
 			if (FcInit() == 0) throw new InvalidOperationException("Fontconfig could not initialize GUI font resolution.");
@@ -87,44 +84,62 @@ namespace Cairo
 			finally { FcPatternDestroy(pattern); }
 		}
 
+		internal static string ResolveWindowsFamilyName(string family)
+		{
+			if (string.IsNullOrWhiteSpace(family) ||
+				family.Equals("Sans", StringComparison.OrdinalIgnoreCase) ||
+				family.Equals("sans-serif", StringComparison.OrdinalIgnoreCase) ||
+				family.Equals("serif", StringComparison.OrdinalIgnoreCase) ||
+				family.Equals("monospace", StringComparison.OrdinalIgnoreCase))
+				return "Arial";
+
+			int nul = family.IndexOf('\0');
+			if (nul >= 0) family = family.Substring(0, nul);
+			if (string.IsNullOrWhiteSpace(family)) return "Arial";
+
+			return windowsFamilyCache.GetOrAdd(family, static requested =>
+			{
+				IntPtr dc = CreateCompatibleDC(IntPtr.Zero);
+				if (dc == IntPtr.Zero) return requested;
+				IntPtr nativeFont = IntPtr.Zero, previousFont = IntPtr.Zero;
+				try
+				{
+					nativeFont = CreateFontW(-24, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, requested);
+					if (nativeFont == IntPtr.Zero) return requested;
+					previousFont = SelectObject(dc, nativeFont);
+					if (previousFont == IntPtr.Zero || previousFont == new IntPtr(-1)) return requested;
+					var buffer = new StringBuilder(64);
+					int length = GetTextFaceW(dc, buffer.Capacity, buffer);
+					return length > 0 ? buffer.ToString() : requested;
+				}
+				finally
+				{
+					if (previousFont != IntPtr.Zero && previousFont != new IntPtr(-1)) SelectObject(dc, previousFont);
+					if (nativeFont != IntPtr.Zero) DeleteObject(nativeFont);
+					DeleteDC(dc);
+				}
+			});
+		}
+
 		// Cairo's Windows toy-font backend advances each glyph on the GDI device
-		// pixel grid. Use the same integer advances for the recorded text run while
-		// leaving glyph coverage to Skia. This is limited to integral-size Arial
-		// runs so fractional transforms and unrelated font metrics retain Skia's
-		// normal behavior until their parity is measured separately.
+		// pixel grid when metrics hinting is active, or on the unscaled EM grid when
+		// metrics hinting is disabled or the CTM does not preserve axes.
 		internal static bool TryGetWindowsGlyphAdvances(SKFont font, ushort[] glyphs, out float[] advances)
+			=> TryGetWindowsGlyphAdvances(font, null, true, glyphs, out advances);
+
+		internal static bool TryGetWindowsGlyphAdvances(SKFont font, Matrix matrix, bool hintMetrics, ushort[] glyphs, out float[] advances)
 		{
 			advances = null;
-			if (!OperatingSystem.IsWindows() || font == null || font.Typeface == null || glyphs == null || glyphs.Length == 0 ||
-				!string.Equals(font.Typeface.FamilyName, "Arial", StringComparison.OrdinalIgnoreCase) ||
-				Math.Abs(font.Size - Math.Round(font.Size)) > 0.001 || font.ScaleX != 1f)
+			if (!OperatingSystem.IsWindows() || font == null || font.Typeface == null || glyphs == null || glyphs.Length == 0)
 				return false;
 
-			IntPtr dc = CreateCompatibleDC(IntPtr.Zero);
-			if (dc == IntPtr.Zero) return false;
-			IntPtr nativeFont = IntPtr.Zero;
-			IntPtr previousFont = IntPtr.Zero;
-			try
-			{
-				int height = -(int)Math.Round(font.Size);
-				int weight = font.Typeface.FontStyle.Weight >= (int)SKFontStyleWeight.Bold ? 700 : 400;
-				bool italic = font.Typeface.FontStyle.Slant != SKFontStyleSlant.Upright;
-				nativeFont = CreateFontW(height, 0, 0, 0, weight, italic ? 1u : 0u, 0, 0,
-					1, 4, 0, 5, 0, font.Typeface.FamilyName);
-				if (nativeFont == IntPtr.Zero) return false;
-				previousFont = SelectObject(dc, nativeFont);
-				if (previousFont == IntPtr.Zero || previousFont == new IntPtr(-1)) return false;
-				var widths = new int[glyphs.Length];
-				if (!GetCharWidthI(dc, 0, (uint)glyphs.Length, glyphs, widths)) return false;
-				advances = Array.ConvertAll(widths, width => (float)width);
-				return true;
-			}
-			finally
-			{
-				if (previousFont != IntPtr.Zero && previousFont != new IntPtr(-1)) SelectObject(dc, previousFont);
-				if (nativeFont != IntPtr.Zero) DeleteObject(nativeFont);
-				DeleteDC(dc);
-			}
+			using var outlines = SkiaHintedFontOutlines.Create(font, matrix ?? new Matrix());
+			if (outlines == null) return false;
+			var result = new float[glyphs.Length];
+			for (int i = 0; i < glyphs.Length; i++)
+				result[i] = (float)outlines.GetGlyphAdvance(glyphs[i], hintMetrics);
+			advances = result;
+			return true;
 		}
 
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern int FcInit();
@@ -141,7 +156,7 @@ namespace Cairo
 		[DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFontW(int height, int width, int escapement, int orientation, int weight, uint italic, uint underline, uint strikeOut, uint charSet, uint outputPrecision, uint clipPrecision, uint quality, uint pitchAndFamily, string faceName);
 		[DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr CreateCompatibleDC(IntPtr dc);
 		[DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr SelectObject(IntPtr dc, IntPtr gdiObject);
-		[DllImport("gdi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] static extern bool GetCharWidthI(IntPtr dc, uint firstGlyph, uint glyphCount, ushort[] glyphs, int[] widths);
+		[DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern int GetTextFaceW(IntPtr dc, int count, StringBuilder faceName);
 		[DllImport("gdi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] static extern bool DeleteObject(IntPtr gdiObject);
 		[DllImport("gdi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] static extern bool DeleteDC(IntPtr dc);
 	}

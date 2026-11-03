@@ -425,8 +425,38 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.IsType<InvalidOperationException> (RunOnSeparateThread (() => surface.Dispose ()));
 		Assert.Equal (SurfaceRecordingState.Recording, surface.RecordingState);
 		recorder.FillRectangle (0, 0, 1, 1, 0, 0, 0, 1);
+		if (!CairoNativeGuard.NativeAllowed) {
+			Assert.Throws<NotSupportedException> (() => _ = surface.Handle);
+			Assert.Equal (SurfaceRecordingState.Recording, surface.RecordingState);
+			return;
+		}
 		_ = surface.Handle;
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, surface.RecordingState);
+	}
+
+	[Fact]
+	public void DetachedRecordingSurfaceTransfersOwnershipAtPixelReadback()
+	{
+		var surface = new ImageSurface (Format.Argb32, 8, 8);
+		var recorder = surface.BeginRecording ();
+		recorder.FillRectangle (0, 0, 8, 8, 1, 0, 0, 1);
+
+		byte[] pixels = null;
+		Exception failure = null;
+		var renderThread = new Thread (() => {
+			try {
+				pixels = new byte[surface.Stride * surface.Height];
+				Marshal.Copy (surface.DataPtr, pixels, 0, pixels.Length);
+				surface.Dispose ();
+			} catch (Exception error) { failure = error; }
+		});
+		renderThread.Start ();
+		renderThread.Join ();
+
+		if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture (failure).Throw ();
+		Assert.NotNull (pixels);
+		Assert.Equal (255, pixels[(4 * 8 + 4) * 4 + 2]);
+		Assert.Equal (SurfaceRecordingState.Disposed, surface.RecordingState);
 	}
 
 	[Fact]

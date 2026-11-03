@@ -19,31 +19,49 @@ namespace Cairo
 				if (antialias == Antialias.Default) antialias = configuredAntialias;
 				if (order == SubpixelOrder.Default) order = configuredOrder;
 			}
-			using var outlines = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0);
+			using var outlines = SkiaHintedFontOutlines.Create(font, state.Matrix, state.FontFileSource?.LoadOptions ?? 0, state.FontFileSource != null);
 			if (outlines == null) return null;
 			state.TryGetCurrentPoint(out double x, out double y);
+			PointD translation = state.FontTranslation;
+			x += translation.X;
+			y += translation.Y;
 			Matrix matrix = state.Matrix;
 			ushort[] glyphs = font.GetGlyphs(text);
 			double position = x, minX = double.PositiveInfinity, minY = double.PositiveInfinity;
 			double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity;
 			bool overlap = false;
-			using var metricFont = options.HintMetrics == HintMetrics.Off ? new SKFont(font.Typeface, font.Size) {
+			using var metricFont = OperatingSystem.IsLinux() && options.HintMetrics == HintMetrics.Off ? new SKFont(font.Typeface, font.Size) {
 				ScaleX = font.ScaleX, SkewX = font.SkewX, Hinting = SKFontHinting.None, Subpixel = true } : null;
 			// Cairo's image surface rounds each glyph origin before unioning its
 			// device-space metric box, then rounds the union outward (24.8 fixed).
 			foreach (ushort glyph in glyphs) {
-				using var metricPath = metricFont?.GetGlyphPath(glyph);
-				SKRect ink = metricFont != null ? metricPath?.Bounds ?? default : outlines.GetGlyphBounds(glyph, true);
-				if (ink.Width > 0 && ink.Height > 0) {
-					double px = Math.Floor(matrix.Xx * position + matrix.X0 + .5);
-					double py = Math.Floor(matrix.Yy * y + matrix.Y0 + .5);
-					double left = px + Math.Round(matrix.Xx * ink.Left * 256) / 256;
-					double top = py + Math.Round(matrix.Yy * ink.Top * 256) / 256;
-					double right = px + Math.Round(matrix.Xx * ink.Right * 256) / 256;
-					double bottom = py + Math.Round(matrix.Yy * ink.Bottom * 256) / 256;
+				if (outlines.TryGetDeviceGlyphBounds(glyph, antialias, options.HintMetrics != HintMetrics.Off,
+					out double dLeft, out double dTop, out double dRight, out double dBottom)) {
+					double gx0 = position, gy0 = y;
+					matrix.TransformPoint(ref gx0, ref gy0);
+					double px = Math.Floor(gx0 + .5);
+					double py = Math.Floor(gy0 + .5);
+					double left = px + Math.Round(dLeft * 256) / 256;
+					double top = py + Math.Round(dTop * 256) / 256;
+					double right = px + Math.Round(dRight * 256) / 256;
+					double bottom = py + Math.Round(dBottom * 256) / 256;
 					overlap |= right > minX && left < maxX && bottom > minY && top < maxY;
 					minX = Math.Min(minX, left); minY = Math.Min(minY, top);
 					maxX = Math.Max(maxX, right); maxY = Math.Max(maxY, bottom);
+				} else {
+					using var metricPath = metricFont?.GetGlyphPath(glyph);
+					SKRect ink = metricFont != null ? metricPath?.Bounds ?? default : outlines.GetGlyphBounds(glyph, true);
+					if (ink.Width > 0 && ink.Height > 0) {
+						double px = Math.Floor(matrix.Xx * position + matrix.X0 + .5);
+						double py = Math.Floor(matrix.Yy * y + matrix.Y0 + .5);
+						double left = px + Math.Round(matrix.Xx * ink.Left * 256) / 256;
+						double top = py + Math.Round(matrix.Yy * ink.Top * 256) / 256;
+						double right = px + Math.Round(matrix.Xx * ink.Right * 256) / 256;
+						double bottom = py + Math.Round(matrix.Yy * ink.Bottom * 256) / 256;
+						overlap |= right > minX && left < maxX && bottom > minY && top < maxY;
+						minX = Math.Min(minX, left); minY = Math.Min(minY, top);
+						maxX = Math.Max(maxX, right); maxY = Math.Max(maxY, bottom);
+					}
 				}
 				position += outlines.GetGlyphAdvance(glyph, options.HintMetrics != HintMetrics.Off);
 			}
@@ -60,7 +78,8 @@ namespace Cairo
 					// Quantize in original device coordinates, including LCD filter fringes.
 					var coverage = outlines.GetGlyphCoverage(glyphs[i], antialias, order, out int left, out int top,
 						Math.Floor((px - Math.Floor(px)) * 4 + .5) / 4, Math.Floor((py - Math.Floor(py)) * 4 + .5) / 4);
-					float gx = (float)Math.Floor(px) + left, gy = (float)Math.Floor(py) - top;
+					float gx = outlines.IsWindows ? (float)Math.Floor(px + .5) + left : (float)Math.Floor(px) + left;
+					float gy = outlines.IsWindows ? (float)Math.Floor(py + .5) - top : (float)Math.Floor(py) - top;
 					coverages[i] = (coverage, gx, gy);
 					if (coverage != null) {
 						leftBound = Math.Min(leftBound, (int)Math.Clamp(gx, 0, width));
@@ -116,7 +135,7 @@ namespace Cairo
 			}
 		}
 
-		static bool RequiresAlphaClip(RecordedGuiClip[] clips)
+		internal static bool RequiresAlphaClip(RecordedGuiClip[] clips)
 		{
 			static bool Diagonal(SKPoint a, SKPoint b) =>
 				Math.Round(a.X * 256d) != Math.Round(b.X * 256d) && Math.Round(a.Y * 256d) != Math.Round(b.Y * 256d);
