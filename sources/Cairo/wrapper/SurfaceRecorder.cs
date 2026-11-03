@@ -334,6 +334,30 @@ namespace Cairo
 				resources.Add(new RecordedResource(drawing));
 				graphicsState.MoveTo(endX, endY);
 				return true;
+			} else if (options.HintMetrics != HintMetrics.Off && graphicsState.Matrix.Xx == 1 && graphicsState.Matrix.Yy == 1 &&
+				graphicsState.Matrix.Xy == 0 && graphicsState.Matrix.Yx == 0 &&
+				SkiaFontResolver.TryGetWindowsGlyphAdvances(font, font.GetGlyphs(decoded), out float[] windowsAdvances)) {
+				// Windows Cairo lays out this generic Arial face with GDI's integer
+				// glyph advances. Keep Skia's coverage but use those device-pixel
+				// positions for the isolated, integral-size parity path.
+				SKTextBlob blob = null;
+				try {
+					var glyphs = font.GetGlyphs(decoded);
+					var positions = new SKPoint[glyphs.Length];
+					float x = 0;
+					for (int i = 0; i < glyphs.Length; i++) {
+						positions[i] = new SKPoint(x, 0);
+						x += windowsAdvances[i];
+					}
+					advance = x;
+					using var blobBuilder = new SKTextBlobBuilder();
+					blobBuilder.AddPositionedRun(glyphs, font, positions);
+					blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to build a GDI-positioned Windows text run.");
+					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
+						textInkClip: textInkClip);
+					blob = null;
+				} finally { blob?.Dispose(); font.Dispose(); }
 			} else if (SkiaTextMetrics.UsesNormalHintedAdvances(font, options, decoded)) {
 				// FreeType's LIGHT target changes raster coverage but uses linear
 				// advances. Keep the existing Normal-hinted Skia advances for string
@@ -372,9 +396,21 @@ namespace Cairo
 						textInkClip: textInkClip);
 			}
 			bool captureCoverage = graphicsState.Operator is Operator.Screen or Operator.Difference or Operator.Exclusion;
-			if (captureCoverage && drawing.TextFont != null) {
+			bool windowsCoverageCaptured = false;
+			if (OperatingSystem.IsWindows() && drawing.TextBlob != null && drawing.Paint.Shader == null && currentSource == null) {
+				using var coverageFont = SkiaGuiFont.Create(graphicsState, options);
+				if (WindowsGdiTextCoverage.TryCapture(graphicsState, coverageFont, options, decoded, drawing.Clips,
+					width, height, drawing.TextInkClip, out SKImage coverage, out PointD coverageOrigin)) {
+					drawing.TextCoverageOrigin = coverageOrigin;
+					drawing.SetTextCoverage(coverage, graphicsState.Operator);
+					windowsCoverageCaptured = true;
+				} else {
+					coverage?.Dispose();
+				}
+			}
+			if (!windowsCoverageCaptured && captureCoverage && drawing.TextFont != null) {
 				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, drawing.TextFont, options, decoded, drawing.Clips, width, height, out drawing.TextCoverageOrigin), graphicsState.Operator);
-			} else if (captureCoverage && drawing.TextBlob != null) {
+			} else if (!windowsCoverageCaptured && captureCoverage && drawing.TextBlob != null) {
 				using var coverageFont = SkiaGuiFont.Create(graphicsState, options);
 				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, coverageFont, options, decoded, drawing.Clips, width, height, out drawing.TextCoverageOrigin), graphicsState.Operator);
 			}

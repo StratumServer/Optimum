@@ -29,7 +29,18 @@ namespace Cairo
 			fontconfigAntialias = Antialias.Gray;
 			fontconfigOrder = SubpixelOrder.Rgb;
 			if (!OperatingSystem.IsLinux())
+			{
+				// Cairo's Windows toy-font backend resolves its generic aliases through
+				// GDI. On current Windows systems it selects Arial for these aliases,
+				// while Skia maps "sans-serif" to Segoe UI. Keep the recorded renderer
+				// on the same effective face as the Cairo compatibility backend.
+				if (OperatingSystem.IsWindows() && family is not null &&
+					(family.Equals("sans-serif", StringComparison.OrdinalIgnoreCase) ||
+					 family.Equals("serif", StringComparison.OrdinalIgnoreCase) ||
+					 family.Equals("monospace", StringComparison.OrdinalIgnoreCase)))
+					family = "Arial";
 				return SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant);
+			}
 			if (FcInit() == 0) throw new InvalidOperationException("Fontconfig could not initialize GUI font resolution.");
 
 			IntPtr pattern = FcPatternCreate();
@@ -76,6 +87,46 @@ namespace Cairo
 			finally { FcPatternDestroy(pattern); }
 		}
 
+		// Cairo's Windows toy-font backend advances each glyph on the GDI device
+		// pixel grid. Use the same integer advances for the recorded text run while
+		// leaving glyph coverage to Skia. This is limited to integral-size Arial
+		// runs so fractional transforms and unrelated font metrics retain Skia's
+		// normal behavior until their parity is measured separately.
+		internal static bool TryGetWindowsGlyphAdvances(SKFont font, ushort[] glyphs, out float[] advances)
+		{
+			advances = null;
+			if (!OperatingSystem.IsWindows() || font == null || font.Typeface == null || glyphs == null || glyphs.Length == 0 ||
+				!string.Equals(font.Typeface.FamilyName, "Arial", StringComparison.OrdinalIgnoreCase) ||
+				Math.Abs(font.Size - Math.Round(font.Size)) > 0.001 || font.ScaleX != 1f)
+				return false;
+
+			IntPtr dc = CreateCompatibleDC(IntPtr.Zero);
+			if (dc == IntPtr.Zero) return false;
+			IntPtr nativeFont = IntPtr.Zero;
+			IntPtr previousFont = IntPtr.Zero;
+			try
+			{
+				int height = -(int)Math.Round(font.Size);
+				int weight = font.Typeface.FontStyle.Weight >= (int)SKFontStyleWeight.Bold ? 700 : 400;
+				bool italic = font.Typeface.FontStyle.Slant != SKFontStyleSlant.Upright;
+				nativeFont = CreateFontW(height, 0, 0, 0, weight, italic ? 1u : 0u, 0, 0,
+					1, 4, 0, 5, 0, font.Typeface.FamilyName);
+				if (nativeFont == IntPtr.Zero) return false;
+				previousFont = SelectObject(dc, nativeFont);
+				if (previousFont == IntPtr.Zero || previousFont == new IntPtr(-1)) return false;
+				var widths = new int[glyphs.Length];
+				if (!GetCharWidthI(dc, 0, (uint)glyphs.Length, glyphs, widths)) return false;
+				advances = Array.ConvertAll(widths, width => (float)width);
+				return true;
+			}
+			finally
+			{
+				if (previousFont != IntPtr.Zero && previousFont != new IntPtr(-1)) SelectObject(dc, previousFont);
+				if (nativeFont != IntPtr.Zero) DeleteObject(nativeFont);
+				DeleteDC(dc);
+			}
+		}
+
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern int FcInit();
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern IntPtr FcPatternCreate();
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern int FcPatternAddString(IntPtr pattern, [MarshalAs(UnmanagedType.LPUTF8Str)] string objectName, [MarshalAs(UnmanagedType.LPUTF8Str)] string value);
@@ -87,5 +138,11 @@ namespace Cairo
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern int FcPatternGetInteger(IntPtr pattern, [MarshalAs(UnmanagedType.LPUTF8Str)] string objectName, int index, out int value);
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern int FcPatternGetBool(IntPtr pattern, [MarshalAs(UnmanagedType.LPUTF8Str)] string objectName, int index, out int value);
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern void FcPatternDestroy(IntPtr pattern);
+		[DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFontW(int height, int width, int escapement, int orientation, int weight, uint italic, uint underline, uint strikeOut, uint charSet, uint outputPrecision, uint clipPrecision, uint quality, uint pitchAndFamily, string faceName);
+		[DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+		[DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr SelectObject(IntPtr dc, IntPtr gdiObject);
+		[DllImport("gdi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] static extern bool GetCharWidthI(IntPtr dc, uint firstGlyph, uint glyphCount, ushort[] glyphs, int[] widths);
+		[DllImport("gdi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] static extern bool DeleteObject(IntPtr gdiObject);
+		[DllImport("gdi32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] static extern bool DeleteDC(IntPtr dc);
 	}
 }

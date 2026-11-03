@@ -85,7 +85,11 @@ namespace Cairo
 				SKFont measure = advanceFont ?? font;
 				ushort[] glyphs = measure.GetGlyphs(text);
 				float[] widths = new float[glyphs.Length];
-				measure.GetGlyphWidths(glyphs, widths, null);
+				if (advanceFont == null && options.HintMetrics != HintMetrics.Off &&
+					SkiaFontResolver.TryGetWindowsGlyphAdvances(font, glyphs, out float[] windowsAdvances))
+					Array.Copy(windowsAdvances, widths, widths.Length);
+				else
+					measure.GetGlyphWidths(glyphs, widths, null);
 				// Advances come from the metrics-hinted twin, but the ink box is the one the drawing font rasterizes.
 				SKRect[] bounds = new SKRect[glyphs.Length];
 				if (advanceFont != null) font.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
