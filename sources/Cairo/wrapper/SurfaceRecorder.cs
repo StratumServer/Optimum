@@ -562,10 +562,11 @@ namespace Cairo
 					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:state-" + state;
 					snapshot = null; return false;
 				}
-				if (saveDepth != 0) {
-					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:unbalanced-save-depth-" + saveDepth;
-					snapshot = null; return false;
-				}
+				// The GUI asks for a snapshot from inside many Save()/Restore()-scoped
+				// drawing calls, so the active Cairo context can legitimately have
+				// saved state at this point. Recorded drawings capture their own
+				// transforms and clips; Skia replay does not depend on closing this
+				// live Cairo context's save stack.
 				if (unqualifiedHelperDrawing) {
 					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:unqualified-helper-drawing";
 					snapshot = null; return false;

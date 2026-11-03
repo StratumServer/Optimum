@@ -176,7 +176,7 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
-	public void UnbalancedSaveCannotBeSealedForSkia()
+	public void ActiveCairoSaveStackDoesNotBlockSkiaSnapshot()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
 		var recorder = actual.BeginRecording ();
@@ -189,8 +189,8 @@ public sealed class CairoSurfaceRecorderTests
 		}
 
 		using var bitmap = new SKBitmap (16, 12, SKColorType.Rgba8888, SKAlphaType.Premul);
-		using (var canvas = new SKCanvas (bitmap)) Assert.False (actual.TryDrawRecordedCommands (canvas));
-		Assert.Equal (SurfaceRecordingState.Recording, recorder.State);
+		using (var canvas = new SKCanvas (bitmap)) Assert.True (actual.TryDrawRecordedCommands (canvas));
+		Assert.Equal (SurfaceRecordingState.Sealed, recorder.State);
 
 		using var expected = new ImageSurface (Format.Argb32, 16, 12);
 		using (var context = new Context (expected)) {

@@ -362,9 +362,10 @@ namespace Vintagestory.Client.NoObf
 						string gpuFailure = failureReason;
 						try
 						{
-							UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+							string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
 							rendered = true;
-							failureReason = "skia-cpu-fallback:ganesh=" + gpuFailure;
+							failureReason = "skia-cpu-fallback:ganesh=" + gpuFailure +
+								(uploadPreexistingErrors == null ? string.Empty : ";drained-gl-errors=" + uploadPreexistingErrors);
 						}
 						catch (Exception exception)
 						{
@@ -398,7 +399,7 @@ namespace Vintagestory.Client.NoObf
 					try
 					{
 						GL.GenTextures(1, out texture);
-						UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+						string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
 						if (ContextWasReset(out string cpuResetReason))
 						{
 							try { GL.DeleteTextures(1, ref texture); } catch { }
@@ -409,7 +410,8 @@ namespace Vintagestory.Client.NoObf
 						if (!surface.CommitGpuRenderedCommands())
 							throw new InvalidOperationException("Skia CPU output could not commit the GUI display list.");
 						candidateTexture = texture;
-						failureReason = "skia-cpu-fallback:gpu-preflight=" + gpuFailure;
+						failureReason = "skia-cpu-fallback:gpu-preflight=" + gpuFailure +
+							(uploadPreexistingErrors == null ? string.Empty : ";drained-gl-errors=" + uploadPreexistingErrors);
 						return true;
 					}
 					catch (Exception exception)
@@ -420,7 +422,7 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-				private static void UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
+				private static string UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
 				{
 					int width = Math.Max(1, surface.Width);
 					int height = Math.Max(1, surface.Height);
@@ -436,26 +438,45 @@ namespace Vintagestory.Client.NoObf
 						if (!rasterSurface.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0))
 							throw new InvalidOperationException("Skia CPU could not copy the LCD raster into the GUI upload bitmap.");
 						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
+						// The CPU upload is the recovery route after Ganesh or a preflight
+						// failure. Do not mistake GL errors already queued by that failed
+						// attempt (or the engine's preceding draw) for a failure of TexImage2D.
+						string preexistingErrors = DrainPreexistingGlErrors();
 						int isolatedVertexArray = 0;
 						try
 						{
 							GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
+							CheckCpuUploadGlError("unbind-pixel-unpack-buffer");
 							GL.ActiveTexture(TextureUnit.Texture0);
+							CheckCpuUploadGlError("select-texture-unit");
 							GL.BindTexture(TextureTarget.Texture2D, texture);
+							CheckCpuUploadGlError("bind-texture");
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+							CheckCpuUploadGlError("set-min-filter");
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
+							CheckCpuUploadGlError("set-mag-filter");
 							GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+							CheckCpuUploadGlError("set-unpack-alignment");
 							GL.PixelStore((PixelStoreParameter)0x0CF2, 0); // UNPACK_ROW_LENGTH
+							CheckCpuUploadGlError("set-unpack-row-length");
 							GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
+							CheckCpuUploadGlError("set-unpack-skip-rows");
 							GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
+							CheckCpuUploadGlError("set-unpack-skip-pixels");
 							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,
 								PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
-							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
-								throw new InvalidOperationException("OpenGL Skia CPU texture upload failed: " + error + ".");
+							CheckCpuUploadGlError("upload-pixels");
 						}
 						finally { uploadState.Restore(ref isolatedVertexArray); }
+						return preexistingErrors;
 					}
+				}
+
+				private static void CheckCpuUploadGlError(string operation)
+				{
+					OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+					if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+						throw new InvalidOperationException("OpenGL Skia CPU texture " + operation + " failed: " + error + ".");
 				}
 
 		private static string DrainPreexistingGlErrors()

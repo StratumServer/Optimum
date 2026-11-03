@@ -203,7 +203,7 @@ half4 main(float2 p) {
 				Matrix drawMatrix = context.Matrix;
 				context.Matrix = nativeSourceMatrix;
 				if (sourceSnapshot != null && nativeImage == null) {
-					nativeImage = new ImageSurface(sourceSnapshot.PixelFormat, sourceSnapshot.Width, sourceSnapshot.Height);
+					nativeImage = ImageSurface.CreateNativeCompatibilitySurface(sourceSnapshot.PixelFormat, sourceSnapshot.Width, sourceSnapshot.Height);
 					sourceSnapshot.ReplayNative(nativeImage.NativeHandleForMetadata);
 					var pattern = new SurfacePattern(nativeImage) { Matrix = sourcePatternMatrix, Extend = sourceExtend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
 					nativeSource?.Dispose(); nativeSource = pattern;
@@ -241,7 +241,7 @@ half4 main(float2 p) {
 				NativeMethods.cairo_pattern_get_surface(h, out IntPtr surface);
 				int width = NativeMethods.cairo_image_surface_get_width(surface), height = NativeMethods.cairo_image_surface_get_height(surface);
 				Format format = NativeMethods.cairo_image_surface_get_format(surface);
-				nativeImage = new ImageSurface(format, width, height);
+				nativeImage = ImageSurface.CreateNativeCompatibilitySurface(format, width, height);
 				int inputStride = NativeMethods.cairo_image_surface_get_stride(surface);
 				int outputStride = nativeImage.Stride;
 				var row = new byte[checked(width * 4)];

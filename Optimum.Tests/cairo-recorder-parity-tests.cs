@@ -18,9 +18,9 @@ public sealed class CairoRecorderParityTests
 	internal const int FlatTolerance = 1;
 	internal const int EdgeTolerance = 32;
 
-	/// <summary>Records <paramref name="draw"/>, renders it with Skia's CPU raster backend
-	/// and compares it with vanilla Cairo. Then materializes the retained list and requires
-	/// byte equality with vanilla Cairo.</summary>
+	/// <summary>Records <paramref name="draw"/>, renders it with Skia's CPU raster backend,
+	/// and compares it with vanilla Cairo. After GPU publication, managed readback must retain
+	/// byte parity without forcing native Cairo materialization.</summary>
 	/// <summary>
 	/// Curved and stroked geometry uses the GUI visual-parity policy
 	/// (linux-gpu-cairo-local-aa-v2) for antialiased edges: Skia's coverage of a
@@ -49,7 +49,7 @@ public sealed class CairoRecorderParityTests
 
 		Assert.True (actual.CommitGpuRenderedCommands ());
 		Assert.Equal (expected, actual.Data); // CPU readback after GPU publication replays natively.
-		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
+		Assert.Equal (SurfaceRecordingState.GpuRendered, recorder.State);
 	}
 
 	internal static Func<ImageSurface, int, int, byte[]> RenderOverride;
