@@ -92,7 +92,7 @@ internal sealed class PatchSplashScreen : IDisposable
     {
         var settings = new NativeWindowSettings
         {
-            ClientSize = new Vector2i(640, 220),
+            ClientSize = new Vector2i(860, 260),
             Title = "Optimum",
             WindowBorder = WindowBorder.Hidden,
             StartVisible = false,
@@ -203,7 +203,7 @@ internal sealed class PatchSplashScreen : IDisposable
         using var font = new SKFont(typeface, FontSize);
         using var paint = new SKPaint { Color = SKColor.Parse(TextColorHex), IsAntialias = true };
 
-        float maximumTextWidth = Math.Max(1, _window.ClientSize.X * 0.84f - 4);
+        float maximumTextWidth = Math.Max(1, _window.ClientSize.X * 0.88f - 4);
         string[] lines = WrapText(text, font, paint, maximumTextWidth);
         float textWidth = 0;
         foreach (string line in lines) textWidth = Math.Max(textWidth, font.MeasureText(line, paint));
@@ -247,6 +247,8 @@ internal sealed class PatchSplashScreen : IDisposable
         if (maximumWidth <= 0) throw new ArgumentOutOfRangeException(nameof(maximumWidth));
         var lines = new List<string>();
         var line = new StringBuilder();
+        int lastWordBreakLineLen = -1;
+
         TextElementEnumerator elements = StringInfo.GetTextElementEnumerator(text);
         while (elements.MoveNext())
         {
@@ -255,15 +257,43 @@ internal sealed class PatchSplashScreen : IDisposable
             {
                 lines.Add(line.ToString());
                 line.Clear();
+                lastWordBreakLineLen = -1;
                 continue;
             }
+
             string candidate = line.ToString() + element;
             if (line.Length != 0 && font.MeasureText(candidate, paint) > maximumWidth)
             {
-                lines.Add(line.ToString());
-                line.Clear();
+                if (lastWordBreakLineLen > 0 && lastWordBreakLineLen < line.Length)
+                {
+                    string currentStr = line.ToString();
+                    string linePart = currentStr.Substring(0, lastWordBreakLineLen);
+                    string overflowPart = currentStr.Substring(lastWordBreakLineLen);
+                    lines.Add(linePart);
+                    line.Clear();
+                    line.Append(overflowPart);
+                    lastWordBreakLineLen = -1;
+                    candidate = line.ToString() + element;
+                    if (font.MeasureText(candidate, paint) > maximumWidth && line.Length != 0)
+                    {
+                        lines.Add(line.ToString());
+                        line.Clear();
+                        lastWordBreakLineLen = -1;
+                    }
+                }
+                else
+                {
+                    lines.Add(line.ToString());
+                    line.Clear();
+                    lastWordBreakLineLen = -1;
+                }
             }
+
             line.Append(element);
+            if (element is " " or "\t")
+            {
+                lastWordBreakLineLen = line.Length;
+            }
         }
         if (line.Length != 0 || lines.Count == 0) lines.Add(line.ToString());
         return lines.ToArray();

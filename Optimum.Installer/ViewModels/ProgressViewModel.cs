@@ -147,7 +147,14 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
             this);
 
         if (!deploy.Ok)
-            return WriteOutcome(cancelled: false, deploy.Message ?? "the install failed", null, null);
+        {
+            string message = deploy.Message ?? "the install failed";
+            // Package deployment runs in-process after the build subprocess exits.
+            // Keep its failure in the same raw log so a successful package build
+            // cannot hide a later file-lock or destination error.
+            ((IBuildObserver)this).RawOutput(isError: true, message);
+            return WriteOutcome(cancelled: false, message, null, null);
+        }
 
         Phase(ProgressPhase.Verify, 99, "done");
         return WriteOutcome(cancelled: false, "Optimum is installed.", deploy.InstallDirectory, deploy.Launcher);

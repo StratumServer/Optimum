@@ -172,8 +172,9 @@ public sealed class RetypeFieldsTests
         IReadOnlyList<FieldDefinition> retyped = MemberInjector.RetypeFields(
             vanilla, compiled, "Fixture.Gate", new List<string> { "gate" });
 
-        Assert.Empty(ILPatcher.RetargetFieldInitializers(vanilla, retyped));
+        HashSet<string> acceptedInitializers = ILPatcher.RetargetFieldInitializers(vanilla, retyped);
         MethodDefinition ctor = vanillaType.Methods.Single(m => m.Name == ".ctor");
+        Assert.Contains(MethodSignature.GetKey(ctor), acceptedInitializers);
         MethodReference ctorRef = Assert.IsType<MethodReference>(
             ctor.Body.Instructions.Single(i => i.OpCode == OpCodes.Newobj).Operand);
         Assert.Equal("System.Threading.Lock", ctorRef.DeclaringType.FullName);

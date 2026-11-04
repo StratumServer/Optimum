@@ -59,7 +59,7 @@ index 0c6dcd5..e90867e 100644
 +            CairoNativeGuard.RequireNativeAllowed("Managed surface pattern replay");
 +            using (SurfaceRecorderSnapshot snapshot = RecordedSource.Capture()) {
 +                if (snapshot == null) throw new InvalidOperationException("The recorded surface pattern source is no longer available.");
-+                using (var surface = new ImageSurface(snapshot.PixelFormat, snapshot.Width, snapshot.Height)) {
++                using (var surface = ImageSurface.CreateNativeCompatibilitySurface(snapshot.PixelFormat, snapshot.Width, snapshot.Height)) {
 +                    snapshot.ReplayNative(surface.NativeHandleForMetadata);
 +                    return new SurfacePattern(surface) { Filter = Filter, Extend = Extend, Matrix = Matrix };
 +                }

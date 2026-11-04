@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..627ec2b 100644
+index 6f7730e..133bcd2 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,607 @@
+@@ -32,37 +32,623 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -58,20 +58,19 @@ index 6f7730e..627ec2b 100644
  
  		protected Surface (IntPtr handle, bool owner)
 +			: this (handle, owner, false, false)
- 		{
--			if (handle == IntPtr.Zero)
--				throw new ArgumentException ("handle should not be NULL", "handle");
++		{
 +		}
 +
 +		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly)
 +			: this (handle, owner, recordingCandidate, managedOnly, Status.Success)
-+		{
+ 		{
+-			if (handle == IntPtr.Zero)
 +		}
 +
 +		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly, Status managedStatus = Status.Success)
 +		{
 +			if (handle == IntPtr.Zero && !managedOnly)
-+				throw new ArgumentException ("handle should not be NULL", "handle");
+ 				throw new ArgumentException ("handle should not be NULL", "handle");
 +			if (handle != IntPtr.Zero)
 +				CairoNativeGuard.RequireNativeAllowed (nameof (Surface) + " native handle construction");
  
@@ -253,6 +252,22 @@ index 6f7730e..627ec2b 100644
 +			lock (recordingSync) {
 +				EnsureRecordingOwnerThread ();
 +				recorder?.ClearCommandsForPixelCheckpoint ();
++			}
++		}
++		internal void EnsureRecordingOwnerThreadForPixelAccess ()
++		{
++			if (aliasOwner != null && managedOnly) { aliasOwner.EnsureRecordingOwnerThreadForPixelAccess (); return; }
++			lock (recordingSync) {
++				if (recorder == null || recorder.State != SurfaceRecordingState.Recording ||
++				    ReferenceEquals (recordingOwnerThread, Thread.CurrentThread)) return;
++				if (recordingContext != null) {
++					EnsureRecordingOwnerThread ();
++					return;
++				}
++				// A detached recording surface can be handed to another thread at a
++				// pixel-readback boundary. No Context can append commands until a new
++				// one is attached, so claiming ownership here is race-free.
++				recordingOwnerThread = Thread.CurrentThread;
 +			}
 +		}
 +		internal int RecordedWidth => this is ImageSurface image ? image.ManagedWidth : managedOnly ? managedWidth : NativeMethods.cairo_image_surface_get_width (NativeHandleForMetadata);
@@ -616,7 +631,7 @@ index 6f7730e..627ec2b 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +657,299 @@ namespace Cairo
+@@ -87,141 +673,299 @@ namespace Cairo
  		}
  
  
@@ -741,16 +756,14 @@ index 6f7730e..627ec2b 100644
  				return;
  
 -			NativeMethods.cairo_surface_destroy (handle);
--			handle = IntPtr.Zero;
--		}
 +			if (recorder != null) {
 +				if (recordedSourceReferences > 0) disposedSourceSnapshot = recorder.CaptureSnapshot();
 +				recorder.DisposeFromSurface ();
 +			}
- 
--		protected void CheckDisposed ()
++
 +			if (handle != IntPtr.Zero) NativeMethods.cairo_surface_destroy (handle);
-+			handle = IntPtr.Zero;
+ 			handle = IntPtr.Zero;
+-		}
 +            disposed = true;
 +            if (managedOnly && aliasOwner != null && !transferredManagedBackend) {
 +                Surface owner = aliasOwner.ManagedRecordingOwner;
@@ -759,7 +772,8 @@ index 6f7730e..627ec2b 100644
 +            }
 +            }
 +        }
-+
+ 
+-		protected void CheckDisposed ()
 +        protected void CheckDisposed ()
  		{
 -			if (handle == IntPtr.Zero)

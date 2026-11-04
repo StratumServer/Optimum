@@ -30,6 +30,14 @@ namespace Vintagestory.Client.NoObf
 		private static IntPtr contextResetLatchedHandle;
 		private static IntPtr resetSupportHandle;
 		private static bool resetSupportValue;
+		private static IntPtr cachedContextHandle;
+		private static int cachedContextThreadId;
+		private static SkiaGlBindings cachedBindings;
+		private static GRGlInterface cachedGlInterface;
+		private static GRContext cachedContext;
+		private static int persistentScratchFramebuffer;
+		private static int persistentIsolatedVertexArray;
+		private static readonly object contextLock = new object();
 		/// <summary>Number of device/context resets that made GUI rendering fail closed.</summary>
 		public static long ContextResetCount => Interlocked.Read(ref contextResetCount);
 		/// <summary>Reason string of the last observed reset, or null.</summary>
@@ -55,6 +63,48 @@ namespace Vintagestory.Client.NoObf
 			resetSupportValue = false;
 			Volatile.Write(ref simulatedContextResetStatusForTest, 0);
 			Volatile.Write(ref simulatedContextResetSkipChecksForTest, 0);
+			InvalidateCachedContext();
+		}
+
+		private static void AbandonAndDisposeContext(ref GRContext context)
+		{
+			if (context != null)
+			{
+				try { context.AbandonContext(false); context.Dispose(); } catch { }
+				context = null;
+			}
+		}
+
+		/// <summary>Invalidates and disposes the cached Skia GRContext.</summary>
+		public static void InvalidateCachedContext()
+		{
+			lock (contextLock)
+			{
+				AbandonAndDisposeContext(ref cachedContext);
+				if (cachedGlInterface != null)
+				{
+					try { cachedGlInterface.Dispose(); } catch { }
+					cachedGlInterface = null;
+				}
+				if (cachedBindings != null)
+				{
+					try { cachedBindings.Dispose(); } catch { }
+					cachedBindings = null;
+				}
+				if (persistentScratchFramebuffer != 0)
+				{
+					try { GL.DeleteFramebuffers(1, ref persistentScratchFramebuffer); } catch { }
+					persistentScratchFramebuffer = 0;
+				}
+				if (persistentIsolatedVertexArray != 0)
+				{
+					try { GL.DeleteVertexArrays(1, ref persistentIsolatedVertexArray); } catch { }
+					persistentIsolatedVertexArray = 0;
+				}
+				cachedContextHandle = IntPtr.Zero;
+				cachedContextThreadId = 0;
+				GlStateSnapshot.InvalidateCapabilities();
+			}
 		}
 		/// <summary>Reuse immutable CPU preparation without skipping legacy mod callbacks.</summary>
 		public static bool RecordingPreparationReuseEnabled { get => RecordedPreparationCache.Enabled; set => RecordedPreparationCache.Enabled = value; }
@@ -159,8 +209,14 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, bool linearMin = false)
+		[ThreadStatic] private static bool threadLinearMinOverride;
+
+		/// <summary>Opt-in per-thread linear-min filter for the next candidate texture candidate.</summary>
+		internal static bool LinearMinOverride { get => threadLinearMinOverride; set => threadLinearMinOverride = value; }
+
+		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, int reusableTexture = 0)
 				{
+					bool linearMin = threadLinearMinOverride;
 					candidateTexture = 0;
 					failureReason = null;
 					if (!OptimumGuiGpuProbe.RenderingRequested)
@@ -206,27 +262,39 @@ namespace Vintagestory.Client.NoObf
 					if (!MatchesCertifiedDevice())
 					{
 						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"current-device-or-context-mismatch", out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"current-device-or-context-mismatch", out candidateTexture, out failureReason);
+						failureReason = "current-device-or-context-mismatch";
+						return false;
 					}
 					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
+						failureReason = "OpenGL 3.0 or newer is required for state capture";
+						return false;
 					}
 					TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"gpu-probe-not-passed", out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"gpu-probe-not-passed", out candidateTexture, out failureReason);
+						failureReason = "gpu-probe-not-passed";
+						return false;
 					}
 					// Keep pre-existing engine errors out of the candidate operation. The probe's caller
 					// performs the normal upload error check if this returns false.
 					string preexistingErrors = DrainPreexistingGlErrors();
 					if (preexistingErrors != null)
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"preexisting-gl-errors:" + preexistingErrors, out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"preexisting-gl-errors:" + preexistingErrors, out candidateTexture, out failureReason);
+						failureReason = "preexisting-gl-errors:" + preexistingErrors;
+						return false;
 					}
 
 					GlStateSnapshot state = null;
@@ -237,16 +305,35 @@ namespace Vintagestory.Client.NoObf
 					try
 					{
 						state = GlStateSnapshot.Capture();
-						isolatedVertexArray = state.CreateIsolatedVertexArray();
+						if (persistentIsolatedVertexArray == 0)
+						{
+							persistentIsolatedVertexArray = state.CreateIsolatedVertexArray();
+						}
+						else
+						{
+							GL.BindVertexArray(persistentIsolatedVertexArray);
+						}
 						GL.BindBuffer(BufferTarget.PixelPackBuffer, 0);
 						GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
 						GL.ActiveTexture(TextureUnit.Texture0);
-						GL.GenTextures(1, out texture);
-						GL.BindTexture(TextureTarget.Texture2D, texture);
-						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
-						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
-						GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
-						GL.GenFramebuffers(1, out framebuffer);
+						if (reusableTexture != 0)
+						{
+							texture = reusableTexture;
+							GL.BindTexture(TextureTarget.Texture2D, texture);
+						}
+						else
+						{
+							GL.GenTextures(1, out texture);
+							GL.BindTexture(TextureTarget.Texture2D, texture);
+							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
+							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+						}
+						if (persistentScratchFramebuffer == 0)
+						{
+							GL.GenFramebuffers(1, out persistentScratchFramebuffer);
+						}
+						framebuffer = persistentScratchFramebuffer;
 						GL.BindFramebuffer(FramebufferTarget.Framebuffer, framebuffer);
 						GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, texture, 0);
 						GL.DrawBuffer(DrawBufferMode.ColorAttachment0);
@@ -276,43 +363,79 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
 						GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
 
-						using (var bindings = new SkiaGlBindings(isolatedVertexArray))
-						using (GRGlInterface glInterface = GRGlInterface.Create(bindings.GetProcedureAddress))
+						IntPtr operationContext = CurrentContextHandle();
+						GRContext context;
+						bool abandonOnExit = false;
+						lock (contextLock)
 						{
-							if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
-							using (GRContext context = GRContext.CreateGl(glInterface))
+							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId || ContextWasReset(out _))
 							{
-								if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
-								IntPtr operationContext = CurrentContextHandle();
-								try
+								AbandonAndDisposeContext(ref cachedContext);
+								if (cachedGlInterface != null)
 								{
-									context.ResetContext(GRGlBackendState.All);
-									var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-									using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-									using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
-									using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
-									{
-										if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-									using (var blur = new RecordedGpuBlur(context))
-									{
-										if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-										skSurface.Flush();
-										context.Flush();
-										context.Submit(true);
-										GL.Finish();
-										OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-										if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
-										rendered = true;
-									}
+									try { cachedGlInterface.Dispose(); } catch { }
+									cachedGlInterface = null;
 								}
-								}
-								finally
+								if (cachedBindings != null)
 								{
-									// Dispose only abandons Ganesh; release its GL objects while the owning context is usable.
-									bool releaseResources = operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext;
-									if (releaseResources && ContextWasReset(out renderResetReason)) releaseResources = false;
+									try { cachedBindings.Dispose(); } catch { }
+									cachedBindings = null;
+								}
+
+								cachedBindings = new SkiaGlBindings(persistentIsolatedVertexArray);
+								cachedGlInterface = GRGlInterface.Create(cachedBindings.GetProcedureAddress);
+								if (cachedGlInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
+								cachedContext = GRContext.CreateGl(cachedGlInterface);
+								if (cachedContext == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
+								cachedContext.SetResourceCacheLimit(64 * 1024 * 1024);
+								cachedContextHandle = operationContext;
+								cachedContextThreadId = expectedContextThreadId;
+							}
+							else
+							{
+								cachedBindings.SetIsolatedVertexArray(persistentIsolatedVertexArray);
+							}
+							context = cachedContext;
+						}
+
+						try
+						{
+							context.ResetContext(GRGlBackendState.All);
+							var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
+							using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
+							using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
+							{
+								if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
+								using (var blur = new RecordedGpuBlur(context))
+								{
+									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+									skSurface.Flush();
+									context.Flush();
+									context.Submit(false);
+									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+									rendered = true;
+								}
+							}
+						}
+						catch
+						{
+							abandonOnExit = true;
+							throw;
+						}
+						finally
+						{
+							bool releaseResources = operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext;
+							if (releaseResources && ContextWasReset(out renderResetReason)) { releaseResources = false; abandonOnExit = true; }
+							if (abandonOnExit)
+							{
+								lock (contextLock)
+								{
+									cachedContext = null;
+									cachedContextHandle = IntPtr.Zero;
+								}
 								context.AbandonContext(releaseResources);
-								}
 							}
 						}
 					}
@@ -323,13 +446,30 @@ namespace Vintagestory.Client.NoObf
 					}
 					finally
 					{
+						try
+						{
+							if (framebuffer != 0)
+							{
+								if (framebuffer == persistentScratchFramebuffer)
+								{
+									GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, 0, 0);
+									GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+								}
+								else
+								{
+									GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+									GL.DeleteFramebuffers(1, ref framebuffer);
+									framebuffer = 0;
+								}
+							}
+						}
+						catch (Exception exception) { rendered = false; failureReason = "framebuffer-cleanup-exception:" + exception.GetType().Name + ":" + exception.Message; }
+						// Cleanup changes the framebuffer binding; restore the caller's state last.
 						if (state != null)
 						{
 							try { state.Restore(ref isolatedVertexArray); }
 							catch (Exception exception) { rendered = false; failureReason = "gl-state-restore-exception:" + exception.GetType().Name + ":" + exception.Message; }
 						}
-						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
-						catch (Exception exception) { rendered = false; failureReason = "framebuffer-cleanup-exception:" + exception.GetType().Name + ":" + exception.Message; }
 
 						try
 						{
@@ -356,9 +496,10 @@ namespace Vintagestory.Client.NoObf
 						string gpuFailure = failureReason;
 						try
 						{
-							UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+							string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
 							rendered = true;
-							failureReason = "skia-cpu-fallback:ganesh=" + gpuFailure;
+							failureReason = "skia-cpu-fallback:ganesh=" + gpuFailure +
+								(uploadPreexistingErrors == null ? string.Empty : ";drained-gl-errors=" + uploadPreexistingErrors);
 						}
 						catch (Exception exception)
 						{
@@ -375,7 +516,7 @@ namespace Vintagestory.Client.NoObf
 					if (failureReason == null) failureReason = rendered
 						? "display-list-commit-failed:state=" + surface.RecordingState + ";trigger=" + (surface.FirstMaterializationTrigger ?? "none")
 						: "candidate-render-failed";
-					try { if (texture != 0) GL.DeleteTextures(1, ref texture); } catch { }
+					try { if (texture != 0 && texture != reusableTexture) GL.DeleteTextures(1, ref texture); } catch { }
 					try { while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { } } catch { }
 					return false;
 				}
@@ -392,7 +533,7 @@ namespace Vintagestory.Client.NoObf
 					try
 					{
 						GL.GenTextures(1, out texture);
-						UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+						string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
 						if (ContextWasReset(out string cpuResetReason))
 						{
 							try { GL.DeleteTextures(1, ref texture); } catch { }
@@ -403,7 +544,8 @@ namespace Vintagestory.Client.NoObf
 						if (!surface.CommitGpuRenderedCommands())
 							throw new InvalidOperationException("Skia CPU output could not commit the GUI display list.");
 						candidateTexture = texture;
-						failureReason = "skia-cpu-fallback:gpu-preflight=" + gpuFailure;
+						failureReason = "skia-cpu-fallback:gpu-preflight=" + gpuFailure +
+							(uploadPreexistingErrors == null ? string.Empty : ";drained-gl-errors=" + uploadPreexistingErrors);
 						return true;
 					}
 					catch (Exception exception)
@@ -414,7 +556,7 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-				private static void UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
+				private static string UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
 				{
 					int width = Math.Max(1, surface.Width);
 					int height = Math.Max(1, surface.Height);
@@ -430,26 +572,45 @@ namespace Vintagestory.Client.NoObf
 						if (!rasterSurface.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0))
 							throw new InvalidOperationException("Skia CPU could not copy the LCD raster into the GUI upload bitmap.");
 						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
+						// The CPU upload is the recovery route after Ganesh or a preflight
+						// failure. Do not mistake GL errors already queued by that failed
+						// attempt (or the engine's preceding draw) for a failure of TexImage2D.
+						string preexistingErrors = DrainPreexistingGlErrors();
 						int isolatedVertexArray = 0;
 						try
 						{
 							GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
+							CheckCpuUploadGlError("unbind-pixel-unpack-buffer");
 							GL.ActiveTexture(TextureUnit.Texture0);
+							CheckCpuUploadGlError("select-texture-unit");
 							GL.BindTexture(TextureTarget.Texture2D, texture);
+							CheckCpuUploadGlError("bind-texture");
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+							CheckCpuUploadGlError("set-min-filter");
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
+							CheckCpuUploadGlError("set-mag-filter");
 							GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+							CheckCpuUploadGlError("set-unpack-alignment");
 							GL.PixelStore((PixelStoreParameter)0x0CF2, 0); // UNPACK_ROW_LENGTH
+							CheckCpuUploadGlError("set-unpack-row-length");
 							GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
+							CheckCpuUploadGlError("set-unpack-skip-rows");
 							GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
+							CheckCpuUploadGlError("set-unpack-skip-pixels");
 							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,
 								PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
-							OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-							if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
-								throw new InvalidOperationException("OpenGL Skia CPU texture upload failed: " + error + ".");
+							CheckCpuUploadGlError("upload-pixels");
 						}
 						finally { uploadState.Restore(ref isolatedVertexArray); }
+						return preexistingErrors;
 					}
+				}
+
+				private static void CheckCpuUploadGlError(string operation)
+				{
+					OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+					if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+						throw new InvalidOperationException("OpenGL Skia CPU texture " + operation + " failed: " + error + ".");
 				}
 
 		private static string DrainPreexistingGlErrors()
@@ -571,7 +732,7 @@ namespace Vintagestory.Client.NoObf
 			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
 			private delegate void BindVertexArrayDelegate(uint array);
 
-			private readonly uint isolatedVertexArray;
+			private uint isolatedVertexArray;
 			private readonly BindVertexArrayDelegate nativeBindVertexArray;
 			private readonly BindVertexArrayDelegate bindVertexArray;
 
@@ -580,6 +741,11 @@ namespace Vintagestory.Client.NoObf
 				this.isolatedVertexArray = (uint)isolatedVertexArray;
 				nativeBindVertexArray = Marshal.GetDelegateForFunctionPointer<BindVertexArrayDelegate>(GetGlProcedureAddress("glBindVertexArray"));
 				bindVertexArray = BindVertexArray;
+			}
+
+			internal void SetIsolatedVertexArray(int isolatedVertexArray)
+			{
+				this.isolatedVertexArray = (uint)isolatedVertexArray;
 			}
 
 			internal IntPtr GetProcedureAddress(string name) => name == "glBindVertexArray"
@@ -711,15 +877,16 @@ namespace Vintagestory.Client.NoObf
 					}
 					finally
 					{
+						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
+						catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "framebuffer cleanup: " + exception.Message); }
+						try { if (texture != 0) GL.DeleteTextures(1, ref texture); }
+						catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "texture cleanup: " + exception.Message); }
+						// Cleanup changes the framebuffer binding; restore the caller's state last.
 						if (state != null)
 						{
 							try { state.Restore(ref isolatedVertexArray); }
 							catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "GL state restore: " + exception.Message); }
 						}
-						try { if (framebuffer != 0) { GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0); GL.DeleteFramebuffers(1, ref framebuffer); framebuffer = 0; } }
-						catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "framebuffer cleanup: " + exception.Message); }
-						try { if (texture != 0) GL.DeleteTextures(1, ref texture); }
-						catch (Exception exception) { probeFailure = AppendFailure(probeFailure, "texture cleanup: " + exception.Message); }
 
 						// This method is invoked only after the engine's GL error check succeeded.
 						// Consume errors produced by this probe so they cannot surface on a later upload.
@@ -777,6 +944,29 @@ namespace Vintagestory.Client.NoObf
 
 				private sealed class GlStateSnapshot
 				{
+					private static int cachedTrackedTextureUnits = -1;
+					private static bool cachedSamplerObjectsSupported;
+					private static bool cachedSupportsRasterizerDiscard;
+
+					internal static void InvalidateCapabilities()
+					{
+						cachedTrackedTextureUnits = -1;
+					}
+
+					private static void EnsureStaticCapabilities()
+					{
+						if (cachedTrackedTextureUnits >= 0) return;
+						GL.GetInteger((GetPName)0x8B4D, out int textureUnitCount);
+						if (textureUnitCount < 1 || textureUnitCount > 1024) textureUnitCount = 16;
+						// Vintage Story GUI only uses Texture0, and the 3D renderer uses at most 8-16 units.
+						// Cap tracked units to 16 to avoid querying 80-192 units on modern drivers (AMD/NVIDIA).
+						cachedTrackedTextureUnits = Math.Min(textureUnitCount, 16);
+						GL.GetInteger((GetPName)0x821B, out int glMajor);
+						GL.GetInteger((GetPName)0x821C, out int glMinor);
+						cachedSupportsRasterizerDiscard = glMajor >= 3;
+						cachedSamplerObjectsSupported = glMajor > 3 || (glMajor == 3 && glMinor >= 3);
+					}
+
 					private readonly int readFramebuffer;
 					private readonly int drawFramebuffer;
 					private readonly int renderbuffer;
@@ -836,24 +1026,21 @@ namespace Vintagestory.Client.NoObf
 
 					private GlStateSnapshot()
 					{
+						EnsureStaticCapabilities();
+						supportsRasterizerDiscard = cachedSupportsRasterizerDiscard;
+						samplerObjectsSupported = cachedSamplerObjectsSupported;
+
 						GL.GetInteger((GetPName)0x8CAA, out readFramebuffer);
 						GL.GetInteger((GetPName)0x8CA6, out drawFramebuffer);
 						GL.GetInteger((GetPName)0x8CA7, out renderbuffer);
 						GL.GetInteger((GetPName)0x84E0, out activeTexture);
-						GL.GetInteger((GetPName)0x8B4D, out int textureUnitCount);
-						// GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS is driver-dependent; llvmpipe and modern
-						// desktop drivers may expose more than the old 128-unit assumption.
-						if (textureUnitCount < 1 || textureUnitCount > 1024)
-							throw new InvalidOperationException("Unexpected GL texture unit count: " + textureUnitCount + ".");
-						textureBindings = new int[textureUnitCount];
-						GL.GetInteger((GetPName)0x821B, out int glMajor);
-						GL.GetInteger((GetPName)0x821C, out int glMinor);
-						supportsRasterizerDiscard = glMajor >= 3;
-						samplerObjectsSupported = glMajor > 3 || (glMajor == 3 && glMinor >= 3);
-						samplerBindings = samplerObjectsSupported ? new int[textureUnitCount] : Array.Empty<int>();
+
+						int trackedUnits = cachedTrackedTextureUnits;
+						textureBindings = new int[trackedUnits];
+						samplerBindings = samplerObjectsSupported ? new int[trackedUnits] : Array.Empty<int>();
 						try
 						{
-							for (int unit = 0; unit < textureUnitCount; unit++)
+							for (int unit = 0; unit < trackedUnits; unit++)
 							{
 								GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
 								GL.GetInteger((GetPName)0x8069, out textureBindings[unit]);

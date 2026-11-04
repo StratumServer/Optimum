@@ -35,6 +35,8 @@ namespace Cairo
 		Matrix sourcePatternMatrix;
 		Extend sourceExtend;
 		SKMatrix sourceTransform;
+		bool usePixmanNearest;
+		int pixmanScaleX, pixmanScaleY, pixmanTranslateX, pixmanTranslateY;
 		SKShader shader;
 		SKPathEffect dash;
 		float[] dashIntervals;
@@ -44,6 +46,70 @@ namespace Cairo
 		bool hasDeferredSolidSource;
 		ImageSurface nativeImage;
 		Matrix nativeSourceMatrix;
+		static SKRuntimeEffect pixmanNearestEffect;
+		static readonly object pixmanNearestEffectLock = new object();
+
+		static bool TryGetPixmanNearestTransform(Matrix pattern, SKRect bounds, int targetWidth, int targetHeight,
+			out int scaleX, out int scaleY, out int translateX, out int translateY)
+		{
+			scaleX = scaleY = translateX = translateY = 0;
+			if (pattern is null || targetWidth <= 0 || targetHeight <= 0 || pattern.Xx <= 0 || pattern.Yy <= 0 || pattern.Xy != 0 || pattern.Yx != 0 ||
+				!float.IsFinite(bounds.Left) || !float.IsFinite(bounds.Top) || !float.IsFinite(bounds.Right) || !float.IsFinite(bounds.Bottom)) return false;
+			double left = Math.Floor(Math.Max(0, bounds.Left)), top = Math.Floor(Math.Max(0, bounds.Top));
+			double right = Math.Ceiling(Math.Min(targetWidth, bounds.Right)), bottom = Math.Ceiling(Math.Min(targetHeight, bounds.Bottom));
+			if (right <= left || bottom <= top || left < -32767 || right > 32767 || top < -32767 || bottom > 32767) return false;
+			double centerX = (left + right) * 0.5, centerY = (top + bottom) * 0.5;
+			long fixedScaleX = (long)Math.Round(pattern.Xx * 65536d, MidpointRounding.ToEven);
+			long fixedScaleY = (long)Math.Round(pattern.Yy * 65536d, MidpointRounding.ToEven);
+			long fixedTranslateX = (long)Math.Round(pattern.X0 * 65536d + centerX * (pattern.Xx * 65536d - fixedScaleX), MidpointRounding.ToEven);
+			long fixedTranslateY = (long)Math.Round(pattern.Y0 * 65536d + centerY * (pattern.Yy * 65536d - fixedScaleY), MidpointRounding.ToEven);
+			if (fixedScaleX <= 0 || fixedScaleX > 65535 || fixedScaleY <= 0 || fixedScaleY > 65535 ||
+				fixedTranslateX < int.MinValue || fixedTranslateX > int.MaxValue || fixedTranslateY < int.MinValue || fixedTranslateY > int.MaxValue) return false;
+			double maxCoordinateX = Math.Max(Math.Abs(left), Math.Abs(right));
+			double maxCoordinateY = Math.Max(Math.Abs(top), Math.Abs(bottom));
+			if (maxCoordinateX * fixedScaleX + Math.Abs(fixedTranslateX) + fixedScaleX >= int.MaxValue ||
+				maxCoordinateY * fixedScaleY + Math.Abs(fixedTranslateY) + fixedScaleY >= int.MaxValue) return false;
+			scaleX = (int)fixedScaleX; scaleY = (int)fixedScaleY;
+			translateX = (int)fixedTranslateX; translateY = (int)fixedTranslateY;
+			return true;
+		}
+
+		static SKShader CreatePixmanNearestShader(SKImage image, SKShaderTileMode tile, int scaleX, int scaleY, int translateX, int translateY)
+		{
+			SKRuntimeEffect effect = pixmanNearestEffect;
+			if (effect == null) {
+				lock (pixmanNearestEffectLock) {
+					effect = pixmanNearestEffect;
+					if (effect == null) {
+						const string source = @"
+uniform shader sourceImage;
+uniform int scaleX;
+uniform int scaleY;
+uniform int translateX;
+uniform int translateY;
+int floorFixed(int value) {
+    return (value - (value < 0 ? 65535 : 0)) / 65536;
+}
+half4 main(float2 p) {
+    int x = int(floor(p.x));
+    int y = int(floor(p.y));
+    int sx = floorFixed(x * scaleX + (scaleX + 1) / 2 + translateX - 1);
+    int sy = floorFixed(y * scaleY + (scaleY + 1) / 2 + translateY - 1);
+    return sourceImage.eval(float2(float(sx) + 0.5, float(sy) + 0.5));
+}";
+						pixmanNearestEffect = effect = SKRuntimeEffect.CreateShader(source, out _);
+					}
+				}
+			}
+			if (effect == null) return null;
+			using var sourceShader = image.ToShader(tile, tile, new SKSamplingOptions(SKFilterMode.Nearest));
+			var uniforms = new SKRuntimeEffectUniforms(effect) {
+				["scaleX"] = scaleX, ["scaleY"] = scaleY,
+				["translateX"] = translateX, ["translateY"] = translateY
+			};
+			var children = new SKRuntimeEffectChildren(effect) { ["sourceImage"] = sourceShader };
+			return effect.ToShader(uniforms, children);
+		}
 		static SKImage gammaInverseTable;
 
 		internal static RecordedGuiDrawing Capture(ManagedGraphicsState context, int targetWidth, int targetHeight, bool stroke, bool paintAll,
@@ -109,6 +175,13 @@ namespace Cairo
 					result.geometryCoverage = RecordedCoarseGeometry.Fast(result.Path, context.Matrix, targetWidth, targetHeight);
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceCapture)) {
 				Pattern source = context.SourcePattern;
+				SurfacePattern nearestSurface = source as SurfacePattern;
+				result.usePixmanNearest = !stroke && !paintAll && result.Path != null &&
+					clips != null && clips.Length == 0 && maskSurface is null && maskPattern is null &&
+					(sourceMatrix is null || sourceMatrix.IsIdentity()) && context.Matrix.IsIdentity() &&
+					nearestSurface != null && nearestSurface.Filter == Filter.Nearest &&
+					TryGetPixmanNearestTransform(source.Matrix, result.Path.Bounds, targetWidth, targetHeight, out result.pixmanScaleX, out result.pixmanScaleY,
+						out result.pixmanTranslateX, out result.pixmanTranslateY);
 				result.SetSource(source, context.SourceColor, alpha, sourceMatrix, context, targetWidth, targetHeight);
 				if (sourceSnapshot == null) result.FreezeSource(source, context.SourceColor);
 				else {
@@ -130,7 +203,7 @@ namespace Cairo
 				Matrix drawMatrix = context.Matrix;
 				context.Matrix = nativeSourceMatrix;
 				if (sourceSnapshot != null && nativeImage == null) {
-					nativeImage = new ImageSurface(sourceSnapshot.PixelFormat, sourceSnapshot.Width, sourceSnapshot.Height);
+					nativeImage = ImageSurface.CreateNativeCompatibilitySurface(sourceSnapshot.PixelFormat, sourceSnapshot.Width, sourceSnapshot.Height);
 					sourceSnapshot.ReplayNative(nativeImage.NativeHandleForMetadata);
 					var pattern = new SurfacePattern(nativeImage) { Matrix = sourcePatternMatrix, Extend = sourceExtend, Filter = sourceFilter == SKFilterMode.Nearest ? Filter.Nearest : Filter.Bilinear };
 					nativeSource?.Dispose(); nativeSource = pattern;
@@ -168,7 +241,7 @@ namespace Cairo
 				NativeMethods.cairo_pattern_get_surface(h, out IntPtr surface);
 				int width = NativeMethods.cairo_image_surface_get_width(surface), height = NativeMethods.cairo_image_surface_get_height(surface);
 				Format format = NativeMethods.cairo_image_surface_get_format(surface);
-				nativeImage = new ImageSurface(format, width, height);
+				nativeImage = ImageSurface.CreateNativeCompatibilitySurface(format, width, height);
 				int inputStride = NativeMethods.cairo_image_surface_get_stride(surface);
 				int outputStride = nativeImage.Stride;
 				var row = new byte[checked(width * 4)];
@@ -246,11 +319,13 @@ namespace Cairo
 					for (int y = 0; y < height; y++) { Marshal.Copy(IntPtr.Add(input, checked(y * stride)), row, 0, row.Length); Marshal.Copy(row, 0, IntPtr.Add(output, checked(y * bitmap.RowBytes)), row.Length); }
 					image = SKImage.FromBitmap(bitmap);
 				}
-				shader = image.ToShader(tile, tile, new SKSamplingOptions(pattern is SurfacePattern sp && sp.Filter == Filter.Nearest ? SKFilterMode.Nearest : SKFilterMode.Linear));
+				if (usePixmanNearest)
+					shader = CreatePixmanNearestShader(image, tile, pixmanScaleX, pixmanScaleY, pixmanTranslateX, pixmanTranslateY);
+				shader ??= image.ToShader(tile, tile, new SKSamplingOptions(pattern is SurfacePattern sp && sp.Filter == Filter.Nearest ? SKFilterMode.Nearest : SKFilterMode.Linear));
 			} else throw new NotSupportedException("Recorded source pattern: " + type);
 
 			if (sourceSnapshot != null) { sourceTransform = inverse; Paint.Color = Color(1, 1, 1, alpha); return; }
-			SKShader transformed = shader.WithLocalMatrix(inverse);
+			SKShader transformed = usePixmanNearest ? shader : shader.WithLocalMatrix(inverse);
 			if (!ReferenceEquals(shader, transformed)) shader.Dispose();
 			shader = transformed;
 			Paint.Shader = shader; Paint.Color = Color(1, 1, 1, alpha);
@@ -281,9 +356,21 @@ namespace Cairo
 			if (geometryCoverage != null && (Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Clear)) { DrawGeometrySourceOrClear(target, deviceOffset); return false; }
 			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
 			if (TextCoverage != null && gpu == null) {
-				using var destination = target.Snapshot();
-				DrawLcdComposite(lcdEffect, TextCoverage, TextCoverage, destination, target.Canvas, false,
-					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode, TextCoverageOrigin, Paint.ColorF);
+				double targetLeft = TextCoverageOrigin.X + deviceOffset.X;
+				double targetTop = TextCoverageOrigin.Y + deviceOffset.Y;
+				int left = (int)Math.Clamp(Math.Floor(targetLeft), 0, width);
+				int top = (int)Math.Clamp(Math.Floor(targetTop), 0, height);
+				int right = (int)Math.Clamp(Math.Ceiling(targetLeft + TextCoverage.Width), 0, width);
+				int bottom = (int)Math.Clamp(Math.Ceiling(targetTop + TextCoverage.Height), 0, height);
+				if (right <= left || bottom <= top) return true;
+
+				var bounds = new SKRectI(left, top, right, bottom);
+				using var destination = target.Snapshot(bounds);
+				if (destination == null) return true;
+
+				var coverageOriginInBounds = new PointD(targetLeft - left, targetTop - top);
+				DrawLcdComposite(lcdEffect, TextCoverage, TextCoverage, destination, target.Canvas, Paint.BlendMode == SKBlendMode.Src,
+					Paint.ColorF.Alpha, Paint.Color, bounds.Width, bounds.Height, new PointD(left, top), Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode, coverageOriginInBounds, Paint.ColorF);
 			} else if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
 			else DrawLcdTextCpu(target, lcdEffect, width, height, deviceOffset);
 			return true;
@@ -316,7 +403,11 @@ namespace Cairo
 						?? throw new InvalidOperationException("Skia could not create a software GUI surface.");
 					sourceSnapshot.DrawTo(surface); dependencyImage = surface.Snapshot();
 				}
-				dependencyShader = dependencyImage.ToShader(sourceTile, sourceTile, new SKSamplingOptions(sourceFilter), sourceTransform); Paint.Shader = dependencyShader;
+				dependencyShader = usePixmanNearest
+					? CreatePixmanNearestShader(dependencyImage, sourceTile, pixmanScaleX, pixmanScaleY, pixmanTranslateX, pixmanTranslateY)
+					: null;
+				dependencyShader ??= dependencyImage.ToShader(sourceTile, sourceTile, new SKSamplingOptions(sourceFilter), sourceTransform);
+				Paint.Shader = dependencyShader;
 			}
 			if (maskPatternDrawing?.sourceSnapshot != null) {
 				if (gpu != null) maskDependencyImage = gpu.RenderSource(maskPatternDrawing.sourceSnapshot, out ownsMaskDependencyImage);
@@ -374,7 +465,10 @@ namespace Cairo
 						canvas.DrawImage(geometryCoverage.Image, geometryCoverage.Bounds.Left, geometryCoverage.Bounds.Top, coveragePaint);
 					} finally { canvas.RestoreToCount(coverageSave); }
 				} else if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
-				else if (TextFont != null) canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
+				else if (TextFont != null) {
+					if (IntPtr.Size == 4) DrawRecordedText(canvas, Text, TextX, TextY, TextFont, Paint);
+					else canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
+				}
 				else if (PaintAll) canvas.DrawPaint(Paint);
 				else canvas.DrawPath(Path, Paint);
 				if (!sourceOnly && (maskImage != null || maskPatternDrawing != null)) {
@@ -398,6 +492,15 @@ namespace Cairo
 				if (ownsDependencyImage) dependencyImage?.Dispose();
 				if (ownsMaskDependencyImage) maskDependencyImage?.Dispose();
 			}
+		}
+
+		// Keep text submission outside the large replay method. On Windows x86,
+		// calling DrawText here lost fractional positioning despite the font's
+		// Subpixel flag; a non-inlined helper preserved the recorded origin.
+		[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+		static void DrawRecordedText(SKCanvas canvas, string text, float x, float y, SKFont font, SKPaint paint)
+		{
+			canvas.DrawText(text, x, y, font, paint);
 		}
 
 		static readonly Lazy<SKRuntimeEffect> geometrySourceEffect = new Lazy<SKRuntimeEffect>(() => {
@@ -444,17 +547,71 @@ half4 main(float2 p) {
 		internal void DrawLcdTextCpu(SKSurface target, SKRuntimeEffect effect, int width, int height, PointD deviceOffset = default)
 		{
 			if (effect == null) throw new ArgumentNullException(nameof(effect));
-			var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+			if (!TryGetLcdTextBounds(width, height, deviceOffset, out SKRectI bounds)) return;
+			int rasterWidth = bounds.Width, rasterHeight = bounds.Height;
+			// LCD masks need Skia's native N32 format and an opaque surface. These
+			// black/white rasters are coverage inputs only; the final GUI surface
+			// keeps its own alpha type and is composited below.
+			var info = new SKImageInfo(rasterWidth, rasterHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
 			using var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal);
 			using var black = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD black surface.");
 			using var white = SKSurface.Create(info, properties) ?? throw new InvalidOperationException("Skia could not create a CPU LCD white surface.");
 			black.Canvas.Clear(SKColors.Black); white.Canvas.Clear(SKColors.White);
-			DrawTextMask(black.Canvas, deviceOffset); DrawTextMask(white.Canvas, deviceOffset);
+			var rasterOffset = new PointD(deviceOffset.X - bounds.Left, deviceOffset.Y - bounds.Top);
+			DrawTextMask(black.Canvas, rasterOffset); DrawTextMask(white.Canvas, rasterOffset);
 			using SKImage blackImage = black.Snapshot();
 			using SKImage whiteImage = white.Snapshot();
-			using SKImage destination = target.Snapshot();
+			using SKImage destination = target.Snapshot(bounds)
+				?? throw new InvalidOperationException("Skia could not snapshot the destination under LCD text.");
 			DrawLcdComposite(effect, blackImage, whiteImage, destination, target.Canvas, Paint.BlendMode == SKBlendMode.Src,
-				Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen);
+				Paint.ColorF.Alpha, Paint.Color, rasterWidth, rasterHeight,
+				new PointD(bounds.Left, bounds.Top), Paint.BlendMode == SKBlendMode.Screen);
+		}
+
+		bool TryGetLcdTextBounds(int width, int height, PointD deviceOffset, out SKRectI bounds)
+		{
+			bounds = default;
+			if (width <= 0 || height <= 0) return false;
+
+			SKRect textBounds;
+			if (TextBlob != null) {
+				textBounds = TextBlob.Bounds;
+				textBounds = new SKRect(textBounds.Left + TextX, textBounds.Top + TextY,
+					textBounds.Right + TextX, textBounds.Bottom + TextY);
+			} else if (TextFont != null && !string.IsNullOrEmpty(Text)) {
+				TextFont.MeasureText(Text, out textBounds, Paint);
+				textBounds = new SKRect(textBounds.Left + TextX, textBounds.Top + TextY,
+					textBounds.Right + TextX, textBounds.Bottom + TextY);
+			} else {
+				return false;
+			}
+
+			if (textBounds.Right <= textBounds.Left || textBounds.Bottom <= textBounds.Top) return false;
+			textBounds = Matrix.MapRect(textBounds);
+			textBounds = new SKRect(
+				textBounds.Left + (float)deviceOffset.X,
+				textBounds.Top + (float)deviceOffset.Y,
+				textBounds.Right + (float)deviceOffset.X,
+				textBounds.Bottom + (float)deviceOffset.Y);
+
+			if (!float.IsFinite(textBounds.Left) || !float.IsFinite(textBounds.Top) ||
+				!float.IsFinite(textBounds.Right) || !float.IsFinite(textBounds.Bottom)) {
+				bounds = new SKRectI(0, 0, width, height);
+				return true;
+			}
+
+			// Keep a small device-space fringe for LCD coverage after the recorded
+			// transform, while avoiding full-surface clears and composites for long
+			// rich-text images such as the credits screen.
+			const double lcdFringe = 2;
+			int left = (int)Math.Clamp(Math.Floor(textBounds.Left) - lcdFringe, 0, width);
+			int top = (int)Math.Clamp(Math.Floor(textBounds.Top) - lcdFringe, 0, height);
+			int right = (int)Math.Clamp(Math.Ceiling(textBounds.Right) + lcdFringe, 0, width);
+			int bottom = (int)Math.Clamp(Math.Ceiling(textBounds.Bottom) + lcdFringe, 0, height);
+			if (right <= left || bottom <= top) return false;
+
+			bounds = new SKRectI(left, top, right, bottom);
+			return true;
 		}
 
 		internal static void DrawLcdComposite(SKRuntimeEffect effect, SKImage black, SKImage white, SKImage destination,
@@ -465,7 +622,11 @@ half4 main(float2 p) {
 			bool invertGamma = Environment.GetEnvironmentVariable("OPTIMUM_GUI_LCD_GAMMA_INVERSE") switch {
 				"0" => false,
 				"1" => true,
-				_ => OperatingSystem.IsLinux()
+				// Cairo's Win32 LCD output uses GDI's gamma-correct coverage blend;
+				// the same inverse-gamma pass used for the Linux Pixman reference is
+				// needed to match it on Windows. Keep the environment override for
+				// driver-specific diagnostics and preserve the other platforms.
+				_ => OperatingSystem.IsLinux() || OperatingSystem.IsWindows()
 			};
 			var uniforms = new SKRuntimeEffectUniforms(effect) {
 				["sourceOperator"] = sourceOperator ? 1 : 0,
@@ -523,6 +684,9 @@ half4 main(float2 p) {
     if (directCoverage != 0) {
         float3 source = sourceColor * sourceAlpha * black.rgb;
         float alpha = sourceAlpha * black.g;
+				if (sourceOperator != 0) {
+					return half4(source + destination.rgb * (1.0 - black.rgb), alpha + destination.a * (1.0 - black.g));
+				}
         if (separableOperator != 0 || screenOperator != 0) {
             // Pixman 0.46 combine_<mode>_ca/_u: byte-rounded source IN mask, one final DIV_ONE_UN8.
             float3 m = floor(black.rgb * 255.0 + 0.5);

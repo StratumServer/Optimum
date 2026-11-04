@@ -51,7 +51,16 @@ namespace Vintagestory.Client.NoObf
 					_ => throw new InvalidOperationException("Skia SVG textures cannot be materialized through Cairo."),
 					textureColorOrder: true);
 				if (!transferred) throw new InvalidOperationException("Skia rejected the GUI SVG texture display list.");
-					bool rendered = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture (surface, true, RuntimeEnv.MainThreadId, out int candidate, out string reason, linearMin: true);
+					bool previousLinearMinOverride = OptimumGuiGpuProbeBackend.LinearMinOverride;
+					OptimumGuiGpuProbeBackend.LinearMinOverride = true;
+					bool rendered;
+					int candidate = 0;
+					string reason = null;
+					try {
+						rendered = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture (surface, true, RuntimeEnv.MainThreadId, out candidate, out reason);
+					} finally {
+						OptimumGuiGpuProbeBackend.LinearMinOverride = previousLinearMinOverride;
+					}
 					if (OptimumGuiMetrics.Enabled) OptimumGuiMetrics.RecordGpuCandidateTexture (rendered, reason);
 					if (!rendered) throw new InvalidOperationException("Skia could not render the requested SVG texture: " + reason);
 					texture = new LoadedTexture (api, candidate, width, height);

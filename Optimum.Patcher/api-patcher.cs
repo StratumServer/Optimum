@@ -320,8 +320,6 @@ public static class ApiPatcher
 
     internal static int PatchQueuedGuiContexts(ModuleDefinition module, ModuleDefinition contracts)
     {
-        var requested = contracts.GetType("Vintagestory.API.Client.OptimumGuiGpuProbe").Methods
-            .Single(method => method.Name == "get_RenderingRequested");
         int patched = 0;
         IEnumerable<TypeDefinition> Descendants(TypeDefinition type) => new[] { type }.Concat(type.NestedTypes.SelectMany(Descendants));
         var types = new[] { "GuiElementStatbar", "GuiElementDynamicText", "GuiElementItemstackInfo" }
@@ -350,10 +348,9 @@ public static class ApiPatcher
                     Code.Leave_S => OpCodes.Leave, _ => instruction.OpCode
                 };
             var processor = method.Body.GetILProcessor();
-            processor.InsertBefore(delegateTarget, Instruction.Create(OpCodes.Call, module.ImportReference(requested)));
-            processor.InsertBefore(delegateTarget, Instruction.Create(OpCodes.Brfalse, delegateTarget));
-            // The delegate target object is already on the stack. Release its completed
-            // writer contexts before enqueueing; the retained surfaces cross threads.
+            // Release completed writer contexts before enqueueing, even while GPU
+            // certification is still pending. Managed-only CPU fallback uses the
+            // same render-thread texture upload and also needs this thread handoff.
             foreach (var field in fields)
             {
                 var dispose = new MethodReference("Dispose", module.TypeSystem.Void, module.ImportReference(field.FieldType)) { HasThis = true };

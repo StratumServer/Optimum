@@ -334,6 +334,27 @@ namespace Cairo
 				resources.Add(new RecordedResource(drawing));
 				graphicsState.MoveTo(endX, endY);
 				return true;
+			} else if (OperatingSystem.IsWindows() &&
+				SkiaFontResolver.TryGetWindowsGlyphAdvances(font, graphicsState.Matrix, options.HintMetrics != HintMetrics.Off, font.GetGlyphs(decoded), out float[] windowsAdvances)) {
+				// Windows Cairo lays out system fonts with GDI's glyph advances.
+				SKTextBlob blob = null;
+				try {
+					var glyphs = font.GetGlyphs(decoded);
+					var positions = new SKPoint[glyphs.Length];
+					float x = 0;
+					for (int i = 0; i < glyphs.Length; i++) {
+						positions[i] = new SKPoint(x, 0);
+						x += windowsAdvances[i];
+					}
+					advance = x;
+					using var blobBuilder = new SKTextBlobBuilder();
+					blobBuilder.AddPositionedRun(glyphs, font, positions);
+					blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to build a GDI-positioned Windows text run.");
+					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
+						textInkClip: textInkClip);
+					blob = null;
+				} finally { blob?.Dispose(); font.Dispose(); }
 			} else if (SkiaTextMetrics.UsesNormalHintedAdvances(font, options, decoded)) {
 				// FreeType's LIGHT target changes raster coverage but uses linear
 				// advances. Keep the existing Normal-hinted Skia advances for string
@@ -372,9 +393,22 @@ namespace Cairo
 						textInkClip: textInkClip);
 			}
 			bool captureCoverage = graphicsState.Operator is Operator.Screen or Operator.Difference or Operator.Exclusion;
-			if (captureCoverage && drawing.TextFont != null) {
+			bool windowsCoverageCaptured = false;
+			if (!captureCoverage && OperatingSystem.IsWindows() && (graphicsState.Operator is Operator.Over or Operator.Source) &&
+				drawing.TextBlob != null && drawing.Paint.Shader == null && currentSource == null) {
+				using var coverageFont = SkiaGuiFont.Create(graphicsState, options);
+				if (WindowsGdiTextCoverage.TryCapture(graphicsState, coverageFont, options, decoded, drawing.Clips,
+					width, height, drawing.TextInkClip, out SKImage coverage, out PointD coverageOrigin)) {
+					drawing.TextCoverageOrigin = coverageOrigin;
+					drawing.SetTextCoverage(coverage, graphicsState.Operator);
+					windowsCoverageCaptured = true;
+				} else {
+					coverage?.Dispose();
+				}
+			}
+			if (!windowsCoverageCaptured && captureCoverage && drawing.TextFont != null) {
 				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, drawing.TextFont, options, decoded, drawing.Clips, width, height, out drawing.TextCoverageOrigin), graphicsState.Operator);
-			} else if (captureCoverage && drawing.TextBlob != null) {
+			} else if (!windowsCoverageCaptured && captureCoverage && drawing.TextBlob != null) {
 				using var coverageFont = SkiaGuiFont.Create(graphicsState, options);
 				drawing.SetTextCoverage(RecordedFreeTypeText.Capture(graphicsState, coverageFont, options, decoded, drawing.Clips, width, height, out drawing.TextCoverageOrigin), graphicsState.Operator);
 			}
@@ -526,10 +560,11 @@ namespace Cairo
 					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:state-" + state;
 					snapshot = null; return false;
 				}
-				if (saveDepth != 0) {
-					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:unbalanced-save-depth-" + saveDepth;
-					snapshot = null; return false;
-				}
+				// The GUI asks for a snapshot from inside many Save()/Restore()-scoped
+				// drawing calls, so the active Cairo context can legitimately have
+				// saved state at this point. Recorded drawings capture their own
+				// transforms and clips; Skia replay does not depend on closing this
+				// live Cairo context's save stack.
 				if (unqualifiedHelperDrawing) {
 					firstMaterializationTrigger ??= "Recorder.Seal.Unsupported:unqualified-helper-drawing";
 					snapshot = null; return false;
@@ -632,10 +667,6 @@ namespace Cairo
 
 		internal void Materialize (IntPtr contextHandle = default)
 		{
-			if (Surface.AutomaticRecordingEnabled)
-				throw new InvalidOperationException ("Cairo materialization is forbidden while the Skia GUI renderer is requested.");
-			if (surface.IsManagedOnly)
-				throw new NotSupportedException ("A managed-only image surface cannot be materialized as a native Cairo surface.");
 			string trigger = null;
 			ExceptionDispatchInfo materializationFailure = null;
 			bool attempted = false;
@@ -648,6 +679,8 @@ namespace Cairo
 				try {
 					SurfaceRecordingDiagnostics.Materialize();
 					IntPtr native = surface.NativeHandleForMetadata;
+					if (native == IntPtr.Zero)
+						throw new NotSupportedException ("A managed-only image surface cannot be materialized as a native Cairo surface without a native backend.");
 					ThrowIfError (NativeMethods.cairo_surface_status (native), "surface before replay");
 					IntPtr replayHandle = contextHandle == IntPtr.Zero ? NativeMethods.cairo_create (native) : contextHandle;
 					using (var context = new Context (replayHandle, contextHandle == IntPtr.Zero)) {
