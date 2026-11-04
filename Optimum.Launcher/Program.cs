@@ -435,13 +435,15 @@ public static class Program
             ?? throw new InvalidDataException("Patched API lacks the GUI certification contract.");
         var certificationSetter = apiConfig.GetMethod("SetGuiGpuCertificationPassed", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidDataException("Patched API lacks the GUI certification setter.");
-        certificationSetter.Invoke(null, [false, null, null, null, 0, 0, 0, 0]);
         var certification = GuiCertification.Validate(gameDir, cacheDir, dataPath, args);
+        bool waived = certification.Reason == "certificate-missing" &&
+            apiConfig.GetProperty("GuiGpuCertificationWaived", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) is true;
+        bool approved = certification.Passed || waived;
         var identity = certification.DeviceIdentity;
-        certificationSetter.Invoke(null, [certification.Passed, identity?.Vendor, identity?.Renderer,
+        certificationSetter.Invoke(null, [approved, identity?.Vendor, identity?.Renderer,
             identity?.Version, identity?.Major ?? 0, identity?.Minor ?? 0,
             identity?.ProfileMask ?? 0, identity?.ContextFlags ?? 0]);
-        Logger.Log($"[Optimum] GUI certification: {(certification.Passed ? "approved profile" : "vanilla")}; {certification.Reason}");
+        Logger.Log($"[Optimum] GUI certification: {(certification.Passed ? "approved profile" : (waived ? "waived" : "vanilla"))}; {certification.Reason}");
 
         // Find and invoke ClientProgram.Main
         var clientProgramType = vintagestoryLib.GetType("Vintagestory.Client.ClientProgram");

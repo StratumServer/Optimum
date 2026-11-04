@@ -498,11 +498,13 @@ index b1b2eea..67b9a1d 100644
 +		{
 +			string probeResult = OptimumGuiGpuProbeBackend.TryRunOnce(RuntimeEnv.MainThreadId);
 +			if (probeResult != null) logger.Notification("{0}", probeResult);
-+			if (!OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out int candidateTexture, out string candidateFailureReason))
-+				throw new InvalidOperationException("Skia GUI rendering was requested, but neither Skia GPU nor Skia CPU could produce the texture: " + candidateFailureReason);
-+			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuCandidateTexture(true, null);
-+			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, true);
-+			return candidateTexture;
++			if (OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out int candidateTexture, out string candidateFailureReason))
++			{
++				if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuCandidateTexture(true, null);
++				if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, true);
++				return candidateTexture;
++			}
++			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuCandidateTexture(false, candidateFailureReason);
 +		}
  		int num = GL.GenTexture();
  		GL.BindTexture((TextureTarget)3553, num);
@@ -536,8 +538,6 @@ index b1b2eea..67b9a1d 100644
 +		{
 +			guiGpuCandidate = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out candidateTexture, out string candidateFailureReason);
 +			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuCandidateTexture(guiGpuCandidate, candidateFailureReason);
-+			if (!guiGpuCandidate)
-+				throw new InvalidOperationException("Skia GUI rendering was requested, but neither Skia GPU nor Skia CPU could produce the texture: " + candidateFailureReason);
 +		}
 +		if (guiGpuCandidate)
 +		{

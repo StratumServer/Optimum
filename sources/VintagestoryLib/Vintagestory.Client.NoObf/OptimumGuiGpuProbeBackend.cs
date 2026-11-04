@@ -212,27 +212,39 @@ namespace Vintagestory.Client.NoObf
 					if (!MatchesCertifiedDevice())
 					{
 						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"current-device-or-context-mismatch", out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"current-device-or-context-mismatch", out candidateTexture, out failureReason);
+						failureReason = "current-device-or-context-mismatch";
+						return false;
 					}
 					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
+						failureReason = "OpenGL 3.0 or newer is required for state capture";
+						return false;
 					}
 					TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"gpu-probe-not-passed", out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"gpu-probe-not-passed", out candidateTexture, out failureReason);
+						failureReason = "gpu-probe-not-passed";
+						return false;
 					}
 					// Keep pre-existing engine errors out of the candidate operation. The probe's caller
 					// performs the normal upload error check if this returns false.
 					string preexistingErrors = DrainPreexistingGlErrors();
 					if (preexistingErrors != null)
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-							"preexisting-gl-errors:" + preexistingErrors, out candidateTexture, out failureReason);
+						if (ForceSkiaCpuFallbackForTest)
+							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+								"preexisting-gl-errors:" + preexistingErrors, out candidateTexture, out failureReason);
+						failureReason = "preexisting-gl-errors:" + preexistingErrors;
+						return false;
 					}
 
 					GlStateSnapshot state = null;

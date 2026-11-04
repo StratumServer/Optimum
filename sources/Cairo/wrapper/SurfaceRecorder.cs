@@ -667,10 +667,6 @@ namespace Cairo
 
 		internal void Materialize (IntPtr contextHandle = default)
 		{
-			if (Surface.AutomaticRecordingEnabled)
-				throw new InvalidOperationException ("Cairo materialization is forbidden while the Skia GUI renderer is requested.");
-			if (surface.IsManagedOnly)
-				throw new NotSupportedException ("A managed-only image surface cannot be materialized as a native Cairo surface.");
 			string trigger = null;
 			ExceptionDispatchInfo materializationFailure = null;
 			bool attempted = false;
@@ -683,6 +679,8 @@ namespace Cairo
 				try {
 					SurfaceRecordingDiagnostics.Materialize();
 					IntPtr native = surface.NativeHandleForMetadata;
+					if (native == IntPtr.Zero)
+						throw new NotSupportedException ("A managed-only image surface cannot be materialized as a native Cairo surface without a native backend.");
 					ThrowIfError (NativeMethods.cairo_surface_status (native), "surface before replay");
 					IntPtr replayHandle = contextHandle == IntPtr.Zero ? NativeMethods.cairo_create (native) : contextHandle;
 					using (var context = new Context (replayHandle, contextHandle == IntPtr.Zero)) {

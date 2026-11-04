@@ -565,9 +565,14 @@ public static class OptimumConfig
 
     public static bool GuiGpuRenderRequested => GuiGpuRenderEnabled || environmentGuiGpuRender;
 
+    private static int guiGpuCertificationRevoked;
+    public static bool GuiGpuCertificationWaived { get; set; } = true;
+
     internal static bool GuiGpuCertificationPassed => System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0;
 
-    public static bool GuiGpuRecordingEligible => GuiGpuRenderRequested && System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0;
+    public static bool GuiGpuRecordingEligible => GuiGpuRenderRequested &&
+        System.Threading.Volatile.Read(ref guiGpuCertificationRevoked) == 0 &&
+        (GuiGpuCertificationWaived || System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0);
 
     private static string? guiGpuVendor;
     private static string? guiGpuRenderer;
@@ -588,18 +593,24 @@ public static class OptimumConfig
         guiGpuProfileMask = passed ? profileMask : 0;
         guiGpuContextFlags = passed ? contextFlags : 0;
         System.Threading.Volatile.Write(ref guiGpuCertificationPassed, passed ? 1 : 0);
+        System.Threading.Volatile.Write(ref guiGpuCertificationRevoked, passed ? 0 : 1);
     }
 
     internal static bool GuiGpuDeviceMatches(string vendor, string renderer, string version,
         int major, int minor, int profileMask, int contextFlags) =>
-        GuiGpuRecordingEligible &&
-        string.Equals(guiGpuVendor, vendor, StringComparison.Ordinal) &&
-        string.Equals(guiGpuRenderer, renderer, StringComparison.Ordinal) &&
-        string.Equals(guiGpuVersion, version, StringComparison.Ordinal) &&
-        guiGpuMajor == major && guiGpuMinor == minor &&
-        guiGpuProfileMask == profileMask && guiGpuContextFlags == contextFlags;
+        GuiGpuRecordingEligible && (
+            (GuiGpuCertificationWaived && guiGpuVendor == null) || (
+                string.Equals(guiGpuVendor, vendor, StringComparison.Ordinal) &&
+                string.Equals(guiGpuRenderer, renderer, StringComparison.Ordinal) &&
+                string.Equals(guiGpuVersion, version, StringComparison.Ordinal) &&
+                guiGpuMajor == major && guiGpuMinor == minor &&
+                guiGpuProfileMask == profileMask && guiGpuContextFlags == contextFlags));
 
-    internal static void RevokeGuiGpuCertification() => SetGuiGpuCertificationPassed(false, null, null, null, 0, 0, 0, 0);
+    internal static void RevokeGuiGpuCertification()
+    {
+        System.Threading.Volatile.Write(ref guiGpuCertificationRevoked, 1);
+        SetGuiGpuCertificationPassed(false, null, null, null, 0, 0, 0, 0);
+    }
 
     public static bool EffectiveGuiGpuRender => GuiGpuRecordingEligible && System.Threading.Volatile.Read(ref guiGpuBackendProbePassed) != 0;
 
