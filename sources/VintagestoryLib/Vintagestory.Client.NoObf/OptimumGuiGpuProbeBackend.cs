@@ -78,6 +78,7 @@ namespace Vintagestory.Client.NoObf
 		/// <summary>Invalidates and disposes the cached Skia GRContext.</summary>
 		public static void InvalidateCachedContext()
 		{
+			cachedDeviceIdentity = null;
 			lock (contextLock)
 			{
 				AbandonAndDisposeContext(ref cachedContext);
@@ -268,7 +269,7 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "current-device-or-context-mismatch";
 						return false;
 					}
-					if (!IsOpenGl3OrNewer(SafeGetString(StringName.Version)))
+					if (!IsOpenGl3OrNewer(cachedDeviceIdentity?.Version ?? SafeGetString(StringName.Version)))
 					{
 						if (ForceSkiaCpuFallbackForTest)
 							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
@@ -704,22 +705,40 @@ namespace Vintagestory.Client.NoObf
 			return supported;
 		}
 
+		// GL identity of one native context. Vendor/renderer/version/profile never change for a given handle,
+		// so the ~7 synchronous glGet* calls (and their string allocations) run once per context, not per upload.
+		private sealed class DeviceIdentity
+		{
+			internal IntPtr Handle; internal bool Usable;
+			internal string Vendor, Renderer, Version; internal int Major, Minor, ProfileMask, ContextFlags;
+		}
+		private static DeviceIdentity cachedDeviceIdentity;
+
 		private static bool MatchesCertifiedDevice()
 		{
 			try
 			{
-				string vendor = SafeGetString(StringName.Vendor);
-				string renderer = SafeGetString(StringName.Renderer);
-				string version = SafeGetString(StringName.Version);
-				GL.GetInteger(GetPName.MajorVersion, out int major);
-				GL.GetInteger(GetPName.MinorVersion, out int minor);
-				GL.GetInteger(GetPName.ContextProfileMask, out int profileMask);
-				GL.GetInteger(GetPName.ContextFlags, out int contextFlags);
-				return !string.IsNullOrWhiteSpace(vendor) && vendor != "unknown" &&
-					!string.IsNullOrWhiteSpace(renderer) && renderer != "unknown" &&
-					!string.IsNullOrWhiteSpace(version) && version != "unknown" &&
-					Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches(vendor, renderer, version,
-						major, minor, profileMask, contextFlags);
+				IntPtr handle = CurrentContextHandle();
+				DeviceIdentity identity = cachedDeviceIdentity;
+				if (identity == null || handle == IntPtr.Zero || identity.Handle != handle)
+				{
+					identity = new DeviceIdentity { Handle = handle };
+					identity.Vendor = SafeGetString(StringName.Vendor);
+					identity.Renderer = SafeGetString(StringName.Renderer);
+					identity.Version = SafeGetString(StringName.Version);
+					GL.GetInteger(GetPName.MajorVersion, out identity.Major);
+					GL.GetInteger(GetPName.MinorVersion, out identity.Minor);
+					GL.GetInteger(GetPName.ContextProfileMask, out identity.ProfileMask);
+					GL.GetInteger(GetPName.ContextFlags, out identity.ContextFlags);
+					identity.Usable = !string.IsNullOrWhiteSpace(identity.Vendor) && identity.Vendor != "unknown" &&
+						!string.IsNullOrWhiteSpace(identity.Renderer) && identity.Renderer != "unknown" &&
+						!string.IsNullOrWhiteSpace(identity.Version) && identity.Version != "unknown";
+					if (handle != IntPtr.Zero && identity.Usable) cachedDeviceIdentity = identity;
+				}
+				// The certificate itself can be granted or revoked at any time, so it is always re-evaluated (no GL calls).
+				return identity.Usable &&
+					Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches(identity.Vendor, identity.Renderer, identity.Version,
+						identity.Major, identity.Minor, identity.ProfileMask, identity.ContextFlags);
 			}
 			catch
 			{
@@ -945,6 +964,7 @@ namespace Vintagestory.Client.NoObf
 				private sealed class GlStateSnapshot
 				{
 					private static int cachedTrackedTextureUnits = -1;
+					private static int[] cachedUnitIndices;
 					private static bool cachedSamplerObjectsSupported;
 					private static bool cachedSupportsRasterizerDiscard;
 
@@ -961,6 +981,16 @@ namespace Vintagestory.Client.NoObf
 						// Vintage Story GUI only uses Texture0, and the 3D renderer uses at most 8-16 units.
 						// Cap tracked units to 16 to avoid querying 80-192 units on modern drivers (AMD/NVIDIA).
 						cachedTrackedTextureUnits = Math.Min(textureUnitCount, 16);
+						// Skia programs here sample at most 5 textures (units 0-4) and Ganesh binds uploads on the LAST
+						// fragment unit (GrGLGpu: lastUnitIdx = numTextureUnits() - 1). Track units 0-7 plus that last unit
+						// instead of 0-15: fewer glGet/Bind calls per upload and the scratch unit is now restored too.
+						GL.GetInteger((GetPName)0x8872, out int fragmentUnits);
+						if (fragmentUnits < 1 || fragmentUnits > 1024) fragmentUnits = textureUnitCount;
+						var indices = new List<int>();
+						for (int u = 0; u < Math.Min(8, textureUnitCount); u++) indices.Add(u);
+						int last = Math.Min(fragmentUnits, textureUnitCount) - 1;
+						if (last >= 0 && !indices.Contains(last)) indices.Add(last);
+						cachedUnitIndices = indices.ToArray();
 						GL.GetInteger((GetPName)0x821B, out int glMajor);
 						GL.GetInteger((GetPName)0x821C, out int glMinor);
 						cachedSupportsRasterizerDiscard = glMajor >= 3;
@@ -971,6 +1001,7 @@ namespace Vintagestory.Client.NoObf
 					private readonly int drawFramebuffer;
 					private readonly int renderbuffer;
 					private readonly int activeTexture;
+					private readonly int[] unitIndices;
 					private readonly int[] textureBindings;
 					private readonly int[] samplerBindings;
 					private readonly bool samplerObjectsSupported;
@@ -1035,16 +1066,17 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x8CA7, out renderbuffer);
 						GL.GetInteger((GetPName)0x84E0, out activeTexture);
 
-						int trackedUnits = cachedTrackedTextureUnits;
+						unitIndices = cachedUnitIndices;
+						int trackedUnits = unitIndices.Length;
 						textureBindings = new int[trackedUnits];
 						samplerBindings = samplerObjectsSupported ? new int[trackedUnits] : Array.Empty<int>();
 						try
 						{
-							for (int unit = 0; unit < trackedUnits; unit++)
+							for (int i = 0; i < trackedUnits; i++)
 							{
-								GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
-								GL.GetInteger((GetPName)0x8069, out textureBindings[unit]);
-								if (samplerObjectsSupported) GL.GetInteger((GetPName)0x8919, out samplerBindings[unit]);
+								GL.ActiveTexture((TextureUnit)(0x84C0 + unitIndices[i]));
+								GL.GetInteger((GetPName)0x8069, out textureBindings[i]);
+								if (samplerObjectsSupported) GL.GetInteger((GetPName)0x8919, out samplerBindings[i]);
 							}
 						}
 					finally { GL.ActiveTexture((TextureUnit)activeTexture); }
@@ -1160,11 +1192,12 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF2, unpackRowLength);
 						GL.PixelStore((PixelStoreParameter)0x0CF3, unpackSkipRows);
 						GL.PixelStore((PixelStoreParameter)0x0CF4, unpackSkipPixels);
-						for (int unit = 0; unit < textureBindings.Length; unit++)
+						for (int i = 0; i < textureBindings.Length; i++)
 						{
+							int unit = unitIndices[i];
 							GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
-							GL.BindTexture(TextureTarget.Texture2D, textureBindings[unit]);
-							if (samplerObjectsSupported) GL.BindSampler(unit, samplerBindings[unit]);
+							GL.BindTexture(TextureTarget.Texture2D, textureBindings[i]);
+							if (samplerObjectsSupported) GL.BindSampler(unit, samplerBindings[i]);
 						}
 						GL.ActiveTexture((TextureUnit)activeTexture);
 						GL.Viewport(viewport[0], viewport[1], viewport[2], viewport[3]);
