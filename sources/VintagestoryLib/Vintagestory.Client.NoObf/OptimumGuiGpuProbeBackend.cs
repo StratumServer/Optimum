@@ -30,6 +30,12 @@ namespace Vintagestory.Client.NoObf
 		private static IntPtr contextResetLatchedHandle;
 		private static IntPtr resetSupportHandle;
 		private static bool resetSupportValue;
+		private static IntPtr cachedContextHandle;
+		private static int cachedContextThreadId;
+		private static SkiaGlBindings cachedBindings;
+		private static GRGlInterface cachedGlInterface;
+		private static GRContext cachedContext;
+		private static readonly object contextLock = new object();
 		/// <summary>Number of device/context resets that made GUI rendering fail closed.</summary>
 		public static long ContextResetCount => Interlocked.Read(ref contextResetCount);
 		/// <summary>Reason string of the last observed reset, or null.</summary>
@@ -55,6 +61,32 @@ namespace Vintagestory.Client.NoObf
 			resetSupportValue = false;
 			Volatile.Write(ref simulatedContextResetStatusForTest, 0);
 			Volatile.Write(ref simulatedContextResetSkipChecksForTest, 0);
+			InvalidateCachedContext();
+		}
+
+		/// <summary>Invalidates and disposes the cached Skia GRContext.</summary>
+		public static void InvalidateCachedContext()
+		{
+			lock (contextLock)
+			{
+				if (cachedContext != null)
+				{
+					try { cachedContext.AbandonContext(false); cachedContext.Dispose(); } catch { }
+					cachedContext = null;
+				}
+				if (cachedGlInterface != null)
+				{
+					try { cachedGlInterface.Dispose(); } catch { }
+					cachedGlInterface = null;
+				}
+				if (cachedBindings != null)
+				{
+					try { cachedBindings.Dispose(); } catch { }
+					cachedBindings = null;
+				}
+				cachedContextHandle = IntPtr.Zero;
+				cachedContextThreadId = 0;
+			}
 		}
 		/// <summary>Reuse immutable CPU preparation without skipping legacy mod callbacks.</summary>
 		public static bool RecordingPreparationReuseEnabled { get => RecordedPreparationCache.Enabled; set => RecordedPreparationCache.Enabled = value; }
@@ -294,42 +326,83 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
 						GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
 
-						using (var bindings = new SkiaGlBindings(isolatedVertexArray))
-						using (GRGlInterface glInterface = GRGlInterface.Create(bindings.GetProcedureAddress))
+						IntPtr operationContext = CurrentContextHandle();
+						GRContext context;
+						bool abandonOnExit = false;
+						lock (contextLock)
 						{
-							if (glInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
-							using (GRContext context = GRContext.CreateGl(glInterface))
+							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId || ContextWasReset(out _))
 							{
-								if (context == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
-								IntPtr operationContext = CurrentContextHandle();
-								try
+								if (cachedContext != null)
 								{
-									context.ResetContext(GRGlBackendState.All);
-									var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
-									using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
-									using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
-									using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
-									{
-										if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-									using (var blur = new RecordedGpuBlur(context))
-									{
-										if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-										skSurface.Flush();
-										context.Flush();
-										context.Submit(false);
-										OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-										if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
-										rendered = true;
-									}
+									try { cachedContext.AbandonContext(false); cachedContext.Dispose(); } catch { }
+									cachedContext = null;
 								}
-								}
-								finally
+								if (cachedGlInterface != null)
 								{
-									// Dispose only abandons Ganesh; release its GL objects while the owning context is usable.
-									bool releaseResources = operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext;
-									if (releaseResources && ContextWasReset(out renderResetReason)) releaseResources = false;
+									try { cachedGlInterface.Dispose(); } catch { }
+									cachedGlInterface = null;
+								}
+								if (cachedBindings != null)
+								{
+									try { cachedBindings.Dispose(); } catch { }
+									cachedBindings = null;
+								}
+
+								cachedBindings = new SkiaGlBindings(isolatedVertexArray);
+								cachedGlInterface = GRGlInterface.Create(cachedBindings.GetProcedureAddress);
+								if (cachedGlInterface == null) throw new InvalidOperationException("Skia could not create an OpenGL interface.");
+								cachedContext = GRContext.CreateGl(cachedGlInterface);
+								if (cachedContext == null) throw new InvalidOperationException("Skia could not create the current-context GPU backend.");
+								cachedContext.SetResourceCacheLimit(64 * 1024 * 1024);
+								cachedContextHandle = operationContext;
+								cachedContextThreadId = expectedContextThreadId;
+							}
+							else
+							{
+								cachedBindings.SetIsolatedVertexArray(isolatedVertexArray);
+							}
+							context = cachedContext;
+						}
+
+						try
+						{
+							context.ResetContext(GRGlBackendState.All);
+							var info = new GRGlFramebufferInfo((uint)framebuffer, (uint)PixelInternalFormat.Rgba8);
+							using (var target = new GRBackendRenderTarget(surface.Width, surface.Height, 0, 0, info))
+							using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
+							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
+							{
+								if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
+								using (var blur = new RecordedGpuBlur(context))
+								{
+									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+									skSurface.Flush();
+									context.Flush();
+									context.Submit(false);
+									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
+									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+									rendered = true;
+								}
+							}
+						}
+						catch
+						{
+							abandonOnExit = true;
+							throw;
+						}
+						finally
+						{
+							bool releaseResources = operationContext != IntPtr.Zero && CurrentContextHandle() == operationContext;
+							if (releaseResources && ContextWasReset(out renderResetReason)) { releaseResources = false; abandonOnExit = true; }
+							if (abandonOnExit)
+							{
+								lock (contextLock)
+								{
+									cachedContext = null;
+									cachedContextHandle = IntPtr.Zero;
+								}
 								context.AbandonContext(releaseResources);
-								}
 							}
 						}
 					}
@@ -610,7 +683,7 @@ namespace Vintagestory.Client.NoObf
 			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
 			private delegate void BindVertexArrayDelegate(uint array);
 
-			private readonly uint isolatedVertexArray;
+			private uint isolatedVertexArray;
 			private readonly BindVertexArrayDelegate nativeBindVertexArray;
 			private readonly BindVertexArrayDelegate bindVertexArray;
 
@@ -619,6 +692,11 @@ namespace Vintagestory.Client.NoObf
 				this.isolatedVertexArray = (uint)isolatedVertexArray;
 				nativeBindVertexArray = Marshal.GetDelegateForFunctionPointer<BindVertexArrayDelegate>(GetGlProcedureAddress("glBindVertexArray"));
 				bindVertexArray = BindVertexArray;
+			}
+
+			internal void SetIsolatedVertexArray(int isolatedVertexArray)
+			{
+				this.isolatedVertexArray = (uint)isolatedVertexArray;
 			}
 
 			internal IntPtr GetProcedureAddress(string name) => name == "glBindVertexArray"
