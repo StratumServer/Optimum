@@ -536,7 +536,8 @@ index b1b2eea..67b9a1d 100644
 +		bool guiGpuCandidate = false;
 +		if (Vintagestory.API.Client.OptimumGuiGpuProbe.RenderingRequested)
 +		{
-+			guiGpuCandidate = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out candidateTexture, out string candidateFailureReason);
++			int reusableTexture = (intoTexture.TextureId != 0 && intoTexture.Width == surface.Width && intoTexture.Height == surface.Height) ? intoTexture.TextureId : 0;
++			guiGpuCandidate = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture(surface, linearMag, RuntimeEnv.MainThreadId, out candidateTexture, out string candidateFailureReason, reusableTexture);
 +			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordGpuCandidateTexture(guiGpuCandidate, candidateFailureReason);
 +		}
 +		if (guiGpuCandidate)
@@ -545,8 +546,8 @@ index b1b2eea..67b9a1d 100644
 +			intoTexture.TextureId = candidateTexture;
 +			intoTexture.Width = surface.Width;
 +			intoTexture.Height = surface.Height;
-+			if (oldTexture != 0) GL.DeleteTexture(oldTexture);
-+			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, true);
++			if (oldTexture != 0 && oldTexture != candidateTexture) GL.DeleteTexture(oldTexture);
++			if (optimumGuiMetricsEnabled) Vintagestory.API.Config.OptimumGuiMetrics.RecordUpload(optimumGuiUploadStart, surface.Width, surface.Height, oldTexture != candidateTexture);
 +			return;
 +		}
 +		if (optimumGuiMetricsAllocatesTexture)
