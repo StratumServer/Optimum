@@ -316,8 +316,7 @@ namespace Vintagestory.Client.NoObf
 										if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
 										skSurface.Flush();
 										context.Flush();
-										context.Submit(true);
-										GL.Finish();
+										context.Submit(false);
 										OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
 										if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
 										rendered = true;

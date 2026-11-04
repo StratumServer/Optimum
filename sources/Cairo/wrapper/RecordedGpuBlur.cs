@@ -9,22 +9,69 @@ namespace Cairo
 	internal sealed class RecordedGpuBlur : IDisposable
 	{
 		const int MaxCachedEffects = 16;
+		private static readonly object staticSync = new object();
+		private static readonly Dictionary<int, SKRuntimeEffect> staticBlurEffects = new Dictionary<int, SKRuntimeEffect>();
+		private static readonly Queue<int> staticBlurEffectOrder = new Queue<int>();
+		private static SKRuntimeEffect staticDemultiplyEffect;
+		private static SKImage staticDemultiplyTable;
+		private static SKRuntimeEffect staticImageOverlayEffect;
+		private static SKRuntimeEffect staticLcdTextEffect;
+
 		readonly GRContext context;
-		readonly Dictionary<int, SKRuntimeEffect> effects = new Dictionary<int, SKRuntimeEffect> ();
-		readonly Queue<int> effectOrder = new Queue<int> ();
 		readonly Dictionary<(long, int), SKImage> sourceImages = new Dictionary<(long, int), SKImage>();
 		readonly Queue<(long, int)> sourceOrder = new Queue<(long, int)>();
 		long sourceBytes;
 		int dependencyDepth;
 		SKSurface horizontal, vertical;
-		SKRuntimeEffect demultiplyEffect;
-		SKImage demultiplyTable;
-		SKRuntimeEffect imageOverlayEffect;
-		SKRuntimeEffect lcdTextEffect;
 		SKSurface lcdBlack, lcdWhite;
 		int lcdWidth, lcdHeight;
 		int width, height;
 		internal long PassCount { get; private set; }
+
+		private static SKImage GetOrCreateDemultiplyTable()
+		{
+			if (staticDemultiplyTable != null) return staticDemultiplyTable;
+			lock (staticSync)
+			{
+				return staticDemultiplyTable ??= CreateDemultiplyTable();
+			}
+		}
+
+		private static SKRuntimeEffect GetOrCreateDemultiplyEffect()
+		{
+			if (staticDemultiplyEffect != null) return staticDemultiplyEffect;
+			lock (staticSync)
+			{
+				if (staticDemultiplyEffect != null) return staticDemultiplyEffect;
+				var effect = SKRuntimeEffect.CreateShader(DemultiplyShaderSource, out string errors);
+				if (effect == null) throw new NotSupportedException("Recorded demultiply shader compilation failed: " + errors);
+				return staticDemultiplyEffect = effect;
+			}
+		}
+
+		private static SKRuntimeEffect GetOrCreateImageOverlayEffect()
+		{
+			if (staticImageOverlayEffect != null) return staticImageOverlayEffect;
+			lock (staticSync)
+			{
+				if (staticImageOverlayEffect != null) return staticImageOverlayEffect;
+				var effect = SKRuntimeEffect.CreateShader(ImageOverlayShaderSource, out string errors);
+				if (effect == null) throw new NotSupportedException("Recorded GUI image shader compilation failed: " + errors);
+				return staticImageOverlayEffect = effect;
+			}
+		}
+
+		private static SKRuntimeEffect GetOrCreateLcdTextEffect()
+		{
+			if (staticLcdTextEffect != null) return staticLcdTextEffect;
+			lock (staticSync)
+			{
+				if (staticLcdTextEffect != null) return staticLcdTextEffect;
+				var effect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
+				if (effect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
+				return staticLcdTextEffect = effect;
+			}
+		}
 
 		internal RecordedGpuBlur (GRContext context) { this.context = context ?? throw new ArgumentNullException (nameof (context)); }
 
@@ -145,13 +192,10 @@ float4 main(float2 p) {
 
 		internal void Demultiply(SKSurface target, int width, int height)
 		{
-			if (demultiplyEffect == null) {
-				demultiplyEffect = SKRuntimeEffect.CreateShader(DemultiplyShaderSource, out string errors);
-				if (demultiplyEffect == null) throw new NotSupportedException("Recorded demultiply shader compilation failed: " + errors);
-			}
+			SKRuntimeEffect effect = GetOrCreateDemultiplyEffect();
 			EnsureSurfaces(width, height);
-			demultiplyTable ??= CreateDemultiplyTable();
-			using (var original = target.Snapshot()) DrawDemultiply(demultiplyEffect, original, demultiplyTable, horizontal, width, height);
+			SKImage table = GetOrCreateDemultiplyTable();
+			using (var original = target.Snapshot()) DrawDemultiply(effect, original, table, horizontal, width, height);
 			using (var result = horizontal.Snapshot())
 			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
 		}
@@ -247,29 +291,23 @@ float4 main(float2 p) {
 
 		internal void DrawImage(RecordedGuiImage image, SKSurface target, int width, int height)
 		{
-			if (imageOverlayEffect == null) {
-				imageOverlayEffect = SKRuntimeEffect.CreateShader(ImageOverlayShaderSource, out string errors);
-				if (imageOverlayEffect == null) throw new NotSupportedException("Recorded GUI image shader compilation failed: " + errors);
-			}
+			SKRuntimeEffect effect = GetOrCreateImageOverlayEffect();
 			EnsureSurfaces(width, height);
-			using (var original = target.Snapshot()) DrawImageOverlay(imageOverlayEffect, image, original, horizontal.Canvas, width, height);
+			using (var original = target.Snapshot()) DrawImageOverlay(effect, image, original, horizontal.Canvas, width, height);
 			using (var result = horizontal.Snapshot())
 			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src }) target.Canvas.DrawImage(result, 0, 0, paint);
 		}
 
 		internal void DrawPicture(RecordedGuiPicture picture, SKSurface target, int width, int height)
 		{
-			if (imageOverlayEffect == null) {
-				imageOverlayEffect = SKRuntimeEffect.CreateShader(ImageOverlayShaderSource, out string errors);
-				if (imageOverlayEffect == null) throw new NotSupportedException("Recorded SVG shader compilation failed: " + errors);
-			}
+			SKRuntimeEffect effect = GetOrCreateImageOverlayEffect();
 			EnsureSurfaces(width, height);
 				using (var properties = new SKSurfaceProperties(SKPixelGeometry.RgbHorizontal))
 				using (var source = SKSurface.Create(context, true, new SKImageInfo(picture.Width, picture.Height, SKColorType.Rgba8888, SKAlphaType.Premul), properties)) {
 				if (source == null) throw new InvalidOperationException("Skia could not allocate a GPU SVG surface.");
 				source.Canvas.Clear(SKColors.Transparent); source.Canvas.DrawPicture(picture.Picture);
 				using (var pixels = source.Snapshot())
-				using (var original = target.Snapshot()) DrawOverlay(imageOverlayEffect, pixels, original, horizontal.Canvas,
+				using (var original = target.Snapshot()) DrawOverlay(effect, pixels, original, horizontal.Canvas,
 					picture.X, picture.Y, picture.Width, picture.Height, width, height, new SKSamplingOptions(SKFilterMode.Nearest), picture.Tint, picture.TextureColorOrder, true);
 			}
 			using (var result = horizontal.Snapshot())
@@ -291,12 +329,9 @@ float4 main(float2 p) {
 				using var destination = target.Snapshot(bounds);
 				if (destination == null) return;
 
-				if (lcdTextEffect == null) {
-					lcdTextEffect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
-					if (lcdTextEffect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
-				}
+				SKRuntimeEffect effect = GetOrCreateLcdTextEffect();
 				var coverageOriginInBounds = new PointD(targetLeft - left, targetTop - top);
-				RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, drawing.TextCoverage, drawing.TextCoverage, destination, target.Canvas,
+				RecordedGuiDrawing.DrawLcdComposite(effect, drawing.TextCoverage, drawing.TextCoverage, destination, target.Canvas,
 					drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, bounds.Width, bounds.Height, new PointD(left, top), drawing.Paint.BlendMode == SKBlendMode.Screen, true, drawing.Paint.BlendMode, coverageOriginInBounds, drawing.Paint.ColorF);
 				return;
 			}
@@ -308,11 +343,8 @@ float4 main(float2 p) {
 			using SKImage black = lcdBlack.Snapshot();
 			using SKImage white = lcdWhite.Snapshot();
 			using SKImage destinationGpu = target.Snapshot();
-			if (lcdTextEffect == null) {
-				lcdTextEffect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
-				if (lcdTextEffect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
-			}
-			RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, black, white, destinationGpu, target.Canvas,
+			SKRuntimeEffect lcdEffect = GetOrCreateLcdTextEffect();
+			RecordedGuiDrawing.DrawLcdComposite(lcdEffect, black, white, destinationGpu, target.Canvas,
 				drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, width, height, deviceOffset, drawing.Paint.BlendMode == SKBlendMode.Screen, false, drawing.Paint.BlendMode, drawing.TextCoverageOrigin, drawing.Paint.ColorF);
 		}
 
@@ -369,13 +401,20 @@ float4 main(float2 p) {
 
 		SKRuntimeEffect GetEffect (int radius)
 		{
-			if (effects.TryGetValue (radius, out SKRuntimeEffect effect)) return effect;
-			string errors;
-			effect = SKRuntimeEffect.CreateShader (ShaderSource (radius), out errors);
-			if (effect == null) throw new NotSupportedException ("Recorded blur shader compilation failed: " + errors);
-			if (effects.Count == MaxCachedEffects) { int old = effectOrder.Dequeue (); effects[old].Dispose (); effects.Remove (old); }
-			effects.Add (radius, effect); effectOrder.Enqueue (radius);
-			return effect;
+			lock (staticSync) {
+				if (staticBlurEffects.TryGetValue (radius, out SKRuntimeEffect effect)) return effect;
+				string errors;
+				effect = SKRuntimeEffect.CreateShader (ShaderSource (radius), out errors);
+				if (effect == null) throw new NotSupportedException ("Recorded blur shader compilation failed: " + errors);
+				if (staticBlurEffects.Count >= MaxCachedEffects) {
+					int old = staticBlurEffectOrder.Dequeue ();
+					staticBlurEffects[old].Dispose ();
+					staticBlurEffects.Remove (old);
+				}
+				staticBlurEffects.Add (radius, effect);
+				staticBlurEffectOrder.Enqueue (radius);
+				return effect;
+			}
 		}
 
 		internal static string ShaderSource (int radius)
@@ -439,15 +478,9 @@ half4 main(float2 p) {
 
 		public void Dispose ()
 		{
-			demultiplyEffect?.Dispose(); demultiplyEffect = null;
-			demultiplyTable?.Dispose(); demultiplyTable = null;
-			imageOverlayEffect?.Dispose(); imageOverlayEffect = null;
-			lcdTextEffect?.Dispose(); lcdTextEffect = null;
 			lcdBlack?.Dispose(); lcdBlack = null; lcdWhite?.Dispose(); lcdWhite = null;
 			horizontal?.Dispose (); horizontal = null;
 			vertical?.Dispose (); vertical = null;
-			foreach (SKRuntimeEffect effect in effects.Values) effect.Dispose ();
-			effects.Clear (); effectOrder.Clear ();
 			foreach (var image in sourceImages.Values) image.Dispose(); sourceImages.Clear(); sourceOrder.Clear(); sourceBytes = 0;
 		}
 	}
