@@ -356,9 +356,21 @@ half4 main(float2 p) {
 			if (geometryCoverage != null && (Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Clear)) { DrawGeometrySourceOrClear(target, deviceOffset); return false; }
 			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
 			if (TextCoverage != null && gpu == null) {
-				using var destination = target.Snapshot();
+				double targetLeft = TextCoverageOrigin.X + deviceOffset.X;
+				double targetTop = TextCoverageOrigin.Y + deviceOffset.Y;
+				int left = (int)Math.Clamp(Math.Floor(targetLeft), 0, width);
+				int top = (int)Math.Clamp(Math.Floor(targetTop), 0, height);
+				int right = (int)Math.Clamp(Math.Ceiling(targetLeft + TextCoverage.Width), 0, width);
+				int bottom = (int)Math.Clamp(Math.Ceiling(targetTop + TextCoverage.Height), 0, height);
+				if (right <= left || bottom <= top) return true;
+
+				var bounds = new SKRectI(left, top, right, bottom);
+				using var destination = target.Snapshot(bounds);
+				if (destination == null) return true;
+
+				var coverageOriginInBounds = new PointD(targetLeft - left, targetTop - top);
 				DrawLcdComposite(lcdEffect, TextCoverage, TextCoverage, destination, target.Canvas, Paint.BlendMode == SKBlendMode.Src,
-					Paint.ColorF.Alpha, Paint.Color, width, height, deviceOffset, Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode, TextCoverageOrigin, Paint.ColorF);
+					Paint.ColorF.Alpha, Paint.Color, bounds.Width, bounds.Height, new PointD(left, top), Paint.BlendMode == SKBlendMode.Screen, true, Paint.BlendMode, coverageOriginInBounds, Paint.ColorF);
 			} else if (gpu != null) gpu.DrawLcdText(this, target, width, height, deviceOffset);
 			else DrawLcdTextCpu(target, lcdEffect, width, height, deviceOffset);
 			return true;

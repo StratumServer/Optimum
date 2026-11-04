@@ -278,22 +278,42 @@ float4 main(float2 p) {
 
 		internal void DrawLcdText(RecordedGuiDrawing drawing, SKSurface target, int width, int height, PointD deviceOffset = default)
 		{
+			if (drawing.TextCoverage != null) {
+				double targetLeft = drawing.TextCoverageOrigin.X + deviceOffset.X;
+				double targetTop = drawing.TextCoverageOrigin.Y + deviceOffset.Y;
+				int left = (int)Math.Clamp(Math.Floor(targetLeft), 0, width);
+				int top = (int)Math.Clamp(Math.Floor(targetTop), 0, height);
+				int right = (int)Math.Clamp(Math.Ceiling(targetLeft + drawing.TextCoverage.Width), 0, width);
+				int bottom = (int)Math.Clamp(Math.Ceiling(targetTop + drawing.TextCoverage.Height), 0, height);
+				if (right <= left || bottom <= top) return;
+
+				var bounds = new SKRectI(left, top, right, bottom);
+				using var destination = target.Snapshot(bounds);
+				if (destination == null) return;
+
+				if (lcdTextEffect == null) {
+					lcdTextEffect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
+					if (lcdTextEffect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
+				}
+				var coverageOriginInBounds = new PointD(targetLeft - left, targetTop - top);
+				RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, drawing.TextCoverage, drawing.TextCoverage, destination, target.Canvas,
+					drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, bounds.Width, bounds.Height, new PointD(left, top), drawing.Paint.BlendMode == SKBlendMode.Screen, true, drawing.Paint.BlendMode, coverageOriginInBounds, drawing.Paint.ColorF);
+				return;
+			}
 			EnsureLcdSurfaces(target, width, height);
 			lcdBlack.Canvas.Clear(SKColors.Black);
 			lcdWhite.Canvas.Clear(SKColors.White);
-			if (drawing.TextCoverage == null) {
-				drawing.DrawTextMask(lcdBlack.Canvas, deviceOffset);
-				drawing.DrawTextMask(lcdWhite.Canvas, deviceOffset);
-			}
+			drawing.DrawTextMask(lcdBlack.Canvas, deviceOffset);
+			drawing.DrawTextMask(lcdWhite.Canvas, deviceOffset);
 			using SKImage black = lcdBlack.Snapshot();
 			using SKImage white = lcdWhite.Snapshot();
-			using SKImage destination = target.Snapshot();
+			using SKImage destinationGpu = target.Snapshot();
 			if (lcdTextEffect == null) {
 				lcdTextEffect = SKRuntimeEffect.CreateShader(RecordedGuiDrawing.LcdTextCompositorShaderSource, out string errors);
 				if (lcdTextEffect == null) throw new NotSupportedException("Recorded LCD text compositor shader compilation failed: " + errors);
 			}
-			RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, drawing.TextCoverage ?? black, drawing.TextCoverage ?? white, destination, target.Canvas,
-				drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, width, height, deviceOffset, drawing.Paint.BlendMode == SKBlendMode.Screen, drawing.TextCoverage != null, drawing.Paint.BlendMode, drawing.TextCoverageOrigin, drawing.Paint.ColorF);
+			RecordedGuiDrawing.DrawLcdComposite(lcdTextEffect, black, white, destinationGpu, target.Canvas,
+				drawing.Paint.BlendMode == SKBlendMode.Src, drawing.Paint.ColorF.Alpha, drawing.Paint.Color, width, height, deviceOffset, drawing.Paint.BlendMode == SKBlendMode.Screen, false, drawing.Paint.BlendMode, drawing.TextCoverageOrigin, drawing.Paint.ColorF);
 		}
 
 		void EnsureLcdSurfaces(SKSurface target, int nextWidth, int nextHeight)
