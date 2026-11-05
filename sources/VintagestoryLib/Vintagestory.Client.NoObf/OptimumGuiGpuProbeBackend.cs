@@ -1034,7 +1034,6 @@ namespace Vintagestory.Client.NoObf
 					private readonly bool rasterizerDiscardEnabled;
 					private readonly bool supportsRasterizerDiscard;
 					private readonly bool depthWriteEnabled;
-					private readonly int depthFunction;
 					private readonly int frontStencilFunction;
 					private readonly int frontStencilReference;
 					private readonly int frontStencilValueMask;
@@ -1049,7 +1048,6 @@ namespace Vintagestory.Client.NoObf
 					private readonly int backStencilFail;
 					private readonly int backStencilDepthFail;
 					private readonly int backStencilDepthPass;
-					private readonly int cullFaceMode;
 					private readonly int frontFaceDirection;
 					private readonly int blendSourceRgb;
 					private readonly int blendDestinationRgb;
@@ -1110,8 +1108,8 @@ namespace Vintagestory.Client.NoObf
 						framebufferSrgbEnabled = GL.IsEnabled((EnableCap)0x8DB9);
 						rasterizerDiscardEnabled = supportsRasterizerDiscard && GL.IsEnabled((EnableCap)0x8C89);
 						depthWriteEnabled = GL.GetBoolean((GetPName)0x0B72);
-						GL.GetInteger((GetPName)0x0B74, out depthFunction);
-						GL.GetInteger((GetPName)0x0B45, out cullFaceMode);
+						// Not captured: GL_DEPTH_FUNC and GL_CULL_FACE_MODE. Neither this backend nor Ganesh ever sets them
+						// (GrGLInterface has no glDepthFunc; GrGLGpu never calls glCullFace, it only toggles GL_CULL_FACE).
 						GL.GetInteger((GetPName)0x0B46, out frontFaceDirection);
 						GL.GetInteger((GetPName)0x0B92, out frontStencilFunction);
 						GL.GetInteger((GetPName)0x0B97, out frontStencilReference);
@@ -1216,14 +1214,12 @@ namespace Vintagestory.Client.NoObf
 						SetEnabled((EnableCap)0x8DB9, framebufferSrgbEnabled);
 						if (supportsRasterizerDiscard) SetEnabled((EnableCap)0x8C89, rasterizerDiscardEnabled);
 						GL.DepthMask(depthWriteEnabled);
-						GL.DepthFunc((DepthFunction)depthFunction);
 						GL.StencilFuncSeparate(StencilFace.Front, (StencilFunction)frontStencilFunction, frontStencilReference, frontStencilValueMask);
 						GL.StencilMaskSeparate(StencilFace.Front, frontStencilWriteMask);
 						GL.StencilOpSeparate(StencilFace.Front, (StencilOp)frontStencilFail, (StencilOp)frontStencilDepthFail, (StencilOp)frontStencilDepthPass);
 						GL.StencilFuncSeparate(StencilFace.Back, (StencilFunction)backStencilFunction, backStencilReference, backStencilValueMask);
 						GL.StencilMaskSeparate(StencilFace.Back, backStencilWriteMask);
 						GL.StencilOpSeparate(StencilFace.Back, (StencilOp)backStencilFail, (StencilOp)backStencilDepthFail, (StencilOp)backStencilDepthPass);
-						GL.CullFace((TriangleFace)cullFaceMode);
 						GL.FrontFace((FrontFaceDirection)frontFaceDirection);
 						GL.BlendFuncSeparate((BlendingFactorSrc)blendSourceRgb, (BlendingFactorDest)blendDestinationRgb,
 							(BlendingFactorSrc)blendSourceAlpha, (BlendingFactorDest)blendDestinationAlpha);
