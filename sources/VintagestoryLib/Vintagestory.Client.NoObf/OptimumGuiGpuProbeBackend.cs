@@ -415,11 +415,12 @@ namespace Vintagestory.Client.NoObf
 								using (var blur = new RecordedGpuBlur(context))
 								{
 									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-									// SKSurface.Flush() already flushes the whole GRContext and submits; every
-									// further submit only repeats Ganesh's glGetError drain (a driver round trip).
+									// One flush-and-submit covers this surface and any offscreen blur work. Each further
+									// submit only repeated Ganesh's glGetError drain (a driver round trip). That drain
+									// (GrGLGpu::onSubmitToGpu -> clearErrorsAndCheckForOOM, skipped only for WebGL and
+									// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
+									// from this upload are still caught after the state restore below.
 									context.Flush(submit: true, synchronous: false);
-									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
 									rendered = true;
 								}
 							}
@@ -478,8 +479,12 @@ namespace Vintagestory.Client.NoObf
 
 						try
 						{
-							if (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { rendered = false; failureReason = "gl-error-after-candidate"; }
-							while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+							if (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+							{
+								rendered = false;
+								failureReason = "gl-error-after-candidate";
+								while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+							}
 						}
 						catch (Exception exception) { rendered = false; failureReason = "gl-error-query-exception:" + exception.GetType().Name + ":" + exception.Message; }
 					}
