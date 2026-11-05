@@ -277,7 +277,9 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "OpenGL 3.0 or newer is required for state capture";
 						return false;
 					}
-					TryRunOnce(expectedContextThreadId);
+					// Once the one-shot probe ran, TryRunOnce only repeats the checks above (one more reset-status
+					// read, a driver round trip) and returns null; skip it.
+					if (Volatile.Read(ref attempted) == 0) TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
 						if (ForceSkiaCpuFallbackForTest)
@@ -369,7 +371,9 @@ namespace Vintagestory.Client.NoObf
 						bool abandonOnExit = false;
 						lock (contextLock)
 						{
-							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId || ContextWasReset(out _))
+							// No reset-status read here: the pre-render check above ran with only our own state setup since,
+							// and the post-render checks always run, so a reset in between still fails the upload closed.
+							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId)
 							{
 								AbandonAndDisposeContext(ref cachedContext);
 								if (cachedGlInterface != null)
