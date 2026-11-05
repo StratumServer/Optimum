@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..67b9a1d 100644
+index b1b2eea..8b31c27 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -45,10 +45,124 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -486,7 +486,7 @@ index b1b2eea..67b9a1d 100644
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
  			blit.Use();
  			blit.Scene2D = scene2D;
-@@ -2337,15 +2671,28 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2337,15 +2671,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -517,7 +517,7 @@ index b1b2eea..67b9a1d 100644
  
  	public override void GenTexture(RawTexture tex)
  	{
-@@ -2367,11 +2714,38 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2367,11 +2716,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -556,7 +556,7 @@ index b1b2eea..67b9a1d 100644
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
  			}
-@@ -2387,10 +2761,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2387,10 +2762,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			GL.BindTexture((TextureTarget)3553, intoTexture.TextureId);
  			GL.TexSubImage2D((TextureTarget)3553, 0, 0, 0, surface.Width, surface.Height, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
@@ -582,7 +582,7 @@ index b1b2eea..67b9a1d 100644
  	public override int LoadTexture(SKBitmap bmp, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
  	{
  		if (bmp == null)
-@@ -2665,15 +3054,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2665,15 +3055,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(float[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -603,7 +603,7 @@ index b1b2eea..67b9a1d 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +3073,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +3074,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -624,7 +624,7 @@ index b1b2eea..67b9a1d 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +3092,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +3093,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -645,7 +645,7 @@ index b1b2eea..67b9a1d 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +3111,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +3112,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -666,7 +666,7 @@ index b1b2eea..67b9a1d 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +3130,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +3131,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -687,7 +687,7 @@ index b1b2eea..67b9a1d 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +3153,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +3154,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
