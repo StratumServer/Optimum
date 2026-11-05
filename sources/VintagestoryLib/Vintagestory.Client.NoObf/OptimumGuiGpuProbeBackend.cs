@@ -411,9 +411,9 @@ namespace Vintagestory.Client.NoObf
 								using (var blur = new RecordedGpuBlur(context))
 								{
 									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-									skSurface.Flush();
-									context.Flush();
-									context.Submit(false);
+									// SKSurface.Flush() already flushes the whole GRContext and submits; every
+									// further submit only repeats Ganesh's glGetError drain (a driver round trip).
+									context.Flush(submit: true, synchronous: false);
 									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
 									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
 									rendered = true;
