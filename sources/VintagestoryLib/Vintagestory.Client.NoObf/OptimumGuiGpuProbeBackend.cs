@@ -277,7 +277,9 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "OpenGL 3.0 or newer is required for state capture";
 						return false;
 					}
-					TryRunOnce(expectedContextThreadId);
+					// Once the one-shot probe ran, TryRunOnce only repeats the checks above (one more reset-status
+					// read, a driver round trip) and returns null; skip it.
+					if (Volatile.Read(ref attempted) == 0) TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
 						if (ForceSkiaCpuFallbackForTest)
@@ -369,7 +371,9 @@ namespace Vintagestory.Client.NoObf
 						bool abandonOnExit = false;
 						lock (contextLock)
 						{
-							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId || ContextWasReset(out _))
+							// No reset-status read here: the pre-render check above ran with only our own state setup since,
+							// and the post-render checks always run, so a reset in between still fails the upload closed.
+							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId)
 							{
 								AbandonAndDisposeContext(ref cachedContext);
 								if (cachedGlInterface != null)
@@ -411,11 +415,12 @@ namespace Vintagestory.Client.NoObf
 								using (var blur = new RecordedGpuBlur(context))
 								{
 									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-									skSurface.Flush();
-									context.Flush();
-									context.Submit(false);
-									OpenTK.Graphics.OpenGL.ErrorCode error = GL.GetError();
-									if (error != OpenTK.Graphics.OpenGL.ErrorCode.NoError) throw new InvalidOperationException("OpenGL candidate render error: " + error + ".");
+									// One flush-and-submit covers this surface and any offscreen blur work. Each further
+									// submit only repeated Ganesh's glGetError drain (a driver round trip). That drain
+									// (GrGLGpu::onSubmitToGpu -> clearErrorsAndCheckForOOM, skipped only for WebGL and
+									// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
+									// from this upload are still caught after the state restore below.
+									context.Flush(submit: true, synchronous: false);
 									rendered = true;
 								}
 							}
@@ -474,8 +479,12 @@ namespace Vintagestory.Client.NoObf
 
 						try
 						{
-							if (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { rendered = false; failureReason = "gl-error-after-candidate"; }
-							while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+							if (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError)
+							{
+								rendered = false;
+								failureReason = "gl-error-after-candidate";
+								while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+							}
 						}
 						catch (Exception exception) { rendered = false; failureReason = "gl-error-query-exception:" + exception.GetType().Name + ":" + exception.Message; }
 					}
@@ -750,16 +759,36 @@ namespace Vintagestory.Client.NoObf
 		{
 			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
 			private delegate void BindVertexArrayDelegate(uint array);
+			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
+			private delegate void ActiveTextureDelegate(uint texture);
+			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
+			private delegate void BindTextureDelegate(uint target, uint texture);
+			[UnmanagedFunctionPointer(CallingConvention.Winapi)]
+			private delegate void BindSamplerDelegate(uint unit, uint sampler);
 
 			private uint isolatedVertexArray;
 			private readonly BindVertexArrayDelegate nativeBindVertexArray;
 			private readonly BindVertexArrayDelegate bindVertexArray;
+			// Texture-unit binds go through GlStateSnapshot so it captures exactly the units Ganesh touches.
+			private readonly ActiveTextureDelegate nativeActiveTexture, activeTexture;
+			private readonly BindTextureDelegate nativeBindTexture, bindTexture;
+			private readonly BindSamplerDelegate nativeBindSampler, bindSampler;
 
 			internal SkiaGlBindings(int isolatedVertexArray)
 			{
 				this.isolatedVertexArray = (uint)isolatedVertexArray;
 				nativeBindVertexArray = Marshal.GetDelegateForFunctionPointer<BindVertexArrayDelegate>(GetGlProcedureAddress("glBindVertexArray"));
 				bindVertexArray = BindVertexArray;
+				nativeActiveTexture = Marshal.GetDelegateForFunctionPointer<ActiveTextureDelegate>(GetGlProcedureAddress("glActiveTexture"));
+				activeTexture = ActiveTexture;
+				nativeBindTexture = Marshal.GetDelegateForFunctionPointer<BindTextureDelegate>(GetGlProcedureAddress("glBindTexture"));
+				bindTexture = BindTexture;
+				IntPtr samplerProcedure = GetGlProcedureAddress("glBindSampler");
+				if (samplerProcedure != IntPtr.Zero)
+				{
+					nativeBindSampler = Marshal.GetDelegateForFunctionPointer<BindSamplerDelegate>(samplerProcedure);
+					bindSampler = BindSampler;
+				}
 			}
 
 			internal void SetIsolatedVertexArray(int isolatedVertexArray)
@@ -767,9 +796,35 @@ namespace Vintagestory.Client.NoObf
 				this.isolatedVertexArray = (uint)isolatedVertexArray;
 			}
 
-			internal IntPtr GetProcedureAddress(string name) => name == "glBindVertexArray"
-				? Marshal.GetFunctionPointerForDelegate(bindVertexArray)
-				: GetGlProcedureAddress(name);
+			internal IntPtr GetProcedureAddress(string name)
+			{
+				switch (name)
+				{
+					case "glBindVertexArray": return Marshal.GetFunctionPointerForDelegate(bindVertexArray);
+					case "glActiveTexture": return Marshal.GetFunctionPointerForDelegate(activeTexture);
+					case "glBindTexture": return Marshal.GetFunctionPointerForDelegate(bindTexture);
+					case "glBindSampler": return bindSampler == null ? IntPtr.Zero : Marshal.GetFunctionPointerForDelegate(bindSampler);
+					default: return GetGlProcedureAddress(name);
+				}
+			}
+
+			private void ActiveTexture(uint texture)
+			{
+				nativeActiveTexture(texture);
+				GlStateSnapshot.NoteActiveTexture(texture);
+			}
+
+			private void BindTexture(uint target, uint texture)
+			{
+				GlStateSnapshot.BeforeTextureBind(target);
+				nativeBindTexture(target, texture);
+			}
+
+			private void BindSampler(uint unit, uint sampler)
+			{
+				GlStateSnapshot.BeforeSamplerBind(unit);
+				nativeBindSampler(unit, sampler);
+			}
 
 			private void BindVertexArray(uint array)
 			{
@@ -781,7 +836,13 @@ namespace Vintagestory.Client.NoObf
 
 			// Native function pointers do not root delegates. This scope outlives both
 			// GRContext and GRGlInterface, including their native resource disposal.
-			public void Dispose() { GC.KeepAlive(bindVertexArray); }
+			public void Dispose()
+			{
+				GC.KeepAlive(bindVertexArray);
+				GC.KeepAlive(activeTexture);
+				GC.KeepAlive(bindTexture);
+				GC.KeepAlive(bindSampler);
+			}
 		}
 
 		private static IntPtr GetGlProcedureAddress(string name)
@@ -964,13 +1025,22 @@ namespace Vintagestory.Client.NoObf
 				private sealed class GlStateSnapshot
 				{
 					private static int cachedTrackedTextureUnits = -1;
-					private static int[] cachedUnitIndices;
+					// Texture units captured eagerly. Seeded with unit 0 (this backend binds the candidate there) and the
+					// last fragment unit (Ganesh's scratch unit); every other unit is captured the first time Ganesh binds
+					// a texture or sampler on it (see BeforeTextureBind) and then joins this set for later uploads.
+					private static int[] eagerUnitIndices;
+					private static int eagerUnitCount;
+					// Snapshot whose window is open: Ganesh's texture/sampler binds report to it through SkiaGlBindings.
+					private static GlStateSnapshot armed;
+					private static int armedActiveUnit = -1;
 					private static bool cachedSamplerObjectsSupported;
 					private static bool cachedSupportsRasterizerDiscard;
 
 					internal static void InvalidateCapabilities()
 					{
 						cachedTrackedTextureUnits = -1;
+						eagerUnitIndices = null;
+						eagerUnitCount = 0;
 					}
 
 					private static void EnsureStaticCapabilities()
@@ -978,19 +1048,17 @@ namespace Vintagestory.Client.NoObf
 						if (cachedTrackedTextureUnits >= 0) return;
 						GL.GetInteger((GetPName)0x8B4D, out int textureUnitCount);
 						if (textureUnitCount < 1 || textureUnitCount > 1024) textureUnitCount = 16;
-						// Vintage Story GUI only uses Texture0, and the 3D renderer uses at most 8-16 units.
-						// Cap tracked units to 16 to avoid querying 80-192 units on modern drivers (AMD/NVIDIA).
+						// Units are no longer captured by count (80-192 on AMD/NVIDIA): only those this backend or Ganesh binds.
 						cachedTrackedTextureUnits = Math.Min(textureUnitCount, 16);
-						// Skia programs here sample at most 5 textures (units 0-4) and Ganesh binds uploads on the LAST
-						// fragment unit (GrGLGpu: lastUnitIdx = numTextureUnits() - 1). Track units 0-7 plus that last unit
-						// instead of 0-15: fewer glGet/Bind calls per upload and the scratch unit is now restored too.
+						// Ganesh binds uploads on the LAST fragment unit (GrGLGpu::bindTextureToScratchUnit:
+						// lastUnitIdx = numTextureUnits() - 1) and program samplers from unit 0 upwards.
 						GL.GetInteger((GetPName)0x8872, out int fragmentUnits);
 						if (fragmentUnits < 1 || fragmentUnits > 1024) fragmentUnits = textureUnitCount;
-						var indices = new List<int>();
-						for (int u = 0; u < Math.Min(8, textureUnitCount); u++) indices.Add(u);
 						int last = Math.Min(fragmentUnits, textureUnitCount) - 1;
-						if (last >= 0 && !indices.Contains(last)) indices.Add(last);
-						cachedUnitIndices = indices.ToArray();
+						eagerUnitIndices = new int[8];
+						eagerUnitIndices[0] = 0;
+						eagerUnitCount = 1;
+						if (last > 0) eagerUnitIndices[eagerUnitCount++] = last;
 						GL.GetInteger((GetPName)0x821B, out int glMajor);
 						GL.GetInteger((GetPName)0x821C, out int glMinor);
 						cachedSupportsRasterizerDiscard = glMajor >= 3;
@@ -1001,9 +1069,11 @@ namespace Vintagestory.Client.NoObf
 					private readonly int drawFramebuffer;
 					private readonly int renderbuffer;
 					private readonly int activeTexture;
-					private readonly int[] unitIndices;
-					private readonly int[] textureBindings;
-					private readonly int[] samplerBindings;
+					private int[] unitIndices;
+					private int[] textureBindings;
+					private int[] samplerBindings;
+					private int unitCount;
+					private bool lateCaptureFailed;
 					private readonly bool samplerObjectsSupported;
 					private readonly int currentProgram;
 					private readonly int vertexArray;
@@ -1030,7 +1100,6 @@ namespace Vintagestory.Client.NoObf
 					private readonly bool rasterizerDiscardEnabled;
 					private readonly bool supportsRasterizerDiscard;
 					private readonly bool depthWriteEnabled;
-					private readonly int depthFunction;
 					private readonly int frontStencilFunction;
 					private readonly int frontStencilReference;
 					private readonly int frontStencilValueMask;
@@ -1045,7 +1114,6 @@ namespace Vintagestory.Client.NoObf
 					private readonly int backStencilFail;
 					private readonly int backStencilDepthFail;
 					private readonly int backStencilDepthPass;
-					private readonly int cullFaceMode;
 					private readonly int frontFaceDirection;
 					private readonly int blendSourceRgb;
 					private readonly int blendDestinationRgb;
@@ -1066,17 +1134,17 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x8CA7, out renderbuffer);
 						GL.GetInteger((GetPName)0x84E0, out activeTexture);
 
-						unitIndices = cachedUnitIndices;
-						int trackedUnits = unitIndices.Length;
-						textureBindings = new int[trackedUnits];
-						samplerBindings = samplerObjectsSupported ? new int[trackedUnits] : Array.Empty<int>();
+						int eagerUnits = eagerUnitCount;
+						unitIndices = new int[eagerUnits + 4];
+						textureBindings = new int[eagerUnits + 4];
+						samplerBindings = samplerObjectsSupported ? new int[eagerUnits + 4] : Array.Empty<int>();
 						try
 						{
-							for (int i = 0; i < trackedUnits; i++)
+							for (int i = 0; i < eagerUnits; i++)
 							{
-								GL.ActiveTexture((TextureUnit)(0x84C0 + unitIndices[i]));
-								GL.GetInteger((GetPName)0x8069, out textureBindings[i]);
-								if (samplerObjectsSupported) GL.GetInteger((GetPName)0x8919, out samplerBindings[i]);
+								int unit = eagerUnitIndices[i];
+								GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
+								CaptureCurrentUnit(unit);
 							}
 						}
 					finally { GL.ActiveTexture((TextureUnit)activeTexture); }
@@ -1106,8 +1174,8 @@ namespace Vintagestory.Client.NoObf
 						framebufferSrgbEnabled = GL.IsEnabled((EnableCap)0x8DB9);
 						rasterizerDiscardEnabled = supportsRasterizerDiscard && GL.IsEnabled((EnableCap)0x8C89);
 						depthWriteEnabled = GL.GetBoolean((GetPName)0x0B72);
-						GL.GetInteger((GetPName)0x0B74, out depthFunction);
-						GL.GetInteger((GetPName)0x0B45, out cullFaceMode);
+						// Not captured: GL_DEPTH_FUNC and GL_CULL_FACE_MODE. Neither this backend nor Ganesh ever sets them
+						// (GrGLInterface has no glDepthFunc; GrGLGpu never calls glCullFace, it only toggles GL_CULL_FACE).
 						GL.GetInteger((GetPName)0x0B46, out frontFaceDirection);
 						GL.GetInteger((GetPName)0x0B92, out frontStencilFunction);
 						GL.GetInteger((GetPName)0x0B97, out frontStencilReference);
@@ -1129,6 +1197,81 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x80CA, out blendDestinationAlpha);
 						GL.GetInteger((GetPName)0x8009, out blendEquationRgb);
 						GL.GetInteger((GetPName)0x883D, out blendEquationAlpha);
+						if (armed == null)
+						{
+							armed = this;
+							armedActiveUnit = -1;
+						}
+					}
+
+					// Records the binding of `unit`, which must be the active texture unit.
+					private void CaptureCurrentUnit(int unit)
+					{
+						if (unitCount == unitIndices.Length)
+						{
+							Array.Resize(ref unitIndices, unitCount * 2);
+							Array.Resize(ref textureBindings, unitCount * 2);
+							if (samplerObjectsSupported) Array.Resize(ref samplerBindings, unitCount * 2);
+						}
+						unitIndices[unitCount] = unit;
+						GL.GetInteger((GetPName)0x8069, out textureBindings[unitCount]);
+						if (samplerObjectsSupported) GL.GetInteger((GetPName)0x8919, out samplerBindings[unitCount]);
+						unitCount++;
+					}
+
+					private bool HasUnit(int unit)
+					{
+						for (int i = 0; i < unitCount; i++) if (unitIndices[i] == unit) return true;
+						return false;
+					}
+
+					// Called by SkiaGlBindings after Ganesh's glActiveTexture.
+					internal static void NoteActiveTexture(uint texture)
+					{
+						if (armed != null) armedActiveUnit = (int)texture - 0x84C0;
+					}
+
+					// Called by SkiaGlBindings before Ganesh's glBindTexture: capture the unit's caller binding first.
+					internal static void BeforeTextureBind(uint target)
+					{
+						GlStateSnapshot snapshot = armed;
+						if (snapshot == null || target != 0x0DE1) return; // GL_TEXTURE_2D, the only target restored
+						try
+						{
+							if (armedActiveUnit < 0)
+							{
+								GL.GetInteger((GetPName)0x84E0, out int active);
+								armedActiveUnit = active - 0x84C0;
+							}
+							snapshot.CaptureLate(armedActiveUnit, true);
+						}
+						catch { snapshot.lateCaptureFailed = true; }
+					}
+
+					// Called by SkiaGlBindings before Ganesh's glBindSampler.
+					internal static void BeforeSamplerBind(uint unit)
+					{
+						GlStateSnapshot snapshot = armed;
+						if (snapshot == null) return;
+						try { snapshot.CaptureLate((int)unit, (int)unit == armedActiveUnit); }
+						catch { snapshot.lateCaptureFailed = true; }
+					}
+
+					private void CaptureLate(int unit, bool unitIsActive)
+					{
+						if (unit < 0 || HasUnit(unit)) return;
+						if (unitIsActive) CaptureCurrentUnit(unit);
+						else
+						{
+							GL.GetInteger((GetPName)0x84E0, out int active);
+							GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
+							try { CaptureCurrentUnit(unit); }
+							finally { GL.ActiveTexture((TextureUnit)active); }
+						}
+						if (eagerUnitIndices == null) return;
+						for (int i = 0; i < eagerUnitCount; i++) if (eagerUnitIndices[i] == unit) return;
+						if (eagerUnitCount == eagerUnitIndices.Length) Array.Resize(ref eagerUnitIndices, eagerUnitCount * 2);
+						eagerUnitIndices[eagerUnitCount++] = unit;
 					}
 
 					internal static GlStateSnapshot Capture() => new GlStateSnapshot();
@@ -1160,7 +1303,16 @@ namespace Vintagestory.Client.NoObf
 
 					internal void Restore(ref int isolatedVertexArray)
 					{
-						try { RestoreCapturedState(); }
+						if (armed == this)
+						{
+							armed = null;
+							armedActiveUnit = -1;
+						}
+						try
+						{
+							RestoreCapturedState();
+							if (lateCaptureFailed) throw new InvalidOperationException("A texture unit bound by Skia could not be captured for restore.");
+						}
 						finally
 						{
 							if (isolatedVertexArray != 0)
@@ -1192,7 +1344,7 @@ namespace Vintagestory.Client.NoObf
 						GL.PixelStore((PixelStoreParameter)0x0CF2, unpackRowLength);
 						GL.PixelStore((PixelStoreParameter)0x0CF3, unpackSkipRows);
 						GL.PixelStore((PixelStoreParameter)0x0CF4, unpackSkipPixels);
-						for (int i = 0; i < textureBindings.Length; i++)
+						for (int i = 0; i < unitCount; i++)
 						{
 							int unit = unitIndices[i];
 							GL.ActiveTexture((TextureUnit)(0x84C0 + unit));
@@ -1212,14 +1364,12 @@ namespace Vintagestory.Client.NoObf
 						SetEnabled((EnableCap)0x8DB9, framebufferSrgbEnabled);
 						if (supportsRasterizerDiscard) SetEnabled((EnableCap)0x8C89, rasterizerDiscardEnabled);
 						GL.DepthMask(depthWriteEnabled);
-						GL.DepthFunc((DepthFunction)depthFunction);
 						GL.StencilFuncSeparate(StencilFace.Front, (StencilFunction)frontStencilFunction, frontStencilReference, frontStencilValueMask);
 						GL.StencilMaskSeparate(StencilFace.Front, frontStencilWriteMask);
 						GL.StencilOpSeparate(StencilFace.Front, (StencilOp)frontStencilFail, (StencilOp)frontStencilDepthFail, (StencilOp)frontStencilDepthPass);
 						GL.StencilFuncSeparate(StencilFace.Back, (StencilFunction)backStencilFunction, backStencilReference, backStencilValueMask);
 						GL.StencilMaskSeparate(StencilFace.Back, backStencilWriteMask);
 						GL.StencilOpSeparate(StencilFace.Back, (StencilOp)backStencilFail, (StencilOp)backStencilDepthFail, (StencilOp)backStencilDepthPass);
-						GL.CullFace((TriangleFace)cullFaceMode);
 						GL.FrontFace((FrontFaceDirection)frontFaceDirection);
 						GL.BlendFuncSeparate((BlendingFactorSrc)blendSourceRgb, (BlendingFactorDest)blendDestinationRgb,
 							(BlendingFactorSrc)blendSourceAlpha, (BlendingFactorDest)blendDestinationAlpha);
