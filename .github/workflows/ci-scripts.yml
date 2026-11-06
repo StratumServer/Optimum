@@ -3,22 +3,10 @@ name: Shell scripts
 on:
   push:
     paths: &script_paths
-      - 'scripts/bootstrap.sh'
-      - 'scripts/bootstrap.ps1'
-      - 'scripts/extract-stage-root.ps1'
-      - 'scripts/git-repository.sh'
-      - 'scripts/git-repository.ps1'
-      - 'scripts/install-linux.sh'
-      - 'scripts/install-linux-legacy.sh'
-      - 'scripts/package-linux.sh'
-      - 'scripts/package-macos.sh'
-      - 'scripts/package-linux.ps1'
-      - 'scripts/prepare-runtime-donors.sh'
-      - 'scripts/prepare-runtime-donors.ps1'
-      - 'scripts/release-checksums.js'
-      - 'scripts/sync-runtimeconfig-frameworks.ps1'
-      - 'scripts/tests/sync-runtimeconfig-frameworks.ps1'
-      - 'scripts/tests/**'
+      - 'scripts/**'
+      - 'patches/**'
+      - 'sources/shaders/**'
+      - 'Makefile'
       - '.github/workflows/ci-scripts.yml'
   pull_request:
     paths: *script_paths
@@ -111,3 +99,46 @@ jobs:
 
       - name: Release checksums unit tests
         run: bash scripts/tests/release-checksums.sh
+
+  patch-syntax:
+    name: Patch syntax and headers validate cleanly
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate patch syntax
+        run: bash scripts/validate-patch-syntax.sh patches
+
+  shader-assets:
+    name: Shader asset overlays are intact
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Validate shader assets
+        run: bash scripts/validate-shader-assets.sh sources/shaders
+
+  installer-prerequisites:
+    name: Linux installer prerequisite resolution and non-FHS routing
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run Linux NixOS and non-FHS prerequisite tests
+        run: bash scripts/tests/install-linux-nixos.sh
+
+      - name: Run Linux installer prerequisite detection and installation tests
+        run: bash scripts/tests/install-linux-prerequisites.sh
+
+  worldgen-benchmark-fixtures:
+    name: Worldgen benchmark fixtures and statistics integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run worldgen benchmark integrity tests
+        run: bash scripts/tests/worldgen-benchmark-integrity-test.sh

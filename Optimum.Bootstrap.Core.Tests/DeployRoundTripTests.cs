@@ -217,7 +217,7 @@ public sealed class DeployRoundTripTests : IDisposable
     [Fact]
     public void MenuShortcutIsRecordedInTheManifestAndRemovedByUninstall()
     {
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsLinux())
             return; // this path exercises the Linux .desktop writer
 
         var probe = SystemProbe.Default;
@@ -337,7 +337,7 @@ public sealed class DeployRoundTripTests : IDisposable
     [Fact]
     public void ReinstallAndUninstallPreserveAndCleanUpLinuxUriHandlerAssociations()
     {
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsLinux())
             return;
 
         var probe = SystemProbe.Default;

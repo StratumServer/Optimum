@@ -16,6 +16,8 @@ on:
       - 'flake.nix'
       - 'flake.lock'
       - 'scripts/check-prereqs.sh'
+      - 'scripts/install-*.sh'
+      - 'scripts/install-*.ps1'
       - 'scripts/tests/nixos-dev-shell-smoke.sh'
       - 'NuGet.config'
       - '.github/workflows/ci-installer.yml'
@@ -90,6 +92,31 @@ jobs:
           key: nuget-installer-windows-${{ hashFiles('Optimum.Bootstrap.Core/**/*.csproj', 'Optimum.Cli/**/*.csproj', 'Optimum.Installer/**/*.csproj', 'Optimum.*.Tests/**/*.csproj') }}
           restore-keys: |
             nuget-installer-windows-
+
+      - name: Test
+        run: dotnet test Optimum.Installer.slnf -c Release --nologo
+
+  build-test-macos:
+    name: Build and test on macOS
+    runs-on: macos-15
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-installer-macos-${{ hashFiles('Optimum.Bootstrap.Core/**/*.csproj', 'Optimum.Cli/**/*.csproj', 'Optimum.Installer/**/*.csproj', 'Optimum.*.Tests/**/*.csproj') }}
+          restore-keys: |
+            nuget-installer-macos-
 
       - name: Test
         run: dotnet test Optimum.Installer.slnf -c Release --nologo
