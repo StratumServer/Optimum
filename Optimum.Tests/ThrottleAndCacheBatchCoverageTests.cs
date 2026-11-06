@@ -8,14 +8,14 @@ public class ThrottleAndCacheBatchCoverageTests
 {
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch")]
-    public void OnBeforeRenderReusesTheCachedLightScanWhileStationary(string relativePath)
+    public void OnBeforeRenderPerformsAllocFreeSpatialChunkWalk(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
-        Assert.Contains("ClientSettings.OptimumDynamicLightCache", source);
-        Assert.Contains("OptimumDiagnostics.DynamicLightCache.Hit()", source);
-        Assert.Contains("OptimumDiagnostics.DynamicLightCache.Skip()", source);
-        Assert.Contains("LightScanRefreshFrames = 15", source);
+        Assert.Contains("blockAccessor.GetChunk(cx, cy, cz)", source);
+        Assert.Contains("float lightRadius = 120f;", source);
+        Assert.Contains("Array.Clear(_lightScratch, 0, _lightScratchCount);", source);
+        Assert.DoesNotContain("LightScanRefreshFrames", source);
     }
 
     [Fact]

@@ -148,11 +148,10 @@ public class IssueTrackerBugfixBatchCoverageTests
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
         Assert.Contains("if (maxDynLights <= 0)", source);
-        Assert.Contains("array = Array.Empty<Entity>();", source);
 
         int guardIndex = source.IndexOf("if (maxDynLights <= 0)", StringComparison.Ordinal);
-        int scratchBranchIndex = source.IndexOf("else if (array.Length > maxDynLights)", StringComparison.Ordinal);
-        Assert.True(guardIndex >= 0 && scratchBranchIndex > guardIndex, "the zero guard must precede the over-capacity branch");
+        int scratchBranchIndex = source.IndexOf("_lightScratch = new Entity[maxDynLights];", StringComparison.Ordinal);
+        Assert.True(guardIndex >= 0 && scratchBranchIndex > guardIndex, "the zero guard must precede scratch allocation");
     }
 
     private static string FindRepositoryFile(string relativePath)

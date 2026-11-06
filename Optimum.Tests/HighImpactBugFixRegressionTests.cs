@@ -473,6 +473,51 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, GetClipSnapshot()", source);
     }
 
+    [Fact]
+    public void SystemRenderPlayerEffects_UsesAllocFreeSpatialChunkWalkAndRestoresVanilla120mRadius()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch");
+        Assert.Contains("blockAccessor.GetChunk(cx, cy, cz)", patch);
+        Assert.Contains("float lightRadius = 120f;", patch);
+        Assert.Contains("Array.Clear(_lightScratch, 0, _lightScratchCount);", patch);
+        Assert.DoesNotContain("LightScanRefreshFrames", patch);
+        Assert.DoesNotContain("_lightScanFramesSinceRefresh", patch);
+    }
+
+    [Fact]
+    public void RecordedCairoGradient_UsesNativeSkiaGradientShadersWithoutCpuBitmapOrRuntimeEffect()
+    {
+        string source = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/Cairo/wrapper/RecordedCairoGradient.cs"));
+        Assert.Contains("SKShader.CreateLinearGradient(", source);
+        Assert.Contains("SKShader.CreateTwoPointConicalGradient(", source);
+        Assert.Contains("SKShader.CreateRadialGradient(", source);
+        Assert.DoesNotContain("new SKBitmap(256", source);
+        Assert.DoesNotContain("SKRuntimeEffect.CreateShader", source);
+        Assert.DoesNotContain("bitmap.SetPixel", source);
+    }
+
+    [Fact]
+    public void RecordedCairoIntegerBlend_UsesHardwareBlendModes()
+    {
+        string source = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/Cairo/wrapper/RecordedCairoIntegerBlend.cs"));
+        Assert.Contains("For(Operator op) => null;", source);
+        Assert.DoesNotContain("SKRuntimeEffect.CreateBlender", source);
+    }
+
+    [Fact]
+    public void RecordedGuiDrawing_EliminatesCpuScanlineRasterizerAndGeometryCoverage()
+    {
+        string source = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/Cairo/wrapper/RecordedGuiDrawing.cs"));
+        Assert.DoesNotContain("RecordedGeometryCoverage", source);
+        Assert.DoesNotContain("RecordedCoarseGeometry", source);
+        Assert.DoesNotContain("geometryCoverage", source);
+        Assert.DoesNotContain("geometrySourceEffect", source);
+        Assert.DoesNotContain("DrawGeometrySourceOrClear", source);
+    }
+
     private sealed class DelegatingDropsBehavior : BlockBehavior
     {
         private readonly System.Func<ItemStack[]> provider;

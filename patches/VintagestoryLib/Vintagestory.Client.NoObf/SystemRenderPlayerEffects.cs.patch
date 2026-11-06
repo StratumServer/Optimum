@@ -1,11 +1,12 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..938b3b3 100644
+index 2eca300..24e0660 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-@@ -1,8 +1,10 @@
+@@ -1,8 +1,11 @@
 +using System;
  using System.Linq;
  using Vintagestory.API.Client;
++using Vintagestory.API.Common;
  using Vintagestory.API.Common.Entities;
 +using Vintagestory.API.Config;
  using Vintagestory.API.MathTools;
@@ -13,41 +14,19 @@ index 2eca300..938b3b3 100644
  namespace Vintagestory.Client.NoObf;
  
  public class SystemRenderPlayerEffects : ClientSystem
-@@ -31,22 +33,136 @@ public class SystemRenderPlayerEffects : ClientSystem
+@@ -31,24 +34,107 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
  	}
  
-+	// Optimum: scale light search radius by view distance. Lower VD means fewer
-+	// distant lights processed. At VD 128, radius drops from 120 to 35 blocks.
-+	private static float GetOptimumLightRadius(int viewDistance) => viewDistance switch
-+	{
-+		<= 128 => 35f,
-+		<= 256 => 45f,
-+		<= 384 => 52f,
-+		_ => 60f
-+	};
++	// Optimum: restore full 120-block vanilla light search radius without pop-in.
++	private static float GetOptimumLightRadius(int viewDistance) => 120f;
 +
 +	// Optimum: static predicate avoids lambda allocation and <>c cache field.
-+	// Still used for the GetEntitiesAround fallback path when the K-nearest
-+	// scratch runs into edge cases.
-+	private static bool HasLight(Entity e) => e.LightHsv != null && e.LightHsv[2] > 0;
++	private static bool HasLight(Entity e) => e != null && e.LightHsv != null && e.LightHsv[2] > 0;
 +
-+	// Optimum: dynamic-light entity scan cache. Refreshes every 15 frames
-+	// stationary, or when the player moves >= 2 blocks, with a hard floor of
-+	// 5 frames between movement-triggered scans. Staleness bound: creative
-+	// flight at 30 blocks/s covers 2.5 blocks in 5 frames at 60 FPS; a light
-+	// 2.5 blocks stale at the rim of a 35-block radius is below perception.
-+	private Entity[] _cachedLightEntities;
-+	private Vec3d _lastLightScanPos;
-+	private int _lightScanFramesSinceRefresh;
-+	private const int LightScanRefreshFrames = 15;
-+	private const int LightScanMinFrames = 5;
-+	private const double LightScanMoveThresholdSq = 4.0;
-+
-+	// Optimum: K-nearest scratch arrays for alloc-free over-capacity handling.
-+	// maxDynLights is single digits; an O(K) replace beats any sort allocation.
++	// Optimum: K-nearest scratch arrays for alloc-free spatial walk handling.
 +	private Entity[] _lightScratch;
 +	private double[] _lightScratchDistSq;
 +	private int _lightScratchCount;
@@ -55,102 +34,95 @@ index 2eca300..938b3b3 100644
  	private void onBeforeRender(float dt)
  	{
  		game.shUniforms.PointLightsCount = 0;
++		if (maxDynLights <= 0)
++		{
++			return;
++		}
++		if (game.EntityPlayer?.Pos == null) return;
++
  		Vec3d plrPos = game.EntityPlayer.Pos.XYZ;
 -		Entity[] array = game.GetEntitiesAround(plrPos, 120f, 120f, (Entity e) => e.LightHsv != null && e.LightHsv[2] > 0);
 -		if (array.Length > maxDynLights)
-+		// Optimum: dynamic light radius gated by OptimumDynamicLightScale setting.
-+		bool scaled = ClientSettings.OptimumDynamicLightScale;
-+		float lightRadius = scaled ? GetOptimumLightRadius(ClientSettings.ViewDistance) : 120f;
-+		if (scaled) OptimumDiagnostics.DynamicLightRadius.Hit(); else OptimumDiagnostics.DynamicLightRadius.Skip();
++		float lightRadius = 120f;
++		double lightRadiusSq = lightRadius * lightRadius;
 +
-+		bool cacheEnabled = ClientSettings.OptimumDynamicLightCache;
-+		_lightScanFramesSinceRefresh++;
-+		// B2: movement cannot force a scan more often than every 5 frames.
-+		// The 15-frame cap bounds stationary staleness. Together they keep
-+		// the cache valid during sprint (threshold fires ~every 20 frames)
-+		// and bound creative flight to 12 scans/s.
-+		bool needsRefresh = !cacheEnabled || _cachedLightEntities == null
-+			|| _lightScanFramesSinceRefresh >= LightScanRefreshFrames
-+			|| (_lightScanFramesSinceRefresh >= LightScanMinFrames
-+				&& plrPos.SquareDistanceTo(_lastLightScanPos ?? plrPos) >= LightScanMoveThresholdSq);
-+
-+		Entity[] array;
-+		if (needsRefresh)
++		if (_lightScratch == null || _lightScratch.Length < maxDynLights)
  		{
 -			array = array.OrderBy((Entity e) => e.Pos.SquareDistanceTo(plrPos)).ToArray();
-+			OptimumDiagnostics.DynamicLightCache.Hit();
-+			// B3: alloc-free K-nearest. GetEntitiesAround still allocates
-+			// internally (GameMain owns that code), but we avoid the sort
-+			// allocation and read LightHsv once per entity in the add loop.
-+			array = game.GetEntitiesAround(plrPos, lightRadius, lightRadius, HasLight);
-+			if (maxDynLights <= 0)
-+			{
-+				// Optimum: maxDynLights 0 (the low-end graphics presets) renders no
-+				// dynamic lights, matching vanilla. The K-nearest path sizes its
-+				// scratch arrays to maxDynLights, so running it at 0 reads
-+				// _lightScratchDistSq[0] from a zero-length array (issue #60).
-+				array = Array.Empty<Entity>();
-+			}
-+			else if (array.Length > maxDynLights)
-+			{
-+				// K-nearest selection into scratch arrays, no LINQ, no delegate.
-+				if (_lightScratch == null || _lightScratch.Length < maxDynLights)
-+				{
-+					_lightScratch = new Entity[maxDynLights];
-+					_lightScratchDistSq = new double[maxDynLights];
-+				}
-+				_lightScratchCount = 0;
-+				for (int i = 0; i < array.Length; i++)
-+				{
-+					Entity ent = array[i];
-+					if (ent?.Pos == null) continue;
-+					double distSq = ent.Pos.SquareDistanceTo(plrPos);
-+					if (_lightScratchCount < maxDynLights)
-+					{
-+						_lightScratch[_lightScratchCount] = ent;
-+						_lightScratchDistSq[_lightScratchCount] = distSq;
-+						_lightScratchCount++;
-+					}
-+					else
-+					{
-+						int farthest = 0;
-+						double farthestDist = _lightScratchDistSq[0];
-+						for (int k = 1; k < _lightScratchCount; k++)
-+						{
-+							if (_lightScratchDistSq[k] > farthestDist) { farthest = k; farthestDist = _lightScratchDistSq[k]; }
-+						}
-+						if (distSq < farthestDist)
-+						{
-+							_lightScratch[farthest] = ent;
-+							_lightScratchDistSq[farthest] = distSq;
-+						}
-+					}
-+				}
-+				array = _lightScratch;
-+			}
-+			if (cacheEnabled)
-+			{
-+				_cachedLightEntities = array;
-+				_lastLightScanPos = (_lastLightScanPos ?? new Vec3d()).Set(plrPos);
-+				_lightScanFramesSinceRefresh = 0;
-+			}
++			_lightScratch = new Entity[maxDynLights];
++			_lightScratchDistSq = new double[maxDynLights];
  		}
 -		foreach (Entity entity in array)
-+		else
- 		{
-+			OptimumDiagnostics.DynamicLightCache.Skip();
-+			array = _cachedLightEntities;
-+		}
-+		// Consumer loop: read live .Pos and .LightHsv once per entity.
-+		int limit = (array == _lightScratch) ? _lightScratchCount : array.Length;
-+		for (int i = 0; i < limit; i++)
++		_lightScratchCount = 0;
++
++		var blockAccessor = game.World?.BlockAccessor;
++		if (blockAccessor != null)
 +		{
-+			Entity entity = array[i];
++			int minCx = (int)((plrPos.X - lightRadius) / 32.0);
++			int maxCx = (int)((plrPos.X + lightRadius) / 32.0);
++			int minCy = Math.Max(0, (int)((plrPos.Y - lightRadius) / 32.0));
++			int maxCy = (int)((plrPos.Y + lightRadius) / 32.0);
++			int minCz = (int)((plrPos.Z - lightRadius) / 32.0);
++			int maxCz = (int)((plrPos.Z + lightRadius) / 32.0);
++
++			for (int cx = minCx; cx <= maxCx; cx++)
++			{
++				for (int cy = minCy; cy <= maxCy; cy++)
++				{
++					for (int cz = minCz; cz <= maxCz; cz++)
++					{
++						IWorldChunk chunk = blockAccessor.GetChunk(cx, cy, cz);
++						Entity[] chunkEntities = chunk?.Entities;
++						if (chunkEntities == null) continue;
++						int count = chunk.EntitiesCount;
++						for (int i = 0; i < count; i++)
++						{
++							Entity ent = chunkEntities[i];
++							if (ent == null || ent.State == EnumEntityState.Despawned || ent.Pos == null) continue;
++							byte[] hsv = ent.LightHsv;
++							if (hsv == null || hsv[2] <= 0) continue;
++
++							double distSq = ent.Pos.SquareDistanceTo(plrPos);
++							if (distSq > lightRadiusSq) continue;
++
++							if (_lightScratchCount < maxDynLights)
++							{
++								_lightScratch[_lightScratchCount] = ent;
++								_lightScratchDistSq[_lightScratchCount] = distSq;
++								_lightScratchCount++;
++							}
++							else
++							{
++								int farthest = 0;
++								double farthestDist = _lightScratchDistSq[0];
++								for (int k = 1; k < _lightScratchCount; k++)
++								{
++									if (_lightScratchDistSq[k] > farthestDist) { farthest = k; farthestDist = _lightScratchDistSq[k]; }
++								}
++								if (distSq < farthestDist)
++								{
++									_lightScratch[farthest] = ent;
++									_lightScratchDistSq[farthest] = distSq;
++								}
++							}
++						}
++					}
++				}
++			}
++		}
++
++		for (int i = 0; i < _lightScratchCount; i++)
+ 		{
++			Entity entity = _lightScratch[i];
 +			if (entity == null) continue;
  			byte[] lightHsv = entity.LightHsv;
 +			if (lightHsv == null || entity.Pos == null) continue;
  			AddPointLight(lightHsv, entity.Pos);
  		}
++		Array.Clear(_lightScratch, 0, _lightScratchCount);
++		_lightScratchCount = 0;
  		for (int num2 = 0; num2 < game.pointlights.Count; num2++)
  		{
  			IPointLight pointLight = game.pointlights[num2];
+ 			AddPointLight(pointLight.Color, pointLight.Pos);
+ 		}
