@@ -891,6 +891,10 @@ exec ./run.sh \${LAUNCH_ARGS[@]+\"\${LAUNCH_ARGS[@]}\"}"
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
+if [[ -z "${DOTNET_ROOT:-}" && -x "$HOME/.dotnet/dotnet" ]]; then
+    export DOTNET_ROOT="$HOME/.dotnet"
+fi
+
 NORMALIZED_MOD_ARG=""
 
 validate_mod_uri() {

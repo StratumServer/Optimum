@@ -29,6 +29,78 @@ public static class DotnetSdkProbe
         return null;
     }
 
+    /// <summary>
+    /// Resolves the true .NET installation directory (DOTNET_ROOT) for the found SDK.
+    /// If the executable is a symlink or installed in a bin directory (such as /usr/bin/dotnet),
+    /// resolves to the actual SDK root containing host/ and sdk/ (e.g. /usr/lib/dotnet),
+    /// or parses the directory from 'dotnet --list-sdks'.
+    /// </summary>
+    public static string? FindDotnetRoot(ISystemProbe probe)
+    {
+        foreach (string candidate in Candidates(probe))
+        {
+            if (!probe.IsExecutable(candidate))
+                continue;
+            ProcessOutcome outcome = probe.Run(candidate, ["--list-sdks"], ProbeTimeout);
+            if (outcome.Started && HasNet10Line(outcome.StandardOutput))
+                return ResolveDotnetRoot(probe, candidate, outcome.StandardOutput);
+        }
+
+        return null;
+    }
+
+    internal static string? ResolveDotnetRoot(ISystemProbe probe, string executablePath, string? listSdksOutput = null)
+    {
+        bool isUnixPath = executablePath.Contains('/') && !executablePath.Contains('\\');
+        string? candidateDir = Path.GetDirectoryName(executablePath);
+        if (isUnixPath && candidateDir is not null)
+            candidateDir = candidateDir.Replace('\\', '/');
+
+        if (candidateDir is not null
+            && (probe.DirectoryExists(Path.Combine(candidateDir, "sdk"))
+                || probe.DirectoryExists(Path.Combine(candidateDir, "shared"))
+                || probe.DirectoryExists(Path.Combine(candidateDir, "host"))))
+        {
+            return candidateDir;
+        }
+
+        if (!string.IsNullOrWhiteSpace(listSdksOutput))
+        {
+            foreach (string rawLine in listSdksOutput.Split('\n'))
+            {
+                string line = rawLine.Trim();
+                if (!line.StartsWith("10.", StringComparison.Ordinal))
+                    continue;
+
+                int openBracket = line.IndexOf('[');
+                int closeBracket = line.IndexOf(']', openBracket + 1);
+                if (openBracket >= 0 && closeBracket > openBracket)
+                {
+                    string sdkPath = line.Substring(openBracket + 1, closeBracket - openBracket - 1).Trim();
+                    string? parentDir = Path.GetDirectoryName(sdkPath);
+                    if (isUnixPath && parentDir is not null)
+                        parentDir = parentDir.Replace('\\', '/');
+
+                    if (!string.IsNullOrEmpty(parentDir)
+                        && (probe.DirectoryExists(parentDir)
+                            || probe.DirectoryExists(Path.Combine(parentDir, "sdk"))
+                            || probe.DirectoryExists(Path.Combine(parentDir, "shared"))))
+                    {
+                        return parentDir;
+                    }
+                }
+            }
+        }
+
+        if (candidateDir is not null && (candidateDir.EndsWith("/bin", StringComparison.Ordinal)
+            || candidateDir.EndsWith("\\bin", StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        return candidateDir;
+    }
+
     private static bool HasNet10Line(string listSdksOutput)
     {
         // Matches the shell's `grep -q '^10\.'`: anchored at column 0.

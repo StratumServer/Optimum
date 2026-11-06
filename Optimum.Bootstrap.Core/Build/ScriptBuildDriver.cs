@@ -346,16 +346,22 @@ public sealed class ScriptBuildDriver(
                 char sep = probe.Os == OsKind.Windows ? ';' : ':';
                 List<string> prependParts = [];
 
+                string? dotnetRoot = DotnetSdkProbe.FindDotnetRoot(probe);
+                if (!string.IsNullOrEmpty(dotnetRoot))
+                {
+                    env.Set("DOTNET_ROOT", dotnetRoot);
+                    prependParts.Add(dotnetRoot);
+                }
+
                 string? dotnet = DotnetSdkProbe.Find(probe);
                 if (dotnet is not null)
                 {
                     string? dotnetDir = Path.GetDirectoryName(dotnet);
-                    if (!string.IsNullOrEmpty(dotnetDir))
+                    if (!string.IsNullOrEmpty(dotnetDir) && !prependParts.Contains(dotnetDir))
                     {
-                        env.Set("DOTNET_ROOT", dotnetDir);
                         prependParts.Add(dotnetDir);
-                        prependParts.Add(Path.Combine(probe.HomeDirectory, ".dotnet", "tools"));
                     }
+                    prependParts.Add(Path.Combine(probe.HomeDirectory, ".dotnet", "tools"));
                 }
 
                 if (probe.Os == OsKind.Windows)
