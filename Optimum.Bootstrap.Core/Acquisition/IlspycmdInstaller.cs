@@ -33,10 +33,12 @@ public sealed class IlspycmdInstaller(ISystemProbe probe) : IIlspycmdAcquisition
 
         // `dotnet tool update -g` writes into DOTNET_CLI_HOME/.dotnet/tools; keep
         // it under the user profile and off any machine-wide location.
-        var environment = new Dictionary<string, string?>
+        string? dotnetRoot = DotnetSdkProbe.FindDotnetRoot(probe);
+        var environment = new Dictionary<string, string?>();
+        if (!string.IsNullOrEmpty(dotnetRoot))
         {
-            ["DOTNET_ROOT"] = Path.GetDirectoryName(dotnet),
-        };
+            environment["DOTNET_ROOT"] = dotnetRoot;
+        }
 
         AcquisitionProcess.Outcome outcome = await AcquisitionProcess.RunAsync(
             dotnet, IlspycmdAcquisition.ToolArguments(compat.Pin), repoRoot,

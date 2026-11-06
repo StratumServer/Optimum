@@ -89,7 +89,11 @@ optimum uninstall --install-dir ~/.local/share/optimum
 
 `build` decompiles your copy of Vintage Story locally and requires `--acknowledge-decompile`. `--acquire-source` performs a shallow HTTPS clone at the matching release tag and caches it under the platform's user cache directory. Pass `--source-cache <absolute-path>` to override the cache root.
 
-The sections below are the original per-platform scripts. They still work.
+The sections below are the original per-platform scripts. They still work:
+
+- [Linux](#linux)
+- [Windows](#windows)
+- [macOS](#macos)
 
 ### Linux
 

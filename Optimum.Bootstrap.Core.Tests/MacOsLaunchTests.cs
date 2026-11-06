@@ -25,4 +25,18 @@ public sealed class MacOsLaunchTests
         Assert.Contains("exec ./Optimum \"$@\"", launcher);
         Assert.DoesNotContain("run.sh", launcher);
     }
+
+    [Fact]
+    public void MacOsLauncherExportsDotnetRootWhenInstalledUnderHome()
+    {
+        string launcher = PackageDeployer.BuildMacOsLauncherScript(null);
+        Assert.Contains("export DOTNET_ROOT=\"$HOME/.dotnet\"", launcher);
+    }
+
+    [Fact]
+    public void LinuxLauncherExportsDotnetRootWhenInstalledUnderHome()
+    {
+        string launcher = PackageDeployer.BuildLinuxLauncherScript(null);
+        Assert.Contains("export DOTNET_ROOT=\"$HOME/.dotnet\"", launcher);
+    }
 }

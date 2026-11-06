@@ -12,13 +12,27 @@ Optimum accepts pull requests for performance optimizations, bugfixes, and build
 
 ## Setup
 
+### Linux / macOS
+
 ```bash
 make build   # bootstrap (decompile vanilla) + compile
 make test    # verify all 178 tests pass
 make run     # launch and test in-game
 ```
 
-See the [Building from Source](https://github.com/StratumServer/Optimum/wiki/Building-from-Source) wiki page for prerequisites and details.
+### Windows (PowerShell)
+
+```powershell
+.\scripts\bootstrap.ps1                        # download, decompile, clone forks, patch
+dotnet build VintageStory.slnx -c Release      # compile optimized DLLs
+dotnet test                                    # verify tests pass (or make test if Git Bash is available)
+.\scripts\package.ps1                          # build Optimum-v*-win-x64/ folder
+.\scripts\package.ps1 -Zip                     # folder + portable zip
+```
+
+Requires .NET 10 SDK, Git for Windows, and PowerShell 5.1+.
+
+See the [Building from Source](https://github.com/StratumServer/Optimum/wiki/Building-from-Source) wiki page and [README.md](README.md#windows) for prerequisites and details.
 
 ### Installer
 

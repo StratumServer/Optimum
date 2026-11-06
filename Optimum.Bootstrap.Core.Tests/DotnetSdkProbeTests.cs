@@ -57,4 +57,29 @@ public class DotnetSdkProbeTests
 
         Assert.Equal("/usr/bin/dotnet", DotnetSdkProbe.Find(probe));
     }
+
+    [Fact]
+    public void ResolvesTrueDotnetRootWhenDotnetIsInBinDirectory()
+    {
+        var probe = new FakeSystemProbe();
+        probe.Path.Add("/usr/bin");
+        probe.AddFile("/usr/bin/dotnet");
+        probe.AddDirectory("/usr/lib/dotnet");
+        probe.AddDirectory("/usr/lib/dotnet/sdk");
+        probe.OnCommand("/usr/bin/dotnet", "--list-sdks", "10.0.114 [/usr/lib/dotnet/sdk]\n");
+
+        Assert.Equal("/usr/lib/dotnet", DotnetSdkProbe.FindDotnetRoot(probe)?.Replace('\\', '/'));
+    }
+
+    [Fact]
+    public void ResolvesCandidateDirectoryWhenItDirectlyContainsSdk()
+    {
+        var probe = new FakeSystemProbe();
+        probe.Environment["OPTIMUM_DOTNET_CANDIDATES"] = "/home/tester/.dotnet/dotnet";
+        probe.AddFile("/home/tester/.dotnet/dotnet");
+        probe.AddDirectory("/home/tester/.dotnet/sdk");
+        probe.OnCommand("/home/tester/.dotnet/dotnet", "--list-sdks", "10.0.100 [/home/tester/.dotnet/sdk]\n");
+
+        Assert.Equal("/home/tester/.dotnet", DotnetSdkProbe.FindDotnetRoot(probe)?.Replace('\\', '/'));
+    }
 }

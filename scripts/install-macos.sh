@@ -235,6 +235,11 @@ install_optimum() {
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
+
+if [[ -z "${DOTNET_ROOT:-}" && -x "$HOME/.dotnet/dotnet" ]]; then
+    export DOTNET_ROOT="$HOME/.dotnet"
+fi
+
 exec ./Optimum "$@"
 LAUNCHER
     chmod +x "$install_dir/run-optimum.sh"

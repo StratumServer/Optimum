@@ -358,6 +358,11 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             #!/bin/sh
             set -eu
             cd "$(dirname "$0")"
+
+            if [ -z "${DOTNET_ROOT:-}" ] && [ -x "$HOME/.dotnet/dotnet" ]; then
+                export DOTNET_ROOT="$HOME/.dotnet"
+            fi
+
             {{dataPathArgs}}
             """;
     }
@@ -386,6 +391,10 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             #!/usr/bin/env bash
             set -euo pipefail
             cd "$(dirname "${BASH_SOURCE[0]}")"
+
+            if [[ -z "${DOTNET_ROOT:-}" && -x "$HOME/.dotnet/dotnet" ]]; then
+                export DOTNET_ROOT="$HOME/.dotnet"
+            fi
 
             NORMALIZED_MOD_ARG=""
 
