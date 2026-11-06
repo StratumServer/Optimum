@@ -1,9 +1,9 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
-index acdf1b9..729e14d 100644
 --- a/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs
-@@ -1,16 +1,18 @@
+@@ -1,18 +1,21 @@
  using System;
++using System.Collections.Concurrent;
  using System.Collections.Generic;
  using System.Linq;
 +using System.Reflection;
@@ -22,10 +22,16 @@ index acdf1b9..729e14d 100644
  {
  	protected long listenerId;
  
-@@ -38,6 +40,46 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 	protected LoadedTexture debugTagTexture;
+ 
+@@ -36,10 +39,52 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 
+ 	protected ITexPositionSource defaultTexSource;
  
  	protected Vec4f lightrgbs;
  
++	private static ConcurrentDictionary<Type, bool> optimumShaderCompatibleByType;
++
 +	protected bool optimumShaderStateCompatible;
 +
 +	protected int optimumActiveLightBatchId;
@@ -69,7 +75,11 @@ index acdf1b9..729e14d 100644
  	protected float intoxIntensity;
  
  	public bool DoRenderHeldItem;
-@@ -130,10 +172,20 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 
+ 	public int AddRenderFlags;
+@@ -128,14 +173,36 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 
+ 	public Size2i AtlasSize => capi.EntityTextureAtlas.Size;
  
  	public virtual TextureAtlasPosition this[string textureCode] => defaultTexSource[textureCode] ?? skinTexPos;
  
@@ -77,20 +87,36 @@ index acdf1b9..729e14d 100644
 +
 +	public bool OptimumShaderStateCompatible => optimumShaderStateCompatible;
 +
- 	public EntityShapeRenderer(Entity entity, ICoreClientAPI api)
- 		: base(entity, api)
- 	{
- 		EntityShapeRenderer entityShapeRenderer = this;
-+		MethodInfo shaderRenderMethod = GetType().GetMethod(nameof(DoRender3DOpaqueBatched), BindingFlags.Instance | BindingFlags.Public, null, new Type[2]
++	private static bool IsOptimumShaderStateCompatible(Type rendererType)
++	{
++		ConcurrentDictionary<Type, bool> cache = optimumShaderCompatibleByType ??= new ConcurrentDictionary<Type, bool>();
++		if (cache.TryGetValue(rendererType, out bool compatible))
++		{
++			return compatible;
++		}
++		MethodInfo shaderRenderMethod = rendererType.GetMethod(nameof(DoRender3DOpaqueBatched), BindingFlags.Instance | BindingFlags.Public, null, new Type[2]
 +		{
 +			typeof(float),
 +			typeof(bool)
 +		}, null);
-+		optimumShaderStateCompatible = shaderRenderMethod?.DeclaringType == typeof(EntityShapeRenderer);
++		compatible = shaderRenderMethod?.DeclaringType == typeof(EntityShapeRenderer);
++		cache[rendererType] = compatible;
++		return compatible;
++	}
++
+ 	public EntityShapeRenderer(Entity entity, ICoreClientAPI api)
+ 		: base(entity, api)
+ 	{
+ 		EntityShapeRenderer entityShapeRenderer = this;
++		optimumShaderStateCompatible = IsOptimumShaderStateCompatible(GetType());
  		eagent = entity as EntityAgent;
  		DoRenderHeldItem = true;
  		glitchAffected = true;
-@@ -353,16 +405,43 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 		waterBobbing = entity.Properties.Attributes?["waterBobbing"].AsBool() ?? false;
+ 		glitchFlicker = entity.Properties.Attributes?["glitchFlicker"].AsBool() ?? false;
+@@ -361,20 +428,47 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 
+ 	public override void BeforeRender(float dt)
  	{
  		if (!entity.ShapeFresh)
  		{
@@ -102,7 +128,7 @@ index acdf1b9..729e14d 100644
 +			// (e.g. a trader caravan loading in) front-loads all of that into one frame. An
 +			// entity's very first tesselation (no mesh yet) is never gated, so newly
 +			// spawned/loaded entities don't sit invisible waiting for a budget slot.
-+			if (meshRefOpaque == null || OptimumDiagnostics.TryConsumeEntityTesselationBudget())
++			if (meshRefOpaque == null || entity.EntityId == capi.World.Player?.Entity?.EntityId || OptimumDiagnostics.TryConsumeEntityTesselationBudget())
 +			{
 +				TesselateShape();
 +				OptimumDiagnostics.EntityTesselationBudget.Hit();
@@ -120,13 +146,13 @@ index acdf1b9..729e14d 100644
 +		int lightZ = (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1);
 +		bool needsUpperSample = entity.SelectionBox.Y2 > 1f;
 +		if (TryUseOptimumLightSamples(lightX, lightY, lightZ, needsUpperSample, out lightrgbs))
- 		{
--			Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY + 1, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
--			if (lightRGBs.W > lightrgbs.W)
++		{
 +			OptimumDiagnostics.EntityLightBatch.Skip();
 +		}
 +		else
-+		{
+ 		{
+-			Vec4f lightRGBs = capi.World.BlockAccessor.GetLightRGBs((int)(entity.Pos.X + (double)entity.SelectionBox.X1 - (double)entity.OriginSelectionBox.X1), (int)entity.Pos.InternalY + 1, (int)(entity.Pos.Z + (double)entity.SelectionBox.Z1 - (double)entity.OriginSelectionBox.Z1));
+-			if (lightRGBs.W > lightrgbs.W)
 +			OptimumDiagnostics.EntityLightBatch.Hit();
 +			lightrgbs = capi.World.BlockAccessor.GetLightRGBs(lightX, lightY, lightZ);
 +			if (needsUpperSample)
@@ -140,7 +166,11 @@ index acdf1b9..729e14d 100644
  			}
  		}
  		if (meshRefOpaque == null)
-@@ -600,6 +679,7 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 		{
+ 			return;
+@@ -608,10 +702,11 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 	public override void DoRender3DOpaqueBatched(float dt, bool isShadowPass)
+ 	{
  		if (!isSpectator && meshRefOpaque != null && entity.AnimManager?.Animator != null)
  		{
  			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
@@ -148,7 +178,11 @@ index acdf1b9..729e14d 100644
  			if (isShadowPass)
  			{
  				Mat4f.Mul(tmpMvMat, capi.Render.CurrentModelviewMatrix, ModelMat);
-@@ -612,7 +692,15 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 				currentActiveShader.UniformMatrix("modelViewMatrix", tmpMvMat);
+ 			}
+@@ -620,11 +715,19 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 				frostAlpha += (targetFrostAlpha - frostAlpha) * dt / 6f;
+ 				float value = (float)Math.Round(GameMath.Clamp(frostAlpha, 0f, 1f), 4);
  				currentActiveShader.Uniform("rgbaLightIn", lightrgbs);
  				currentActiveShader.Uniform("extraGlow", entity.Properties.Client.GlowLevel);
  				currentActiveShader.UniformMatrix("modelMatrix", ModelMat);
@@ -165,7 +199,11 @@ index acdf1b9..729e14d 100644
  				currentActiveShader.Uniform("addRenderFlags", AddRenderFlags);
  				currentActiveShader.Uniform("windWaveIntensity", (float)WindWaveIntensity);
  				currentActiveShader.Uniform("entityId", (int)entity.EntityId);
-@@ -630,7 +718,11 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 				currentActiveShader.Uniform("glitchFlicker", glitchFlicker ? 1 : 0);
+ 				currentActiveShader.Uniform("frostAlpha", value);
+@@ -638,18 +741,119 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 				double val2 = capi.World.Player.Entity.WatchedAttributes.GetDouble("temporalStability", 1.0);
+ 				double num = Math.Min(val, val2);
  				float value2 = (float)(glitchAffected ? Math.Max(0.0, 1.0 - 2.5 * num) : 0.0);
  				currentActiveShader.Uniform("glitchEffectStrength", value2);
  			}
@@ -178,7 +216,7 @@ index acdf1b9..729e14d 100644
  			if (meshRefOpaque != null)
  			{
  				capi.Render.RenderMultiTextureMesh(meshRefOpaque, "entityTex");
-@@ -638,6 +730,103 @@ public class EntityShapeRenderer : EntityRenderer, ITexPositionSource
+ 			}
  		}
  	}
  
@@ -282,3 +320,5 @@ index acdf1b9..729e14d 100644
  	public override void DoRender2D(float dt)
  	{
  		if (isSpectator || (debugTagTexture == null && messageTextures == null))
+ 		{
+ 			return;

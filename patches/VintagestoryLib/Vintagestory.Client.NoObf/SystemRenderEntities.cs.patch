@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..324fffa 100644
+index 374f827..d78e93e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 @@ -1,15 +1,36 @@
@@ -329,20 +329,23 @@ index 374f827..324fffa 100644
  		game.GlPopMatrix();
  		entityanimated.Stop();
  		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -127,10 +377,25 @@ public class SystemRenderEntities : ClientSystem
+@@ -127,11 +377,28 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
  			Entity entity = entityRenderer.Value.entity;
-+			// Optimum: cull entities beyond shadow distance threshold.
+-			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
++			double shadowRadius = Math.Max(3.0, (double)entity.FrustumSphereRadius);
++			// Optimum: cull entities beyond shadow distance threshold, scaled by bounding sphere radius.
 +			bool shadowCullEnabled = ClientSettings.OptimumEntityShadowCull;
 +			if (shadowCullEnabled && entity != game.EntityPlayer)
 +			{
-+double dx = entity.Pos.X - game.EntityPlayer.Pos.X;
-+			double dz = entity.Pos.Z - game.EntityPlayer.Pos.Z;
-+			double shadowThreshold = entity.IsShadowRendered ? ShadowCullDistanceSq * OptimumConfig.HysteresisFactorSq : ShadowCullDistanceSq;
-+			if (dx * dx + dz * dz > shadowThreshold)
++				double dx = entity.Pos.X - game.EntityPlayer.Pos.X;
++				double dz = entity.Pos.Z - game.EntityPlayer.Pos.Z;
++				double radiusScale = shadowRadius / 3.0;
++				double shadowThreshold = (entity.IsShadowRendered ? ShadowCullDistanceSq * OptimumConfig.HysteresisFactorSq : ShadowCullDistanceSq) * (radiusScale * radiusScale);
++				if (dx * dx + dz * dz > shadowThreshold)
 +				{
 +					entity.IsShadowRendered = false;
 +					OptimumDiagnostics.EntityShadowCull.Skip();
@@ -350,8 +353,9 @@ index 374f827..324fffa 100644
 +				}
 +				OptimumDiagnostics.EntityShadowCull.Hit();
 +			}
- 			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
++			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, shadowRadius) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
  			{
  				entity.IsShadowRendered = true;
  				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
  			}
+ 			else

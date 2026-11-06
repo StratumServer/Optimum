@@ -91,9 +91,9 @@ public class CecilInjectedFieldInitializerTests
         Assert.DoesNotContain("optimumWindSpeed", patch);
         Assert.DoesNotContain("optimumSurfaceWindSpeed", patch);
 
-        // optimumWindFrameCounter is an int (default-zeroed by the CLR, no
+        // optimumWindAccum is a float (default-zeroed by the CLR, no
         // constructor call needed), so it's safe as an injected field.
-        Assert.Contains("private int optimumWindFrameCounter;", patch);
+        Assert.Contains("private float optimumWindAccum;", patch);
     }
 
     [Fact]

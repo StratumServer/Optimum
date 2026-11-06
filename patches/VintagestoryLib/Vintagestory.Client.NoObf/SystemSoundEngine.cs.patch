@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-index 8f0a63f..1b072e6 100644
+index 8f0a63f..342de86 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-@@ -180,15 +180,50 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+@@ -180,15 +180,52 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
  		TargetReverbness = (float)num;
  		RoomLocation = new Cuboidi(vec3d2.AsBlockPos, vec3d3.AsBlockPos).GrowBy(10, 10, 10);
  		scanning = false;
@@ -14,17 +14,17 @@ index 8f0a63f..1b072e6 100644
 +	// plus a periodic forced refresh (matching audio-listener-benchmark)
 +	// actually skips redundant updates while standing still.
 +	private double _lastListenerX, _lastListenerY, _lastListenerZ;
-+	private float _lastListenerDirX, _lastListenerDirZ;
++	private float _lastListenerDirX, _lastListenerDirY, _lastListenerDirZ;
 +	// No field initializer: Cecil field injection never runs it (the vanilla
 +	// .ctor is not a transplant target - a const initializer would not run
-+	// either), so this is always 0 at runtime instead of 10. Harmless: it
-+	// just delays the first audio-listener refresh by up to
-+	// ListenerRefreshFrames frames on startup; every other reader here
-+	// tolerates any value via the >= comparison below.
-+	private int _listenerFramesSinceUpdate;
++	// either), so this is always 0f at runtime. Harmless: it just delays the
++	// first periodic audio-listener refresh by up to ListenerRefreshInterval
++	// seconds on startup; every other reader here tolerates any value via
++	// the >= comparison below.
++	private float _listenerTimeSinceUpdate;
 +	private const double ListenerMoveThresholdSq = 0.0025;
 +	private const float ListenerDirThresholdSq = 0.000001f;
-+	private const int ListenerRefreshFrames = 10;
++	private const float ListenerRefreshInterval = 0.1f;
 +
  	public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
  	{
@@ -35,18 +35,20 @@ index 8f0a63f..1b072e6 100644
 +		double dy = vec3d.Y - _lastListenerY;
 +		double dz = vec3d.Z - _lastListenerZ;
 +		float ddx = viewVector.X - _lastListenerDirX;
++		float ddy = viewVector.Y - _lastListenerDirY;
 +		float ddz = viewVector.Z - _lastListenerDirZ;
-+		_listenerFramesSinceUpdate++;
++		_listenerTimeSinceUpdate += deltaTime;
 +		if (dx * dx + dy * dy + dz * dz >= ListenerMoveThresholdSq
-+			|| ddx * ddx + ddz * ddz >= ListenerDirThresholdSq
-+			|| _listenerFramesSinceUpdate >= ListenerRefreshFrames)
++			|| ddx * ddx + ddy * ddy + ddz * ddz >= ListenerDirThresholdSq
++			|| _listenerTimeSinceUpdate >= ListenerRefreshInterval)
 +		{
 +			_lastListenerX = vec3d.X;
 +			_lastListenerY = vec3d.Y;
 +			_lastListenerZ = vec3d.Z;
 +			_lastListenerDirX = viewVector.X;
++			_lastListenerDirY = viewVector.Y;
 +			_lastListenerDirZ = viewVector.Z;
-+			_listenerFramesSinceUpdate = 0;
++			_listenerTimeSinceUpdate = 0f;
 +			game.Platform.UpdateAudioListener((float)vec3d.X, (float)vec3d.Y, (float)vec3d.Z, viewVector.X, 0f, viewVector.Z);
 +		}
  		NowReverbness += (TargetReverbness - NowReverbness) * deltaTime / 1.5f;
