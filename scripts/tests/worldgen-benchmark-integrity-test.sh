@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 VALIDATOR="$PROJECT_ROOT/scripts/validate-worldgen-run.sh"

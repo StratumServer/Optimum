@@ -39,7 +39,7 @@ ifneq ($(CLIENT_ARCHIVE),)
 endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
-.PHONY: help check check-patches check-compat check-shaders test-runtimeconfig bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
+.PHONY: help check check-patches check-patch-syntax check-compat check-shaders test-runtimeconfig bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
         package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
@@ -51,6 +51,9 @@ check: ## Report which bootstrap/packaging tools are installed (installs nothing
 
 check-patches: ## Verify patch files against the current working tree
 	bash scripts/check-patches.sh
+
+check-patch-syntax: ## Verify patch syntax and headers against git apply
+	bash scripts/validate-patch-syntax.sh patches
 
 check-compat: ## Verify patches keep vanilla multiplayer compatibility guards
 	bash scripts/check-vanilla-compat.sh

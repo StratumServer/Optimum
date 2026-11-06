@@ -126,6 +126,7 @@ EOF
 
     # 3. Verify optimum-launch.sh argument construction and URI validation.
     LAUNCHER="$INSTALL_SPACES/optimum-launch.sh"
+    grep -Fq 'DOTNET_ROOT' "$LAUNCHER"
     [[ "$("$LAUNCHER")" == "<--dataPath><$DATA_SPACES>" ]]
     [[ "$("$LAUNCHER" "vintagestorymodinstall://carrycapacity@1.8.0")" == "<--dataPath><$DATA_SPACES><-i><vintagestorymodinstall://carrycapacity@1.8.0>" ]]
     [[ "$("$LAUNCHER" "VINTAGESTORYMODINSTALL://primitivesurvival%403.7.5%2Bbuild1///")" == "<--dataPath><$DATA_SPACES><-i><vintagestorymodinstall://primitivesurvival@3.7.5+build1>" ]]
