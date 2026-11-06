@@ -1,0 +1,28 @@
+diff --git a/VintagestoryApi/Common/Inventory/InventoryBase.cs b/VintagestoryApi/Common/Inventory/InventoryBase.cs
+index 0820ca0..cd12f17 100644
+--- a/VintagestoryApi/Common/Inventory/InventoryBase.cs
++++ b/VintagestoryApi/Common/Inventory/InventoryBase.cs
+@@ -685,10 +685,11 @@ namespace Vintagestory.API.Common
+         /// <param name="slotId"></param>
+         public virtual void MarkSlotDirty(int slotId)
+         {
+             if (slotId < 0) throw new Exception("Negative slotid?!");
+             dirtySlots.Add(slotId);
++            Vintagestory.API.Config.OptimumApiBridge.MarkInventoryDirty();
+         }
+ 
+         /// <summary>
+         /// Discards everything in the item slots.
+         /// </summary>
+@@ -701,10 +702,11 @@ namespace Vintagestory.API.Common
+                     dirtySlots.Add(i);
+                 }
+ 
+                 this[i].Itemstack = null;
+             }
++            Vintagestory.API.Config.OptimumApiBridge.MarkInventoryDirty();
+         }
+ 
+ 
+         public virtual void DropSlotIfHot(ItemSlot slot, IPlayer player = null)
+         {

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Common/Collectible/Block/Block.cs b/VintagestoryApi/Common/Collectible/Block/Block.cs
-index 05bb9ff..b3276b7 100644
+index 05bb9ff..75b93e0 100644
 --- a/VintagestoryApi/Common/Collectible/Block/Block.cs
 +++ b/VintagestoryApi/Common/Collectible/Block/Block.cs
-@@ -1263,37 +1263,49 @@ namespace Vintagestory.API.Common
+@@ -1263,50 +1263,76 @@ namespace Vintagestory.API.Common
              }
  
              return drops;
@@ -23,49 +23,80 @@ index 05bb9ff..b3276b7 100644
          /// <returns></returns>
          public virtual ItemStack[] GetDrops(IWorldAccessor world, BlockPos pos, IPlayer byPlayer, float dropQuantityMultiplier = 1f)
          {
+-            bool preventDefault = false;
+-            List<ItemStack> dropStacks = new List<ItemStack>();
+-
+-            foreach (BlockBehavior behavior in BlockBehaviors)
 +            bool reuseLists = _optimumGetDropsDepth == 0;
 +            _optimumGetDropsDepth++;
-+
-+            List<ItemStack> dropStacks = reuseLists ? (_optimumBehaviorDrops ??= new(8)) : new();
-+            if (reuseLists) dropStacks.Clear();
-+
-             bool preventDefault = false;
--            List<ItemStack> dropStacks = new List<ItemStack>();
- 
-             foreach (BlockBehavior behavior in BlockBehaviors)
++            try
              {
-                 EnumHandling handled = EnumHandling.PassThrough;
+-                EnumHandling handled = EnumHandling.PassThrough;
++                List<ItemStack> dropStacks = reuseLists ? (_optimumBehaviorDrops ??= new(8)) : new();
++                if (reuseLists) dropStacks.Clear();
  
-                 ItemStack[] stacks = behavior.GetDrops(world, pos, byPlayer, ref dropQuantityMultiplier, ref handled);
-                 if (stacks != null) dropStacks.AddRange(stacks);
+-                ItemStack[] stacks = behavior.GetDrops(world, pos, byPlayer, ref dropQuantityMultiplier, ref handled);
+-                if (stacks != null) dropStacks.AddRange(stacks);
 -                if (handled == EnumHandling.PreventSubsequent) return stacks;
-+                if (handled == EnumHandling.PreventSubsequent) { _optimumGetDropsDepth--; return stacks; }
-                 if (handled == EnumHandling.PreventDefault) preventDefault = true;
-             }
+-                if (handled == EnumHandling.PreventDefault) preventDefault = true;
+-            }
++                bool preventDefault = false;
  
 -            if (preventDefault) return dropStacks.ToArray();
-+            if (preventDefault) { _optimumGetDropsDepth--; return dropStacks.ToArray(); }
++                if (BlockBehaviors != null)
++                {
++                    foreach (BlockBehavior behavior in BlockBehaviors)
++                    {
++                        EnumHandling handled = EnumHandling.PassThrough;
  
 -            if (Drops == null) return null;
 -            List<ItemStack> todrop = new List<ItemStack>();
-+            if (Drops == null) { _optimumGetDropsDepth--; return null; }
++                        ItemStack[] stacks = behavior.GetDrops(world, pos, byPlayer, ref dropQuantityMultiplier, ref handled);
++                        if (stacks != null) dropStacks.AddRange(stacks);
++                        if (handled == EnumHandling.PreventSubsequent) return stacks;
++                        if (handled == EnumHandling.PreventDefault) preventDefault = true;
++                    }
++                }
+ 
+-            for (int i = 0; i < Drops.Length; i++)
+-            {
+-                BlockDropItemStack dstack = Drops[i];
+-                ItemStack stack = dstack.ToRandomItemstackForPlayer(byPlayer, world, dropQuantityMultiplier);
+-                if (stack == null) continue;
+-                todrop.Add(stack);
+-                if (dstack.LastDrop) break;
+-            }
++                if (preventDefault) return dropStacks.ToArray();
 +
-+            List<ItemStack> todrop = reuseLists ? (_optimumBlockDrops ??= new(8)) : new();
-+            if (reuseLists) todrop.Clear();
++                if (Drops == null) return null;
++
++                List<ItemStack> todrop = reuseLists ? (_optimumBlockDrops ??= new(8)) : new();
++                if (reuseLists) todrop.Clear();
++
++                for (int i = 0; i < Drops.Length; i++)
++                {
++                    BlockDropItemStack dstack = Drops[i];
++                    ItemStack stack = dstack.ToRandomItemstackForPlayer(byPlayer, world, dropQuantityMultiplier);
++                    if (stack == null) continue;
++                    todrop.Add(stack);
++                    if (dstack.LastDrop) break;
++                }
  
-             for (int i = 0; i < Drops.Length; i++)
-             {
-                 BlockDropItemStack dstack = Drops[i];
-                 ItemStack stack = dstack.ToRandomItemstackForPlayer(byPlayer, world, dropQuantityMultiplier);
-@@ -1302,11 +1314,12 @@ namespace Vintagestory.API.Common
-                 if (dstack.LastDrop) break;
-             }
- 
-             todrop.AddRange(dropStacks);
+-            todrop.AddRange(dropStacks);
++                todrop.AddRange(dropStacks);
  
 -            return todrop.ToArray();
-+            _optimumGetDropsDepth--;
-+            return todrop.Count == 0 ? Array.Empty<ItemStack>() : todrop.ToArray();
++                return todrop.Count == 0 ? Array.Empty<ItemStack>() : todrop.ToArray();
++            }
++            finally
++            {
++                if (reuseLists)
++                {
++                    _optimumBehaviorDrops?.Clear();
++                    _optimumBlockDrops?.Clear();
++                }
++                _optimumGetDropsDepth--;
++            }
          }
  
  

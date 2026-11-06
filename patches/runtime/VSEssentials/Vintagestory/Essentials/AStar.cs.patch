@@ -1,87 +1,53 @@
 diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintagestory/Essentials/AStar.cs
 --- a/VSEssentials/Vintagestory/Essentials/AStar.cs
 +++ b/VSEssentials/Vintagestory/Essentials/AStar.cs
-@@ -33,6 +33,62 @@ public class AStar
+@@ -33,6 +33,8 @@ public class AStar
  
  	protected Cuboidd tmpCub = new Cuboidd();
  
-+	private PathNode[] optimumNodePool;
-+
-+	private int optimumNodePoolIndex;
-+
-+	private PathNode OptimumRentNode(PathNode parent, Cardinal cardinal)
-+	{
-+		optimumNodePool ??= new PathNode[4096];
-+		if (optimumNodePoolIndex >= optimumNodePool.Length)
-+		{
-+			return new PathNode(parent, cardinal);
-+		}
-+		int index = optimumNodePoolIndex++;
-+		PathNode node = optimumNodePool[index];
-+		if (node == null)
-+		{
-+			node = new PathNode(parent, cardinal);
-+			optimumNodePool[index] = node;
-+			return node;
-+		}
-+		node.Set(parent.X + cardinal.Normali.X, parent.Y + cardinal.Normali.Y, parent.Z + cardinal.Normali.Z);
-+		node.dimension = parent.dimension;
-+		node.gCost = 0f;
-+		node.hCost = 0f;
-+		node.Parent = null;
-+		node.pathLength = 0;
-+		node.HeapIndex = 0;
-+		node.Action = EnumTraverseAction.Walk;
-+		return node;
-+	}
-+
-+	private PathNode OptimumRentNode(BlockPos pos)
-+	{
-+		optimumNodePool ??= new PathNode[4096];
-+		if (optimumNodePoolIndex >= optimumNodePool.Length)
-+		{
-+			return new PathNode(pos);
-+		}
-+		int index = optimumNodePoolIndex++;
-+		PathNode node = optimumNodePool[index];
-+		if (node == null)
-+		{
-+			node = new PathNode(pos);
-+			optimumNodePool[index] = node;
-+			return node;
-+		}
-+		node.Set(pos.X, pos.Y, pos.Z);
-+		node.dimension = pos.dimension;
-+		node.gCost = 0f;
-+		node.hCost = 0f;
-+		node.Parent = null;
-+		node.pathLength = 0;
-+		node.HeapIndex = 0;
-+		node.Action = EnumTraverseAction.Walk;
-+		return node;
-+	}
++	protected PathNode scratchNode;
 +
  	public AStar(ICoreServerAPI api)
  	{
  		this.api = api;
-@@ -67,8 +123,9 @@ public class AStar
- 		centerOffsetX = 0.3 + api.World.Rand.NextDouble() * 0.4;
- 		centerOffsetZ = 0.3 + api.World.Rand.NextDouble() * 0.4;
+@@ -68,6 +70,7 @@ public class AStar
  		NodesChecked = 0;
--		PathNode pathNode = new PathNode(start);
--		PathNode pathNode2 = new PathNode(endOrAvoidPos);
-+		optimumNodePoolIndex = 0;
-+		PathNode pathNode = OptimumRentNode(start);
-+		PathNode pathNode2 = OptimumRentNode(endOrAvoidPos);
+ 		PathNode pathNode = new PathNode(start);
+ 		PathNode pathNode2 = new PathNode(endOrAvoidPos);
++		PathNode scratch = scratchNode ??= new PathNode(start);
  		float num = modeMinFleeDistance * modeMinFleeDistance;
  		openSet.Clear();
  		closedSet.Clear();
-@@ -95,7 +152,7 @@ public class AStar
+@@ -95,19 +98,27 @@ public class AStar
  			for (int i = 0; i < Cardinal.ALL.Length; i++)
  			{
  				Cardinal cardinal = Cardinal.ALL[i];
 -				PathNode pathNode4 = new PathNode(pathNode3, cardinal);
-+				PathNode pathNode4 = OptimumRentNode(pathNode3, cardinal);
++				scratch.Set(pathNode3.X + cardinal.Normali.X, pathNode3.Y + cardinal.Normali.Y, pathNode3.Z + cardinal.Normali.Z);
++				scratch.dimension = pathNode3.dimension;
++				scratch.gCost = 0f;
++				scratch.hCost = 0f;
++				scratch.Parent = null;
++				scratch.pathLength = 0;
++				scratch.HeapIndex = 0;
++				scratch.Action = EnumTraverseAction.Walk;
  				float extraCost = 0f;
- 				PathNode pathNode5 = openSet.TryFindValue(pathNode4);
+-				PathNode pathNode5 = openSet.TryFindValue(pathNode4);
++				PathNode pathNode5 = openSet.TryFindValue(scratch);
  				if ((object)pathNode5 != null)
+ 				{
+-					float num2 = pathNode3.gCost + pathNode3.distanceTo(pathNode4);
+-					if (pathNode5.gCost > num2 + 0.0001f && traversable(pathNode4, stepHeight, maxFallHeight, entityCollBox, cardinal, ref extraCost) && pathNode5.gCost > num2 + extraCost + 0.0001f)
++					float num2 = pathNode3.gCost + pathNode3.distanceTo(scratch);
++					if (pathNode5.gCost > num2 + 0.0001f && traversable(scratch, stepHeight, maxFallHeight, entityCollBox, cardinal, ref extraCost) && pathNode5.gCost > num2 + extraCost + 0.0001f)
+ 					{
+ 						UpdateNode(pathNode3, pathNode5, extraCost);
+ 					}
+ 				}
+-				else if (!closedSet.Contains(pathNode4) && traversable(pathNode4, stepHeight, maxFallHeight, entityCollBox, cardinal, ref extraCost))
++				else if (!closedSet.Contains(scratch) && traversable(scratch, stepHeight, maxFallHeight, entityCollBox, cardinal, ref extraCost))
+ 				{
++					PathNode pathNode4 = new PathNode(scratch);
+ 					UpdateNode(pathNode3, pathNode4, extraCost);
+ 					pathNode4.hCost = ((modeMinFleeDistance > 0f) ? (1f + modeMinFleeDistance - pathNode4.distanceTo(pathNode2)) : pathNode4.distanceTo(pathNode2));
+ 					openSet.Add(pathNode4);

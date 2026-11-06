@@ -11,6 +11,7 @@ namespace Cairo
 	// CPU alpha-coverage check confirms that no transparent texels remain.
 	internal static unsafe class RecordedSvgGeometry
 	{
+		[StructLayout (LayoutKind.Sequential)] struct Image { internal NsvgSize Size; internal NsvgViewbox Viewbox; internal IntPtr Shapes; }
 		[StructLayout (LayoutKind.Sequential)] struct Paint { internal byte Type; internal IntPtr Value; }
 		[StructLayout (LayoutKind.Sequential)] struct Shape
 		{
@@ -53,7 +54,7 @@ namespace Cairo
 				using (var recorder = new SKPictureRecorder ()) {
 					var canvas = recorder.BeginRecording (SKRect.Create (textureWidth, textureHeight));
 					canvas.Translate (offsetX, offsetY); canvas.Scale (scale);
-					IntPtr pointer = Marshal.ReadIntPtr (image, 24);
+					IntPtr pointer = Marshal.PtrToStructure<Image> (image).Shapes;
 					int shapeCount = 0;
 					while (pointer != IntPtr.Zero) {
 						if (++shapeCount > 100000) throw new NotSupportedException ("Recorded SVG has too many shapes.");

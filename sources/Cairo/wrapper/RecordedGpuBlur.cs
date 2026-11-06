@@ -75,6 +75,11 @@ namespace Cairo
 
 		internal RecordedGpuBlur (GRContext context) { this.context = context ?? throw new ArgumentNullException (nameof (context)); }
 
+		internal void ResetPerUploadState()
+		{
+			dependencyDepth = 0;
+		}
+
 		internal SKImage RenderSource(SurfaceRecorderSnapshot recording, out bool callerOwnsImage)
 		{
 			callerOwnsImage = false;

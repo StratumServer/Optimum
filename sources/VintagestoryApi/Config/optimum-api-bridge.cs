@@ -79,8 +79,20 @@ public static class OptimumApiBridge
         destination.Z = (float)(-Math.Cos(yaw) * cosPitch);
     }
 
+    private static int inventoryDirty = 1;
+
     public static void SetChiselLodDistance(ModelDataPoolLocation location, bool enabled) { }
-    public static bool ConsumeAnySlotDirty() { return false; }
+
+    public static void MarkInventoryDirty()
+    {
+        Volatile.Write(ref inventoryDirty, 1);
+    }
+
+    public static bool ConsumeAnySlotDirty()
+    {
+        return Interlocked.Exchange(ref inventoryDirty, 0) != 0;
+    }
+
     public static void ForceAdaptiveCap(AdaptiveWorkerController controller, int cap)
     {
         controller.ForceCapForTesting(cap);

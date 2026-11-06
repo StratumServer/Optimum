@@ -339,13 +339,7 @@ var membersToInject = new Dictionary<string, List<string>>
     },
     ["Vintagestory.Server.ServerSystemBlockSimulation"] = new()
     {
-        "optimumPosPool",
-        "optimumPosPoolIndex",
-        "optimumFluidPosPool",
-        "optimumFluidPosPoolIndex",
         "optimumTickSliceIndex",
-        "OptimumGetPooledPos",
-        "OptimumGetPooledFluidPos",
     },
     ["Vintagestory.Server.ServerSystemUnloadChunks"] = new()
     {
@@ -687,7 +681,6 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerSystemSendChunks", "sendAndEnqueueChunks", 1),
     new("Vintagestory.Server.ServerSystemBlockSimulation", "GetUpdateInterval", 0),
     new("Vintagestory.Server.ServerSystemBlockSimulation", "OnSeparateThreadTick", 0),
-    new("Vintagestory.Server.ServerSystemBlockSimulation", "tryTickBlock", 2),
     new("Vintagestory.Server.ServerSystemUnloadChunks", "UnloadGeneratingChunkColumns", 1),
     new("Vintagestory.Server.ServerSystemUnloadChunks", "FindUnloadableChunkColumnCandidates", 0),
     new("Vintagestory.Server.ServerSystemUnloadChunks", "SendOutOfRangeChunkUnloads", 1),

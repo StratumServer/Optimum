@@ -1,33 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
-index 6b3cdd0..a47ea1d 100644
+index 6b3cdd0..2a95ebd 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
-@@ -37,10 +37,24 @@ public class ServerSystemBlockSimulation : ServerSystem
- 
- 	private List<int> clientIds = new List<int>();
- 
- 	private Random rand = new Random();
- 
-+	private const int OptimumPosPoolSize = 2048;
-+
-+	// No field initializer: Cecil field injection never runs it (the vanilla
-+	// .ctor is not a transplant target). Lazily created with ??= at each use
-+	// site below (OnSeparateThreadTick runs on its own single dedicated
-+	// thread, so a plain ??= is race-free).
-+	private BlockPos[] optimumPosPool;
-+
-+	private int optimumPosPoolIndex;
-+
-+	private FluidBlockPos[] optimumFluidPosPool;
-+
-+	private int optimumFluidPosPoolIndex;
-+
- 	[ThreadStatic]
- 	private static FastMemoryStream reusableSendingStream;
- 
- 	private List<Packet_BlockEntity> blockEntitiesPacked = new List<Packet_BlockEntity>();
- 
-@@ -650,13 +664,28 @@ public class ServerSystemBlockSimulation : ServerSystem
+@@ -650,13 +650,28 @@ public class ServerSystemBlockSimulation : ServerSystem
  		return false;
  	}
  
@@ -57,23 +32,7 @@ index 6b3cdd0..a47ea1d 100644
  		HandleDirtyAndUpdatedBlocks();
  		SendDirtyBlockEntities();
  	}
-@@ -822,10 +851,15 @@ public class ServerSystemBlockSimulation : ServerSystem
- 	{
- 		if (server.RunPhase != EnumServerRunPhase.RunGame)
- 		{
- 			return;
- 		}
-+		if (queuedTicks.IsEmpty)
-+		{
-+			optimumPosPoolIndex = 0;
-+			optimumFluidPosPoolIndex = 0;
-+		}
- 		chunksToBeTicked.Clear();
- 		int blockTickChunkRange = server.Config.BlockTickChunkRange;
- 		lock (clientIdsLock)
- 		{
- 			foreach (int clientId in clientIds)
-@@ -864,20 +898,30 @@ public class ServerSystemBlockSimulation : ServerSystem
+@@ -864,20 +879,30 @@ public class ServerSystemBlockSimulation : ServerSystem
  				}
  			}
  		}
@@ -104,71 +63,3 @@ index 6b3cdd0..a47ea1d 100644
  	private void tickChunk(long index3d, ServerChunk chunk)
  	{
  		ChunkPos chunkPos = server.WorldMap.ChunkPosFromChunkIndex3D(index3d);
-@@ -915,19 +959,66 @@ public class ServerSystemBlockSimulation : ServerSystem
- 		{
- 			return false;
- 		}
- 		if (extra == null)
- 		{
--			queuedTicks.Enqueue(atPos.Copy());
-+			if (atPos is FluidBlockPos)
-+			{
-+				queuedTicks.Enqueue(OptimumGetPooledFluidPos(atPos));
-+			}
-+			else
-+			{
-+				queuedTicks.Enqueue(OptimumGetPooledPos(atPos));
-+			}
- 		}
- 		else
- 		{
- 			queuedTicks.Enqueue(new BlockPosWithExtraObject(atPos.Copy(), extra));
- 		}
- 		return true;
- 	}
- 
-+	private BlockPos OptimumGetPooledPos(BlockPos source)
-+	{
-+		int idx = optimumPosPoolIndex;
-+		if (idx >= OptimumPosPoolSize)
-+		{
-+			return source.Copy();
-+		}
-+		optimumPosPoolIndex = idx + 1;
-+		optimumPosPool ??= new BlockPos[OptimumPosPoolSize];
-+		BlockPos pooled = optimumPosPool[idx];
-+		if (pooled == null)
-+		{
-+			pooled = new BlockPos(0);
-+			optimumPosPool[idx] = pooled;
-+		}
-+		pooled.Set(source.X, source.Y, source.Z);
-+		pooled.SetDimension(source.dimension);
-+		return pooled;
-+	}
-+
-+	private FluidBlockPos OptimumGetPooledFluidPos(BlockPos source)
-+	{
-+		int idx = optimumFluidPosPoolIndex;
-+		if (idx >= OptimumPosPoolSize)
-+		{
-+			return new FluidBlockPos(source.X, source.Y, source.Z, source.dimension);
-+		}
-+		optimumFluidPosPoolIndex = idx + 1;
-+		optimumFluidPosPool ??= new FluidBlockPos[OptimumPosPoolSize];
-+		FluidBlockPos pooled = optimumFluidPosPool[idx];
-+		if (pooled == null)
-+		{
-+			pooled = new FluidBlockPos();
-+			optimumFluidPosPool[idx] = pooled;
-+		}
-+		pooled.Set(source.X, source.Y, source.Z);
-+		pooled.SetDimension(source.dimension);
-+		return pooled;
-+	}
-+
- 	private Packet_BlockEntity BlockEntityToPacket(BlockEntity blockEntity, FastMemoryStream ms)
- 	{
- 		ms.Reset();
- 		BinaryWriter stream = new BinaryWriter(ms);
- 		TreeAttribute treeAttribute = new TreeAttribute();

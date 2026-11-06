@@ -13,21 +13,27 @@ namespace Vintagestory.Client.NoObf
 		public static bool TryRecord (SvgLoader loader, IAsset asset, ImageSurface target, int x, int y, int width, int height, int? color)
 		{
 			if (!OptimumGuiGpuProbe.RenderingRequested) return false;
-			if (asset == null || target == null || width <= 0 || height <= 0 ||
+			if (asset == null || target == null || target.RecordingState != SurfaceRecordingState.Recording ||
+				width <= 0 || height <= 0 ||
 				x < 0 || y < 0 || (long)x + width > target.Width || (long)y + height > target.Height || asset.Data == null)
-				throw new InvalidOperationException("Skia SVG recording received an invalid GUI asset or target.");
+				return false;
 
-			SKPicture picture;
-			try { picture = RecordedSvgGeometry.Parse (asset.ToText (), width, height, width, height, color); }
-			catch (NotSupportedException exception) { throw new NotSupportedException("The requested SVG uses geometry that the Skia GUI recorder does not support.", exception); }
-			bool transferred = false;
-			try {
-				transferred = target.RecordPicture (picture, x, y, width, height, color,
-					_ => throw new InvalidOperationException("Skia SVG display lists cannot be materialized through Cairo."),
-					textureColorOrder: false);
-				if (!transferred) throw new InvalidOperationException("Skia rejected the GUI SVG display list.");
-				return true;
-			} finally { if (!transferred) picture.Dispose (); }
+			string text = asset.ToText ();
+			if (string.IsNullOrWhiteSpace (text)) return false;
+
+			RecordedPreparationCache.Picture picture;
+			try { picture = RecordedSvgGeometry.Acquire (text, width, height, width, height); }
+			catch (NotSupportedException) { return false; }
+			catch (InvalidOperationException) { return false; }
+
+			if (!target.RecordPicture (picture.Value, x, y, width, height, color,
+				_ => loader?.DrawSvg (asset, target, x, y, width, height, color),
+				textureColorOrder: false,
+				pictureOwner: picture)) {
+				picture.Dispose ();
+				return false;
+			}
+			return true;
 		}
 
 		public static bool TryLoad (SvgLoader loader, ICoreClientAPI api, IAsset asset, int textureWidth, int textureHeight,
@@ -35,22 +41,29 @@ namespace Vintagestory.Client.NoObf
 		{
 			texture = null;
 			if (!OptimumGuiGpuProbe.RenderingRequested) return false;
-			if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId || textureWidth <= 0 || textureHeight <= 0)
-				throw new InvalidOperationException("Skia SVG textures require positive dimensions on the OpenGL context thread.");
+			if (api == null || asset == null || asset.Data == null ||
+				Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId ||
+				textureWidth <= 0 || textureHeight <= 0 || width < 0 || height < 0)
+				return false;
 			OptimumGuiGpuProbeBackend.TryRunOnce (RuntimeEnv.MainThreadId);
+			if (!OptimumGuiGpuProbe.GuiRenderingEnabled) return false;
+
+			string text = asset.ToText ();
+			if (string.IsNullOrWhiteSpace (text)) return false;
 
 			SKPicture picture;
-			try { picture = RecordedSvgGeometry.Parse (asset.ToText (), textureWidth, textureHeight, width, height, color, textureColorOrder: true); }
-			catch (NotSupportedException exception) { throw new NotSupportedException("The requested SVG texture uses geometry that the Skia recorder does not support.", exception); }
+			try { picture = RecordedSvgGeometry.Parse (text, textureWidth, textureHeight, width, height, color, textureColorOrder: true); }
+			catch (NotSupportedException) { return false; }
+			catch (InvalidOperationException) { return false; }
 
 			bool transferred = false;
 			try {
 				using (var surface = new ImageSurface (Format.Argb32, textureWidth, textureHeight)) {
 					surface.BeginRecording ();
-				transferred = surface.RecordPicture (picture, 0, 0, textureWidth, textureHeight, color,
-					_ => throw new InvalidOperationException("Skia SVG textures cannot be materialized through Cairo."),
-					textureColorOrder: true);
-				if (!transferred) throw new InvalidOperationException("Skia rejected the GUI SVG texture display list.");
+					transferred = surface.RecordPicture (picture, 0, 0, textureWidth, textureHeight, color,
+						_ => { },
+						textureColorOrder: true);
+					if (!transferred) return false;
 					bool previousLinearMinOverride = OptimumGuiGpuProbeBackend.LinearMinOverride;
 					OptimumGuiGpuProbeBackend.LinearMinOverride = true;
 					bool rendered;
@@ -62,7 +75,7 @@ namespace Vintagestory.Client.NoObf
 						OptimumGuiGpuProbeBackend.LinearMinOverride = previousLinearMinOverride;
 					}
 					if (OptimumGuiMetrics.Enabled) OptimumGuiMetrics.RecordGpuCandidateTexture (rendered, reason);
-					if (!rendered) throw new InvalidOperationException("Skia could not render the requested SVG texture: " + reason);
+					if (!rendered || candidate <= 0) return false;
 					texture = new LoadedTexture (api, candidate, width, height);
 					return true;
 				}
